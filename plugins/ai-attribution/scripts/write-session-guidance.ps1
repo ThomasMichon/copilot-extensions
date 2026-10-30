@@ -153,6 +153,7 @@ try {
                                     if ($parentPath -eq $componentPath) { break }
                                     $componentPath = $parentPath
                                 }
+                                if ($probe.kind -eq 'excluded') { continue }
                                 if ($null -eq $probe.sha256) {
                                     if (Get-Item -LiteralPath $profilePath -Force -ErrorAction SilentlyContinue) {
                                         throw 'A profile appeared'

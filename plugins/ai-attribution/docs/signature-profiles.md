@@ -34,8 +34,13 @@ slots:
    `%APPDATA%\ai-attribution\config.json` on Windows, otherwise
    `$HOME/.config/ai-attribution/config.json`: platform personal override.
 
+Duplicate paths retain their last occurrence so an earlier instruction-directory
+entry cannot demote a later personal override.
+
 Paths are resolved without evaluating shell expressions. Symlink/reparse paths
 are rejected, including ancestors of missing files during native cache reuse.
+Containment exclusions retain lexical safety probes too; a directory cannot
+change into or out of a symlink without invalidating its snapshot.
 Only regular files are opened; FIFOs/devices are rejected without waiting.
 Instruction-directory discovery is bounded to 128 entries and
 65,536 characters before probing; overflow or unresolved user directories
@@ -105,6 +110,8 @@ claims assembled across template/variable boundaries or historical variants, are
 use `{review_status}`, which resolves to `not human-reviewed` unless the caller
 supplies the actual boolean `human_reviewed: true` for this exact draft.
 Configuration never proves review.
+Unescaped bracket fragments must be balanced within each slot; they cannot
+form a link around the draft or hide attribution in a destination across slots.
 
 `header_variants` and `footer_variants` optionally name up to four previous
 **owned** marker templates per slot. They use the same interpolation. The

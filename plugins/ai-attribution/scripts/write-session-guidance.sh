@@ -119,6 +119,9 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                                 fi
                                 component="$(dirname -- "$component")"
                             done
+                            if [[ "$(printf '%s' "$probe" | jq -r '.kind // empty')" == "excluded" ]]; then
+                                continue
+                            fi
                             if [[ -z "$expected" ]]; then
                                 if [[ -e "$profile_path" || -L "$profile_path" ]]; then
                                     run_python_fallback "$stdin_text"

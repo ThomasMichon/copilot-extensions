@@ -21,6 +21,14 @@ def parsed(*rules, **variables):
     return profile.validate({"version": 1, "variables": variables, "rules": list(rules)})
 
 
+def directory_link(link, target):
+    if os.name == "nt":
+        subprocess.run(["cmd.exe", "/c", "mklink", "/J", str(link), str(target)],
+                       capture_output=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
 def test_sparse_slots_specificity_and_explicit_empty():
     data = parsed(
         {"header": "AI: ", "footer": "\nAI footer"},
@@ -200,6 +208,14 @@ def test_hidden_or_active_markup_is_not_a_disclosure(header):
     assert profile.decorate("body", signature) == "[AI-assisted] body"
 
 
+def test_split_slot_link_fragments_cannot_hide_disclosure():
+    with pytest.raises(profile.ProfileError, match="markup"):
+        parsed({"header": "[", "footer": "](https://example.com/AI-assisted)"})
+    for template in ("[", "]", "[AI", "AI]"):
+        with pytest.raises(profile.ProfileError, match="markup"):
+            parsed({"header": template})
+
+
 def test_symlinked_instruction_directory_is_rejected_before_resolution(tmp_path):
     repo, target, link = tmp_path / "repo", tmp_path / "target", tmp_path / "link"
     repo.mkdir()
@@ -235,6 +251,22 @@ def test_load_authority_order_invalid_layer_and_target_contained_dirs(tmp_path):
     data, errors = profile.load_profile(home, repo, env)
     assert errors == ["profile layer 3 rejected"]
     assert profile.resolve(data, CONTEXT)["header"] == "AI shared"
+
+
+def test_personal_profile_keeps_its_last_high_priority_occurrence(tmp_path):
+    shared = tmp_path / "shared"
+    personal = tmp_path / ".copilot"
+    for directory, header in ((personal, "AI personal"), (shared, "AI shared")):
+        directory.mkdir()
+        (directory / "ai-attribution.json").write_text(
+            json.dumps(parsed({"header": header})), encoding="utf-8"
+        )
+    data, errors = profile.load_profile(tmp_path, None, {
+        "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": os.pathsep.join(map(str, (personal, shared))),
+    })
+    assert not errors
+    assert len(data["_inputs"]) == 2
+    assert profile.resolve(data, CONTEXT)["header"] == "AI personal"
 
 
 @pytest.mark.parametrize("directories", ["x" * 65537, ",".join(["x"] * 129)],
@@ -463,11 +495,7 @@ def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path, home_s
     missing_parent.rmdir()
     empty_target = tmp_path / "empty-target"
     empty_target.mkdir()
-    if os.name == "nt":
-        subprocess.run(["cmd.exe", "/c", "mklink", "/J", str(missing_parent), str(empty_target)],
-                       capture_output=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-    else:
-        missing_parent.symlink_to(empty_target, target_is_directory=True)
+    directory_link(missing_parent, empty_target)
     session = "after-link"
     subprocess.run(command, input=json.dumps({"sessionId": session, "cwd": str(repo)}),
                    text=True, capture_output=True, env=env, check=True)
@@ -475,3 +503,37 @@ def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path, home_s
     text = target.read_text(encoding="utf-8")
     assert text.startswith("Disclose AI for ALL contributions.\n\n")
     assert "profile layer" in text and "rejected" in text
+    external_link = tmp_path / "external-link"
+    directory_link(external_link, contained)
+    env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = str(external_link)
+    session = "linked-into-target"
+    subprocess.run(command, input=json.dumps({"sessionId": session, "cwd": str(repo)}),
+                   text=True, capture_output=True, env=env, check=True)
+    target = target.parents[3] / session / "instructions" / "ai-attribution" / target.name
+    assert target.read_text(encoding="utf-8").startswith("Disclose AI for ALL contributions.")
+    if os.name == "nt":
+        external_link.rmdir()
+    else:
+        external_link.unlink()
+    external_link.mkdir()
+    (external_link / "ai-attribution.json").write_text(
+        json.dumps(parsed({"header": "AI external", "required": True})), encoding="utf-8"
+    )
+    session = "replaced-with-external-defaults"
+    subprocess.run(command, input=json.dumps({"sessionId": session, "cwd": str(repo)}),
+                   text=True, capture_output=True, env=env, check=True)
+    target = target.parents[3] / session / "instructions" / "ai-attribution" / target.name
+    text = target.read_text(encoding="utf-8")
+    assert "AI external" in text and '"required": true' in text
+    excluded = repo / "excluded-safe"
+    excluded.mkdir()
+    env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = str(excluded)
+    subprocess.run(command, input=json.dumps({"sessionId": "excluded-before", "cwd": str(repo)}),
+                   text=True, capture_output=True, env=env, check=True)
+    excluded.rmdir()
+    directory_link(excluded, external_link)
+    session = "excluded-after"
+    subprocess.run(command, input=json.dumps({"sessionId": session, "cwd": str(repo)}),
+                   text=True, capture_output=True, env=env, check=True)
+    target = target.parents[3] / session / "instructions" / "ai-attribution" / target.name
+    assert target.read_text(encoding="utf-8").startswith("Disclose AI for ALL contributions.")

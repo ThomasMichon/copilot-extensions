@@ -47,6 +47,17 @@ def _check_markup(value: str) -> None:
         )
     ):
         raise ProfileError("templates support visible text/emphasis, not hidden or active markup")
+    structural = re.sub(r"\\[" + re.escape(string.punctuation) + "]", "", value)
+    depth = 0
+    for character in structural:
+        if character == "[":
+            depth += 1
+        elif character == "]":
+            depth -= 1
+            if depth < 0:
+                break
+    if depth:
+        raise ProfileError("markup fragments must not span slots or draft content")
 
 
 def _template(value: object) -> str:
@@ -112,7 +123,10 @@ def validate(value: object) -> dict:
     return value
 
 
-def profile_paths(home: Path, repo: Path | None, env: dict | None = None) -> list[Path]:
+def profile_paths(
+    home: Path, repo: Path | None, env: dict | None = None, *,
+    excluded: list[Path] | None = None,
+) -> list[Path]:
     """Repository presentation defaults, trusted instruction defaults, personal."""
     env = os.environ if env is None else env
     raw_dirs = env.get("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
@@ -129,7 +143,9 @@ def profile_paths(home: Path, repo: Path | None, env: dict | None = None) -> lis
         if not directory.is_absolute():
             directory = Path.cwd() / directory
         try:
-            if repo and directory.resolve().is_relative_to(repo.resolve()):
+            if repo and _safe_file(directory) and directory.resolve().is_relative_to(repo.resolve()):
+                if excluded is not None:
+                    excluded.append(directory)
                 continue
         except (OSError, RuntimeError):
             pass
@@ -140,7 +156,7 @@ def profile_paths(home: Path, repo: Path | None, env: dict | None = None) -> lis
     )
     paths.append((Path(platform) if platform else home / ".config") /
                  "ai-attribution" / "config.json")
-    return list(dict.fromkeys(paths))
+    return list(dict.fromkeys(reversed(paths)))[::-1]
 
 
 def _safe_file(path: Path) -> bool:
@@ -155,10 +171,15 @@ def _safe_file(path: Path) -> bool:
 def load_profile(home: Path, repo: Path | None, env: dict | None = None) -> tuple[dict, list[str]]:
     profile = {"version": 1, "variables": {}, "rules": [], "_inputs": [], "_probes": []}
     errors = []
+    excluded = []
     try:
-        paths = profile_paths(home, repo, env)
+        paths = profile_paths(home, repo, env, excluded=excluded)
     except (OSError, ValueError, RuntimeError):
         return profile, ["profile discovery rejected"]
+    profile["_probes"].extend(
+        {"path": str(path), "sha256": None, "kind": "excluded"}
+        for path in dict.fromkeys(excluded)
+    )
     for index, path in enumerate(paths):
         probe = {"path": str(path), "sha256": None}
         profile["_probes"].append(probe)

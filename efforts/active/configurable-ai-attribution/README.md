@@ -290,3 +290,15 @@ network dependency, parallel policy registry or mandatory sibling plugin.
   missing-parent junction regression passed for both HOME forms. A portable
   pre-open guard test passed; the real FIFO regression is POSIX-only and was
   skipped locally. High-signal lint passed.
+
+### 2026-10-30 - Excluded-path dependencies and precedence
+- Containment exclusions now retain lexical safety probes, and unsafe paths
+  are rejected instead of being silently excluded. Native reuse cannot miss a
+  directory changing into or out of a symlink/junction.
+- Rejected unbalanced bracket fragments that could form hidden markup across
+  slots/draft content. Duplicate profile paths retain their last occurrence,
+  preserving final personal override precedence.
+- Focused validation passed 93 tests with 4 platform skips, including real
+  native exclusion/junction transitions in both HOME forms. High-signal lint
+  passed. The current review gate remains open until the corrected revision
+  receives its verdict and required checks.
