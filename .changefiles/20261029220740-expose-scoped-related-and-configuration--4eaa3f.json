@@ -1,0 +1,9 @@
+{
+  "comment": "Expose scoped related and configuration acquisition uncertainty without enabling reuse",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

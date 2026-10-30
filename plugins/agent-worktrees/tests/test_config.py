@@ -12,6 +12,73 @@ import pytest
 from agent_worktrees import config as cfg
 
 
+@pytest.mark.parametrize("body", ["repos: [\n", "- not-a-mapping\n"])
+def test_config_acquisition_report_retains_yaml_failure(tmp_path, body):
+    from dropin_registry import ScanAuthority
+
+    path = tmp_path / "config.yaml"
+    path.write_text(body, encoding="utf-8")
+    assert cfg._load_yaml_safe(path) == {}
+    report = cfg._load_yaml_safe_report(path)
+    assert report.value == {}
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.entry == str(path) for f in report.findings)
+    assert report.reusable is False
+
+
+def test_config_acquisition_report_retains_dropin_findings_and_positive_config(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_dropins
+
+    directory = tmp_path / "config.d"
+    directory.mkdir()
+    (directory / "a-invalid.yaml").write_text("repos: [\n", encoding="utf-8")
+    (directory / "b-valid.yaml").write_text(
+        "repos:\n  sample:\n    remote: upstream\n", encoding="utf-8",
+    )
+    owner_report = config_dropins.scan_config_dropin_registry(directory, previous={})
+    assert owner_report.findings
+    monkeypatch.setattr(config_dropins, "scan_config_dropin_registry", lambda *a, **k: owner_report)
+    legacy = cfg._load_config_d(directory)
+    assert legacy == {"repos": {"sample": {"remote": "upstream"}}}
+    report = cfg._load_config_d_report(directory)
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert {(f.entry, f.reason, f.status) for f in report.findings} == {
+        (f.entry, f.reason, f.status) for f in owner_report.findings
+    }
+    assert all(f.detail is None for f in report.findings)
+    assert report.reusable is False
+
+
+def test_config_acquisition_report_required_knowledge_unavailable_keeps_base(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources, machine_config, state_root
+
+    base = str(tmp_path / "base")
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="example", platform="windows", repo_name="sample",
+        repos={"sample": cfg.RepoConfig(
+            anchor=base, worktree_root=str(tmp_path / "trees"), stateless=True,
+        )},
+    )
+    unresolved = state_root.StateRoot(
+        path=None, source="knowledge_repo", repo="knowledge", stateless=True,
+        requires_external=True, bound=False, error="synthetic required binding unavailable",
+    )
+    monkeypatch.setattr(machine_config, "machine_config_root", lambda *a, **k: None)
+    monkeypatch.setattr(state_root, "resolve_state_root", lambda *a, **k: unresolved)
+    legacy = config_sources.config_source_anchors(config, base_anchor=base)
+    assert [(source.anchor, source.origin) for source in legacy] == [(base, "harness")]
+    report = config_sources.config_source_anchors_report(config, base_anchor=base)
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "knowledge-unavailable" for f in report.findings)
+    assert "synthetic required binding unavailable" not in repr(report.observations)
+    assert report.reusable is False
+    assert report.reuse_blockers
+
+
 @pytest.fixture(autouse=True)
 def _isolate_config_layers(tmp_path_factory, monkeypatch):
     """Make layered config hermetic across the module.
@@ -2690,3 +2757,43 @@ def test_own_checked_in_config_resolves_strategy_keep_alive():
     config_path = Path(__file__).resolve().parents[3] / ".agent-worktrees" / "config.yaml"
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert data["pr"]["strategy"] == "keep-alive"
+
+
+@pytest.mark.parametrize("entry_observed", [True, False], ids=["entry-uncertain", "registry-unavailable"])
+def test_config_acquisition_report_retains_owner_verdict_for_last_known_data(tmp_path, monkeypatch, entry_observed):
+    from dropin_registry import EntryDecision, EntryStatus, Finding, ScanAuthority, ScanSnapshot
+    from agent_worktrees import config_dropins
+
+    entry = tmp_path / "config.d" / "managed.json"
+    target = tmp_path / "plugin" / "config.yaml"
+    finding = Finding(registry="config.d", entry=str(entry), status="indeterminate", reason="unreadable-source")
+    contribution = config_dropins.ConfigDropin(
+        entry=entry, target=target, entry_class="managed-plugin", owner="sample@example-market",
+        raw_config={"repos": {"sample": {"remote": "retained-upstream"}}},
+    )
+    owner = config_dropins.ConfigDropinRegistryReport(
+        snapshot=ScanSnapshot(
+            registry="config.d", authority=ScanAuthority.COMPLETE if entry_observed else ScanAuthority.INDETERMINATE,
+            decisions={str(entry): EntryDecision.indeterminate(finding)} if entry_observed else {},
+            findings=(finding,),
+        ), active_entries={str(entry): contribution},
+    )
+    calls = []
+
+    def scan(*args, **kwargs):
+        calls.append("scan")
+        return owner
+
+    monkeypatch.setattr(config_dropins, "scan_config_dropin_registry", scan)
+    report = cfg._load_config_d_report(entry.parent)
+    assert calls == ["scan"]
+    assert report.value == contribution.raw_config
+    assert report.authority is ScanAuthority.INDETERMINATE
+    observation = next(o for o in report.observations if o.source == str(entry))
+    assert observation.retained is True
+    assert observation.status is (EntryStatus.INDETERMINATE if entry_observed else None)
+    assert observation.owner == contribution.owner
+    assert observation.target == str(target)
+    assert "retained-upstream" not in repr(report.observations)
+    assert report.findings == (finding,)
+    assert report.reusable is False
