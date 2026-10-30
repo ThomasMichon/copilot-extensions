@@ -199,6 +199,16 @@ contract.
   CI gate; the failed local run is not passing proof.
 - Proposed the next finite provider-owned acquisition slice for review alongside
   this source candidate; it retains existing transport and credential owners.
+- A consumer reported 14 offline replay scenarios passing for the initial
+  immutable candidate, including omitted policy evaluations and distinct absent/
+  null/zero votes. This is not live acquisition or independently executed
+  reviewer qualification.
+- The source PR's first current-head CI passed, including eligible units with
+  coverage. Its code review found five real input/revision issues: endpoint
+  parser error disclosure, a newer nonmatching iteration hidden by historical
+  matching data, unusable changed paths, non-round-trippable size bounds and a
+  null sync baseline. Added focused fixes and regressions rather than treating
+  the clean consumer replay as proof those edge cases were sound.
 
 ### 2026-10-30 - Source continuation admitted
 - Source implementation was explicitly authorized, with incremental candidates

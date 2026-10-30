@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 import time
 
-from .review_workspace import MAX_BYTES, build_generation
+from .review_workspace import MAX_BYTES, MAX_GENERATION_BYTES, build_generation
 
 
 def _unique(pairs: list[tuple[str, object]]) -> dict:
@@ -20,14 +20,14 @@ def _unique(pairs: list[tuple[str, object]]) -> dict:
     return value
 
 
-def _read(path: str) -> object:
+def _read(path: str, budget: int) -> object:
     stream = sys.stdin.buffer if path == "-" else Path(path).open("rb")
     try:
-        raw = stream.read(MAX_BYTES + 1)
+        raw = stream.read(budget + 1)
     finally:
         if path != "-":
             stream.close()
-    if len(raw) > MAX_BYTES:
+    if len(raw) > budget:
         raise ValueError("workspace input exceeds its byte budget")
     return json.loads(raw, object_pairs_hook=_unique)
 
@@ -58,12 +58,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if args.command == "sync" and args.evidence == args.previous == "-":
                 raise ValueError("evidence and previous cannot both consume stdin")
-            result = build_generation(
-                _read(args.evidence),
-                _read(args.previous) if args.command == "sync" else None,
-            )
+            previous = _read(args.previous, MAX_GENERATION_BYTES) if args.command == "sync" else None
+            if args.command == "sync" and not isinstance(previous, dict):
+                raise ValueError("sync requires a previous generation object")
+            result = build_generation(_read(args.evidence, MAX_BYTES), previous)
             result["duration_ms"] = round((time.monotonic() - start) * 1000, 3)
-        print(json.dumps(result, indent=2, sort_keys=True, allow_nan=False))
+        print(json.dumps(result, separators=(",", ":"), sort_keys=True, allow_nan=False))
         return 0
     except (json.JSONDecodeError, OSError, UnicodeError, RecursionError) as exc:
         # Input paths and provider data may be private; never echo their bytes.

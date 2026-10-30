@@ -14,6 +14,7 @@ EVIDENCE_SCHEMA = "agent-pull-requests.review-evidence"
 GENERATION_SCHEMA = "agent-pull-requests.review-generation"
 SECTIONS = ("pull_request", "iterations", "changes", "discussions", "reviewers", "policies")
 MAX_BYTES = 8 * 1024 * 1024
+MAX_GENERATION_BYTES = 2 * MAX_BYTES
 MAX_RECORDS = 20_000
 
 
@@ -40,11 +41,16 @@ def _scope(value: object) -> dict:
     result = {key: _text(value.get(key), key) for key in names if key != "number"}
     if result["provider"] != "azure-devops":
         raise ValueError("unsupported provider; this adapter supports azure-devops")
-    endpoint = urlsplit(result["endpoint"])
-    if (
-        endpoint.scheme != "https" or not endpoint.hostname or endpoint.username
-        or endpoint.password or endpoint.query or endpoint.fragment
-    ):
+    try:
+        endpoint = urlsplit(result["endpoint"])
+        invalid_endpoint = (
+            endpoint.scheme != "https" or not endpoint.hostname or endpoint.username
+            or endpoint.password or endpoint.query or endpoint.fragment
+        )
+        _ = endpoint.port
+    except ValueError:
+        invalid_endpoint = True
+    if invalid_endpoint:
         raise ValueError("endpoint must be an explicit HTTPS endpoint without credentials or query")
     result["endpoint"] = result["endpoint"].rstrip("/")
     if type(value.get("number")) is not int or value["number"] <= 0:
@@ -125,18 +131,30 @@ def _record(name: str, value: dict) -> dict:
         return result
     if name == "changes":
         result = _select(value, ("changeTrackingId", "changeId", "changeType", "originalPath"))
-        if "item" in value:
-            if not isinstance(value["item"], dict):
-                raise ValueError("change item must be an object")
-            result["item"] = _select(value["item"], (
-                "path", "objectId", "originalObjectId", "gitObjectType", "isFolder",
-            ))
+        item = value.get("item")
+        if not isinstance(item, dict):
+            raise ValueError("change item must be an object with a usable repository path")
+        path = item.get("path")
+        if (
+            not isinstance(path, str) or not path.startswith("/") or path == "/"
+            or "\0" in path or any(part in (".", "..") for part in path.split("/"))
+        ):
+            raise ValueError("change item must have a usable repository path")
+        result["item"] = _select(item, (
+            "path", "objectId", "originalObjectId", "gitObjectType", "isFolder",
+        ))
         return result
     if name == "discussions":
         result = _select(value, (
             "id", "status", "publishedDate", "lastUpdatedDate", "isDeleted",
             "threadContext", "pullRequestThreadContext",
         ))
+        if "properties" in value:
+            if not isinstance(value["properties"], dict):
+                raise ValueError("discussion properties must be an object")
+            result["properties"] = _select(value["properties"], (
+                "CodeReviewThreadType", "CodeReviewVoteResult", "CodeReviewVotedByTfId",
+            ))
         if "comments" in value:
             if not isinstance(value["comments"], list):
                 raise ValueError("discussion comments must be a list")
@@ -202,6 +220,8 @@ def _section(name: str, value: object, scope: dict) -> dict:
         ):
             raise ValueError(f"{name} data must be a bounded list of objects")
         data = [_record(name, row) for row in data]
+        if name == "iterations" and len({row["id"] for row in data}) != len(data):
+            raise ValueError("iteration ids must be unique")
         # Provider order is not material, but comment order within a thread is.
         data.sort(key=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":")))
     result = {
@@ -225,34 +245,34 @@ def _section(name: str, value: object, scope: dict) -> dict:
 def _revision(sections: dict) -> dict:
     pull = sections["pull_request"]["data"] or {}
     head = (pull.get("lastMergeSourceCommit") or {}).get("commitId")
-    iterations = [
-        row for row in (sections["iterations"]["data"] or [])
-        if head and (row.get("sourceRefCommit") or {}).get("commitId") == head
-    ]
+    iterations = sections["iterations"]["data"] or []
     latest = (
         max(iterations, key=lambda row: row["id"])
         if iterations and sections["iterations"]["complete"] and sections["pull_request"]["complete"]
         else {}
     )
+    iteration_head = (latest.get("sourceRefCommit") or {}).get("commitId")
+    current = latest if head and iteration_head == head else {}
     return {
-        "head_sha": head, "iteration": latest.get("id"),
-        "iteration_target_sha": (latest.get("targetRefCommit") or {}).get("commitId"),
-        "common_sha": (latest.get("commonRefCommit") or {}).get("commitId"),
+        "head_sha": head, "iteration": current.get("id"),
+        "iteration_head_sha": iteration_head,
+        "iteration_target_sha": (current.get("targetRefCommit") or {}).get("commitId"),
+        "common_sha": (current.get("commonRefCommit") or {}).get("commitId"),
         "target_sha": (pull.get("lastMergeTargetCommit") or {}).get("commitId"),
     }
 
 
-def _bounded(value: object) -> None:
+def _bounded(value: object, budget: int) -> None:
     try:
         encoded = json.dumps(value, allow_nan=False).encode("utf-8")
     except (ValueError, TypeError, RecursionError):
         raise ValueError("workspace input must be finite JSON") from None
-    if len(encoded) > MAX_BYTES:
+    if len(encoded) > budget:
         raise ValueError("workspace input exceeds its byte budget")
 
 
 def _generation(value: object, scope: dict) -> dict:
-    _bounded(value)
+    _bounded(value, MAX_GENERATION_BYTES)
     if not isinstance(value, dict):
         raise ValueError("previous generation must be an object")
     body = {key: item for key, item in value.items() if key != "id"}
@@ -270,7 +290,7 @@ def _generation(value: object, scope: dict) -> dict:
 
 def build_generation(evidence: object, previous: object = None) -> dict:
     """Normalize supplied evidence; no IO, eligibility decision or upstream effects."""
-    _bounded(evidence)
+    _bounded(evidence, MAX_BYTES)
     if (
         not isinstance(evidence, dict) or evidence.get("schema") != EVIDENCE_SCHEMA
         or type(evidence.get("version")) is not int or evidence["version"] != 1
@@ -299,6 +319,7 @@ def build_generation(evidence: object, previous: object = None) -> dict:
         "source_attachment": {"state": "unsupported", "head_sha": revision["head_sha"]},
     }
     generation = {**body, "id": _digest(body)}
+    _bounded(generation, MAX_GENERATION_BYTES)
     before = _generation(previous, scope) if previous is not None else None
     changed = [
         name for name in SECTIONS if before is None

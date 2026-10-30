@@ -64,7 +64,10 @@ network or credentials. The envelope is:
 
 The adapter selects domain fields rather than retaining arbitrary response
 headers or raw diagnostic objects. Completion values preserve presence/null/
-false, as do votes, deleted comments and iteration contexts. Unsupported
+false, as do votes, deleted comments and iteration contexts. Selected
+provider vote-event properties retain their native `CodeReviewThreadType`,
+`CodeReviewVoteResult` and `CodeReviewVotedByTfId` presence/wrappers; the adapter
+does not interpret them as review authorization. Other unsupported
 provider fields are not evidence of false values. Records are deterministically
 ordered; comments retain provider order. A blob's type or path is not a binary/
 text classification or proof that source was prepared.
@@ -75,6 +78,11 @@ text classification or proof that source was prepared.
 `generation`, `changed_sections`, `invalidations`, operation `duration_ms`,
 `acquisition: caller_supplied` and `effects: none`.
 
+Evidence input is capped at 8 MiB. Generation inputs/outputs have a separate
+16 MiB bound to accommodate normalization metadata, so a valid generated
+baseline can round-trip through `sync`. The CLI emits compact JSON; caller-added
+whitespace still counts against its raw input limit.
+
 The generation is `agent-pull-requests.review-generation` version 1. Its `id`
 hashes canonical scope, selected normalized data, revision, completeness and
 observation intervals. It is an integrity/revision key, not provenance or
@@ -83,9 +91,11 @@ Generations do not assert an atomic forge snapshot or expiration-based freshness
 Consumers retain the per-section observation intervals and apply their own
 action-specific freshness requirements.
 
-`revision` records the PR head, latest matching source iteration, iteration
+`revision` records the PR head, newest observed iteration head, current source iteration, iteration
 target, authoritative common commit and current PR target. Missing facts remain
-null. Changes bound to another head/iteration/common commit remain visible but
+null. The newest iteration must agree with the PR metadata head before it
+establishes a current range; a historical matching iteration cannot hide a
+newer conflicting head. Changes bound to another head/iteration/common commit remain visible but
 become incomplete with `revision_mismatch`. Source attachment always reports
 `unsupported` and the currently observed head; old source is never relabeled.
 `complete` means all supplied required sections and revision evidence are

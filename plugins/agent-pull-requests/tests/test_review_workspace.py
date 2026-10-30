@@ -5,6 +5,8 @@ import json
 
 import pytest
 
+from agent_pull_requests import review_workspace as workspace
+from agent_pull_requests import review_workspace_cli as cli
 from agent_pull_requests.review_workspace import build_generation
 from agent_pull_requests.review_workspace_cli import main
 
@@ -83,6 +85,7 @@ def test_initial_load_preserves_presence_revision_and_no_effects(evidence):
     assert generation["sections"]["reviewers"]["data"][0]["vote"] == 0
     assert generation["revision"] == {
         "head_sha": HEAD, "iteration": 3, "common_sha": COMMON,
+        "iteration_head_sha": HEAD,
         "iteration_target_sha": TARGET, "target_sha": TARGET,
     }
     assert generation["complete"] is True
@@ -172,6 +175,23 @@ def test_partial_iteration_read_cannot_reuse_old_current_range(evidence):
     assert not result["generation"]["sections"]["changes"]["complete"]
 
 
+def test_newest_iteration_at_another_head_cannot_reuse_historical_range(evidence):
+    before = build_generation(evidence)["generation"]
+    evidence["sections"]["iterations"]["data"].append({
+        "id": 4, "sourceRefCommit": {"commitId": "e" * 40},
+        "commonRefCommit": {"commitId": COMMON},
+    })
+    result = build_generation(evidence, before)
+    generation = result["generation"]
+    assert generation["revision"]["head_sha"] == HEAD
+    assert generation["revision"]["iteration_head_sha"] == "e" * 40
+    assert generation["revision"]["iteration"] is None
+    assert generation["revision"]["common_sha"] is None
+    assert not generation["complete"]
+    assert not generation["sections"]["changes"]["complete"]
+    assert {"source_analysis", "inline_anchors"} <= set(result["invalidations"])
+
+
 def test_changed_manifest_invalidates_analysis_even_with_same_head(evidence):
     before = build_generation(evidence)["generation"]
     evidence["sections"]["changes"]["data"].append({
@@ -183,6 +203,24 @@ def test_changed_manifest_invalidates_analysis_even_with_same_head(evidence):
     changes = result["generation"]["sections"]["changes"]["data"]
     assert any(row["changeType"] == "delete" for row in changes)
     assert all("isBinary" not in row["item"] for row in changes)
+
+
+def test_native_vote_event_presence_and_changes_survive_normalization(evidence):
+    thread = evidence["sections"]["discussions"]["data"][0]
+    thread["properties"] = {
+        "CodeReviewThreadType": {"$value": "VoteUpdate"},
+        "CodeReviewVoteResult": {"$value": 0},
+        "CodeReviewVotedByTfId": {"$value": "reviewer-id"},
+        "unrelatedProperty": "not retained",
+    }
+    before = build_generation(evidence)["generation"]
+    properties = before["sections"]["discussions"]["data"][0]["properties"]
+    assert properties["CodeReviewVoteResult"] == {"$value": 0}
+    assert "unrelatedProperty" not in properties
+    thread["properties"]["CodeReviewVoteResult"]["$value"] = 10
+    result = build_generation(evidence, before)
+    assert result["changed_sections"] == ["discussions"]
+    assert "review_decision" in result["invalidations"]
 
 
 @pytest.mark.parametrize("field,value", [
@@ -260,3 +298,55 @@ def test_cli_refuses_ambiguous_duplicate_fields_without_echoing_values(tmp_path,
     error = json.loads(capsys.readouterr().out)
     assert error["error"] == "workspace JSON contains a duplicate field"
     assert "private-value" not in str(error)
+
+
+def test_endpoint_parser_failures_never_echo_authority(evidence, tmp_path, capsys):
+    supplied = tmp_path / "evidence.json"
+    evidence["scope"]["endpoint"] = "https://private-user:private-password@example.org\uff0f"
+    supplied.write_text(json.dumps(evidence), encoding="utf-8")
+    assert main(["load", "--evidence", str(supplied)]) == 1
+    error = json.loads(capsys.readouterr().out)
+    assert error["error"].startswith("endpoint must be an explicit HTTPS endpoint")
+    assert "private-" not in str(error)
+
+
+@pytest.mark.parametrize("change", [{}, {"item": {}}, {"item": {"path": ""}},
+                                 {"item": {"path": "/a/../b"}}])
+def test_malformed_change_entries_cannot_appear_complete(evidence, change):
+    evidence["sections"]["changes"]["data"] = [change]
+    with pytest.raises(ValueError, match="usable repository path"):
+        build_generation(evidence)
+
+
+def test_sync_refuses_null_baseline(evidence, tmp_path, capsys):
+    supplied = tmp_path / "evidence.json"
+    previous = tmp_path / "previous.json"
+    supplied.write_text(json.dumps(evidence), encoding="utf-8")
+    previous.write_text("null", encoding="utf-8")
+    assert main(["sync", "--evidence", str(supplied), "--previous", str(previous)]) == 1
+    error = json.loads(capsys.readouterr().out)
+    assert error["error"] == "sync requires a previous generation object"
+    assert "generation" not in error
+
+
+def test_near_limit_load_output_round_trips_as_sync_baseline(
+    evidence, tmp_path, capsys, monkeypatch,
+):
+    monkeypatch.setattr(workspace, "MAX_BYTES", 4096)
+    monkeypatch.setattr(workspace, "MAX_GENERATION_BYTES", 8192)
+    monkeypatch.setattr(cli, "MAX_BYTES", 4096)
+    monkeypatch.setattr(cli, "MAX_GENERATION_BYTES", 8192)
+    pull = evidence["sections"]["pull_request"]["data"]
+    pull["description"] = ""
+    pull["description"] = "x" * (4096 - len(json.dumps(evidence).encode()) - 1)
+    supplied = tmp_path / "evidence.json"
+    previous = tmp_path / "generation.json"
+    supplied.write_text(json.dumps(evidence), encoding="utf-8")
+    assert main(["load", "--evidence", str(supplied)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    encoded = json.dumps(result["generation"])
+    assert 4096 < len(encoded.encode()) < 8192
+    previous.write_text(encoded, encoding="utf-8")
+    assert main(["sync", "--evidence", str(supplied), "--previous", str(previous)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["changed_sections"] == result["invalidations"] == []
