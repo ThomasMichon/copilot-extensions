@@ -29,6 +29,12 @@ from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml
 from machine_transport import normalize_machine_entries as _mt_normalize_machine_entries
 from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
 
+from . import config_acquisition
+from .config_acquisition import (
+    _load_config_d_report as _load_config_d_report,
+    _load_yaml_safe_report as _load_yaml_safe_report,
+)
+
 from . import config_migrations, inrepo_config_source, project_state, publication_deadline, registry_paths
 from . import machine_instructions
 from .codename_config import CodenameConfig, parse_codename
@@ -1232,14 +1238,7 @@ def _load_yaml_safe(path: Path) -> dict[str, Any]:
     missing, empty, or malformed file degrades to an empty mapping rather than
     breaking the whole CLI.
     """
-    try:
-        if not path.exists():
-            return {}
-        with open(path, encoding="utf-8") as f:
-            raw = yaml.load(f, Loader=_YamlSafeLoader)
-        return raw if isinstance(raw, dict) else {}
-    except Exception:
-        return {}
+    return config_acquisition.yaml_value(path)
 
 
 def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
@@ -1297,21 +1296,7 @@ def _load_config_d(
     independent fault boundary and uncertainty retains only its last-known
     contribution.
     """
-    from .config_dropins import (
-        scan_config_dropin_registry,
-        warn_config_dropin_findings,
-    )
-
-    report = scan_config_dropin_registry(
-        config_d,
-        project_name=project_name,
-    )
-    if warn:
-        warn_config_dropin_findings(report)
-    merged: dict[str, Any] = {}
-    for contribution in report.active_configs:
-        merged = _deep_merge(merged, contribution.raw_config)
-    return merged
+    return config_acquisition.dropin_value(config_d, project_name=project_name, warn=warn)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

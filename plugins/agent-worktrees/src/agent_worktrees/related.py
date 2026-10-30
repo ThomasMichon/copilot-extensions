@@ -56,15 +56,21 @@ loaders.
 
 from __future__ import annotations
 
-import json
+import json as json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 import yaml
-from dropin_registry import ScanAuthority
-from plugin_activation import ActivationReport, resolve_active_plugins
+from plugin_activation import ActivationReport, resolve_active_plugins as resolve_active_plugins
+
+from . import related_acquisition
+from .related_acquisition import (
+    installed_plugin_related_anchors_report as installed_plugin_related_anchors_report,
+    read_related_grafted_report as read_related_grafted_report,
+    read_related_report as read_related_report,
+)
 
 from .related_availability import (
     MachineMatch,
@@ -444,73 +450,15 @@ def _parse_related_pr(raw: Any) -> dict[str, Any]:
 
 def _parse_related_file(path: Path) -> RelatedConfig:
     """Load one related.yaml file, or an empty config when unreadable."""
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except Exception:
-        return RelatedConfig()
-    if not isinstance(data, dict):
-        return RelatedConfig()
-
-    primary = str(data.get("primary", "")).strip()
-
-    related: dict[str, RelatedEntry] = {}
-    raw_related = data.get("related", {})
-    if isinstance(raw_related, dict):
-        for name, entry in raw_related.items():
-            # A bare ``name:`` (null value) is a valid minimal link.
-            if entry is None:
-                entry = {}
-            if not isinstance(entry, dict):
-                continue
-            related[str(name)] = RelatedEntry(
-                name=str(name),
-                role=normalize_role(entry.get("role", "")),
-                summary=str(entry.get("summary", "")).strip(),
-                doc=str(entry.get("doc", "")).strip(),
-                locus=_parse_locus(entry.get("locus")),
-                delegate=_parse_delegate(entry.get("delegate")),
-                ownership=normalize_ownership(entry.get("ownership")),
-                owner=str(entry.get("owner", "")).strip(),
-                audience=normalize_audience(entry.get("audience")),
-                ai_attribution=_parse_ai_attribution(entry.get("ai_attribution")),
-                plugins=_parse_plugins(entry.get("plugins")),
-                pr=_parse_related_pr(entry.get("pr")),
-                doc_root=str(path.parent),
-            )
-
-    return RelatedConfig(primary=primary, related=related)
+    return related_acquisition.parse_file(path)
 
 
 def _repo_base_related_path(anchor: Path) -> Path | None:
-    for candidate in (anchor / CANONICAL_RELATED_DIR / RELATED_FILENAME, legacy_related_path(anchor)):
-        if candidate.exists():
-            return candidate
-    return None
+    return related_acquisition.base_path(anchor)
 
 
 def _repo_marketplace_overlay_related_path(anchor: Path) -> Path | None:
-    raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
-    if not raw:
-        return None
-    try:
-        if raw.startswith("{"):
-            context = json.loads(raw)
-        else:
-            context = json.loads(Path(raw).expanduser().read_text(encoding="utf-8"))
-    except (OSError, TypeError, ValueError):
-        return None
-    if not isinstance(context, dict):
-        return None
-    marketplace_id = str(context.get("marketplaceId") or "").strip()
-    if not marketplace_id:
-        return None
-    candidate = (
-        anchor
-        / MARKETPLACE_OVERLAYS_DIR
-        / marketplace_id
-        / RELATED_FILENAME
-    )
-    return candidate if candidate.exists() else None
+    return related_acquisition.overlay_path(anchor)
 
 
 def read_related(anchor: str | Path) -> RelatedConfig:
@@ -525,24 +473,7 @@ def read_related(anchor: str | Path) -> RelatedConfig:
     ``.agent-worktrees/related.yaml`` location. Missing, empty, or malformed
     files yield an empty :class:`RelatedConfig`.
     """
-    root = Path(anchor)
-    if _looks_like_plugin_anchor(root):
-        return _parse_related_file(legacy_related_path(root))
-
-    merged = RelatedConfig()
-    layers: list[Path] = []
-    base = _repo_base_related_path(root)
-    if base is not None:
-        layers.append(base)
-    overlay = _repo_marketplace_overlay_related_path(root)
-    if overlay is not None:
-        layers.append(overlay)
-    for path in layers:
-        loaded = _parse_related_file(path)
-        if loaded.primary:
-            merged.primary = loaded.primary
-        merged.related.update(loaded.related)
-    return merged
+    return related_acquisition.read(anchor)
 
 
 def _quote(v: str) -> str:
@@ -806,19 +737,7 @@ def config_contribution_anchor(
 
 def _plugin_manifest_name(plugin_root: Path) -> str:
     """Read a plugin's declared identity, or return empty when unverifiable."""
-    for manifest in (
-        plugin_root / "plugin.json",
-        plugin_root / ".claude-plugin" / "plugin.json",
-    ):
-        try:
-            raw = json.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(raw, dict):
-            name = str(raw.get("name") or "").strip()
-            if name:
-                return name
-    return ""
+    return related_acquisition.plugin_manifest_name(plugin_root)
 
 
 def entry_provenance(entry: RelatedEntry) -> dict[str, str]:
@@ -853,36 +772,12 @@ def installed_plugins_root() -> Path:
 
 def _has_plugin_manifest(plugin_dir: Path) -> bool:
     """True if ``plugin_dir`` looks like an installed plugin (has a manifest)."""
-    return (
-        (plugin_dir / "plugin.json").is_file()
-        or (plugin_dir / ".claude-plugin" / "plugin.json").is_file()
-    )
+    return related_acquisition.has_plugin_manifest(plugin_dir)
 
 
 def _filesystem_plugin_related_anchors(base: Path) -> list[str]:
     """Discover related fragments beneath one explicit plugin payload root."""
-    try:
-        if not base.is_dir():
-            return []
-    except OSError:
-        return []
-    rel = f"{INREPO_DIRNAME}/{RELATED_FILENAME}"
-    found: set[str] = set()
-    for pattern in (f"*/*/{rel}", f"*/{rel}"):
-        try:
-            for related_yaml in base.glob(pattern):
-                plugin_dir = related_yaml.parent.parent
-                try:
-                    if _has_plugin_manifest(plugin_dir):
-                        found.add(str(plugin_dir.resolve()))
-                except OSError:
-                    continue
-        except OSError:
-            continue
-    return [
-        _PluginContributionAnchor(path, _plugin_manifest_name(Path(path)))
-        for path in sorted(found, key=os.path.normcase)
-    ]
+    return related_acquisition.filesystem_anchors(base)
 
 
 def installed_plugin_related_anchors(
@@ -906,50 +801,17 @@ def installed_plugin_related_anchors(
     These anchors are the lowest-precedence config-graft layer (see the module
     note above); callers prepend them ahead of the base/knowledge anchors.
     """
-    override = os.environ.get(INSTALLED_PLUGINS_ENV)
-    if root is not None or override:
-        return _filesystem_plugin_related_anchors(
-            root or installed_plugins_root()
-        )
-
-    try:
-        report = report or resolve_active_plugins(home=home)
-    except (OSError, ValueError):
-        return []
-    if report.authority is ScanAuthority.INDETERMINATE:
-        return []
-    found: dict[str, str] = {}
-    for plugin in report.active.values():
-        for selected in plugin.live_roots:
-            try:
-                if related_path(selected.root).is_file():
-                    found[str(selected.root)] = plugin.name
-            except OSError:
-                continue
-    return [
-        _PluginContributionAnchor(path, found[path])
-        for path in sorted(found, key=os.path.normcase)
-    ]
+    return related_acquisition.installed(root, home=home, report=report)
 
 
 def _is_installed_plugin_anchor(anchor: str | Path) -> bool:
     """True when ``anchor`` is a cached or explicitly tagged plugin root."""
-    if isinstance(anchor, _PluginContributionAnchor):
-        return True
-    try:
-        root = installed_plugins_root().resolve()
-        return root in Path(anchor).resolve().parents
-    except OSError:
-        return False
+    return related_acquisition.is_installed_plugin_anchor(anchor)
 
 
 def _anchor_key(anchor: str | Path) -> str:
     """Canonical comparison key for an anchor, with a fail-safe fallback."""
-    try:
-        resolved = Path(anchor).expanduser().resolve()
-    except OSError:
-        resolved = Path(os.path.abspath(os.path.expanduser(str(anchor))))
-    return os.path.normcase(str(resolved))
+    return related_acquisition.anchor_key(anchor)
 
 
 def read_related_grafted(anchors: list[str | Path]) -> RelatedConfig:
@@ -974,39 +836,7 @@ def read_related_grafted(anchors: list[str | Path]) -> RelatedConfig:
     A single-anchor list reproduces the pre-graft single-repo behavior exactly, so
     callers can always route reads through this function.
     """
-    merged = RelatedConfig()
-    for anchor in anchors:
-        rc = read_related(anchor)
-        plugin_anchor = _is_installed_plugin_anchor(anchor)
-        if rc.primary and not plugin_anchor:
-            merged.primary = rc.primary
-        for name, entry in rc.related.items():
-            origin = (
-                anchor
-                if isinstance(anchor, _PluginContributionAnchor)
-                else (
-                    _PluginContributionAnchor(
-                        str(anchor),
-                        _plugin_manifest_name(Path(str(anchor))),
-                    )
-                    if plugin_anchor
-                    else str(anchor)
-                )
-            )
-            entry.origin_anchor = origin
-            if plugin_anchor:
-                entry.origin_layer = "plugin"
-            elif isinstance(anchor, _ConfigContributionAnchor):
-                entry.origin_layer = anchor.source_layer
-            else:
-                entry.origin_layer = "repository"
-            entry.origin_plugin = (
-                origin.plugin_name
-                if isinstance(origin, _PluginContributionAnchor)
-                else ""
-            )
-            merged.related[name] = entry
-    return merged
+    return related_acquisition.grafted(anchors)
 
 
 def list_related_grafted(

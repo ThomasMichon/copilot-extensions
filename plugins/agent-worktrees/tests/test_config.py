@@ -12,6 +12,73 @@ import pytest
 from agent_worktrees import config as cfg
 
 
+@pytest.mark.parametrize("body", ["repos: [\n", "- not-a-mapping\n"])
+def test_config_acquisition_report_retains_yaml_failure(tmp_path, body):
+    from dropin_registry import ScanAuthority
+
+    path = tmp_path / "config.yaml"
+    path.write_text(body, encoding="utf-8")
+    assert cfg._load_yaml_safe(path) == {}
+    report = cfg._load_yaml_safe_report(path)
+    assert report.value == {}
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.entry == str(path) for f in report.findings)
+    assert report.reusable is False
+
+
+def test_config_acquisition_report_retains_dropin_findings_and_positive_config(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_dropins
+
+    directory = tmp_path / "config.d"
+    directory.mkdir()
+    (directory / "a-invalid.yaml").write_text("repos: [\n", encoding="utf-8")
+    (directory / "b-valid.yaml").write_text(
+        "repos:\n  sample:\n    remote: upstream\n", encoding="utf-8",
+    )
+    owner_report = config_dropins.scan_config_dropin_registry(directory, previous={})
+    assert owner_report.findings
+    monkeypatch.setattr(config_dropins, "scan_config_dropin_registry", lambda *a, **k: owner_report)
+    legacy = cfg._load_config_d(directory)
+    assert legacy == {"repos": {"sample": {"remote": "upstream"}}}
+    report = cfg._load_config_d_report(directory)
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert {(f.entry, f.reason, f.status) for f in report.findings} == {
+        (f.entry, f.reason, f.status) for f in owner_report.findings
+    }
+    assert all(f.detail is None for f in report.findings)
+    assert report.reusable is False
+
+
+def test_config_acquisition_report_required_knowledge_unavailable_keeps_base(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources, machine_config, state_root
+
+    base = str(tmp_path / "base")
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="example", platform="windows", repo_name="sample",
+        repos={"sample": cfg.RepoConfig(
+            anchor=base, worktree_root=str(tmp_path / "trees"), stateless=True,
+        )},
+    )
+    unresolved = state_root.StateRoot(
+        path=None, source="knowledge_repo", repo="knowledge", stateless=True,
+        requires_external=True, bound=False, error="synthetic required binding unavailable",
+    )
+    monkeypatch.setattr(machine_config, "machine_config_root", lambda *a, **k: None)
+    monkeypatch.setattr(state_root, "resolve_state_root", lambda *a, **k: unresolved)
+    legacy = config_sources.config_source_anchors(config, base_anchor=base)
+    assert [(source.anchor, source.origin) for source in legacy] == [(base, "harness")]
+    report = config_sources.config_source_anchors_report(config, base_anchor=base)
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "knowledge-unavailable" for f in report.findings)
+    assert "synthetic required binding unavailable" not in repr(report.observations)
+    assert report.reusable is False
+    assert report.reuse_blockers
+
+
 @pytest.fixture(autouse=True)
 def _isolate_config_layers(tmp_path_factory, monkeypatch):
     """Make layered config hermetic across the module.
@@ -2690,3 +2757,213 @@ def test_own_checked_in_config_resolves_strategy_keep_alive():
     config_path = Path(__file__).resolve().parents[3] / ".agent-worktrees" / "config.yaml"
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert data["pr"]["strategy"] == "keep-alive"
+
+
+@pytest.mark.parametrize("entry_observed", [True, False], ids=["entry-uncertain", "registry-unavailable"])
+def test_config_acquisition_report_retains_owner_verdict_for_last_known_data(tmp_path, monkeypatch, entry_observed):
+    from dropin_registry import EntryDecision, EntryStatus, Finding, ScanAuthority, ScanSnapshot
+    from agent_worktrees import config_dropins
+
+    entry = tmp_path / "config.d" / "managed.json"
+    target = tmp_path / "plugin" / "config.yaml"
+    finding = Finding(registry="config.d", entry=str(entry), status="indeterminate", reason="unreadable-source")
+    contribution = config_dropins.ConfigDropin(
+        entry=entry, target=target, entry_class="managed-plugin", owner="sample@example-market",
+        raw_config={"repos": {"sample": {"remote": "retained-upstream"}}},
+    )
+    owner = config_dropins.ConfigDropinRegistryReport(
+        snapshot=ScanSnapshot(
+            registry="config.d", authority=ScanAuthority.COMPLETE if entry_observed else ScanAuthority.INDETERMINATE,
+            decisions={str(entry): EntryDecision.indeterminate(finding)} if entry_observed else {},
+            findings=(finding,),
+        ), active_entries={str(entry): contribution},
+    )
+    calls = []
+
+    def scan(*args, **kwargs):
+        calls.append("scan")
+        return owner
+
+    monkeypatch.setattr(config_dropins, "scan_config_dropin_registry", scan)
+    report = cfg._load_config_d_report(entry.parent)
+    assert calls == ["scan"]
+    assert report.value == contribution.raw_config
+    assert report.authority is ScanAuthority.INDETERMINATE
+    observation = next(o for o in report.observations if o.source == str(entry))
+    assert observation.retained is True
+    assert observation.status is (EntryStatus.INDETERMINATE if entry_observed else None)
+    assert observation.owner == contribution.owner
+    assert observation.target == str(target)
+    assert "retained-upstream" not in repr(report.observations)
+    assert report.findings == (finding,)
+    assert report.reusable is False
+
+
+def _machine_overlay_report_config(base: Path, tmp_path: Path):
+    return cfg.Config(
+        srcroot=str(tmp_path), machine="example", platform="windows", repo_name="sample",
+        repos={"sample": cfg.RepoConfig(anchor=str(base), worktree_root=str(tmp_path / "trees"))},
+    )
+
+
+def test_config_source_report_retains_suppressed_project_root_failure(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources
+
+    base = tmp_path / "base"
+    base.mkdir()
+    config = _machine_overlay_report_config(base, tmp_path)
+
+    def unavailable(project=None):
+        raise ValueError("synthetic project root resolution failure")
+
+    monkeypatch.setattr(cfg, "project_dir", unavailable)
+    legacy = config_sources.config_source_anchors(config, base_anchor=str(base))
+    assert [(source.anchor, source.origin) for source in legacy] == [(str(base), "harness")]
+    report = config_sources.config_source_anchors_report(config, base_anchor=str(base))
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.findings
+    assert "synthetic project root resolution failure" not in repr(report.observations)
+    assert report.reusable is False
+
+
+@pytest.mark.parametrize("later_marker_present", [False, True], ids=["no-positive-marker", "later-positive-marker"])
+def test_config_source_report_retains_suppressed_marker_stat_failure(tmp_path, monkeypatch, later_marker_present):
+    import os
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources, machine_config
+
+    base, overlay = tmp_path / "base", tmp_path / "overlay"
+    base.mkdir()
+    overlay.mkdir()
+    denied = overlay / ".agent-worktrees"
+    if later_marker_present:
+        (overlay / ".copilot-extensions" / "agent-worktrees").mkdir(parents=True)
+    config = _machine_overlay_report_config(base, tmp_path)
+    monkeypatch.setattr(cfg, "project_dir", lambda project=None: overlay)
+    original_stat = machine_config.os.stat
+
+    def stat(path, *args, **kwargs):
+        if isinstance(path, (str, os.PathLike)) and os.path.normcase(os.fspath(path)) == os.path.normcase(str(denied)):
+            raise PermissionError("synthetic private marker failure")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(machine_config.os, "stat", stat)
+    legacy = config_sources.config_source_anchors(config, base_anchor=str(base))
+    expected = [(str(base), "harness")]
+    if later_marker_present:
+        expected.append((str(overlay), "machine"))
+    assert [(source.anchor, source.origin) for source in legacy] == expected
+    report = config_sources.config_source_anchors_report(config, base_anchor=str(base))
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.findings
+    assert "synthetic private marker failure" not in repr(report.observations)
+    assert report.reusable is False
+
+
+def test_config_yaml_report_retains_bool_suppressed_source_lookup_error(tmp_path, monkeypatch):
+    import errno
+    import os
+    from dropin_registry import ScanAuthority
+
+    path = tmp_path / "config.yaml"
+    path.write_text("repos: {sample: {remote: upstream}}\n", encoding="utf-8")
+    original = os.stat
+
+    def loop(candidate, *args, **kwargs):
+        if isinstance(candidate, (str, os.PathLike)) and os.path.normcase(os.fspath(candidate)) == os.path.normcase(str(path)):
+            raise OSError(errno.ELOOP, "synthetic source lookup loop")
+        return original(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", loop)
+    assert path.exists() is False
+    assert cfg._load_yaml_safe(path) == {}
+    report = cfg._load_yaml_safe_report(path)
+    assert report.value == {}
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(o.source == str(path) and o.authority is ScanAuthority.INDETERMINATE for o in report.observations)
+
+
+@pytest.mark.parametrize("outcome", ["timeout", "os-error", "not-repo-nonzero", "other-nonzero", "empty-success"])
+def test_config_source_report_retains_default_root_lookup_uncertainty(tmp_path, monkeypatch, outcome):
+    import subprocess
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources, machine_config, state_root
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    fallback, cwd = tmp_path / "fallback", tmp_path / "caller"
+    config = _machine_overlay_report_config(fallback, tmp_path)
+    monkeypatch.setattr(machine_config, "machine_config_root", lambda *a, **k: None)
+    monkeypatch.setattr(machine_config, "machine_config_root_report", lambda *a, **k: AcquisitionReport("machine", None, ()))
+    calls = []
+
+    def lookup(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output="private Git output", stderr="private Git error")
+        if outcome == "os-error":
+            raise OSError("private Git lookup failure")
+        if outcome == "not-repo-nonzero":
+            return SimpleNamespace(returncode=128, stdout="", stderr="fatal: not a git repository")
+        if outcome == "other-nonzero":
+            return SimpleNamespace(returncode=128, stdout="private Git output", stderr="private Git error")
+        return SimpleNamespace(returncode=0, stdout="  ", stderr="")
+
+    monkeypatch.setattr(state_root.subprocess, "run", lookup)
+    legacy = config_sources.config_source_anchors(config, cwd=str(cwd))
+    assert [(source.anchor, source.origin) for source in legacy] == [(str(fallback), "harness")]
+    assert len(calls) == 1
+    calls.clear()
+    report = config_sources.config_source_anchors_report(config, cwd=str(cwd))
+    assert report.value == legacy
+    assert len(calls) == 1
+    argv, options = calls[0]
+    assert argv == ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"]
+    assert options["timeout"] == 10
+    assert options["capture_output"] is True and options["text"] is True
+    assert options["stdin"] is subprocess.DEVNULL
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.findings
+    assert "private Git" not in repr(report.observations)
+    assert "not a git repository" not in repr(report.observations)
+    assert report.reusable is False
+
+
+@pytest.mark.parametrize("selection", ["explicit-base", "git-success", "missing-default"])
+def test_config_source_report_default_selection_preserves_bypass_and_fallback_controls(tmp_path, monkeypatch, selection):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources, machine_config, state_root
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    fallback, current = tmp_path / "fallback", tmp_path / "current"
+    config = _machine_overlay_report_config(fallback, tmp_path)
+    if selection == "missing-default":
+        from dataclasses import replace
+        config = replace(config, repos={})
+    monkeypatch.setattr(machine_config, "machine_config_root", lambda *a, **k: None)
+    monkeypatch.setattr(machine_config, "machine_config_root_report", lambda *a, **k: AcquisitionReport("machine", None, ()))
+    calls = []
+
+    def lookup(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if selection == "explicit-base":
+            raise AssertionError("explicit positive base must skip Git lookup")
+        return SimpleNamespace(returncode=0, stdout=str(current) if selection == "git-success" else "", stderr="")
+
+    monkeypatch.setattr(state_root.subprocess, "run", lookup)
+    explicit = str(current) if selection == "explicit-base" else None
+    legacy = config_sources.config_source_anchors(config, base_anchor=explicit)
+    assert len(calls) == (0 if selection == "explicit-base" else 1)
+    calls.clear()
+    report = config_sources.config_source_anchors_report(config, base_anchor=explicit)
+    assert report.value == legacy
+    assert len(calls) == (0 if selection == "explicit-base" else 1)
+    if selection == "missing-default":
+        assert report.value == []
+        assert report.authority is ScanAuthority.INDETERMINATE
+    else:
+        assert [(source.anchor, source.origin) for source in report.value] == [(str(current), "harness")]
+        assert report.authority is ScanAuthority.COMPLETE
