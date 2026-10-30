@@ -157,7 +157,7 @@ async def resolve_controller_cwd(
     caller, *, caller_session_id: str | None = None, affinity_id: str | None = None,
 ) -> str | None:
     """Honor explicit controller context without requiring managed adoption."""
-    from .acquisition_authority import worktree_command
+    from .acquisition_authority import read_worktree_record
     from .caller_project import _OWNER_REF
     from .caller_session import normalize_caller_session_id
     from .session_manager import _REQUEST_OVERRIDES_KEY
@@ -201,19 +201,7 @@ async def resolve_controller_cwd(
         ):
             raise ValueError("controller owner session differs from caller session")
         machine, project, worktree_id = owner.partition("#")[0].split("/")
-        result = await worktree_command(
-            ["list", "--json", "--cache-only", "--worktree-id", worktree_id], project,
-        )
-        listed = result.get("worktrees")
-        if not isinstance(listed, list):
-            raise ValueError("invalid controller owner response")
-        rows = [
-            row for row in listed
-            if isinstance(row, dict) and row.get("id") == worktree_id
-        ]
-        if len(rows) != 1:
-            raise ValueError("controller worktree is not tracked")
-        row = rows[0]
+        row = await read_worktree_record(worktree_id, project)
         if (
             row.get("repo") != project or not _controller_machine_matches(row, machine)
             or row.get("status") in {"finalized", "complete", "completed", "archived"}
