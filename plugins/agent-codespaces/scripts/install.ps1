@@ -1234,9 +1234,9 @@ function Write-CodespacesDeployManifest {
 # rolling out; this is the login-triggered convenience, not the only way it
 # starts: a tenant (ssh/dispatch) also spins it up itself on-demand if it isn't
 # already running, and the daemon exits on its own once idle -- see
-# connection_owner.idle_shutdown_after). An explicit opt-out -> the task is
-# ensured ABSENT, so a machine that disabled the feature is unchanged (truly
-# inert; on-demand spin-up also respects the disabled config). The task
+# connection_owner.idle_shutdown_after). An explicit opt-out does not create
+# or start an owner. Updates never stop or unregister a predecessor; explicit
+# lifecycle operations own shutdown. The task
 # launches through the stable self-provisioning binstub (agent-codespaces.ps1),
 # which resolves the active versioned slot at runtime, so it survives updates.
 $OwnerTaskName = 'agent-codespaces-owner'
@@ -1269,40 +1269,24 @@ function Get-ConnectionOwnerConfig {
     return $result
 }
 
-function Unregister-ConnectionOwnerService {
-    <# Stop + remove the Owner scheduled task (used when the feature is disabled
-       or on uninstall). Best-effort; never throws. #>
-    $existing = Get-ScheduledTask -TaskName $OwnerTaskName -ErrorAction SilentlyContinue
-    if ($existing) {
-        try { Stop-ScheduledTask -TaskName $OwnerTaskName -ErrorAction SilentlyContinue } catch { }
-        try {
-            Unregister-ScheduledTask -TaskName $OwnerTaskName -Confirm:$false -ErrorAction Stop
-        } catch {
-            try { & schtasks.exe /Delete /TN $OwnerTaskName /F *> $null } catch { }
-        }
-        Write-ServiceChanged "Removed Connection Owner scheduled task ($OwnerTaskName)"
-    }
-}
-
 function Sync-ConnectionOwnerService {
-    <# Config-gated provisioning of the Connection Owner daemon. Enabled ->
-       register + start the per-user scheduled task; disabled (default) -> ensure
-       it is absent. Idempotent + additive; failures are non-fatal to install. #>
+    <# Register future login starts and independently ensure the selected runtime.
+       Updating a task does not start a new instance while IgnoreNew holds V1.
+       No predecessor shutdown is a prerequisite for installation or startup. #>
     $co = Get-ConnectionOwnerConfig
     if (-not $co.Known) {
         Write-ServiceWarn "Connection Owner config query failed; leaving any existing scheduled task unchanged"
         return
     }
     if (-not $co.Enabled) {
-        Unregister-ConnectionOwnerService
+        Write-ServiceOk 'Connection Owner disabled -- not starting an owner; existing task left unchanged'
         return
     }
     $stub = Join-Path $LocalBin 'agent-codespaces.ps1'
     if (-not (Test-Path $stub)) {
         Write-ServiceWarn "Connection Owner enabled but binstub missing ($stub) -- skipping service provisioning"
-        return
-    }
-    try {
+    } else {
+      try {
         $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
         $exe = if ($pwshCmd) { $pwshCmd.Source } else { (Get-Command powershell.exe).Source }
         # conhost --headless so Windows Terminal / the DefTerm handoff can't surface
@@ -1340,14 +1324,24 @@ function Sync-ConnectionOwnerService {
                 -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
             Write-ServiceChanged "Registered Connection Owner scheduled task ($OwnerTaskName; interval=$($co.Interval)s)"
         }
-        try {
-            Start-ScheduledTask -TaskName $OwnerTaskName -ErrorAction Stop
-            Write-ServiceOk 'Connection Owner daemon started'
-        } catch {
-            Write-ServiceWarn 'Connection Owner task registered but did not start now (no interactive session?) -- it starts at next logon'
-        }
-    } catch {
+      } catch {
         Write-ServiceWarn "Connection Owner service provisioning failed: $_"
+      }
+    }
+    # The selected Python uses the existing owned/headless daemon launch API.
+    # Readiness is this build's own beacon, possibly passive while V1 drains;
+    # never await an old task, require its IPC contract, or stop it here.
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $LinkPython -I -c 'from agent_codespaces.connection_owner import ensure_owner_running; raise SystemExit(0 if ensure_owner_running(None) else 1)'
+        if ($LASTEXITCODE -eq 0) {
+            Write-ServiceOk 'Selected Connection Owner started (work activation may still be draining)'
+        } else {
+            Write-ServiceWarn 'Selected Connection Owner startup not confirmed; code installation is retained'
+        }
+    } finally {
+        $ErrorActionPreference = $previousEap
     }
 }
 

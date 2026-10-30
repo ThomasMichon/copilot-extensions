@@ -517,6 +517,37 @@ def test_ensure_owner_running_is_noop_when_already_live(store, monkeypatch):
     assert spawned["called"] is False  # already live -- never spawns
 
 
+@pytest.mark.parametrize("old_contract", (0, 1, 99))
+def test_ensure_selected_owner_never_accepts_an_old_build_as_startup_readiness(
+    store, monkeypatch, old_contract,
+):
+    import types
+
+    live = owner.OwnerLiveness(
+        pid=123, host="offline", heartbeat_at=0, interval=1,
+        runtime_identity="", owner_control_version=old_contract,
+    )
+    monkeypatch.setattr(owner, "_PROCESS_SELECTION", types.SimpleNamespace(identity="selected-slot"))
+    monkeypatch.setattr(owner, "_live_snapshot", lambda: live)
+    starts = []
+
+    def spawn(root, *, source):
+        starts.append(root)
+        return object(), root / "log"
+
+    def wait(child, ready, **kwargs):
+        assert not ready(), "legacy or unknown IPC is not selected-build readiness"
+        live.runtime_identity = "selected-slot"
+        live.state = "passive"
+        assert ready(), "passive selected startup must not await predecessor cleanup"
+        return True
+
+    monkeypatch.setattr(owner, "spawn_owner_process", spawn)
+    monkeypatch.setattr(owner, "wait_for_owner_startup", wait)
+    assert owner.ensure_owner_running(None)
+    assert len(starts) == 1
+
+
 def test_ensure_owner_running_spawns_and_waits_for_liveness(store, monkeypatch):
     calls = {"popen": 0}
     live_after_spawn = {"value": False}

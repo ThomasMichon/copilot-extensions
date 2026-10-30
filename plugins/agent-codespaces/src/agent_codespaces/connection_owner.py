@@ -57,6 +57,7 @@ from .owner_startup import DEFAULT_OWNER_STARTUP_TIMEOUT, spawn_owner_process, w
 from .owner_liveness import OwnerLiveness, _LIVE_STALE_FLOOR as _LIVE_STALE_FLOOR
 from . import owner_session_records
 from . import __version__ as _PROCESS_VERSION
+from .source_build import capture_owner_runtime
 
 if TYPE_CHECKING:
     from .session_forwards import SessionForwards
@@ -451,12 +452,15 @@ def release(
 LIVE_FILE = RUNTIME_DIR / "connection-owner.live.json"
 
 _PROCESS_STARTED_AT = time.time()
+_PROCESS_SELECTION = capture_owner_runtime(RUNTIME_DIR)
 
 
 def _write_liveness(
     interval: float,
     active: Iterable[str] | None = None,
     bridge_forwards: Iterable[str] | None = None,
+    *,
+    state: str = "active",
 ) -> None:
     """Refresh the daemon liveness beacon (best-effort; never raises).
 
@@ -473,10 +477,13 @@ def _write_liveness(
             "process_identity": owner_process_identity(os.getpid()),
             "heartbeat_at": time.time(),
             "interval": float(interval),
-            "active": sorted(active or ()),
-            "bridge_forwards": sorted(bridge_forwards or ()),
+            "active": sorted(active or ()) if state == "active" else [],
+            "bridge_forwards": sorted(bridge_forwards or ()) if state == "active" else [],
             "heals": ["bridge-serving", "single-owner"],  # what this Owner repairs itself
             "owner_control_version": 1,
+            "runtime_identity": _PROCESS_SELECTION.identity if _PROCESS_SELECTION else "",
+            "state": state,
+            "work_lease_version": 1,
         }
         tmp = LIVE_FILE.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")
@@ -488,8 +495,9 @@ def _write_liveness(
 def _clear_liveness() -> None:
     """Remove this daemon's own liveness beacon (never another Owner's; never raises)."""
     try:
-        if (current := read_liveness()) is None or current.pid == os.getpid():
-            LIVE_FILE.unlink(missing_ok=True)
+        with _owner_lock():
+            if (current := read_liveness()) is not None and current.pid == os.getpid():
+                LIVE_FILE.unlink(missing_ok=True)
     except Exception as exc:
         log.debug("Connection Owner liveness beacon clear failed: %s", exc)
 
@@ -523,6 +531,13 @@ def read_liveness() -> OwnerLiveness | None:
             version=raw["version"] if isinstance(raw.get("version"), str) else "",
             owner_control_version=(
                 raw["owner_control_version"] if type(raw.get("owner_control_version")) is int else 0
+            ),
+            runtime_identity=(
+                raw["runtime_identity"] if isinstance(raw.get("runtime_identity"), str) else ""
+            ),
+            state="active" if raw.get("state", "active") == "active" else "passive",
+            work_lease_version=(
+                raw["work_lease_version"] if type(raw.get("work_lease_version")) is int else 0
             ),
         )
     except (TypeError, ValueError):
@@ -584,7 +599,7 @@ def owner_active_codespaces(now: float | None = None) -> set[str]:
     meaningless), so callers fail safe. Reads the beacon once.
     """
     live = _live_snapshot(now)
-    return set(live.active) if live else set()
+    return set(live.active) if live and live.state == "active" else set()
 
 
 def owner_serves_relay(codespace: str, now: float | None = None) -> bool:
@@ -600,17 +615,22 @@ def owner_serves_relay(codespace: str, now: float | None = None) -> bool:
 def claim_owner_singleton(interval: float) -> bool:
     """Atomically become the machine's only Connection Owner daemon.
 
-    Two tenants may call :func:`ensure_owner_running` at nearly the same moment
-    (e.g. two detached launches fanned out in parallel), spawning two daemons
-    that would each open a competing ``-R`` bind. Under the registry lock, a
-    starting daemon refuses when another live Owner's beacon is present, and
-    otherwise publishes its own beacon immediately so a racing sibling sees it.
+    Concurrent starts of the same installed identity share one beacon winner.
+    A selected different identity may publish passive readiness immediately;
+    its separate native work lease, not beacon metadata, admits channel work.
+    Unattributed legacy/source callers retain the original discovery singleton.
     """
     with _owner_lock():
+        if _PROCESS_SELECTION and _PROCESS_SELECTION.superseded():
+            return False
         live = _live_snapshot()
         if live is not None and live.pid != os.getpid():
-            return False
-        _write_liveness(interval)
+            if not _PROCESS_SELECTION or live.runtime_identity == _PROCESS_SELECTION.identity:
+                return False
+        from .owner_identity import retain_legacy_exclusion
+
+        retain_legacy_exclusion(read_liveness())
+        _write_liveness(interval, state="passive")
         return True
 
 
@@ -637,8 +657,6 @@ def should_defer_to_owner(
     co = getattr(config, "connection_owner", None)
     if not (co and getattr(co, "enabled", False)):
         return False
-    if is_owner_live():
-        return True
     return ensure_owner_running(config)
 
 
@@ -897,59 +915,17 @@ async def run_owner_daemon(
     indefinitely. A tenant that needs it again later starts it back up
     on-demand (:func:`ensure_owner_running`). ``None`` disables idle shutdown.
 
-    Refuses to start (returns immediately, touching nothing) when another
-    live Owner already holds the machine -- see :func:`claim_owner_singleton`.
+    A selected incoming build starts passively alongside an incumbent, then
+    acquires the shared work lease before admitting any channel mutations.
+    Selection changes make an incumbent drain and self-retire; its lease stays
+    held through native cleanup. Same-build contenders do not duplicate it.
     """
-    if not claim_owner_singleton(interval):
-        log.info("Connection Owner already live on this machine; not starting a second one.")
-        return
-    stop = stop_event if stop_event is not None else asyncio.Event()
-    idle_since: float | None = None
-    from .owner_beacon import BeaconKeeper, settle_owner_task
-    loop = asyncio.get_running_loop()
-    keeper = BeaconKeeper(owner, interval, lambda: loop.call_soon_threadsafe(stop.set))
-    try:
-        keeper.start()
-        keeper.beat()
-        while not stop.is_set():
-            try:
-                await owner.reconcile()
-            except Exception as exc:  # a bad cycle must not kill the daemon
-                log.warning("Connection Owner reconcile cycle failed: %s", exc)
-            # Refresh the beacon (live channels, so tenants can defer to them), or
-            # stand down if another Owner took the machine over (BeaconKeeper).
-            if keeper.yielded or not keeper.beat():
-                break
-            if idle_shutdown_after is not None:
-                if list_holds():
-                    idle_since = None
-                else:
-                    if idle_since is None:
-                        idle_since = time.monotonic()
-                    elif time.monotonic() - idle_since >= owner.idle_limit(idle_shutdown_after):
-                        log.info("Connection Owner idle (no held CodeSpaces, no owed push) -- exiting;"
-                                 " a tenant starts it back up on demand.")
-                        break
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=interval)
-            except (TimeoutError, asyncio.TimeoutError):
-                pass
-    finally:
-        async def finish() -> None:
-            from .owner_control import shutdown_owner
+    from .owner_beacon import run_owner_loop
 
-            keeper.stop()
-            await keeper.wait_stopped()
-            try:
-                await shutdown_owner(owner)
-            finally:
-                _clear_liveness()
-
-        task = asyncio.create_task(finish())
-        cancelled = await settle_owner_task(task)
-        task.result()
-        if cancelled:
-            raise asyncio.CancelledError
+    await run_owner_loop(
+        owner, interval=interval, stop_event=stop_event,
+        idle_shutdown_after=idle_shutdown_after,
+    )
 
 
 def ensure_owner_running(
@@ -957,7 +933,8 @@ def ensure_owner_running(
 ) -> bool:
     """Best-effort on-demand start of the Connection Owner daemon.
 
-    Returns ``True`` once the Owner is live -- already running, or freshly
+    Returns ``True`` once this installed identity is live (possibly passive) --
+    already running, or freshly
     spawned (detached, surviving this caller's own exit) and observed to become
     live within ``spawn_timeout`` (30 seconds by default, including cold imports
     and configuration loading). Returns ``False`` on spawn failure, child exit
@@ -966,7 +943,13 @@ def ensure_owner_running(
     on-demand half of "spins up when needed, exits when idle" -- the daemon is
     never assumed to already be running as a permanent background service.
     """
-    if is_owner_live():
+    def selected_is_live() -> bool:
+        if _PROCESS_SELECTION is None:
+            return is_owner_live()
+        live = _live_snapshot()
+        return bool(live and live.runtime_identity == _PROCESS_SELECTION.identity)
+
+    if selected_is_live():
         return True
     try:
         child, stdio_log = spawn_owner_process(RUNTIME_DIR, source=__file__)
@@ -974,6 +957,6 @@ def ensure_owner_running(
         log.warning("Connection Owner on-demand spin-up failed: %s", exc)
         return False
     return wait_for_owner_startup(
-        child, is_owner_live, timeout=spawn_timeout, poll=poll,
+        child, selected_is_live, timeout=spawn_timeout, poll=poll,
         log_path=stdio_log,
     )

@@ -24,7 +24,7 @@ def spawn_owner_process(root: Path, *, source: str) -> tuple[Popen[bytes], Path]
     root.mkdir(parents=True, exist_ok=True)
     log_path = root / "logs" / "owner-stdio.log"
     child = spawn_daemon(
-        [sys.executable, "-m", "agent_codespaces", "owner"],
+        [sys.executable, "-I", "-m", "agent_codespaces", "owner"],
         instance=DaemonInstanceSpec("agent-codespaces-owner", root, Path(source).resolve()),
         cwd=os.path.expanduser("~"),
         log_path=log_path,
