@@ -2,18 +2,13 @@
 
 from __future__ import annotations
 
-import os
-import stat
-import sys
-import time
-from contextlib import contextmanager
 from pathlib import Path
-from uuid import uuid4
 
 import yaml
 from pydantic import TypeAdapter
 
 from . import config
+from .config_write import atomic_write_config, config_file_lock
 from .preference_models import SessionMode, SessionModes, SessionRepo, SessionVenue
 
 
@@ -60,38 +55,6 @@ def _absolute_root(value: Path) -> Path:
     if not value.is_absolute() or not value.is_dir():
         raise ValueError("configuration repository must be an existing absolute directory")
     return value
-
-
-@contextmanager
-def _write_lock(path: Path):
-    """Kernel-owned per-config lock; a crashed writer cannot leave a stale hold."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o600), "r+b") as stream:
-        deadline = time.monotonic() + 5
-        while True:
-            try:
-                if sys.platform == "win32":
-                    import msvcrt
-
-                    stream.seek(1 << 30)
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-
-                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError as exc:
-                if time.monotonic() >= deadline:
-                    raise ValueError("session-mode configuration is busy; retry the update") from exc
-                time.sleep(0.05)
-        try:
-            yield
-        finally:
-            if sys.platform == "win32":
-                stream.seek(1 << 30)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 def resolve_session_mode(
@@ -147,7 +110,7 @@ def write_session_mode(
     else:
         config.load_config(strict=True)
         path = config.config_dir() / config.CONFIG_FILENAME
-    with _write_lock(path.with_name(f".{path.name}.session-mode.lock")):
+    with config_file_lock(path):
         if operator_repo is not None:
             config.load_repo_bridge_config(operator_repo)
         else:
@@ -158,7 +121,6 @@ def write_session_mode(
 
 def _update_file(path: Path, scope: list[str], mode: str | None, unset: bool) -> None:
     before = path.read_bytes() if path.exists() else None
-    permissions = stat.S_IMODE(path.stat().st_mode) if before is not None else 0o600
     data = yaml.safe_load(before) if before is not None else {}
     data = {} if data is None else data
     if not isinstance(data, dict):
@@ -177,27 +139,10 @@ def _update_file(path: Path, scope: list[str], mode: str | None, unset: bool) ->
     else:
         target[scope[-1]] = mode
     SessionModes.model_validate(policy)
-    encoded = yaml.safe_dump(data, sort_keys=False, allow_unicode=True).encode("utf-8")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    staged = path.with_name(f".{path.name}.{uuid4().hex}.pending")
-    try:
-        descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(descriptor, "wb") as stream:
-            os.chmod(staged, permissions)
-            stream.write(encoded)
-            stream.flush()
-            os.fsync(stream.fileno())
-        if (path.read_bytes() if path.exists() else None) != before:
-            raise ValueError("configuration changed during update; retry from current policy")
-        os.replace(staged, path)
-        actual = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if actual != data:
-            raise ValueError("session-mode configuration readback failed")
-    finally:
-        staged.unlink(missing_ok=True)
+    atomic_write_config(path, data, expected=before)
 
 
-def current_repo_root() -> Path:
+def current_repo_root() -> Path | None:
     """Use the nearest checkout, not a guessed operator configuration repository."""
     cwd = Path.cwd()
-    return next((path for path in (cwd, *cwd.parents) if (path / ".git").exists()), cwd)
+    return next((path for path in (cwd, *cwd.parents) if (path / ".git").exists()), None)

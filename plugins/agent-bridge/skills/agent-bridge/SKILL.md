@@ -249,8 +249,11 @@ It reports the effective mode and attributable file/scope. Canonical
 `.agent-bridge/config.yaml`; explicit marketplace overlays retain their existing
 precedence. See [session-mode configuration](references/session-mode.md).
 
-Use the existing ACP launch for `acp`, or existing explicit `create <venue-target>
---cli --detach` for `cli` when coordinating hands-off, not attached observation.
+Use the existing ACP launch for `acp`. For `cli` on CodeSpace, trusted-container
+or SSH targets, use existing explicit `create <venue-target> --cli --detach`
+when coordinating hands-off, not attached observation. For local CLI creation,
+use the existing `agent-worktrees:worktree` / `copilot` launch owner, not a
+fabricated Bridge `local:` CLI target.
 CLI is session instantiation, not another transport or a requirement for a human
 to watch it. Both modes retain Bridge/provider/SSH/authentication/claims.
 The helper does not change `create`/`send` semantics: callers apply the result

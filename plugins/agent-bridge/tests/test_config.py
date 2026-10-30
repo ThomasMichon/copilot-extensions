@@ -174,7 +174,7 @@ class TestSessionModes:
         def denied(*args):
             raise PermissionError("test denial")
 
-        monkeypatch.setattr("agent_bridge.session_modes.os.replace", denied)
+        monkeypatch.setattr("agent_bridge.config_write.os.replace", denied)
         with pytest.raises(PermissionError):
             write_session_mode(operator_repo=tmp_path, mode="cli")
         assert path.read_bytes() == before
@@ -210,47 +210,59 @@ class TestSessionModes:
         finally:
             os.umask(old_umask)
 
-    def test_overlapping_subprocess_writers_preserve_both_scopes(self, tmp_path, config_home):
+    @pytest.mark.parametrize("second_action", ["session-mode", "adopt", "remove"])
+    def test_overlapping_subprocess_writers_preserve_both_scopes(
+        self, tmp_path, config_home, fake_repo, second_action,
+    ):
         import subprocess
         import sys
 
         from agent_procutil import no_window_kwargs
 
-        self.policy(tmp_path, {"default": "acp"})
+        save_config(ServiceConfig(
+            session_modes={"default": "acp"}, topologies={"existing": TopologyProfile()},
+        ))
         first_script = """
 import sys
 from pathlib import Path
 from agent_bridge import session_modes as modes
-replace = modes.os.replace
+from agent_bridge import config_write as writes
+replace = writes.os.replace
 def held_replace(*args):
     print("ready", flush=True)
     sys.stdin.readline()
     replace(*args)
-modes.os.replace = held_replace
-modes.write_session_mode(operator_repo=Path(sys.argv[1]), venue="ssh", mode="cli")
+writes.os.replace = held_replace
+modes.write_session_mode(machine_local=True, venue="ssh", mode="cli")
 """
         second_script = """
 import sys
 from pathlib import Path
 from agent_bridge import session_modes as modes
-sleep = modes.time.sleep
+from agent_bridge import config, config_write as writes
+sleep = writes.time.sleep
 def contended(delay):
     print("waiting", flush=True)
     sleep(delay)
-modes.time.sleep = contended
-modes.write_session_mode(operator_repo=Path(sys.argv[1]), venue="container", mode="cli")
+writes.time.sleep = contended
+if sys.argv[2] == "session-mode":
+    modes.write_session_mode(machine_local=True, venue="container", mode="cli")
+elif sys.argv[2] == "adopt":
+    config.adopt_topology("example", sys.argv[1])
+else:
+    config.remove_topology("existing")
 """
         processes = []
         try:
             first = subprocess.Popen(
-                [sys.executable, "-c", first_script, str(tmp_path)],
+                [sys.executable, "-c", first_script, str(fake_repo)],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, **no_window_kwargs(),
             )
             processes.append(first)
             assert first.stdout.readline().strip() == "ready"
             second = subprocess.Popen(
-                [sys.executable, "-c", second_script, str(tmp_path)],
+                [sys.executable, "-c", second_script, str(fake_repo), second_action],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **no_window_kwargs(),
             )
             processes.append(second)
@@ -264,8 +276,33 @@ modes.write_session_mode(operator_repo=Path(sys.argv[1]), venue="container", mod
                 if process.poll() is None:
                     process.kill()
                 process.wait(timeout=10)
-        for venue in ("ssh", "container"):
-            assert resolve_session_mode(operator_repo=tmp_path, venue=venue)["mode"] == "cli"
+        assert resolve_session_mode(venue="ssh")["mode"] == "cli"
+        if second_action == "session-mode":
+            assert resolve_session_mode(venue="container")["mode"] == "cli"
+        elif second_action == "adopt":
+            assert "example" in load_config().topologies
+        else:
+            assert "existing" not in load_config().topologies
+
+    def test_stale_native_save_preserves_new_preference(self, config_home):
+        save_config(ServiceConfig(port=1234))
+        stale = load_config()
+        write_session_mode(machine_local=True, mode="cli")
+        stale.port = 2345
+        save_config(stale)
+        assert load_config().port == 2345
+        assert resolve_session_mode()["mode"] == "cli"
+        save_config(ServiceConfig(port=3456))
+        assert resolve_session_mode()["mode"] == "cli"
+
+    def test_conflicting_native_mode_edit_refuses_stale_save(self, config_home):
+        write_session_mode(machine_local=True, mode="acp")
+        stale = load_config()
+        write_session_mode(machine_local=True, mode="cli")
+        stale.session_modes.venues["ssh"] = "cli"
+        with pytest.raises(ValueError, match="changed concurrently"):
+            save_config(stale)
+        assert resolve_session_mode()["mode"] == "cli"
 
     @pytest.mark.parametrize("kwargs", [{"repo": "../example"}, {"venue": "SSH"}, {"mode": "other"}])
     def test_invalid_write_selectors(self, config_home, kwargs):
@@ -294,17 +331,23 @@ modes.write_session_mode(operator_repo=Path(sys.argv[1]), venue="container", mod
         help_result = command("--help")
         assert help_result.returncode == 0, help_result.stderr
         assert "agent-bridge.session-mode/v1" in help_result.stdout
+        save_config(ServiceConfig())
+        local = command("--machine-local", "--set", "cli")
+        assert local.returncode == 0, local.stderr
+        assert json.loads(local.stdout)["mode"] == "cli"
+        operator = tmp_path / "operator"
+        operator.mkdir()
         denied = command("--set", "cli")
         assert denied.returncode == 1
         assert "exactly one" in denied.stderr
-        set_result = command("--operator-repo", str(tmp_path), "--venue", "container", "--set", "cli")
+        set_result = command("--operator-repo", str(operator), "--venue", "container", "--set", "cli")
         assert set_result.returncode == 0, set_result.stderr
         assert json.loads(set_result.stdout)["written"]["source"].endswith("session_modes.venues.container")
-        read_result = command("--operator-repo", str(tmp_path), "--repo", "example", "--venue", "container")
+        read_result = command("--operator-repo", str(operator), "--repo", "example", "--venue", "container")
         assert read_result.returncode == 0, read_result.stderr
         assert json.loads(read_result.stdout)["mode"] == "cli"
-        self.policy(tmp_path, {"default": "invalid"})
-        invalid = command("--operator-repo", str(tmp_path))
+        self.policy(operator, {"default": "invalid"})
+        invalid = command("--operator-repo", str(operator))
         assert invalid.returncode == 1
         assert "refusing authority fallback" in invalid.stderr
 
