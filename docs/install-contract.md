@@ -2521,7 +2521,9 @@ selected, and unknown siblings are retained.
 
 Agent MCP's `scripts/uninstall-profile.json` now uses the version-2
 `copilot-extensions.installed-footprint` contract. Its ordered history contains
-complete snapshots and exact introduced/changed/retired deltas. The latest
+complete snapshots and exact introduced/changed/retired deltas.
+Serialized history must fit the native reader's 64 KiB budget; compact JSON
+formatting may change without changing any published history record. The latest
 snapshot's version-1 finite profile is the removal inventory consumed by both
 the shared helper and MCP's native adapter; the adapter no longer maintains a
 second list. Existing version-1 profiles for other owners remain supported.
