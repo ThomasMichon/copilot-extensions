@@ -3,7 +3,7 @@
 # payload-command-catalog-sha256: @@CATALOG_FILE_SHA256@@
 $ErrorActionPreference = 'SilentlyContinue'
 
-$selfRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$selfRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 @@CATALOG_GATE_POWERSHELL@@
 $commandPath = Join-Path $selfRoot '@@OUTPUT_DIR_PS@@\@@COMMAND@@@@WINDOWS_CATALOG_SUFFIX@@'
 $installerPath = Join-Path $selfRoot 'scripts\@@INSTALLER@@.ps1'

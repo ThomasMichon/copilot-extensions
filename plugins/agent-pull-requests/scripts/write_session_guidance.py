@@ -6,17 +6,15 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import stat
-import subprocess
 import sys
 import tempfile
+from contextlib import redirect_stdout
 from pathlib import Path
 
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 _MAX_INPUT_BYTES = 64 * 1024
 _GUIDANCE_MAX_BYTES = 4 * 1024
-_SUBPROCESS_TIMEOUT_S = 10.0
 _GUIDANCE_HEADER = "# Agent Pull Requests session guidance\n\n"
 
 
@@ -42,33 +40,20 @@ def _plugin_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _producer_argv(root: Path) -> list[str] | None:
-    if os.name == "nt":
-        script = root / "scripts" / "emit-command-catalog.ps1"
-        shell = shutil.which("pwsh") or shutil.which("powershell.exe")
-        return (
-            [shell, "-NoLogo", "-NoProfile", "-File", str(script)]
-            if shell and script.is_file()
-            else None
-        )
-    script = root / "scripts" / "emit-command-catalog.sh"
-    shell = shutil.which("bash")
-    return [shell, str(script)] if shell and script.is_file() else None
-
-
 def _run_producer(root: Path, payload: bytes) -> str:
-    argv = _producer_argv(root)
-    if argv is None:
-        return ""
+    script = root / "scripts" / "emit_command_catalog.py"
     try:
-        completed = subprocess.run(
-            argv, input=payload, capture_output=True,
-            timeout=_SUBPROCESS_TIMEOUT_S, check=False,
-            env={**os.environ, "PYTHONPATH": ""},
-        )
-    except (OSError, subprocess.SubprocessError):
+        with script.open("rb") as stream:
+            source = stream.read(_MAX_INPUT_BYTES + 1)
+        if len(source) > _MAX_INPUT_BYTES:
+            return ""
+        namespace = {"__file__": str(script), "__name__": "_payload_session_catalog"}
+        with redirect_stdout(sys.stderr):
+            exec(compile(source.decode("utf-8"), str(script), "exec"), namespace)
+            context = namespace["render_context"]()
+        return context.strip() if isinstance(context, str) else ""
+    except Exception:
         return ""
-    return _producer_context(completed.stdout) if completed.returncode == 0 else ""
 
 
 def _is_link_or_reparse(path: Path) -> bool:

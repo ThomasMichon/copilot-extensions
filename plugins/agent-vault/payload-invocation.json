@@ -6,6 +6,7 @@
   "legacyRuntimeRoot": ".agent-vault",
   "installationContext": "required",
   "installerLifecycle": true,
+  "inProcessCatalog": true,
   "noSelfProvisionEnv": "AGENT_VAULT_NO_SELFPROVISION",
   "purpose": "Fetch and manage machine-local vault credentials",
   "installer": "install",

@@ -3,7 +3,7 @@
 # payload-command-catalog-sha256: @@CATALOG_FILE_SHA256@@
 $ErrorActionPreference = 'SilentlyContinue'
 
-$selfRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$selfRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 @@CATALOG_GATE_POWERSHELL@@
 $installerPath = Join-Path $selfRoot 'scripts\@@INSTALLER@@.ps1'
 $specs = '@@CATALOG_SPECS_JSON_PS@@' | ConvertFrom-Json
