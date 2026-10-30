@@ -75,9 +75,10 @@ old clients keep their existing paths. No retirement or deployment is included.
   changes as incomplete; completion settings and other reviewers remain reads.
 - [x] Exercise exporter output through the actual generation builder and
   source-selected parser, without a live backend or runtime installation.
-- [ ] Publish through normal source gates. Separately coordinate authorized
-  read-only live consumer feedback; source tests do not establish live access
-  or a completed ADO review.
+- [x] Publish through normal source gates (#9667, current-head approval and green CI).
+- [ ] Separately qualify authorized read-only live consumer feedback through an
+  actual trusted credential owner or reviewed/adopted owner-executed profile;
+  source tests do not establish live access or a completed ADO review.
 
 ## Still outside this slice
 
