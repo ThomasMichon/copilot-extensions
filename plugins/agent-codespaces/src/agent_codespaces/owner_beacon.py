@@ -51,6 +51,10 @@ def renew_owner_singleton(
         live = _live_snapshot()
         if live is not None and live.pid != os.getpid():
             return False
+        from .owner_control import stop_requested
+
+        if stop_requested():
+            return False
         _write_liveness(interval, active=active, bridge_forwards=bridge_forwards)
         return True
 
@@ -97,7 +101,7 @@ class BeaconKeeper:
             try:
                 if not self.beat():
                     log.warning(
-                        "Connection Owner: another Owner holds this machine now; "
+                        "Connection Owner: ownership yielded or cooperative stop requested; "
                         "stopping this one and its forwards."
                     )
                     self._on_yield()
@@ -121,7 +125,7 @@ class BeaconKeeper:
         if self._thread.is_alive():
             self._thread.join(timeout=5)
         log.info("Connection Owner stopping (pid %s%s)", os.getpid(),
-                 ", yielded to another Owner" if self.yielded else "")
+                 ", relinquished ownership" if self.yielded else "")
 
     async def wait_stopped(self) -> None:
         """Retain the beacon until its last native write has actually returned."""

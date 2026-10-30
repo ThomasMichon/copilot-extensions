@@ -730,6 +730,11 @@ def main(argv: list[str] | None = None) -> int:
              "install/update uses this to gate service provisioning (does not "
              "start the daemon)",
     )
+    owner_p.add_argument(
+        "--stop", action="store_true",
+        help="request cooperative shutdown of the verified running owner and "
+             "wait for its normal channel cleanup (never kills a process)",
+    )
 
     # --- status ---
     sub.add_parser("status", help="Show service status")
