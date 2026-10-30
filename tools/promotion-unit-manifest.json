@@ -3130,7 +3130,11 @@
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_foreground_request_rejects_bad_deadline_before_native_effect[True]",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_foreground_request_rejects_bad_deadline_before_native_effect[later]",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_foreground_endpoint_captured_after_deadline_is_not_accepted",
-        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_foreground_postcondition_does_not_replace_raw_calibration_witnesses"
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_foreground_postcondition_does_not_replace_raw_calibration_witnesses",
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_slow_native_query_cannot_request_foreground_after_deadline[pin]",
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_slow_native_query_cannot_request_foreground_after_deadline[target-query]",
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_slow_native_query_cannot_request_foreground_after_deadline[foreground-query]",
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_slow_parent_query_cannot_create_visible_control_after_deadline"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3474,9 +3478,9 @@
         "libs/agent-procutil/src/agent_procutil/_shell_caller_owned.py": "ac7a083c4bcfd41fc9c657c367b4717837ae5fecdd57bff1dd215ce4253873b1",
         "libs/agent-procutil/src/agent_procutil/_windows_parent_job.py": "d59e628dae3016c67df4d0e691407cc9ca3e1f77df576a36b10ca17d7d658277",
         "tools/promotion_unit_tests/test_shell_caller_owned.py": "0723f365986fc1e537f4507ab681a290b22abe99fd4a688eddfd02861df6cb5a",
-        "libs/agent-procutil/tests/sdk_desktop_observer.py": "ee06775c9501e64d539410f62acda3823167d069123a46297884e64387ebf46f",
-        "libs/agent-procutil/tests/sdk_visibility.py": "3db295b4b95b1e3eb7a36f04acc0b929e1f0000478472e59ad37f51641404059",
-        "tools/promotion_unit_tests/test_sdk_desktop_observer.py": "e1fea555c46e8418218e8c1994c168eef3abd5abae01952390313c7ff3453cd4",
+        "libs/agent-procutil/tests/sdk_desktop_observer.py": "94611376383991ec78de7a1d29eb4256c592a4aa9be0bcf98b7df6f6e415e022",
+        "libs/agent-procutil/tests/sdk_visibility.py": "ef36a2c6548e7cd671b770f06e0e4db0a0b403b409e75a34b3fa4f89cb0f2062",
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py": "bf7a2cf2cfc1092e6cc2973eabd2c9abf138135e8c784ff0c61c0ae100c2af17",
         "libs/agent-procutil/tests/sdk_visibility_sources.py": "1369a38abd05304d5bb1c9dfd546a0ac1c2f7b4463d90024d07374b5ab08aa7d",
         "libs/agent-procutil/tests/sdk_visibility_cases.py": "6cf438b387e7123eca6baeec1fed5d14e4297a1c336f029de4ec66dc99ad2972",
         "libs/installation-context/_installation_context_worker.py": "6c10396cb0555736155b25bf3f52d507c9e36b189eb06a175d0a27fc778f6c8d",

@@ -312,6 +312,9 @@ by the existing control deadline, it pumps only its own messages and verifies
 the visible target's HWND/PID/TID/query-pinned birth at the actual foreground
 endpoint. A nonzero return without that endpoint cannot pass; an already
 matching endpoint does not by itself replace any raw calibration witness.
+The deadline is rechecked after pinning and native queries immediately before
+the foreground request, and after parent queries before visible creation.
+An expired prerequisite cannot start a late foreground or window effect.
 The [Win32 contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)
 does not document extended `GetLastError` information, and
 [activation can be asynchronous across input queues](https://devblogs.microsoft.com/oldnewthing/20161118-00/?p=94745).

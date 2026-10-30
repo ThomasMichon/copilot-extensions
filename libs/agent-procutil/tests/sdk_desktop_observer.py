@@ -55,6 +55,8 @@ def activate_foreground(
 
         require_target()
         before = api.foreground()
+        if time.monotonic() >= deadline:
+            raise ObservationBlocked(f"{operation}: foreground deadline expired before request")
         returned = bool(api.user.SetForegroundWindow(hwnd))
         observed = before
         while time.monotonic() < deadline:

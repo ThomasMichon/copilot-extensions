@@ -367,8 +367,9 @@ def canary(request: dict, allow_visible: bool) -> int:
             api.window_identity(original["hwnd"]) != (original["pid"], original["thread"])
         ):
             raise ObservationBlocked("original foreground identity is no longer live")
-        result["potentially_visible_attempted"] = True
         result["before_visible"] = time.monotonic()
+        require_time(visible_deadline, "calibration window creation")
+        result["potentially_visible_attempted"] = True
         hwnd = int(api.user.CreateWindowExW(
             0, "STATIC", "SDK visibility calibration", 0x10CF0000,
             20, 20, 320, 100, None, None, None, None,

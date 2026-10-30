@@ -66,7 +66,9 @@ class API:
     def raw_windows(self):
         return dict(self.windows)
 
-    def pin(self, pid):
+    def pin(self, pid, birth=0, *, owned=False):
+        if birth and birth != self.birth:
+            raise observer.ObservationBlocked("query pin birth changed")
         self.pins.append(pid)
         return SimpleNamespace(
             birth=self.birth, gone=lambda: False, close=lambda: self.closed.append(pid),
@@ -183,6 +185,69 @@ def test_foreground_endpoint_captured_after_deadline_is_not_accepted(monkeypatch
     with pytest.raises(observer.ObservationBlocked, match="foreground postcondition deadline"):
         observer.activate_foreground(api, 11, (3, 4, 100), 101, "unit request")
     assert api.pins == api.closed == [3]
+
+
+@pytest.mark.parametrize("delay", ["pin", "target-query", "foreground-query"])
+def test_slow_native_query_cannot_request_foreground_after_deadline(monkeypatch, delay):
+    api = API()
+    tick = [100.0]
+    calls = []
+    monkeypatch.setattr(observer, "time", SimpleNamespace(monotonic=lambda: tick[0]))
+    api.user.SetForegroundWindow = lambda hwnd: calls.append(hwnd) or 1
+    if delay == "pin":
+        original = api.pin
+
+        def pin(pid):
+            value = original(pid)
+            tick[0] = 102
+            return value
+
+        api.pin = pin
+    elif delay == "target-query":
+        def visible(_hwnd):
+            tick[0] = 102
+            return True
+
+        api.user.IsWindowVisible = visible
+    else:
+        def foreground():
+            tick[0] = 102
+            return 10
+
+        api.foreground = foreground
+    with pytest.raises(observer.ObservationBlocked, match="foreground deadline expired before request"):
+        observer.activate_foreground(api, 11, (3, 4, 100), 101, "unit request")
+    assert calls == []
+    assert api.pins == api.closed == [3]
+
+
+def test_slow_parent_query_cannot_create_visible_control_after_deadline(monkeypatch):
+    api = API()
+    tick = [100.0]
+    calls = []
+    events = []
+
+    def parent_gone():
+        tick[0] = 102
+        return False
+
+    api.require_parent_pipe = lambda request: SimpleNamespace(
+        gone=parent_gone, close=lambda: events.append("parent-close"),
+    )
+    api.identity = lambda: {"pid": 9, "birth": 100}
+    api.user.CreateWindowExW = lambda *args: calls.append(args) or 20
+    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: tick[0]))
+    monkeypatch.setattr(runner, "new_api", lambda: api)
+    monkeypatch.setattr(runner, "command", lambda *args: "show")
+    monkeypatch.setattr(runner, "emit", lambda value: events.append(value))
+    with pytest.raises(observer.ObservationBlocked, match="deadline.*calibration window creation"):
+        runner.canary({
+            "nonce": "a" * 32, "deadline": 101, "visible_controls": 1,
+            "original": {"hwnd": 10, "pid": 1, "thread": 2, "birth": 100},
+        }, True)
+    assert calls == []
+    assert api.pins == api.closed == [1]
+    assert events[-1] == "parent-close"
 
 
 def test_foreground_postcondition_does_not_replace_raw_calibration_witnesses():
