@@ -211,6 +211,134 @@ Run both with the contained
 runner and `--allow-explicit-tiers`. These are native consumer controls, not
 real mux/Copilot interaction, supported uninstall or installed rollout evidence.
 
+`libs/agent-procutil/tests/test_shell_caller_owned_native.py` is an on-demand
+native SDK-lifetime packet, not a required PR actor lane. It uses the actual
+PowerShell adapter, private Python worker and canonical source-only lifecycle
+archive. Two cycles each cover callback completion, abrupt callback exit,
+original PowerShell death and runspace cancellation. Child/grandchild identities
+are pinned before release; all must be retired before observer cleanup can
+establish a pass. These controls are distinct from source/argument compatibility,
+interpreter prerequisite, and desktop visibility qualification. Native platform
+skips do not qualify another platform. Actor-free admission/framing and
+pipe-bound Job controls live in `tools/promotion_unit_tests/test_shell_caller_owned.py`.
+The eight native offer cases create their file-backed capture, cold-child gate
+and process/I/O fixtures before taking the parent-handle baseline. Those fixture
+resources stay held through the SDK operation and exact Job-handle balance checks;
+there are no `communicate` reader threads in that measured interval. The child
+cannot invoke the SDK until the baseline gate opens. Existing permission/ACK/abort
+bytes and case identities are unchanged; no count offset or tolerance is applied.
+`test_offer_fixture_contract.py` separately checks that sequencing, all eight
+branches and leak/noninheritance refusal with native dependency doubles, plus a
+bounded Linux gate control. It does not qualify Windows.
+The separate Linux-only `test_shell_completion_native.py` checks actual
+returned and abrupt exits with both zero and nonzero statuses. It requires the
+callback-return witness independently of the reaped status and does not
+repeat the desktop matrix or qualify Windows behavior.
+Separate cell-caller cases in the same native test file exercise original-shell
+loss and the shared deadline while payload hashing is blocked and while a real
+nested installer owns a descendant. A transport case returns non-ASCII stdout
+and stderr despite a legacy Python output environment. These are not added to
+the opt-in 44-case SDK desktop roster and do not replace its qualification.
+The cell hash's actual bytecode-cache and `.git`-named synthetic-file controls
+remain in the on-demand packet, not promotion units: the latter's existing
+bytecode-attribution and Git-storage effect refusals stay intact.
+`plugins/agent-machines/tests/test_cell_construction_inputs.py` separately runs
+the actual attached construction protocol against a copied SDK snapshot with
+real namespace/snapshot/slot receipts, then checks every selected byte. Its
+offline UV build runs the real shipped dependency-policy CLI and a backend that
+writes build/egg-info artifacts, proving those writes stay in the canonical
+retained-input copy and its cleanup settles. These are native process tests,
+not admitted promotion units or Windows desktop qualification.
+The fixture's identity report is admitted only after a separate marker confirms
+the producer completed its closed-file publication. A failed admitted read stays
+an error; the fixture does not suppress permissions failures or retry them as a pass.
+
+The separate opt-in desktop witness is
+`libs/agent-procutil/tests/sdk_visibility.py`, with its co-located pure observer
+and Win32 bindings. It is not a pytest-discovered test or a daemon. Its visible
+mode requires explicit single-control consent, a source-bound request, a normal
+local unelevated desktop and the admitted outer native Job owner. Job membership
+alone does not establish that producer's limits; do not invoke the visible mode
+directly or bypass a hosted-only fixture's guard.
+
+The `passive` mode creates no window and changes no foreground state: it checks
+the native bindings, complete raw-event/poll capture and private-pipe identity
+handshake. After independent source review, the separately authorized visible
+mode consumes one control attempt, requires raw show/foreground/original-
+restoration/retirement witnesses, then observes 44 cases inside one uninterrupted
+quiet epoch: the exact 32-case SDK lifetime matrix in two disjoint 16-case
+packets, eight real Windows Job-offer protocol controls, and startup receipt-EOF
+and malformed-nonempty-receipt unwinding on both PowerShell hosts. The latter
+passes an actual canonical lifetime offer through deliberately malformed JSON,
+requires refusal before the callback and rejects unknown native settlement.
+The offer controls cover absent/invalid
+permission, explicit unadopted abort, receipt-write failure, absent/invalid ACK
+and normal adoption, including exact parent handle-table settlement. They test
+the native protocol, not every possible shell cancellation instruction.
+The probe request's `case_packets` supplies all 44 literal parametrized node
+IDs in that order. `sdk_visibility_cases.py` rejects broad function selectors, overlapping
+packets, source escapes and incomplete host/composition/mode/cycle coverage
+before any native binding or visible attempt. Each isolated worker runs at
+most 16 cases, retires inside that same observer and writes its own exact
+literal JUnit; all four reports must cover the declared matrix. Calibration is
+never repeated to partition tests, and the original whole deadline is not
+rearmed between workers.
+The canonical arguments explicitly retain all four pytest temporary sessions,
+including failed cases, so the fourth packet cannot prune the first SDK
+packet's closed publications before final reconciliation. The policy is
+`tmp_path_retention_count=4` and `tmp_path_retention_policy=all`, passed as
+literal command options rather than inherited configuration. The cold-source
+regression runs four real pytest sessions over synthetic cases with one shared
+temporary root and verifies that all earlier evidence survives. It is not
+native SDK or desktop acceptance.
+Each worker sets `--rootdir` to the verified SDK tree while keeping its empty
+configuration file in the output directory. Without that explicit root,
+pytest can assign an empty filesystem node ID to an individually selected
+external file and emit an empty JUnit `classname`. The strict source-identity
+check requires the exact dotted classname derived from the source path under
+that SDK root, including its complete prefix. Empty, missing or suffix-matching
+unrelated class names are refused; the gate is not relaxed to fit
+a failed artifact. The separate cold metadata regression reproduces that
+failure and verifies the explicit-root form using synthetic, actor-free cases.
+It preserves the original 20-ms poll, 0.5-second coverage/delivery
+ceiling, bounded raw stream and same-thread hook cleanup. Unknown/unrelated
+foreground events remain evidence, never a process-name-filtered zero.
+Foreground polling independently captures a directly visible HWND, PID, TID
+and query-pinned process birth before and after each enumeration. Microsoft
+documents that `EnumWindows` enumerates top-level desktop-app windows, not every
+foreground window; an observable foreground can therefore be absent even from
+a successful enumeration. The trace preserves that absence without inserting
+a fabricated enumeration member or applying a window-class allowlist.
+Null, invisible, exited, changed or unqueryable foregrounds, failed query-handle
+closure, enumeration failures and conflicting enumerated ownership still refuse
+qualification. Enumeration and direct captures are non-atomic endpoints, not
+proof that no intervening change occurred: the same unfiltered raw WinEvent
+stream, calibration witnesses and original coverage ceilings remain required.
+Its portable policy controls are in
+`tools/promotion_unit_tests/test_sdk_desktop_observer.py`; actual desktop proof
+is a different lane and must never appear in required unit-only CI.
+The source manifest must include the runner helpers and the explicit SDK
+closure declared in `sdk_visibility_sources.py`, all beneath the selected
+SDK root. It must match that exact closure, not mix in separately located
+runner/observer copies. The running runner and every already-loaded helper
+must also originate at their declared locations in that same SDK tree.
+Both caller and isolated worker refuse a mixed-root request before native
+binding or any visible attempt and verify the source hashes; the worker
+binds its source-only procutil import before pytest, never an ambient installed
+copy. `test_sdk_visibility_source.py` is the separate cold `-I` subprocess
+regression, including real pytest collection, not a promotion unit.
+Owned-child retirement and incomplete-control restoration stay inside their
+capture epochs, including error paths. Raw witnesses require a strictly newer
+generation tick than the private command boundary; the canary waits for that
+tick before acting. Same-tick delayed callbacks cannot qualify restoration.
+Each worker attempt is recorded before construction, including attempts that
+fail before readiness. After bounded reader retirement inside the capture
+epoch, the report retains the actual exit status, partial stdout/stderr,
+exact base64-encoded stream bytes, reader errors and cleanup status. A cleanup
+failure is recorded without replacing an already-raised primary failure.
+An exited child with drained readers cannot turn a literal prerequisite error
+into an unexplained admission timeout.
+
 Agent-worktrees' `test_launch_seed_native.py` covers the finite backend and setup
 provider: retained one-time seed claims, literal argv, existing prompt-free
 execution observations, PID/birth and incarnation refusals, definite-spawn
@@ -2527,6 +2655,16 @@ The runner rejects process, network, native-loader,
 Git-storage, thread and sleep effects, including attempted effects caught by a
 test. Test writes are confined to synthetic temporary storage.
 
+`tools/promotion_unit_tests/test_cell_installer.py` admits the original thirteen
+actor-free Machines release-payload and watchdog controls. The owned process
+runner and fingerprint thread executor are substituted at their actor boundaries;
+canonical file selection, framing and hashing still execute. It excludes the original module's real Linux
+descendant-retirement test. The separate snapshot-provenance suite exercises
+actual POSIX payload replacement during a held provisioning lock, both adapters'
+copy-before-publication checks, and a native PowerShell cell-lock deadline on
+Linux. These process tests remain outside promotion units and do not establish
+Windows Job or desktop qualification.
+
 Release-helper qualification additionally resolves the canonical repository
 import closure from controller-discovered commands and registered executable
 build inputs. Candidate verification includes both the preserved Main control
@@ -4481,6 +4619,10 @@ Explicit out-of-plugin targets use the same bounded runner and admission lease:
 `worktree-manager` selects that product's tests, `payload-invocation` selects
 `libs/payload-invocation/tests`, and `runtime-source` selects the source
 preparation/identity/native-consumer contracts in `libs/versioned-runtime/tests`.
+`installation-context` selects `libs/installation-context/tests`, including
+the compiler-free PowerShell adapter. Use the same target with
+`tools/run_tests_in_devcontainer.py` for ordinary POSIX fixtures on a WSL host;
+synthetic POSIX profiles do not establish native WSL guest identity.
 `agent-procutil` selects the shared process primitives in
 `libs/agent-procutil/tests`, including explicit native daemon wait-status controls.
 `--all` remains scoped to plugin suites.

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -56,13 +55,17 @@ def _snapshot(root: Path) -> dict:
     }
 
 
+def _host_environment(profile: Path) -> dict:
+    return {**governance._profile_environment(profile), "wslDistro": None}
+
+
 def _fixture(tmp_path: Path, namespaced: bool, pointer_exists: bool) -> tuple[dict, Path, Path]:
     layout = governance._cell_layout(tmp_path)
     profile = tmp_path / "profile"
     legacy = tmp_path / "legacy"
     profile.mkdir()
     legacy.mkdir()
-    environment = governance._profile_environment(profile)
+    environment = _host_environment(profile)
     if namespaced:
         governance._activation(layout, environment=environment)
         governance._write_json(
@@ -99,8 +102,10 @@ def test_derived_diagnostic_api_read_only(
     copy: Path, namespaced: bool, pointer_exists: bool,
 ) -> None:
     primitive = _load(copy, "diagnostic_derived_primitive", monkeypatch)
+    # These synthetic host records must not inherit the runner's WSL identity.
+    monkeypatch.setattr(primitive, "_is_wsl_guest", lambda: False)
     layout, profile, legacy = _fixture(tmp_path, namespaced, pointer_exists)
-    environment = governance._profile_environment(profile)
+    environment = _host_environment(profile)
     arguments = governance._api_arguments(
         layout, profile, legacy,
         platform=environment["platform"], wsl_distro=environment["wslDistro"],
@@ -129,6 +134,7 @@ def test_peer_governance_wrapper_read_only(
         else copy.with_name("_installation_context.py")
     )
     primitive = _load(primitive_path, "diagnostic_peer_primitive", monkeypatch)
+    monkeypatch.setattr(primitive, "_is_wsl_guest", lambda: False)
     layout, profile, _legacy = _fixture(tmp_path, activated, pointer_exists)
     monkeypatch.setenv("HOME", str(profile))
     monkeypatch.setenv("USERPROFILE", str(profile))
@@ -136,7 +142,7 @@ def test_peer_governance_wrapper_read_only(
     environment = {
         "HOME": str(profile),
         "USERPROFILE": str(profile),
-        "WSL_DISTRO_NAME": os.environ.get("WSL_DISTRO_NAME", ""),
+        "WSL_DISTRO_NAME": "",
     }
     current_environment = primitive._current_environment
 

@@ -66,6 +66,7 @@ from standalone_consumers import standalone_build_resources
 from plugin_test_cache import clear_cache_contents, dependency_fingerprint, ordinary_cache_root
 # Preserve the runner's existing public map as an explicit re-export.
 from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
+from plugin_test_selection import SOURCE_ONLY_TEST_TARGETS
 from plugin_test_selection import (
     TestSelection, load_selection, resolve_plugin_root, validate_test_file,
 )
@@ -322,7 +323,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
             raise RuntimeError("uv replaced the leased environment directory")
     if fresh or reinstall:
-        if _has_pyproject(name):
+        if _has_pyproject(name) and name not in SOURCE_ONLY_TEST_TARGETS:
             # Install the plugin editable with its dev extras. cwd = the plugin
             # dir so uv reads that pyproject's [tool.uv.sources] (vendored path
             # deps).
@@ -355,10 +356,8 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                 ),
             )
         else:
-            # A pyproject-less plugin (e.g. a skill-script plugin like
-            # harness-knowledge): there is nothing to install editable -- its
-            # tests import the scripts directly (importlib). Just ensure a
-            # pytest runner is present in the venv.
+            # Source-only targets and pyproject-less plugins import their
+            # owning scripts directly; they need test tooling, not an editable.
             run_uv_install(
                 uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES,
                      *EXTERNAL_TEST_DEPENDENCIES.get(name, ())],

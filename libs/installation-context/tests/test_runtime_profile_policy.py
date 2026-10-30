@@ -23,8 +23,11 @@ from test_installation_mode_governance import (
 
 
 @pytest.fixture
-def adopter(tmp_path):
+def adopter(tmp_path, monkeypatch):
     module = _load_module()
+    # Runtime intent is measured against this synthetic non-guest profile.
+    monkeypatch.setattr(module, "_is_wsl_guest", lambda: False)
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
     layout = _cell_layout(tmp_path)
     profile = tmp_path / "profile"
     profile.mkdir()

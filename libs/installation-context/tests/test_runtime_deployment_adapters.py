@@ -107,7 +107,7 @@ def _run_adapter(
 def test_native_timeout_retains_phase_evidence_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
     failure = subprocess.TimeoutExpired(
-        ["native-reader"], 30, stderr=b"native-policy-phase=Add-Type;elapsed_ms=50\n",
+        ["native-reader"], 30, stderr=b"native-policy-phase=Get-Command;elapsed_ms=50\n",
     )
     monkeypatch.setattr(failure, "add_note", None, raising=False)
     failure.__notes__ = ["existing diagnostic"]
@@ -122,7 +122,7 @@ def test_native_timeout_retains_phase_evidence_without_retry(monkeypatch: pytest
     assert captured.value is failure
     assert len(calls) == 1
     assert calls[0][1]["timeout"] == 30
-    assert "native-policy-phase=Add-Type" in "\n".join(failure.__notes__)
+    assert "native-policy-phase=Get-Command" in "\n".join(failure.__notes__)
     assert failure.__notes__[0] == "existing diagnostic"
     assert "Native policy child started at " in failure.__notes__[-1]
 
@@ -157,7 +157,7 @@ def test_stock_bash_management_retains_modern_shell_floor(tmp_path: Path) -> Non
 def test_native_policy_decision_matches_reference(
     tmp_path: Path, runner: str, case: str,
 ) -> None:
-    module = _load_module()
+    module = _load_module(native_environment=True)
     layout = _cell_layout(tmp_path)
     current = _environment()
     profile = Path(current["homeRealPath"])
@@ -252,7 +252,7 @@ def test_native_policy_decision_matches_reference(
     expected_code = 0 if reference["allowPluginPublication"] else 3
     assert result.returncode == expected_code, result.stdout + result.stderr
     if runner == "powershell" and os.environ.get("INSTALLATION_CONTEXT_POLICY_TRACE") == "1":
-        for stage in ("process-entry", "Add-Type", "Resolve-InstallationStatus"):
+        for stage in ("process-entry", "ConvertTo-InputPath", "Get-Command", "ConvertFrom-Json"):
             assert f"native-policy-phase={stage};" in result.stderr, result.stderr
     value = json.loads(result.stdout)
     actual = value["deployment"]
@@ -268,7 +268,7 @@ def test_native_policy_decision_matches_reference(
 
 @pytest.mark.parametrize("runner", ADMISSION_RUNNERS)
 def test_namespaced_adapter_policy_uses_governed_actual_root(tmp_path: Path, runner: str) -> None:
-    module = _load_module()
+    module = _load_module(native_environment=True)
     layout = _cell_layout(tmp_path)
     current = _environment()
     profile = Path(current["homeRealPath"])
@@ -308,7 +308,7 @@ def test_inaccessible_policy_cannot_become_missing(
 ) -> None:
     if os.geteuid() == 0:
         pytest.skip("An OS superuser can read the restricted fixture")
-    module = _load_module()
+    module = _load_module(native_environment=True)
     layout = _cell_layout(tmp_path)
     legacy = tmp_path / "runtime"
     path = legacy / module.RUNTIME_DEPLOYMENT_FILE

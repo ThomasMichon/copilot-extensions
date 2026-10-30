@@ -10,6 +10,7 @@ using System.Text;
 using System.Diagnostics;
 using System.Threading;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 namespace CopilotExtensions {
@@ -48,7 +49,8 @@ namespace CopilotExtensions {
             public BasicLimit Basic; public Io Counters;
             public UIntPtr ProcessMemory, JobMemory, PeakProcess, PeakJob;
         }
-        [DllImport("kernel32.dll", SetLastError=true)] private static extern IntPtr CreateJobObject(IntPtr a, string n);
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        private static extern IntPtr CreateJobObject(IntPtr a, string n);
         [DllImport("kernel32.dll", SetLastError=true)]
         private static extern bool SetInformationJobObject(IntPtr j, int c, ref ExtendedLimit i, uint s);
         [DllImport("kernel32.dll", SetLastError=true)]
@@ -138,15 +140,39 @@ namespace CopilotExtensions {
             lock (Gate) {
                 if (Timers.ContainsKey(id)) return;
                 if (Lifetime == IntPtr.Zero) {
-                    IntPtr job = CreateJobObject(IntPtr.Zero, null);
+                    const string key = "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES";
+                    string inherited = null;
+                    foreach (System.Collections.DictionaryEntry item in Environment.GetEnvironmentVariables())
+                        if (String.Equals((string)item.Key, key, StringComparison.OrdinalIgnoreCase))
+                            inherited = (string)item.Value;
+                    var names = new HashSet<string>(StringComparer.Ordinal);
+                    if (inherited != null) {
+                        if (inherited.Length == 0 || inherited.Length > 4096)
+                            throw new IOException("invalid owned Job scopes");
+                        foreach (string name in inherited.Split(';')) {
+                            if (!Regex.IsMatch(name, @"\ALocal\\ce-owned-job-[0-9a-f]{32}\z") || !names.Add(name))
+                                throw new IOException("invalid owned Job scopes");
+                        }
+                    }
+                    string scope = @"Local\ce-owned-job-" + Guid.NewGuid().ToString("N");
+                    string chain = inherited == null ? scope : inherited + ";" + scope;
+                    if (names.Count >= 64 || chain.Length > 4096)
+                        throw new IOException("owned Job scope limit exceeded");
+                    IntPtr job = CreateJobObject(IntPtr.Zero, scope);
+                    int jobError = Marshal.GetLastWin32Error();
+                    if (job == IntPtr.Zero || jobError == 183) {
+                        if (job != IntPtr.Zero) CloseHandle(job);
+                        throw new IOException("disposable daemon scope creation refused");
+                    }
                     var limits = new ExtendedLimit(); limits.Basic.Flags = 0x2000;
-                    if (job == IntPtr.Zero || !SetInformationJobObject(job, 9, ref limits,
+                    if (!SetInformationJobObject(job, 9, ref limits,
                         (uint)Marshal.SizeOf(typeof(ExtendedLimit))) ||
                         !AssignProcessToJobObject(job, Process.GetCurrentProcess().Handle)) {
                         if (job != IntPtr.Zero) CloseHandle(job);
                         throw new IOException("disposable daemon descendant custody unavailable");
                     }
                     Lifetime = job;
+                    Environment.SetEnvironmentVariable(key, chain);
                 }
                 var clock = Stopwatch.StartNew();
                 double hard = Math.Max(0, hardRemaining);

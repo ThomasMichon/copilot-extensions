@@ -334,6 +334,8 @@ def _source_descriptor(arguments: argparse.Namespace) -> Mapping[str, Any] | Non
         return None
     if not isinstance(value, Mapping):
         _fail("A source descriptor must be a JSON object.")
+    if _POWERSHELL_PATHS.get():
+        value = _powershell_source_descriptor(value)
     return value
 
 
@@ -396,6 +398,33 @@ def _parse_cli_generation(value: str) -> int:
             "generation exceeds the portable signed 64-bit maximum"
         )
     return parsed
+
+
+@_validation_scope
+def _resolve_cli_status(
+    arguments: argparse.Namespace,
+    mode_arguments: Mapping[str, Any],
+) -> dict[str, Any]:
+    if arguments.with_context_validation and not (
+        arguments.expected_plugin_id and arguments.expected_payload_root
+    ):
+        _fail("--with-context-validation requires --expected-plugin-id and --expected-payload-root.")
+    result = resolve_installation_mode(**mode_arguments)
+    if (
+        arguments.with_context_validation
+        and result["actualMode"] == "namespaced"
+        and result["status"] in {"ready", "deactivation-required"}
+    ):
+        pointer = Path(result["context"])
+        result["contextValidation"] = validate_context_receipt(
+            pointer,
+            pointer.parents[4],
+            expected_marketplace_id=arguments.expected_marketplace_id,
+            expected_plugin_id=arguments.expected_plugin_id,
+            expected_payload_root=arguments.expected_payload_root,
+            expected_cell_root=arguments.expected_cell_root,
+        )
+    return result
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -626,6 +655,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     status_parser = subparsers.add_parser("status")
     _add_mode_arguments(status_parser)
+    status_parser.add_argument("--with-context-validation", action="store_true")
 
     deployment_parser = subparsers.add_parser("deployment-status")
     _add_mode_arguments(deployment_parser)
@@ -940,7 +970,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "marketplace_key": arguments.marketplace_key,
             }
             if arguments.action == "status":
-                result = resolve_installation_mode(**mode_arguments)
+                result = _resolve_cli_status(arguments, mode_arguments)
             elif arguments.action == "probe-management-publication":
                 borrow_runtime_publication(**mode_arguments)
                 result = resolve_runtime_deployment(**mode_arguments)

@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 EXTERNAL_TEST_ROOTS = {
     "worktree-manager": Path("worktree-manager"),
     "payload-invocation": Path("libs/payload-invocation"),
+    "installation-context": Path("libs/installation-context"),
     "runtime-source": Path("libs/versioned-runtime"),
     "worktree-identity": Path("libs/worktree-identity"),
     "repository-policy": Path("libs/repository-policy"),
@@ -17,6 +18,7 @@ EXTERNAL_TEST_ROOTS = {
     "ssh-manager": Path("libs/ssh-manager"),
     "venue-copilot": Path("libs/venue-copilot"),
 }
+SOURCE_ONLY_TEST_TARGETS = frozenset({"installation-context"})
 
 
 def resolve_plugin_root(repo: Path, name: str, *, plugins_root: Path | None = None) -> Path:

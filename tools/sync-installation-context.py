@@ -26,6 +26,9 @@ import stat
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from daemon_lifecycle_assets import ARCHIVE_NAME, lifecycle_archive
+
 REPO = Path(__file__).resolve().parent.parent
 CANONICAL_DIR = REPO / "libs" / "installation-context"
 FILES = (
@@ -47,9 +50,13 @@ FILES = (
     "_installation_context_mode_cli.py",
     "_installation_context_deployment.py",
     "_installation_context_publication.py",
+    "_installation_context_powershell.py",
+    "_installation_context_worker.py",
     "installation_context.py",
+    ARCHIVE_NAME,
     "installation-context.sh",
     "installation-context.ps1",
+    "shell-caller-owned.ps1",
     "plugin-publication-probe.ps1",
     "plugin-publication-probe.sh",
     "guest-environment.ps1",
@@ -114,7 +121,7 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
             "agent-pull-requests", "agent-ssh",
         }
         for name in FILES
-        if name.endswith(".py")
+        if name.endswith(".py") and name != "_installation_context_worker.py"
     ] + [
         (
             CANONICAL_DIR / name,
@@ -129,7 +136,7 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
         )
         for relative_dir, _label in STANDALONE_PYTHON_ADOPTERS
         for name in FILES
-        if name.endswith(".py")
+        if name.endswith(".py") and name != "_installation_context_worker.py"
     ] + [
         (CANONICAL_DIR / name, REPO / destination)
         for name, destination in STANDALONE_ASSETS
@@ -157,6 +164,11 @@ def unregistered_adopters() -> list[str]:
 
 def verify() -> list[str]:
     problems: list[str] = []
+    archive = CANONICAL_DIR / ARCHIVE_NAME
+    if ADOPTERS and (
+        not archive.is_file() or archive.read_bytes() != lifecycle_archive(REPO)
+    ):
+        problems.append("canonical caller-lifetime source archive is missing or drifted")
     for plugin in unregistered_adopters():
         problems.append(
             f"plugins/{plugin} vendors scripts/installation-context/ but is not "
@@ -179,6 +191,12 @@ def verify() -> list[str]:
 
 def sync() -> list[str]:
     written: list[str] = []
+    if ADOPTERS:
+        archive = CANONICAL_DIR / ARCHIVE_NAME
+        data = lifecycle_archive(REPO)
+        if not archive.is_file() or archive.read_bytes() != data:
+            archive.write_bytes(data)
+            written.append(archive.relative_to(REPO).as_posix())
     for source, destination in vendor_pairs():
         if not source.is_file():
             raise FileNotFoundError(f"canonical source missing: {source}")

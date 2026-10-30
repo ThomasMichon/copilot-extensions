@@ -486,6 +486,8 @@ def test_packaged_peer_launch_bytes_are_canonical() -> None:
         == (PLUGIN / "src" / "agent_index" / "_installation_context.py").read_bytes()
     )
     for fragment in sorted(context_dir.glob("_installation_context_*.py")):
+        if fragment.name == "_installation_context_worker.py":
+            continue
         assert fragment.read_bytes() == (PLUGIN / "src" / "agent_index" / fragment.name).read_bytes()
 
 

@@ -17,6 +17,33 @@ The legacy decision child suppresses PowerShell module-preparation progress,
 not diagnostics or refusal status. Ordinary invocation, native command decoding,
 runtime construction and publication authority remain unchanged.
 
+Cell/slot actions do not allocate the legacy `.agent-machines/.install-stage`.
+The PowerShell entrypoint retains a compiler-free, caller-owned whole-tree
+watchdog, including payload selection/hashing, provisioning-lock waits and
+runtime construction. The original PowerShell caller adopts the same shared
+shell-lifetime Job/pipe transport as the installation-context SDK before hashing
+begins; losing that caller retires the watchdog, not just its child installer.
+Its default
+deadline is 480 seconds; `AGENT_MACHINES_INSTALL_DEADLINE_SEC`, then
+`COPILOT_PLUGIN_INSTALL_DEADLINE_SEC`, may select another positive deadline.
+Nonpositive or malformed deadlines are refused instead of disabling containment.
+Captured UTF-8 stdout/stderr are returned at completion, with separate 16 MiB
+budgets; timeout fails with status 124, and cleanup uncertainty is an explicit
+error, never successful completion. The transport explicitly selects UTF-8 for
+both its Python producer and its PowerShell decoders, including Python 3.10.
+Both native adapters bind the selected package version and every copied regular file
+before waiting for the cell lock, recheck the recursive child, and verify copied
+snapshot bytes before publication. This also covers ordinary marketplace payloads
+without `runtime-source.json`. Generated/build directories and bytecode caches
+are included, not silently excluded by source-assembly filtering. Linked,
+reparse, nonregular or incompletely scanned inputs are refused; only the two
+root publication sidecars retain separate ownership/provenance checks.
+Construction, dependency-policy, lifecycle and import-health Python controls
+explicitly disable bytecode writes; isolated Python does not honor the
+environment-only equivalent. Existing cached bytes stay part of the selection.
+Package builds use the dependency installer's existing retained-input copy, so
+backend build/egg-info output does not mutate the verified snapshot.
+
 ## Legacy runtime removal
 
 The native `scripts/init.ps1 -Action uninstall -InstallDir <root>` and
@@ -240,6 +267,11 @@ scripts/init.sh slot-provision --context /path/to/install.json --expected-market
 scripts/init.sh slot-validate --context /path/to/install.json --expected-marketplace-id <marketplace-id>
 scripts/init.sh slot-cutover --context /path/to/install.json --expected-marketplace-id <marketplace-id> --expected-namespace-generation <n> --expected-install-generation <n> --expected-current-version <version>
 ```
+
+Cell/slot actions use their explicit receipt transaction without entering the
+legacy payload self-stage or creating its legacy runtime footprint. This
+exception is selected from the parsed action, not an inherited stage marker;
+ordinary legacy installation still stages a replaceable marketplace payload.
 
 `cell-provision` is reserved for the payload-local dispatcher and bootstrap
 reconciler after the shared resolver proves an already-active Agent Machines

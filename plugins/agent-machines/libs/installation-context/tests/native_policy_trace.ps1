@@ -6,21 +6,26 @@ $global:NativePolicyTraceSeen = @{}
 [Console]::Error.WriteLine(
     ('native-policy-phase=process-entry;utc={0:o}' -f [DateTime]::UtcNow)
 )
-foreach ($stage in @(
-    'Add-Type', 'Canonical-Path', 'Resolve-InstallationStatus',
-    'Read-RuntimeDeploymentPolicy', 'Read-RegularFileBytes', 'Read-JsonText'
+foreach ($capture in @(
+    @{ Script = $Adapter; Commands = @('ConvertTo-InputPath') },
+    @{
+        Script = Join-Path (Split-Path -Parent $Adapter) 'shell-caller-owned.ps1'
+        Commands = @('Get-Command', 'ConvertFrom-Json')
+    }
 )) {
-    $action = {
-        if (-not $global:NativePolicyTraceSeen.ContainsKey($stage)) {
-            $global:NativePolicyTraceSeen[$stage] = $true
-            [Console]::Error.WriteLine(
-                ('native-policy-phase={0};utc={1:o};elapsed_ms={2}' -f
-                    $stage, [DateTime]::UtcNow,
-                    $global:NativePolicyTraceClock.ElapsedMilliseconds)
-            )
-        }
-    }.GetNewClosure()
-    $null = Set-PSBreakpoint -Script $Adapter -Command $stage -Action $action
+    foreach ($stage in $capture.Commands) {
+        $action = {
+            if (-not $global:NativePolicyTraceSeen.ContainsKey($stage)) {
+                $global:NativePolicyTraceSeen[$stage] = $true
+                [Console]::Error.WriteLine(
+                    ('native-policy-phase={0};utc={1:o};elapsed_ms={2}' -f
+                        $stage, [DateTime]::UtcNow,
+                        $global:NativePolicyTraceClock.ElapsedMilliseconds)
+                )
+            }
+        }.GetNewClosure()
+        $null = Set-PSBreakpoint -Script $capture.Script -Command $stage -Action $action
+    }
 }
 [string[]]$nativeArguments = Get-Content -LiteralPath $ArgumentsFile -Raw | ConvertFrom-Json
 $adapterParameters = @{ Action = $nativeArguments[0] }

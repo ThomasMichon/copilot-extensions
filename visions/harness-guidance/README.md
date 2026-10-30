@@ -90,14 +90,16 @@ available on demand. **`sessionStart` `additionalContext` composition across
 multiple hooks is empirically unreliable** — observed sessions deliver no
 contributor's output at all, not merely a last-writer-wins loss. Ambient session
 guidance a harness depends on should therefore reach the agent through a
-checked-in static pointer instruction plus a hook-written session-scoped file
+creation/startup-projected pointer instruction plus a hook-written session-scoped file
 the agent is directed to read (see
 `docs/patterns/session-scoped-dynamic-guidance.md`), not through
 `additionalContext` aggregation alone. When the host natively composes every
 independent hook output and that behavior is proven at the supported version
 floor, direct plugin-owned `additionalContext` should become the preferred
-perfectly dynamic path. Until then, the checked-in pointer plus exact-session
-guidance file remains authoritative.
+perfectly dynamic path. Until then, projected pointers plus exact-session
+guidance files should provide the normal delivery path. Offline recovery
+should use periodically synchronized, non-automatically-loaded fallback bodies,
+not a second automatic copy of the same policy.
 
 ### circumstance-based-intervention
 
@@ -221,6 +223,13 @@ operator should be able to restart that session to load corrected upstream
 guidance; protecting a previously copied generation must not prevent refresh.
 Filesystem delivery should remain distinct from proving model admission.
 
+Automatically discovered full plugin instruction bodies should come from this
+creation/startup projection, not independently maintained checked-in copies.
+Periodically synchronized offline fallbacks should remain available on demand;
+their content-bearing filenames must not contain `.instructions.md` or otherwise
+match native instruction discovery. Thin recovery locators should not duplicate
+policy or cause an available projected body and its fallback to load together.
+
 ### coordinator-first-task-routing
 
 Harnesses should provide model-neutral guidance that helps a coordinating agent
@@ -313,23 +322,22 @@ should remain discoverable from the concise ambient kernel.
 
 ### resilient-safety-boundary
 
-Critical safety and publication constraints should retain a minimal static
-fallback when a launch path cannot load the richer plugin-owned guidance.
-Plugin setup should own any compatibility/fallback prose through a stable,
-idempotently reconciled marker or dedicated rule file. For worktree-scoped
-projected instruction content specifically, the lifecycle-hook-rendered,
-gitignored local cache is the **primary** delivery path -- it reflects the
-currently installed payload, not a sync-lagged approximation of it. The
-checked-in, scheduled-sync-worker-maintained copy is strictly the
-**fallback**: the floor a session falls back to only when no pre-session
-hook could render anything fresher (a fully hookless/headless/sandboxed
-launch) or hasn't yet had the chance to (a pre-sync gap on an otherwise
-hook-capable path). For managed instruction copies, the currently selected
-plugin and its declaration determine the primary file; no separate version,
-content-provenance or fingerprint comparison should choose between it and the
-fallback. Creation and session start should replace stale generated copies
-directly. A failed copy should be reported explicitly, with the offline fallback
-remaining available when no usable managed copy exists.
+Critical safety and publication constraints should remain recoverable when a
+launch path cannot load richer plugin-owned guidance. Repository-owned
+invariants should stay with the repository; plugin-owned offline fallback
+content should be periodically synchronized and read only when needed, never
+automatically loaded beside its current projection. Thin recovery locators may
+remain discoverable without embedding another policy body.
+
+For worktree-scoped projected content, creation/startup-generated local guidance
+should be the normal automatic delivery path. A checked-in offline fallback
+should remain usable when no usable current projection exists, including
+hookless/headless or failed preparation. Content-bearing fallback filenames
+must not contain `.instructions.md` or otherwise trigger automatic discovery.
+The selected plugin and its declaration should determine the primary file;
+no separate version, content-provenance or fingerprint comparison should choose
+between it and the fallback. A failed copy should be reported explicitly, not
+hidden by a fallback read or mistaken for successful refresh.
 
 Applicable worktree and session-creation boundaries should establish that
 local guidance is available before the agent begins loading instructions. Session-start

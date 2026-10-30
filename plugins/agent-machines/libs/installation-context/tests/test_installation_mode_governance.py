@@ -76,12 +76,16 @@ def _supported_bash() -> str | None:
 BASH = _supported_bash()
 
 
-def _load_module():
+def _load_module(*, native_environment: bool = False):
     spec = importlib.util.spec_from_file_location("installation_context", PYTHON_SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    if not native_environment:
+        # In-process API fixtures describe isolated non-guest profiles.
+        # Native subprocess parity uses the unchanged SDK and real observation.
+        module._is_wsl_guest = lambda: False
     return module
 
 
@@ -115,15 +119,11 @@ def _environment() -> dict[str, object]:
 
         profile = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
         platform = "posix"
-    return {
-        "platform": platform,
-        "homeRealPath": str(profile),
-        "wslDistro": (
-            None
-            if platform == "windows"
-            else os.environ.get("WSL_DISTRO_NAME") or None
-        ),
-    }
+    module = _load_module(native_environment=True)
+    current, _profile = module._current_environment(
+        environment=os.environ, os_profile=profile, platform=platform, wsl_distro=None,
+    )
+    return current
 
 
 def _api_environment(profile: Path) -> dict[str, object]:
@@ -138,7 +138,7 @@ def _profile_environment(profile: Path) -> dict[str, object]:
     return {
         "platform": "windows" if os.name == "nt" else "posix",
         "homeRealPath": str(profile.resolve()),
-        "wslDistro": None if os.name == "nt" else os.environ.get("WSL_DISTRO_NAME") or None,
+        "wslDistro": None,
     }
 
 

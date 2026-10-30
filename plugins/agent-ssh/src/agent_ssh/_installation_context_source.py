@@ -521,6 +521,8 @@ def _get_declarations(
         descriptor = _property(declaration, "source")
         if not isinstance(descriptor, Mapping):
             _fail(f"Marketplace '{key}' has no source in '{path}'.")
+        if _POWERSHELL_PATHS.get():
+            descriptor = _powershell_source_descriptor(descriptor)
         declarations.append(
             {
                 "source": normalize_source(descriptor, base),
