@@ -601,6 +601,44 @@ def test_queued_redrive_unknown_requires_its_frozen_pending_operation(hosted, mo
     assert queue.latest_reservation(task_id).startup_complete is False
 
 
+def test_completed_redrive_allows_later_normal_cold_resume(hosted, monkeypatch, tmp_path):
+    queue, task_id = hosted
+    queue.resume(task_id, OWNER, reuse_session=True)
+    queue.yield_task(task_id, OWNER, release_spawn=False)
+    _capture(monkeypatch)
+    supervisor = _native_supervisor(queue)
+    assert supervisor.redrive_unclaimed_spawns() == 1
+    completed = queue.latest_reservation(task_id)
+    frozen = completed.agent_info["retained_redrive"]
+    queue.claim_one(OWNER, task_id=task_id)
+    queue.start(task_id, OWNER, owner_session_id=NATIVE)
+    queue.suspend(task_id, OWNER, reason="external")
+    cooling = queue.claim_spawn_cooling(
+        completed.key, startup_revision=completed.startup_revision,
+        session_handle=completed.session_handle, state="spawned",
+    )
+    queue.record_cold(
+        completed.key, startup_revision=cooling.startup_revision, cooling_token=cooling.cooling_token,
+    )
+    queue.submit_steer(task_id, fields={"continue": True}, sender="producer")
+    resumed = []
+    supervisor.local_body_target_dir_fn = lambda _sid: str(tmp_path)
+    supervisor.local_resume_fn = lambda sid, _prompt: resumed.append(sid) or True
+    assert supervisor.release_resumed_cold_tasks() == 1
+    after = queue.latest_reservation(task_id)
+    assert resumed == [BRIDGE]
+    assert after.startup_complete is True
+    assert after.startup_revision == completed.startup_revision + 1
+    assert after.agent_info["retained_redrive"] == frozen
+    assert queue.get(task_id).owner_session_id == NATIVE
+    queue.take_steer(task_id, OWNER, all_pending=True)
+    queue.suspend(task_id, OWNER, reason="external")
+    assert queue.claim_spawn_cooling(
+        after.key, startup_revision=after.startup_revision,
+        session_handle=after.session_handle, state="spawned",
+    ).cooling_token is not None
+
+
 @pytest.mark.parametrize("change", [
     "native-history", "missing-history", "host", "handle", "retired", "release",
     "cooling", "hold", "qualified", "waiter-failed", "waiter-unknown",

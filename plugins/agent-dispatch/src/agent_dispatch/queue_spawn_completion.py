@@ -89,7 +89,11 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
             if startup_complete is True and not row["startup_complete"] and row["agent_info"]:
                 import json
 
-                if json.loads(row["agent_info"]).get("retained_redrive") is not None:
+                marker = json.loads(row["agent_info"]).get("retained_redrive")
+                if marker is not None and not (
+                    isinstance(marker, dict) and type(marker.get("startup_revision")) is int
+                    and 1 <= marker["startup_revision"] < row["startup_revision"]
+                ):
                     raise TaskError("retained native redrive completion requires its exact operation")
             if row["state"] == SpawnState.RELEASING and (
                 row["startup_fenced"]

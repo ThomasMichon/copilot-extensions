@@ -1122,6 +1122,8 @@ after fresh queued-task/native/custody admission. An unrelated pending startup
 cannot use this path. Successful transport closes only the matching revision
 and invocation, preserving any concurrent release state and intent. Generic
 startup completion cannot close a retained continuation's pending revision.
+Its historical marker does not own a later normal cold-resume startup revision;
+that caller can complete normally without discarding the frozen redrive bytes.
 
 The supervisor uses standard Bridge `send` with the captured native target,
 one reservation-bound `:redrive` idempotency key and an explicit operation-bound
