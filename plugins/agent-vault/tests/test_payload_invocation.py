@@ -28,6 +28,8 @@ def test_payload_manifest_describes_agent_vault_runtime() -> None:
         "noSelfProvisionEnv": "AGENT_VAULT_NO_SELFPROVISION",
         "purpose": "Fetch and manage machine-local vault credentials",
         "installer": "install",
+        "installerLifecycle": True,
+        "inProcessCatalog": True,
         "windowsCatalogShim": "cmd",
         "provisionMode": "direct",
         "payloadRootEnv": "AGENT_VAULT_PAYLOAD_ROOT",

@@ -20,10 +20,22 @@ def test_cleanup_only_calls_a_loaded_construction_handler(
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
     installer = Path(__file__).resolve().parents[1] / "scripts" / "install.ps1"
-    source = installer.read_text(encoding="utf-8")
-    dispatch = "\ntry {\n    switch ($Action) {"
-    assert source.count(dispatch) == 1
-    tail = dispatch + source.split(dispatch, 1)[1]
+    quoted = str(installer).replace("'", "''")
+    tail = (
+        "$tokens=$null;$errors=$null;"
+        "$ast=[System.Management.Automation.Language.Parser]::ParseFile("
+        f"'{quoted}',[ref]$tokens,[ref]$errors);"
+        "if($errors.Count){throw 'Installer parse failed'};"
+        "$dispatch=@($ast.EndBlock.Statements|Where-Object {"
+        "$_ -is [System.Management.Automation.Language.TryStatementAst] -and "
+        "@($_.Body.Statements|Where-Object {"
+        "$_ -is [System.Management.Automation.Language.SwitchStatementAst] -and "
+        "$_.Condition.Find({param($node)"
+        "$node -is [System.Management.Automation.Language.VariableExpressionAst] -and "
+        "$node.VariablePath.UserPath -eq 'Action'},$true)}).Count -eq 1});"
+        "if($dispatch.Count -ne 1){throw 'Expected one installer dispatch owner'};"
+        ". ([scriptblock]::Create($dispatch[0].Extent.Text))"
+    )
     modules = tmp_path / "modules"
     module = modules / "UnrelatedConstruction"
     module.mkdir(parents=True)
@@ -46,6 +58,7 @@ def test_cleanup_only_calls_a_loaded_construction_handler(
     script.write_text(
         "$ErrorActionPreference='Stop';$PSModuleAutoLoadingPreference='All';$Action='stamp'\n"
         f"function Invoke-Stamp {{[Console]::WriteLine('STAMP');{failure}}}\n"
+        "function Assert-SourceRuntime {}\n"
         "function Exit-InstallLock {[Console]::WriteLine('UNLOCK')}\n"
         + handler + tail,
         encoding="utf-8",

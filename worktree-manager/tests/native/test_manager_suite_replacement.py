@@ -7,6 +7,7 @@ failure, not a skipped or reduced-portfolio success.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ import sys
 import shutil
 import subprocess
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -92,6 +94,43 @@ def test_observer_follows_successor_before_incumbent_releases_work_lease(
     )
     assert _record(tmp_path, name)[0]["pid"] == os.getpid()
     assert json.loads((tmp_path / lock_name).read_text(encoding="utf-8"))["pid"] == 101
+
+
+@pytest.mark.parametrize("exit_code", (259, 0))
+def test_retained_engine_attests_original_health_and_native_lifetime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int,
+) -> None:
+    (tmp_path / "stop").touch()
+    health = {"pid": 101, "version": "engine-v1", "ready": True,
+              "runtime_generation": "retained", "dependencies": {}}
+    probes = []
+
+    def probe(name: str, root: Path, pid: int) -> dict:
+        probes.append((name, root, pid))
+        return health
+
+    samples = iter(((1234, 0, 259), (1234, 0, exit_code)))
+    monkeypatch.setattr(fixture, "_resident_probe", probe)
+    monkeypatch.setattr(fixture, "closing_process",
+                        lambda pid: nullcontext(SimpleNamespace(times=lambda: next(samples))))
+    report = fixture._watch_resident("agent-index/engine", tmp_path, 101, tmp_path)
+    assert probes == [("agent-index/engine", tmp_path, 101)] * 2
+    assert report == {"retention": {"before": health, "after": health,
+                                    "created_ns": 1234, "exit_code": exit_code}}
+    assert json.loads((tmp_path / "ready.json").read_text()) == health
+
+
+def test_retained_engine_does_not_accept_a_replacement_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    health = {"pid": 101, "ready": True}
+    monkeypatch.setattr(fixture, "_resident_probe", lambda *args: health)
+    monkeypatch.setattr(fixture, "_record", lambda *args: ({"pid": 202}, 0))
+    monkeypatch.setattr(fixture, "closing_process",
+                        lambda pid: nullcontext(SimpleNamespace(times=lambda: (1234, 0, 259))))
+    assert fixture._watch_resident("agent-index/engine", tmp_path, 101, tmp_path) == {
+        "error": "Retained engine process changed during the update",
+    }
 
 
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native PowerShell capture")
@@ -276,7 +315,11 @@ def test_installed_manager_replaces_the_whole_applicable_suite(mode: str) -> Non
         assert arguments == ["update", "--project", "example"]
     else:
         assert arguments == [
-            "update", "--repair-engine", report["source"], "--force", "--project", "example",
+            "--bootstrap-update", "update", "--force", "--project", "example",
+        ]
+        assert report["update"]["command"][1:] == [
+            "-NoProfile", "-File", str(Path(report["source"]) / "worktree-manager" / "bootstrap.ps1"),
+            *arguments,
         ]
 
     declared = set(report["declared"])
@@ -313,7 +356,14 @@ def test_installed_manager_replaces_the_whole_applicable_suite(mode: str) -> Non
     assert all(row["resolver_proofs"] for row in report["registrations"])
     assert report["index_engine_retained"], "The separate V1 embedding-engine slot changed"
     assert report["exclusive_work"], "The resident Manager did not retain exclusive-work custody"
-    assert set(report["residents"]) == set(report["required_residents"])
+    assert set(report["retained_residents"]) == {"agent-index/engine"}
+    assert set(report["residents"]) | set(report["retained_residents"]) == set(report["required_residents"])
+    retained = report["retained_residents"]["agent-index/engine"]
+    assert retained["exit_code"] == 259
+    before_engine = report["before"]["resident_observations"]["agent-index/engine"]
+    assert retained["created_ns"] == before_engine["created_ns"]
+    for field in ("pid", "version", "runtime_generation", "ready"):
+        assert retained["before"][field] == retained["after"][field] == before_engine[field]
     for name, row in report["residents"].items():
         assert row["old_pid"] != row["new_pid"], name
         assert row["old_version"].replace("-dev", ".dev") == (

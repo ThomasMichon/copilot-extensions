@@ -20,23 +20,22 @@ from . import __version__ as _PROCESS_VERSION
 from .config import (
     DEFAULT_TCP_PORT,
     ENDPOINT_ENV,
-    INSTALLATION_ID_ENV,
     IS_WINDOWS,
     LOG_FILE,
     PID_FILE,
-    PIPE_PATH,
     SOCKET_PATH,
     load_config,
     normalize_entry,
-    resolve_context,
     resolve_kpdb,
     run_dir,
 )
+from .config import PIPE_PATH as PIPE_PATH, resolve_context as resolve_context
 from .config import (
     tcp_port as configured_tcp_port,
 )
 from .config import within_group as _within_group
-from .extensions import ActionContext, StartupContext, UnlockContext, get_registry
+from .extensions import ActionContext, UnlockContext, get_registry
+from .extensions import StartupContext as StartupContext
 from .gcm import git_credential_action
 from .keepassxc import KeePassXCBackend, PasswordMutationAmbiguous
 from .prompt import prompt_password
@@ -45,11 +44,14 @@ from .rendezvous import (
     clear_endpoint,
     connect_probe,
     resolve,
-    write_endpoint,
 )
-from .service_endpoints import advertised_endpoint
+from .rendezvous import write_endpoint as write_endpoint
+from .service_endpoints import advertised_endpoint as advertised_endpoint
 from .service_connections import VaultConnections, settle_owned
-from .winpipe import pipe_send, start_pipe_server
+from .service_generation import PROCESS_GENERATION, PROTOCOL, ServiceGeneration
+from .service_handoff import supported_versions
+from .winpipe import pipe_send
+from .winpipe import start_pipe_server as start_pipe_server
 
 # Service inactivity timeout (0 = never, set via --persistent)
 TIMEOUT_SECONDS = int(os.environ.get("VAULT_TIMEOUT", "600"))
@@ -83,7 +85,9 @@ class VaultService:
         self._credential_generations: dict[tuple[str, str, str], int] = {}
         self.last_activity = time.time()
         self._password_set_at: dict[str, float] = {}
+        self._password_handoff_deadlines: dict[str, float] = {}
         self._shutdown = False
+        self._runtime_can_work = True
         self.ttl_override: int | None = None  # 0 = persistent (never expire)
         self._unlock_lock = threading.Lock()  # prevents concurrent GUI prompts
         self._credential_lock = threading.RLock()
@@ -275,17 +279,32 @@ class VaultService:
             return False
         return self.ttl <= 0
 
+    def _password_expiration(self, kpdb: str, set_at: float) -> float | None:
+        deadline = set_at + PASSWORD_TTL if PASSWORD_TTL > 0 else None
+        inherited = self._password_handoff_deadlines.get(kpdb)
+        return (
+            min(deadline, inherited) if deadline is not None and inherited is not None
+            else inherited if inherited is not None else deadline
+        )
+
     def _check_password_ttl(self) -> None:
-        """Clear cached password if it has exceeded PASSWORD_TTL."""
-        if PASSWORD_TTL <= 0:
-            return
-        now = time.time()
+        """Clear cached password without racing a native request or handoff snapshot."""
         for kpdb, set_at in list(self._password_set_at.items()):
-            if self.cli.has_password(kpdb) and (now - set_at) > PASSWORD_TTL:
-                log.info("Password TTL expired (%ds) - clearing %s", PASSWORD_TTL, kpdb)
+            deadline = self._password_expiration(kpdb, set_at)
+            if deadline is None or time.time() < deadline:
+                continue
+            with self._credential_lock:
+                stamp = self._password_set_at.get(kpdb)
+                if stamp is None:
+                    continue
+                deadline = self._password_expiration(kpdb, stamp)
+                if deadline is None or time.time() < deadline or not self.cli.has_password(kpdb):
+                    continue
+                log.info("Password TTL expired - clearing %s", kpdb)
                 self.cli.clear_password(kpdb)
                 self.invalidate_cache(kpdb)
                 self._password_set_at.pop(kpdb, None)
+                self._password_handoff_deadlines.pop(kpdb, None)
 
     def initialize(self) -> None:
         kpdb = resolve_kpdb(required=False)
@@ -376,6 +395,7 @@ class VaultService:
                 pw, provider_name = provided
                 self.cli.set_password(kpdb, pw)
                 self._password_set_at[kpdb] = time.time()
+                self._password_handoff_deadlines.pop(kpdb, None)
                 self._unlock_failed_at.pop(kpdb, None)
                 self._record_unlock_error(kpdb, None)
                 self._last_dismiss[kpdb] = False
@@ -439,6 +459,7 @@ class VaultService:
                 if self.cli.verify_password(kpdb, pw):
                     self.cli.set_password(kpdb, pw)
                     self._password_set_at[kpdb] = time.time()
+                    self._password_handoff_deadlines.pop(kpdb, None)
                     self._unlock_failed_at.pop(kpdb, None)
                     self._record_unlock_error(kpdb, None)
                     self._last_dismiss[kpdb] = False
@@ -517,6 +538,10 @@ class VaultService:
 
     def handle_request(self, request: dict, peer: str = "?",
                        transport: str = "unknown") -> dict:
+        if not self._runtime_can_work and request.get("action") not in {
+            "ping", "stop", "handoff-export",
+        }:
+            return {"ok": False, "error": "service_transition", "retryable": True}
         self.keepalive()
         self._check_password_ttl()
         action = request.get("action")
@@ -555,6 +580,18 @@ class VaultService:
                 "ok": True,
                 "pid": os.getpid(),
                 "version": _PROCESS_VERSION,
+                "runtime_generation": PROCESS_GENERATION,
+                "generation_protocol": PROTOCOL,
+                "accepting_work": self._runtime_can_work,
+                "auth_handoff_versions": supported_versions(),
+                "auth_handoff_receiver": (
+                    self._generation.handoff_advertisement()
+                    if getattr(self, "_generation", None) is not None else None
+                ),
+                "auth_handoff": (
+                    self._generation.handoff_result
+                    if getattr(self, "_generation", None) is not None else "not-requested"
+                ),
                 "ttl": self.ttl,
                 "cached": len(self.cache),
                 "cli": self.cli.status(kpdb or None),
@@ -618,6 +655,7 @@ class VaultService:
                 self.cli.clear_password(lock_kpdb)
                 self.invalidate_cache(lock_kpdb)
                 self._password_set_at.pop(lock_kpdb, None)
+                self._password_handoff_deadlines.pop(lock_kpdb, None)
                 self._unlock_failed_at.pop(lock_kpdb, None)
                 self._record_unlock_error(lock_kpdb, None)
                 self._last_dismiss.pop(lock_kpdb, None)
@@ -651,6 +689,7 @@ class VaultService:
             if self.cli.verify_password(kpdb, password):
                 self.cli.set_password(kpdb, password)
                 self._password_set_at[kpdb] = time.time()
+                self._password_handoff_deadlines.pop(kpdb, None)
                 self._unlock_failed_at.pop(kpdb, None)
                 self._record_unlock_error(kpdb, None)
                 self._last_dismiss[kpdb] = False
@@ -961,105 +1000,21 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
             else "inactivity timeout" if service.is_expired else "server stopped"
         )
         log.info("Stopping: %s", reason)
-        await settle_owned(connections.close(servers, pipe_servers, cleanup))
+        generation = getattr(service, "_generation", None)
+        try:
+            if generation is not None:
+                await generation.close_handoff()
+        finally:
+            await settle_owned(connections.close(
+                servers, pipe_servers, generation.cleanup if generation is not None else cleanup,
+            ))
 
 
 async def _serve(service, tcp_port, servers, pipe_servers, connections):
-    unix_bound = False
-    if not IS_WINDOWS:
-        if os.path.exists(SOCKET_PATH):
-            os.unlink(SOCKET_PATH)
-        unix_srv = await asyncio.start_unix_server(
-            connections.callback("unix"),
-            path=SOCKET_PATH,
-        )
-        servers.append(unix_srv)
-        os.chmod(SOCKET_PATH, 0o600)
-        unix_bound = True
-        log.info("Listening on Unix socket %s", SOCKET_PATH)
-
-    port = tcp_port or configured_tcp_port()
-    tcp_address: str | None = None
-    bound_port: int | None = None
-    try:
-        tcp_srv = await asyncio.start_server(
-            connections.callback("tcp"),
-            host="127.0.0.1",
-            port=port,
-        )
-        servers.append(tcp_srv)
-        # Read the *actual* bound port so this stays correct if ``port`` is ever 0.
-        bound_port = tcp_srv.sockets[0].getsockname()[1]
-        tcp_address = f"127.0.0.1:{bound_port}"
-        log.info("Listening on TCP %s", tcp_address)
-    except OSError as e:
-        if IS_WINDOWS or not servers:
-            log.error("Could not bind TCP 127.0.0.1:%d (%s); no listeners, exiting", port, e)
-            sys.exit(1)
-        log.warning("Could not bind TCP 127.0.0.1:%d (%s); using Unix socket only", port, e)
-
-    with open(PID_FILE, "w") as f:
-        f.write(str(os.getpid()))
-
-    # Windows rung 2: bind a named pipe *alongside* TCP (additive). The pipe is
-    # the preferred, port-free local endpoint; TCP stays as the legacy + WSL/
-    # fallback path until Stage D retires it. Any pipe failure degrades cleanly to
-    # TCP-only, so this can never make the daemon less reachable than today.
-    pipe_bound = False
-    if IS_WINDOWS:
-        try:
-            pipe_servers.extend(await start_pipe_server(
-                PIPE_PATH, connections.callback("pipe")
-            ))
-            pipe_bound = bool(pipe_servers)
-            if pipe_bound:
-                log.info("Listening on named pipe %s", PIPE_PATH)
-        except Exception as e:  # pipe is best-effort; TCP still serves
-            log.warning("Could not bind named pipe %s (%s); TCP only", PIPE_PATH, e)
-
-    # Advertise the endpoint so clients can discover it instead of hardcoding a
-    # constant -- see the endpoint-rendezvous lib and
-    # docs/patterns/local-endpoint-discovery.md. Additive: clients that still use
-    # the fixed socket/port are unaffected.
-    advertised = advertised_endpoint(
-        is_windows=IS_WINDOWS,
-        unix_bound=unix_bound,
-        socket_path=SOCKET_PATH,
-        pipe_bound=pipe_bound,
-        pipe_address=PIPE_PATH if pipe_bound else None,
-        tcp_bound=tcp_address is not None,
-        tcp_address=tcp_address,
-    )
-    if advertised is not None:
-        try:
-            path = write_endpoint(
-                run_dir(),
-                advertised[0],
-                advertised[1],
-                installation_id=os.environ.get(INSTALLATION_ID_ENV),
-                alt=advertised[2] or None,
-            )
-            log.info("Advertised endpoint %s:%s at %s", advertised[0], advertised[1], path)
-        except OSError as e:
-            log.warning("Could not write rendezvous file (%s); discovery degraded", e)
-
-    # Run extension startup hooks once, now that listeners are bound and the
-    # endpoint is advertised. Lets an extension start a long-lived background task
-    # tied to the daemon's lifetime (e.g. a transport bridge) instead of forking
-    # the service launcher. Fail-open: a broken hook never blocks serving.
-    startup_res = resolve_context()
-    get_registry().run_startup(
-        service,
-        StartupContext(
-            kpdb=startup_res.kpdb,
-            group=startup_res.group,
-            vault_name=startup_res.vault_name or "",
-            port=bound_port or port,
-            run_dir=str(run_dir()),
-        ),
-    )
-
+    generation = service._generation = ServiceGeneration(service, connections, servers, pipe_servers)
+    await generation.start(tcp_port)
     while not service._shutdown and not service.is_expired:
+        await generation.tick()
         await asyncio.sleep(0.5)
 
 
@@ -1077,8 +1032,8 @@ def _dial_unix(request: dict, path: str, timeout: float = 5.0) -> dict | None:
 
     try:
         s = sock_mod.socket(sock_mod.AF_UNIX, sock_mod.SOCK_STREAM)
-        s.connect(path)
         s.settimeout(timeout)
+        s.connect(path)
         s.sendall((json.dumps(request) + "\n").encode())
         buf = b""
         while b"\n" not in buf:
@@ -1219,13 +1174,6 @@ def _prepare_service(args, *, handoff_payload=None, handoff_consumed=False):
     from .service_logging import configure_logging
 
     configure_logging(log, str(LOG_FILE), verbose=args.verbose)
-    existing = send_command({"action": "ping"})
-    if existing and existing.get("ok"):
-        pid = existing["pid"]
-        if is_process_alive(pid):
-            print(f"Vault service already running - PID {pid}, cli={existing['cli']}")
-            sys.exit(0)
-        cleanup()
     service = VaultService()
     if args.persistent:
         service.ttl_override = 0
@@ -1272,6 +1220,7 @@ def main() -> None:
                         help=f"TCP port (default: {DEFAULT_TCP_PORT})")
     parser.add_argument("--ping", action="store_true", help="Check if service is running")
     parser.add_argument("--stop", action="store_true", help="Stop running service")
+    parser.add_argument("--ensure-selected", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--export-handoff", action="store_true",
         help=(
@@ -1306,6 +1255,11 @@ def main() -> None:
 
     log.setLevel(level)
 
+    if args.ensure_selected:
+        from .service_generation import ensure_selected
+
+        sys.exit(0 if ensure_selected() else 1)
+
     if args.ping:
         resp = send_command({"action": "ping"})
         if resp and resp.get("ok"):
@@ -1339,9 +1293,10 @@ def main() -> None:
         print("Vault service not running")
         sys.exit(1)
 
-    existing = send_command({"action": "ping"})
-    if existing and existing.get("ok") and is_process_alive(existing["pid"]):
-        print(f"Vault service already running - PID {existing['pid']}, cli={existing['cli']}")
+    from .service_generation import generation_running
+
+    if generation_running():
+        print("Vault runtime generation already running or starting")
         return
 
     if args.foreground:

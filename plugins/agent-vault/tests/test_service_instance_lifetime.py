@@ -114,11 +114,17 @@ def invoke():
         assert rows() == [], rows()
         assert not events
     elif mode == "already-running":
-        service.send_command = lambda *_args: {
-            "ok": True, "pid": os.getpid(), "cli": "fixture",
-        }
+        from agent_vault.service_generation import generation_lease
+        lease = generation_lease(config.home_dir())
+        lease.acquire()
+        def unexpected(*args):
+            raise AssertionError("Startup must not depend on predecessor IPC")
+        service.send_command = unexpected
         sys.argv = ["agent_vault.service"]
-        service.main()
+        try:
+            service.main()
+        finally:
+            lease.release()
         assert rows() == [], rows()
         assert not events
     else:
