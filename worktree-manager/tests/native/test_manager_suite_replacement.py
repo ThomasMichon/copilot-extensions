@@ -13,6 +13,7 @@ from pathlib import Path
 import sys
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -134,6 +135,46 @@ def test_failed_commands_retain_driver_evidence_without_changing_their_outcome(
     else:
         assert fixture._run(["fixture"], tmp_path, check=False) is result
     assert (tmp_path / "driver-logs" / (identifier + ".log")).read_text(encoding="utf-8") == "inner failure"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows scoped handoff pipes")
+def test_scoped_engine_handoff_keeps_inherited_pipes_without_showing_windows() -> None:
+    import mux_windows_observer as observer
+    from agent_procutil import no_window_kwargs
+
+    child = (
+        "import sys,time;"
+        "print('engine progress',flush=True);"
+        "print('engine failure',file=sys.stderr,flush=True);"
+        "time.sleep(.25);sys.exit(7)"
+    )
+    parent = (
+        "import sys,update_driver;"
+        "from worktree_manager import engine_client as ec;"
+        "update_driver.participant_environment=lambda:{'UPDATE_DRIVER_WITNESS':'fixture'};"
+        f"ec.set_engine_command([sys.executable,'-I','-X','utf8','-c',{child!r}]);"
+        "results=[ec.run_engine_passthrough(None,['update']) for _ in range(2)];"
+        "assert results==[7,7],results"
+    )
+    with subprocess.Popen(
+        [sys.executable, "-I", "-X", "utf8", "-c", parent],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", **no_window_kwargs(),
+    ) as process:
+        owned, shown, focused = {process.pid}, set(), set()
+        deadline = time.monotonic() + 15
+        while process.poll() is None and time.monotonic() < deadline:
+            owned.update(observer.descendants(process.pid, observer.processes()))
+            windows, foreground = observer.windows()
+            shown.update(set(windows.values()) & owned)
+            if foreground in owned:
+                focused.add(foreground)
+            time.sleep(.025)
+        stdout, stderr = process.communicate(timeout=2)
+        assert process.returncode == 0, stdout + stderr
+    assert stdout.splitlines() == ["engine progress"] * 2
+    assert stderr.splitlines() == ["engine failure"] * 2
+    assert not shown and not focused, (shown, focused)
 
 
 @pytest.mark.parametrize("mode", ("normal", "repair"))
