@@ -5107,6 +5107,8 @@ The Index host role is written as YAML readable by both native and
 dependency-free role resolvers. Preparation explicitly provisions its full
 independent engine through the native installer; ordinary Manager updates
 preserve that separately managed engine rather than provisioning it implicitly.
+After cold setup, the installed Codespaces on-demand owner is ensured before
+recording V1; its normal idle policy is unchanged.
 
 Cold preparation and exercise each have a 900-second owned-process deadline;
 assertions retain a separate 300-second runner boundary and the usual pytest
