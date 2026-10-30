@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -10,6 +11,14 @@ import sys
 from typing import Any
 
 MAX_LOG_BYTES = 4 * 1024 * 1024
+
+
+def _snapshot(path: Path) -> dict[str, Any]:
+    if not path.is_dir() or path.is_symlink():
+        raise RuntimeError(f"Sealed generation missing or indirect: {path}")
+    return {str(item.relative_to(path)): [hashlib.sha256(item.read_bytes()).hexdigest(),
+            item.stat().st_size, item.stat().st_mtime_ns, item.stat().st_dev, item.stat().st_ino]
+            for item in sorted(path.rglob("*")) if item.is_file() and not item.is_symlink()}
 
 
 def _engine_probe() -> dict[str, Any]:

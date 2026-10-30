@@ -5109,7 +5109,12 @@ independent engine through the native installer; ordinary Manager updates
 preserve that separately managed engine rather than provisioning it implicitly.
 After cold setup, the Codespaces owner starts through its verified native
 scheduled registration, with installed liveness observed before recording V1.
-Its normal idle policy is unchanged, and the same task owner handles settlement.
+Worktrees' V1 monitor is explicitly ensured through its installed on-demand API;
+installation alone intentionally need not start an absent monitor. Settlement
+uses Codespaces' generation-bound `owner --stop` and waits for normal channel
+cleanup before removing the exact owned scheduled registration. Task termination
+alone is not daemon-exit evidence. Idle policy, deadlines and final birth-verified
+resident-exit assertions are unchanged.
 
 Cold preparation and exercise each have a 900-second owned-process deadline;
 assertions retain a separate 300-second runner boundary and the usual pytest

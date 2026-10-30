@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manager_suite_artifacts import (
     _DELIVERY, _MATERIALIZE, _command, _configuration, _env, _task_inventory_script, _write,
 )
-from manager_suite_diagnostics import _engine_probe, retain_driver_logs
+from manager_suite_diagnostics import _engine_probe, _snapshot, retain_driver_logs
 
 REPO = Path(__file__).resolve().parents[3]
 SCHEMA = "worktree-manager.native-suite-replacement.v1"
@@ -122,14 +122,6 @@ def _probe(case: Path, kind: str) -> dict[str, Any]:
     root = case / "h" / (".worktree-manager" if kind == "manager" else ".agent-worktrees")
     result = _run([_python(root), "-I", "-X", "utf8", "-B", __file__, "--probe", kind], case, timeout=30)
     return json.loads(result.stdout)
-
-
-def _snapshot(path: Path) -> dict[str, Any]:
-    if not path.is_dir() or path.is_symlink():
-        raise RuntimeError(f"Sealed generation missing or indirect: {path}")
-    return {str(item.relative_to(path)): [hashlib.sha256(item.read_bytes()).hexdigest(),
-            item.stat().st_size, item.stat().st_mtime_ns, item.stat().st_dev, item.stat().st_ino]
-            for item in sorted(path.rglob("*")) if item.is_file() and not item.is_symlink()}
 
 
 def _observe(case: Path, declared: dict[str, Any]) -> dict[str, Any]:
@@ -589,6 +581,20 @@ def _cleanup(case: Path) -> list[str]:
         except Exception as error:
             errors.append(f"{name} normal producer stop: {error}")
     try:
+        root = case / "h" / ".agent-codespaces"
+        marker, _ = _record(root, "agent-codespaces")
+        with closing_process(marker["pid"]) as process:
+            alive = process.times()[2] == 259
+        if alive:
+            _run(_command(case, "agent-codespaces", "owner", "--stop"), case, timeout=40)
+    except (FileNotFoundError, ProcessLookupError):
+        pass
+    except OSError as error:
+        if getattr(error, "winerror", None) not in {87, 1168}:
+            errors.append(f"Codespaces resident identity: {error}")
+    except Exception as error:
+        errors.append(f"Codespaces cooperative shutdown: {error}")
+    try:
         manager = case / "h" / ".worktree-manager"
         try:
             marker, _ = _record(manager, "worktree-manager")
@@ -640,8 +646,6 @@ def _cleanup(case: Path) -> list[str]:
             errors.append(f"Independent Index engine identity: {error}")
     except Exception as error:
         errors.append(f"Independent Index engine normal shutdown: {error}")
-    # Codespaces install.ps1 has no stop action. Its exact scheduler roots
-    # below are the available Windows lifecycle owner, not a fictional CLI.
     for row in tasks:
         try:
             # Only exact registrations whose actual exported XML names this HOME.
@@ -783,6 +787,11 @@ def prepare(directory: Path, mode: str) -> None:
         _run([shutil.which("pwsh"), "-NoProfile", "-File", payload.with_name("agent-index") / "scripts" / "install.ps1",
               "engine"], case, timeout=600)
         _run(_command(case, "worktree-manager", "mux-daemon", "ensure"), case, timeout=30)
+        _run([_python(case / "h" / ".agent-worktrees"), "-I", "-X", "utf8", "-B", "-c",
+              "from agent_worktrees import config;"
+              "from agent_worktrees.status_monitor_runtime import _ensure_status_monitor;"
+              "config.set_active_project('example');"
+              "assert _ensure_status_monitor(), 'Baseline Worktrees monitor failed to start'"], case, timeout=30)
         owner_tasks = [row for row in _tasks(case) if row["name"] == "agent-codespaces-owner"]
         if len(owner_tasks) != 1:
             raise RuntimeError("Baseline Codespaces owner requires its exact owned native task")

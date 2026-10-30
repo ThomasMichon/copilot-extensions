@@ -23,6 +23,7 @@ class OwnerLiveness:
     active: tuple[str, ...] = ()
     bridge_forwards: tuple[str, ...] = ()
     version: str = ""
+    owner_control_version: int = 0
 
     def staleness_threshold(self) -> float:
         return max(_LIVE_STALE_FLOOR, _LIVE_STALE_INTERVALS * max(self.interval, 0.0))

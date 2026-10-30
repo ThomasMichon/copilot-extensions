@@ -139,6 +139,12 @@ def _owner_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
         try:
             fd = os.open(str(_LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             break
+        except PermissionError:
+            # Windows can expose an unlinking lock as access-denied until the
+            # last handle closes. Never steal it or hide a persistent I/O error.
+            if os.name != "nt" or time.monotonic() >= deadline:
+                raise
+            time.sleep(poll)
         except FileExistsError:
             if time.monotonic() >= deadline:
                 # Stale lock recovery: if older than timeout*3, steal it.
@@ -473,6 +479,7 @@ def _write_liveness(
             "active": sorted(active or ()),
             "bridge_forwards": sorted(bridge_forwards or ()),
             "heals": ["bridge-serving", "single-owner"],  # what this Owner repairs itself
+            "owner_control_version": 1,
         }
         tmp = LIVE_FILE.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")
@@ -517,6 +524,9 @@ def read_liveness() -> OwnerLiveness | None:
             active=tuple(str(cs) for cs in active_raw if isinstance(cs, str)),
             bridge_forwards=tuple(str(cs) for cs in bridge_raw if isinstance(cs, str)),
             version=raw["version"] if isinstance(raw.get("version"), str) else "",
+            owner_control_version=(
+                raw["owner_control_version"] if type(raw.get("owner_control_version")) is int else 0
+            ),
         )
     except (TypeError, ValueError):
         return None
@@ -929,10 +939,12 @@ async def run_owner_daemon(
                 pass
     finally:
         async def finish() -> None:
+            from .owner_control import shutdown_owner
+
             keeper.stop()
             await keeper.wait_stopped()
             try:
-                await owner.shutdown()
+                await shutdown_owner(owner)
             finally:
                 _clear_liveness()
 
