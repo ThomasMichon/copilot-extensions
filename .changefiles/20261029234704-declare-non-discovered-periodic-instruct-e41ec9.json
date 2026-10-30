@@ -1,0 +1,9 @@
+{
+  "comment": "Declare non-discovered periodic instruction fallbacks explicitly while keeping complete startup templates.",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

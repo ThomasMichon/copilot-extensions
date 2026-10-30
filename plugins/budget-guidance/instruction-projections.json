@@ -13,7 +13,7 @@
     },
     {
       "id": "posture-boundary",
-      "deliveryMode": "inline",
+      "deliveryMode": "selector",
       "template": "instructions/posture-boundary.instructions.md",
       "destination": ".github/instructions/budget-guidance/posture-boundary.instructions.md",
       "customizationKind": "instructions",

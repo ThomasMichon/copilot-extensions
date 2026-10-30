@@ -660,29 +660,15 @@ def test_real_read_only_cli_boundary_never_asserts_model_admission(tmp_path: Pat
 
 
 @pytest.mark.guard
-def test_shipped_inline_allowlist_is_explicit_and_substantive() -> None:
-    expected = {
-        ("agent-conduct-guidance", "elevation-fallback"),
-        ("agent-conduct-guidance", "multi-agent-rules-of-engagement"),
-        ("agent-conduct-guidance", "process-hygiene-fallback"),
-        ("agent-conduct-guidance", "delegation-fallback"),
-        ("agent-conduct-guidance", "scratch-space-fallback"),
-        ("agent-conduct-guidance", "secret-masking-fallback"),
-        ("agent-conduct-guidance", "maintenance-standby"),
-        ("ai-attribution", "publication-safety"),
-        ("budget-guidance", "posture-boundary"),
-        ("copilot-extensions-harness", "contribution-boundary"),
-        ("efforts", "completion-gate"),
-        ("customizing-copilot", "local-cache-catchall"),
-    }
+def test_shipped_sources_all_declare_non_discovered_fallbacks() -> None:
     repo = Path(__file__).resolve().parents[3]
-    actual = set()
+    declared = 0
     for declaration in (repo / "plugins").glob("*/instruction-projections.json"):
         for entry in json.loads(declaration.read_bytes())["projections"]:
-            assert entry["deliveryMode"] in {"inline", "selector"}
-            if entry["deliveryMode"] == "inline":
-                actual.add((declaration.parent.name, entry["id"]))
-    assert actual == expected
+            assert entry["deliveryMode"] == "selector", (declaration, entry["id"])
+            assert not entry.get("skipLocalCache", False), (declaration, entry["id"])
+            declared += 1
+    assert declared
 
 
 @pytest.mark.parametrize("change", ["source", "middle", "scope"])

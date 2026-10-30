@@ -42,7 +42,7 @@ def run_ps(*arguments: str) -> subprocess.CompletedProcess[str]:
 def test_owned_projection_and_discoverable_skill():
     declarations = json.loads((PLUGIN / "instruction-projections.json").read_text())
     projection, = [row for row in declarations["projections"] if row["id"] == "elevation-fallback"]
-    assert projection["deliveryMode"] == "inline"
+    assert projection["deliveryMode"] == "selector"
     assert projection["template"] == "instructions/elevation-fallback.instructions.md"
     assert projection["destination"].endswith("/agent-conduct-guidance/elevation-fallback.instructions.md")
     content = (PLUGIN / projection["template"]).read_text(encoding="utf-8")
