@@ -143,7 +143,7 @@ publishing and starting the selected replacement. The 2026-10-29 clarification
 above governs ordinary updates and repair. This documentation revision neither
 restarts completed Phase 2 work nor claims remaining cutover/adoption proven.
 
-**Best-effort follow-on (2026-10-22), summary:** the operator permits outgoing
+**Historical best-effort follow-on (2026-10-22), summary:** the operator permits outgoing
 daemons to quick-terminate their owned scope, and the selected newcomer to
 force-terminate an identity-verified predecessor when handoff cannot complete.
 Clients tolerate transient network-like outages/stream cut-offs; child daemons
@@ -152,6 +152,12 @@ A breaking development contract must not veto replacement. The
 [canonical verbatim capture](../immutable-dev-slot/README.md#request) preserves
 the complete operator input. Existing source/maintenance/driver and native
 acceptance owners remain; no live shutdown or rollout is authorized here.
+The later 2026-10-29 clarification supersedes its predecessor-force-termination
+allowance for ordinary updates and repair/force-install. All retained families
+and linked source slices below use incoming startup followed by outgoing-owner
+self-retirement for those operations. Historical intake text cannot restore a
+force-termination acceptance route; explicit stop/uninstall or separately
+authorized stuck-writer recovery remains a distinct operation.
 
 **Settled request summary:** add a local gate only around service payload
 publication and installed runtime redirect updates; retain all other hook
@@ -350,7 +356,7 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection
 - [ ] Replace Main/release code through the existing global installation roots, binstubs and service registrations with immutable merged-Dev slots, preserving the same existing runtime configuration, databases and durable state; do not introduce custom roots, installation cells or a parallel data store for this cutover.
-- [ ] **Agent-recommended alignment qualification:** prove forward/reverse current-generation replacement, including same-package/different-source selection, with preferred compatible handoff and bounded identity-checked cold takeover when contracts break or drain fails; use identity inequality, not version ordering.
+- [ ] **Agent-recommended alignment qualification:** prove forward/reverse current-generation replacement, including same-package/different-source selection, with preferred compatible handoff and independent incoming startup when contracts break or drain fails; use identity inequality and observe outgoing-owner self-retirement after startup, not installer-driven termination.
 - [ ] Maintain a separate installation source with main, stable/exact pin and opt-in merged-dev selection resolved once per run.
 - [x] Land Manager's independent default-off source policy and owned exact-commit acquisition diagnostics, refusing unconnected source-backed updates rather than silently installing from marketplace.
 - [x] Ship the trusted canonical preparation toolkit inside Manager's own payload and qualify standalone Manager preparation, exact retained assets and fetched-tools-as-data isolation before connecting source-backed execution.
@@ -817,11 +823,13 @@ Plan/Validation/Coordination readback must deliver every row before administrati
 superseding #2822. Existing effort creation, a child document or this proposal is not
 receipt. If status, scope, custody or evidence tiers cannot be preserved, retain #2822.
 
-Current best-effort handoff interpretation: references above to compatible
-forward/reverse handoff do not reinstate zero-outage continuity, a compatibility veto,
-or incoming successor readiness before every old-runtime retirement. Preserve the
-accepted bounded, identity-checked cold-takeover route when handoff breaks, explicit
-outage/unknown recovery, and client/child retry obligations. Actual candidate/output CLI
+Current best-effort handoff interpretation: compatible forward/reverse handoff
+does not impose zero-outage continuity or an incumbent compatibility veto.
+Ordinary and repair replacement starts the incoming runtime independently;
+the outgoing owner observes supersession and retires itself after that startup.
+An incompatible handoff permits cold recovery from durable state, not an
+installer stop/force-termination of V1. Preserve explicit outage/unknown
+recovery and client/child retry obligations. Actual candidate/output CLI
 health still gates candidate promotion and completion, and a verified retained
 previous-good generation must survive failed construction or cutover. Best-effort
 continuity does not make an unhealthy candidate or corrupt current/LKG evidence
@@ -869,12 +877,12 @@ Normal current reviewed Dev workflow remains mandatory; no new universal ACK.
   generation, safe selectors/redirects, failed construction/cutover preservation and
   explicit corrupt/unknown/LKG recovery. Never rewrite a completed slot or merely
   display a healthy-looking newer label.
-- [ ] Preserve accepted best-effort compatible handoff and bounded identity-checked
-  old-owner shutdown/cold takeover when handoff is broken, refused or hung. Cold
-  fallback may establish old-owner exclusion before incoming readiness. Temporary
-  outage/stream cut-off, durable recovery and client/child retries remain explicit; no
-  zero-outage, compatibility veto or incoming-ready-before-every-retirement rule is
-  reinstated.
+- [ ] Preserve best-effort compatible handoff and independent incoming startup
+  when handoff is broken, refused or hung. For ordinary updates and repair,
+  observe old-owner self-retirement only after incoming startup; installer-driven
+  shutdown or force termination cannot satisfy this item. Temporary outage,
+  stream cut-off, durable recovery and client/child retries remain explicit;
+  startup is not a promise of zero-outage or completed serving readiness.
 - [ ] Keep this finite legacy/version outcome independent of full
   runtime/adopter/maintenance/driver or every-host completion. Preserve the original
   supported evidence tiers and all separately owned parent obligations; no test,
@@ -944,9 +952,10 @@ implementation, rollout or parent completion is declared.
   credential/relay/session/source/config custody and exact process/generation identity.
   Keep listener health, actual accepted handoff, transport result, serving identity and
   native exit separate; uncertain consequential outcomes cannot be replayed.
-- [ ] P6: Preserve current best-effort compatible handoff and bounded owning-authority
-  cold recovery when contracts are incompatible/refused/hung, INCLUDING permitted old
-  retirement before incoming ready. Do not reinstate universal
+- [ ] P6: Preserve best-effort compatible handoff and independent incoming startup
+  with cold recovery when contracts are incompatible/refused/hung. Ordinary and
+  repair replacement requires outgoing-owner self-retirement after incoming
+  startup, not old-owner termination to make room. Do not reinstate universal
   zero-outage/ACK/compatibility vetoes. Actual candidate/output CLI health, VERIFIED
   retained previous-good generation and durable recoverable progress remain mandatory;
   failure uses safe recovery OR proven justified commit-forward, never success-shaped
@@ -1075,14 +1084,14 @@ implementation, rollout or parent completion is declared.
   current portfolio bounds. Administrative intake is not implementation, native
   acceptance, rollout, or completion of unrelated parent work.
 
-- [ ] **Bidirectional selection:** forward, lower-version and same-package/different-source replacements use identity inequality; compatible handoff health-gates before retirement, while incompatible/refused/hung handoff allows bounded owned-scope shutdown or identity-checked force termination before cold-start readiness.
+- [ ] **Bidirectional selection:** forward, lower-version and same-package/different-source replacements use identity inequality. Both ordinary updates and repair start the incoming runtime independently, then observe outgoing-owner self-retirement. Compatible handoff improves continuity; incompatible/refused/hung handoff permits cold recovery but cannot pass acceptance through installer-driven old-owner shutdown or force termination.
 - [ ] **Cold recovery and retries:** breaking all predecessor handoff contracts does not veto selected Dev deployment. Qualify durable recovery after abrupt child death, consumer reconnect after stream/reply loss, safe retry/deduplication or unknown-outcome reconciliation, exclusive ownership and explicit failed-recovery reporting.
-- [ ] **Operator repair authority:** explicit repair proceeds without historical cleanup or pre-launch evidence, including older records that cannot supply it. Audited pre-launch recovery is optional. Distinguish authorization from native settlement, preserve actual failure/pending history, and verify scoped takeover, actual selected readiness and unrelated-data preservation separately. Normal fresh fallback must not require this separate repair selection.
+- [ ] **Operator repair authority:** explicit repair proceeds without historical cleanup or pre-launch evidence, including older records that cannot supply it. Audited pre-launch recovery is optional. Preserve actual failure/pending history and one installation writer; verify incoming startup, selected readiness, old-owner self-retirement and unrelated-data preservation separately. Repair is not permission to stop V1 as an installation prerequisite. Separately authorized stuck-writer recovery is not this runtime-replacement test.
 - [ ] **Source admission:** reject dirty, worktree-backed, unmerged or substituted source; preserve the exact resolved commit throughout a run.
 - [ ] **Materialization:** actual installer imports the complete vendor closure from a non-editable install with no source-checkout dependency.
 - [ ] **Identity:** identical inputs reuse unchanged completion bytes; different commits or assembly/dependency/profile inputs cannot overwrite a completed slot.
 - [ ] **Selection:** installed binstubs and native resolvers execute the exact completed selected generation, including hash-qualified dev sources.
-- [ ] **Failure:** incomplete/failed candidates remain unselected; preparation failure preserves the previous healthy runtime and redirects. For failures after fresh-path retirement begins, report actual service/selection state without claiming an untouched predecessor or successful replacement.
+- [ ] **Failure:** incomplete/failed candidates remain unselected; preparation failure preserves the previous healthy runtime and redirects. For failures after incoming startup or outgoing-owner self-retirement, report actual service/selection state without claiming an untouched predecessor or successful replacement. An uncooperative V1 is an explicit convergence failure, not implicit authority to terminate it.
 - [ ] **Policy:** real hook and first-use paths do not publish runtime copies or redirects in managed mode; their non-deployment behavior still runs.
 - [ ] **Skew:** newer-plugin/older-service and older-plugin/newer-service interactions work within declared capabilities or return precise readiness outcomes.
 - [ ] **Source modes:** main tracking, stable/exact pins and dev tracking converge through one source-assembly path without moving midway through a run.
