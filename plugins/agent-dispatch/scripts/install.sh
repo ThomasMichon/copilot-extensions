@@ -1007,10 +1007,10 @@ deploy_binstub() {
         fi
     done
     mkdir -p "$INSTALL_DIR/bin/installation-context" || return 1
-    for r in installation-context.sh installation-context.ps1 \
-        guest-environment.sh guest-environment.ps1 json-query.awk; do
-        _runtime_publication_copy "$SCRIPT_DIR/installation-context/$r" \
-            "$INSTALL_DIR/bin/installation-context/$r" || return 1
+    for r in "$SCRIPT_DIR/installation-context/"*; do
+        [[ -f "$r" ]] || continue
+        _runtime_publication_copy "$r" \
+            "$INSTALL_DIR/bin/installation-context/${r##*/}" || return 1
     done
     if [[ ! "$INSTALL_DIR" -ef "$LEGACY_INSTALL_DIR" ]]; then
         _ok 'Scoped install keeps the global compatibility binstubs unchanged'

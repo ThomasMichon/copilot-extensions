@@ -130,6 +130,51 @@ def test_out_of_session_boundaries_remain_explicit() -> None:
     assert "marketplace-isolation: allow remote-management" in skill
 
 
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
+def test_published_windows_admission_helper_has_its_own_sdk(
+    tmp_path: Path, host: str,
+) -> None:
+    from . import source_publication_fixture as fixture
+
+    powershell = shutil.which(host)
+    if not powershell:
+        pytest.skip(f"{host} unavailable")
+    env = fixture.environment(tmp_path)
+    env["AGENT_DISPATCH_SUPERVISE_MACHINE"] = "fixture"
+    root = Path(env["HOME"]) / ".agent-dispatch"
+    root.mkdir()
+    shutil.copytree(
+        fixture.SCRIPTS / "installation-context", tmp_path / "installation-context",
+    )
+    script = tmp_path / "publish.ps1"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$PluginDir = '{PLUGIN}'\n"
+        f"$InstallDir = '{root}'\n"
+        "$legacyInstallDir = $InstallDir\n"
+        f"$LocalBin = '{Path(env['HOME']) / '.local/bin'}'\n"
+        "function Assert-SourceRuntime {}\n"
+        "function Write-Ok { param($Message) }\n"
+        "function Get-InstallDirectoryIdentity { param($Path) return $Path }\n"
+        + fixture.function("ps1", "Deploy-SelfProvisioningBinstub")
+        + "\nDeploy-SelfProvisioningBinstub\n"
+        + "& (Join-Path $InstallDir 'bin/installation-context/installation-context.ps1') "
+        + "-Action status -PluginId agent-dispatch -LegacyRoot $InstallDir "
+        + "-PayloadRoot $PluginDir\nexit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        env=env, cwd=tmp_path, capture_output=True, text=True, timeout=30,
+        creationflags=fixture.HEADLESS, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    decision = json.loads(result.stdout)
+    assert decision["actualMode"] == "legacy"
+    assert (root / "bin/installation-context/installation_context.py").is_file()
+    assert (Path(env["HOME"]) / ".local/bin/agent-dispatch.cmd").is_file()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX payload command test")
 def test_posix_payload_command_ignores_shadow_path_and_preserves_stdin(
     tmp_path: Path,

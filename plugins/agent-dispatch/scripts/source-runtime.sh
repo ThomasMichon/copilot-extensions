@@ -111,9 +111,9 @@ _publish_source_redirects() {
 _runtime_publication_begin_install() {
     local support
     local -a launch_paths=("$INSTALL_DIR/bin/runtime-gate.sh" "$INSTALL_DIR/bin/runtime-gate.ps1")
-    for support in installation-context.sh installation-context.ps1 \
-        guest-environment.sh guest-environment.ps1 json-query.awk; do
-        launch_paths+=("$INSTALL_DIR/bin/installation-context/$support")
+    for support in "$SCRIPT_DIR/installation-context/"*; do
+        [[ -f "$support" ]] || continue
+        launch_paths+=("$INSTALL_DIR/bin/installation-context/${support##*/}")
     done
     _runtime_publication_begin \
         "$INSTALL_DIR/bin/resolve-runtime.sh" "$INSTALL_DIR/bin/resolve-runtime.ps1" \
