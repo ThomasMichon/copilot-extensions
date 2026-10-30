@@ -31,6 +31,37 @@ def test_start_service_launches_through_spawn_service(monkeypatch, recorded_spaw
     assert recorded_spawns == [["--tcp-port", "4242", "--foreground"]]
 
 
+def test_start_service_waits_for_credential_work_admission(monkeypatch, recorded_spawns):
+    replies = iter(({"ok": True, "accepting_work": False}, {"ok": True, "accepting_work": True}))
+    seen = []
+
+    def ping(*args, **kwargs):
+        response = next(replies)
+        seen.append(response)
+        return response
+
+    monkeypatch.setattr(cli, "send_command", ping)
+    assert cli.start_service(4242)
+    assert len(seen) == 2
+    assert recorded_spawns == [["--tcp-port", "4242", "--foreground"]]
+
+
+@pytest.mark.parametrize("eventually_ready", (True, False))
+def test_ensure_waits_for_transition_without_spawning_a_duplicate(
+    monkeypatch, recorded_spawns, eventually_ready,
+):
+    calls = []
+
+    def ping(*args, **kwargs):
+        calls.append(True)
+        return {"ok": True, "accepting_work": eventually_ready and len(calls) >= 3}
+
+    monkeypatch.setattr(cli, "send_command", ping)
+    assert cli.ensure_service(4242) is eventually_ready
+    assert len(calls) == (3 if eventually_ready else 21)
+    assert recorded_spawns == []
+
+
 def test_windows_self_daemonize_launches_through_spawn_service(monkeypatch):
     calls: list[list[str]] = []
     monkeypatch.setattr(launch, "spawn_service", lambda args: calls.append(list(args)))

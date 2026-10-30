@@ -37,24 +37,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manager_suite_artifacts import (
     _DELIVERY, _MATERIALIZE, _command, _configuration, _env, _task_inventory_script, _write,
 )
-from manager_suite_diagnostics import _engine_probe, _snapshot, retain_driver_logs
+from manager_suite_diagnostics import (
+    MARKERS, _engine_probe, _record, _resident_probe, _snapshot, retain_driver_logs,
+)
 
 REPO = Path(__file__).resolve().parents[3]
 SCHEMA = "worktree-manager.native-suite-replacement.v1"
 _COMMAND_LOG_LOCK = threading.Lock()
-# Observer capabilities, NOT the applicable portfolio. The installed planner
-# chooses that portfolio. Unknown/new residents refuse acceptance.
-MARKERS = {
-    "agent-worktrees": "status-monitor.lock", "agent-bridge": "running-version.json",
-    "agent-codespaces": "connection-owner.live.json", "agent-dispatch": "running-version.json",
-    "agent-index": "running-version.json", "agent-vault": r"run\agent-vault-service.pid",
-    "worktree-manager": "mux-daemon.lock",
-    "agent-index/engine": "engine.pid",
-}
 CLIENT_DEFAULTS = {
     "agent-containers", "agent-logger", "agent-machines", "agent-mcp",
     "agent-pull-requests", "agent-ssh", "budget-guidance",
 }
+RETAINED_RESIDENTS = {"agent-index/engine"}
 
 
 def require_venue() -> None:
@@ -196,135 +190,6 @@ def _tasks(case: Path) -> list[dict[str, Any]]:
     home = str(case / "h").casefold()
     owned = re.compile(re.escape(home) + r"""(?=[\\/"'<]|$)""")
     return [row for row in rows if owned.search(row["xml"].casefold())]
-
-
-def _record(root: Path, name: str) -> tuple[dict[str, Any], int]:
-    if name in {"worktree-manager", "agent-worktrees", "agent-bridge", "agent-dispatch", "agent-index"}:
-        from zdd.routing import read_active_endpoint
-
-        route = read_active_endpoint(root / {
-            "worktree-manager": "mux-daemon-routing", "agent-worktrees": "status-monitor-routing",
-        }.get(name, ""))
-        if route is None:
-            raise FileNotFoundError(f"{name}: published resident route missing at {root}")
-        return {"pid": route.pid}, 0
-    marker = MARKERS.get(name)
-    if marker is None:
-        raise RuntimeError(f"{name}: no resident marker recognizer; do not reduce the portfolio")
-    path = root / marker
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"{name}: missing real resident marker {path}; canonical lifecycle/observer prerequisite unmet",
-        )
-    value = {"pid": int(path.read_text().strip())} if name in {
-        "agent-vault", "agent-index/engine",
-    } else _read(path)
-    if not isinstance(value.get("pid"), int) or value["pid"] <= 0:
-        raise RuntimeError(f"{name}: unsupported resident PID evidence at {path}")
-    return value, path.stat().st_mtime_ns
-
-
-def _resident_probe(name: str, root: Path, expected_pid: int) -> dict[str, Any]:
-    """Run inside the installed interpreter; never substitute selected version."""
-    record, _ = _record(root, name)
-    if record["pid"] != expected_pid:
-        raise RuntimeError("Resident changed before health observation")
-    if name == "worktree-manager":
-        from worktree_manager import mux_daemon_cutover as control
-        route = control.routed_endpoint(root)
-        if route is None or route.pid != expected_pid:
-            raise RuntimeError("Manager route does not name the observed PID")
-        status = control.ControlClient(route.base_url, root=root, timeout=1).health()
-        ready = status.get("status") == "ready"
-        generation = status.get("runtime_generation")
-    elif name == "agent-worktrees":
-        from agent_worktrees import status_monitor_cutover as control
-        from zdd.routing import read_active_endpoint
-        route = read_active_endpoint(control.routing_dir(root))
-        if route is None or route.pid != expected_pid:
-            raise RuntimeError("Worktrees route does not name the observed PID")
-        status = control.ControlClient(route.base_url, config_dir=root, timeout=1).health()
-        ready = status.get("status") == "ready"
-        generation = status.get("runtime_generation")
-    elif name == "agent-bridge":
-        from agent_bridge.client import BridgeClient
-        from zdd.routing import read_active_endpoint
-        route = read_active_endpoint(root)
-        if route is None or route.pid != expected_pid:
-            raise RuntimeError("Bridge route does not name the observed PID")
-        client = BridgeClient.from_config()
-        client._timeout, client._connect_grace = 1, 0
-        status = client.health()
-        ready = status.get("ready") is True and not status.get("draining")
-        if status.get("slot", {}).get("pid") != expected_pid:
-            raise RuntimeError("Bridge health PID mismatch")
-        generation = record.get("generation_id")
-    elif name == "agent-dispatch":
-        from agent_dispatch import config
-        from agent_dispatch.client import DispatchClient
-        from zdd.routing import read_active_endpoint
-        route = read_active_endpoint(config.routing_dir())
-        if route is None or route.pid != expected_pid:
-            raise RuntimeError("Dispatch route does not name the observed PID")
-        with DispatchClient(route.base_url, token=config.client_token(), timeout=1) as client:
-            status = client.health()
-        ready = status.get("status") == "ok" and not status.get("draining")
-        if status.get("slot", {}).get("pid") != expected_pid:
-            raise RuntimeError("Dispatch health PID mismatch")
-        generation = str(route.generation)
-    elif name == "agent-index":
-        from agent_index import config
-        from agent_index.__main__ import _owned_service_client
-        from zdd.routing import read_active_endpoint
-        route = read_active_endpoint(config.routing_dir())
-        if route is None or route.pid != expected_pid:
-            raise RuntimeError("Index route does not name the observed PID")
-        status, _client = _owned_service_client(route.base_url, timeout=1)
-        ready = status.get("status") == "ok"
-        if status.get("pid") != expected_pid:
-            raise RuntimeError("Index health PID mismatch")
-        generation = status.get("runtimeVersion", status.get("version"))
-    elif name == "agent-vault":
-        from agent_vault.service import send_command
-        status = send_command({"action": "ping"})
-        ready = isinstance(status, dict) and status.get("ok") is True
-        if not ready or status.get("pid") != expected_pid:
-            raise RuntimeError("Vault ping did not authenticate the observed service PID")
-        generation = status.get("runtime_generation")
-    elif name == "agent-index/engine":
-        from agent_index.engine import daemon
-        status = daemon.health(*daemon.engine_endpoint(), timeout=1)
-        if status.get("pid") != expected_pid:
-            raise RuntimeError(
-                "agent-index engine health must attest its exact PID; owner: "
-                "plugins/agent-index/server/src/agent_index_engine/app.py::HealthResponse/health",
-            )
-        ready = status.get("status") == "ok"
-        generation = status.get("generation")
-    elif name == "agent-codespaces":
-        from agent_codespaces.connection_owner import read_liveness
-        beacon = read_liveness()
-        if beacon is None or beacon.pid != expected_pid:
-            raise RuntimeError("Codespaces beacon PID mismatch")
-        ready = beacon.is_fresh()
-        status = {"version": beacon.version}
-        generation = record.get("process_identity")
-    else:
-        raise RuntimeError(f"{name}: resident health adapter missing")
-    if not status.get("version"):
-        raise RuntimeError(
-            f"{name}: running producer lacks attributable version; "
-            "VaultService ping / connection_owner._write_liveness must publish the running build",
-        )
-    if not ready:
-        raise RuntimeError(f"{name}: actual resident health is not ready")
-    return {
-        "pid": expected_pid, "version": status["version"],
-        "runtime_generation": generation, "ready": True, "ready_observed_ns": time.time_ns(),
-        "dependencies": {key: status[key] for key in (
-            "gpu_deps_installed", "cuda_available", "device", "model_loaded", "cli",
-        ) if key in status},
-    }
 
 
 def _health(case: Path, before: dict[str, Any], name: str, pid: int) -> dict[str, Any]:
@@ -517,10 +382,18 @@ def _watch_resident(name: str, root: Path, old_pid: int, control: Path) -> dict[
         _write(control / "ready.json", original)
         deadline = time.monotonic() + 840
         last_error = "No distinct successor was published"
+        next_demand = 0.0
         while time.monotonic() < deadline and not (control / "stop").exists():
             try:
+                if name == "agent-worktrees" and time.monotonic() >= next_demand:
+                    from agent_worktrees import list_cache
+                    list_cache.note_demand("native-suite", argparse.Namespace(),
+                                           project="example", tracking_status="active")
+                    next_demand = time.monotonic() + 15
                 marker, _ = _record(root, name)
                 if marker["pid"] != old_pid:
+                    if name in RETAINED_RESIDENTS:
+                        return {"error": "Retained engine process changed during the update"}
                     health = _resident_probe(name, root, marker["pid"])
                     with closing_process(marker["pid"]) as successor:
                         created, _exit, new_code = successor.times()
@@ -541,6 +414,11 @@ def _watch_resident(name: str, root: Path, old_pid: int, control: Path) -> dict[
             except Exception as error:
                 last_error = f"{type(error).__name__}: {error}"
             time.sleep(0.02)
+        if name in RETAINED_RESIDENTS and (control / "stop").exists():
+            health = _resident_probe(name, root, old_pid)
+            created, _exit, code = incumbent.times()
+            return {"retention": {"before": original, "after": health,
+                                  "created_ns": created, "exit_code": code}}
         return {"error": last_error}
 
 
@@ -582,6 +460,10 @@ def _cleanup(case: Path) -> list[str]:
             errors.append(f"{name} normal producer stop: {error}")
     try:
         root = case / "h" / ".agent-codespaces"
+        if (root / "current-version").is_file():
+            _run([_python(root), "-I", "-X", "utf8", "-B", "-c",
+                  "from agent_codespaces.connection_owner import release;"
+                  "release('native-suite','manager-suite')"], case, timeout=30)
         marker, _ = _record(root, "agent-codespaces")
         with closing_process(marker["pid"]) as process:
             alive = process.times()[2] == 259
@@ -787,11 +669,10 @@ def prepare(directory: Path, mode: str) -> None:
         _run([shutil.which("pwsh"), "-NoProfile", "-File", payload.with_name("agent-index") / "scripts" / "install.ps1",
               "engine"], case, timeout=600)
         _run(_command(case, "worktree-manager", "mux-daemon", "ensure"), case, timeout=30)
-        _run([_python(case / "h" / ".agent-worktrees"), "-I", "-X", "utf8", "-B", "-c",
-              "from agent_worktrees import config;"
-              "from agent_worktrees.status_monitor_runtime import _ensure_status_monitor;"
-              "config.set_active_project('example');"
-              "assert _ensure_status_monitor(), 'Baseline Worktrees monitor failed to start'"], case, timeout=30)
+        before = _observe(case, declared)
+        _run([_python(case / "h" / ".agent-codespaces"), "-I", "-X", "utf8", "-B", "-c",
+              "from agent_codespaces.connection_owner import hold;"
+              "hold('native-suite', 'manager-suite')"], case, timeout=30)
         owner_tasks = [row for row in _tasks(case) if row["name"] == "agent-codespaces-owner"]
         if len(owner_tasks) != 1:
             raise RuntimeError("Baseline Codespaces owner requires its exact owned native task")
@@ -804,7 +685,13 @@ def prepare(directory: Path, mode: str) -> None:
               "deadline=time.monotonic()+30\n"
               "while not is_owner_live() and time.monotonic()<deadline: time.sleep(.2)\n"
               "assert is_owner_live(), 'Scheduled Codespaces owner did not become ready'"], case, timeout=60)
-        before = _observe(case, declared)
+        _run([_python(case / "h" / ".agent-worktrees"), "-I", "-X", "utf8", "-B", "-c",
+              "import argparse;from agent_worktrees import config,list_cache;"
+              "from agent_worktrees.status_monitor_runtime import _ensure_status_monitor;"
+              "config.set_active_project('example');"
+              "list_cache.note_demand('native-suite',argparse.Namespace(),"
+              "project='example',tracking_status='active');"
+              "assert _ensure_status_monitor(), 'Baseline Worktrees monitor failed to start'"], case, timeout=30)
         setup["before"] = before
         setup["required_residents"] = sorted(before["resident_roots"])
         _write(case / "setup.json", setup)
@@ -839,6 +726,7 @@ def exercise(directory: Path, mode: str) -> None:
         "schema": SCHEMA, "mode": mode, "venue": "github-hosted-windows",
         "declared": setup["declared"], "before": setup["before"],
         "required_residents": setup["required_residents"], "errors": [], "residents": {},
+        "retained_residents": {},
         "source": str(case / "published"), "cleanup_errors": [],
     }
     before = setup["before"]
@@ -864,8 +752,14 @@ def exercise(directory: Path, mode: str) -> None:
                     raise RuntimeError(f"{name}: V1 resident was not retained across native stages")
                 old[name] = process
             arguments = (["update"] if mode == "normal" else [
-                "update", "--repair-engine", str(case / "published"), "--force",
+                "--bootstrap-update", "update", "--force",
             ]) + ["--project", "example"]
+            command = (
+                _command(case, "worktree-manager", *arguments) if mode == "normal" else [
+                    shutil.which("pwsh"), "-NoProfile", "-File",
+                    case / "published" / "worktree-manager" / "bootstrap.ps1", *arguments,
+                ]
+            )
             controls = {}
             with ThreadPoolExecutor(max_workers=len(old)) as observer:
                 futures = {}
@@ -893,8 +787,9 @@ def exercise(directory: Path, mode: str) -> None:
                     shutil.copytree(case / "candidate", case / "published", dirs_exist_ok=True,
                                     ignore=shutil.ignore_patterns(".git"))
                     _commit(case, case / "published")
-                    result = _run(_command(case, "worktree-manager", *arguments), case, timeout=840, check=False)
+                    result = _run(command, case, timeout=840, check=False)
                     report["update"] = {"arguments": arguments, "returncode": result.returncode,
+                                        "command": list(map(str, command)),
                                         "stdout": result.stdout, "stderr": result.stderr}
                     after = report["after"] = _observe(case, setup["declared"])
                 finally:
@@ -902,6 +797,7 @@ def exercise(directory: Path, mode: str) -> None:
                         (control / "stop").touch()
                 observed = {name: json.loads(future.result().stdout)
                             for name, future in futures.items()}
+                report["resident_results"] = observed
             report["applicability"] = after["portfolio"]
             report["retained"] = {
                 name: _snapshot(Path(slot)) == before["sealed"][name]
@@ -909,8 +805,15 @@ def exercise(directory: Path, mode: str) -> None:
             }
             deadline = time.monotonic() + 30
             for name, process in old.items():
+                if name in RETAINED_RESIDENTS:
+                    if "retention" not in observed[name]:
+                        report["errors"].append(f"{name}: retained engine was not attested: {observed[name]}")
+                    else:
+                        report["retained_residents"][name] = observed[name]["retention"]
+                    continue
                 if "observation" not in observed[name]:
-                    raise RuntimeError(f"{name}: successor readiness was not observed: {observed[name]}")
+                    report["errors"].append(f"{name}: successor readiness was not observed: {observed[name]}")
+                    continue
                 row = observed[name]["observation"]
                 while process.times()[2] == 259 and time.monotonic() < deadline:
                     time.sleep(0.05)
@@ -945,6 +848,9 @@ def exercise(directory: Path, mode: str) -> None:
     except Exception as error:
         report["errors"].append(f"{type(error).__name__}: {error}")
     finally:
+        if report["errors"]:
+            update = report.get("update", {})
+            retain_driver_logs(case, "\n".join((update.get("stdout", ""), update.get("stderr", ""))))
         try:
             report["cleanup_errors"] = _cleanup(case)
         except Exception as error:

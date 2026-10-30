@@ -1041,7 +1041,7 @@ $portDirective
 `$_py = `$null
 if (Test-Path -LiteralPath `$_resolver) { `$env:AGENT_RT_ROOT = `$_root; . `$_resolver; `$_py = `$AgentRtPy }
 if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = '$($LinkPython -replace "'","''")' }
-& `$_py -m agent_vault.service --foreground --persistent
+& `$_py -m agent_vault.service --foreground --persistent @args
 exit `$LASTEXITCODE
 "@, $utf8NoBom)
     $action = New-ScheduledTaskAction `
@@ -1087,27 +1087,19 @@ exit `$LASTEXITCODE
 
     Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 
-    # #1836/readiness-flap: Start-ScheduledTask is fire-and-forget, and the task
-    # itself only resolves + launches the active slot -- it does not confirm the
-    # replacement daemon actually comes up. Poll the fixed endpoint so
-    # install/update never silently returns "done" while the service is still
-    # down (e.g. immediately after Stop-VaultDaemonGraceful released it, or a
-    # slow first import on a cold venv).
-    $py = if (Test-Path $LinkPython) { $LinkPython } else { $null }
-    if ($py) {
-        $ready = $false
+    # IgnoreNew may leave the predecessor's task running. The selected owner
+    # starts its successor independently and verifies its generation, not merely
+    # the continued health of whichever daemon still serves the old endpoint.
+    if (Test-Path $LinkPython) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        for ($i = 0; $i -lt 40; $i++) {
-            Start-Sleep -Milliseconds 250
-            & $py -m agent_vault.service --ping 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 0) { $ready = $true; break }
-        }
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $TaskLauncher --ensure-selected
+        $ready = ($LASTEXITCODE -eq 0)
         $ErrorActionPreference = $prevEAP
         if ($ready) {
             Write-Ok 'agent-vault service is running (post-(re)start readiness confirmed)'
         } else {
-            Write-Fail 'agent-vault service did not become reachable within 10s after (re)start'
+            Write-Fail 'agent-vault runtime installed, but its selected service generation is not ready'
             exit 1
         }
     }
@@ -1153,65 +1145,6 @@ function Invoke-Stamp {
     Write-Ok 'Stamped: agent-vault binstub on PATH; runtime provisions on first use.'
 }
 
-function Stop-VaultDaemonGraceful {
-    <# Graceful drain-stop of the running vault daemon before a version cutover
-       (Thread B, lightest tier; docs/patterns/graceful-daemon-cutover.md).
-       agent-vault serves a FIXED endpoint (Unix socket / named pipe / fixed TCP),
-       so an active/passive port flip is inapplicable -- the new daemon rebinds the
-       SAME endpoint after the old releases it. The daemon's `--stop` sends a
-       cooperative shutdown that lets the in-flight request finish (drain) and
-       closes its listeners cleanly; it is NOT a kill. The unlocked in-memory
-       master is intentionally released -- the RECONNECT is the opt-in persistent
-       encrypted credential cache (credential-cache.enc, DPAPI-wrapped key) that a
-       fresh daemon reads on demand without a re-prompt, or (cache off) a single
-       re-unlock on first post-cutover use. Returns $true when a daemon was
-       drained+stopped. #>
-    $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
-    if (-not $py) { return $false }
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    # Only stop if one is actually running (ping), so a fresh install/update on a
-    # box with no live daemon skips straight to a normal start.
-    & $py -m agent_vault.service --ping 2>$null | Out-Null
-    $running = ($LASTEXITCODE -eq 0)
-    if (-not $running) { $ErrorActionPreference = $prevEAP; return $false }
-    Write-Step 'Graceful cutover: draining the in-flight request and stopping the old vault daemon (auth state reconnects via the persistent cache or a single re-unlock)...'
-    & $py -m agent_vault.service --stop 2>$null | Out-Null
-    # Give the old daemon a moment to close its listeners so the new one can rebind
-    # the fixed endpoint (Unix socket / named pipe / TCP).
-    for ($i = 0; $i -lt 20; $i++) {
-        Start-Sleep -Milliseconds 250
-        & $py -m agent_vault.service --ping 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { break }
-    }
-    $stillRunning = ($LASTEXITCODE -eq 0)
-    if ($stillRunning) {
-        # The graceful `--stop` request did not retire the process within the
-        # drain window (observed in practice: an asyncio shutdown race can leave
-        # the old daemon's OS process alive even after it stops answering as the
-        # advertised endpoint). Force-retire it by PID from the run-dir marker so
-        # a stuck predecessor never lingers to contend for the fixed endpoint
-        # with the daemon this update starts next -- otherwise repeated updates
-        # accumulate zombie processes that intermittently win the port/pipe bind
-        # race and make readiness flap.
-        $oldPid = $null
-        if (Test-Path $PidFile) {
-            $oldPid = (Get-Content -LiteralPath $PidFile -Raw -ErrorAction SilentlyContinue).Trim()
-        }
-        if ($oldPid -match '^\d+$' -and (Get-Process -Id ([int]$oldPid) -ErrorAction SilentlyContinue)) {
-            Stop-Process -Id ([int]$oldPid) -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Milliseconds 250
-            Write-Warn "Old vault daemon (PID $oldPid) did not retire gracefully within 5s -- force-stopped"
-        } else {
-            Write-Warn 'Old vault daemon did not retire gracefully within 5s, and its PID could not be confirmed for a force-stop'
-        }
-    } else {
-        Write-Ok 'Old vault daemon drained + stopped (in-flight request finished; endpoint released for the new build)'
-    }
-    $ErrorActionPreference = $prevEAP
-    return $true
-}
-
 function Invoke-Install {
     Write-Step 'agent-vault install'
     Install-Runtime
@@ -1223,15 +1156,6 @@ function Invoke-Update {
     Write-Step 'agent-vault update'
     Invoke-DowngradeGuard
     Install-Runtime
-    # Thread B (lightest tier; docs/patterns/graceful-daemon-cutover.md): a version
-    # update must never kill in-flight, non-resumable work. Install-Runtime built +
-    # activated the new slot; now gracefully DRAIN + STOP the old daemon (finish the
-    # in-flight request, close cleanly -- not a kill) so the new slot can rebind the
-    # FIXED endpoint. Auth state reconnects on the new daemon via the opt-in
-    # persistent encrypted cache (no re-prompt) or a single re-unlock on first use.
-    # Skipped for a client-only host (-NoService). Register-AgentVaultTask then
-    # starts the new daemon on the now-free endpoint.
-    if (-not $NoService) { [void](Stop-VaultDaemonGraceful) }
     Register-AgentVaultTask
     Write-Ok 'agent-vault update'
 }

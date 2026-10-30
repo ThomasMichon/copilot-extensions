@@ -5097,8 +5097,10 @@ python tools/run-manager-suite-acceptance.py --root .v --mode repair
 
 These commands refuse local execution before creating fixtures. Each case
 constructs V1 and V2 through canonical materialization, starts the applicable
-V1 portfolio, and calls the real installed Manager against the same default
-HOME and durable data. Controlled acquisition replaces only external artifact
+V1 portfolio, and calls the real installed Manager for normal updates or its
+native bootstrap repair entrypoint for repair, against the same default HOME
+and durable data. The private repaired-engine handoff is not a substitute for
+constructing the fresh Manager first. Controlled acquisition replaces only external artifact
 delivery and credentials; the planner, constructors, launchers and scheduled
 registrations remain real. Missing prerequisite or resident-attribution evidence
 fails acceptance rather than reducing the portfolio.
@@ -5107,10 +5109,16 @@ The Index host role is written as YAML readable by both native and
 dependency-free role resolvers. Preparation explicitly provisions its full
 independent engine through the native installer; ordinary Manager updates
 preserve that separately managed engine rather than provisioning it implicitly.
+Its exact native process identity, running version, healthy readiness and sealed
+slot are attested as retained; it is not misclassified as a replaced runtime.
 After cold setup, the Codespaces owner starts through its verified native
 scheduled registration, with installed liveness observed before recording V1.
 Worktrees' V1 monitor is explicitly ensured through its installed on-demand API;
-installation alone intentionally need not start an absent monitor. Settlement
+installation alone intentionally need not start an absent monitor. A
+fixture-owned Codespaces tenant hold and periodic Worktrees list demand keep
+these on-demand residents needed during the update without changing their idle
+policy. This synthetic demand does not qualify a real remote SSH channel.
+Settlement releases the fixture tenant,
 uses Codespaces' generation-bound `owner --stop` and waits for normal channel
 cleanup before removing the exact owned scheduled registration. Task termination
 alone is not daemon-exit evidence. Idle policy, deadlines and final birth-verified
