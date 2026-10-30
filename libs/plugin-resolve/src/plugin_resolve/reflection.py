@@ -68,6 +68,13 @@ def _validate_absence(root: Path, manifest, name: str) -> None:
         if member.is_symlink() or getattr(member.lstat(), "st_reparse_tag", 0):
             raise ValueError("Linked marketplace evidence cannot authorize omission")
     raw = json.loads(path.read_text(encoding="utf-8"))
+    metadata = raw.get("metadata", {})
+    if not isinstance(metadata, dict) or (
+        "pluginRoot" in metadata and (
+            not isinstance(metadata["pluginRoot"], str) or Path(metadata["pluginRoot"]).is_absolute()
+        )
+    ):
+        raise ValueError("Cannot allow a missing plugin from malformed marketplace metadata")
     entries = raw.get("plugins")
     if (
         not isinstance(entries, list) or manifest.duplicates

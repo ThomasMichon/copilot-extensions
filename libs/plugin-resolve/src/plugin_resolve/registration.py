@@ -493,12 +493,13 @@ def register_prepared(
                    if source not in resolved and source not in omitted_sources]
         if missing:
             raise ValueError(f"Enabled plugins do not resolve: {', '.join(missing)}")
+        reverse = {projected: logical for logical, projected in identities.items()}
         for source, directory_path in resolved.items():
             _name, marketplace = split_source(source)
             manifest = plugin_manifest(Path(directory_path))
             required = dependencies(manifest, marketplace)
             if omitted_sources:
-                logical = publications.get(source, {}).get("logical_source", source)
+                logical = publications.get(source, {}).get("logical_source", reverse.get(source, source))
                 logical_marketplace = split_source(logical)[1]
                 omitted_dependencies = set(
                     required if logical_marketplace == marketplace
@@ -517,7 +518,6 @@ def register_prepared(
                         "status": "disabled" if effective.enabled.get(dependency) is False
                         else "outside-selection",
                     })
-        reverse = {projected: logical for logical, projected in identities.items()}
         logical_result = {}
         expected_plugins = []
         for source, directory_path in resolved.items():

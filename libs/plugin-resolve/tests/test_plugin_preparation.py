@@ -135,6 +135,55 @@ def test_missing_override_retires_only_stale_owned_marketplace(tmp_path, mode):
     assert "local" not in overlay["extraKnownMarketplaces"]
 
 
+def test_missing_override_blocks_dependency_from_authored_retained_alias(tmp_path):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    local_plan(target, name="native")
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    alias = next(source for source in read_repo_settings(target).enabled if source.startswith("sample@"))
+    assert alias != "sample@local"
+    settings_path = target / ".github" / "copilot" / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings["enabledPlugins"].update({alias: True, "retired@local": True})
+    atomic_json(settings_path, settings)
+    manifest_path = host / ".ai" / "sample" / "plugin.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["dependencies"] = ["retired"]
+    atomic_json(manifest_path, manifest)
+    before = settings_path.read_bytes()
+    plan = build_plan([{"source": "retired@local", "allow_missing": True}], [])
+    with pytest.raises(ValueError, match="Required dependency was omitted"):
+        prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    assert settings_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("metadata", [
+    None, [], {"pluginRoot": 123}, {"pluginRoot": None}, {"pluginRoot": False}, "absolute-root",
+])
+def test_missing_override_rejects_malformed_empty_catalog_metadata(tmp_path, metadata):
+    target = tmp_path / "target"
+    init_checkout(target)
+    catalog = target / ".ai" / "marketplace.json"
+    catalog.parent.mkdir()
+    if metadata == "absolute-root":
+        metadata = {"pluginRoot": str(catalog.parent.resolve())}
+    atomic_json(catalog, {
+        "name": "local", "owner": {"name": "Synthetic"}, "plugins": [], "metadata": metadata,
+    })
+    settings = target / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    atomic_json(settings, {
+        "enabledPlugins": {"retired@local": True},
+        "extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": "./.ai"}}},
+    })
+    plan = build_plan([{"source": "retired@local", "allow_missing": True}], [])
+    with pytest.raises(ValueError, match="malformed marketplace metadata"):
+        prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    assert not settings.with_name("settings.local.json").exists()
+
+
 @pytest.mark.parametrize("failure", ["dependency", "broken-payload", "wrong-identity", "malformed"])
 def test_missing_override_does_not_weaken_required_or_invalid_sources(tmp_path, failure):
     target = tmp_path / "target"
