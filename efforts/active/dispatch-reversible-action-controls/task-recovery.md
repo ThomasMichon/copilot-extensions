@@ -90,31 +90,39 @@ operator requests.
 
 ## Validation Plan
 
-- [ ] Actual supported diagnostic reads include current and historical
+- [x] Actual supported diagnostic reads include current and historical
       assignments, a queued/unowned task with an older retained attachment,
       missing reservation, optional-peer failure and changed owner/generation.
       Results are bounded, attributable and mutation-free; no token leakage.
-- [ ] Distinguish target unpin, agent detach, Proposed reset, Queued reset,
+- [x] Distinguish target unpin, agent detach, Proposed reset, Queued reset,
       physical stop and existing hold/release/rearm semantics at their actual
       public boundaries. Cover defaults, invalid destinations and useful
       action-refusal output rather than merely testing helper names.
-- [ ] Exercise current control authorization, restricted/cross-task token
+- [x] Exercise current control authorization, restricted/cross-task token
       refusal, stale status/owner/generation, concurrent reclaim or attachment
       replacement, and exact idempotent replay versus conflicting retry.
-- [ ] Detach/reset cannot orphan a live execution or enable a second claimant
+- [x] Detach/reset cannot orphan a live execution or enable a second claimant
       while a reservation, exclusive key or unresolved send retains custody.
       Preserve the old attachment/audit and all independent holds.
-- [ ] Reconcile qualified original pending/unknown send identity with actual
+- [x] Reconcile qualified original pending/unknown send identity with actual
       transport evidence, plus wrong identity, unsupported/unavailable
       transport, already-settled contradiction and transaction races.
       Legacy attempted/no-token and absent-event cases remain unknown.
       No test may replace the original wake, send a prompt or fabricate absence.
-- [ ] Cover REST/client/CLI/MCP parity, strict parser validation and advertised
+- [x] Cover REST/client/CLI/MCP parity, strict parser validation and advertised
       live contract support. Exercise old caller/new provider, new caller/old
       provider and provider rollback without effectful fallback.
-- [ ] Add changefile and owning docs; complete required review and CI, verify
-      the containing release, and retain separately authorized installed/native
-      qualification. Keep exhaustive/process matrices out of required unit CI.
+- [x] Add changefile and owning docs; complete required review and CI and verify
+      the containing release. Keep exhaustive/process matrices out of required
+      unit CI.
+- [ ] Under separate installation-owner and live-action authority, qualify
+      actual installed consumers and retain the independent native-continuity
+      gates. A source receipt is not a running-account result.
+
+The checked criteria qualify source behavior through contained queue,
+authenticated ASGI, parser and actual default-factory tests. They do not
+establish installed-account adoption or native execution. Separately authorized
+installed/native qualification remains open.
 
 ## Journal
 
@@ -263,3 +271,36 @@ operator requests.
   policy and venue packet passes 163 cases.
 - Re-review of the integrated head, required CI, release and running/native
   qualification remain separate gates.
+
+### 2026-10-30 - Reviewed source suite merged
+
+- #9643 merged to `dev` as `6d0afa4a9759fb9386f4ec2e57342f7df53bf229`
+  after exact-head approval on `ecc28f01fb`, no open review findings and
+  successful required CI. The retained acquisition conversation was explicitly
+  resolved after its supported binding/failure regression proved the fix.
+- Re-read the canonical Plan and Validation Plan. Close source delivery and
+  the contained boundary criteria only; retain installed consumers, actual
+  native continuity and the final release/qualification criterion.
+- The source worktree's terminal PR observation was stale after a cross-repo
+  merge command. Refreshing its canonical `pr-status` established Merged;
+  verified `pr-complete` then preserved the old tip and pulled forward past the
+  real squash without replaying or discarding new work.
+- Containing Dev CI passed. Follow the existing automatic containing promotion,
+  verify the released bytes, then obtain installation-owner authority before
+  runtime adoption or any live task action. The effort remains Active.
+
+### 2026-10-30 - Containing release verified
+
+- Containing Dev CI `41042324449` succeeded. Existing automatic promotion
+  `41042643738` admitted exact source `6d0afa4a9759fb9386f4ec2e57342f7df53bf229`,
+  completed qualification and source publication/readback, then merged its
+  ready Main candidate. No duplicate dispatch or qualification retry was used.
+- Selected Main is `bb7e82ec51e0ec57e4d10b27fbe1a4808be68ff2`, resolved from
+  the annotated `promote-dev-<source>` tag. All 29 changed Bridge/Dispatch
+  runtime modules are byte-identical to reviewed source. Released versions
+  are Bridge `0.9.228-dev1` and Dispatch `0.18.163-dev1`.
+- The earlier successful promoter admitted a predecessor, not this source,
+  and was not credited. Package versions alone were not containment evidence.
+- Close the source-release criterion, not installed or native qualification.
+  No update, live reset/detach/stop, wake replay, replacement or worker-pool
+  activation was performed. The effort remains Active.
