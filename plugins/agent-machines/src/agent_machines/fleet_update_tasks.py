@@ -145,6 +145,13 @@ def _normalize_windows_text(value: str | None) -> str:
     return (value or "").replace("/", "\\").casefold().strip()
 
 
+def _task_argument_key(argument: str) -> str:
+    value = argument.strip('"')
+    if value.startswith("--") or value.casefold() == "update":
+        return value
+    return _normalize_windows_text(value)
+
+
 def _ps_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
@@ -197,8 +204,8 @@ def task_definition_matches(
         and "cmd.exe /c" in literal_arguments
         and _normalize_windows_text(task_binstub_path(home)) in normalized_arguments
         and "update" in literal_arguments
-        and tuple(_normalize_windows_text(arg.strip('"')) for arg in arguments)
-        == tuple(_normalize_windows_text(arg.strip('"')) for arg in expected)
+        and tuple(_task_argument_key(arg) for arg in arguments)
+        == tuple(_task_argument_key(arg) for arg in expected)
         and _normalize_windows_text(snapshot.working_directory)
         == _normalize_windows_text(task_working_directory(home))
         and (snapshot.trigger_kind or "") == spec.schedule_kind

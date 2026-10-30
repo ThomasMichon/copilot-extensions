@@ -537,11 +537,20 @@ def test_task_definition_matches_its_own_generated_arguments(monkeypatch, home):
     assert fleet_update_tasks.task_definition_matches(snapshot, "sweep", home=home)
     from dataclasses import replace
 
-    for marker in ("", " --automatic", " --auto-suffix", ' "--auto suffix"', " --auto --auto"):
+    for marker in (
+        "", " --automatic", " --auto-suffix", ' "--auto suffix"', " --auto --auto", " --AUTO",
+    ):
         invalid = replace(snapshot, arguments=snapshot.arguments.replace(" --auto", marker))
+        assert not fleet_update_tasks.task_definition_matches(invalid, "sweep", home=home)
+    for old, new in ((" update", " UPDATE"), ("--headless", "--HEADLESS")):
+        invalid = replace(snapshot, arguments=snapshot.arguments.replace(old, new))
         assert not fleet_update_tasks.task_definition_matches(invalid, "sweep", home=home)
     quoted = replace(snapshot, arguments=snapshot.arguments.replace(" --auto", ' "--auto"'))
     assert fleet_update_tasks.task_definition_matches(quoted, "sweep", home=home)
+    path_case = replace(snapshot, arguments=snapshot.arguments.replace(
+        "worktree-manager.cmd", "WORKTREE-MANAGER.CMD",
+    ))
+    assert fleet_update_tasks.task_definition_matches(path_case, "sweep", home=home)
 
 
 def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
