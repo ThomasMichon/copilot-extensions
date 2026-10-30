@@ -336,8 +336,11 @@ An explicit `<repo> update` or `worktree-manager update` is manual by default:
 the automatic-update KillSwitch does not inhibit it, and manual intent does not
 force rebuilding already-current runtimes. Existing `--force`, `--force-runtime`,
 recreate and repair selections keep their own construction semantics.
-Unattended producers pass `--auto`; an applicable default-installation hold returns the visible exit-3
-no-op before bootstrap or installers, while an inactive hold executes normally.
+Unattended producers pass `--auto`; an applicable default-installation hold returns
+the visible exit-3 no-op before Manager runtime construction or downstream
+installers, while an inactive hold executes normally. The POSIX bootstrap checks
+the same canonical admission policy before construction; target-scoped updates
+retain their manual/automatic mode through the target parser and engine handoff.
 Independent namespaced cells retain their existing exemption from that default hold.
 Interrupted-transaction settlement and live-installer exclusivity remain separate
 gates. The existing queued `repair` boolean records manual admission, not rebuild

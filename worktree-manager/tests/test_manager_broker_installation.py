@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from agent_procutil import no_window_kwargs
 import pytest
 
 from update_driver import core
@@ -292,6 +294,38 @@ def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_w
     )
     assert "--force" not in bootstrap.runner.argv
     assert json.loads(switch.read_text()) == {"active": held}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX bootstrap entry")
+@pytest.mark.parametrize(("automatic", "held"), [(False, True), (True, True), (True, False)])
+def test_posix_bootstrap_hold_precedes_installer(tmp_path, automatic, held):
+    root = tmp_path / "manager"
+    marker = tmp_path / "installer-ran"
+    hold = tmp_path / "hold.json"
+    hold.write_text(json.dumps({"active": held}))
+    command = [sys.executable, "-c", """
+import sys
+from pathlib import Path
+from worktree_manager import self_install
+adapter = self_install._runtime_installer()
+def install(args):
+    Path(sys.argv[2]).write_text('ordinary construction')
+    return 17
+adapter._install = install
+raise SystemExit(adapter.main(['--root', sys.argv[1], '--', 'update', *sys.argv[3:]]))
+""", str(root), str(marker), *(["--auto"] if automatic else [])]
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        env={**os.environ, "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(hold),
+             "COPILOT_EXTENSIONS_CONTEXT": ""},
+    )
+    skipped = automatic and held
+    assert result.returncode == (3 if skipped else 17), result.stdout + result.stderr
+    assert marker.exists() is not skipped
+    assert not root.exists()
+    assert json.loads(hold.read_text()) == {"active": held}
+    if skipped:
+        assert "automatic-update KillSwitch active; nothing ran" in result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows removal execution ownership")
