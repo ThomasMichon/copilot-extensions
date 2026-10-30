@@ -111,13 +111,6 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                         while IFS= read -r probe; do
                             profile_path="$(printf '%s' "$probe" | jq -er '.path' 2>/dev/null)"
                             expected="$(printf '%s' "$probe" | jq -r '.sha256 // empty' 2>/dev/null)"
-                            if [[ -z "$expected" ]]; then
-                                if [[ -e "$profile_path" || -L "$profile_path" ]]; then
-                                    run_python_fallback "$stdin_text"
-                                    exit 0
-                                fi
-                                continue
-                            fi
                             component="$profile_path"
                             while [[ "$component" != "/" && "$component" != "." ]]; do
                                 if [[ -L "$component" ]]; then
@@ -126,6 +119,13 @@ if [[ -n "$session_id" && "$session_id" =~ $SESSION_ID_PATTERN \
                                 fi
                                 component="$(dirname -- "$component")"
                             done
+                            if [[ -z "$expected" ]]; then
+                                if [[ -e "$profile_path" || -L "$profile_path" ]]; then
+                                    run_python_fallback "$stdin_text"
+                                    exit 0
+                                fi
+                                continue
+                            fi
                             if [[ ! -f "$profile_path" ]] || [[ "$(wc -c < "$profile_path")" -gt 65536 ]]; then
                                 run_python_fallback "$stdin_text"
                                 exit 0

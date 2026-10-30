@@ -169,6 +169,24 @@ def test_current_marker_wins_over_overlapping_historical_variant():
     assert profile.decorate(once, signature) == once
 
 
+@pytest.mark.parametrize("rule,draft", [
+    ({"header": "[AI-assisted] ", "footer": "\nAI footer",
+      "footer_variants": ["[AI-assisted] Drafted with Copilot."]},
+     "Drafted with Copilot."),
+    ({"header": "[AI] ", "footer": "\nAI footer",
+      "footer_variants": ["[AI] original"]}, "[AI] original"),
+    ({"header": "[AI] ", "footer": "\nAI footer",
+      "header_variants": ["original"], "footer_variants": ["original"]}, "original"),
+])
+def test_cross_slot_overlap_preserves_draft_and_idempotence(rule, draft):
+    signature = profile.resolve(parsed(rule), CONTEXT)
+    once = profile.decorate(draft, signature)
+    assert draft in once
+    assert once.startswith(signature["header"])
+    assert once.endswith(signature["footer"])
+    assert profile.decorate(once, signature) == once
+
+
 @pytest.mark.parametrize("header", [
     "<!-- AI-assisted -->", "<span hidden>AI-assisted</span>",
     "[](#AI-assisted)", "[hidden]: https://example.com/AI-assisted",
@@ -265,6 +283,29 @@ def test_invalid_profile_file_is_rejected_as_a_layer(tmp_path, raw):
     data, errors = profile.load_profile(tmp_path, None, {})
     assert errors == ["profile layer 1 rejected"]
     assert not data["_inputs"]
+
+
+def test_nonregular_profile_is_rejected_before_open(monkeypatch, tmp_path):
+    config = tmp_path / ".copilot" / "ai-attribution.json"
+    config.parent.mkdir()
+    config.write_text('{"version":1}', encoding="utf-8")
+    is_file = Path.is_file
+    monkeypatch.setattr(Path, "is_file", lambda path: False if path == config else is_file(path))
+    monkeypatch.setattr(profile.os, "open", lambda *args: pytest.fail("must not open"))
+    data, errors = profile.load_profile(tmp_path, None, {})
+    assert errors == ["profile layer 1 rejected"]
+    assert not data["_inputs"]
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs unavailable")
+def test_fifo_profile_does_not_block_loading(tmp_path):
+    config = tmp_path / ".copilot" / "ai-attribution.json"
+    config.parent.mkdir()
+    os.mkfifo(config)
+    _, errors = profile.load_profile(tmp_path, None, {})
+    assert errors == ["profile layer 1 rejected"]
 
 
 @pytest.mark.portfolio_tier("T3")
@@ -414,3 +455,23 @@ def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path, home_s
         assert text.startswith("Disclose AI for ALL contributions.\n\n")
         assert "profile discovery rejected" in text
         assert "[owner: ai-attribution@" in text
+    missing_parent = tmp_path / "missing-parent"
+    missing_parent.mkdir()
+    env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = str(missing_parent)
+    subprocess.run(command, input=json.dumps({"sessionId": "before-link", "cwd": str(repo)}),
+                   text=True, capture_output=True, env=env, check=True)
+    missing_parent.rmdir()
+    empty_target = tmp_path / "empty-target"
+    empty_target.mkdir()
+    if os.name == "nt":
+        subprocess.run(["cmd.exe", "/c", "mklink", "/J", str(missing_parent), str(empty_target)],
+                       capture_output=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    else:
+        missing_parent.symlink_to(empty_target, target_is_directory=True)
+    session = "after-link"
+    subprocess.run(command, input=json.dumps({"sessionId": session, "cwd": str(repo)}),
+                   text=True, capture_output=True, env=env, check=True)
+    target = home / ".copilot" / "session-state" / session / "instructions" / "ai-attribution" / target.name
+    text = target.read_text(encoding="utf-8")
+    assert text.startswith("Disclose AI for ALL contributions.\n\n")
+    assert "profile layer" in text and "rejected" in text

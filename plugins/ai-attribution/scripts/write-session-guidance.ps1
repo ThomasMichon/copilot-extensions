@@ -143,6 +143,16 @@ try {
                             ) { throw 'Profile discovery context changed' }
                             foreach ($probe in $data.profile_probes) {
                                 $profilePath = $probe.path
+                                $componentPath = $profilePath
+                                while ($componentPath) {
+                                    $component = Get-Item -LiteralPath $componentPath -Force -ErrorAction SilentlyContinue
+                                    if ($component -and $component.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
+                                        throw 'Unsafe profile path'
+                                    }
+                                    $parentPath = Split-Path -Parent $componentPath
+                                    if ($parentPath -eq $componentPath) { break }
+                                    $componentPath = $parentPath
+                                }
                                 if ($null -eq $probe.sha256) {
                                     if (Get-Item -LiteralPath $profilePath -Force -ErrorAction SilentlyContinue) {
                                         throw 'A profile appeared'
@@ -152,12 +162,6 @@ try {
                                 $component = Get-Item -LiteralPath $profilePath -Force -ErrorAction Stop
                                 if ($component.PSIsContainer -or $component.Length -gt 65536) {
                                     throw 'Invalid profile file'
-                                }
-                                while ($component) {
-                                    if ($component.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
-                                        throw 'Unsafe profile path'
-                                    }
-                                    $component = if ($component.PSIsContainer) { $component.Parent } else { $component.Directory }
                                 }
                                 if (
                                     (Get-FileHash -LiteralPath $profilePath -Algorithm SHA256 -ErrorAction Stop).Hash -ne $probe.sha256

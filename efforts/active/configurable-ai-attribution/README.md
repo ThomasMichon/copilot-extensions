@@ -277,3 +277,16 @@ network dependency, parallel policy registry or mandatory sibling plugin.
 - Focused validation passed 87 tests with 3 platform skips. Warm no-Python
   fixtures now originate in the real Python owner rather than synthetic
   base-only cache records. Lint passed.
+
+### 2026-10-30 - Boundary overlap and file-kind safety
+- Determined both owned draft boundaries before inserting either slot.
+  Overlapping removals and removals crossing the opposite current marker are
+  preserved, preventing cross-slot deletion and retaining idempotence.
+- Native missing probes now check lexical ancestors too, detecting a new
+  symlink/junction even when the target still lacks the candidate file.
+- Profile loading rejects non-regular candidates before opening and verifies
+  the opened descriptor; nonblocking/no-follow flags protect supported systems.
+- The affected packet passed 91 tests with 4 platform skips. The real Windows
+  missing-parent junction regression passed for both HOME forms. A portable
+  pre-open guard test passed; the real FIFO regression is POSIX-only and was
+  skipped locally. High-signal lint passed.

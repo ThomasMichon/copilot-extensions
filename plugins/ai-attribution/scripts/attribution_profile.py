@@ -9,6 +9,7 @@ import html
 import json
 import os
 import re
+import stat
 import string
 import sys
 import unicodedata
@@ -166,7 +167,13 @@ def load_profile(home: Path, repo: Path | None, env: dict | None = None) -> tupl
                 raise ProfileError("unsafe config path")
             if not path.exists():
                 continue
-            with path.open("rb") as handle:
+            if not path.is_file():
+                raise ProfileError("config must be a regular file")
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) |
+                                 getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(descriptor, "rb") as handle:
+                if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                    raise ProfileError("config must be a regular file")
                 raw = handle.read(MAX_BYTES + 1)
             if len(raw) > MAX_BYTES:
                 raise ProfileError("config exceeds byte limit")
@@ -269,23 +276,31 @@ def decorate(draft: str, signature: dict) -> str:
     """Only supplied draft text is changed; never a send or approval operation."""
     if not signature["required"]:
         return draft
-    body = draft
+    present, removed = {}, {}
     for slot in SLOTS:
         current = signature[slot]
-        if not current:
-            continue
         at_boundary = lambda text: (
-            body.startswith(text) if slot == "header" else body.endswith(text)
+            draft.startswith(text) if slot == "header" else draft.endswith(text)
         )
-        if at_boundary(current):
+        present[slot] = bool(current and at_boundary(current))
+        removed[slot] = 0
+        if not current or present[slot]:
             continue
         variants = signature[slot + "_variants"]
         variants = sorted({v for v in variants if v}, key=len, reverse=True)
         found = next((v for v in variants if at_boundary(v)), None)
         if found is not None:
-            body = body[len(found):] if slot == "header" else body[:-len(found)]
-        body = current + body if slot == "header" else body + current
-    return body
+            removed[slot] = len(found)
+    if removed["header"] + removed["footer"] > len(draft):
+        removed = dict.fromkeys(SLOTS, 0)
+    for slot, opposite in (("header", "footer"), ("footer", "header")):
+        if present[opposite] and removed[slot] + len(signature[opposite]) > len(draft):
+            removed[slot] = 0
+    body = draft[removed["header"]:len(draft) - removed["footer"]]
+    return (
+        ("" if present["header"] else signature["header"]) + body
+        + ("" if present["footer"] else signature["footer"])
+    )
 
 
 def guidance(profile: dict) -> str:

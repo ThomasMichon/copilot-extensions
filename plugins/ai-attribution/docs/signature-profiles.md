@@ -35,7 +35,9 @@ slots:
    `$HOME/.config/ai-attribution/config.json`: platform personal override.
 
 Paths are resolved without evaluating shell expressions. Symlink/reparse paths
-are rejected. Instruction-directory discovery is bounded to 128 entries and
+are rejected, including ancestors of missing files during native cache reuse.
+Only regular files are opened; FIFOs/devices are rejected without waiting.
+Instruction-directory discovery is bounded to 128 entries and
 65,536 characters before probing; overflow or unresolved user directories
 produce a profile diagnostic, not a silently truncated configuration.
 Each file is at most 64 KiB with 32 rules. Invalid layers produce a
@@ -111,6 +113,9 @@ An already-current boundary is preserved before considering historical variants,
 so overlapping old markers cannot consume draft content on repeated decoration.
 Otherwise at most one historical marker is replaced per slot. It does not fuzzy-match AI mentions,
 search quoted body content, or remove another operator's acknowledgement.
+Both boundaries are identified in the original draft before any insertion.
+Overlapping removals or removals crossing an existing current marker are
+preserved rather than consuming draft content or the opposite slot.
 Never configure another author's text as an owned variant.
 Variants are applied only for a nonempty current slot; a suppressed slot does
 not destructively remove old text without a replacement boundary.
