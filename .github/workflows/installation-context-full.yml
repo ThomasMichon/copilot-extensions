@@ -551,6 +551,8 @@ jobs:
             .v/*/task-inventory.json
             .v/*/driver-diagnostics.json
             .v/*/driver-logs/*.log
+            .v/*/resident-logs/agent-bridge/*.log
+            .v/*/resident-logs/agent-codespaces/logs/*.log
           include-hidden-files: true
           if-no-files-found: warn
 

@@ -5123,6 +5123,10 @@ uses Codespaces' generation-bound `owner --stop` and waits for normal channel
 cleanup before removing the exact owned scheduled registration. Task termination
 alone is not daemon-exit evidence. Idle policy, deadlines and final birth-verified
 resident-exit assertions are unchanged.
+Observers retain each successor's native handle through the final sample rather
+than reopening a possibly exited process ID after the update. Failure artifacts
+include bounded tails of the fixture's known Bridge and Codespaces daemon logs;
+durable application data and unrelated files are not collected.
 
 Cold preparation and exercise each have a 900-second owned-process deadline;
 assertions retain a separate 300-second runner boundary and the usual pytest

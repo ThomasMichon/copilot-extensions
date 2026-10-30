@@ -7,7 +7,7 @@ failure, not a skipped or reduced-portfolio success.
 from __future__ import annotations
 
 import argparse
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import json
 import os
 from pathlib import Path
@@ -133,6 +133,44 @@ def test_retained_engine_does_not_accept_a_replacement_process(
     }
 
 
+@pytest.mark.parametrize("final_code", (259, 0))
+def test_observer_pins_successor_until_final_native_observation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, final_code: int,
+) -> None:
+    held = set()
+    reads = []
+    health = {"pid": 101, "version": "v1", "ready": True,
+              "runtime_generation": "g1", "dependencies": {}, "ready_observed_ns": 10}
+
+    @contextmanager
+    def process(pid):
+        held.add(pid)
+
+        def times():
+            reads.append((pid, (tmp_path / "stop").exists()))
+            assert pid in held
+            return (pid, 0, final_code if pid == 202 and (tmp_path / "stop").exists() else 259)
+
+        try:
+            yield SimpleNamespace(times=times)
+        finally:
+            held.remove(pid)
+
+    def stop_after_ready(_delay):
+        assert held == {101, 202}
+        (tmp_path / "stop").touch()
+
+    monkeypatch.setattr(fixture, "closing_process", process)
+    monkeypatch.setattr(fixture, "_resident_probe", lambda *args: health)
+    monkeypatch.setattr(fixture, "_record", lambda *args: ({"pid": 202}, 0))
+    monkeypatch.setattr(fixture.time, "sleep", stop_after_ready)
+    row = fixture._watch_resident("agent-dispatch", tmp_path, 101, tmp_path)["observation"]
+    assert row["new_exit_code_at_ready"] == 259
+    assert row["new_exit_code"] == final_code
+    assert reads.count((202, False)) == 1 and reads.count((202, True)) == 1
+    assert held == set()
+
+
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native PowerShell capture")
 @pytest.mark.parametrize("owned_count", (0, 1, 2))
 def test_task_inventory_captures_only_owned_unicode_records(
@@ -198,6 +236,21 @@ def test_missing_driver_log_does_not_replace_the_primary_error(tmp_path: Path) -
     diagnostics.retain_driver_logs(tmp_path, f"Update request {'a' * 32}: interrupted")
     report = json.loads((tmp_path / "driver-diagnostics.json").read_text(encoding="utf-8"))
     assert report[0]["error"].startswith("FileNotFoundError:")
+
+
+def test_resident_diagnostics_are_bounded_and_exclude_application_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "h" / ".agent-codespaces"
+    (root / "logs").mkdir(parents=True)
+    (root / "logs" / "owner.log").write_bytes(b"old lines\nactual failure")
+    (root / "credentials.json").write_text("not a diagnostic", encoding="utf-8")
+    monkeypatch.setattr(diagnostics, "MAX_LOG_BYTES", 14)
+    diagnostics.retain_resident_logs(tmp_path)
+    copied = list((tmp_path / "resident-logs").rglob("*"))
+    assert [path.name for path in copied if path.is_file()] == ["owner.log"]
+    assert (tmp_path / "resident-logs" / "agent-codespaces" / "logs" / "owner.log").read_bytes() == b"actual failure"
+    assert (root / "logs" / "owner.log").read_bytes() == b"old lines\nactual failure"
 
 
 @pytest.mark.parametrize("check", (False, True))

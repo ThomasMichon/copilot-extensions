@@ -39,6 +39,7 @@ from manager_suite_artifacts import (
 )
 from manager_suite_diagnostics import (
     MARKERS, _engine_probe, _record, _resident_probe, _snapshot, retain_driver_logs,
+    retain_resident_logs,
 )
 
 REPO = Path(__file__).resolve().parents[3]
@@ -397,20 +398,24 @@ def _watch_resident(name: str, root: Path, old_pid: int, control: Path) -> dict[
                     health = _resident_probe(name, root, marker["pid"])
                     with closing_process(marker["pid"]) as successor:
                         created, _exit, new_code = successor.times()
-                    _created, old_exit, old_code = incumbent.times()
-                    return {"observation": {
-                        "old_pid": old_pid, "old_created_ns": old_created,
-                        "old_version": original["version"],
-                        "old_runtime_generation": original["runtime_generation"],
-                        "old_dependencies": original["dependencies"],
-                        "new_pid": marker["pid"], "new_created_ns": created,
-                        "new_version": health["version"],
-                        "new_runtime_generation": health["runtime_generation"],
-                        "new_dependencies": health["dependencies"],
-                        "new_exit_code": new_code, "new_exit_code_at_ready": new_code,
-                        "new_ready_observed_ns": health["ready_observed_ns"],
-                        "old_exit_ns_at_ready": old_exit, "old_exit_code_at_ready": old_code,
-                    }}
+                        _created, old_exit, old_code = incumbent.times()
+                        row = {
+                            "old_pid": old_pid, "old_created_ns": old_created,
+                            "old_version": original["version"],
+                            "old_runtime_generation": original["runtime_generation"],
+                            "old_dependencies": original["dependencies"],
+                            "new_pid": marker["pid"], "new_created_ns": created,
+                            "new_version": health["version"],
+                            "new_runtime_generation": health["runtime_generation"],
+                            "new_dependencies": health["dependencies"],
+                            "new_exit_code_at_ready": new_code,
+                            "new_ready_observed_ns": health["ready_observed_ns"],
+                            "old_exit_ns_at_ready": old_exit, "old_exit_code_at_ready": old_code,
+                        }
+                        while time.monotonic() < deadline and not (control / "stop").exists():
+                            time.sleep(0.02)
+                        row["new_exit_code"] = successor.times()[2]
+                        return {"observation": row}
             except Exception as error:
                 last_error = f"{type(error).__name__}: {error}"
             time.sleep(0.02)
@@ -818,8 +823,6 @@ def exercise(directory: Path, mode: str) -> None:
                 while process.times()[2] == 259 and time.monotonic() < deadline:
                     time.sleep(0.05)
                 _created, exited, code = process.times()
-                with closing_process(row["new_pid"]) as successor:
-                    row["new_exit_code"] = successor.times()[2]
                 row.update(old_exit_ns=exited, old_exit_code=code)
                 report["residents"][name] = row
             report["commands"] = _frontdoors(case, after)
@@ -851,6 +854,7 @@ def exercise(directory: Path, mode: str) -> None:
         if report["errors"]:
             update = report.get("update", {})
             retain_driver_logs(case, "\n".join((update.get("stdout", ""), update.get("stderr", ""))))
+            retain_resident_logs(case)
         try:
             report["cleanup_errors"] = _cleanup(case)
         except Exception as error:

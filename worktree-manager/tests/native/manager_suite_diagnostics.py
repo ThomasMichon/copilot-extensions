@@ -211,3 +211,30 @@ def retain_driver_logs(case: Path, output: str) -> None:
         )
     except OSError as error:
         print(f"Driver diagnostic write failed: {error}", file=sys.stderr)
+
+
+def retain_resident_logs(case: Path) -> None:
+    """Keep only known fixture daemon outputs, never scan durable application data."""
+    for component, names in {
+        "agent-bridge": ("agent-bridge.log", "agent-bridge-err.log"),
+        "agent-codespaces": ("logs/owner.log", "logs/owner-stdio.log"),
+    }.items():
+        for name in names:
+            source = case / "h" / ("." + component) / name
+            try:
+                if any(path.is_symlink() for path in (source, *source.parents)):
+                    raise ValueError("Resident log is indirect")
+                if not source.resolve().is_relative_to(case.resolve()):
+                    raise ValueError("Resident log escapes the owned fixture")
+                with source.open("rb") as stream:
+                    size = stream.seek(0, os.SEEK_END)
+                    stream.seek(max(0, size - MAX_LOG_BYTES))
+                    data = stream.read(MAX_LOG_BYTES)
+                destination = case / "resident-logs" / component / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(data)
+            except FileNotFoundError:
+                continue
+            except Exception as error:
+                print(f"Resident diagnostic unavailable ({component}/{name}): {error}",
+                      file=sys.stderr)
