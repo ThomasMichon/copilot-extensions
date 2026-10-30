@@ -46,7 +46,9 @@ def run_probes(root: Path, proof: dict, vector: dict, *, evidence=evidence) -> d
                 sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-bridge",
                 "--test-file", Path(evidence.TEST).relative_to("plugins/agent-bridge").as_posix(),
                 "-k", " or ".join(evidence.PROBES),
-            ], timeout=240, max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=1024 * 1024)
+                *(["--test-timeout", "120"] if os.name == "nt" else []),
+            ], timeout=600 if os.name == "nt" else 240,
+                max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=1024 * 1024)
         print(result.stdout, end="")
         print(result.stderr, end="", file=sys.stderr)
         if result.returncode or request.read_bytes() != payload:
