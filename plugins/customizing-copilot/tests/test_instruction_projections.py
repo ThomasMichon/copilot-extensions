@@ -2913,7 +2913,7 @@ def test_customizing_copilot_ships_the_repo_wide_local_cache_catchall() -> None:
     assert {spec.source_id for spec in specs} == {"local-cache-catchall"}
     spec = specs[0]
     assert spec.apply_to == "**"
-    assert spec.skip_local_cache is True
+    assert spec.skip_local_cache is False
     rendered = projections.render_projection(spec)
     assert rendered.byte_count <= projections.MAX_PROJECTION_BYTES
     text = rendered.fallback_content.decode("utf-8")

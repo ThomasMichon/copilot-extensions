@@ -11,7 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Client Request Interpretation](active/client-request-interpretation/README.md) | Draft; current-model snapshots and evidence-aware local analysis proposal | #9609; extends released #9589, no shared inference logging or rollout |
-| [Startup-Only Guidance](active/startup-only-guidance/README.md) | Active; proposal reviewed, provider-side non-discovered fallback implementation next | Bounded #5993 follow-up; preserves periodic sync and existing delivery/native owners, no rollout |
+| [Startup-Only Guidance](active/startup-only-guidance/README.md) | Active; provider merged, uniform selector declarations and approved adopter migration next | Bounded #5993 follow-up; preserves periodic sync and existing delivery/native owners, no rollout |
 | [PR Review Workspaces](active/pr-review-workspaces/README.md) | Draft; ADO-first vision and architecture proposal only | #9535; successor PR plugin/service cache, existing #6007/#7188 and #7051 owners retained; no implementation or rollout |
 | [Native Startup Prompts](active/native-startup-prompts/README.md) | Active; ordinary cold-launch consumer #9374 merged, native POSIX/full-mux and installed qualification remain | #9364; preserves #7116/#8375/#7942/#8669/#5579 owners; no rollout or retained-session restart |
 | [Dispatch Reversible Action Controls](active/dispatch-reversible-action-controls/README.md) | Active; controls released, native preparation and supervisor-preserving adoption qualification in progress | #9334; reuses #6820/#7694 lifecycle owners; installed and running adoption remain gated |

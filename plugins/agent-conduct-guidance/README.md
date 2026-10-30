@@ -4,13 +4,18 @@
 > plugin, multiple independent ambient modules.
 
 Several small, generally-applicable behavioral reminders (not domain
-capabilities, not runtimes) share the same shape: a concise checked-in
-instruction projection for the always-on reminder, plus a paired skill where
+capabilities, not runtimes) share the same shape: a startup-generated
+instruction copy for the always-on reminder, plus a paired skill where
 on-demand depth is needed. Rather than shipping each as its own single-purpose plugin,
 this plugin is the single roof they group under. Each module is independent —
 enabling the plugin does not entangle one module's guidance with another's —
 but they share one README, one version, one install line, and one place to
 look for "is there ambient guidance for X."
+
+Periodic maintenance retains full offline fallbacks outside automatic instruction
+discovery, with thin recovery selectors rather than duplicate policy bodies.
+The [delivery pattern](../../docs/patterns/worktree-scoped-dynamic-guidance.md)
+owns publication, recovery and provider upgrade/rollback mechanics.
 
 ## Modules
 
@@ -47,7 +52,7 @@ patches or weakened update gates.
 | Entry point | When it applies | What it does |
 |-------------|-----------------|--------------|
 | [`requesting-windows-elevation`](skills/requesting-windows-elevation/SKILL.md) skill | Windows UAC, run as administrator, or an approved headless operation that cannot reach the user's consent desktop | Uses Windows and PowerShell 7.2+ only; stages a limited interactive task, requests RunAs, streams both outputs, waits for the actual result and removes the confirmed owned task |
-| checked-in instruction projections | Every adopting repository | Loads each module's bounded owner-marked reminder without a startup output hook |
+| startup-generated instruction copies | Every prepared adopting repository | Loads each module's complete owner-marked reminder; an unavailable current copy uses its separately maintained offline fallback |
 | [`using-multi-agent-rules-of-engagement`](skills/using-multi-agent-rules-of-engagement/SKILL.md) skill | peer work directives, repeated-approval questions, conflicting directives, leadership handoff or external-domain instructions | Resolves the existing domain/scope/custody evidence and applies bounded authority rules without adding an authorization service |
 | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) skill | "run this in the background", authoring a script/service that shells out, "why does a window keep flashing", any CMD/PowerShell/Python/Node child-process spawn | Selects the correct windowless/headless mechanism for the target language and OS before the spawn happens |
 | [`delegating-work`](skills/delegating-work/SKILL.md) skill | "delegate this research", "use agents to compare", "parallelize the investigation", "split these bulk edits" | Chooses direct versus delegated work, defines bounded contracts, and preserves coordinator ownership |
@@ -313,7 +318,9 @@ agent, MCP, bridge, or dispatch plugins separately when a task needs them.
 | [`tests/`](tests/) | Declarative policy, projection/discovery, reserved policy-producer and model-routing contracts; these do not certify model behavior or runtime authorization |
 
 For modules with a paired skill, that skill owns the detailed task-time
-procedure. Projection-only modules keep their complete bounded policy inline.
+procedure. Projection-only modules retain their complete bounded policy in the
+canonical template, current startup copy and non-discovered offline fallback,
+not in the checked-in selector.
 
 ## Troubleshooting, contributing & issues
 
