@@ -73,3 +73,22 @@ def test_local_refusal_precedes_any_fixture_write(
     with pytest.raises(RuntimeError, match="disposable GitHub-hosted Windows VM"):
         runner.main()
     assert not root.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows legacy pipe encoding")
+def test_isolated_stage_diagnostics_use_explicit_utf8(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    execute = runner._run
+
+    def run(argv: list[str], *, timeout: float) -> int:
+        if "--prepare" not in argv:
+            return 0
+        prefix = argv[:argv.index(str(runner.FIXTURE))]
+        return execute([
+            *prefix, "-c", "import sys; assert sys.flags.utf8_mode == 1; print(chr(0x2014))",
+        ], timeout=30)
+
+    monkeypatch.setattr(runner, "_run", run)
+    assert runner.qualify(tmp_path, "normal", Path(sys.executable)) == 0
+    assert "\u2014" in capsys.readouterr().out

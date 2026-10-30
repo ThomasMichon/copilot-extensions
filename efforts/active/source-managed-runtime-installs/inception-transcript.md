@@ -223,3 +223,15 @@ full runtime snapshot for every source change. The
 [bounded implementation proposal](footprint-contract-evolution.md) separates
 operator intent from recommended schema, compatibility and validation choices.
 It grants no concrete installation, cleanup, service or rollout action.
+
+## I/O-only installation refusal boundary
+
+> Under what conditions can an install still refuse? Or are these cases where that previous refusal which now ensure never refuse? As far as I am concerned, the only thing which can block an install is I/O errors, like file locks and lack of write permissions
+
+This is the operator's installation-failure boundary, not a claim that current
+installers already conform. Existing-layout, recognition, receipt, ownership
+metadata and compatibility disagreements must not become installation vetoes.
+Actual I/O failures remain explicit; application readiness must not be claimed
+without evidence. Separating file/registration application from readiness
+reporting is an agent-recommended realization of this boundary.
+This intent revision does not authorize a live-host install or removal.

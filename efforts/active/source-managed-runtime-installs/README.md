@@ -144,6 +144,15 @@ scope separately from agent-recommended implementation choices. Existing
 retained families and their custody remain; this extension does not supersede
 another contributor's open PR or silently waive an old admission check.
 
+**I/O-only installation refusal boundary (2026-10-30), summary of operator direction:**
+only actual I/O errors, such as file locks or insufficient write permissions,
+may block applying an explicitly requested installation. Old layout,
+recognition, receipt, ownership-metadata and compatibility disagreements are not
+extra permission gates. The [verbatim clarification](inception-transcript.md#io-only-installation-refusal-boundary)
+is authoritative; the [fresh-default slice](fresh-default-installation.md)
+records the proposed installation/readiness outcome separation. Existing live
+operation approvals are unchanged.
+
 **Independent repair acceptance (2026-10-29), summary of operator direction:**
 install and run the complete V1 suite, then force-install V2 in repair mode
 without requiring a prior-install existence check or uninstalling, deleting,
@@ -460,6 +469,12 @@ reuse/admission behavior is not an exception to the fresh-default revision.
   mostly fresh known-runtime fallback. Preserve durable config/data, silence
   the displaced owner and retain one installation execution owner; do not
   turn missing incremental receipts back into update refusal.
+- [ ] **Operator-requested I/O-only refusal:** audit installation refusal paths
+  and remove non-I/O old-state admission vetoes. Use fresh construction and
+  current-output publication instead of demanding recognized old ownership,
+  receipts or contracts. Keep actual I/O failures attributable and preserve
+  unrelated/durable/protected state. **Agent-recommended realization:** separate
+  installation application from truthful build/start/readiness diagnostics.
 - [ ] Define maintained recognizer manifests with separate disposable-reset
   inventories and incremental marker/version/contract ranges, plus historical
   footprint deltas. Make installed-footprint changes carry manifest/migration
@@ -1082,6 +1097,17 @@ implementation, rollout or parent completion is declared.
 - [ ] Resolve every [W0–W4 acceptance item](wheel-first-transition.md#plan-and-acceptance), including actual tools/daemon health and source-change reinstall, before claiming the wheel-first transition complete.
 - [ ] Keep [construction measurements](wheel-first-performance.md) distinct from installed readiness, native lifecycle, SSH-shaped execution and rollout evidence.
 - [ ] Prove preservation/explicit refusal for all [generic recovery classes](wheel-first-recovery-cases.md), without private identifiers or unofficial workarounds.
+
+Completed refusal controls below retain their historical component evidence.
+They do not exempt an explicitly requested installation from the newer
+operator-requested I/O-only refusal boundary.
+
+- [ ] **Operator-requested I/O-only refusal:** absent/corrupt/contradictory old
+  metadata, unrecognized/edited historical outputs and incompatible incumbents
+  do not block applying the requested installation. Inject real lock/permission
+  I/O failures and report their exact cause; independently expose failed
+  build/start/readiness without manufacturing a healthy service or a new
+  permission gate. Qualify through real ordinary and repair entry points.
 - [ ] **Fresh-default orchestration:** resolve the [public-entry-point and construction-path matrix](fresh-default-installation.md#validation-plan): global project update interception, upstream Main/default and explicit overrides, cold/broken old runtime, compatible incremental/ZDD and missing/incompatible recognition reaching mostly fresh installation under the same execution owner. Receipts must not become update permission.
 - [x] **Agent-recommended bounded metadata recovery:** native Windows/Linux
   construction under pending missing/corrupt receipts publishes selectable

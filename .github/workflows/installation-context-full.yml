@@ -548,6 +548,8 @@ jobs:
             .validation/*/preparation-error.json
             .validation/*/settlement.json
             .validation/*/commands.jsonl
+            .validation/*/task-inventory.json
+          include-hidden-files: true
           if-no-files-found: warn
 
   manager-uninstall-windows:
