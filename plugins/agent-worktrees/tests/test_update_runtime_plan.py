@@ -313,6 +313,32 @@ def test_plan_execution_uses_collected_command_and_environment(portfolio, monkey
     assert captured[0][1]["target_version"] == "2"
 
 
+@pytest.mark.parametrize("name,explicit_repo", [
+    ("agent-index", False), ("agent-index", True), ("agent-bridge", False),
+])
+def test_index_activation_retains_logical_repo_without_changing_artifact(
+    portfolio, monkeypatch, name, explicit_repo,
+):
+    from agent_worktrees import update_runtime_plan
+
+    _engine, payload, _calls = portfolio
+    project = payload.parent / "consumer"
+    project.mkdir()
+    explicit = payload.parent / "explicit-repo"
+    environment = {"AGENT_INDEX_REPO": str(explicit)} if explicit_repo else {}
+    monkeypatch.setattr(
+        reconcile, "runtime_installer_environment",
+        lambda *args: (environment, payload.parent / "runtime"),
+    )
+    step = update_runtime_plan._select_inputs(
+        update_runtime_plan.RuntimeUpdateStep(name, "module_update", payload), None, project,
+    )
+    assert not step.blocked
+    assert step.artifact == payload and step.project_root == project
+    expected = str(explicit) if explicit_repo else str(project) if name == "agent-index" else None
+    assert step.environment.get("AGENT_INDEX_REPO") == expected
+
+
 def test_collected_environment_is_an_immutable_snapshot(portfolio, monkeypatch):
     from agent_worktrees import update_runtime_plan
 

@@ -783,11 +783,18 @@ def prepare(directory: Path, mode: str) -> None:
         _run([shutil.which("pwsh"), "-NoProfile", "-File", payload.with_name("agent-index") / "scripts" / "install.ps1",
               "engine"], case, timeout=600)
         _run(_command(case, "worktree-manager", "mux-daemon", "ensure"), case, timeout=30)
+        owner_tasks = [row for row in _tasks(case) if row["name"] == "agent-codespaces-owner"]
+        if len(owner_tasks) != 1:
+            raise RuntimeError("Baseline Codespaces owner requires its exact owned native task")
+        task_path = owner_tasks[0]["path"].replace("'", "''")
+        _run([shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+              "$ErrorActionPreference='Stop'; Start-ScheduledTask -TaskName 'agent-codespaces-owner' "
+              f"-TaskPath '{task_path}'"], case, timeout=30)
         _run([_python(case / "h" / ".agent-codespaces"), "-I", "-X", "utf8", "-B", "-c",
-              "from agent_codespaces.config import load_merged_config;"
-              "from agent_codespaces.connection_owner import ensure_owner_running;"
-              "assert ensure_owner_running(load_merged_config(include_cwd=False)),"
-              "'Canonical Codespaces owner did not become ready'"], case, timeout=60)
+              "import time\nfrom agent_codespaces.connection_owner import is_owner_live\n"
+              "deadline=time.monotonic()+30\n"
+              "while not is_owner_live() and time.monotonic()<deadline: time.sleep(.2)\n"
+              "assert is_owner_live(), 'Scheduled Codespaces owner did not become ready'"], case, timeout=60)
         before = _observe(case, declared)
         setup["before"] = before
         setup["required_residents"] = sorted(before["resident_roots"])
