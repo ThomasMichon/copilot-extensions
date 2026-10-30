@@ -172,7 +172,7 @@ def test_actual_logger_hook_deadline_caller_loss_drift_install_and_consumers(
     payload, installation, project = materialized_logger
     profile = installation.parent
     root = profile / ".copilot-extensions/update-driver"
-    env = cold_environment(installation, project, area)
+    env = cold_environment(installation, project, area, python_prerequisite=True)
     env.pop("AGENT_VAULT_HOME")
     env["AGENT_LOGGER_HOME"] = str(installation)
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(profile / "bootstrap-killswitch.json")

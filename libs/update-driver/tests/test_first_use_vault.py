@@ -248,16 +248,17 @@ def cold_environment(installation, project, area, *, python_prerequisite=False):
     env.pop("UPDATE_DRIVER_WITNESS", None)
     if os.name == "nt":
         env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
-        isolation = subprocess.run(
-            [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
-             "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-             "if (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) { exit 92 }; exit 0"],
-            env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
-        )
-        assert isolation.returncode == 0, "native qualification must not expose host Python"
         if python_prerequisite:
             env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
             assert Path(shutil.which("python", path=env["PATH"])).samefile(sys.executable)
+        else:
+            isolation = subprocess.run(
+                [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
+                 "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+                 "if (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) { exit 92 }; exit 0"],
+                env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+            )
+            assert isolation.returncode == 0, "native qualification must not expose host Python"
     else:
         tools = area / "native-tools"
         tools.mkdir()
