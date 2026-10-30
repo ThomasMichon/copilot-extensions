@@ -208,6 +208,21 @@ def test_cyclic_symlink_declaration_is_skipped(tmp_path, monkeypatch, isolated):
     assert list(load_config().fleets) == ["own"]
 
 
+def test_inaccessible_fragment_is_skipped(tmp_path, monkeypatch, isolated):
+    root = _plugin(tmp_path / "plugins" / "example-harness", EXAMPLE_FRAGMENT)
+    isolated.append(("example-harness@example", [root]))
+    fragment = (root / "containers.yaml").resolve()
+    real_is_file = Path.is_file
+
+    def is_file(self, *args, **kwargs):
+        if self == fragment:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_is_file(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+    assert load_config(strict=True).fleets == {}
+
+
 def test_unknown_nested_mapping_keys_merge_per_key(tmp_path, monkeypatch, isolated):
     root = _plugin(tmp_path / "plugins" / "example-harness", """\
         fleets:

@@ -125,7 +125,12 @@ def _declared_fragment(source: str, root: Path) -> Path | None:
             "Ignoring %s from %s: %r escapes the plugin root", MANIFEST_FIELD, source, declared
         )
         return None
-    if not target.is_file():
+    try:
+        usable = target.is_file()
+    except OSError as exc:
+        log.warning("Ignoring %s from %s: %s (%s)", MANIFEST_FIELD, source, target, exc)
+        return None
+    if not usable:
         log.warning(
             "Ignoring %s from %s: %s is not a file", MANIFEST_FIELD, source, target
         )
