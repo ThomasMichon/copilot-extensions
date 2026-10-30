@@ -261,7 +261,10 @@ def _foreground(args, driver) -> int:
         ),
     )
     driver.drain()
-    result = driver.wait(request.id, output=sys.stdout)
+    if hasattr(sys.stderr, "reconfigure"):
+        # The durable log already contains native Windows line endings.
+        sys.stderr.reconfigure(newline="")
+    result = driver.wait(request.id, output=sys.stderr)
     if result.state != "completed" or result.exit_code is None:
         raise RuntimeError(f"Native Worktrees installation did not complete: {result.state}")
     return result.exit_code

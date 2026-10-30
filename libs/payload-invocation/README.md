@@ -222,6 +222,10 @@ revalidated after acquisition. Teardown keeps the lock until the native child
 finishes, including configuration removal, and requires parent and child
 interpreters outside the erased runtime. After teardown, lock ownership is
 verified without requiring the intentionally removed payload or manifest.
+Its metadata validation uses the teardown purpose, not permission to replace
+global commands. The removal inventory retains foreign commands while source,
+reservation, root and lease-purpose checks remain enforced; that exception
+cannot authorize publication.
 
 An unavailable source on an unowned legacy installation is reported without
 breaking its existing command. An explicit install can still use the canonical

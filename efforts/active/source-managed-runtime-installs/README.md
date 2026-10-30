@@ -1478,4 +1478,28 @@ the Windows host, so native POSIX qualification remains open. Installer,
 documentation, headless, size and lint guards pass; no hosted suite or installed
 adoption result is inferred from this bounded repair.
 
+The bootstrap guard failures tracked by #9699 came from administrator-trusted
+fixture links, not a missing enforcement flag. Restricted same-user creation
+now retains the original guard/physical-path assertions and restores thread
+identity on failure. The complete local bootstrap packet passes 36 tests with
+9 legitimate skips (7 POSIX-only, 2 file-symlink prerequisites); native POSIX
+and those unprivileged file-symlink effects are not credited. Updated resident
+fixture controls pass 28 tests with the 2 hosted acceptance cases deselected,
+including real Manager subscriber transfer and incumbent log retention.
+Whole-suite normal/repair qualification and installed adoption remain open.
+
+The Codespaces candidate now starts the selected process independently of a
+running task, advertises passive readiness separately from serving work, and
+holds native work custody through cleanup. Independent review caught a lost
+lease-less predecessor exclusion across passive restarts; its durable native
+birth record and genuine lease-less restart/supersession controls resolve that
+named finding. The owner packet passes 165 tests with 1 skip, coordinator
+verification passes 8 new barrier controls, and native state-preserving removal
+passes 45 selected tests. Shared teardown validation now preserves foreign
+commands without granting publication, and native installer diagnostics retain
+stderr framing and line endings. The lifecycle packet records 88 passing cases
+and 18 platform skips; its two fixture-omission failures pass after restoring
+the actual removal function. Exact-head installed-suite qualification, not an
+aggregate component count, remains the next acceptance gate.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

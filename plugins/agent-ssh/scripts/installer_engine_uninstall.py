@@ -290,7 +290,7 @@ def _ownership(payload: Path, plugin: str, root: Path) -> tuple[Any, Any, Any, d
         raise UninstallRefused(f"Typed installation ownership refused: {decision['probeReason']}")
     receipt = None
     try:
-        receipt = binding.publish_legacy_binding(primitive, **arguments)
+        receipt = binding.publish_legacy_binding(primitive, operation="teardown", **arguments)
     except binding.SourceProvenanceUnavailable:
         if record.get("commandBinding") is not None or record.get("commandLifecycle") is not None:
             raise UninstallRefused("Existing typed/lifecycle ownership cannot be revalidated") from None
