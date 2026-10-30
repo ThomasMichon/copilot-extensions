@@ -91,7 +91,10 @@ export function createPythonPolicy({ scriptsRoot, python, environment = process.
     const frame = JSON.stringify(payload) + "\n";
     for (const name of [...GUARDS, "hook_client.py", "hook_runtime.py", "pretool_killswitch.py",
       "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py"]) {
-      boundedFile(join(scriptsRoot, name), 131072);
+      try { boundedFile(join(scriptsRoot, name), 131072); }
+      catch (error) {
+        if (!GUARDS.includes(name) || error?.code !== "ENOENT") throw error;
+      }
     }
     let timer;
     let timedOut = false;

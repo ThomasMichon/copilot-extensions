@@ -41,6 +41,10 @@ def _pretool_recovery_fixture(tmp_path, fault):
             "import sys\nsys.stdout.write(" + repr(output) + ")\nsys.stdout.flush()\nraise SystemExit(3)\n",
             encoding="utf-8",
         )
+    elif fault == "missing-sibling-protected":
+        (scripts / "pr_supersede_guard.py").unlink()
+    elif fault == "unsafe-sibling-protected":
+        (scripts / "pr_supersede_guard.py").write_bytes(b" " * 131073)
     elif fault == "missing-policy":
         (scripts / "hook_pre_policy.py").unlink()
     elif fault == "broken-policy":
@@ -154,6 +158,13 @@ def test_pretool_manifest_component_failure_retains_protected_decision(tmp_path,
     assert result.get("permissionDecision") == decision, result
     assert "anchor" in result.get("permissionDecisionReason", "").lower(), result
     assert "statelessness_guard.py evaluation failed" in result.get("additionalContext", ""), result
+
+
+@pytest.mark.parametrize("consumer", ["powershell", "bash"])
+def test_pretool_missing_sibling_retains_confirmed_violation(tmp_path, consumer):
+    result = _run_pretool_manifest(tmp_path, consumer, "missing-sibling-protected", protected=True)
+    assert result.get("permissionDecision") == "deny", result
+    assert "personal" in result.get("permissionDecisionReason", "").lower(), result
 
 
 @pytest.mark.parametrize("consumer", ["powershell", "bash"])
