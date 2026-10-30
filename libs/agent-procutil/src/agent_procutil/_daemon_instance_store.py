@@ -170,9 +170,13 @@ def _receipt(receipt: DaemonInstanceReceipt) -> Path:
 
 
 @contextlib.contextmanager
-def _locked(receipt: DaemonInstanceReceipt, *, wait_seconds: float = 0):
+def _locked(
+    receipt: DaemonInstanceReceipt, *, wait_seconds: float = 0, nonblocking: bool = False,
+):
     record = _receipt(receipt)
-    with _file_lock(record.with_suffix(".lock"), wait_seconds=wait_seconds):
+    with _file_lock(
+        record.with_suffix(".lock"), wait_seconds=wait_seconds, nonblocking=nonblocking,
+    ):
         yield record
 
 

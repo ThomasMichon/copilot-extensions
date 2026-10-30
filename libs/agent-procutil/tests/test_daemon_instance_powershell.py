@@ -2,6 +2,7 @@
 
 import base64
 import json
+import io
 import os
 from pathlib import Path
 import shutil
@@ -158,6 +159,70 @@ def test_facade_retains_original_process_handle_and_guard_close_is_idempotent(tm
     assert set(requests[3]["receipt"]) == {"instance_id", "registry_root"}
     assert requests[4]["guard_token"] == "b" * 32
     assert set(requests[4]["receipt"]) == {"instance_id", "registry_root"}
+
+
+@pytest.mark.parametrize("kind", ["maximum-batch", "removed-paths"])
+def test_real_python_response_fragments_are_reassembled_by_powershell(tmp_path, monkeypatch, kind):
+    from agent_procutil import _daemon_instance_shell as shell
+
+    rows = (
+        [{"instance_id": f"{index:032x}", "status": "settled",
+          "reason": "finite-worker-exit-observed", "removed": []} for index in range(4096)]
+        if kind == "maximum-batch" else
+        [{"instance_id": "a" * 32, "status": "settled", "reason": "removed",
+          "removed": ["C:/fixture/" + "x" * 2048 + str(index) for index in range(256)]}]
+    )
+    response = {"ok": True, "nonce": "a" * 32, "sequence": 1, "result": rows}
+    output = io.StringIO()
+    with monkeypatch.context() as patch:
+        patch.setattr(shell.sys, "stdout", output)
+        shell._write_response(response)
+    wire = tmp_path / "response.jsonl"
+    wire.write_text(output.getvalue(), encoding="ascii")
+    assert len(output.getvalue().splitlines()) > 1
+    result = _run(
+        "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2; "
+        f". {_literal(HELPER)}; "
+        f"$reader=[IO.StringReader]::new([IO.File]::ReadAllText({_literal(wire)})); "
+        "$state=@{nonce=('a'*32);sequence=1;output=$reader}; "
+        "$clock=[Diagnostics.Stopwatch]::StartNew(); "
+        "$response=Read-DaemonInstanceResponse $state ($reader.ReadLineAsync()) $clock 5; "
+        "$response | ConvertTo-Json -Depth 6 -Compress"
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == response
+
+
+@pytest.mark.parametrize("fault", ["nonce", "sequence", "part", "missing-tail", "mixed-frame"])
+def test_powershell_fragment_reader_refuses_uncorrelated_or_partial_outcomes(tmp_path, monkeypatch, fault):
+    from agent_procutil import _daemon_instance_shell as shell
+
+    output = io.StringIO()
+    with monkeypatch.context() as patch:
+        patch.setattr(shell.sys, "stdout", output)
+        shell._write_response({"ok": True, "nonce": "a" * 32, "sequence": 1, "result": "x" * 600000})
+    frames = [json.loads(line) for line in output.getvalue().splitlines()]
+    if fault == "missing-tail":
+        frames.pop()
+    elif fault == "mixed-frame":
+        frames[1] = {"ok": True, "nonce": "a" * 32, "sequence": 1, "result": []}
+    else:
+        frames[1][fault] = "b" * 32 if fault == "nonce" else 9
+    wire = tmp_path / "response.jsonl"
+    wire.write_text("".join(json.dumps(frame) + "\n" for frame in frames), encoding="ascii")
+    result = _run(
+        "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2; "
+        f". {_literal(HELPER)}; "
+        f"$reader=[IO.StringReader]::new([IO.File]::ReadAllText({_literal(wire)})); "
+        "$state=@{nonce=('a'*32);sequence=1;output=$reader}; "
+        "$clock=[Diagnostics.Stopwatch]::StartNew(); $refusal=$null; "
+        "try { $null=Read-DaemonInstanceResponse $state ($reader.ReadLineAsync()) $clock 5 } "
+        "catch { $refusal=$_.Exception.Message }; "
+        "if (-not $refusal) { throw 'partial response was accepted' }; "
+        "[Console]::Out.WriteLine($refusal)"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Daemon instance" in result.stdout
 
 
 @pytest.mark.parametrize("kind", ["dtssh", "wsl"])

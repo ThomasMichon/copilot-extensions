@@ -153,6 +153,39 @@ sys.exit(main(packet))
     $State.broken = $false
 }
 
+function Read-DaemonInstanceResponse {
+    param([hashtable]$State, $Read, [Diagnostics.Stopwatch]$Clock, [double]$Seconds)
+    $buffer = New-Object IO.MemoryStream
+    $part = 0
+    try {
+        while ($true) {
+            Wait-DaemonInstanceTask $Read $Clock $Seconds
+            if (-not $Read.Result) { throw 'Daemon instance response ended before its outcome was confirmed.' }
+            if ($Read.Result.Length -ge 524288) { throw 'Daemon instance response exceeds its frame bound.' }
+            $response = $Read.Result | ConvertFrom-Json
+            if ($response.nonce -cne $State.nonce -or $response.sequence -cne $State.sequence) {
+                throw 'Daemon instance helper returned an uncorrelated outcome.'
+            }
+            if ($response.PSObject.Properties.Name -notcontains 'fragment') {
+                if ($part -ne 0) { throw 'Daemon instance response lost its fragment sequence.' }
+                return $response
+            }
+            if (($response.part -isnot [int] -and $response.part -isnot [long]) -or
+                $response.part -ne $part -or $response.last -isnot [bool] -or
+                $response.fragment -isnot [string] -or -not $response.fragment) {
+                throw 'Daemon instance helper returned an invalid response fragment.'
+            }
+            $bytes = [Convert]::FromBase64String($response.fragment)
+            $buffer.Write($bytes, 0, $bytes.Length)
+            if ($response.last) {
+                return ([Text.Encoding]::UTF8.GetString($buffer.ToArray()) | ConvertFrom-Json)
+            }
+            $part++
+            $Read = $State.output.ReadLineAsync()
+        }
+    } finally { $buffer.Dispose() }
+}
+
 function Invoke-DaemonInstanceRequest {
     param([Parameter(Mandatory)][hashtable]$Request)
     $gate = [string]::Intern('copilot-daemon-instance-shell-v1')
@@ -198,9 +231,7 @@ function Invoke-DaemonInstanceRequest {
             if ($encoded.Length -ge 524288) { throw 'Daemon instance request exceeds its frame bound.' }
             $read = $state.output.ReadLineAsync()
             Wait-DaemonInstanceTask ($state.input.WriteLineAsync($encoded)) $clock $seconds
-            Wait-DaemonInstanceTask $read $clock $seconds
-            if (-not $read.Result) { throw 'Daemon instance response ended before its outcome was confirmed.' }
-            $response = $read.Result | ConvertFrom-Json
+            $response = Read-DaemonInstanceResponse $state $read $clock $seconds
             if ($response.nonce -cne $state.nonce -or $response.sequence -cne $state.sequence -or
                 $response.ok -isnot [bool]) {
                 throw 'Daemon instance helper returned an uncorrelated outcome.'

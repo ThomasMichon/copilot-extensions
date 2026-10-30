@@ -63,11 +63,20 @@ def _spec(parameters: dict, environment: dict, *, admission: bool) -> DaemonInst
     ttl, maximum = parameters.get("ttl", 0), parameters.get("maximum", 0)
     if type(ttl) not in (int, float) or type(maximum) not in (int, float):
         raise ValueError("daemon lease limits must be numeric")
-    lease = DaemonLeasePolicy(ttl, maximum) if ttl or maximum else None
+    if purpose not in ("production", "unattended-test", "interactive-test"):
+        raise ValueError("daemon purpose must be explicit")
     root = parameters.get("registry_root")
+    owner = None
+    context = store._test_context(environment)
+    if context is not None:
+        if purpose == "interactive-test" and context["purpose"] != "interactive-test":
+            raise ValueError("interactive daemon requires a pause-tolerant lifecycle owner")
+        purpose, owner, root = context["purpose"], context["owner"], context["registry_root"]
+        ttl, maximum = float(context["ttl"]), float(context["max_lifetime"])
+    lease = DaemonLeasePolicy(ttl, maximum) if ttl or maximum else None
     return DaemonInstanceSpec(
         parameters["service"], Path(parameters["runtime_root"]), Path(parameters["source"]),
-        purpose=purpose, registry_root=Path(root) if root else None, lease=lease,
+        purpose=purpose, owner=owner, registry_root=Path(root) if root else None, lease=lease,
     )
 
 
@@ -222,7 +231,7 @@ class ShellInstanceSession:
                 self.owner.retire()
                 return
             try:
-                with store._locked(receipt) as path:
+                with store._locked(receipt, nonblocking=True) as path:
                     record = store._read(path)
                     if not self.owner.identity.matches(record) or record["state"] != "running":
                         raise ValueError("daemon monitor instance identity changed")
@@ -237,6 +246,28 @@ class ShellInstanceSession:
                 self.owner.retire()
         finally:
             self._guard_lock.release()
+
+
+def _write_response(response: dict) -> None:
+    encoded = json.dumps(response, ensure_ascii=True)
+    if len(encoded) + 1 <= _MAX_FRAME:
+        sys.stdout.write(encoded + "\n")
+        sys.stdout.flush()
+        return
+    # Keep every outcome even when a supported reconciliation batch is large.
+    size = _MAX_FRAME // 2
+    for part, offset in enumerate(range(0, len(encoded), size)):
+        chunk = encoded[offset:offset + size].encode("ascii")
+        frame = {
+            "nonce": response["nonce"], "sequence": response["sequence"],
+            "part": part, "last": offset + size >= len(encoded),
+            "fragment": base64.b64encode(chunk).decode("ascii"),
+        }
+        wire = json.dumps(frame, ensure_ascii=True)
+        if len(wire) + 1 > _MAX_FRAME:
+            raise ValueError("instance shell fragment exceeds its frame bound")
+        sys.stdout.write(wire + "\n")
+        sys.stdout.flush()
 
 
 def _serve_requests(session: ShellInstanceSession, nonce: str) -> int:
@@ -262,11 +293,7 @@ def _serve_requests(session: ShellInstanceSession, nonce: str) -> int:
         else:
             response = {"ok": True, "result": result}
         response.update(sequence=sequence, nonce=nonce)
-        encoded = json.dumps(response, ensure_ascii=True)
-        if len(encoded) > _MAX_FRAME:
-            raise ValueError("instance shell response exceeds its frame bound")
-        sys.stdout.write(encoded + "\n")
-        sys.stdout.flush()
+        _write_response(response)
 
 
 def main(request: dict) -> int:

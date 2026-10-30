@@ -27,6 +27,10 @@ requires actual exit for child completion. It does not reconstruct custody by
 reopening a reported child PID. Unknown launch outcomes retain their record.
 Missing or uncorrelated transport outcomes break the channel and refuse
 automatic replay.
+Large outcomes use ordered, nonce/request-correlated fragments within the same
+request deadline. Each frame remains bounded; supported reconciliation batches
+and removed-artifact paths are reassembled without discarding outcomes after
+the registry or cursor has changed.
 
 An already-loaded legacy compiled instance adapter refuses this migration
 before activation. Use a fresh PowerShell process after the normal authorized
@@ -43,9 +47,17 @@ shell, while shell loss retires the helper in the kernel.
 Closing the final admission guard marks its record finished and stops lease
 observation, but does not release that process-lifetime Job. Renewable deadlines
 cannot move the original observer-local monotonic hard bound, including during
-busy-record inspection. Production still has no expiry and is not assigned the
-disposable shell Job. Reconciliation retains the original shell's self-cleanup
+busy-record inspection. The observer never waits on the process-local record
+mutex, so another operation cannot suspend its periodic hard-bound check.
+Containment extends only the original shell's supplied Job scope chain, not
+the helper's private Job metadata. Production still has no expiry and is not
+assigned the disposable shell Job. Reconciliation retains the original shell's self-cleanup
 refusal, shared cursor/byte-range locks and exact-file ownership checks.
+
+An authenticated test lifecycle declaration supplies the effective purpose,
+owner, registry and lease before spec validation. An explicit interactive-test
+request still refuses an unattended lifecycle owner rather than substituting a
+shorter policy.
 
 Portable transaction/ABI-call doubles and PowerShell facade controls are
 distinct from actual Windows process/Job and desktop qualification. The retained

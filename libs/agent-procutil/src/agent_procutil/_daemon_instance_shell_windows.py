@@ -95,9 +95,8 @@ class ShellProcessOwner:
                 raise RuntimeError("disposable shell Job scope publication is unconfirmed")
             return self.scopes
         name = _job_scopes.new_name()
-        scopes = _job_scopes.child_environment(environment, append=name)[
-            _job_scopes.ENVIRONMENT_KEY
-        ]
+        scopes = ";".join((*_job_scopes.scope_names(environment), name))
+        _job_scopes.scope_names({_job_scopes.ENVIRONMENT_KEY: scopes})
         handle = self.kernel.CreateJobObjectW(None, name)
         _check(handle)
         owned = JobHandle(handle, name=name)

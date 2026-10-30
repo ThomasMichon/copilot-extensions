@@ -3139,7 +3139,7 @@
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_child.py": "081933f7f8512827ff9fe0800a3bf226b0d4a757114e9b7060b63081b5aea644",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_identity.py": "2a45a4d16a5990a3ed1e0fe85fa92f598304aa1a2c6d3999fc7c30a70d0a9c31",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py": "cefaa53b33187c2ee4cacc3e1179116fbe03e182b43b73f1d87152205a522942",
-        "libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py": "200d745d6bd5d37c1251b3f0e6cafc3deeeaa82a7d44ffd6bacf1c2575d44c9b",
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py": "21b2b3ae585587915ba0d7358a7a32b0110d1420d6b58e1dd8411e540ad03014",
         "libs/agent-procutil/src/agent_procutil/_darwin_caller_owned.py": "4dfafcc9944e429d3c1c83525d30379c2f02473d12c4031433cf7fe4f6906974",
         "libs/agent-procutil/src/agent_procutil/_interpreter.py": "0fe387814f80638c27f4d12c7bb1c2122abaeb2b4c71b75402d471e3940f92c7",
         "libs/agent-procutil/src/agent_procutil/_linux_pidfd.py": "cfb80912e44db7f98efe911ad57dd38f0fa5eb5a28e4e7b91da8206431871560",
@@ -3482,8 +3482,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/projects_registry.py": "665579af2edf5e67fbdf44ff12dc990a41f0d98cd9008344a3401d7a63558c66",
         "plugins/agent-worktrees/src/agent_worktrees/strict_yaml.py": "98c2abc729a4544129c8fc60d723aa45fb4b49142c7194b21f41e0e84ef018d3",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_records.py": "722d48c76e5a9ac285f09868bd83291ba448fa1aa8a66c8e7854e9354e4fe4d4",
-        "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "1026faf3874c170a1299b54307b9a7c5d1b924410abdcf299b5fa0bdd721e60c",
-        "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "a825d8bbb01952d46f49877e16ea88f8361e13cba449083c51469f0a04193d73"
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "e8a7e27c1e80d04b175d0ee782fc7f790b50ecc30cf18ef4f0cb2bf782c1fb88",
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",

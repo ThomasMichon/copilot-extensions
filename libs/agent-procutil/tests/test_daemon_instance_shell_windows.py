@@ -110,6 +110,37 @@ def test_disposable_job_assigns_retained_shell_and_stays_until_owner_close(api):
     assert api.CloseHandle.call_args_list == [((71,),), ((41,),)]
 
 
+@pytest.mark.parametrize("inherited", [0, 63])
+def test_shell_scope_chain_excludes_helpers_private_job(api, monkeypatch, inherited):
+    key = native._job_scopes.ENVIRONMENT_KEY
+    scopes = [f"Local\\ce-owned-job-{index:032x}" for index in range(inherited)]
+    helper = "Local\\ce-owned-job-" + "e" * 32
+    shell_scope = "Local\\ce-owned-job-" + "f" * 32
+    monkeypatch.setenv(key, ";".join([*scopes, helper]))
+    monkeypatch.setattr(native._job_scopes, "new_name", lambda: shell_scope)
+    owner = native.ShellProcessOwner(ProcessIdentity(4200, "windows:123"), 51)
+    try:
+        environment = {key: ";".join(scopes)} if scopes else {}
+        result = owner.contain(environment)
+        assert result.split(";") == [*scopes, shell_scope]
+        assert helper not in result.split(";")
+    finally:
+        owner.close()
+
+
+@pytest.mark.parametrize("value", ["not-a-job", ";".join(
+    f"Local\\ce-owned-job-{index:032x}" for index in range(64)
+)])
+def test_invalid_or_full_original_scope_chain_refuses_before_native_job(api, value):
+    owner = native.ShellProcessOwner(ProcessIdentity(4200, "windows:123"), 51)
+    try:
+        with pytest.raises(ValueError, match="Job scope metadata"):
+            owner.contain({native._job_scopes.ENVIRONMENT_KEY: value})
+        api.CreateJobObjectW.assert_not_called()
+    finally:
+        owner.close()
+
+
 def test_job_setup_failure_refuses_without_returning_a_lifetime(api):
     owner = native.ShellProcessOwner(ProcessIdentity(4200, "windows:123"), 51)
     api.AssignProcessToJobObject.return_value = False
