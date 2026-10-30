@@ -139,8 +139,29 @@ propagate without fallback or rewrapping; diagnostics retain only the exception
 type, not its body. Reporting adds no read, parse, probe, replay or result cache,
 and an original completed decision does not make these reports reusable.
 
-Control-plane PR discovery and execution-machine discovery still have opaque
-boundaries. Non-default committed parser callbacks likewise lack parser coverage.
+Control-plane PR observations describe the original Python decision in
+`config._control_plane_related_pr_map()`, not complete acquisition of its
+discovery, config-source selection, graft or reader inputs. The no-control-plane
+and empty-anchor paths can complete that decision without certifying the child
+inputs. Originally caught inner discovery errors retain the anchor fallback;
+outer caught errors still return `{}`. Their observations retain only the
+exception type, never its body. An uncertain inner outcome remains visible when
+the fallback supplies usable PR blocks, and delegated `config-owner` coverage
+stays indeterminate even when the original decision completes.
+
+The `load_config` consumer qualifies the exact callback selected at the original
+late call site. Same-globals wrappers, nested calls to originals and
+self-restoring replacements cannot borrow original completion for their returned
+value. The config-source callee remains bound before the nested
+`load_project_config` argument executes. PR filtering and `entry.pr` object
+identity, repeated `local_path()` calls, callback order and fallback values are
+unchanged. Reporting adds no read, parse, probe, replay or cache. Disabling
+control-plane PR loading skips this decision; a config-cache hit neither replays
+it nor manufactures acquisition observations. All reports remain `reusable=False`;
+owner completion does not certify a stable input frontier or reusable data.
+
+Execution-machine discovery and unresolved child acquisition frontiers remain
+opaque. Non-default committed parser callbacks likewise lack parser coverage.
 A valid `Config` or mapping does not certify those owners. Fatal loads propagate
 their original exceptions, never a success-shaped report. These observations are
 not stable input witnesses.

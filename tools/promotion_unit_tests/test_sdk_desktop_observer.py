@@ -857,7 +857,10 @@ def test_closed_child_before_ready_preserves_literal_error_without_waiting():
 
 
 @pytest.fixture
-def probe_failure_fixture(monkeypatch, tmp_path):
+def probe_failure_fixture(monkeypatch, tmp_path, request):
+    if hasattr(request, "param"):
+        epoch = request.param
+        monkeypatch.setattr(sys.modules[__name__], "time", SimpleNamespace(monotonic=lambda: epoch))
     events = []
     active = []
     failure = {"stage": ""}
@@ -913,7 +916,7 @@ def probe_failure_fixture(monkeypatch, tmp_path):
             return {"violations": [], "passed": True}
 
         def raw(self, kind, hwnd):
-            return [{"kind": kind, "hwnd": hwnd, "received": time.monotonic(), "generated_ms": 101}]
+            return [{"kind": kind, "hwnd": hwnd, "received": observer.time.monotonic(), "generated_ms": 101}]
 
     class FixtureChild:
         def __init__(self, _api, argv, request, directory, name, evidence=None):
@@ -945,7 +948,7 @@ def probe_failure_fixture(monkeypatch, tmp_path):
                 api.visible = False
             if failure["stage"] == self.name + "-send":
                 raise observer.ObservationBlocked("injected command")
-            return time.monotonic(), 100
+            return observer.time.monotonic(), 100
 
         def line(self):
             if failure["stage"] == "canary-response":
@@ -989,9 +992,9 @@ def probe_failure_fixture(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "validate_calibration", lambda *args: None)
     monkeypatch.setattr(runner, "verify_native_junit", lambda *args: {})
     monkeypatch.setattr(runner, "wait_for", lambda predicate, *args: predicate())
-    # Avoid real sleeps without changing the observation module's deterministic clock.
-    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=time.monotonic, sleep=lambda _: None))
-    request = {"nonce": "a" * 32, "deadline": time.monotonic() + 10,
+    # Keep probe deadlines and evidence in the observation clock's epoch.
+    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=observer.time.monotonic, sleep=lambda _: None))
+    request = {"nonce": "a" * 32, "deadline": observer.time.monotonic() + 10,
                "output": str(tmp_path / "output"), "python": "python",
                "sdk_root": str(tmp_path / "sdk"), "sources": [], "visible_controls": 1,
                "case_packets": case_packets(tmp_path / "sdk")}
@@ -1062,6 +1065,16 @@ def test_incomplete_control_cleanup_and_restoration_precede_calibration_seal(pro
         runner.probe(request, True)
     assert events.index("canary-close") < events.index("restore") < events.index("calibration-seal")
     assert "quiet-sdk-enter" not in events
+
+
+@pytest.mark.parametrize("probe_failure_fixture", [0.0, 1_000_000.0], indirect=True,
+                         ids=["early-host-epoch", "late-host-epoch"])
+def test_control_cleanup_deadline_uses_observer_epoch_not_host_clock(probe_failure_fixture):
+    request, events, failure, *_ = probe_failure_fixture
+    failure["stage"] = "canary-response"
+    with pytest.raises(observer.ObservationBlocked, match="injected visible response"):
+        runner.probe(request, True)
+    assert events.index("canary-close") < events.index("restore") < events.index("calibration-seal")
 
 
 def test_control_restoration_still_occurs_inside_capture_when_child_cleanup_fails(probe_failure_fixture):
