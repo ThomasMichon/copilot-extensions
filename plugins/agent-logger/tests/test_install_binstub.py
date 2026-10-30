@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ import subprocess
 import sys
 import sysconfig
 import venv
+import zipfile
 from importlib import metadata
 from pathlib import Path
 
@@ -82,6 +84,8 @@ if args[:2] == ['cache', 'dir']:
     raise SystemExit(0)
 if args[:1] == ['build']:
     assert '--offline' in args and '--no-build-isolation' in args
+    with (fixture / 'installs.jsonl').open('a') as log:
+        log.write(json.dumps(args) + '\\n')
     result = subprocess.run(
         [{native_uv!r}, *args], check=False,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
@@ -117,6 +121,7 @@ if args[:1] == ['venv']:
         venv.EnvBuilder(with_pip=False, symlinks=False).create(target)
     raise SystemExit(0)
 assert args[:2] == ['pip', 'install'], args
+assert '--no-editable' not in args and '--editable' not in args
 if '--show-settings' in args:
     assert not any(a == '--quiet' or re.fullmatch('-q+', a) for a in args)
     print('''PipInstallSettings {{ settings: PipSettings {{
@@ -175,22 +180,29 @@ prerequisites = [
 if prerequisites:
     assert '--quiet' in args or '--only-binary' in args
     for name in prerequisites:
-        shutil.copytree(fixture / name, site, dirs_exist_ok=True)
+        shutil.copytree(fixture / name, site, dirs_exist_ok=True, copy_function=shutil.copyfile)
 else:
     sources = [Path(a) for a in args if (Path(a) / 'pyproject.toml').is_file()]
     wheels = []
     for argument in args:
         url = urllib.parse.urlsplit(argument.split(' @ ', 1)[-1])
         if url.scheme == 'file' and url.path.endswith('.whl'):
+            assert url.netloc in ('', 'localhost')
             wheel = Path(urllib.request.url2pathname(url.path))
             assert wheel.resolve().is_relative_to(root.resolve())
-            assert url.fragment == 'sha256=' + hashlib.sha256(wheel.read_bytes()).hexdigest()
-            wheels.append(wheel)
-    for wheel in wheels:
+            digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+            assert url.fragment == 'sha256=' + digest
+            wheels.append((wheel, url.geturl(), digest))
+    for wheel, url, digest in wheels:
         with zipfile.ZipFile(wheel) as archive:
             assert all(not Path(name).is_absolute() and '..' not in Path(name).parts
+                       and chr(92) not in name and ':' not in name
                        for name in archive.namelist())
+            metadata = [name for name in archive.namelist() if name.endswith('.dist-info/METADATA')]
+            assert len(metadata) == 1
             archive.extractall(site)
+        origin = site / Path(metadata[0]).parent / 'direct_url.json'
+        origin.write_text(json.dumps(dict(url=url, archive_info=dict(hashes=dict(sha256=digest)))))
     names = {{tomllib.loads((p / 'pyproject.toml').read_text())['project']['name'] for p in sources}}
     if wheels:
         assert not sources
@@ -444,6 +456,64 @@ def test_release_payload_materializes_activation_closure(tmp_path: Path) -> None
     assert (driver / "src/update_driver/first_use.py").is_file()
     assert (driver / "scripts/first-use.ps1").is_file()
     assert (driver / "scripts/first-use.sh").is_file()
+
+
+@pytest.mark.guard
+def test_offline_uv_records_archive_origin_and_rejects_editable(tmp_path: Path) -> None:
+    env = _isolated_install_env(tmp_path / "home")
+    _offline_uv(tmp_path, env)
+    uv = shutil.which("uv", path=env["PATH"])
+    assert uv is not None
+    runtime = tmp_path / "runtime"
+    venv.EnvBuilder(with_pip=False, symlinks=False).create(runtime)
+    python = runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    wheel = tmp_path / "fixture-1.0-py3-none-any.whl"
+    files = {
+        "fixture-1.0.dist-info/METADATA": b"Metadata-Version: 2.1\nName: fixture\nVersion: 1.0\n",
+        "fixture-1.0.dist-info/WHEEL": (
+            b"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+        ),
+        "fixture.py": b"VALUE = 1\n",
+    }
+    with zipfile.ZipFile(wheel, "w") as archive:
+        records = []
+        for name, content in files.items():
+            archive.writestr(name, content)
+            content_hash = base64.urlsafe_b64encode(
+                hashlib.sha256(content).digest(),
+            ).rstrip(b"=").decode()
+            records.append(f"{name},sha256={content_hash},{len(content)}")
+        records.append("fixture-1.0.dist-info/RECORD,,")
+        archive.writestr(
+            "fixture-1.0.dist-info/RECORD", "\n".join(records) + "\n",
+        )
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    url = wheel.as_uri() + "#sha256=" + digest
+    command = [
+        uv, "pip", "install", "--python", str(python), "--reinstall",
+        "--exclude-newer", "2000-01-01T00:00:00Z", "fixture @ " + url,
+    ]
+    options = dict(
+        env=env, capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    installed = subprocess.run(command, **options)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    observed = subprocess.run(
+        [
+            str(python), "-I", "-c",
+            "import importlib.metadata; print(importlib.metadata.distribution('fixture')"
+            ".read_text('direct_url.json'))",
+        ],
+        **options,
+    )
+    assert observed.returncode == 0, observed.stdout + observed.stderr
+    assert json.loads(observed.stdout) == {
+        "url": url, "archive_info": {"hashes": {"sha256": digest}},
+    }
+    for unsupported in ("--no-editable", "--editable"):
+        refused = subprocess.run([*command, unsupported], **options)
+        assert refused.returncode != 0
 
 
 @pytest.mark.guard
@@ -826,8 +896,9 @@ def test_provision_publishes_durable_compatibility_wrappers(
 # 2026-10-04): same class as `test_provision_publishes_durable_compatibility_
 # wrappers` above -- two sequential subprocess.run calls (timeout=60,
 # timeout=420) mean a worst case near 480s, well past the 30s blanket
-# pytest-timeout default. Real headroom above the combined internal ceiling.
-@pytest.mark.timeout(520)
+# pytest-timeout default. Complete release and real build-tool staging also
+# precede those calls; neither subprocess ceiling includes fixture setup.
+@pytest.mark.timeout(720)
 def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -> None:
     payload = _stage_release_payload(tmp_path)
     home = tmp_path / "home"
@@ -905,23 +976,35 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     shutil.rmtree(tmp_path / "plugins")
     shutil.rmtree(tmp_path / "libs")
 
-    provision = subprocess.run(
-        invoke,
-        env=env,
-        cwd=snapshot,
-        capture_output=True,
-        text=True,
-        timeout=420,
-        check=False,
-    )
-    driver = home / ".copilot-extensions" / "update-driver"
-    diagnostics = "\n".join(
-        f"{path.name}:\n{path.read_text(errors='replace')[-16000:]}"
-        for path in driver.rglob("*.log") if path.is_file()
-    )
-    assert provision.returncode == 0, provision.stdout + provision.stderr + diagnostics
-    assert f"agent-logger {version}" in provision.stdout
+    output = tmp_path / "first-use.stdout"
+    errors = tmp_path / "first-use.stderr"
+    timeout_error = None
+    with output.open("w", encoding="utf-8") as stdout, errors.open("w", encoding="utf-8") as stderr:
+        try:
+            provision = subprocess.run(
+                invoke,
+                env=env,
+                cwd=snapshot,
+                stdout=stdout,
+                stderr=stderr,
+                timeout=420,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            provision = None
+            timeout_error = str(error)
+    observed_output = output.read_text(encoding="utf-8", errors="replace")
+    observed_errors = errors.read_text(encoding="utf-8", errors="replace")
+    if provision is None or provision.returncode != 0:
+        driver = home / ".copilot-extensions" / "update-driver"
+        diagnostics = "\n".join(
+            f"{path.name}:\n{path.read_text(errors='replace')[-16000:]}"
+            for path in driver.rglob("*.log") if path.is_file()
+        )
+        pytest.fail(f"{timeout_error or ''}\n{observed_output}{observed_errors}{diagnostics}")
+    assert f"agent-logger {version}" in observed_output
     assert calls.is_file()
+    assert any(json.loads(line)[:1] == ["build"] for line in calls.read_text().splitlines())
     _assert_complete_runtime(home)
     manifest = json.loads((home / ".agent-logger" / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
     assert manifest["commandLifecycle"]["owner"]["pluginId"] == "agent-logger"
