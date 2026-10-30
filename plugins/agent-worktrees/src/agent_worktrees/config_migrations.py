@@ -169,6 +169,9 @@ def migrate_loaded(doc: dict[str, Any], schema_id: str) -> dict[str, Any]:
     return new_doc
 
 
+_ORIGINAL_MIGRATE_LOADED = migrate_loaded
+
+
 def summarize(results: list[Any]) -> str:
     """One-line-per-file human summary for the CLI/installer."""
     if not results:

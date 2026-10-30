@@ -3089,7 +3089,23 @@
         "tools/promotion_unit_tests/test_related_acquisition.py::test_report_wrappers_retain_missing_owner_uncertainty_without_replay[registry-partial]",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_report_wrappers_retain_missing_owner_uncertainty_without_replay[base-empty]",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_report_wrappers_retain_missing_owner_uncertainty_without_replay[base-populated]",
-        "tools/promotion_unit_tests/test_related_acquisition.py::test_report_wrappers_retain_missing_owner_uncertainty_without_replay[base-partial]"
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_report_wrappers_retain_missing_owner_uncertainty_without_replay[base-partial]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_owner_retains_original_acquisition_outcomes[empty-document]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_owner_retains_original_acquisition_outcomes[empty-mapping]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_owner_retains_original_acquisition_outcomes[populated]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_owner_retains_original_acquisition_outcomes[negative-exists]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_owner_retains_original_acquisition_outcomes[read-error]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_owner_retains_original_acquisition_outcomes[malformed]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_owner_retains_original_acquisition_outcomes[invalid-shape]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_owner_retains_original_acquisition_outcomes[migration-unavailable]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_owner_retains_original_acquisition_outcomes[migration-error]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_adoption_defaults_keep_original_order_and_replacement_opacity[repository-first]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_adoption_defaults_keep_original_order_and_replacement_opacity[projects-fallback]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_adoption_defaults_keep_original_order_and_replacement_opacity[repository-failure]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_adoption_defaults_keep_original_order_and_replacement_opacity[opaque-reader]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_callbacks_bind_actual_callable_identity_and_selection[same-globals-migration]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_callbacks_bind_actual_callable_identity_and_selection[self-restoring-loader]",
+        "tools/promotion_unit_tests/test_related_acquisition.py::test_projects_callbacks_bind_actual_callable_identity_and_selection[read-time-swap]"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3444,20 +3460,23 @@
         "plugins/agent-machines/tests/test_cell_installer.py": "de004be5b70e1d4bed4945e766f393c167db0682979853eba4fa40814e01bf14",
         "plugins/agent-machines/scripts/cell_installer.py": "041a28230551d926c65ff00866213f5944ff5d1e0596c75e37ffa8cd0af64795",
         "libs/versioned-runtime/versioned_runtime_construction.py": "df703e23675c232079f28c74eb85977b3460aef252e2bb2079bbf9081ad1480d",
-        "tools/promotion_unit_tests/test_related_acquisition.py": "d65c3a4b1a67e0853df0403c81159f78cc272df569f75b1adbe45281dcaa3885",
+        "tools/promotion_unit_tests/test_related_acquisition.py": "963b22612054dda04592f32de9623ad0fbc8aecae258c6da02202bd3c6e3bac6",
         "plugins/agent-worktrees/src/agent_worktrees/acquisition_report.py": "a83793221939d9744aa1be72c839bf631d279cee1fc2bb67601ca8fe68c8deed",
         "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py": "085a6a6745c793e781dbf8db9c56c14c140e0f379550af8fd3d34b32770139c9",
-        "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "944a43427c2596c772b06b074429a63e649739dbfd65929fb695ad58c8ebe87e",
+        "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "bc12ee79529480fe03852c84bd4e8e7c6687087e9ddb5f880169b6f9ca6e2bb4",
         "plugins/agent-worktrees/src/agent_worktrees/machine_config.py": "5b5d263e95ccb49725e25d1eaa3b529df5f37050fffd14f16160fc3d5798ea33",
         "plugins/agent-worktrees/src/agent_worktrees/source_probes.py": "6d3a171db77782d50137e61ede48df22bab040eb0f5c3c18391675a11306a9a8",
         "plugins/agent-worktrees/src/agent_worktrees/state_root.py": "c885e37c248086b63ba2822453c11c45be758437e71682f57e11d2c017ccf215",
         "plugins/agent-worktrees/src/agent_worktrees/config_sources.py": "af6f2d7632d492635cb1ba5f7085de2066a2a3e50fd81f7c7b3f6a466e07e637",
         "plugins/agent-worktrees/src/agent_worktrees/inrepo_config_source.py": "2385210a728f529d107e321c3d4fb41edc4968937d3d32f32ae2b9c62576fb27",
-        "plugins/agent-worktrees/src/agent_worktrees/config.py": "d6dd6e9cf9d24657d95ab8b2e75ce3a45dd1773a9c486a68b16548e8fefa38aa",
+        "plugins/agent-worktrees/src/agent_worktrees/config.py": "59dd7bc3d2673aa76136062b779995f349e3b7451f0fa3af0de7df7a3d8ee938",
         "plugins/agent-worktrees/src/agent_worktrees/repos_registry_transaction.py": "5c761e347aa55d8345902679929761696bae29aa6eb5411ac5f13af3c3f6adf5",
         "plugins/agent-worktrees/src/agent_worktrees/repos_configuration_sources.py": "11d2f57beac5d2b734971b06491ba2852c85fc9d0dcb01c44d0946f681bc910e",
         "plugins/agent-worktrees/src/agent_worktrees/repos_registry_reader.py": "5264a28fbe56b7aa3a134409a481f8f9e29f6d94fa391b05a7f28d4afb8970df",
-        "plugins/agent-worktrees/src/agent_worktrees/config_migrations.py": "23475e8f6e7ef32340ad44c2a067191357393ec5df25d130ea957f9e14f25877"
+        "plugins/agent-worktrees/src/agent_worktrees/config_migrations.py": "bbd221022396cda6d02a6c6afbe4e73803a2277d8c3e6fb35eff547937c1e445",
+        "plugins/agent-worktrees/src/agent_worktrees/config_adoption_defaults.py": "c0d49f245fbe1615f064746d7d145066f00ea34414315cc2863298eac82278ea",
+        "plugins/agent-worktrees/src/agent_worktrees/projects_registry.py": "665579af2edf5e67fbdf44ff12dc990a41f0d98cd9008344a3401d7a63558c66",
+        "plugins/agent-worktrees/src/agent_worktrees/strict_yaml.py": "98c2abc729a4544129c8fc60d723aa45fb4b49142c7194b21f41e0e84ef018d3"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",
@@ -3627,7 +3646,10 @@
         "plugins/agent-worktrees/src/agent_worktrees/repos_registry_transaction.py",
         "plugins/agent-worktrees/src/agent_worktrees/repos_configuration_sources.py",
         "plugins/agent-worktrees/src/agent_worktrees/repos_registry_reader.py",
-        "plugins/agent-worktrees/src/agent_worktrees/config_migrations.py"
+        "plugins/agent-worktrees/src/agent_worktrees/config_migrations.py",
+        "plugins/agent-worktrees/src/agent_worktrees/config_adoption_defaults.py",
+        "plugins/agent-worktrees/src/agent_worktrees/projects_registry.py",
+        "plugins/agent-worktrees/src/agent_worktrees/strict_yaml.py"
     ],
     "max_seconds": 300
 }
