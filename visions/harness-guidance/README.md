@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-29
+- **Last revised:** 2026-10-30
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -126,6 +126,21 @@ memoized away. Optional discovery should not dominate the essential event path.
 
 An operator should be able to carry personal policy across target repositories
 without copying it into each repository or erasing repository-owned overrides.
+
+### configurable-attribution-signatures
+
+AI disclosure should have one authoritative policy owner. An adopting harness
+should express its attribution goals through configuration of that owner,
+rather than another decision matrix or competing signature convention.
+
+Sparse circumstance-based configuration should select header and footer
+signatures with useful defaults and trusted personal overrides. Templates and
+interpolation should remain data. Lightly formatted session guidance should
+help an agent choose and adapt the appropriate marker; an optional programmatic
+consumer should use the same effective configuration and avoid duplicate
+markers. Neither presentation path should invent human review, waive a required
+disclosure, authorize publication or change an already approved or published
+item.
 
 ### maintenance-aware-tool-unavailability
 
