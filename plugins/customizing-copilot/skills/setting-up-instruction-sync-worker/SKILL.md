@@ -3,8 +3,8 @@ name: setting-up-instruction-sync-worker
 description: >
   Scaffold the `projection-reflect` deterministic sync worker for a repo that
   wants its enabled plugins' static instruction-projection content kept
-  current automatically, instead of only at the next session's proactive
-  resync. Requires the adopting repo's own explicit, committed opt-in before
+  current periodically for offline recovery, independently of startup copies.
+  Requires the adopting repo's own explicit, committed opt-in before
   scaffolding the scheduler, bypass profile, or reconciler agent -- never
   merely an operator request in the current session. (The `.gitignore`
   local-cache convention is the one exception -- see its own section below.)
@@ -24,10 +24,12 @@ description: >
 
 Scaffolds `projection-reflect` (`efforts/2026/10/02
 ambient-guidance-navigability` Phase 2) for a repo that wants its own scheduled, non-agentic worker to keep
-enabled plugins' checked-in static instruction projections current, closing
-the sync-freshness gap the immediate/proactive resync trigger
-(`copilot-extensions-harness:cross-repo-debug-tracking`) only covers when a
-session happens to be active.
+enabled plugins' checked-in offline fallbacks current periodically.
+Creation/startup already copies current enabled templates; this worker maintains
+the separate recovery path, not a per-launch prerequisite. Full fallback bodies
+remain ordinary non-discovered `.md` files, with thin automatic recovery locators.
+The owning delivery pattern and its provider-first upgrade/rollback window are
+in `docs/patterns/worktree-scoped-dynamic-guidance.md`.
 
 This skill is a **scaffolder**, not a turnkey installer: the scheduler
 mechanism (a systemd timer, a scheduled GitHub Action, a cron entry) and the

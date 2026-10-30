@@ -768,8 +768,8 @@ def _load_specs(
                 delivery_mode = entry.get("deliveryMode", "inline")
                 if not isinstance(delivery_mode, str) or delivery_mode not in {"inline", "selector"}:
                     raise ValueError("deliveryMode must be inline or selector")
-                if skip_local_cache and delivery_mode == "selector":
-                    raise ValueError("a cache-free control kernel must remain inline")
+                # Legacy declarations remain readable, but new full fallbacks are never inline.
+                delivery_mode = "selector"
                 template_path = _safe_existing_file(payload_root, template_rel)
                 template_raw = _canonical_template_bytes(
                     _read_bounded_regular(template_path, template_limit)

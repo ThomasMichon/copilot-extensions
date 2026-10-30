@@ -149,12 +149,12 @@ def test_over_budget_sync_reports_audit_debt_without_repeat_prs(
             body="x" * 2700 + "\n",
             apply_to=f"policy-{index}/**",
         )[1]
-        for index in range(4)
+        for index in range(10)
     ]
     first = worker.run_sync_pass(
         repo, sources, trusted_marketplaces=["copilot-extensions"],
     )
-    assert len(first.changed) == 4
+    assert len(first.changed) == 20
     assert first.bypass_eligible
     assert not first.needs_conflict_dispatch
     assert first.audit_warnings
@@ -272,7 +272,12 @@ def test_disabled_plugin_projection_is_never_touched_even_if_payload_changed(
         repo / ".github" / "instructions" / "policy" / "fallback.instructions.md"
     )
     synced_content = destination.read_bytes()
-    assert b"Original body." in synced_content
+    fallback = repo / projections.delivery.fallback_destination(
+        destination.relative_to(repo).as_posix()
+    )
+    synced_fallback = fallback.read_bytes()
+    assert b"Original body." in synced_fallback
+    assert b"Original body." not in synced_content
 
     # Simulate the installed payload changing after the plugin is disabled --
     # the template on disk now says something different, but this source is
@@ -293,6 +298,7 @@ def test_disabled_plugin_projection_is_never_touched_even_if_payload_changed(
     # The checked-in destination is untouched: still the original content,
     # never regenerated with the changed-but-now-unreferenced payload.
     assert destination.read_bytes() == synced_content
+    assert fallback.read_bytes() == synced_fallback
     assert b"Changed body." not in destination.read_bytes()
 
 

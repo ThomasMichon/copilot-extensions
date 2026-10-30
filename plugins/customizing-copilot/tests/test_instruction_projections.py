@@ -6,6 +6,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,7 +20,7 @@ _SCRIPTS = (
 )
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
-import instruction_projections as projections
+import instruction_projections as projections  # noqa: E402
 
 _SCANNER_PATH = _SCRIPTS / "scan-customizations.py"
 _scanner_spec = importlib.util.spec_from_file_location(
@@ -42,6 +43,8 @@ REPO = Path(__file__).resolve().parents[3]
 def _source(plugin: Path, marketplace: str, name: str) -> SimpleNamespace:
     return SimpleNamespace(
         origin=f"{marketplace}/{name}",
+        marketplace=marketplace,
+        plugin_name=name,
         payload_root=plugin,
         skills_root=plugin / "skills",
         controlled=False,
@@ -159,7 +162,8 @@ def test_render_is_deterministic_and_marker_carries_complete_provenance(
     assert b"\r" not in first.content
     assert marker == first.marker
     assert marker["schema"] == projections.PROJECTION_SCHEMA
-    assert marker["version"] == projections.PROJECTION_VERSION
+    assert marker["version"] == 2
+    assert marker["deliveryKind"] == "selector"
     assert marker["plugin"] == "policy@market"
     assert marker["pluginVersion"] == "1.0.0"
     assert marker["templateSha256"] == specs[0].template_sha256
@@ -169,17 +173,18 @@ def test_render_is_deterministic_and_marker_carries_complete_provenance(
         for line in first.content.splitlines()
         if not line.startswith(projections.MARKER_PREFIX.encode("ascii"))
     )
-    assert b"Keep this static fallback useful." in without_marker
+    assert b"Keep this static fallback useful." not in without_marker
+    assert b"Keep this static fallback useful." in first.fallback_content
 
 
-def test_render_projection_includes_prefer_local_preamble(tmp_path: Path) -> None:
+def test_legacy_inline_render_includes_prefer_local_preamble(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _plugin, source = _write_plugin(tmp_path, "market", "policy")
     result = projections.Result(operation="test")
     specs, _unknown = projections._load_specs(repo, [source], result)
 
-    rendered = projections.render_projection(specs[0])
+    rendered = projections.render_projection(replace(specs[0], delivery_mode="inline"))
     text = rendered.content.decode("utf-8")
 
     # The preamble names this destination's own local-cache sibling, and
@@ -201,7 +206,7 @@ def test_render_projection_includes_prefer_local_preamble(tmp_path: Path) -> Non
     )
 
 
-def test_render_projection_preamble_trusts_current_managed_copy_without_admission(
+def test_legacy_inline_preamble_trusts_current_managed_copy_without_admission(
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
@@ -211,7 +216,9 @@ def test_render_projection_preamble_trusts_current_managed_copy_without_admissio
         repo, [source], projections.Result(operation="test")
     )
 
-    text = projections.render_projection(specs[0]).content.decode("utf-8")
+    text = projections.render_projection(
+        replace(specs[0], delivery_mode="inline")
+    ).content.decode("utf-8")
 
     assert "Prefer the current plugin copy" in text
     assert "without hash, fingerprint, version, provenance or receipt checks" in text
@@ -1445,7 +1452,8 @@ def test_sync_safely_creates_then_updates_projection_and_lock(
 
     assert created.blocking == 0
     assert created.changed == [
-        ".github/instructions/policy/fallback.instructions.md"
+        ".github/instructions/policy/fallback.instructions.md",
+        ".github/copilot/context-fallbacks/policy/fallback.md",
     ]
     assert created.lock_updated is True
     assert initial_lock["schema"] == projections.LOCK_SCHEMA
@@ -2050,12 +2058,10 @@ def test_rollback_does_not_overwrite_a_concurrent_edit(
     )
     original_atomic_write = projections._atomic_write
     local_edit = b"concurrent local edit\n"
-    calls = 0
+    second = first.with_name("second.instructions.md")
 
     def fail_after_edit(path: Path, content: bytes) -> None:
-        nonlocal calls
-        calls += 1
-        if calls == 2:
+        if path == second:
             first.write_bytes(local_edit)
             raise OSError("injected transaction failure")
         original_atomic_write(path, content)
@@ -2069,18 +2075,18 @@ def test_rollback_does_not_overwrite_a_concurrent_edit(
     assert any("rollback also failed" in finding.message for finding in result.findings)
 
 
-def test_file_budget_blocks_but_aggregate_budget_is_advisory(tmp_path: Path) -> None:
+def test_template_budget_blocks_but_selector_aggregate_is_advisory(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _plugin, oversized = _write_plugin(
         tmp_path,
         "market",
         "large",
-        body="x" * 3700 + "\n",
+        body="x" * projections.MAX_TEMPLATE_BYTES + "\n",
     )
     file_result = projections.sync_repository(repo, [oversized])
     assert any(
-        finding.check == "projection-budget"
+        finding.check == "projection-declaration"
         and finding.severity == projections.BLOCKING
         for finding in file_result.findings
     )
@@ -2094,11 +2100,11 @@ def test_file_budget_blocks_but_aggregate_budget_is_advisory(tmp_path: Path) -> 
             f"policy-{index}",
             body="x" * 2700 + "\n",
         )[1]
-        for index in range(4)
+        for index in range(10)
     ]
     aggregate_result = projections.sync_repository(aggregate_repo, sources)
     assert aggregate_result.blocking == 0
-    assert len(aggregate_result.changed) == 4
+    assert len(aggregate_result.changed) == 20
     assert aggregate_result.lock_updated
     assert any(
         finding.check == "projection-aggregate-budget"
@@ -2116,12 +2122,16 @@ def test_local_cache_advisory_budgets_leave_checked_in_scan_strict(
     repo.mkdir()
     sources = [
         _write_plugin(
-            tmp_path, "market", f"policy-{index}", body="x" * 3700 + "\n"
+            tmp_path, "market", f"policy-{index}",
+            body="x" * 3700 + "\n",
         )[1]
         for index in range(4)
     ]
     specs, _ = projections._load_specs(repo, sources, projections.Result("test"))
-    rendered = [projections.render_projection(spec) for spec in specs]
+    rendered = [
+        projections.render_projection(replace(spec, delivery_mode="inline"))
+        for spec in specs
+    ]
     # A checked-in oversized stack must still be audited even if a prior
     # writer bypassed sync's admission gate.
     for projection in rendered:
@@ -2184,7 +2194,7 @@ def test_repository_config_raises_the_aggregate_budget(tmp_path: Path) -> None:
             f"policy-{index}",
             body="x" * 2700 + "\n",
         )[1]
-        for index in range(4)
+        for index in range(10)
     ]
 
     result = projections.sync_repository(repo, sources)
@@ -2213,7 +2223,7 @@ def test_repository_config_can_lower_the_aggregate_budget(tmp_path: Path) -> Non
             f"policy-{index}",
             body="x" * 2700 + "\n",
         )[1]
-        for index in range(4)
+        for index in range(10)
     ]
 
     result = projections.sync_repository(repo, sources)
@@ -2237,7 +2247,7 @@ def test_over_budget_plugin_update_and_adoption_reproject_immediately(
         _write_plugin(
             tmp_path, "market", f"policy-{index}", body="x" * 2700 + "\n",
         )[1]
-        for index in range(4)
+        for index in range(10)
     ]
     monkeypatch.setattr(
         manager, "discover_enabled_sources", lambda *args, **kwargs: sources,
@@ -2245,7 +2255,7 @@ def test_over_budget_plugin_update_and_adoption_reproject_immediately(
     assert manager.main(["sync", str(repo), "--json"]) == 0
     initial = json.loads(capsys.readouterr().out)
     assert initial["blocking"] == 0
-    assert len(initial["changed"]) == 4
+    assert len(initial["changed"]) == 20
     assert any(
         f["check"] == "projection-aggregate-budget"
         and f["severity"] == projections.WARNING for f in initial["findings"]
@@ -2263,8 +2273,12 @@ def test_over_budget_plugin_update_and_adoption_reproject_immediately(
     sources.append(_write_plugin(tmp_path, "market", "new-policy")[1])
     assert manager.main(["sync", str(repo), "--json"]) == 0
     updated = json.loads(capsys.readouterr().out)
-    assert len(updated["changed"]) == 2
-    assert b"Updated policy" in _projection(repo, "policy-0").read_bytes()
+    assert len(updated["changed"]) == 4
+    assert b"Updated policy" in (
+        repo / projections.delivery.fallback_destination(
+            _projection(repo, "policy-0").relative_to(repo).as_posix()
+        )
+    ).read_bytes()
     entries = {entry["destination"]: entry for entry in _lock(repo)["projections"]}
     updated_path = _projection(repo, "policy-0").relative_to(repo).as_posix()
     assert entries[updated_path]["pluginVersion"] == "1.0.1"
@@ -2333,7 +2347,7 @@ def test_malformed_or_out_of_range_config_is_blocking_and_uses_default(
             f"policy-{index}",
             body="x" * 2700 + "\n",
         )[1]
-        for index in range(4)
+        for index in range(10)
     ]
 
     result = projections.sync_repository(repo, sources)
@@ -2713,7 +2727,10 @@ def test_scan_blocks_when_a_locked_plugin_payload_becomes_unavailable(
     plugin, source = _write_plugin(tmp_path, "market", "policy")
     synced = projections.sync_repository(repo, [source])
     assert synced.blocking == 0
-    assert synced.changed == [".github/instructions/policy/fallback.instructions.md"]
+    assert synced.changed == [
+        ".github/instructions/policy/fallback.instructions.md",
+        ".github/copilot/context-fallbacks/policy/fallback.md",
+    ]
 
     # The plugin's payload has since vanished (e.g. uninstalled, or its
     # source can no longer be resolved from this settings layer) while its
@@ -2899,13 +2916,13 @@ def test_customizing_copilot_ships_the_repo_wide_local_cache_catchall() -> None:
     assert spec.skip_local_cache is True
     rendered = projections.render_projection(spec)
     assert rendered.byte_count <= projections.MAX_PROJECTION_BYTES
-    text = rendered.content.decode("utf-8")
+    text = rendered.fallback_content.decode("utf-8")
     assert ".github/instructions/agent-worktrees-generated/**/*.local.instructions.md" in text
     body = spec.template_content.decode("utf-8")
     normalized = " ".join(body.split())
     assert "Do not compare content hashes, fingerprints, versions, provenance markers or receipts" in normalized
     assert "do not let an old selector or fallback lock block an available copy" in normalized
-    assert spec.delivery_mode == "inline"
+    assert spec.delivery_mode == "selector"
     assert "Creation and session-start copy enabled plugins' declared files there" in normalized
     assert "read the omitted ranges" in normalized
     assert "Do not persist loaded-state" in normalized
