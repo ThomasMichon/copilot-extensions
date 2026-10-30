@@ -332,6 +332,23 @@ concurrent update already selected the new runtime, run the same normal update
 again: that invocation uses the new caller's recovery check. Copying a payload
 alone does not replace code already loaded by an old process.
 
+An explicit `<repo> update` or `worktree-manager update` is manual by default:
+the automatic-update KillSwitch does not inhibit it, and manual intent does not
+force rebuilding already-current runtimes. Existing `--force`, `--force-runtime`,
+recreate and repair selections keep their own construction semantics.
+Unattended producers pass `--auto`; an applicable default-installation hold returns
+the visible exit-3 no-op before Manager runtime construction or downstream
+installers, while an inactive hold executes normally. The POSIX bootstrap checks
+the same canonical admission policy before construction; target-scoped updates
+retain their manual/automatic mode through the target parser and engine handoff.
+Both native bootstraps anchor a relative hold-file override to the caller's
+directory before staging, and queued bootstrap admission retains that exact path.
+Independent namespaced cells retain their existing exemption from that default hold.
+Interrupted-transaction settlement and live-installer exclusivity remain separate
+gates. The existing queued `repair` boolean records manual admission, not rebuild
+selection; old records without it remain automatic. Parsers without `--auto`
+support refuse the request rather than silently treating it as manual.
+
 Recovery requires the existing provider registration naming the canonical
 Manager root and local-bin launcher. Registered launchers may be older or
 damaged; their bytes are not historical-version authority. Captured command and

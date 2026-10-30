@@ -322,7 +322,7 @@ def run_tier(
         # the branch is spelled out for symmetry with self_update.run_tier's
         # per-tier shape, so a second tier can be added the same way later.
         if tier == SWEEP_TIER:
-            update_result = runner(["worktree-manager", "update"], timeout=3600)
+            update_result = runner(["worktree-manager", "update", "--auto"], timeout=3600)
             steps = [
                 StepResult(
                     "update",

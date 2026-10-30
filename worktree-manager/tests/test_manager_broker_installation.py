@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from agent_procutil import no_window_kwargs
 import pytest
 
 from update_driver import core
@@ -232,25 +234,34 @@ def test_foreground_bootstrap_queues_only_its_fixed_installation_not_application
     (["--", "update", "--force"], True),
     (["update", "--force-runtime", "agent-worktrees"], True),
     (["update", "--recreate-venv"], True),
-    (["update"], False),
+    (["update"], True),
+    (["update", "--auto"], False),
+    (["update", "--auto", "--force"], False),
     (["create", "--prompt", "--force"], False),
 ])
+@pytest.mark.parametrize("held", [True, False])
 def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_work(
-    installation, monkeypatch, command, repair,
+    installation, monkeypatch, command, repair, held,
 ):
     state = installation
     monkeypatch.setattr(state.adapter, "_source_digest", lambda payload: "a" * 64)
     state.adapter.runtime.mark_complete(state.root, state.slot.name, payload_hash="b" * 64)
     switch = state.root / "killswitch.json"
-    switch.write_text('{"active":true}', encoding="utf-8")
-    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
+    switch.write_text(json.dumps({"active": held}), encoding="utf-8")
+    caller = state.root / "caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", "../killswitch.json")
     automatic = core.enqueue(
-        core.RequestSpec("automatic-fixture", cwd=str(state.root)),
+        core.RequestSpec("automatic-fixture", cwd=str(caller)),
         runner=core.TrustedRunner((sys.executable, "-c", "raise SystemExit(99)"), str(state.root)),
     )
     executed = []
 
     def install(transaction):
+        if transaction.request.id == automatic.id:
+            executed.append(automatic.id)
+            return 0
         assert transaction.request.spec.backend == "manager-bootstrap"
         executed.append(transaction.request.id)
         transaction.log_path.write_text(json.dumps({
@@ -270,18 +281,55 @@ def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_w
         skip_instance_reconcile=False,
     )
     result = state.adapter._foreground_install(args, driver)
-    assert result == (state.slot if repair else 3)
+    admitted = repair or not held
+    assert result == (state.slot if admitted else 3)
     skipped = core.status(automatic.id)
-    assert skipped.state == "completed" and skipped.exit_code == 3 and skipped.started_at is None
+    assert skipped.state == "completed" and skipped.exit_code == (3 if held else 0)
+    if held:
+        assert skipped.started_at is None
     bootstrap = next(request for request in core.status() if request.id != automatic.id)
     assert bootstrap.spec.repair is repair
-    assert bootstrap.state == "completed" and bootstrap.exit_code == (0 if repair else 3)
-    assert executed == ([bootstrap.id] if repair else [])
+    assert Path(bootstrap.spec.killswitch_path) == switch
+    assert bootstrap.state == "completed" and bootstrap.exit_code == (0 if admitted else 3)
+    assert executed == ([] if held else [automatic.id]) + ([bootstrap.id] if admitted else [])
     assert bootstrap.spec.argv == (
-        ("install", "repair-update") if normalized[:1] == ["update"] else ("install",)
+        (*(("install", "repair-update") if normalized[:1] == ["update"] else ("install",)),
+         *(("--auto",) if "--auto" in normalized else ()))
     )
     assert "--force" not in bootstrap.runner.argv
-    assert json.loads(switch.read_text()) == {"active": True}
+    assert json.loads(switch.read_text()) == {"active": held}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX bootstrap entry")
+@pytest.mark.parametrize(("automatic", "held"), [(False, True), (True, True), (True, False)])
+def test_posix_bootstrap_hold_precedes_installer(tmp_path, automatic, held):
+    root = tmp_path / "manager"
+    marker = tmp_path / "installer-ran"
+    hold = tmp_path / "hold.json"
+    hold.write_text(json.dumps({"active": held}))
+    command = [sys.executable, "-c", """
+import sys
+from pathlib import Path
+from worktree_manager import self_install
+adapter = self_install._runtime_installer()
+def install(args):
+    Path(sys.argv[2]).write_text('ordinary construction')
+    return 17
+adapter._install = install
+raise SystemExit(adapter.main(['--root', sys.argv[1], '--', 'update', *sys.argv[3:]]))
+""", str(root), str(marker), *(["--auto"] if automatic else [])]
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        env={**os.environ, "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(hold),
+             "COPILOT_EXTENSIONS_CONTEXT": ""},
+    )
+    skipped = automatic and held
+    assert result.returncode == (3 if skipped else 17), result.stdout + result.stderr
+    assert marker.exists() is not skipped
+    assert not root.exists()
+    assert json.loads(hold.read_text()) == {"active": held}
+    if skipped:
+        assert "automatic-update KillSwitch active; nothing ran" in result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows removal execution ownership")

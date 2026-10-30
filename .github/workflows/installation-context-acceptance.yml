@@ -580,6 +580,30 @@ jobs:
           python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
           --test-file tests/test_update_driver.py
           --test-file tests/test_update_launch_cli.py
+          --test-file tests/test_update_driver_json.py
+          --test-file tests/test_provision_hook_cwd.py
+      - name: Qualify manual admission and held automatic updates through native Manager entrypoints
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers
+          --test-file tests/test_update_driver_cli.py
+          --test-file tests/test_manager_broker_installation.py
+          --test-file tests/test_launch_update_requests.py
+          --test-file tests/test_installation_updates.py
+          --test-file tests/test_bootstrap_repair_recovery.py
+          -k "manual_auto_hold or operator_repair_classification or bootstrap_retains_update_repair or native_launch_submits_fixed_phases or posix_bootstrap_hold or target_bypasses_bootstrap or bootstrap_preserves_hold_path"
+      - name: Qualify automatic producer registrations and per-repository forwarding
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-machines
+          --test-file tests/test_fleet_update.py
+          --test-file tests/test_self_update.py
+      - name: Qualify legacy automatic records, cell scope and independent manual request identity
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_core.py
+          --test-file tests/test_legacy_record_readback.py
       - name: Qualify scoped acquisition and actual installer recovery boundary
         if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-

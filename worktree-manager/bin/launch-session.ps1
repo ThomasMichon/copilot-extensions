@@ -655,7 +655,7 @@ function Start-UpdateStage {
         Write-SetupLog 'Starting background update stage (stage-update)'
         return Start-Job -Name 'aw-stage-update' -ScriptBlock {
             param($py)
-            & $py -m agent_worktrees stage-update *> $null
+            & $py -m agent_worktrees stage-update --auto *> $null
         } -ArgumentList $VenvPython
     } catch {
         Write-SetupLog "Update stage spawn failed: $_ (will stage inline at join)" 'WARN'
@@ -731,7 +731,7 @@ function Invoke-UpdateApply {
         if ($noUpdate -and -not $includeReconcile) { return }
         $requestArgs = @('-m', 'agent_worktrees')
         if ($script:LaunchProject) { $requestArgs += @('--project', $script:LaunchProject) }
-        $requestArgs += @('launch-update', 'automatic', '--detach')
+        $requestArgs += @('launch-update', 'automatic', '--auto', '--detach')
         if ($noUpdate) { $requestArgs += '--no-update' }
         if ($includeReconcile) { $requestArgs += '--with-reconcile' }
         $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $requestArgs) `
@@ -760,7 +760,7 @@ function Invoke-UpdateApply {
         if (-not $status -or -not $status.stage_done -or $status.skipped -eq 'locked') {
             if (-not (Test-AutomaticMaintenance)) { return }
             Write-SetupStatus 'Background download unavailable; downloading the plugin update now...'
-            & $VenvPython -m agent_worktrees stage-update *> $null
+            & $VenvPython -m agent_worktrees stage-update --auto *> $null
             if (Test-Path $statusFile) {
                 try { $status = Get-Content $statusFile -Raw | ConvertFrom-Json } catch {}
             }
@@ -777,7 +777,7 @@ function Invoke-UpdateApply {
         Write-SetupStatus 'Checking bootstrap services for pending updates...'
         $bootstrapArgs = @('-m', 'agent_worktrees')
         if ($script:LaunchProject) { $bootstrapArgs += @('--project', $script:LaunchProject) }
-        $bootstrapArgs += @('launch-update', 'bootstrap')
+        $bootstrapArgs += @('launch-update', 'bootstrap', '--auto')
         if ($applyStaged) { $bootstrapArgs += '--defer-worktrees' }
         $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $bootstrapArgs) `
             -Scope 'launch/bootstrap' -Label 'Bootstrap update'
@@ -796,7 +796,7 @@ function Invoke-UpdateApply {
     if ($WithReconcile -and $env:WORKTREE_NO_RECONCILE -ne '1') {
         $reconcileArgs = @('-m', 'agent_worktrees')
         if ($script:LaunchProject) { $reconcileArgs += @('--project', $script:LaunchProject) }
-        $reconcileArgs += @('launch-update', 'reconcile')
+        $reconcileArgs += @('launch-update', 'reconcile', '--auto')
         $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $reconcileArgs) `
             -Scope 'launch/reconcile' -Label 'Plugin reconcile'
         $reresolvedPython = Resolve-RuntimePython
@@ -808,7 +808,7 @@ function Invoke-UpdateApply {
     if (-not $noUpdate -and $applyStaged) {
         $requestArgs = @('-m', 'agent_worktrees')
         if ($script:LaunchProject) { $requestArgs += @('--project', $script:LaunchProject) }
-        $requestArgs += @('launch-update', 'staged', '--status', $statusFile)
+        $requestArgs += @('launch-update', 'staged', '--auto', '--status', $statusFile)
         if (-not $env:WORKTREE_BLOCKING_INSTALL) { $requestArgs += '--detach' }
         $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $requestArgs) `
             -Scope 'launch/installer' -Label 'Staged runtime request (applies on the next launch)'

@@ -129,7 +129,7 @@ def test_native_launch_acceptance_is_explicit_and_source_pinned() -> None:
     trigger = workflow.get("on", workflow.get(True))
     assert set(trigger) == {"workflow_dispatch"}
     assert trigger["workflow_dispatch"]["inputs"]["native_launch"] == {
-        "description": "Qualify copied Windows setup, cross-entrypoint mux admission and the POSIX seed reply reader",
+        "description": "Qualify copied native setup, POSIX terminal ownership and cross-entrypoint mux admission",
         "type": "boolean", "default": False,
     }
     job = workflow["jobs"]["native-launch-windows"]
@@ -168,7 +168,7 @@ def test_native_seed_reader_acceptance_uses_stock_posix_shells_only_when_selecte
     job = workflow["jobs"][name]
     assert job["if"] == "${{ inputs.native_launch }}"
     assert job["runs-on"] == runner
-    assert job["timeout-minutes"] == 8
+    assert job["timeout-minutes"] == 12
     assert job["steps"][0]["with"] == {
         "ref": "${{ github.sha }}", "persist-credentials": False,
     }
@@ -176,12 +176,17 @@ def test_native_seed_reader_acceptance_uses_stock_posix_shells_only_when_selecte
     assert 'git rev-parse HEAD' in preflight["run"] and '"$EXPECTED_SHA"' in preflight["run"]
     if runner == "macos-latest":
         assert '/bin/bash -c \'[[ "$BASH_VERSINFO" == 3 ]]\'' in preflight["run"]
-    execution = job["steps"][-1]["run"]
+    execution = next(
+        step["run"] for step in job["steps"]
+        if "--test-file tests/test_native_seed_reply_shell.py" in step.get("run", "")
+    )
     assert 'export PATH="/bin:$PATH"' in execution
     assert "--test-file tests/test_native_seed_reply_shell.py" in execution
     assert "--test-file tests/test_native_seed_phase_shell.py" in execution
     assert "--test-file tests/test_session_shell.py" in execution
-    assert "--timeout 180 --plugin-timeout 240 --test-timeout 30" in execution
+    assert "--test-file tests/native/test_native_seed_exec_posix.py" in execution
+    assert "--test-file tests/native/test_native_seed_setup_posix.py" in execution
+    assert "--timeout 360 --plugin-timeout 480 --test-timeout 30" in execution
     assert "--allow-host-state" not in execution
     assert not any(step.get("continue-on-error", False) for step in job["steps"])
 
@@ -258,6 +263,7 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
     job = workflow["jobs"][name]
     assert job["if"] == "${{ inputs.update_diagnostics }}"
     assert job["runs-on"] == route
+    assert job["timeout-minutes"] == 15
     checkout = job["steps"][0]
     assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
     identity = next(step for step in job["steps"] if step.get("id") == "source")
@@ -274,13 +280,50 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
         "tests/test_update_entry_windows.py",
     }
     assert all(any(path in command for command in commands) for path in expected)
+    required = {
+        "agent-worktrees": {
+            "tests/test_update_driver_json.py", "tests/test_provision_hook_cwd.py",
+        },
+        "worktree-manager": {
+            "tests/test_update_driver_cli.py", "tests/test_manager_broker_installation.py",
+            "tests/test_launch_update_requests.py", "tests/test_installation_updates.py",
+            "tests/test_bootstrap_repair_recovery.py",
+        },
+        "agent-machines": {"tests/test_fleet_update.py", "tests/test_self_update.py"},
+        "update-driver": {"tests/test_core.py", "tests/test_legacy_record_readback.py"},
+        "agent-mcp": {"tests/test_source_install_transactions.py"},
+        "agent-procutil": {"tests/test_retirement_custody.py"},
+        "payload-invocation": {"tests/test_command_lifecycle.py"},
+    }
+    selected = {target: set() for target in required}
     for step in families:
         command = step["run"]
-        assert "tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers" in command
+        arguments = shlex.split(command)
+        if arguments[:2] == ["python", "tools/retirement_custody_acceptance.py"]:
+            assert arguments[2:] == ["--ephemeral-ci-consent"]
+            assert "runner.os == 'Linux'" in step["if"]
+        else:
+            assert arguments[:2] == ["python", "tools/run-plugin-tests.py"]
+            target = arguments[2]
+            assert target in required
+            if target not in {"agent-machines", "update-driver"}:
+                assert "--allow-explicit-tiers" in arguments
+            selected[target].update(
+                arguments[index + 1] for index, value in enumerate(arguments)
+                if value == "--test-file"
+            )
+            if target == "worktree-manager":
+                assert arguments[arguments.index("-k") + 1].split(" or ") == [
+                    "manual_auto_hold", "operator_repair_classification",
+                    "bootstrap_retains_update_repair", "native_launch_submits_fixed_phases",
+                    "posix_bootstrap_hold", "target_bypasses_bootstrap",
+                    "bootstrap_preserves_hold_path",
+                ]
         assert "!cancelled() && steps.tooling.outcome == 'success'" in step["if"]
         assert not any(flag in command for flag in (
             "--test-timeout", "--timeout", "--plugin-timeout", "--allow-host-state",
         ))
+    assert all(paths <= selected[target] for target, paths in required.items())
     assert not any(step.get("continue-on-error", False) for step in job["steps"])
 
 
@@ -574,6 +617,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "packaging-seed-linux", "packaging-seed-windows",
         "runtime-removal-macos",
         "windows-broker-portable", "windows-broker-probe", "windows-broker-consumers",
+        "windows-native-process",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]

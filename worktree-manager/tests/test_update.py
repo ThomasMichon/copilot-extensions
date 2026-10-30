@@ -117,6 +117,13 @@ def test_update_self_updates_then_orchestrates_bypass(monkeypatch):
     assert calls["passthrough"]["args"] == ["update", "--no-manager"]
 
 
+@pytest.mark.parametrize("flags", [[], ["--auto"]])
+def test_update_mode_survives_the_inner_suite_handoff_without_force(monkeypatch, flags):
+    rc, calls, _out = _run_update(flags, monkeypatch)
+    assert rc == 0
+    assert calls["passthrough"]["args"] == ["update", "--no-manager", *flags]
+
+
 def test_update_forwards_project_and_flags(monkeypatch):
     rc, calls, out = _run_update(
         ["--force", "--project", "dotfiles", "--skip-modules", "agent-bridge"],

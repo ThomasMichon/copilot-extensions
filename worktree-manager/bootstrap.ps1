@@ -20,6 +20,15 @@
 
 $ErrorActionPreference = 'Stop'
 
+if ($env:BOOTSTRAP_KILLSWITCH_STATE_FILE -and
+    -not $env:BOOTSTRAP_KILLSWITCH_STATE_FILE.StartsWith('~')) {
+    $holdPath = $env:BOOTSTRAP_KILLSWITCH_STATE_FILE
+    if (-not [IO.Path]::IsPathRooted($holdPath)) {
+        $holdPath = Join-Path (Get-Location).Path $holdPath
+    }
+    $env:BOOTSTRAP_KILLSWITCH_STATE_FILE = [IO.Path]::GetFullPath($holdPath)
+}
+
 $BootstrapClock = [Diagnostics.Stopwatch]::StartNew()
 function Write-BootstrapProgress(
     [string]$Message,

@@ -377,15 +377,38 @@ def _source_digest(payload: Path) -> str:
     return runtime.fingerprint_source(engine._source_files(engine._package_roots(payload)))
 
 
+def _bootstrap_hold_path() -> str:
+    override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE", "")
+    return os.path.abspath(os.path.expanduser(override)) if override else ""
+
+
+def _automatic_bootstrap_inhibited(args) -> bool:
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if command[:1] != ["update"]:
+        return False
+    from worktree_manager.update_driver_cli import parse_options, request_context
+
+    options, _forwarded = parse_options(command[1:])
+    if not options.auto:
+        return False
+    driver = _execution_driver(args.payload)
+    return driver._automatic_update_inhibited(driver.RequestSpec(
+        "manager-bootstrap", context=tuple(request_context().items()),
+        killswitch_path=_bootstrap_hold_path(),
+    ))
+
+
 def _foreground_install(args, driver) -> Path | int:
     """Explicit bootstrap owns the existing finite driver, not a spawn fallback."""
     from worktree_manager.update_driver_cli import _CONTEXT_KEYS, parse_options, request_context
 
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     repair = False
+    automatic = False
     if command[:1] == ["update"]:
         options, _forwarded = parse_options(command[1:])
-        repair = options.repair
+        automatic = options.auto
+        repair = not automatic
     digest = _source_digest(args.payload)
     arguments = [
         sys.executable, "-I", "-S", "-B", "-X", "utf8", str(SCRIPTS / "runtime_install.py"),
@@ -403,12 +426,15 @@ def _foreground_install(args, driver) -> Path | int:
         evidence = str(args.recover_adopted.resolve())
         arguments.extend(["--recover-adopted", evidence])
         identity.extend(["recover-adopted", evidence])
+    if automatic:
+        identity.append("--auto")
     request = driver.enqueue(
         driver.RequestSpec(
             "manager-bootstrap", tuple(identity), project=str(args.root.resolve()),
             cwd=str(args.payload.resolve()), source=digest,
             context=tuple({**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}.items()),
             repair=repair,
+            killswitch_path=_bootstrap_hold_path(),
         ),
         runner=driver.TrustedRunner(
             tuple(arguments), str(args.payload.resolve()), context_keys=_CONTEXT_KEYS,
@@ -693,6 +719,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if args.install_only:
             raise RuntimeError("Windows installation participant is unsupported on this platform")
+        if _automatic_bootstrap_inhibited(args):
+            print("automatic-update KillSwitch active; nothing ran", file=sys.stderr)
+            return 3
         slot = _install(args)
     return _finish(args, slot, command)
 

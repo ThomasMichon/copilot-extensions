@@ -10,6 +10,7 @@ import subprocess
 import sys
 from contextlib import closing
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -202,3 +203,67 @@ def test_native_bootstrap_routes_recovery_without_touching_installer_staging(
     assert not list(temporary.glob("manager-repair.*"))
     assert sentinel.read_bytes() == b"do not replace this installer's staging"
     assert sorted(staging.iterdir()) == [sentinel]
+
+
+@pytest.mark.parametrize("relative", [True, False])
+def test_native_bootstrap_preserves_hold_path_before_staging(tmp_path, monkeypatch, relative):
+    from test_bootstrap_ps1 import _fake_tools, _source_repo
+    from worktree_manager import self_install
+
+    shell = shutil.which("pwsh") if os.name == "nt" else shutil.which("bash")
+    if not shell or not shutil.which("git"):
+        pytest.skip("matching native bootstrap shell and Git required")
+    source = _source_repo(tmp_path)
+    home = tmp_path / "home"
+    root = home / ".worktree-manager"
+    root.mkdir(parents=True)
+    (root / "config.toml").write_text(
+        f'[source]\nrepo = "{source.as_posix()}"\nref = "main"\n', encoding="utf-8",
+    )
+    hold = home / "hold file.json"
+    hold.write_text(json.dumps({"active": True}))
+    tools = tmp_path / "tools"
+    _fake_tools(tools, uv_exit=0, python_exit=0)
+    observer = tools / "observe.py"
+    observer.write_text(
+        "import json,os,sys\n"
+        "print(json.dumps({'argv':sys.argv[1:],'cwd':os.getcwd(),"
+        "'hold':os.environ['BOOTSTRAP_KILLSWITCH_STATE_FILE']}))\n",
+        encoding="utf-8",
+    )
+    if os.name == "nt":
+        (tools / "fake-python.cmd").write_text(
+            f'@echo off\r\n"{sys.executable}" -I -S -B "{observer}" %*\r\n'
+            "exit /b %errorlevel%\r\n", encoding="utf-8",
+        )
+        command = [shell, "-NoProfile", "-NonInteractive", "-File",
+                   str(INSTALLER.parents[1] / "bootstrap.ps1")]
+    else:
+        (tools / "fake-python").write_text(
+            f'#!/bin/sh\nexec "{sys.executable}" -I -S -B "{observer}" "$@"\n',
+            encoding="utf-8",
+        )
+        command = [shell, str(INSTALLER.parents[1] / "bootstrap.sh")]
+    result = subprocess.run(
+        [*command, "--bootstrap-update", "update", "--auto"], cwd=home,
+        env={**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+             "WORKTREE_MANAGER_ROOT": str(root),
+             "BOOTSTRAP_KILLSWITCH_STATE_FILE": "./hold file.json" if relative else str(hold),
+             "PATH": str(tools) + os.pathsep + os.environ.get("PATH", "")},
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert Path(observed["cwd"]).is_relative_to(root / "staging")
+    assert observed["argv"][-3:] == ["--", "update", "--auto"]
+    assert Path(observed["hold"]).is_absolute()
+    assert Path(observed["hold"]).resolve() == hold
+    monkeypatch.chdir(observed["cwd"])
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", observed["hold"])
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    adapter = self_install._runtime_installer()
+    assert adapter._automatic_bootstrap_inhibited(SimpleNamespace(
+        payload=INSTALLER.parents[1], command=["update", "--auto"],
+    ))
+    assert json.loads(hold.read_text()) == {"active": True}

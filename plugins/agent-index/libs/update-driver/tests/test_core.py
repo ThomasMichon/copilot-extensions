@@ -148,11 +148,43 @@ def test_killswitch_default_path_and_namespaced_isolation(area, monkeypatch, leg
     switch.parent.mkdir(parents=True)
     switch.write_text('{"active":true}', encoding="utf-8")
     normal = sample(area)
-    namespaced = sample(area, context=(("COPILOT_EXTENSIONS_CONTEXT", "explicit-cell"),))
+    namespaced = sample(
+        area, argv=("--auto",), context=(("COPILOT_EXTENSIONS_CONTEXT", "explicit-cell"),),
+    )
     seen = []
     assert drain(root=area / "state", executor=lambda tx: seen.append(tx.request.id) or 0) == 0
     assert seen == [namespaced.id]
     assert status(normal.id, root=area / "state").exit_code == 3
+
+
+@pytest.mark.parametrize("held", [True, False])
+def test_manual_and_auto_admission_do_not_coalesce_or_force_the_native_runner(area, monkeypatch, held):
+    root = area / "state"
+    switch = area / "hold.json"
+    switch.write_text(json.dumps({"active": held}), encoding="utf-8")
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
+    marker = area / "executed"
+    runner = TrustedRunner((
+        sys.executable, "-c",
+        "import sys; from pathlib import Path; "
+        "assert len(sys.argv)==2; "
+        "p=Path(sys.argv[1]); p.write_text(p.read_text()+'ran\\n' if p.exists() else 'ran\\n')",
+        str(marker),
+    ), str(area))
+    # Even identical construction/runner arguments must retain distinct admission.
+    automatic = enqueue(RequestSpec("fixture"), runner=runner, root=root)
+    manual = enqueue(RequestSpec("fixture", repair=True), runner=runner, root=root)
+    assert automatic.id != manual.id
+    assert enqueue(RequestSpec("fixture", repair=True), runner=runner, root=root).id == manual.id
+    assert drain(root=root) == 0
+    assert wait(manual.id, root=root).exit_code == 0
+    auto_result = wait(automatic.id, root=root)
+    assert auto_result.exit_code == (3 if held else 0)
+    if held:
+        assert auto_result.started_at is None
+        assert not auto_result.log_path.exists()
+        assert auto_result.error == "automatic-update KillSwitch active; nothing ran"
+    assert marker.read_text().splitlines() == ["ran"] * (1 if held else 2)
 
 
 @pytest.mark.parametrize("content", ['{"active":"true"}', "{", '{"active":false}'])

@@ -5021,6 +5021,23 @@ version drifts** from the payload -- **unless the bootstrap-killswitch is
 active**, in which case that plugin's hook skips its own reconcile entirely for
 this session (see `libs/bootstrap-killswitch/README.md`; amends the
 *self-provisioning-runtime* vision in `visions/plugin-services/README.md`).
+Explicit `<repo> update` and `worktree-manager update` calls are manual by
+default and do not require clearing an automatic-update hold. Genuine
+unattended producers pass `--auto`; the existing execution owner retires an
+inhibited automatic request with the visible exit-3 no-work outcome before its
+installer starts. Manual admission does not inject `--force`, recreate a healthy
+runtime, settle an interrupted transaction, or supersede a live installer.
+Existing force/repair options and installation-cell scope remain independent.
+The [driver contract](../libs/update-driver/README.md) defines persisted
+manual/automatic identity and compatible readers.
+
+Generated unattended commands and task definitions include `--auto`. During
+rollout, reconcile previously generated schedules through their existing owner
+before re-enabling automatic execution; an old unmarked scheduled `update` must
+not acquire manual semantics merely because its receiver was upgraded.
+Legacy launch-maintenance verbs retain their automatic admission semantics
+while their updated producers also spell out `--auto`.
+
 Every adopting plugin's `bootstrap-check.{ps1,sh}` checks its vendored
 `bootstrap-killswitch-guard.{ps1,sh}` as its very first step, before any
 version comparison below, against one shared, cross-plugin state file

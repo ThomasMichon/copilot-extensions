@@ -1176,6 +1176,14 @@ The manual `installation-context-acceptance.yml` selector
 launch-request contracts on isolated Linux and Windows runners. Each platform
 also exercises its actual selected-phase shell front doors, including missing
 engine refusal without repair downloads or implicit provisioning.
+The same packet exercises manual versus explicit `--auto` requests through the
+real Manager CLI/worker and cold-bootstrap entry, native launch producers,
+automatic schedule definitions, per-repository forwarding and inner queued
+reconciliation. Held automatic requests must start no installer; manual admission
+must preserve ordinary construction arguments. Legacy record semantics,
+independent-cell scope and distinct manual/automatic identities remain covered.
+This does not migrate installed schedules, upgrade an already-running worker or
+qualify a full runtime construction or machine rollout.
 The packet also routes the real outer runtime planner/executor through Bridge's
 native completed-slot installer functions and shared slot evidence, with
 healthy-current, older-serving, refused-probe and failed-transition controls.

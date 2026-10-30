@@ -48,13 +48,17 @@ def test_detach_json_is_an_observer_option_not_an_installer_argument():
 
 
 @pytest.mark.parametrize("flags,repair", [
-    ([], False), (["--force"], True), (["--force-runtime", "agent-bridge"], True),
+    ([], True), (["--auto"], False), (["--auto", "--force"], False),
+    (["--force"], True), (["--force-runtime", "agent-bridge"], True),
     (["--recreate-venv"], True), (["--repair-engine", "/fresh/source"], True),
 ])
 def test_operator_repair_classification_is_persisted(queued, flags, repair):
     seen, _request = queued
     assert driver.cmd_update_request(flags) == 6
     assert seen["spec"].repair is repair
+    assert seen["spec"].argv == tuple(flags)
+    if not flags:
+        assert "--force" not in seen["runner"].argv
 
 
 @pytest.mark.parametrize("flags", [
@@ -97,6 +101,9 @@ def test_explicit_operator_recovery_reports_authority_not_native_proof(queued, m
     ["--auth-report", "--detach"],
     ["--auth-report", "--supervised-debug"],
     ["--token", "synthetic-unknown-secret"],
+    ["--aut"],
+    ["--automatic"],
+    ["--request-status", "one", "--auto"],
     ["--auth-source", "https://example.invalid/tools.git"],
     ["--request-status", "one", "--engine-acquisition-timeout", "600"],
     ["--recovery-status", "--engine-acquisition-timeout", "600"],
@@ -430,6 +437,45 @@ def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monke
     requests = update_driver.status()
     assert len(requests) in (1, 2)
     assert all(request.state == "completed" and request.exit_code == 6 for request in requests)
+
+
+@pytest.mark.parametrize("automatic,held", [(False, True), (True, True), (True, False)])
+@pytest.mark.timeout(_NATIVE_QUEUE_TIMEOUT)
+def test_real_cli_manual_auto_hold_reaches_the_execution_owner(
+    tmp_path, monkeypatch, short_home, automatic, held,
+):
+    import json
+    import sys
+    from agent_procutil.owned_process import run_owned
+    import update_driver
+
+    events = tmp_path / "events.jsonl"
+    hold = tmp_path / "hold.json"
+    hold.write_text(json.dumps({"active": held}), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(short_home))
+    monkeypatch.setenv("USERPROFILE", str(short_home))
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(hold))
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_EVENTS", str(events))
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_ENGINE_HANDOFF", "1")
+    fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
+    result = run_owned(
+        [sys.executable, str(fixture), "submit", "--wait", *(["--auto"] if automatic else [])],
+        timeout=_NATIVE_QUEUE_TIMEOUT,
+    )
+    skipped = automatic and held
+    assert result.returncode == (3 if skipped else 6), result.stderr
+    request, = update_driver.status()
+    assert request.spec.repair is not automatic
+    assert ("--auto" in request.runner.argv) is automatic
+    assert "--force" not in request.runner.argv
+    assert request.state == "completed" and request.exit_code == result.returncode
+    assert events.exists() is not skipped
+    if skipped:
+        assert request.started_at is None and not request.log_path.exists()
+        assert "automatic-update KillSwitch active; nothing ran" in result.stderr
+    else:
+        records = [json.loads(line) for line in events.read_text().splitlines()]
+        assert any(record["phase"] == "engine" for record in records)
 
 
 @pytest.mark.parametrize("fresh_repair", [False, True], ids=["ordinary", "fresh-repair"])

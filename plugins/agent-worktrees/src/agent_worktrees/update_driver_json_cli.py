@@ -166,6 +166,8 @@ def cmd_reconcile_request(args: argparse.Namespace) -> int:
     if not getattr(args, "apply", False) or getattr(args, "check_update", False):
         return update_cli.cmd_reconcile_plugins(args)
     flags = ["--apply"]
+    if getattr(args, "auto", False):
+        flags.append("--auto")
     for name in ("repo", "status", "machine"):
         value = getattr(args, name, None)
         if value:
@@ -184,6 +186,8 @@ def cmd_stage_request(args: argparse.Namespace) -> int:
     if getattr(args, "indicator_state", False):
         return update_stage.cmd_stage_update(args)
     flags = ["--json"]
+    if getattr(args, "auto", False):
+        flags.append("--auto")
     value = getattr(args, "status", None)
     if value:
         value = str(Path(value).expanduser().resolve())

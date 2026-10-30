@@ -126,9 +126,8 @@ def add_parsers(sub) -> None:
 
     sub.add_parser("pre-launch", help="Check bootstrap staleness (JSON output)")
 
-    sp = sub.add_parser(
-        "reconcile-plugins", help="Reconcile repo enabledPlugins payloads + gated runtimes (JSON)"
-    )
+    sp = sub.add_parser("reconcile-plugins", help="Reconcile repo enabledPlugins payloads + gated runtimes (JSON)", allow_abbrev=False)
+    sp.add_argument("--auto", action="store_true", help="Automatic reconciliation; honor the automatic-update hold")
     sp.add_argument(
         "--check-update",
         action="store_true",
