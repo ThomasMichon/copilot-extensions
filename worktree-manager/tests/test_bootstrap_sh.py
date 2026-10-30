@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from test_bootstrap_ps1 import _fake_tools, _source_repo
+from test_bootstrap_ps1 import _fake_tools, _retained_sparse, _source_repo
 
 BOOTSTRAP = Path(__file__).resolve().parents[1] / "bootstrap.sh"
 BASH = shutil.which("bash")
@@ -21,12 +21,17 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.parametrize(
-    ("python_exit", "incomplete_checkout"), [(0, False), (17, False), (0, True)],
+    ("python_exit", "incomplete_checkout", "retained_sparse"),
+    [(0, False, False), (17, False, False), (0, True, False), (0, False, True)],
 )
-def test_bootstrap_progress_keeps_command_exit_and_stdout(tmp_path, python_exit, incomplete_checkout):
+def test_bootstrap_progress_keeps_command_exit_and_stdout(
+    tmp_path, python_exit, incomplete_checkout, retained_sparse,
+):
     repo = _source_repo(tmp_path)
     root = tmp_path / "manager-root"
     root.mkdir()
+    if retained_sparse:
+        _retained_sparse(repo, root)
     (root / "config.toml").write_text(
         f'[source]\nrepo = "{repo.as_posix()}"\nref = "main"\n', encoding="utf-8",
     )
@@ -63,6 +68,12 @@ def test_bootstrap_progress_keeps_command_exit_and_stdout(tmp_path, python_exit,
         assert not (root / "current-version").exists()
         return
     assert result.returncode == python_exit, result.stdout + result.stderr
+    if retained_sparse:
+        from worktree_manager.core_install import install_script
+
+        assert install_script(root / "staging") == (
+            root / "staging" / "plugins" / "agent-worktrees" / "scripts" / "install.sh"
+        )
     assert result.stdout == ""
     progress = [
         line for line in result.stderr.splitlines()
