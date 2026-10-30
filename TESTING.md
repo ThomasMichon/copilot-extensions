@@ -1801,7 +1801,7 @@ native integration remains explicitly manual, not required PR CI.
 Logger's corresponding manual `installation-context-full.yml` portfolio
 `logger-bootstrap` runs `test_first_use_logger_bootstrap.py` and the retained
 `test_first_use_logger.py` recipes on native Windows and Ubuntu. It measures the
-actual 15-second hook and exact `{}` stdout, Python-free cold and drift callers,
+actual 15-second hook and exact `{}` stdout, cold and drift callers,
 caller loss, concurrent submissions, ordinary durable receipts/results, complete
 packaged foundation and native raw-checkout snapshot mappings. Drift must run
 `install` (including isolated task/timer reconciliation), not service-less
@@ -1813,7 +1813,7 @@ personal sessions. This is an explicit manual integration lane, not required PR
 CI, live timer/serving-worker proof, selected-snapshot recipe admission or rollout.
 
 The cold consumer fixture keeps the canonical runner's containment and daemon
-lifetime context. On Windows, the actual Logger consumer supplies the documented
+lifetime context. On Windows, both actual Logger consumers supply the documented
 `python` prerequisite for caller-owned admission; this is not Python-absent
 machine qualification. On Linux, only the nonproduction lifecycle supervisor
 receives a private, test-owned copy of the runner interpreter; product `PATH`
