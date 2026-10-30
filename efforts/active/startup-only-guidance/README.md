@@ -279,3 +279,19 @@ existing review, custody and explicit approval gates.
   680 tests (1,752 passed with 142 platform/explicit skips in total).
 - Declaration publication and review remain next. Selected adopter mutation
   approval, native delivery qualification and authorized rollout are still open.
+
+### 2026-10-30 - Declaration review tightened qualification
+
+- #9627 review found the renamed declaration guard still referenced by the
+  optional macOS packet. Updated the workflow selector and its exact-packet
+  expectation together, without changing job activation or CI scope.
+- Strengthened every shipped-source check to prove policy text is absent from
+  the selector and present in the fallback, then remove the test fixture's
+  current copy and verify actual offline fallback selection.
+- Running the workflow contract exposed an older fixture assumption that all
+  manual routes used single-input expressions. The helper now supports the
+  workflow's existing grouped alternatives and exclusion terms, with positive
+  and negative controls; it still rejects unsupported syntax.
+- The full isolated customization suite remains at 680 passes with two skips;
+  the focused workflow contract passes all 26 tests. Current-head re-review
+  and addressed-thread resolution remain required before merge.

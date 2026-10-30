@@ -38,16 +38,26 @@ def test_shipped_sources_publish_one_current_body_and_an_offline_fallback(tmp_pa
         fallback = repo / delivery.fallback_destination(spec.destination)
         expected.update((selector, current))
         assert spec.delivery_mode == "selector"
-        assert delivery.parse_marker(selector.read_bytes())["deliveryKind"] == "selector"
+        selector_bytes = selector.read_bytes()
+        assert delivery.parse_marker(selector_bytes)["deliveryKind"] == "selector"
         assert current.read_bytes() == spec.template_content
         assert fallback not in automatic
         assert ".instructions.md" not in fallback.relative_to(repo).as_posix().casefold()
         raw = fallback.read_bytes()
         assert delivery.complete_body(raw, delivery.parse_marker(raw))
+        policy = spec.template_content.split(b"\n---\n", 1)[1].strip()
+        assert policy and policy not in selector_bytes
+        assert policy in raw
         assert projections.resolve_instruction_source(
             repo, spec.destination, sources,
         )["selectedPath"] == current.relative_to(repo).as_posix()
     assert automatic == expected
+    for spec in specs:
+        current = repo / delivery.managed_destination(spec.destination, spec.plugin)
+        current.unlink()
+        assert projections.resolve_instruction_source(
+            repo, spec.destination, sources,
+        )["selectedPath"] == delivery.fallback_destination(spec.destination)
 
 
 @pytest.mark.parametrize(
