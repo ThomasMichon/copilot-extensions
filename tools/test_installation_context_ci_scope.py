@@ -858,6 +858,43 @@ def test_logger_command_adoption_uses_explicit_native_portfolio() -> None:
         ]
 
 
+def test_logger_bootstrap_windows_keeps_disjoint_storage_packets() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    for platform, runner, opt_in in (
+        ("linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+        ("windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+    ):
+        name = f"logger-bootstrap-{platform}"
+        job = workflow["jobs"][name]
+        assert name not in required["jobs"] and not job.get("strategy")
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-bootstrap'"
+        )
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 25
+        assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+    execution = [step for step in workflow["jobs"]["logger-bootstrap-windows"]["steps"] if "run" in step]
+    consumer = "test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed_consumers"
+    assert [shlex.split(step["run"]) for step in execution] == [
+        ["python", "tools/run-plugin-tests.py", "update-driver",
+         "--test-file", "tests/test_first_use_logger.py", "-k", f"not {consumer}",
+         "--max-files-per-sub-suite", "1", "--test-timeout", "900", "--timeout", "1200"],
+        ["python", "tools/run-plugin-tests.py", "update-driver",
+         "--test-file", "tests/test_first_use_logger_bootstrap.py",
+         "--test-timeout", "900", "--timeout", "1200"],
+        ["python", "tools/run-plugin-tests.py", "update-driver",
+         "--test-file", "tests/test_first_use_logger.py", "-k", consumer,
+         "--test-timeout", "900", "--timeout", "1200"],
+        ["python", "tools/run-plugin-tests.py", "agent-logger",
+         "--test-file", "tests/test_bootstrap_check_reconcile_always_on.py",
+         "--test-file", "tests/test_bootstrap_driver.py", "--test-file", "tests/test_install_binstub.py",
+         "--max-files-per-sub-suite", "1", "--test-timeout", "180", "--timeout", "420"],
+    ]
+    assert execution[1]["env"] == {"PYTEST_ADDOPTS": "--capture=tee-sys"}
+
+
 def test_codespaces_recipes_remain_manual_and_bounded() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()

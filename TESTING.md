@@ -1362,6 +1362,11 @@ payload binstub identity without configuring a host bridge or processing
 personal sessions. This is an explicit manual integration lane, not required PR
 CI, live timer/serving-worker proof, selected-snapshot recipe admission or rollout.
 
+Windows runs recipe refusals, actual bootstrap hooks and the concurrent cold
+consumer in three separate contained packets. A filtered invocation combines
+its selected files, so each packet names only its own file. All three keep the
+canonical storage cap and retain every selected test.
+
 ## Optional CodeSpaces bootstrap adoption
 
 Independent Windows evaluator admission is a separate native packet:
