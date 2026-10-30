@@ -1825,6 +1825,8 @@ Windows runs recipe refusals, actual bootstrap hooks and the concurrent cold
 consumer in three separate contained packets. A filtered invocation combines
 its selected files, so each packet names only its own file. All three keep the
 canonical storage cap and retain every selected test.
+The Windows cold-hook packet streams bounded failure diagnostics before the
+observer waits for native owner settlement; that wait and its custody are unchanged.
 
 Windows runs recipe refusals, actual bootstrap hooks and the concurrent cold
 consumer in three separate contained packets. A filtered invocation combines

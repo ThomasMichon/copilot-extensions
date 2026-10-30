@@ -171,6 +171,14 @@ def owned_hook(
             # Pin the launched owner before asserting the budget, so a failure still settles it.
             assert elapsed <= timeout, f"bootstrap took {elapsed:.2f}s; hook deadline is {timeout}s\n{diagnostic()}"
             yield SimpleNamespace(close_caller=close_caller, exited=exited, receipt_log=receipt_log)
+        except BaseException as error:
+            message = f"Native hook failure before owner settlement: {type(error).__name__}: {error}\n"
+            try:
+                message += diagnostic()[-65536:]
+            except Exception as diagnostic_error:
+                message += f"Diagnostic read failed: {diagnostic_error}"
+            print(message, file=sys.stderr, flush=True)
+            raise
         finally:
             close_caller()
             if owner is not None:
@@ -183,6 +191,38 @@ def owned_hook(
                     observe(exited, 900, diagnostic)
                 finally:
                     os.close(descriptor)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows owner cleanup reporting")
+def test_hook_failure_reports_before_waiting_for_owner_cleanup(area, monkeypatch, capsys):
+    import test_foundation_genesis_process as native
+
+    events = []
+
+    def wait_for_owner(timeout):
+        error = capsys.readouterr().err
+        assert "controlled hook failure" in error and "retained native diagnostic" in error
+        events.append("wait")
+
+    owner = SimpleNamespace(wait=wait_for_owner, close=lambda: events.append("owner-close"))
+
+    def launch(_command, **kwargs):
+        kwargs["stdout"].write(b"{}\n")
+        kwargs["stdout"].flush()
+        frame = ACKNOWLEDGEMENT + json.dumps({"log": str(area / "receipt.log")}) + "\n"
+        kwargs["stderr"].write(frame.encode())
+        kwargs["stderr"].flush()
+        return SimpleNamespace(wait=lambda timeout: 0), SimpleNamespace(close=lambda: events.append("caller-close"))
+
+    monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job", launch)
+    monkeypatch.setattr(native, "pinned_worker", lambda _acknowledgement: owner)
+    with pytest.raises(RuntimeError, match="controlled hook failure"):
+        with owned_hook(
+            ["fixture"], env={}, project=area, directory=area / "hook", timeout=15,
+            diagnostic=lambda: "retained native diagnostic",
+        ):
+            raise RuntimeError("controlled hook failure")
+    assert events == ["caller-close", "wait", "owner-close"]
 
 
 @native_genesis
