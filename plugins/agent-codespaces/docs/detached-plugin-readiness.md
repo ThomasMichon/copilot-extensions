@@ -89,6 +89,12 @@ up on failure; an already admitted task is not killed merely because creation
 receipt settlement loses its reply. Inbox admission is durable ownership, not a
 claim that the model has consumed or completed the task.
 
+Confirmed refusal failures include an optional `refusal_reason` with the fixed
+Bridge startup code, without copying raw error details. Older or unknown reasons
+remain generic; admission and retry authority are unchanged. The shared
+[owned-delivery diagnostic contract](../../../libs/venue-copilot/README.md#owned-delivery-refusal-diagnostics)
+also governs the trusted-container and SSH detached consumers.
+
 ## Ambiguous admission is retained ownership
 
 Prepared sends use the CLI's structured JSON admission receipt. A nonzero exit,

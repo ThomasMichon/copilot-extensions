@@ -402,7 +402,11 @@ def launch_detached(
                 if delivery_result.status == "refused":
                     adapter.record_pending_delivery(plan, None)
                     pending_delivery = False
-                    return 1, _payload(False, plan, error="owned seed was not admitted after plugin readiness")
+                    detail = f" ({delivery_result.reason})" if delivery_result.reason else ""
+                    return 1, _payload(
+                        False, plan, refusal_reason=delivery_result.reason,
+                        error="owned seed was not admitted after plugin readiness" + detail,
+                    )
             seed_delivery_status = "bridge" if delivery_result else "failed"
             if owned:
                 ok = True  # A durably admitted task must not be killed by receipt-cleanup failure.

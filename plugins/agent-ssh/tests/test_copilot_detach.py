@@ -15,6 +15,7 @@ import pytest
 from ssh_manager import keeper_holds as shared_keeper_holds
 from agent_procutil import no_window_flags
 from venue_copilot import detached as venue_detached
+from venue_copilot.refs import deliver_note as real_deliver_note
 
 from agent_ssh import copilot_detach as detach
 from agent_ssh.copilot_detach import ensure_keeper as real_ensure_keeper, stop_keeper as real_stop_keeper
@@ -150,6 +151,28 @@ def test_detach_success_reserves_ssh_venue_and_reports_handle(seams, capsys):
     assert "--copilot-arg=--no-ask-user" in launch
     assert "--json" in launch
     assert seams.release == [("anchor-repo@devbox", "r1")]
+
+
+def test_owned_refusal_preserves_fixed_reason_without_replay(seams, monkeypatch, capsys):
+    attempts = []
+
+    def run(argv, **kwargs):
+        attempts.append(argv)
+        return types.SimpleNamespace(returncode=69, stdout=json.dumps({
+            "owned_delivery_version": 1, "admission_status": "not_admitted",
+            "reason": "plugins_not_ready", "error": "private readiness detail",
+        }))
+
+    monkeypatch.setattr(
+        "venue_copilot.refs.deliver_note",
+        lambda sid, note, **kwargs: real_deliver_note(sid, note, run=run, **kwargs),
+    )
+    assert detach.cmd_detach(_args()) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is False and report["refusal_reason"] == "plugins_not_ready"
+    assert "plugins_not_ready" in report["error"]
+    assert "private readiness detail" not in json.dumps(report)
+    assert len(attempts) == 1
 
 
 def test_streamed_receiver_transport_is_isolated_from_terminal_signals(monkeypatch):

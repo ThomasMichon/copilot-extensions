@@ -1118,13 +1118,15 @@ def test_owned_readiness_refusal_never_falls_back_or_reports_seeded(
     seams, monkeypatch, capsys, tmp_path, created,
 ):
     attempted = []
-    from venue_copilot.refs import owned_result
     def refuse(sid, note, **kwargs):
         attempted.append(kwargs)
-        return dataclasses.replace(owned_result(
-            False, session_id=sid, operation=kwargs["operation"], note=note,
-            context=kwargs["prepared_context"],
-        ), status="refused")
+        return _real_deliver_note(
+            sid, note, **kwargs,
+            run=lambda *a, **k: types.SimpleNamespace(returncode=69, stdout=json.dumps({
+                "owned_delivery_version": 1, "admission_status": "not_admitted",
+                "reason": "plugins_not_ready", "error": "private readiness detail",
+            })),
+        )
     monkeypatch.setattr("venue_copilot.refs.deliver_note",
                         refuse)
     output = json.dumps({"ok": True, "created": created})
@@ -1132,6 +1134,9 @@ def test_owned_readiness_refusal_never_falls_back_or_reports_seeded(
     assert detach.cmd_detach(args, ssh_session=_ssh(seams, stdout=output)) == 1
     report = json.loads(capsys.readouterr().out)
     assert report["ok"] is False and "not admitted" in report["error"]
+    assert report["refusal_reason"] == "plugins_not_ready"
+    assert "plugins_not_ready" in report["error"]
+    assert "private readiness detail" not in json.dumps(report)
     assert len(attempted) == 1 and attempted[0]["prepared_context"]["version"] == 1
     assert any("tmux kill-session" in command for command in seams.remote) is created
 
