@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import sys
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from repository_policy import AgentHostingError
 
+from agent_bridge import windows_path
 from agent_bridge.connect import ConnectError, ConnectStage
+from agent_bridge.session_lifecycle_cli import _agent_worktrees_environment
 from agent_bridge.transport import (
     _ACP_STDIO_LIMIT_BYTES,
     AgentProcess,
@@ -1682,3 +1687,307 @@ class TestAgentProcessKillGracefulWindows:
             await agent_proc.kill()
 
         mock_win.assert_not_awaited()
+
+
+# Captured at import: the autouse ``_isolate_registry_path`` fixture replaces
+# the reader during every test, and the reader tests below need the real one.
+_REAL_REGISTRY_PATH_ENTRIES = windows_path.registry_path_entries
+
+_MACHINE_ENVIRONMENT_KEY = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+_REG_SZ, _REG_EXPAND_SZ, _REG_DWORD = 1, 2, 4
+_INHERITED_PATH = r"C:\Existing\bin"
+_NEW_ENTRY = r"C:\Tools\new-helper\bin"
+_REFRESHED_PATH = _INHERITED_PATH + ";" + _NEW_ENTRY
+
+
+def _use_registry_entries(monkeypatch, entries):
+    monkeypatch.setattr(windows_path, "registry_path_entries", lambda: list(entries))
+
+
+def _agent_bridge_messages(caplog):
+    return [r.getMessage() for r in caplog.records if r.name == "agent-bridge"]
+
+
+class TestAppendRegistryPath:
+    """append_registry_path -- registry PATH entries that the inherited PATH
+    lacks are appended after it; nothing else changes."""
+
+    def test_appends_missing_entries_after_inherited_path(self, monkeypatch):
+        _use_registry_entries(
+            monkeypatch, [_INHERITED_PATH, _NEW_ENTRY, r"C:\Tools\other\bin"],
+        )
+        env = {"PATH": _INHERITED_PATH + r";C:\Inherited\only", "OTHER": "kept"}
+
+        windows_path.append_registry_path(env)
+
+        assert env == {
+            "PATH": _INHERITED_PATH + r";C:\Inherited\only;" + _NEW_ENTRY
+            + r";C:\Tools\other\bin",
+            "OTHER": "kept",
+        }
+
+    def test_skips_entries_already_inherited_in_another_form(self, monkeypatch):
+        inherited = 'C:\\Existing\\bin\\;"C:\\Quoted Dir";C:/Forward/Slash'
+        _use_registry_entries(monkeypatch, [
+            r"c:\existing\BIN", "C:\\Quoted Dir\\", r"C:\Forward\Slash", _NEW_ENTRY,
+        ])
+        env = {"PATH": inherited}
+
+        windows_path.append_registry_path(env)
+
+        assert env["PATH"] == inherited + ";" + _NEW_ENTRY
+
+    def test_registry_duplicates_and_blank_entries_append_once(self, monkeypatch):
+        _use_registry_entries(
+            monkeypatch, [_NEW_ENTRY, "", "   ", '""', _NEW_ENTRY.upper() + "\\"],
+        )
+        env = {"PATH": _INHERITED_PATH}
+
+        windows_path.append_registry_path(env)
+
+        assert env["PATH"] == _REFRESHED_PATH
+
+    def test_trailing_separator_is_not_doubled(self, monkeypatch):
+        _use_registry_entries(monkeypatch, [_NEW_ENTRY])
+        env = {"PATH": _INHERITED_PATH + ";"}
+
+        windows_path.append_registry_path(env)
+
+        assert env["PATH"] == _REFRESHED_PATH
+
+    @pytest.mark.parametrize("initial", [{"PATH": ""}, {}])
+    def test_empty_or_missing_path_gets_registry_entries(self, monkeypatch, initial):
+        _use_registry_entries(monkeypatch, [r"C:\First\bin", r"C:\Second\bin"])
+        env = dict(initial)
+
+        windows_path.append_registry_path(env)
+
+        assert env == {"PATH": r"C:\First\bin;C:\Second\bin"}
+
+    def test_existing_mixed_case_path_key_is_updated_in_place(self, monkeypatch):
+        _use_registry_entries(monkeypatch, [_NEW_ENTRY])
+        env = {"Path": _INHERITED_PATH}
+
+        windows_path.append_registry_path(env)
+
+        assert env == {"Path": _REFRESHED_PATH}
+
+    def test_reader_failure_leaves_environment_unchanged(self, monkeypatch, caplog):
+        def broken_reader():
+            raise RuntimeError("reader detail")
+
+        monkeypatch.setattr(windows_path, "registry_path_entries", broken_reader)
+        caplog.set_level(logging.DEBUG, logger="agent-bridge")
+        env = {"PATH": _INHERITED_PATH}
+
+        windows_path.append_registry_path(env)
+
+        assert env == {"PATH": _INHERITED_PATH}
+        messages = _agent_bridge_messages(caplog)
+        assert any("RuntimeError" in message for message in messages)
+        assert not any("reader detail" in message for message in messages)
+
+    def test_logs_only_the_appended_count(self, monkeypatch, caplog):
+        _use_registry_entries(monkeypatch, [_NEW_ENTRY, r"C:\Tools\other\bin"])
+        caplog.set_level(logging.DEBUG, logger="agent-bridge")
+
+        windows_path.append_registry_path({"PATH": _INHERITED_PATH})
+
+        messages = _agent_bridge_messages(caplog)
+        assert len(messages) == 1
+        assert "Appended 2 PATH entries" in messages[0]
+        assert "Tools" not in messages[0] and "Existing" not in messages[0]
+
+    def test_nothing_missing_is_unchanged_and_silent(self, monkeypatch, caplog):
+        _use_registry_entries(monkeypatch, [_INHERITED_PATH])
+        caplog.set_level(logging.DEBUG, logger="agent-bridge")
+        env = {"PATH": _INHERITED_PATH}
+
+        windows_path.append_registry_path(env)
+
+        assert env == {"PATH": _INHERITED_PATH}
+        assert _agent_bridge_messages(caplog) == []
+
+
+class _FakeRegistryKey:
+    def __init__(self, value):
+        self.value = value
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+def _install_fake_winreg(monkeypatch, values):
+    """Serve ``values[(hive, subkey)]`` through a stand-in ``winreg`` module.
+
+    Each value is a ``(data, kind)`` pair, an ``OSError`` raised when the key
+    is opened, or absent (the key has no ``Path`` value). Returns the list of
+    opened keys.
+    """
+    opened = []
+
+    def open_key(hive, subkey):
+        opened.append((hive, subkey))
+        value = values.get((hive, subkey))
+        if isinstance(value, OSError):
+            raise value
+        return _FakeRegistryKey(value)
+
+    def query_value_ex(key, name):
+        assert name == "Path"
+        if key.value is None:
+            raise FileNotFoundError(2, "value not found")
+        return key.value
+
+    fake = SimpleNamespace(
+        HKEY_LOCAL_MACHINE="machine",
+        HKEY_CURRENT_USER="user",
+        REG_SZ=_REG_SZ,
+        REG_EXPAND_SZ=_REG_EXPAND_SZ,
+        OpenKey=open_key,
+        QueryValueEx=query_value_ex,
+        ExpandEnvironmentStrings=lambda value: value.replace("%TOOLS_ROOT%", r"C:\Tools"),
+    )
+    monkeypatch.setitem(sys.modules, "winreg", fake)
+    monkeypatch.setattr(windows_path, "sys", SimpleNamespace(platform="win32"))
+    return opened
+
+
+class TestRegistryPathEntries:
+    """registry_path_entries -- the machine, then the user, registry Path."""
+
+    def test_reads_machine_then_user_and_expands_only_expandable_values(
+        self, monkeypatch,
+    ):
+        opened = _install_fake_winreg(monkeypatch, {
+            ("machine", _MACHINE_ENVIRONMENT_KEY): (
+                r"%TOOLS_ROOT%\machine-bin;;C:\Shared\bin", _REG_EXPAND_SZ,
+            ),
+            ("user", "Environment"): (r"%TOOLS_ROOT%\user-bin; ;C:\User\bin", _REG_SZ),
+        })
+
+        assert _REAL_REGISTRY_PATH_ENTRIES() == [
+            r"C:\Tools\machine-bin", r"C:\Shared\bin",
+            r"%TOOLS_ROOT%\user-bin", r"C:\User\bin",
+        ]
+        assert opened == [
+            ("machine", _MACHINE_ENVIRONMENT_KEY), ("user", "Environment"),
+        ]
+
+    def test_unreadable_key_is_skipped(self, monkeypatch):
+        _install_fake_winreg(monkeypatch, {
+            ("machine", _MACHINE_ENVIRONMENT_KEY): PermissionError(13, "access denied"),
+            ("user", "Environment"): (r"C:\User\bin", _REG_SZ),
+        })
+
+        assert _REAL_REGISTRY_PATH_ENTRIES() == [r"C:\User\bin"]
+
+    def test_missing_path_value_is_skipped(self, monkeypatch):
+        _install_fake_winreg(monkeypatch, {
+            ("machine", _MACHINE_ENVIRONMENT_KEY): (r"C:\Shared\bin", _REG_SZ),
+        })
+
+        assert _REAL_REGISTRY_PATH_ENTRIES() == [r"C:\Shared\bin"]
+
+    def test_non_string_value_is_skipped(self, monkeypatch):
+        _install_fake_winreg(monkeypatch, {
+            ("machine", _MACHINE_ENVIRONMENT_KEY): (1234, _REG_DWORD),
+            ("user", "Environment"): (r"C:\User\bin", _REG_SZ),
+        })
+
+        assert _REAL_REGISTRY_PATH_ENTRIES() == [r"C:\User\bin"]
+
+    def test_non_windows_reads_nothing(self, monkeypatch):
+        monkeypatch.setitem(sys.modules, "winreg", None)  # importing would raise
+        monkeypatch.setattr(windows_path, "sys", SimpleNamespace(platform="linux"))
+
+        assert _REAL_REGISTRY_PATH_ENTRIES() == []
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="reads the Windows registry")
+    def test_real_registry_smoke(self):
+        entries = _REAL_REGISTRY_PATH_ENTRIES()
+
+        assert isinstance(entries, list)
+        assert all(isinstance(entry, str) and entry.strip() for entry in entries)
+
+
+class TestSpawnEnvironmentRegistryPath:
+    """Spawned processes get the registry PATH entries that the service's
+    inherited PATH lacks, e.g. a tool installed after the service started."""
+
+    @pytest.fixture(autouse=True)
+    def stale_service_path(self, monkeypatch):
+        monkeypatch.setenv("PATH", _INHERITED_PATH)
+        _use_registry_entries(monkeypatch, [_INHERITED_PATH, _NEW_ENTRY])
+        monkeypatch.setattr(
+            "agent_bridge.transport._wrap_batch_for_windows", lambda cmd, env: cmd,
+        )
+
+    @pytest.mark.asyncio
+    async def test_local_launch_appends_registry_entries(self):
+        target = SpawnTarget(type="local", cwd="/work", copilot_path="copilot")
+
+        _args, _cwd, env = await resolve_local_launch(target)
+
+        assert env["PATH"] == _REFRESHED_PATH
+
+    @pytest.mark.asyncio
+    async def test_explicit_target_path_is_used_verbatim(self):
+        target = SpawnTarget(
+            type="local", cwd="/work", copilot_path="copilot",
+            env={"PATH": r"C:\Explicit\bin"},
+        )
+
+        _args, _cwd, env = await resolve_local_launch(target)
+
+        assert env["PATH"] == r"C:\Explicit\bin"
+
+    @pytest.mark.asyncio
+    async def test_worktree_resolver_and_session_get_registry_entries(
+        self, monkeypatch,
+    ):
+        monkeypatch.setattr(
+            "agent_bridge.transport._agent_worktrees_launch_prefix",
+            lambda: ["owner-command"],
+        )
+        plan = {"launch": {"worktree_id": "wt-1", "work_dir": "/work", "cmd": ["copilot"]}}
+        resolver_paths = []
+
+        async def fake_exec(*argv, **kw):
+            resolver_paths.append(kw["env"]["PATH"])
+            proc = MagicMock()
+            proc.returncode = 0
+            proc.communicate = AsyncMock(return_value=(json.dumps(plan).encode(), b""))
+            return proc
+
+        target = SpawnTarget(type="local", project="test-project")
+        with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+            _args, _cwd, env = await resolve_local_launch(target)
+
+        assert resolver_paths == [_REFRESHED_PATH]
+        assert env["PATH"] == _REFRESHED_PATH
+
+    @pytest.mark.asyncio
+    async def test_raw_command_spawn_appends_registry_entries(self):
+        target = SpawnTarget(type="command", spawn_command=["provider-command", "exec"])
+        with patch("agent_bridge.transport.asyncio") as mock_asyncio, \
+             patch("agent_bridge.transport._creation_flags", return_value=0):
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=MagicMock())
+            mock_asyncio.subprocess = asyncio.subprocess
+
+            await spawn_raw(target)
+
+        env = mock_asyncio.create_subprocess_exec.call_args[1]["env"]
+        assert env["PATH"] == _REFRESHED_PATH
+
+    def test_owner_environment_appends_registry_entries(self):
+        assert _agent_worktrees_environment()["PATH"] == _REFRESHED_PATH
+
+    def test_owner_environment_keeps_a_supplied_environment_verbatim(self):
+        # A supplied environment was already refreshed by its caller.
+        assert _agent_worktrees_environment({"PATH": r"C:\Caller\bin"}) == {
+            "PATH": r"C:\Caller\bin",
+        }

@@ -19,6 +19,7 @@ from agent_procutil import no_window_kwargs
 from agent_bridge import acquisition_authority as authority
 from agent_bridge import local_cache_refresh
 from agent_bridge import session_lifecycle_cli as lifecycle
+from agent_bridge import windows_path
 from agent_bridge._peer_launch import ContextRefused
 from agent_bridge.acquisition_contract import AcquisitionRefused, AcquisitionRequest
 
@@ -110,6 +111,8 @@ def installation(tmp_path, monkeypatch, request):
     deploy_installed_layout(own, request.param)
     monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: own)
     monkeypatch.setenv("PATH", "")
+    # The registry PATH refresh must not reintroduce an interactive PATH here.
+    monkeypatch.setattr(windows_path, "registry_path_entries", lambda: [])
     which = Mock(return_value=None)
     monkeypatch.setattr(lifecycle.shutil, "which", which)
     peer = tmp_path / ".agent-worktrees"

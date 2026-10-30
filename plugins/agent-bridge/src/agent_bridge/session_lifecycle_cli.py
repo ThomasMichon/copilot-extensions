@@ -16,6 +16,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from . import _peer_launch
+from .windows_path import append_registry_path
 
 
 def _core():
@@ -278,7 +279,12 @@ def _agent_worktrees_environment(inherited: dict[str, str] | None = None) -> dic
         "VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH", "__PYVENV_LAUNCHER__",
     }
     source = os.environ if inherited is None else inherited
-    return {key: value for key, value in source.items() if key.upper() not in excluded}
+    env = {key: value for key, value in source.items() if key.upper() not in excluded}
+    if inherited is None:
+        # Pick up tools installed since the service started (no-op off
+        # Windows); an inherited environment was already refreshed by its caller.
+        append_registry_path(env)
+    return env
 
 
 def _cmd_handoff_check(args: argparse.Namespace) -> None:

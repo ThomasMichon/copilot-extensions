@@ -16,6 +16,7 @@ from bridge_http47_runtime import install as _install_capture_guard
 http47_binding_validation.start()
 _install_capture_guard(observer=True)
 
+from agent_bridge import windows_path
 from agent_bridge.db import Database
 from agent_bridge.events import EventLog
 from agent_bridge.models import ServiceConfig
@@ -48,6 +49,18 @@ def _isolate_runtime_dirs(tmp_path, monkeypatch):
     runtime = tmp_path / "agent-bridge-runtime"
     runtime.mkdir(exist_ok=True)
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(runtime))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_registry_path(monkeypatch):
+    """Keep spawned-session environments independent of the host registry.
+
+    On Windows, environments built for spawned processes append registry
+    ``Path`` entries that the inherited ``PATH`` lacks, so a test asserting an
+    exact environment would otherwise depend on the machine's registry. Tests
+    that exercise the refresh install their own fake reader (a monkeypatch
+    re-set within the test wins)."""
+    monkeypatch.setattr(windows_path, "registry_path_entries", lambda: [])
 
 
 @pytest.fixture
