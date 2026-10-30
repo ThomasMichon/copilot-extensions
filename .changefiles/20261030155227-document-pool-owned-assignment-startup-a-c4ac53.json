@@ -1,0 +1,9 @@
+{
+  "comment": "Document pool-owned assignment startup and retry-eligibility repair design without changing runtime behavior",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
