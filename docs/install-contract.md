@@ -5022,8 +5022,8 @@ active**, in which case that plugin's hook skips its own reconcile entirely for
 this session (see `libs/bootstrap-killswitch/README.md`; amends the
 *self-provisioning-runtime* vision in `visions/plugin-services/README.md`).
 Explicit `<repo> update` and `worktree-manager update` calls are manual by
-default and do not require clearing an automatic-update hold. Genuine
-unattended producers pass `--auto`; the existing execution owner retires an
+default and do not require clearing an automatic-update hold. Manager's optional
+pre-launch/resume maintenance passes `--auto`; the existing execution owner retires an
 inhibited automatic request with the visible exit-3 no-work outcome before its
 installer starts. Manual admission does not inject `--force`, recreate a healthy
 runtime, settle an interrupted transaction, or supersede a live installer.
@@ -5031,10 +5031,11 @@ Existing force/repair options and installation-cell scope remain independent.
 The [driver contract](../libs/update-driver/README.md) defines persisted
 manual/automatic identity and compatible readers.
 
-Generated unattended commands and task definitions include `--auto`. During
-rollout, reconcile previously generated schedules through their existing owner
-before re-enabling automatic execution; an old unmarked scheduled `update` must
-not acquire manual semantics merely because its receiver was upgraded.
+Only Manager's optional pre-session update producers add `--auto`.
+Independently requested fleet/self-update commands and their opted-in schedules
+use ordinary admission, not Manager's launch-maintenance hold. Reconcile obsolete
+scheduled `--auto` arguments through their existing owner under separate
+deployment authority; source publication does not edit installed schedules.
 Legacy launch-maintenance verbs retain their automatic admission semantics
 while their updated producers also spell out `--auto`.
 
