@@ -10,7 +10,9 @@ import threading
 from collections.abc import Mapping
 from pathlib import Path
 
-from plugin_resolve.reflection import build_plan, build_prepare_script, parse_prepared, selection_spec
+from plugin_resolve.reflection import (
+    build_plan, build_prepare_script, parse_prepared, selection_cli_args, selection_spec,
+)
 from plugin_resolve.target import requires_repository_binding
 from worktree_identity import execution_machine_from_fields
 
@@ -46,7 +48,7 @@ async def local_plugin_request(target, workspace: str, environment: dict[str, st
             for relative in SETTINGS_RELS:
                 _settings_document(root.joinpath(*relative))
         specs = [
-            {"source": ref.source, "enable": ref.enable}
+            ref.selection()
             for ref in related_plugins_for_repo(target.project, anchors=roots)
             if not is_harness_plugin(ref.source)
         ]
@@ -298,6 +300,18 @@ async def venue_plugin_plan(
         controller_cwd = await resolve_controller_cwd(
             caller, **({"caller_session_id": session_id} if session_id is not None else {}),
         )
+    roots = list(dict.fromkeys(
+        [*([Path(controller_cwd)] if controller_cwd is not None else []), *control_plane_anchors()]
+    ))
+    specs = [selection_spec(value) for value in target.get("related_plugins", [])]
+    selected_related = {
+        spec["source"]: spec for spec in specs if not is_harness_plugin(spec["source"])
+    }
+    if target.get("repo"):
+        for ref in related_plugins_for_repo(target["repo"], anchors=roots):
+            spec = ref.selection()
+            if not is_harness_plugin(spec["source"]):
+                selected_related.setdefault(spec["source"], spec)
     plan = {"plugins": []}
     provider = target.get("provider_command")
     codespace = target.get("plugin_plan") or codespace
@@ -314,24 +328,15 @@ async def venue_plugin_plan(
             command += ["--repo", target["repo"]]
         if controller_cwd is not None:
             command += ["--plugin-root", controller_cwd]
+        for spec in selected_related.values():
+            if spec.get("allow_missing"):
+                command += selection_cli_args(spec)
         rc, out, _err = await _run_provider(
             command, timeout=120, **({"cwd": controller_cwd} if controller_cwd is not None else {}),
         )
         if rc:
             raise RuntimeError("Venue provider could not select required plugins")
         plan = json.loads(out)
-    roots = list(dict.fromkeys(
-        [*([Path(controller_cwd)] if controller_cwd is not None else []), *control_plane_anchors()]
-    ))
-    specs = [selection_spec(value) for value in target.get("related_plugins", [])]
-    selected_related = {
-        spec["source"]: spec for spec in specs if not is_harness_plugin(spec["source"])
-    }
-    if target.get("repo"):
-        for ref in related_plugins_for_repo(target["repo"], anchors=roots):
-            spec = selection_spec({"source": ref.source, "enable": ref.enable})
-            if not is_harness_plugin(spec["source"]):
-                selected_related.setdefault(spec["source"], spec)
     if selected_related:
         binding = {}
         if target.get("repo") and requires_repository_binding(selected_related.values(), roots):
@@ -346,6 +351,8 @@ async def venue_plugin_plan(
         for item in related["plugins"]:
             provider_item = selected.get(item["source"])
             if provider_item is not None and item.get("resolve_on_target"):
+                if item.get("allow_missing"):
+                    selected[item["source"]] = {**provider_item, "allow_missing": True}
                 continue
             selected[item["source"]] = {
                 **item, "enable": provider_item["enable"] if provider_item is not None else item["enable"],

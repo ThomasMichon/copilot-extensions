@@ -10,7 +10,7 @@ exclude-newer = "7 days"
 # "plugin-resolve") to prevent dependency-confusion; the import module stays
 # ``plugin_resolve``. Mirrors agent-config-migrate / agent-ssh-manager / agent-zdd.
 name = "agent-plugin-resolve"
-version = "0.1.2-dev1"
+version = "0.1.3-dev1"
 description = "Copilot CLI + Claude plugin resolution: locate marketplaces, plugins, and a repo's enabled plugins across both conventions"
 readme = "README.md"
 license = "MIT"

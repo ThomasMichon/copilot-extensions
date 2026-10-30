@@ -18,7 +18,13 @@ def is_harness_only(source: str) -> bool:
 
 def report_diagnostic(item: dict) -> None:
     logger = logging.getLogger("plugin-resolve")
-    if item["status"] == "native-origin-preserved":
+    if item["status"] == "missing-local-allowed":
+        logger.warning(
+            "Skipping absent local plugin %s (explicit allow_missing override); "
+            "repository settings are unchanged for this source",
+            item["source"],
+        )
+    elif item["status"] == "native-origin-preserved":
         logger.warning(
             "%s prepared from target-native remote origin; original %s declaration "
             "preserved in repository settings",

@@ -347,6 +347,7 @@ class CliNamespaceResolver(NamespaceResolver):
             if source:
                 argv += selection_cli_args({
                     "source": source, "enable": getattr(plugin, "enable", True),
+                    "allow_missing": getattr(plugin, "allow_missing", False),
                 })
         res = await self._run(argv)
         if res is not None:

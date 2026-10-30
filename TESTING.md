@@ -3047,6 +3047,21 @@ for trusted-default activation and measurement boundaries.
 
 ## Bridge protocol validation and startup performance
 
+Current retained-inbox evidence captures re-read their complete committed source
+closure inside each selected probe. Prewarm the isolated dependency environment
+before invoking a capture from an independent interpreter:
+
+```powershell
+python tools\run-plugin-tests.py agent-bridge --prepare-only
+python tools\capture_bridge_http51.py --source-commit <committed-source-sha> --write
+```
+
+The Windows capture portfolio permits 120 seconds per test and 600 seconds for
+the owned runner process, allowing full source-proof I/O before the ASGI checks.
+Other platforms retain their existing runner defaults and 240-second process
+bound. Source, interpreter and observation checks remain mandatory; these bounds
+do not permit synthesizing observations or rewriting historical authority.
+
 Protocol correctness and startup speed have separate on-demand flows. Run the
 native transfer and import-boundary contracts normally:
 

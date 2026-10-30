@@ -415,8 +415,9 @@ def _parse_plugins(raw: Any) -> list[dict[str, Any]]:
 
     Accepts a list whose items are either a bare source string (shorthand for
     ``{source, enable: true}``) or a mapping with ``source`` (+ optional
-    ``enable``). Items without a usable ``source`` are skipped; duplicate
-    sources are collapsed (last ``enable`` wins). Never raises.
+    ``enable`` and strict boolean ``allow_missing``). Items without a usable
+    ``source`` are skipped; duplicate sources are collapsed (last mapping wins).
+    Invalid omission permissions raise rather than becoming truthy.
     """
     if not isinstance(raw, list):
         return []
@@ -432,6 +433,10 @@ def _parse_plugins(raw: Any) -> list[dict[str, Any]]:
         if not source:
             continue
         out[source] = {"source": source, "enable": enable}
+        if isinstance(item, dict) and item.get("allow_missing") is True:
+            out[source]["allow_missing"] = True
+        elif isinstance(item, dict) and not isinstance(item.get("allow_missing", False), bool):
+            raise ValueError("Related plugin allow_missing must be a boolean")
     return list(out.values())
 
 
@@ -590,7 +595,10 @@ def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
                 lines.append("    plugins:")
                 for p in entry.plugins:
                     src = _quote(str(p.get("source", "")))
-                    if p.get("enable", True):
+                    if p.get("allow_missing"):
+                        enabled = "true" if p.get("enable", True) else "false"
+                        lines.append(f"      - {{ source: {src}, enable: {enabled}, allow_missing: true }}")
+                    elif p.get("enable", True):
                         lines.append(f"      - {{ source: {src} }}")
                     else:
                         lines.append(f"      - {{ source: {src}, enable: false }}")

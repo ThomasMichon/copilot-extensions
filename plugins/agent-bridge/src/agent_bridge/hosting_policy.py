@@ -309,7 +309,7 @@ async def resolve_namespace_with_plugins(
     metadata = target.codespace or target.container
     if metadata is not None:
         metadata["related_plugins"] = [
-            {"source": ref.source, "enable": ref.enable} for ref in extra
+            ref.selection() for ref in extra
         ]
     return target
 

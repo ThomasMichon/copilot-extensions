@@ -567,9 +567,29 @@ def test_provider_selection_bool_wins_related_fallback(monkeypatch):
         SimpleNamespace(source="sample@synthetic", enable=False),
     ])
     monkeypatch.setattr(module, "build_plan", lambda selections, roots, **kw: selections)
-    assert module.plugin_plan(None, SimpleNamespace(), ["sample@synthetic"]) == [
-        {"source": "sample@synthetic", "enable": False},
+    assert module.plugin_plan(None, SimpleNamespace(), [
+        {"source": "sample@synthetic", "allow_missing": True},
+    ]) == [
+        {"source": "sample@synthetic", "enable": False, "allow_missing": True},
     ]
+
+
+def test_plugin_plan_cli_passes_structured_selection_before_planning(monkeypatch, capsys):
+    from agent_codespaces import __main__ as cli, plugin_preparation as module
+
+    spec = {"source": "retired@local", "enable": False, "allow_missing": True}
+    observed = {}
+    monkeypatch.setattr(cli, "load_merged_config", lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        module, "plugin_plan",
+        lambda repo, config, **kwargs: observed.update(repo=repo, **kwargs) or {"plugins": []},
+    )
+    assert cli.main([
+        "plugin-plan", "synthetic", "--repo", "example/app",
+        "--stage-plugin-spec", json.dumps(spec),
+    ]) == 0
+    assert observed["sources"] == [spec]
+    assert json.loads(capsys.readouterr().out) == {"plugins": []}
 
 
 def test_interrupt_before_attached_readiness_cancels_install_and_awaits_cleanup(monkeypatch):

@@ -460,6 +460,38 @@ Child-inventory settings accept the existing bounded leading-`//` comment-header
 convention used by activation readers. This is read-only compatibility, not a
 claim of a general JSONC parser; other malformed settings still fail explicitly.
 
+## Explicit missing-local selections
+
+A selection mapping accepts `allow_missing: true` alongside `source` and
+`enable` (both booleans are strict; `allow_missing` defaults to false).
+For example, `{source: retired@example-local, enable: true, allow_missing: true}`
+permits preparation to omit only that absent entry from its target-declared local
+marketplace, with a warning. A present entry stages normally, respecting target
+disablement and install-only selection. Other missing plugins remain fatal.
+
+The exception does not authorize acquisition from another marketplace, changing
+authored settings, or ignoring a malformed catalog, a declared-but-invalid
+payload, source identity, content proof or a dependency on the omitted source.
+Absence is checked again under the registration lock before publication.
+An unchanged operation-owned marketplace override is retired when it would
+mask the target's current local declaration; authored preferences are preserved.
+The permission is request-scoped and is never persisted as a target preference.
+Native and legacy settings use the existing native-last, last-per-key precedence.
+
+Structured CLI transport uses `--stage-plugin-spec '<JSON selection>'` only for
+this opt-in; ordinary and install-only selections retain their existing flags.
+An older CLI rejects the new argument rather than silently dropping the policy.
+The Codespaces planning command and SSH launch parser accept the same structured
+selection, including before strict producer planning.
+Remote streamed preparation carries its matching shared implementation, so it
+does not depend on an installed receiver's schema version. Local native requests
+retain their existing version and digest the full plan; older preparation code
+cannot honor the omission and still fails on the missing target-enabled source.
+Privileged ACP retains version 1: the authenticated context binds the controller
+directory, and the actual elevated receiver reads its related selections and
+revalidates preparation against its own allocated checkout. This does not grant
+elevation, change context ownership, or attest to running-peer support.
+
 ## Sources
 
 - Copilot CLI: docs.github.com/.../customize-copilot/plugins-marketplace
