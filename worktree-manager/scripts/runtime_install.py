@@ -377,6 +377,11 @@ def _source_digest(payload: Path) -> str:
     return runtime.fingerprint_source(engine._source_files(engine._package_roots(payload)))
 
 
+def _bootstrap_hold_path() -> str:
+    override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE", "")
+    return os.path.abspath(os.path.expanduser(override)) if override else ""
+
+
 def _automatic_bootstrap_inhibited(args) -> bool:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if command[:1] != ["update"]:
@@ -387,10 +392,9 @@ def _automatic_bootstrap_inhibited(args) -> bool:
     if not options.auto:
         return False
     driver = _execution_driver(args.payload)
-    override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE", "")
     return driver._automatic_update_inhibited(driver.RequestSpec(
         "manager-bootstrap", context=tuple(request_context().items()),
-        killswitch_path=os.path.abspath(os.path.expanduser(override)) if override else "",
+        killswitch_path=_bootstrap_hold_path(),
     ))
 
 
@@ -430,6 +434,7 @@ def _foreground_install(args, driver) -> Path | int:
             cwd=str(args.payload.resolve()), source=digest,
             context=tuple({**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}.items()),
             repair=repair,
+            killswitch_path=_bootstrap_hold_path(),
         ),
         runner=driver.TrustedRunner(
             tuple(arguments), str(args.payload.resolve()), context_keys=_CONTEXT_KEYS,

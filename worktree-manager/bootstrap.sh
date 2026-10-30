@@ -34,6 +34,14 @@ if [ "${1-}" = --system-python ]; then
     exit 2
 fi
 
+case "${BOOTSTRAP_KILLSWITCH_STATE_FILE:-}" in
+    ""|/*|"~"*) ;;
+    *)
+        BOOTSTRAP_KILLSWITCH_STATE_FILE="$(pwd -P)/$BOOTSTRAP_KILLSWITCH_STATE_FILE"
+        export BOOTSTRAP_KILLSWITCH_STATE_FILE
+        ;;
+esac
+
 ROOT="${WORKTREE_MANAGER_ROOT:-$HOME/.worktree-manager}"
 STAGING="$ROOT/staging"
 CONFIG="$ROOT/config.toml"

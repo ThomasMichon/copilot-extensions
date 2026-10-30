@@ -248,9 +248,12 @@ def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_w
     state.adapter.runtime.mark_complete(state.root, state.slot.name, payload_hash="b" * 64)
     switch = state.root / "killswitch.json"
     switch.write_text(json.dumps({"active": held}), encoding="utf-8")
-    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
+    caller = state.root / "caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", "../killswitch.json")
     automatic = core.enqueue(
-        core.RequestSpec("automatic-fixture", cwd=str(state.root)),
+        core.RequestSpec("automatic-fixture", cwd=str(caller)),
         runner=core.TrustedRunner((sys.executable, "-c", "raise SystemExit(99)"), str(state.root)),
     )
     executed = []
@@ -286,6 +289,7 @@ def test_bootstrap_retains_update_repair_authority_without_executing_inhibited_w
         assert skipped.started_at is None
     bootstrap = next(request for request in core.status() if request.id != automatic.id)
     assert bootstrap.spec.repair is repair
+    assert Path(bootstrap.spec.killswitch_path) == switch
     assert bootstrap.state == "completed" and bootstrap.exit_code == (0 if admitted else 3)
     assert executed == ([] if held else [automatic.id]) + ([bootstrap.id] if admitted else [])
     assert bootstrap.spec.argv == (

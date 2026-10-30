@@ -341,6 +341,8 @@ the visible exit-3 no-op before Manager runtime construction or downstream
 installers, while an inactive hold executes normally. The POSIX bootstrap checks
 the same canonical admission policy before construction; target-scoped updates
 retain their manual/automatic mode through the target parser and engine handoff.
+Both native bootstraps anchor a relative hold-file override to the caller's
+directory before staging, and queued bootstrap admission retains that exact path.
 Independent namespaced cells retain their existing exemption from that default hold.
 Interrupted-transaction settlement and live-installer exclusivity remain separate
 gates. The existing queued `repair` boolean records manual admission, not rebuild

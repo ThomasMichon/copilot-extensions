@@ -287,6 +287,7 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
         "worktree-manager": {
             "tests/test_update_driver_cli.py", "tests/test_manager_broker_installation.py",
             "tests/test_launch_update_requests.py", "tests/test_installation_updates.py",
+            "tests/test_bootstrap_repair_recovery.py",
         },
         "agent-machines": {"tests/test_fleet_update.py", "tests/test_self_update.py"},
         "update-driver": {"tests/test_core.py", "tests/test_legacy_record_readback.py"},
@@ -316,6 +317,7 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
                     "manual_auto_hold", "operator_repair_classification",
                     "bootstrap_retains_update_repair", "native_launch_submits_fixed_phases",
                     "posix_bootstrap_hold", "target_bypasses_bootstrap",
+                    "bootstrap_preserves_hold_path",
                 ]
         assert "!cancelled() && steps.tooling.outcome == 'success'" in step["if"]
         assert not any(flag in command for flag in (
