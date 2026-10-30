@@ -25,6 +25,7 @@ from agent_procutil import no_window_flags
 from ssh_manager import SSHProfileSource, get_default_manager
 
 from .connect import ConnectError, ConnectStage, ConnectTracker
+from .local_launch_arguments import append_local_launch_arguments as _append_local_launch_arguments
 from .procgroup import safe_killpg, terminate_windows_tree
 from .relay_state import get_live_relay_port
 from .resolver_diagnostics import (
@@ -578,6 +579,7 @@ async def resolve_local_launch(
     env.pop("VIRTUAL_ENV", None)
     env.pop("PYTHONHOME", None)
     env.update(target.env)
+    record_path = None
 
     if target.project and (not target.explicit_cwd or target.native_resume_id):
         # Stage 6: create/resume the worktree. Failures propagate (no retry).
@@ -589,6 +591,7 @@ async def resolve_local_launch(
         cmd = launch.get("cmd", [])
         plan_env = launch.get("env", {})
         worktree_id = launch.get("worktree_id")
+        record_path = launch.get("record_path")
 
         if not cmd:
             raise RuntimeError("Worktree resolve returned empty cmd")
@@ -602,21 +605,15 @@ async def resolve_local_launch(
         # Merge plan environment into the process env
         env.update(plan_env)
 
-        # --no-auto-update pins the child to the installed build (no silent CLI updates).
-        args = cmd + ["--acp", "--stdio", "--no-auto-update"] + target.copilot_args
-        log.info(
-            "Resolved copilot launch from worktree plan: %s (cwd=%s, worktree=%s)",
-            " ".join(args), work_dir, worktree_id,
-        )
     else:
         if not target.cwd:
             raise ValueError("Local agent without 'project' requires 'cwd'")
         copilot = _find_copilot(env, cwd=target.cwd, explicit_path=target.copilot_path)
-        args = [copilot, "--acp", "--stdio", "--no-auto-update"] + target.copilot_args
+        cmd = [copilot]
         work_dir = target.cwd
-        log.info("Resolved local agent launch: %s (cwd=%s)", " ".join(args), work_dir)
 
     require_path_hosting(work_dir)
+    native_args = target.copilot_args
     if (
         prepare_plugins and target.type == "local" and target.local_plugin_preparation
         and not target.spawn_command
@@ -639,10 +636,18 @@ async def resolve_local_launch(
         if target.elevated:
             prepared_context["execution_cwd"] = work_dir
         if replacement is not None:
-            launch_prefix = args[:-len(target.copilot_args)] if target.copilot_args else args
-            args = [*launch_prefix, *_prepared_plugin_args(target, replacement)]
+            native_args = _prepared_plugin_args(target, replacement)
             if target.elevated:
                 target.cwd = work_dir
+    # Assemble once after plugin preparation; envelope arguments are not an argv suffix.
+    args = _append_local_launch_arguments(
+        cmd, ["--acp", "--stdio", "--no-auto-update", *native_args],
+        record_path=record_path,
+    )
+    log.info(
+        "Resolved local agent launch: %s (cwd=%s, worktree=%s)",
+        " ".join(args), work_dir, target.worktree_id,
+    )
     args = _wrap_batch_for_windows(args, env)
     return args, work_dir, env
 

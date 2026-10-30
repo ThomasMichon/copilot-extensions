@@ -30,6 +30,10 @@ REFS_ROOT = "$HOME/.agent-bridge/refs"  # marketplace-isolation: allow agent-bri
 #: The payload travels in memory (tar.gz -> base64); larger inputs belong in a
 #: repository or storage account the venue can reach itself.
 MAX_REF_BYTES = 256 * 1024 * 1024
+_OWNED_REFUSAL_REASONS = frozenset({
+    "startup_input", "startup_target", "startup_protocol", "unsupported_protocol",
+    "plugins_not_ready",
+})
 
 
 class RefFileError(ValueError):
@@ -140,6 +144,7 @@ class OwnedDelivery:
     idempotency_key: str
     input_digest: str
     message_id: int | None = None
+    reason: str | None = None
 
     def __bool__(self):
         return self.status == "admitted"
@@ -239,7 +244,10 @@ def deliver_note(
                 type(payload.get("owned_delivery_version")) is int and payload["owned_delivery_version"] == 1
                 and payload.get("admission_status") == "not_admitted" and not unknown
             ):
-                return OwnedDelivery("refused", op, session_id, key, fingerprint)
+                reason = payload.get("reason")
+                if not isinstance(reason, str) or reason not in _OWNED_REFUSAL_REASONS:
+                    reason = None
+                return OwnedDelivery("refused", op, session_id, key, fingerprint, reason=reason)
             unknown = True
         return OwnedDelivery("unknown", op, session_id, key, fingerprint)
     try:

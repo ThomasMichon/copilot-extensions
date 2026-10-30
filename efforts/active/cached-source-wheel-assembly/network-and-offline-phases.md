@@ -2,8 +2,9 @@
 
 Parent contract: [Cached Source Wheel Assembly](README.md), #9290.
 
-This is a proposed, **agent-recommended implementation slice**, not a change to
-installed runtimes or permission to replay an interrupted update.
+This **agent-recommended implementation slice** was reviewed in #9588 and
+implemented in #9592. It is not a change to installed runtimes or permission
+to replay an interrupted update.
 
 ## Request
 
@@ -11,11 +12,11 @@ installed runtimes or permission to replay an interrupted update.
 
 ## Problem and scope
 
-The ordinary `retained_source_wheels` path currently shares one constructor
+The ordinary `retained_source_wheels` path previously shared one constructor
 child deadline across build-tool provisioning, source copying, offline wheel
 builds, archive inspection and repeated source/build-tool verification.
-Requirement-group provisioning is interleaved with per-project construction.
-An expiry while hashing a local tool tree can therefore be reported through
+Requirement-group provisioning was interleaved with per-project construction.
+An expiry while hashing a local tool tree could therefore be reported through
 the generic wheel-inspection deadline error.
 
 The first adopting boundary is this ordinary source-wheel path in the shared
@@ -83,22 +84,28 @@ replay, extend an outer deadline or replace owned-child cancellation.
 
 ## Acceptance
 
-- [ ] All distinct build-tool groups are acquired before any offline project
+- [x] All distinct build-tool groups are acquired before any offline project
   build; each retains independent dependency selection.
-- [ ] Controlled acquisition work can consume its own allowance without
+- [x] Controlled acquisition work can consume its own allowance without
   shortening the local phase's allowance; local expiry remains bounded and
   identifies the actual phase.
-- [ ] A real retained-source consumer completes offline wheel building and
+- [x] A real retained-source consumer completes offline wheel building and
   verification after the fixture feed becomes unavailable, with no hidden
   acquisition in that boundary.
-- [ ] Existing cache-hit, source-edit invalidation, backend mutation, corrupt
+- [x] Existing cache-hit, source-edit invalidation, backend mutation, corrupt
   archive and interrupted-publication controls remain effective.
-- [ ] Phase progress, failure attribution and final result framing are covered.
-- [ ] Ordinary source installation and its unsupported fallback retain truthful
+- [x] Phase progress, failure attribution and final result framing are covered.
+- [x] Ordinary source installation and its unsupported fallback retain truthful
   network-capability classification; this slice makes no whole-update latency
   or deployment claim.
-- [ ] Shared consumer materialization, source admission, focused native/POSIX
+- [x] Shared consumer materialization, source admission, focused native/POSIX
   qualification and required publication gates pass without weakening checks.
+
+The [parent journal](README.md#journal) records the exact merged source and
+successful real-backend Linux/Windows qualification. Promotion #9600 released
+the exact26 source copies on Main
+`ffcd3a7539be20eea641e1eeb63cbdc082d2fda9`; no installed runtime or
+whole-update performance result is asserted.
 
 ## Delivery boundaries
 

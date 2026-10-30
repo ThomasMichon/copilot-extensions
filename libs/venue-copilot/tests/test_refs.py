@@ -21,12 +21,14 @@ def test_prepared_delivery_retains_unknown_after_timeout_even_if_retry_refuses()
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         return SimpleNamespace(returncode=69, stdout=json.dumps({
             "owned_delivery_version": 1, "admission_status": "not_admitted",
+            "reason": "plugins_not_ready",
         }))
     result = venue_refs.deliver_note(
         "native", "owned", run=run, operation="operation",
         prepared_context={"version": 1, "cwd": "/workspace", "plugins": []},
     )
     assert result.status == "unknown" and len(calls) == 2
+    assert result.reason is None
     assert calls[0] == calls[1]
     assert "--expected-session-id" in calls[0][0]
 
@@ -41,12 +43,43 @@ def test_prepared_delivery_requires_structured_admission_or_confirmed_refusal():
             "owned_delivery_version": 1, "admission_status": "not_admitted",
         })),
     )
-    assert refused.status == "refused"
+    assert refused.status == "refused" and refused.reason is None
     bare_success = venue_refs.deliver_note(
         "native", "owned", operation="operation", prepared_context=context,
         run=lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=""),
     )
     assert bare_success.status == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        ("plugins_not_ready", "plugins_not_ready"),
+        ("startup_protocol", "startup_protocol"),
+        ("unrecognized diagnostic text", None),
+        ({"detail": "untrusted diagnostic"}, None),
+    ],
+)
+def test_prepared_delivery_preserves_only_fixed_refusal_reasons(reason, expected):
+    import json
+    from types import SimpleNamespace
+
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=69, stdout=json.dumps({
+            "owned_delivery_version": 1, "admission_status": "not_admitted",
+            "reason": reason, "error": "raw diagnostic must not propagate",
+        }))
+
+    result = venue_refs.deliver_note(
+        "native", "owned", run=run, operation="operation",
+        prepared_context={"version": 1, "cwd": "/workspace", "plugins": []},
+    )
+    assert result.status == "refused" and len(calls) == 1
+    assert result.reason == expected and result.recovery()["reason"] == expected
+    assert "raw diagnostic" not in repr(result.recovery())
 
 
 def test_confirmed_admission_recovery_never_resends_after_native_session_exits():

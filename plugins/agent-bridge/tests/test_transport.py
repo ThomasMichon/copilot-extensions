@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -828,7 +829,8 @@ class TestSpawnLocal:
 
 
     @pytest.mark.asyncio
-    async def test_local_with_project_resolves_then_execs(self):
+    @pytest.mark.parametrize("enveloped", [False, True], ids=["direct", "windows-setup"])
+    async def test_local_with_project_resolves_then_execs(self, enveloped, monkeypatch):
         """Local spawn with project should resolve via --json --new, then exec copilot."""
         target = SpawnTarget(
             type="local",
@@ -839,12 +841,23 @@ class TestSpawnLocal:
         # Mock the resolve subprocess (returns JSON plan)
         resolve_proc = MagicMock()
         resolve_proc.returncode = 0
+        command = (
+            ["pwsh", "-NoProfile", "-File",
+             str(Path(__file__).resolve().parents[2] / "agent-worktrees/scripts/default-setup.ps1"),
+             "-NativeArgumentsJson", '{"args":[]}']
+            if enveloped else ["/usr/bin/copilot"]
+        )
+        if enveloped:
+            monkeypatch.setattr(
+                "agent_bridge.local_launch_arguments._worktrees_setup_script",
+                lambda: Path(command[3]),
+            )
         resolve_plan = {
             "version": 1,
             "worktree": {"id": "test-wt-1234"},
             "launch": {
                 "work_dir": "/tmp/worktree",
-                "cmd": ["/usr/bin/copilot"],
+                "cmd": command,
                 "env": {"MY_VAR": "val"},
                 "worktree_id": "test-wt-1234",
             },
@@ -879,10 +892,14 @@ class TestSpawnLocal:
             # Second call: copilot exec
             exec_call = mock_asyncio.create_subprocess_exec.call_args_list[1]
             exec_args = exec_call[0]
-            assert exec_args[0] == "/usr/bin/copilot"
-            assert "--acp" in exec_args
-            assert "--stdio" in exec_args
-            assert "--allow-all" in exec_args
+            expected_native = ["--acp", "--stdio", "--no-auto-update", "--allow-all"]
+            if enveloped:
+                assert len(exec_args) == len(command)
+                assert Path(exec_args[0]).stem.casefold() == "pwsh"
+                assert list(exec_args[1:-1]) == command[1:-1]
+                assert json.loads(exec_args[-1]) == {"args": expected_native}
+            else:
+                assert list(exec_args) == ["/usr/bin/copilot", *expected_native]
             assert exec_call[1]["cwd"] == "/tmp/worktree"
             # The ACP stdout reader must use a large frame limit, not asyncio's
             # 64 KiB default, so large tool results don't drop the connection.
@@ -895,7 +912,8 @@ class TestSpawnLocal:
             assert target.cwd == "/tmp/worktree"
 
     @pytest.mark.asyncio
-    async def test_local_with_project_resume_worktree(self):
+    @pytest.mark.parametrize("enveloped", [False, True], ids=["direct", "windows-setup"])
+    async def test_local_with_project_resume_worktree(self, enveloped, monkeypatch):
         """Local spawn with worktree_id should resolve with --worktree-id."""
         target = SpawnTarget(
             type="local",
@@ -905,11 +923,23 @@ class TestSpawnLocal:
 
         resolve_proc = MagicMock()
         resolve_proc.returncode = 0
+        native = ["--resume", "sess-abc"]
+        command = (
+            ["powershell", "-NoProfile", "-File",
+             str(Path(__file__).resolve().parents[2] / "agent-worktrees/scripts/default-setup.ps1"),
+             "-NativeArgumentsJson", json.dumps({"args": native})]
+            if enveloped else ["/usr/bin/copilot", *native]
+        )
+        if enveloped:
+            monkeypatch.setattr(
+                "agent_bridge.local_launch_arguments._worktrees_setup_script",
+                lambda: Path(command[3]),
+            )
         resolve_plan = {
             "version": 1,
             "launch": {
                 "work_dir": "/tmp/existing",
-                "cmd": ["/usr/bin/copilot", "--resume", "sess-abc"],
+                "cmd": command,
                 "env": {},
                 "worktree_id": "existing-wt-5678",
             },
@@ -936,6 +966,17 @@ class TestSpawnLocal:
             assert "existing-wt-5678" in resolve_args
             assert "--new" not in resolve_args
             assert "--no-resume" in resolve_args
+            exec_call = mock_asyncio.create_subprocess_exec.call_args_list[1]
+            exec_args = exec_call[0]
+            expected_native = [*native, "--acp", "--stdio", "--no-auto-update"]
+            if enveloped:
+                assert len(exec_args) == len(command)
+                assert Path(exec_args[0]).stem.casefold() == "powershell"
+                assert list(exec_args[1:-1]) == command[1:-1]
+                assert json.loads(exec_args[-1]) == {"args": expected_native}
+            else:
+                assert list(exec_args) == ["/usr/bin/copilot", *expected_native]
+            assert exec_call[1]["cwd"] == "/tmp/existing"
 
     @pytest.mark.asyncio
     async def test_local_resolve_failure_raises(self):

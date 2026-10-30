@@ -15,6 +15,7 @@ EXTERNAL_TEST_ROOTS = {
     "update-driver": Path("libs/update-driver"),
     "agent-procutil": Path("libs/agent-procutil"),
     "ssh-manager": Path("libs/ssh-manager"),
+    "venue-copilot": Path("libs/venue-copilot"),
 }
 
 

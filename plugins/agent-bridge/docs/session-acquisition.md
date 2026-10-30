@@ -12,6 +12,76 @@ fleet acquisition remains outstanding.
 
 ## Request and result
 
+Local ACP launch keeps the ground owner's command representation intact.
+When Worktrees returns its normalized PowerShell `default-setup.ps1` command
+with `-NativeArgumentsJson`, Bridge adds its ACP flags and final prepared
+plugin/request arguments inside that envelope, preserving the original native
+arguments and setup parameters. It never appends a second loose argument tail
+to an envelope command. Bridge matches the setup script's path against the
+selected Worktrees installation's `scripts/default-setup.ps1`, as the Worktrees
+argument producer does. In an installation cell, it uses Bridge's existing
+validated owner context to select the same-cell Worktrees root; legacy
+installations use the existing legacy root. A matching filename or copied
+script comment does not make a custom launcher Worktrees-owned.
+That check follows the complete returned plan: the selected installation's
+`launch-command.ps1` wrapper, the optional
+`python -m agent_worktrees.launch_seed_exec --record ... --` prefix, and
+per-attempt copied scripts. Deferred commands must name the plan's existing
+`record_path`. Copied scripts must occupy that record's
+`launch-attempts/<attempt-id>/<shell-id>.shell/` directory, retain the native
+preparation controls naming the same record and selected installation, and
+keep wrapper and setup together. These are the current Worktrees plan
+conventions, not a new ownership certificate or protocol. Bridge preserves
+the outer command and changes only the native argument envelope.
+Native options are inserted before the real `--` terminator; option/value pairs
+are walked together so a literal `--` value is not mistaken for that boundary.
+Malformed owned envelopes fail before starting the backend;
+the setup script's mixed-argument rejection remains unchanged. Older setup
+commands without an envelope, direct executables, and custom launchers retain
+their existing append behavior. This is a Bridge-side consumption fix, with
+no new owner command, runtime-version requirement, or replacement allocation.
+
+### Local launch regression coverage
+
+The fresh/resume spawn tests cover direct and envelope commands with mocked
+process creation. They assert the complete native argument list, preserved
+resume identity, unchanged setup parameters, and envelope placement without
+a loose argument tail. These tests do not execute the setup script.
+The required unit packet also admits
+[`test_local_launch_boundary.py`](../../../tools/promotion_unit_tests/test_local_launch_boundary.py):
+it composes Worktrees' actual argument producer with Bridge's consumer,
+checking setup parameters, resume identity, literal values, immutability,
+literal tails, same-named custom scripts, malformed envelopes and legacy commands.
+The adapter's option/value vocabulary is checked against the producer's
+vocabulary. Wrapped, deferred, and prepared copies are covered along with
+mismatched records, installations, paths and custom wrappers. The native
+Windows checks below exercise the shipped setup script and outer wrapper;
+the required unit packet uses a temporary installation path and does not execute
+PowerShell. Plugin tests also cover validated same-cell and legacy path selection,
+invalid installation context, and a copied setup script outside the owner path.
+Its exact cases, source hashes and
+coverage targets are enrolled in `tools/promotion-unit-manifest.json`; adding
+a plugin test alone does not enroll it in required PR unit checks.
+
+[`test_local_launch_arguments.py`](../tests/test_local_launch_arguments.py)
+also builds complete plans through Worktrees' launch builder and deferred
+preparation function in temporary, isolated state. It checks fresh/resume
+requests with and without plugin preparation. It additionally runs the
+shipped setup script both directly and through `launch-command.ps1`, with
+an inert argument-recording backend under Windows PowerShell 5 and PowerShell 7.
+It requires the old
+mixed form to fail and the corrected form to preserve arguments and the
+backend's exit status. These native checks run locally on Windows when each
+shell is available; they are not required CI coverage (the Windows rotation
+job is currently disabled). They skip machine setup in recovery mode and do
+not start an installed Bridge daemon or perform live native admission. Those
+remain separate release/rollout checks; generating a prepared plan does not
+prove that a live session starts. Run the tests alongside the spawn tests:
+
+```powershell
+python tools/run-plugin-tests.py agent-bridge --test-file tests/test_transport.py --test-file tests/test_local_launch_arguments.py --allow-explicit-tiers
+```
+
 The [workspace allocation and session acquisition contract](../../../docs/patterns/workspace-allocation-and-session-acquisition.md)
 qualifies every allocation/acquisition by the selected execution project, not
 the producing task lane. Bridge creation for a worktree-capable project

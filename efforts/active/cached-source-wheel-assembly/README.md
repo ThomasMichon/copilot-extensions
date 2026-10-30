@@ -142,11 +142,13 @@ builder, publisher or composition plan.
 
 ### Phase 3 - Proportionate completion and adoption
 
-- [ ] Review and implement the bounded
+- [x] Review and implement the bounded
   [network acquisition/offline source-wheel split](network-and-offline-phases.md),
   with distinct phase accounting and no hidden download in the local build loop.
   This is agent-recommended decomposition of the operator's explicit request
   quoted in that contract, not authority to change installed runtimes.
+  #9588 reviewed the contract; #9592 implemented and qualified it. Release and
+  installed rollout remain separate from this source-completion item.
 - [x] Qualify exact-input reuse for static graphs with different declared
   build requirements, retaining independently admitted tooling per requirement
   set rather than merging their resolution environments.
@@ -232,6 +234,41 @@ claim for that substitution. Remove only the returned task folder after its
 evidence is no longer needed.
 
 ## Journal
+
+### 2026-10-30 - Acquisition/offline orchestration merged and qualified
+
+- #9592 merged at03:23:44 UTC as
+  `fc19cdec6203c7868081174da41fa851f51d680c`. Current-head Copilot review
+  `PRR_kwDOSovzAM8AAAABVDRjtQ` had no findings; its pending native qualification
+  was satisfied before merge. No unresolved threads remained and refreshed
+  required CI passed. The managed Maintainer path omitted only the authorized
+  additional CODEOWNER vote, not a check or change request.
+- Native acceptance run40996191649 used exact reviewed head
+  `ccfd9c8ac940b81129efb371b44df1dba0eb852c` with the hash-pinned real
+  Setuptools backend: Linux37passed/2skipped in93.77s and
+  Windows36passed/3skipped in161.87s. Both unchanged six-minute jobs passed.
+  Existing platform and synthetic-backend-only skips remained explicit.
+- Hosted CI executed the unchanged admitted packet once:
+  2,634passed in44.555s with contextual coverage and packet verification.
+  Local unpartitioned source and unit packets exceeded the unchanged360s
+  supervisor without assertion failures; all source cases completed across
+  bounded packets. Hosted success does not erase those local timing misses.
+- Installer synchronization, install contract, touched-Python lint,
+  documentation/runbook checks and the actual committed26-file module guard
+  passed. Admission changes were only the two exact source digests;
+  no unit selection, effect allowance, coverage requirement or budget changed.
+- Re-read this plan after merge and close only the phase-orchestration item.
+  The parent effort stays Active: release-artifact consumption, whole-update
+  latency, installed service proof and the deployment owner's rollout remain
+  open.
+- Promotion #9600 actually merged at04:10:23 UTC as Main
+  `ffcd3a7539be20eea641e1eeb63cbdc082d2fda9`. Successful normal pipeline
+  run41000232655 published qualified Dev
+  `dbb39a94a1e533aeb884684d7f30f7deb02c8178` and its source artifacts
+  before merge. All26 canonical and synchronized source-build/deadline files
+  match #9592 byte-for-byte on that Main snapshot.
+  The phase split is released, pending the existing deployment owner's
+  separately authorized execution; it is not installed adoption.
 
 ### 2026-10-30 - Review acquisition and offline phase separation
 
