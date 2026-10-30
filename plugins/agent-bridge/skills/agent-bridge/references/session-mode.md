@@ -51,7 +51,7 @@ and other scopes (including aliased YAML), serializes setters with a per-config
 kernel lock, atomically replaces the selected file and verifies readback. Lock
 contention beyond five seconds fails visibly. Existing permission bits are
 preserved; newly created files use restrictive permissions.
-Native service save/adopt/remove share that lock across their configuration
+Native service save/adopt/remove and eager schema migration share that lock across their configuration
 transaction. A stale native save retains a newer mode preference when it did
 not edit that policy, and refuses conflicting simultaneous mode edits.
 Serialized YAML uses ASCII Unicode escapes, preserving non-ASCII values even

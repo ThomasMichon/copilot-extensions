@@ -210,7 +210,7 @@ class TestSessionModes:
         finally:
             os.umask(old_umask)
 
-    @pytest.mark.parametrize("second_action", ["session-mode", "adopt", "remove"])
+    @pytest.mark.parametrize("second_action", ["session-mode", "adopt", "remove", "migrate"])
     def test_overlapping_subprocess_writers_preserve_both_scopes(
         self, tmp_path, config_home, fake_repo, second_action,
     ):
@@ -221,6 +221,8 @@ class TestSessionModes:
 
         save_config(ServiceConfig(
             session_modes={"default": "acp"}, topologies={"existing": TopologyProfile()},
+            schema_version=1 if second_action == "migrate" else 2,
+            port=9280 if second_action == "migrate" else 0,
         ))
         first_script = """
 import sys
@@ -249,6 +251,9 @@ if sys.argv[2] == "session-mode":
     modes.write_session_mode(machine_local=True, venue="container", mode="cli")
 elif sys.argv[2] == "adopt":
     config.adopt_topology("example", sys.argv[1])
+elif sys.argv[2] == "migrate":
+    from agent_bridge.config_migrations import run_migrations
+    run_migrations()
 else:
     config.remove_topology("existing")
 """
@@ -281,6 +286,9 @@ else:
             assert resolve_session_mode(venue="container")["mode"] == "cli"
         elif second_action == "adopt":
             assert "example" in load_config().topologies
+        elif second_action == "migrate":
+            actual = yaml.safe_load((config_home / "config.yaml").read_text())
+            assert actual["schema_version"] == 2 and load_config().port == 0
         else:
             assert "existing" not in load_config().topologies
 
