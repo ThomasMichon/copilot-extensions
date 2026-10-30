@@ -56,7 +56,7 @@ loaders.
 
 from __future__ import annotations
 
-import json
+import json as json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -737,19 +737,7 @@ def config_contribution_anchor(
 
 def _plugin_manifest_name(plugin_root: Path) -> str:
     """Read a plugin's declared identity, or return empty when unverifiable."""
-    for manifest in (
-        plugin_root / "plugin.json",
-        plugin_root / ".claude-plugin" / "plugin.json",
-    ):
-        try:
-            raw = json.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(raw, dict):
-            name = str(raw.get("name") or "").strip()
-            if name:
-                return name
-    return ""
+    return related_acquisition.plugin_manifest_name(plugin_root)
 
 
 def entry_provenance(entry: RelatedEntry) -> dict[str, str]:
@@ -784,10 +772,7 @@ def installed_plugins_root() -> Path:
 
 def _has_plugin_manifest(plugin_dir: Path) -> bool:
     """True if ``plugin_dir`` looks like an installed plugin (has a manifest)."""
-    return (
-        (plugin_dir / "plugin.json").is_file()
-        or (plugin_dir / ".claude-plugin" / "plugin.json").is_file()
-    )
+    return related_acquisition.has_plugin_manifest(plugin_dir)
 
 
 def _filesystem_plugin_related_anchors(base: Path) -> list[str]:
@@ -821,22 +806,12 @@ def installed_plugin_related_anchors(
 
 def _is_installed_plugin_anchor(anchor: str | Path) -> bool:
     """True when ``anchor`` is a cached or explicitly tagged plugin root."""
-    if isinstance(anchor, _PluginContributionAnchor):
-        return True
-    try:
-        root = installed_plugins_root().resolve()
-        return root in Path(anchor).resolve().parents
-    except OSError:
-        return False
+    return related_acquisition.is_installed_plugin_anchor(anchor)
 
 
 def _anchor_key(anchor: str | Path) -> str:
     """Canonical comparison key for an anchor, with a fail-safe fallback."""
-    try:
-        resolved = Path(anchor).expanduser().resolve()
-    except OSError:
-        resolved = Path(os.path.abspath(os.path.expanduser(str(anchor))))
-    return os.path.normcase(str(resolved))
+    return related_acquisition.anchor_key(anchor)
 
 
 def read_related_grafted(anchors: list[str | Path]) -> RelatedConfig:

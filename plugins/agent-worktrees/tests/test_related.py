@@ -2608,3 +2608,198 @@ def test_related_report_isolates_entry_conversion_failure_without_changing_legac
     assert report.authority is ScanAuthority.INDETERMINATE
     assert any(f.entry == str(path) and f.reason == "invalid-entry" for f in report.findings)
     assert report.reusable is False
+
+
+def _deny_source_stat_with_loop(monkeypatch, denied: Path):
+    import errno
+
+    original = os.stat
+
+    def loop(path, *args, **kwargs):
+        if isinstance(path, (str, os.PathLike)) and os.path.normcase(os.fspath(path)) == os.path.normcase(str(denied)):
+            raise OSError(errno.ELOOP, "synthetic lookup loop")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", loop)
+
+
+@pytest.mark.parametrize("layer", ["base", "marketplace-overlay"])
+def test_related_report_retains_bool_suppressed_layer_lookup_error(tmp_path, monkeypatch, layer):
+    from dropin_registry import ScanAuthority
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    if layer == "base":
+        denied = related.related_path(tmp_path)
+        fallback = related.legacy_related_path(tmp_path)
+        fallback.parent.mkdir(parents=True)
+        fallback.write_text("related: {known: {role: docs}}\n", encoding="utf-8")
+    else:
+        _write_related(tmp_path, RelatedConfig(related={"known": RelatedEntry(name="known", role="docs")}))
+        denied = tmp_path / related.MARKETPLACE_OVERLAYS_DIR / "sample-market" / "related.yaml"
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", json.dumps({"marketplaceId": "sample-market"}))
+    denied.parent.mkdir(parents=True, exist_ok=True)
+    denied.write_text("related: {unobserved: {role: tooling}}\n", encoding="utf-8")
+    _deny_source_stat_with_loop(monkeypatch, denied)
+    assert denied.exists() is False
+    legacy = related.read_related(tmp_path)
+    assert set(legacy.related) == {"known"}
+    report = related.read_related_report(tmp_path)
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(o.source == str(denied) and o.authority is ScanAuthority.INDETERMINATE for o in report.observations)
+
+
+def test_related_report_retains_bool_suppressed_plugin_directory_error(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+
+    directory = tmp_path / "plugins"
+    directory.mkdir()
+    _deny_source_stat_with_loop(monkeypatch, directory)
+    assert directory.is_dir() is False
+    assert related.installed_plugin_related_anchors(root=directory) == []
+    report = related.installed_plugin_related_anchors_report(root=directory)
+    assert report.value == []
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(o.source == str(directory) and o.authority is ScanAuthority.INDETERMINATE for o in report.observations)
+
+
+def test_related_report_retains_bool_suppressed_active_contribution_error(tmp_path, monkeypatch):
+    from dropin_registry import EntryDecision, ScanAuthority
+    from plugin_activation import ActivationReport, ActivePlugin
+
+    monkeypatch.delenv(related.INSTALLED_PLUGINS_ENV, raising=False)
+    healthy = _make_installed_plugin(tmp_path / "plugins", "sample-market", "healthy", RelatedConfig())
+    uncertain = _make_installed_plugin(tmp_path / "plugins", "sample-market", "uncertain", RelatedConfig())
+    plugins = [ActivePlugin(name + "@sample-market", name, "sample-market", root, ("global",))
+               for name, root in [("healthy", healthy), ("uncertain", uncertain)]]
+    activation = ActivationReport(ScanAuthority.COMPLETE, {p.source: EntryDecision.active(p) for p in plugins})
+    denied = related.legacy_related_path(uncertain)
+    _deny_source_stat_with_loop(monkeypatch, denied)
+    assert denied.is_file() is False
+    legacy = related.installed_plugin_related_anchors(report=activation)
+    assert [str(anchor) for anchor in legacy] == [str(healthy)]
+    report = related.installed_plugin_related_anchors_report(report=activation)
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(o.source == str(denied) and o.authority is ScanAuthority.INDETERMINATE for o in report.observations)
+
+
+@pytest.mark.parametrize("manifest", ["plugin.json", ".claude-plugin/plugin.json"])
+def test_related_report_retains_bool_suppressed_manifest_layout_error(tmp_path, monkeypatch, manifest):
+    from dropin_registry import ScanAuthority
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    _write_related(tmp_path, RelatedConfig(related={"repository": RelatedEntry(name="repository")}))
+    denied = tmp_path / manifest
+    denied.parent.mkdir(parents=True, exist_ok=True)
+    denied.write_text('{"name":"sample"}', encoding="utf-8")
+    _deny_source_stat_with_loop(monkeypatch, denied)
+    assert denied.is_file() is False
+    assert related._looks_like_plugin_anchor(tmp_path) is False
+    legacy = related.read_related(tmp_path)
+    assert set(legacy.related) == {"repository"}
+    report = related.read_related_report(tmp_path)
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(o.source == str(denied) and o.authority is ScanAuthority.INDETERMINATE for o in report.observations)
+
+
+def test_related_report_retains_suppressed_manifest_identity_read_error(tmp_path, monkeypatch):
+    import errno
+    from dropin_registry import ScanAuthority
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    installed = tmp_path / "installed"
+    plugin = _make_installed_plugin(installed, "sample-market", "sample", RelatedConfig(
+        related={"known": RelatedEntry(name="known")},
+    ))
+    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(installed))
+    denied = plugin / "plugin.json"
+    original = Path.read_text
+
+    def unreadable(path, *args, **kwargs):
+        if path == denied:
+            raise OSError(errno.ELOOP, "synthetic manifest read loop")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unreadable)
+    assert related._plugin_manifest_name(plugin) == ""
+    legacy = related.read_related_grafted([plugin])
+    assert legacy.related["known"].origin_plugin == ""
+    report = related.read_related_grafted_report([plugin])
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+
+
+def test_related_report_retains_suppressed_installed_anchor_resolution_error(tmp_path, monkeypatch):
+    import errno
+    from dropin_registry import ScanAuthority
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    installed = tmp_path / "installed"
+    plugin = _make_installed_plugin(installed, "sample-market", "sample", RelatedConfig(
+        primary="legacy-primary", related={"known": RelatedEntry(name="known")},
+    ))
+    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(installed))
+    original = Path.resolve
+
+    def unresolved(path, *args, **kwargs):
+        if path == installed:
+            raise OSError(errno.ELOOP, "synthetic installed-root resolution loop")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", unresolved)
+    assert related._is_installed_plugin_anchor(plugin) is False
+    legacy = related.read_related_grafted([plugin])
+    assert legacy.primary == "legacy-primary"
+    report = related.read_related_grafted_report([plugin])
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+
+
+def test_related_source_report_retains_suppressed_anchor_key_resolution_error(tmp_path, monkeypatch):
+    import errno
+    from dropin_registry import ScanAuthority
+    from plugin_activation import ActivationReport
+    from agent_worktrees import config as cfg, machine_config, related_cli as cli
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    config = cfg.Config(srcroot=str(tmp_path), machine="example", platform="windows", repo_name="sample",
+                        repos={"sample": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"))})
+    monkeypatch.setattr(cfg, "load_config", lambda **kw: config)
+    monkeypatch.setattr(machine_config, "machine_config_root", lambda *a, **k: None)
+    monkeypatch.setattr(machine_config, "machine_config_root_report", lambda *a, **k: AcquisitionReport("machine", None, ()))
+    monkeypatch.setattr(related, "resolve_active_plugins", lambda **kw: ActivationReport(ScanAuthority.ABSENT, {}))
+    monkeypatch.delenv(related.INSTALLED_PLUGINS_ENV, raising=False)
+    original = Path.resolve
+
+    def unresolved(path, *args, **kwargs):
+        if path == tmp_path:
+            raise OSError(errno.ELOOP, "synthetic anchor-key resolution loop")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", unresolved)
+    assert related._anchor_key(tmp_path) == os.path.normcase(os.path.abspath(str(tmp_path)))
+    legacy = cli._related_config_source_anchors(str(tmp_path))
+    report = cli._related_config_source_anchors_report(str(tmp_path))
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+
+
+def test_explicit_plugin_report_does_not_invent_manifest_absence_after_lookup_failure(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+
+    directory = tmp_path / "plugins"
+    healthy = _make_installed_plugin(directory, "sample-market", "healthy", RelatedConfig())
+    uncertain = _make_installed_plugin(directory, "sample-market", "uncertain", RelatedConfig())
+    denied = uncertain / "plugin.json"
+    missing = uncertain / ".claude-plugin" / "plugin.json"
+    _deny_source_stat_with_loop(monkeypatch, denied)
+    legacy = related.installed_plugin_related_anchors(root=directory)
+    assert [str(anchor) for anchor in legacy] == [str(healthy)]
+    report = related.installed_plugin_related_anchors_report(root=directory)
+    assert report.value == legacy
+    assert any(o.source == str(denied) and o.authority is ScanAuthority.INDETERMINATE for o in report.observations)
+    assert any(o.source == str(missing) and o.authority is ScanAuthority.ABSENT for o in report.observations)
+    assert not any(o.source == str(uncertain) and o.stage == "plugin-manifest"
+                   and o.authority is ScanAuthority.ABSENT for o in report.observations)

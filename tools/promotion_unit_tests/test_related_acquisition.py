@@ -38,9 +38,10 @@ def api(monkeypatch):
         return module
 
     load("acquisition_report")
+    probes = load("source_probes")
     related = load("related_acquisition")
     config = load("config_acquisition")
-    return SimpleNamespace(related=related, config=config, stub=stub, load=load)
+    return SimpleNamespace(related=related, config=config, stub=stub, load=load, probes=probes)
 
 
 def test_entry_uncertainty_survives_complete_activation_without_discarding_positive(api, monkeypatch):
@@ -52,7 +53,10 @@ def test_entry_uncertainty_survives_complete_activation_without_discarding_posit
         finding.entry: EntryDecision.indeterminate(finding),
     })
     monkeypatch.delenv("ACQUISITION_TEST_PLUGIN_ROOT", raising=False)
-    api.stub("related", INSTALLED_PLUGINS_ENV="ACQUISITION_TEST_PLUGIN_ROOT",
+    monkeypatch.setattr(api.related, "has_plugin_manifest", lambda *a: True)
+    monkeypatch.setattr(api.related, "probe_source", lambda *a: True)
+    api.stub("related", INREPO_DIRNAME=".agent-worktrees", RELATED_FILENAME="related.yaml",
+             INSTALLED_PLUGINS_ENV="ACQUISITION_TEST_PLUGIN_ROOT",
              related_path=lambda root: SimpleNamespace(is_file=lambda: True),
              _PluginContributionAnchor=lambda path, name: path)
     report = api.related.installed_plugin_related_anchors_report(report=owner)
@@ -182,7 +186,10 @@ def test_machine_marker_classification_keeps_absence_and_short_circuit(api, monk
         assert calls == [owner.os.path.join("overlay", marker) for marker in owner._MARKERS]
         assert report.value is None
         assert report.authority is ScanAuthority.ABSENT
-    assert not report.findings
+    if marker_state == "regular-file":
+        assert all(f.reason == "incorrect-kind" for f in report.findings)
+    else:
+        assert not report.findings
 
 
 @pytest.mark.parametrize("fault_field", ["role", "delegate"])
@@ -213,3 +220,108 @@ def test_related_entry_report_isolates_conversion_fault_at_field_boundary(api, m
     assert "synthetic private conversion body" not in repr(observations)
     with pytest.raises(AttributeError):
         api.related.parse_file(Path("related.yaml"))
+
+
+@pytest.mark.parametrize("outcome", ["missing", "wrong-kind", "loop", "file"])
+def test_source_probe_classifies_one_following_stat_without_boolean_suppression(api, monkeypatch, outcome):
+    import errno
+    import os
+    import stat
+
+    path = Path("synthetic-source")
+    calls = []
+    original = os.stat
+
+    def observed(candidate, *args, **kwargs):
+        if candidate != path:
+            return original(candidate, *args, **kwargs)
+        calls.append((candidate, args, kwargs))
+        if outcome == "missing":
+            raise FileNotFoundError(candidate)
+        if outcome == "loop":
+            raise OSError(errno.ELOOP, "private lookup body")
+        return SimpleNamespace(st_mode=stat.S_IFDIR if outcome == "wrong-kind" else stat.S_IFREG)
+
+    monkeypatch.setattr(os, "stat", observed)
+    observations = []
+    assert api.probes.probe_source(path, "file", observations, "source") is (outcome == "file")
+    assert calls == [(path, (), {})]
+    if outcome == "loop":
+        assert observations[0].authority is ScanAuthority.INDETERMINATE
+    elif outcome == "wrong-kind":
+        assert observations[0].findings[0].reason == "incorrect-kind"
+    elif outcome == "missing":
+        assert observations[0].authority is ScanAuthority.ABSENT
+    else:
+        assert observations == []
+    assert "private lookup body" not in repr(observations)
+
+
+def test_manifest_helpers_keep_later_positive_without_hiding_first_failure(api, monkeypatch):
+    import errno
+    import json
+    import os
+    import stat
+
+    root = Path("synthetic-plugin")
+    first, second = root / "plugin.json", root / ".claude-plugin" / "plugin.json"
+    calls = []
+    original = os.stat
+
+    def observed(candidate, *args, **kwargs):
+        if candidate not in (first, second):
+            return original(candidate, *args, **kwargs)
+        calls.append(candidate)
+        if candidate == first:
+            raise OSError(errno.ELOOP, "private manifest body")
+        return SimpleNamespace(st_mode=stat.S_IFREG)
+
+    monkeypatch.setattr(os, "stat", observed)
+    observations = []
+    assert api.related.has_plugin_manifest(root, observations)
+    assert calls == [first, second]
+    assert observations[0].authority is ScanAuthority.INDETERMINATE
+    calls.clear()
+
+    def read(candidate, *args, **kwargs):
+        calls.append(candidate)
+        if candidate == first:
+            raise OSError(errno.ELOOP, "private manifest body")
+        assert candidate == second
+        return '{"name":"sample"}'
+
+    api.stub("related", json=json)
+    monkeypatch.setattr(Path, "read_text", read)
+    assert api.related.plugin_manifest_name(root, observations) == "sample"
+    assert calls == [first, second]
+    assert any(o.authority is ScanAuthority.INDETERMINATE for o in observations)
+    assert "private manifest body" not in repr(observations)
+
+
+@pytest.mark.parametrize("operation", ["installed-anchor", "anchor-key"])
+def test_resolution_helpers_keep_legacy_fallback_and_observe_failure_once(api, monkeypatch, operation):
+    import errno
+    import os
+
+    anchor, installed = Path("synthetic-anchor"), Path("synthetic-installed")
+    api.stub("related", _PluginContributionAnchor=type("PluginAnchor", (str,), {}),
+             installed_plugins_root=lambda: installed)
+    calls = []
+    original = Path.resolve
+
+    def resolve(candidate, *args, **kwargs):
+        if candidate not in (anchor, installed):
+            return original(candidate, *args, **kwargs)
+        calls.append(candidate)
+        raise OSError(errno.ELOOP, "private resolution body")
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    observations = []
+    if operation == "installed-anchor":
+        assert api.related.is_installed_plugin_anchor(anchor, observations) is False
+        assert calls == [installed]
+    else:
+        assert api.related.anchor_key(anchor, observations) == os.path.normcase(os.path.abspath(str(anchor)))
+        assert calls == [anchor]
+    assert observations[0].authority is ScanAuthority.INDETERMINATE
+    assert "private resolution body" not in repr(observations)

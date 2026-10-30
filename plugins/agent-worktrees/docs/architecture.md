@@ -13,6 +13,11 @@ Machine-overlay reports borrow the machine-config owner's failure-aware lookup
 and link-following marker classification; lookup/stat errors are not absence.
 Report-mode related entry conversion failures retain healthy peers and surface
 uncertainty. Legacy entry conversion exceptions still propagate unchanged.
+Related/config source reports use one purpose-owned, link-following stat
+classifier rather than inferring absence from error-suppressing boolean probes.
+Missing candidates, confirmed incorrect kinds and failed lookups remain distinct.
+Manifest layout/identity and path-resolution fallbacks retain encountered
+uncertainty alongside available values; fallback keys are not stable witnesses.
 
 Each `AcquisitionReport[T]` contains the legacy available value, a named
 operation scope, ordered source observations and `ScanAuthority`/`Finding`

@@ -9,12 +9,12 @@ knowledge overlay, so a session in any checkout of the project resolves them.
 from __future__ import annotations
 
 import os
-import stat
 
 from dropin_registry import ScanAuthority
 
 from . import config as cfg
 from .acquisition_report import AcquisitionReport, SourceObservation, failed, observe
+from .source_probes import probe_source
 
 _MARKERS = (
     ".agent-worktrees",  # marketplace-isolation: allow legacy-compatibility
@@ -52,17 +52,9 @@ def _config_overlay_root(root, base=None, observations=None):
         if observations is None:
             directory = os.path.isdir(candidate)
         else:
-            try:
-                # Like isdir, stat follows links and classifies the target mode.
-                directory = stat.S_ISDIR(os.stat(candidate).st_mode)
-            except (FileNotFoundError, NotADirectoryError):
-                observe(observations, candidate, "machine-source-marker", ScanAuthority.ABSENT)
-                continue
-            except (OSError, ValueError) as exc:
-                failed(observations, candidate, "machine-source-marker", "source-selection-failed", type(exc).__name__)
-                continue
-            observe(observations, candidate, "machine-source-marker",
-                    ScanAuthority.COMPLETE if directory else ScanAuthority.ABSENT)
+            directory = probe_source(candidate, "directory", observations, "machine-source-marker")
+            if directory:
+                observe(observations, candidate, "machine-source-marker", ScanAuthority.COMPLETE)
         if directory:
             observe(observations, root, "machine-source", ScanAuthority.COMPLETE)
             return root

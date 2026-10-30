@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 from dropin_registry import EntryStatus, ScanAuthority
 
 from .acquisition_report import AcquisitionReport, SourceObservation, failed, observe, owner_findings
+from .source_probes import probe_source
 
 
 def parse_file(path: Path, observations: list[SourceObservation] | None = None, *, selected=False):
@@ -80,9 +81,12 @@ def base_path(anchor: Path, observations: list[SourceObservation] | None = None)
     from . import related as r
 
     for candidate in (anchor / r.CANONICAL_RELATED_DIR / r.RELATED_FILENAME, r.legacy_related_path(anchor)):
-        if candidate.exists():
+        if observations is None:
+            present = candidate.exists()
+        else:
+            present = probe_source(candidate, "exists", observations, "related-candidate")
+        if present:
             return candidate
-        observe(observations, str(candidate), "related-candidate", ScanAuthority.ABSENT)
     return None
 
 
@@ -108,9 +112,9 @@ def overlay_path(anchor: Path, observations: list[SourceObservation] | None = No
         return None
     observe(observations, source, "installation-context", ScanAuthority.COMPLETE, owner=marketplace_id)
     candidate = anchor / r.MARKETPLACE_OVERLAYS_DIR / marketplace_id / r.RELATED_FILENAME
-    if candidate.exists():
+    present = candidate.exists() if observations is None else probe_source(candidate, "exists", observations, "related-candidate")
+    if present:
         return candidate
-    observe(observations, str(candidate), "related-candidate", ScanAuthority.ABSENT)
     return None
 
 
@@ -119,7 +123,7 @@ def read(anchor, observations: list[SourceObservation] | None = None):
 
     root = Path(anchor)
     try:
-        plugin_anchor = r._looks_like_plugin_anchor(root)
+        plugin_anchor = r._looks_like_plugin_anchor(root) if observations is None else has_plugin_manifest(root, observations)
     except OSError as exc:
         if observations is None:
             raise
@@ -158,8 +162,8 @@ def filesystem_anchors(base: Path, observations: list[SourceObservation] | None 
     from . import related as r
 
     try:
-        if not base.is_dir():
-            observe(observations, str(base), "plugin-directory", ScanAuthority.ABSENT)
+        directory = base.is_dir() if observations is None else probe_source(base, "directory", observations, "plugin-directory")
+        if not directory:
             return []
     except OSError as exc:
         failed(observations, str(base), "plugin-directory", "unreadable-source", type(exc).__name__)
@@ -175,17 +179,15 @@ def filesystem_anchors(base: Path, observations: list[SourceObservation] | None 
             for related_yaml in base.glob(pattern):
                 plugin_dir = related_yaml.parent.parent
                 try:
-                    if r._has_plugin_manifest(plugin_dir):
+                    if (r._has_plugin_manifest(plugin_dir) if observations is None else has_plugin_manifest(plugin_dir, observations)):
                         selected = str(plugin_dir.resolve())
                         found.add(selected)
                         observe(observations, selected, "plugin-contribution", ScanAuthority.COMPLETE)
-                    else:
-                        observe(observations, str(plugin_dir), "plugin-manifest", ScanAuthority.ABSENT)
                 except OSError as exc:
                     failed(observations, str(plugin_dir), "plugin-contribution", "unreadable-source", type(exc).__name__)
         except OSError as exc:
             failed(observations, str(base), "plugin-directory", "unreadable-source", type(exc).__name__)
-    return [r._PluginContributionAnchor(path, r._plugin_manifest_name(Path(path)))
+    return [r._PluginContributionAnchor(path, r._plugin_manifest_name(Path(path)) if observations is None else plugin_manifest_name(Path(path), observations))
             for path in sorted(found, key=os.path.normcase)]
 
 
@@ -217,14 +219,14 @@ def installed(root=None, *, home=None, report=None, observations=None):
     for plugin in report.active.values():
         for selected in plugin.live_roots:
             try:
-                candidate = r.related_path(selected.root)
-                if candidate.is_file():
+                candidate = (r.related_path(selected.root) if observations is None else
+                             Path(selected.root) / (r.INREPO_DIRNAME if has_plugin_manifest(Path(selected.root), observations) else r.CANONICAL_RELATED_DIR) / r.RELATED_FILENAME)
+                present = candidate.is_file() if observations is None else probe_source(candidate, "file", observations, "plugin-contribution")
+                if present:
                     found[str(selected.root)] = plugin.name
                     observe(observations, str(candidate), "plugin-contribution", ScanAuthority.COMPLETE,
                             owner=getattr(plugin, "source", None), target=str(selected.root))
-                else:
-                    observe(observations, str(candidate), "plugin-contribution", ScanAuthority.ABSENT,
-                            owner=getattr(plugin, "source", None), target=str(selected.root))
+
             except OSError as exc:
                 failed(observations, str(selected.root), "plugin-contribution", "unreadable-source", type(exc).__name__)
     return [r._PluginContributionAnchor(path, found[path]) for path in sorted(found, key=os.path.normcase)]
@@ -245,12 +247,12 @@ def grafted(anchors, observations=None):
     merged = r.RelatedConfig()
     for anchor in anchors:
         rc = r.read_related(anchor) if observations is None else read(anchor, observations)
-        plugin_anchor = r._is_installed_plugin_anchor(anchor)
+        plugin_anchor = r._is_installed_plugin_anchor(anchor) if observations is None else is_installed_plugin_anchor(anchor, observations)
         if rc.primary and not plugin_anchor:
             merged.primary = rc.primary
         for name, entry in rc.related.items():
             origin = (anchor if isinstance(anchor, r._PluginContributionAnchor) else
-                      r._PluginContributionAnchor(str(anchor), r._plugin_manifest_name(Path(str(anchor))))
+                      r._PluginContributionAnchor(str(anchor), r._plugin_manifest_name(Path(str(anchor))) if observations is None else plugin_manifest_name(Path(str(anchor)), observations))
                       if plugin_anchor else str(anchor))
             entry.origin_anchor = origin
             if plugin_anchor:
@@ -291,7 +293,8 @@ def source_anchors(base_anchor, *, installed_anchors=None, observations=None):
     elif os.path.abspath(anchors[0]) != os.path.abspath(base_anchor):
         anchors.insert(0, r.config_contribution_anchor(base_anchor, "harness"))
     try:
-        existing = {r._anchor_key(a) for a in anchors}
+        key = r._anchor_key if observations is None else lambda anchor: anchor_key(anchor, observations)
+        existing = {key(a) for a in anchors}
         if installed_anchors is not None:
             discovered = installed_anchors
             # Supplied values have no activation-acquisition provenance.
@@ -303,7 +306,7 @@ def source_anchors(base_anchor, *, installed_anchors=None, observations=None):
             plugin_report = r.installed_plugin_related_anchors_report()
             discovered = plugin_report.value
             observations.extend(plugin_report.observations)
-        plugins = [p for p in discovered if r._anchor_key(p) not in existing]
+        plugins = [p for p in discovered if key(p) not in existing]
     except Exception as exc:
         failed(observations, "plugin-activation", "related-sources", "source-selection-failed", type(exc).__name__)
         plugins = []
@@ -322,3 +325,59 @@ def _related_config_source_anchors_report(
     observations = []
     value = source_anchors(base_anchor, installed_anchors=installed_anchors, observations=observations)
     return AcquisitionReport("related-source-anchors", value, tuple(observations))
+
+
+def has_plugin_manifest(plugin_dir: Path, observations=None) -> bool:
+    for manifest in (plugin_dir / "plugin.json", plugin_dir / ".claude-plugin" / "plugin.json"):
+        present = manifest.is_file() if observations is None else probe_source(manifest, "file", observations, "plugin-manifest")
+        if present:
+            return True
+    return False
+
+
+def plugin_manifest_name(plugin_root: Path, observations=None) -> str:
+    from . import related as r
+
+    for manifest in (plugin_root / "plugin.json", plugin_root / ".claude-plugin" / "plugin.json"):
+        try:
+            raw = r.json.loads(manifest.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            observe(observations, str(manifest), "plugin-identity", ScanAuthority.ABSENT)
+            continue
+        except (OSError, ValueError) as exc:
+            failed(observations, str(manifest), "plugin-identity", "unreadable-source", type(exc).__name__)
+            continue
+        if isinstance(raw, dict):
+            name = str(raw.get("name") or "").strip()
+            if name:
+                observe(observations, str(manifest), "plugin-identity", ScanAuthority.COMPLETE)
+                return name
+        failed(observations, str(manifest), "plugin-identity", "invalid-entry", "manifest has no usable identity")
+    failed(observations, str(plugin_root), "plugin-identity", "identity-unavailable", "plugin identity is unavailable")
+    return ""
+
+
+def is_installed_plugin_anchor(anchor, observations=None) -> bool:
+    from . import related as r
+
+    if isinstance(anchor, r._PluginContributionAnchor):
+        return True
+    try:
+        root = r.installed_plugins_root().resolve()
+        return root in Path(anchor).resolve().parents
+    except (OSError, RuntimeError) as exc:
+        if observations is None and not isinstance(exc, OSError):
+            raise
+        failed(observations, str(anchor), "plugin-anchor", "resolution-failed", type(exc).__name__)
+        return False
+
+
+def anchor_key(anchor, observations=None) -> str:
+    try:
+        resolved = Path(anchor).expanduser().resolve()
+    except (OSError, RuntimeError) as exc:
+        if observations is None and not isinstance(exc, OSError):
+            raise
+        failed(observations, str(anchor), "related-anchor-key", "resolution-failed", type(exc).__name__)
+        resolved = Path(os.path.abspath(os.path.expanduser(str(anchor))))
+    return os.path.normcase(str(resolved))

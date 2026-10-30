@@ -2862,3 +2862,26 @@ def test_config_source_report_retains_suppressed_marker_stat_failure(tmp_path, m
     assert report.findings
     assert "synthetic private marker failure" not in repr(report.observations)
     assert report.reusable is False
+
+
+def test_config_yaml_report_retains_bool_suppressed_source_lookup_error(tmp_path, monkeypatch):
+    import errno
+    import os
+    from dropin_registry import ScanAuthority
+
+    path = tmp_path / "config.yaml"
+    path.write_text("repos: {sample: {remote: upstream}}\n", encoding="utf-8")
+    original = os.stat
+
+    def loop(candidate, *args, **kwargs):
+        if isinstance(candidate, (str, os.PathLike)) and os.path.normcase(os.fspath(candidate)) == os.path.normcase(str(path)):
+            raise OSError(errno.ELOOP, "synthetic source lookup loop")
+        return original(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", loop)
+    assert path.exists() is False
+    assert cfg._load_yaml_safe(path) == {}
+    report = cfg._load_yaml_safe_report(path)
+    assert report.value == {}
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(o.source == str(path) and o.authority is ScanAuthority.INDETERMINATE for o in report.observations)

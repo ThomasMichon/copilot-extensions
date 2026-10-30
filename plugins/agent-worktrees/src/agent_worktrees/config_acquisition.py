@@ -8,14 +8,15 @@ from typing import Any
 from dropin_registry import EntryStatus, ScanAuthority
 
 from .acquisition_report import AcquisitionReport, SourceObservation, failed, observe, owner_findings
+from .source_probes import probe_source
 
 
 def yaml_value(path: Path, observations: list[SourceObservation] | None = None) -> dict[str, Any]:
     from . import config as cfg
 
     try:
-        if not path.exists():
-            observe(observations, str(path), "config-yaml", ScanAuthority.ABSENT)
+        present = path.exists() if observations is None else probe_source(path, "exists", observations, "config-yaml")
+        if not present:
             return {}
         with open(path, encoding="utf-8") as stream:
             raw = cfg.yaml.load(stream, Loader=cfg._YamlSafeLoader)
