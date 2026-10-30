@@ -2984,6 +2984,10 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
           bridge, is **never** treated as death -- recovery never fires on
           ignorance (the safety guarantee behind liveness-not-lease).
 
+        Ordinary and restricted Bridge conversations retain their reservation
+        even when their process stops; an explicit lifecycle operation, not
+        process liveness, governs retirement.
+
         A terminal task is settled by :meth:`reconcile`; a dead-lettered one is
         settled here (held, not re-spawned). A body that posted a card/progress
         beat after its reservation is also settled: its turn succeeded, so its
@@ -2995,8 +2999,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
 
         recovered = 0
         for res in self._pool_reservations(state=SpawnState.SPAWNED):
-            if res.get("driver") == "restricted-bridge":
-                continue  # Physical task-incarnation bindings require explicit repair, not requeue.
+            if res.get("driver") in {"ordinary-bridge", "restricted-bridge"}:
+                continue  # A stopped native process does not retire its retained conversation.
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
@@ -3252,8 +3256,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         the task is still ``queued`` and unowned: the body exists, but its seed
         was lost or never resumed. That reservation must remain active (to
         prevent duplicate spawns), but the live worker needs one explicit drive
-        prompt so it can claim/start/complete the task. Only a confirmed live
-        worktree session is re-driven; unknown bridge state is left untouched.
+        prompt so it can claim/start/complete the task. CLI sessions require
+        confirmed liveness. An ordinary native continuation requires retained
+        identity and clear custody; Bridge owns same-native stopped recovery.
         """
         from .action_controls import action_inhibited
 
@@ -3265,6 +3270,33 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             if res.get("startup_complete") is not True:
                 continue
             if res.get("release_requested"):
+                continue
+            if res.get("driver") == "ordinary-bridge":
+                try:
+                    current = self.client.get_reservation(key)
+                    session = current.get("ordinary_redrive")
+                    if not isinstance(session, dict) or (
+                        type(session.get("version")) is not int or session["version"] != 1
+                    ):
+                        log.info(
+                            "native redrive held for %s: %s", key,
+                            current.get("ordinary_redrive_error") or "unsupported coordinator redrive facts",
+                        )
+                        continue
+                    task = self.client.get(res["task_id"])
+                    if task.get("status") != Status.QUEUED or task.get("owner") or (
+                        task.get("generation") != session.get("task_generation")
+                    ) or task.get("hold_reason") is not None or task.get("awaiting_steer"):
+                        continue
+                    if action_inhibited("worker-admission", logger=log):
+                        break
+                    if self.redrive_fn(
+                        session["worktree_id"], session["machine"], task, session, current,
+                    ):
+                        self._redriven_spawn_keys.add(key)
+                        redriven += 1
+                except (DispatchError, ValueError, KeyError):
+                    log.exception("retained native redrive refused for %s", key)
                 continue
             if _parse_fleet_body_handle(res.get("session_handle")) is not None:
                 continue
