@@ -256,6 +256,11 @@ def load_manifest(path: Path) -> dict[str, object]:
     catalog_binding = data.get("catalogBinding", False)
     if not isinstance(catalog_binding, bool):
         raise ValueError(f"{path}: catalogBinding must be a boolean")
+    in_process_catalog = data.get("inProcessCatalog", False)
+    if not isinstance(in_process_catalog, bool):
+        raise ValueError(f"{path}: inProcessCatalog must be a boolean")
+    if in_process_catalog and (catalog_gate or catalog_binding):
+        raise ValueError(f"{path}: inProcessCatalog cannot compose catalogGate or catalogBinding")
     installer_lifecycle = data.get("installerLifecycle", False)
     if not isinstance(installer_lifecycle, bool):
         raise ValueError(f"{path}: installerLifecycle must be a boolean")
@@ -297,6 +302,7 @@ def load_manifest(path: Path) -> dict[str, object]:
     data["powershellPipelineInput"] = powershell_pipeline_input
     data["catalogGate"] = catalog_gate
     data["catalogBinding"] = catalog_binding
+    data["inProcessCatalog"] = in_process_catalog
     data["installerLifecycle"] = installer_lifecycle
     data["catalogBindingModule"] = binding_module
     data["plugin"] = plugin
@@ -633,6 +639,12 @@ def render(
         "CATALOG_SPECS_JSON_PS": json.dumps(
             catalog_specs_ps, ensure_ascii=True, separators=(",", ":")
         ),
+        "CATALOG_PLUGIN_PYTHON": repr(data["plugin"]),
+        "CATALOG_SPECS_PYTHON": repr(catalog_specs),
+        "CATALOG_INSTALLER_PYTHON": repr(data["installer"]),
+        "CATALOG_WINDOWS_SUFFIX_PYTHON": repr(windows_catalog_suffix),
+        "CATALOG_WINDOWS_SHELL_PYTHON": repr(windows_catalog_shell),
+        "CATALOG_MULTI_PYTHON": repr(data["multiCommandManifest"]),
         "CATALOG_CONTRACT_JSON": json.dumps(
             {
                 "plugin": data["plugin"],
@@ -718,6 +730,10 @@ def expected_files(manifest: Path) -> dict[Path, str]:
             f"{catalog_prefix}-powershell.tmpl",
         ),
     )
+    if data["inProcessCatalog"]:
+        catalog_outputs += (
+            (manifest.parent / "scripts" / "emit_command_catalog.py", "catalog-python.tmpl"),
+        )
     protected_paths.update(path for path, _template in catalog_outputs)
     command_paths = set(generated)
     collisions = sorted(command_paths & protected_paths)

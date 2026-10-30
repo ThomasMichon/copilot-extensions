@@ -6,6 +6,7 @@
   "legacyRuntimeRoot": ".agent-mcp",
   "installationContext": "required",
   "installerLifecycle": true,
+  "inProcessCatalog": true,
   "noSelfProvisionEnv": "AGENT_MCP_NO_SELFPROVISION",
   "purpose": "Wrap authenticate and materialize MCP servers",
   "installer": "init",

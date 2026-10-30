@@ -6,6 +6,7 @@
   "legacyRuntimeRoot": ".agent-machines",
   "installationContext": "required",
   "installerLifecycle": true,
+  "inProcessCatalog": true,
   "noSelfProvisionEnv": "AGENT_MACHINES_NO_SELFPROVISION",
   "purpose": "Discover validate and restore declared machine state",
   "installer": "init",
