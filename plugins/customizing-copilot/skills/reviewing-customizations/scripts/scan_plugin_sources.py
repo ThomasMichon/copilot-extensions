@@ -99,9 +99,9 @@ def _load_jsonc(path: Path) -> dict:
         return {}
 
 
-def _repo_is_trusted(repo_root: Path, home: Path) -> bool:
+def _repo_is_trusted(repo_root: Path, home: Path, *, copilot_home: Path | None = None) -> bool:
     """Match Copilot's exact persisted-folder trust boundary."""
-    data = _load_jsonc(home / ".copilot" / "config.json")
+    data = _load_jsonc((copilot_home or home / ".copilot") / "config.json")
     folders = data.get("trustedFolders")
     if not isinstance(folders, list):
         return False
@@ -117,7 +117,7 @@ def _repo_is_trusted(repo_root: Path, home: Path) -> bool:
     return False
 
 
-def _strict_settings(path: Path) -> dict:
+def _strict_settings(path: Path, *, allow_line_comments: bool = False) -> dict:
     def unique(pairs):
         data = {}
         for key, value in pairs:
@@ -138,6 +138,12 @@ def _strict_settings(path: Path) -> dict:
         while lines and (not lines[0].strip() or lines[0].lstrip().startswith("//")):
             lines.pop(0)
         text = "".join(lines)
+        if allow_line_comments:
+            text = re.sub(
+                r'"(?:[^"\\]|\\.)*"|//[^\r\n]*',
+                lambda match: match[0] if match[0].startswith('"') else "",
+                text,
+            )
         data = json.loads(text, object_pairs_hook=unique)
     except (UnicodeError, ValueError) as exc:
         raise ValueError(f"invalid settings: {path}: {exc}") from exc
@@ -167,6 +173,8 @@ def _merged_settings(
     include_user: bool = True,
     include_local: bool = True,
     strict: bool = False,
+    copilot_home: Path | None = None,
+    settings_line_comments: bool = False,
 ) -> tuple[dict[str, bool], dict[str, tuple[dict, Path]]]:
     """Merge the settings that decide a repo's *loaded* plugin set.
 
@@ -177,18 +185,19 @@ def _merged_settings(
     booleans use last-layer-wins semantics, including explicit ``false``.
     """
     selected_home = home or Path.home()
+    selected_copilot = copilot_home or selected_home / ".copilot"
     layers = (
-        [(selected_home / ".copilot" / "settings.json",
-          selected_home / ".copilot" if strict else selected_home)]
+        [(selected_copilot / "settings.json",
+          selected_copilot if strict else selected_home)]
         if include_user
         else []
     )
     if include_user and include_local:
         layers.append((
-            selected_home / ".copilot" / "settings.local.json",
-            selected_home / ".copilot" if strict else selected_home,
+            selected_copilot / "settings.local.json",
+            selected_copilot if strict else selected_home,
         ))
-    if not require_trust or _repo_is_trusted(repo_root, selected_home):
+    if not require_trust or _repo_is_trusted(repo_root, selected_home, copilot_home=selected_copilot):
         layers.append((repo_root / ".claude" / "settings.json", repo_root))
         if include_local:
             layers.append(
@@ -207,7 +216,7 @@ def _merged_settings(
     enabled: dict[str, bool] = {}
     marketplaces: dict[str, tuple[dict, Path]] = {}
     for p, base in layers:
-        data = _strict_settings(p) if strict else _load_json(p)
+        data = _strict_settings(p, allow_line_comments=settings_line_comments) if strict else _load_json(p)
         ep = data.get("enabledPlugins")
         if isinstance(ep, dict):
             for k, v in ep.items():
@@ -700,11 +709,15 @@ def assemble_enabled_plugins(
     strict: bool = False,
     include_metadata: bool = True,
     agent_worktrees_command: str | None = None,
+    copilot_home: Path | None = None,
+    allow_legacy_command: bool = True,
+    settings_line_comments: bool = False,
 ) -> list[PluginSource]:
     """Assemble the plugin set *actually loaded for this repo* into review scope."""
     selected_home = home or Path.home()
+    selected_copilot = copilot_home or selected_home / ".copilot"
     if installed_root is None:
-        installed_root = selected_home / ".copilot" / "installed-plugins"
+        installed_root = selected_copilot / "installed-plugins"
     enabled, marketplaces = _merged_settings(
         repo_root,
         home,
@@ -712,6 +725,8 @@ def assemble_enabled_plugins(
         include_user=include_user,
         include_local=include_local,
         strict=strict,
+        copilot_home=selected_copilot,
+        settings_line_comments=settings_line_comments,
     )
     out: list[PluginSource] = []
     for key in sorted(enabled):
@@ -734,6 +749,8 @@ def assemble_enabled_plugins(
         )
 
         try:
+            if src_kind == "agent-worktrees-repo" and not agent_worktrees_command and not allow_legacy_command:
+                raise ValueError(f"catalog agent-worktrees command required for {origin}")
             if strict and mkt in marketplaces:
                 configured_source = declaration.get("source")
                 if (

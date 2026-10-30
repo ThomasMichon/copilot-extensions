@@ -179,8 +179,8 @@ def _custom_instruction_files(
     return files, tuple(aliases)
 
 
-def _personal_instruction_files(home: Path) -> set[Path]:
-    base = home / ".copilot"
+def _personal_instruction_files(home: Path, *, copilot_home: Path | None = None) -> set[Path]:
+    base = copilot_home or home / ".copilot"
     files: set[Path] = set()
     direct = base / "copilot-instructions.md"
     if direct.is_file():
