@@ -856,3 +856,6 @@ The first offline, source-invokable read-generation slice is documented in
 [review workspaces](docs/review-workspaces.md). It normalizes supplied ADO
 evidence and reports synchronization deltas; live acquisition, exact source,
 service caching and submission are not yet supported by that entry point.
+The [protected owner-read embedding](docs/owner-read.md) provides the next
+source integration contract; an actual authorized owner must adopt it before
+any live owner-backed operation exists.

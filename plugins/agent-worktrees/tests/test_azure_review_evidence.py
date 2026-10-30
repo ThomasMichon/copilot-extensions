@@ -54,6 +54,8 @@ class Forge:
         self.fail_policies = False
         self.fail_final_iterations = False
         self.fail_threads_auth = False
+        self.authorized_actor = "actor-id"
+        self.authenticated_actor = "actor-id"
         self.pages = {
             0: {"changeEntries": [{"changeTrackingId": 7, "changeType": "edit",
                                    "item": {"path": "/example.txt"}}],
@@ -65,8 +67,14 @@ class Forge:
         path, query = parsed.path, parse_qs(parsed.query)
         self.requests.append((path, query))
         if path.endswith("/connectionData"):
-            actor = "other-actor" if "other-token" in request.get_header("Authorization") else "actor-id"
-            return Response({"authorizedUser": {"id": actor}})
+            actor = (
+                "other-actor" if "other-token" in request.get_header("Authorization")
+                else self.authorized_actor
+            )
+            result = {"authenticatedUser": {"id": self.authenticated_actor}}
+            if actor is not None:
+                result["authorizedUser"] = {"id": actor}
+            return Response(result)
         if path.endswith("/pullRequests/42"):
             self.pr_reads += 1
             return Response({
@@ -359,3 +367,105 @@ def test_credential_factory_receives_the_shared_decreasing_operation_budget():
     )
     assert limits == [30, 29, 28, 27, 26, 25, 24]
     assert result["acquisition"]["duration_ms"] == 7000
+
+
+def test_effective_authorized_identity_is_not_the_transport_authenticated_identity():
+    forge = Forge()
+    forge.authorized_actor, forge.authenticated_actor = "effective-actor", "transport-actor"
+    result = acquire(forge, expected_principal="effective-actor")
+    assert result["scope"]["principal_id"] == "effective-actor"
+    assert result["acquisition"]["principal_semantics"] == "connectionData.authorizedUser.id"
+    with pytest.raises(ObservationCredentialError):
+        acquire(forge, expected_principal="transport-actor")
+
+
+def test_authenticated_identity_cannot_fill_in_a_missing_authorized_identity():
+    forge = Forge()
+    forge.authorized_actor = None
+    with pytest.raises(ObservationCredentialError):
+        acquire(forge)
+    assert not any(path.endswith("/pullRequests/42") for path, _ in forge.requests)
+
+
+def protected_owner(forge, state):
+    from agent_worktrees.providers.azure_devops import AzureDevOpsProvider
+    from agent_worktrees.providers.azure_owned_evidence import AdoReadOwner
+
+    def checkpoint():
+        state["checks"] = state.get("checks", 0) + 1
+        if not state.get("allowed", True):
+            raise PermissionError("synthetic owner request revoked")
+
+    def factory(number, remaining, page_checkpoint):
+        class ProtectedReader(AdoReader):
+            def json(self, url, *, query=None):
+                page_checkpoint()
+                result = super().json(url, query=query)
+                page_checkpoint()
+                return result
+
+        # The synthetic owner keeps its material inside its own reader. No
+        # forge-credential DTO or caller-side issuer is involved.
+        return ProtectedReader(
+            AzureDevOpsProvider(), "project/repository", number, ENDPOINT,
+            "synthetic-owner-internal-material", opener=forge, budget=remaining(),
+        )
+
+    return AdoReadOwner(
+        ENDPOINT, "project/repository", "project-id", "repository-id",
+        "effective-actor", "synthetic-owner-context", checkpoint, factory,
+    )
+
+
+def test_protected_owner_uses_effective_identity_without_exporting_credentials(monkeypatch):
+    from agent_worktrees.providers.azure_owned_evidence import acquire_owned_evidence
+
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(root / "plugins" / "agent-pull-requests" / "src"))
+    from agent_pull_requests.owner_read import OwnerReadBinding, OwnerReadHandler
+
+    forge = Forge()
+    forge.authorized_actor, forge.authenticated_actor = "effective-actor", "transport-actor"
+    state = {}
+    owner = protected_owner(forge, state)
+    scope = {
+        "provider": "azure-devops", "endpoint": ENDPOINT, "project_id": "project-id",
+        "repository_id": "repository-id", "principal_id": "effective-actor",
+    }
+    binding = OwnerReadBinding(
+        scope, owner.context_id, owner.checkpoint,
+        lambda number, remaining: acquire_owned_evidence(owner, number, budget=remaining()),
+    )
+    handler = OwnerReadHandler(
+        lambda reference, remaining: binding if reference == "example-read-binding" else None,
+        max_work_seconds=30, max_payload_bytes=65536,
+    )
+    response = handler.read({
+        "schema": "agent-pull-requests.owner-read-request", "version": 1,
+        "binding_ref": "example-read-binding", "number": 42, "budget_seconds": 30,
+        "expected_principal": "effective-actor",
+    })
+    assert response["generation"]["scope"]["principal_id"] == "effective-actor"
+    assert response["acquisition"]["owner_identity_checks"] == 2
+    assert response["acquisition"]["principal_semantics"] == "connectionData.authorizedUser.id"
+    assert state["checks"] >= 2 * len(forge.requests)
+    assert "synthetic-owner-internal-material" not in json.dumps(response)
+
+
+@pytest.mark.parametrize("failure", ["wrong_authorized", "missing_authorized", "revoked"])
+def test_protected_owner_authority_and_namespace_refusals_precede_pr_read(failure):
+    from agent_worktrees.providers.azure_owned_evidence import acquire_owned_evidence
+
+    forge = Forge()
+    forge.authorized_actor, forge.authenticated_actor = "effective-actor", "transport-actor"
+    state = {}
+    if failure == "wrong_authorized":
+        forge.authorized_actor = "another-effective-actor"
+    elif failure == "missing_authorized":
+        forge.authorized_actor = None
+    else:
+        state["allowed"] = False
+    owner = protected_owner(forge, state)
+    with pytest.raises((ProviderError, ObservationCredentialError)):
+        acquire_owned_evidence(owner, 42, budget=30)
+    assert not any(path.endswith("/pullRequests/42") for path, _ in forge.requests)

@@ -320,6 +320,21 @@ def build_generation(evidence: object, previous: object = None) -> dict:
     }
     generation = {**body, "id": _digest(body)}
     _bounded(generation, MAX_GENERATION_BYTES)
+    return _compare(generation, previous)
+
+
+def compare_generations(generation: object, previous: object) -> dict:
+    """Compare owner-returned immutable snapshots locally, without another read."""
+    if not isinstance(generation, dict) or not isinstance(previous, dict):
+        raise ValueError("comparison requires current and previous generation objects")
+    scope = _scope(generation.get("scope"))
+    return _compare(_generation(generation, scope), previous)
+
+
+def _compare(generation: dict, previous: object) -> dict:
+    scope, sections, revision = (
+        generation["scope"], generation["sections"], generation["revision"],
+    )
     before = _generation(previous, scope) if previous is not None else None
     changed = [
         name for name in SECTIONS if before is None

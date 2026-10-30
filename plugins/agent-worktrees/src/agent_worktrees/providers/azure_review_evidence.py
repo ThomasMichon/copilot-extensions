@@ -14,6 +14,7 @@ from .base import ProviderError
 from .observation_credentials import ObservationCredentialError, ObservationCredentials
 
 MAX_EVIDENCE_BYTES = 8 * 1024 * 1024
+PRINCIPAL_SEMANTICS = "connectionData.authorizedUser.id"
 
 
 def _id(value: object) -> str:
@@ -33,6 +34,12 @@ def _pr_scope(value: dict, number: int) -> tuple[str, str]:
     if not isinstance(project, dict):
         raise ProviderError("ADO review evidence lacks project/repository identity")
     return _id(project.get("id")), _id(repository.get("id"))
+
+
+def authorized_principal(value: object) -> str:
+    """Use the effective ADO identity, never an authenticated-user fallback."""
+    actor = value.get("authorizedUser") if isinstance(value, dict) else None
+    return _id(actor.get("id") if isinstance(actor, dict) else None)
 
 
 def acquire_evidence(
@@ -89,8 +96,7 @@ def acquire_evidence(
             )
             try:
                 body = probe.identity()
-                actor = body.get("authorizedUser")
-                current = _id(actor.get("id") if isinstance(actor, dict) else None)
+                current = authorized_principal(body)
             except ObservationCredentialError:
                 raise
             except (ProviderError, ValueError, TypeError):
@@ -124,6 +130,20 @@ def acquire_evidence(
             remaining()
             raise
 
+    return collect_evidence(
+        reader, repo, number, endpoint, remaining=remaining, perform=perform,
+        get_principal=lambda: principal, get_identity_checks=lambda: identity_checks,
+        clock=clock, instant=instant, started=started, observed_from=observed_from,
+        source="configured_native_provider",
+    )
+
+
+def collect_evidence(
+    reader, repo, number, endpoint, *, remaining, perform, get_principal,
+    get_identity_checks, clock, instant, started, observed_from, source,
+    expected_ids=None,
+) -> dict:
+    """Shared finite orchestration; its caller retains authorization and transport."""
     def metadata():
         remaining()
         start = instant()
@@ -145,6 +165,9 @@ def acquire_evidence(
 
     first = metadata()
     project_id, repository_id = _pr_scope(first["data"], number)
+    if expected_ids is not None and (project_id, repository_id) != expected_ids:
+        raise ProviderError("ADO review evidence does not match the owner's bound repository")
+    principal = get_principal()
     if principal is None:
         raise ObservationCredentialError("ADO review credential principal was not observed")
     sections = {"pull_request": first}
@@ -202,11 +225,12 @@ def acquire_evidence(
         },
         "sections": sections,
         "acquisition": {
-            "source": "configured_native_provider", "effects": "none",
+            "source": source, "effects": "none",
             "observed_from": observed_from, "observed_to": instant(),
             "duration_ms": round((clock() - started) * 1000, 3),
             "principal_source": "provider_connection_data",
-            "credential_identity_checks": identity_checks, "omissions": omissions,
+            "principal_semantics": PRINCIPAL_SEMANTICS,
+            "credential_identity_checks": get_identity_checks(), "omissions": omissions,
             "snapshot_atomic": False,
         },
     }
