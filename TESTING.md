@@ -1401,9 +1401,10 @@ still contains no Python.
 The installed foundation's SDK home must be inside the private fixture, proving
 it did not borrow that lifecycle interpreter. These are bounded consumer
 controls, not proof of escape from a caller cleanup Job.
-Windows runs the concurrent cold consumer in its own contained packet so earlier
-refusal fixtures do not consume its temporary-storage budget. Both packets keep
-the canonical storage cap and retain every selected test.
+Windows runs recipe refusals, actual bootstrap hooks and the concurrent cold
+consumer in three separate contained packets. A filtered invocation combines
+its selected files, so each packet names only its own file. All three keep the
+canonical storage cap and retain every selected test.
 
 Windows runs recipe refusals, actual bootstrap hooks and the concurrent cold
 consumer in three separate contained packets. A filtered invocation combines
