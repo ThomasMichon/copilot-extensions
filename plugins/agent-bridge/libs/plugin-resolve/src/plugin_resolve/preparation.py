@@ -19,7 +19,7 @@ from .marketplace import marketplace_manifest_path
 from .payload import (
     publication_metadata, catalog_metadata, dependencies, plugin_manifest, report_diagnostic,
 )
-from .reflection import _plan_item, identity
+from .reflection import _plan_item, identity, selection_spec
 from .registration import (
     _installation_home, _operator_settings, _settings_document,
     atomic_json, checkout_lock, register_prepared, strict_json,
@@ -260,7 +260,9 @@ def prepare(
     host_sources = {item["source"] for item in request["plugins"]}
     marketplaces = {**request.get("marketplaces", {}), **native_settings.marketplaces}
     host_selection = []
+    omitted = set()
     for item in request["plugins"]:
+        spec = selection_spec(item)
         _name, marketplace = identity(item["source"])
         origin = native_settings.marketplaces.get(marketplace)
         selected = None
@@ -274,15 +276,19 @@ def prepare(
             kind = origin.get("source", {}).get("source")
             if kind not in REMOTE_MARKETPLACE_SOURCE_KINDS | LOCAL_MARKETPLACE_SOURCE_KINDS:
                 raise ValueError(f"Unsupported target marketplace source: {marketplace}")
+            required = (
+                native_settings.enabled.get(item["source"], False) if local_mode == "reference"
+                else item["source"] in native_settings.enabled
+            ) or bool(item.get("resolve_on_target"))
             selected = _plan_item(
                 item, (repo, native_settings), marketplaces,
                 allow_external=True, existing_root=staging,
-                required=(
-                    native_settings.enabled.get(item["source"], False) if local_mode == "reference"
-                    else item["source"] in native_settings.enabled
-                ) or bool(item.get("resolve_on_target")),
+                required=required and not spec.get("allow_missing", False),
                 local_mode="reference" if kind in LOCAL_MARKETPLACE_SOURCE_KINDS else local_mode,
             )
+            if selected is None and spec.get("allow_missing") and kind in LOCAL_MARKETPLACE_SOURCE_KINDS:
+                omitted.add(item["source"])
+                continue
             if selected is not None and kind in LOCAL_MARKETPLACE_SOURCE_KINDS:
                 selected["native_local"] = True
         if selected is None and "target_relative" in item:
@@ -488,7 +494,13 @@ def prepare(
         inventory=inventory,
         environment=environment,
         prepared_context=prepared_context,
+        omitted_sources=omitted,
     )
+    for source in sorted(omitted):
+        diagnostic = {"source": source, "status": "missing-local-allowed"}
+        if diagnostics is not None:
+            diagnostics.append(diagnostic)
+        report_diagnostic(diagnostic)
     if diagnostics is not None:
         diagnostics.extend(requirements)
     else:

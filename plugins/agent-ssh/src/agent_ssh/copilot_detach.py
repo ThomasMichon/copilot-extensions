@@ -902,6 +902,10 @@ def add_copilot_subparser(sub) -> None:
     p.add_argument("--seed")
     p.add_argument("--seed-file", dest="seed_file")
     p.add_argument("--stage-plugin", dest="stage_plugins", action="append", default=[])
+    from plugin_resolve.reflection import selection_json
+    p.add_argument(
+        "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json,
+    )
     from .copilot_plugins import disabled_plugin
     p.add_argument(
         "--stage-plugin-disabled", dest="stage_plugins", action="append", type=disabled_plugin,

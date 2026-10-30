@@ -37,13 +37,56 @@ def selection_spec(value) -> dict:
         raise ValueError("Plugin selection source must be a non-empty string")
     if not isinstance(enable, bool):
         raise ValueError("Plugin selection enable must be a boolean")
-    return {"source": source, "enable": enable}
+    allow_missing = value.get("allow_missing", False) if isinstance(value, Mapping) else False
+    if not isinstance(allow_missing, bool):
+        raise ValueError("Plugin selection allow_missing must be a boolean")
+    return {"source": source, "enable": enable, **({"allow_missing": True} if allow_missing else {})}
 
 
 def selection_cli_args(value) -> list[str]:
     """Encode install-only selections without overloading source strings."""
     spec = selection_spec(value)
+    if spec.get("allow_missing"):
+        return ["--stage-plugin-spec", json.dumps(spec, separators=(",", ":"))]
     return ["--stage-plugin" if spec["enable"] else "--stage-plugin-disabled", spec["source"]]
+
+
+def selection_json(value: str) -> dict:
+    """Decode an explicit structured CLI selection, without source-string overloading."""
+    return selection_spec(json.loads(value))
+
+
+def _validate_absence(root: Path, manifest, name: str) -> None:
+    """An opt-out covers an absent entry, never an invalid catalog or payload."""
+    from .marketplace import marketplace_manifest_path
+
+    path = marketplace_manifest_path(root)
+    if manifest is None or path is None:
+        raise ValueError("Cannot allow a missing plugin from an invalid marketplace")
+    for member in (root, path, *path.relative_to(root).parents):
+        member = member if member.is_absolute() else root / member
+        if member.is_symlink() or getattr(member.lstat(), "st_reparse_tag", 0):
+            raise ValueError("Linked marketplace evidence cannot authorize omission")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    metadata = raw.get("metadata", {})
+    if not isinstance(metadata, dict) or (
+        "pluginRoot" in metadata and (
+            not isinstance(metadata["pluginRoot"], str) or Path(metadata["pluginRoot"]).is_absolute()
+        )
+    ):
+        raise ValueError("Cannot allow a missing plugin from malformed marketplace metadata")
+    entries = raw.get("plugins")
+    if (
+        not isinstance(entries, list) or manifest.duplicates
+        or any(not isinstance(entry, dict) or not isinstance(entry.get("name"), str)
+               or not entry["name"].strip() or not isinstance(entry.get("source"), (str, dict))
+               for entry in entries)
+    ):
+        raise ValueError("Cannot allow a missing plugin from a malformed marketplace")
+    if manifest.plugin_root:
+        (root / manifest.plugin_root).resolve(strict=True).relative_to(root)
+    if name in manifest.plugins:
+        raise ValueError(f"Declared local plugin is invalid or unavailable: {name}")
 
 
 def identity(source: str) -> tuple[str, str]:
@@ -139,6 +182,7 @@ def _plan_item(
     name, marketplace = identity(source)
     local = local_marketplace_path(marketplace, owner[1], repo_dir=owner[0]) if owner else None
     if local is not None:
+        authored_local = local
         local = local.resolve(strict=True)
         base = owner[0].resolve()
         external = not local.is_relative_to(base)
@@ -151,6 +195,12 @@ def _plan_item(
         if payload is None:
             if manifest is not None and name in manifest.plugins and isinstance(manifest.plugins[name].source, dict):
                 raise ValueError(f"Acquisition of a remote-source entry in a local catalog is not supported: {source}")
+            if item.get("allow_missing"):
+                if authored_local.is_symlink() or getattr(authored_local.lstat(), "st_reparse_tag", 0):
+                    raise ValueError("Linked marketplace evidence cannot authorize omission")
+                if external and not allow_external:
+                    raise ValueError(f"Local marketplace escapes declaring checkout: {marketplace}")
+                _validate_absence(local, manifest, name)
             if not required:
                 return None
             raise ValueError(f"Required local plugin is absent: {source}")
@@ -237,12 +287,14 @@ def build_plan(
             continue
         visited.add(source)
         _name, marketplace = identity(source)
-        plugins.append(_plan_item(
+        planned = _plan_item(
             normalized, owners.get(marketplace), declarations,
             allow_external=allow_external, existing_root=existing_root,
+            required=not normalized.get("allow_missing", False),
             local_mode=local_mode,
             target_repository=target_repository, target_source_roots=bound_roots, environment=environment,
-        ))
+        )
+        plugins.append(planned if planned is not None else {**normalized, "resolve_on_target": True})
     return {
         "plugins": plugins, "marketplaces": declarations,
         **({"target_repository": target_repository} if target_repository else {}),

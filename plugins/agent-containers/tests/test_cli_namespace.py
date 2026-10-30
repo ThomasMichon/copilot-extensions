@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 import subprocess
 import types
 from unittest.mock import patch
@@ -12,6 +13,21 @@ from ssh_manager import SSHConfig
 
 from agent_containers.__main__ import main
 from agent_containers.config import ContainersConfig
+
+
+@pytest.mark.parametrize("detached", [False, True])
+def test_no_plugin_flags_keep_empty_preparation_selection(detached):
+    from agent_containers.copilot_venue import add_copilot_subparser
+    from agent_containers.plugin_preparation import prepare_plugins
+
+    parser = argparse.ArgumentParser()
+    add_copilot_subparser(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["copilot", "synthetic", *(["--detach"] if detached else [])])
+    assert args.stage_plugins == []
+    target = types.SimpleNamespace(actual_profile="trusted", workspace_folder="/workspaces/example")
+    assert prepare_plugins(
+        args, target, run_input=lambda *a, **k: (0, "__VENUE_PLUGINS__{}", ""),
+    ) == []
 
 
 @pytest.mark.parametrize("available", [True, False])
@@ -108,10 +124,12 @@ def test_namespace_resolve_preserves_disabled_and_literal_sources(capsys):
         assert main([
             "namespace-resolve", "synthetic", "--stage-plugin-disabled", "sample@synthetic",
             "--stage-plugin", "/plain source=false",
+            "--stage-plugin-spec", '{"source":"retired@local","allow_missing":true}',
         ]) == 0
     assert json.loads(capsys.readouterr().out)["container"]["related_plugins"] == [
         {"source": "sample@synthetic", "enable": False},
         {"source": "/plain source=false", "enable": True},
+        {"source": "retired@local", "enable": True, "allow_missing": True},
     ]
 
 

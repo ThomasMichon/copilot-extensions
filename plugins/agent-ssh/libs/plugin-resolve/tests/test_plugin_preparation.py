@@ -56,6 +56,208 @@ def local_plan(root, name="sample", marketplace="local"):
     return build_plan([{"source": f"{name}@{marketplace}"}], [root])
 
 
+@pytest.mark.parametrize("convention", [(".github", "copilot"), (".claude",)])
+@pytest.mark.parametrize("mode", ["copy", "reference"])
+@pytest.mark.parametrize("controller", [False, True])
+def test_missing_override_is_exact_and_preserves_authored_settings(
+    tmp_path, caplog, convention, mode, controller,
+):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    local_plan(target, name="support")
+    init_checkout(target)
+    settings_path = target / ".github" / "copilot" / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings["enabledPlugins"]["sample@local"] = True
+    settings_path.unlink()
+    settings_path = target.joinpath(*convention, "settings.json")
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_json(settings_path, settings)
+    before = settings_path.read_bytes()
+    specs = [{"source": "sample@local"}]
+    roots = [host] if controller else []
+    request = {"repo": str(target), **build_plan(specs, roots, local_mode=mode), "local_mode": mode}
+    with pytest.raises(ValueError, match="Required local plugin is absent"):
+        prepare(request)
+    assert not (target / ".github" / "copilot" / "settings.local.json").exists()
+    specs[0]["allow_missing"] = True
+    request = {"repo": str(target), **build_plan(specs, roots, local_mode=mode), "local_mode": mode}
+    diagnostics = []
+    expected = {"support@local": str((target / ".ai" / "support").resolve())}
+    assert prepare(request, diagnostics=diagnostics) == expected
+    assert prepare(request) == expected
+    assert settings_path.read_bytes() == before
+    overlay = read_repo_settings(target)
+    assert overlay.enabled["sample@local"] is True
+    assert "explicit allow_missing override" in caplog.text
+    assert {"source": "sample@local", "status": "missing-local-allowed"} in diagnostics
+    # A different missing source is not excused by the selected override.
+    settings["enabledPlugins"]["other@local"] = True
+    atomic_json(settings_path, settings)
+    with pytest.raises(ValueError, match="Required local plugin is absent: other@local"):
+        prepare(request)
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_present_optional_plugin_keeps_target_enablement(tmp_path, enabled):
+    target = tmp_path / "target"
+    local_plan(target)
+    init_checkout(target)
+    settings_path = target / ".github" / "copilot" / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings["enabledPlugins"]["sample@local"] = enabled
+    atomic_json(settings_path, settings)
+    plan = build_plan([{"source": "sample@local", "allow_missing": True}], [])
+    result = prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    assert result == ({"sample@local": str((target / ".ai" / "sample").resolve())} if enabled else {})
+
+
+@pytest.mark.parametrize("mode", ["copy", "reference"])
+def test_missing_override_retires_only_stale_owned_marketplace(tmp_path, mode):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode=mode)
+    assert "sample@local" in prepare({"repo": str(target), **plan, "local_mode": mode})
+    catalog = target / ".ai" / "marketplace.json"
+    catalog.parent.mkdir()
+    atomic_json(catalog, {"name": "local", "owner": {"name": "Synthetic"}, "plugins": []})
+    settings_path = target / ".github" / "copilot" / "settings.json"
+    atomic_json(settings_path, {
+        "enabledPlugins": {"sample@local": True},
+        "extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": "./.ai"}}},
+    })
+    before = settings_path.read_bytes()
+    plan = build_plan([{"source": "sample@local", "allow_missing": True}], [host], local_mode=mode)
+    assert prepare({"repo": str(target), **plan, "local_mode": mode}) == {}
+    assert settings_path.read_bytes() == before
+    overlay = json.loads(settings_path.with_name("settings.local.json").read_text())
+    assert "local" not in overlay["extraKnownMarketplaces"]
+
+
+def test_missing_override_blocks_dependency_from_authored_retained_alias(tmp_path):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    local_plan(target, name="native")
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    alias = next(source for source in read_repo_settings(target).enabled if source.startswith("sample@"))
+    assert alias != "sample@local"
+    settings_path = target / ".github" / "copilot" / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings["enabledPlugins"].update({alias: True, "retired@local": True})
+    atomic_json(settings_path, settings)
+    manifest_path = host / ".ai" / "sample" / "plugin.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["dependencies"] = ["retired"]
+    atomic_json(manifest_path, manifest)
+    before = settings_path.read_bytes()
+    plan = build_plan([{"source": "retired@local", "allow_missing": True}], [])
+    with pytest.raises(ValueError, match="Required dependency was omitted"):
+        prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    assert settings_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("metadata", [
+    None, [], {"pluginRoot": 123}, {"pluginRoot": None}, {"pluginRoot": False}, "absolute-root",
+])
+def test_missing_override_rejects_malformed_empty_catalog_metadata(tmp_path, metadata):
+    target = tmp_path / "target"
+    init_checkout(target)
+    catalog = target / ".ai" / "marketplace.json"
+    catalog.parent.mkdir()
+    if metadata == "absolute-root":
+        metadata = {"pluginRoot": str(catalog.parent.resolve())}
+    atomic_json(catalog, {
+        "name": "local", "owner": {"name": "Synthetic"}, "plugins": [], "metadata": metadata,
+    })
+    settings = target / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    atomic_json(settings, {
+        "enabledPlugins": {"retired@local": True},
+        "extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": "./.ai"}}},
+    })
+    plan = build_plan([{"source": "retired@local", "allow_missing": True}], [])
+    with pytest.raises(ValueError, match="malformed marketplace metadata"):
+        prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    assert not settings.with_name("settings.local.json").exists()
+
+
+@pytest.mark.parametrize("failure", ["dependency", "broken-payload", "wrong-identity", "malformed"])
+def test_missing_override_does_not_weaken_required_or_invalid_sources(tmp_path, failure):
+    target = tmp_path / "target"
+    local_plan(target, name="support")
+    init_checkout(target)
+    settings_path = target / ".github" / "copilot" / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings["enabledPlugins"]["sample@local"] = True
+    atomic_json(settings_path, settings)
+    catalog_path = target / ".ai" / "marketplace.json"
+    catalog = json.loads(catalog_path.read_text())
+    if failure == "dependency":
+        manifest_path = target / ".ai" / "support" / "plugin.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["dependencies"] = ["sample@local"]
+        atomic_json(manifest_path, manifest)
+    elif failure == "broken-payload":
+        catalog["plugins"].append({"name": "sample", "source": "../outside"})
+    elif failure == "wrong-identity":
+        catalog["name"] = "foreign"
+    else:
+        catalog["plugins"] = {}
+    atomic_json(catalog_path, catalog)
+    plan = build_plan([{"source": "sample@local", "allow_missing": True}], [])
+    with pytest.raises(ValueError):
+        prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    assert not (target / ".github" / "copilot" / "settings.local.json").exists()
+
+
+def test_optional_absent_producer_survives_plan_and_cli_roundtrip(tmp_path):
+    from plugin_resolve.reflection import selection_json
+
+    local_plan(tmp_path)
+    spec = {"source": "retired@local", "enable": False, "allow_missing": True}
+    plan = build_plan([spec], [tmp_path])
+    assert plan["plugins"] == [{**spec, "resolve_on_target": True}]
+    args = selection_cli_args(spec)
+    assert args[0] == "--stage-plugin-spec"
+    assert selection_json(args[1]) == spec
+    for value in ("true", 1, None):
+        with pytest.raises(ValueError, match="allow_missing"):
+            selection_spec({**spec, "allow_missing": value})
+
+
+def test_streamed_receiver_honors_missing_override_without_controller_marketplace(tmp_path):
+    from plugin_resolve.reflection import build_prepare_python
+
+    target, profile = tmp_path / "target", tmp_path / "profile"
+    local_plan(target, name="support")
+    init_checkout(target)
+    profile.mkdir()
+    settings_path = target / ".github" / "copilot" / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings["enabledPlugins"]["retired@local"] = True
+    atomic_json(settings_path, settings)
+    before = settings_path.read_bytes()
+    plan = build_plan([{"source": "retired@local", "allow_missing": True}], [])
+    entry = tmp_path / "receiver.py"
+    entry.write_text(build_prepare_python(plan, str(target)), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-I", str(entry)], capture_output=True, text=True, timeout=60,
+        env={**os.environ, "HOME": str(profile), "USERPROFILE": str(profile)},
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "retired@local" in result.stderr and "allow_missing" in result.stderr
+    assert settings_path.read_bytes() == before
+    prepared = json.loads(next(
+        line.removeprefix("__VENUE_PLUGINS__") for line in result.stdout.splitlines()
+        if line.startswith("__VENUE_PLUGINS__")
+    ))
+    assert prepared == {"support@local": str((target / ".ai" / "support").resolve())}
+
+
 def test_reference_mode_is_direct_repeatable_and_never_writes_source_catalog(tmp_path):
     host, target = tmp_path / "host", tmp_path / "target"
     local_plan(host)
