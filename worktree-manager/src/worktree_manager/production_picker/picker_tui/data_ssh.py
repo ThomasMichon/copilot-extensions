@@ -302,12 +302,13 @@ def _ssh_argv(alias: str, remote: str) -> list[str]:
 
 
 def _argv_for(shell: str, alias: str, project: str, *, classify: bool,
-              reconcile: bool = False):
-    """Remote list argv for a machine/env: pwsh on Windows, bash elsewhere."""
-    cmd = f"{project} {_list_args(shell, classify=classify, reconcile=reconcile)}"
-    if shell == "pwsh":
-        return _ssh_argv(alias, _pwsh_remote(cmd))
-    return _ssh_argv(alias, f"bash -lc '{cmd}'")
+              reconcile: bool = False, stream: bool = False):
+    """Remote listing argv without profile forwarding, for pwsh or bash."""
+    cmd = f"{project} {_list_args(shell, classify=classify, reconcile=reconcile)}" + (" --stream" if stream else "")
+    remote = _pwsh_remote(cmd) if shell == "pwsh" else f"bash -lc '{cmd}'"
+    argv = _ssh_argv(alias, remote)
+    argv[1:1] = ["-o", "ClearAllForwardings=yes"]
+    return argv
 
 
 def _build_sources():
@@ -521,9 +522,7 @@ def _stream_argv(source):
     rows, then classified rows, then a ``done`` frame -- one JSON object per
     flushed line -- so the whole two-phase load happens over a single SSH
     connection with progressive fill."""
-    project = _project()
-    cmd = f"{project} {_list_args(source.shell, classify=True)} --stream"
-    return _wrap_remote(source.shell, source.alias, cmd)
+    return _argv_for(source.shell, source.alias, _project(), classify=True, stream=True)
 
 
 def _parse_ndjson_line(raw: str):
