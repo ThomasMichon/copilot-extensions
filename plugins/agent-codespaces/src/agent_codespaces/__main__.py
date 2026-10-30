@@ -299,6 +299,10 @@ def main(argv: list[str] | None = None) -> int:
              "agent-bridge dispatch path; dispatch-scoped, not globally enabled.",
     )
     from .plugin_preparation import disabled_plugin
+    from plugin_resolve.reflection import selection_json
+    ssh_parser.add_argument(
+        "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json,
+    )
     ssh_parser.add_argument(
         "--stage-plugin-disabled", dest="stage_plugins", action="append", type=disabled_plugin,
     )
@@ -859,6 +863,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     ns_resolve_p.add_argument(
         "--stage-plugin-disabled", dest="stage_plugins", action="append", type=disabled_plugin,
+    )
+    ns_resolve_p.add_argument(
+        "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json,
     )
     ns_target_p = sub.add_parser(
         "namespace-target-repo",

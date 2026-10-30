@@ -46,7 +46,7 @@ async def local_plugin_request(target, workspace: str, environment: dict[str, st
             for relative in SETTINGS_RELS:
                 _settings_document(root.joinpath(*relative))
         specs = [
-            {"source": ref.source, "enable": ref.enable}
+            ref.selection()
             for ref in related_plugins_for_repo(target.project, anchors=roots)
             if not is_harness_plugin(ref.source)
         ]
@@ -329,7 +329,7 @@ async def venue_plugin_plan(
     }
     if target.get("repo"):
         for ref in related_plugins_for_repo(target["repo"], anchors=roots):
-            spec = selection_spec({"source": ref.source, "enable": ref.enable})
+            spec = ref.selection()
             if not is_harness_plugin(spec["source"]):
                 selected_related.setdefault(spec["source"], spec)
     if selected_related:
@@ -346,6 +346,8 @@ async def venue_plugin_plan(
         for item in related["plugins"]:
             provider_item = selected.get(item["source"])
             if provider_item is not None and item.get("resolve_on_target"):
+                if item.get("allow_missing"):
+                    selected[item["source"]] = {**provider_item, "allow_missing": True}
                 continue
             selected[item["source"]] = {
                 **item, "enable": provider_item["enable"] if provider_item is not None else item["enable"],

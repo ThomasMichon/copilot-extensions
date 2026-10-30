@@ -117,6 +117,8 @@ def plugin_plan(repo: str | None, config, sources=(), *, repo_roots=()) -> dict:
         spec = selection_spec(value)
         if not is_harness_plugin(spec["source"]):
             selected.setdefault(spec["source"], spec)
+            if spec.get("allow_missing"):
+                selected[spec["source"]]["allow_missing"] = True
     binding = {}
     if repo and requires_repository_binding(selected.values(), roots):
         binding = _registered_target_binding(repo)

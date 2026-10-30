@@ -175,6 +175,7 @@ def register_prepared(
     inventory: tuple[Path, Path] | None = None,
     environment=None,
     prepared_context: dict | None = None,
+    omitted_sources: frozenset[str] | set[str] = frozenset(),
 ) -> dict:
     """Merge only unclaimed or unchanged owned keys; return effective directories.
 
@@ -467,12 +468,40 @@ def register_prepared(
                         source, candidate, repo, state_dir, operator, effective, publications,
                     )
                     resolved[source] = str(candidate)
-        missing = [source for source in effective.enabled_sources() if source not in resolved]
+        for source in omitted_sources:
+            from .reflection import _plan_item
+
+            _name, marketplace = split_source(source)
+            if local_marketplace_path(marketplace, operator, repo_dir=repo) is None:
+                raise ValueError(f"Omitted plugin lost its target-local authority: {source}")
+            candidate = _plan_item(
+                {"source": source, "allow_missing": True}, (repo, operator), operator.marketplaces,
+                allow_external=True, required=False, local_mode="reference",
+            )
+            if candidate is not None or source in resolved:
+                raise ValueError(f"Omitted plugin changed during preparation: {source}")
+        missing = [source for source in effective.enabled_sources()
+                   if source not in resolved and source not in omitted_sources]
         if missing:
             raise ValueError(f"Enabled plugins do not resolve: {', '.join(missing)}")
         for source, directory_path in resolved.items():
             _name, marketplace = split_source(source)
-            for dependency in dependencies(plugin_manifest(Path(directory_path)), marketplace):
+            manifest = plugin_manifest(Path(directory_path))
+            required = dependencies(manifest, marketplace)
+            if omitted_sources:
+                logical = publications.get(source, {}).get("logical_source", source)
+                logical_marketplace = split_source(logical)[1]
+                omitted_dependencies = set(
+                    required if logical_marketplace == marketplace
+                    else dependencies(manifest, logical_marketplace)
+                ).intersection(omitted_sources)
+                if omitted_dependencies:
+                    raise ValueError(
+                        f"Required dependency was omitted: {logical} requires {', '.join(sorted(omitted_dependencies))}"
+                    )
+            for dependency in required:
+                if dependency in omitted_sources:
+                    raise ValueError(f"Required dependency was omitted: {source} requires {dependency}")
                 if not effective.enabled.get(dependency) or dependency not in resolved:
                     diagnostics.append({
                         "source": source, "dependency": dependency,

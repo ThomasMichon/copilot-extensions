@@ -1379,6 +1379,7 @@ def test_plugins_roundtrip(tmp_path: Path):
             plugins=[
                 {"source": "example-web-codespace@example-marketplace", "enable": True},
                 {"source": "extra@example-marketplace", "enable": False},
+                {"source": "retired@local", "enable": False, "allow_missing": True},
             ],
         ),
     })
@@ -1387,6 +1388,7 @@ def test_plugins_roundtrip(tmp_path: Path):
     assert got.plugins == [
         {"source": "example-web-codespace@example-marketplace", "enable": True},
         {"source": "extra@example-marketplace", "enable": False},
+        {"source": "retired@local", "enable": False, "allow_missing": True},
     ]
 
 

@@ -108,10 +108,12 @@ def test_namespace_resolve_preserves_disabled_and_literal_sources(capsys):
         assert main([
             "namespace-resolve", "synthetic", "--stage-plugin-disabled", "sample@synthetic",
             "--stage-plugin", "/plain source=false",
+            "--stage-plugin-spec", '{"source":"retired@local","allow_missing":true}',
         ]) == 0
     assert json.loads(capsys.readouterr().out)["container"]["related_plugins"] == [
         {"source": "sample@synthetic", "enable": False},
         {"source": "/plain source=false", "enable": True},
+        {"source": "retired@local", "enable": True, "allow_missing": True},
     ]
 
 

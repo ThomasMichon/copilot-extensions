@@ -743,7 +743,7 @@ def _cmd_create_cli(
                 repository, anchors=roots,
                 **({"match_registered_remote": True} if prefix == "ssh" else {}),
             ) if repository else []:
-                argv += selection_cli_args({"source": plugin.source, "enable": plugin.enable})
+                argv += selection_cli_args(plugin.selection())
             for root in roots:
                 argv += ["--plugin-root", str(root)]
     if detach:

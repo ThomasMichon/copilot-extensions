@@ -548,8 +548,10 @@ def test_provider_selection_bool_wins_related_fallback(monkeypatch):
         SimpleNamespace(source="sample@synthetic", enable=False),
     ])
     monkeypatch.setattr(module, "build_plan", lambda selections, roots, **kw: selections)
-    assert module.plugin_plan(None, SimpleNamespace(), ["sample@synthetic"]) == [
-        {"source": "sample@synthetic", "enable": False},
+    assert module.plugin_plan(None, SimpleNamespace(), [
+        {"source": "sample@synthetic", "allow_missing": True},
+    ]) == [
+        {"source": "sample@synthetic", "enable": False, "allow_missing": True},
     ]
 
 

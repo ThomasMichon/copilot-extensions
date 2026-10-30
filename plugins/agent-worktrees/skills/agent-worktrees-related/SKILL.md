@@ -100,6 +100,14 @@ related:
   `--plugin-dir` (no marketplace fetch in the venue). Git-backed and repo-local
   directory marketplaces are both supported, but every listed source must be
   enabled and installed on the machine that dispatches the work.
+  An individual mapping may additionally set `allow_missing: true`, for example
+  `{source: retired@example-local, allow_missing: true}`. This deliberate,
+  exact-source workaround omits only an absent entry in the target's declared
+  local marketplace and emits a warning; the controller need not declare that
+  marketplace. The default remains fail-closed. It neither changes the target's
+  settings nor bypasses invalid payloads, dependencies, or target disablement.
+  `enable: false` retains install-only semantics when the plugin is present.
+  See the [shared selection contract](../../../../libs/plugin-resolve/README.md#explicit-missing-local-selections).
 - **`ownership`** -- the operator's contribution/authority posture toward the
   repo (who maintains it, who reviews it) -- **not** the AI-attribution axis
   (see `audience` below for that): `owned` (the operator wholly owns it --

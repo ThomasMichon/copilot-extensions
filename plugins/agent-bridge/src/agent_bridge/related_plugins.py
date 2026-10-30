@@ -151,11 +151,15 @@ def _parse_plugin_items(raw: object) -> list[PluginRef]:
         return []
     seen: dict[str, PluginRef] = {}
     for item in raw:
+        allow_missing = False
         if isinstance(item, str):
             source, enable = item.strip(), True
         elif isinstance(item, dict):
             source = str(item.get("source", "")).strip()
             enable = bool(item.get("enable", True))
+            allow_missing = item.get("allow_missing", False)
+            if not isinstance(allow_missing, bool):
+                raise ValueError("Related plugin allow_missing must be a boolean")
         else:
             continue
         if not source:
@@ -166,7 +170,7 @@ def _parse_plugin_items(raw: object) -> list[PluginRef]:
                 "(*-harness* plugins are central-harness-only)", source,
             )
             continue
-        seen[source] = PluginRef(source=source, enable=enable)
+        seen[source] = PluginRef(source=source, enable=enable, allow_missing=allow_missing)
     return list(seen.values())
 
 
