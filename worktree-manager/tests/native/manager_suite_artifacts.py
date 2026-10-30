@@ -133,10 +133,10 @@ def _configuration(case: Path, declared: dict[str, Any]) -> None:
     # into a client-only or dependency-suppressed component fixture.
     index = home / ".agent-index"
     index.mkdir()
-    _write(index / "config.yaml", {"role": "host"})
+    (index / "config.yaml").write_text("role: host\n", encoding="utf-8")
     index_repo = project / ".copilot-extensions" / "agent-index" / "config.yaml"
     index_repo.parent.mkdir(parents=True)
-    _write(index_repo, {"indexers": [{"machine": machine}]})
+    index_repo.write_text(f"indexers:\n  - machine: {machine}\n", encoding="utf-8")
     _write(project / "services.yaml", {"plugins": [
         {"name": name, "deploy_machines": [machine]}
         for name, row in declared.items() if row["scope"] == "machine-gated"

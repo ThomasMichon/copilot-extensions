@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import socket
 import sys
 import shutil
 import subprocess
@@ -29,6 +30,48 @@ def test_fullsuite_refuses_execution_outside_the_disposable_venue(monkeypatch: p
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(RuntimeError, match="disposable GitHub-hosted Windows VM"):
         require_venue()
+
+
+@pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Index role readers")
+def test_fixture_configures_host_for_native_and_dependency_free_index_readers(tmp_path: Path) -> None:
+    from agent_procutil import no_window_kwargs
+
+    (tmp_path / "project").mkdir()
+    env = fixture._env(tmp_path)
+    fixture._configuration(tmp_path, {})
+    scripts = fixture.REPO / "plugins" / "agent-index" / "scripts"
+    initialized = subprocess.run(
+        [shutil.which("git"), "init", "-q", "--template=", "-b", "main", str(tmp_path / "project")],
+        env=env, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert initialized.returncode == 0, initialized.stdout + initialized.stderr
+
+    def quote(value: object) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+
+    script = (
+        "$ErrorActionPreference='Stop'; $tokens=$null; $errors=$null;"
+        "$ast=[System.Management.Automation.Language.Parser]::ParseFile("
+        f"{quote(scripts / 'install.ps1')},[ref]$tokens,[ref]$errors);"
+        "$function=$ast.Find({param($node)"
+        "$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and "
+        "$node.Name -eq 'Get-MachineRole'},$true);"
+        ". ([scriptblock]::Create($function.Extent.Text));"
+        f"$InstallDir={quote(tmp_path / 'h' / '.agent-index')}; Get-MachineRole"
+    )
+    commands = [
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script],
+        [sys.executable, "-I", "-S", "-B", str(scripts / "resolve-activation-role.py"),
+         "--repo", str(tmp_path / "project"),
+         "--machine", socket.gethostname().split(".")[0].strip().lower()],
+    ]
+    for command in commands:
+        result = subprocess.run(
+            command, cwd=tmp_path / "project", env=env, capture_output=True,
+            text=True, timeout=30, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.strip() == "host", f"{command}: {result.stdout}{result.stderr}"
 
 
 @pytest.mark.parametrize("name,routing_name,lock_name", (
