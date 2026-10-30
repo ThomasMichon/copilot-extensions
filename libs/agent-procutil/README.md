@@ -947,8 +947,10 @@ retain no runtime dependencies and need no sibling plugin or service.
 Only the consumer's canonical installer, under its existing execution driver,
 calls `reconcile` with its validated installation identity, private durable root
 and already-qualified immutable runtime. Registration has no triggers, saved
-password, elevation or network listener. Installed action and cwd cannot point
-into a payload, checkout or session. Missing adoption fails explicitly; normal
+password, elevation or network listener. The installed action belongs to the
+qualified immutable runtime, and its explicit cwd cannot point into a payload.
+A Git ancestor does not invalidate an otherwise qualified installation.
+Missing adoption fails explicitly; normal
 launches never install or repair it. Update drains finite accepted transactions
 without stopping them; stop/uninstall disable admission and report that already
 transferred child control remains the consumer's responsibility.

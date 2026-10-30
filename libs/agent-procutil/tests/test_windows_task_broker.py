@@ -81,6 +81,32 @@ def test_unsafe_registration_is_refused(overrides):
         registration(**overrides)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows installation metadata paths")
+@pytest.mark.parametrize("git_kind", ("directory", "file"))
+def test_installed_broker_accepts_a_git_ancestor(tmp_path, monkeypatch, git_kind):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    git = checkout / ".git"
+    if git_kind == "directory":
+        git.mkdir()
+    else:
+        git.write_text("gitdir: elsewhere", encoding="utf-8")
+    root = checkout / "home" / ".example"
+    slot = root / "versions" / "1.0"
+    pythonw = slot / "Scripts" / "pythonw.exe"
+    entrypoint = slot / "Lib" / "site-packages" / "agent_procutil" / "windows_broker_entry.py"
+    for path in (pythonw, entrypoint):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"installed fixture")
+    config = registration(root=str(root), pythonw=str(pythonw), entrypoint=str(entrypoint))
+    monkeypatch.setattr(task, "native", lambda: SimpleNamespace(current_sid=lambda: config.principal))
+
+    config.validate_files()
+    monkeypatch.setattr(task, "native", lambda: SimpleNamespace(current_sid=lambda: "S-1-5-21-456"))
+    with pytest.raises(DaemonSpawnError, match="installation prerequisite unavailable"):
+        config.validate_files()
+
+
 def test_contained_spawn_does_not_read_adoption_or_activate(monkeypatch):
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     load, operation = Mock(), Mock()
