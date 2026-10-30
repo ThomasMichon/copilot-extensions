@@ -517,6 +517,11 @@ class ContainersConfig:
     # fleet fragments, and per-fleet/per-key sources (see plugin_config).
     provenance: dict[str, Any] = field(default_factory=dict)
 
+    def fleet_source(self, fleet_name: str | None) -> str | None:
+        """Return the source label that defined ``fleet_name``, when known."""
+        entry = (self.provenance.get("fleets") or {}).get(fleet_name or "") or {}
+        return entry.get("defined_by")
+
     def effective_acp_command(
         self, workspace_folder: str | None = None, acp_command: str | None = None
     ) -> str:

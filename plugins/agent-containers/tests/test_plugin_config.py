@@ -132,6 +132,42 @@ def test_operator_config_overrides_per_key_including_nested_mappings(
     assert entry["keys"]["workspace_folder"] == plugin
 
 
+def test_null_override_clears_shipped_values_to_their_defaults(
+    tmp_path, monkeypatch, isolated,
+):
+    root = _plugin(tmp_path / "plugins" / "example-harness", """\
+        fleets:
+          example:
+            image: example:latest
+            size: 4
+            forward_gh_token: false
+            environment:
+              KEEP: "1"
+              REMOVE: "2"
+    """)
+    isolated.append(("example-harness@example", [root]))
+    path = _operator_config(tmp_path, monkeypatch, """\
+        schema_version: 2
+        fleets:
+          example:
+            size: null
+            forward_gh_token: null
+            environment:
+              REMOVE: null
+    """)
+
+    cfg = load_config(strict=True)
+
+    fleet = cfg.fleets["example"]
+    assert fleet.size == 1
+    assert fleet.forward_gh_token is None
+    assert fleet.environment == {"KEEP": "1"}
+    keys = cfg.provenance["fleets"]["example"]["keys"]
+    assert keys["size"] == f"config:{path}"
+    assert keys["environment.REMOVE"] == f"config:{path}"
+    assert keys["environment.KEEP"] == "plugin:example-harness@example"
+
+
 def test_unknown_nested_mapping_keys_merge_per_key(tmp_path, monkeypatch, isolated):
     root = _plugin(tmp_path / "plugins" / "example-harness", """\
         fleets:

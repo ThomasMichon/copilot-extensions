@@ -20,7 +20,8 @@ Rules:
   global defaults, relay, dotfiles and harness settings remain operator-owned.
 * The operator's config overrides a plugin fleet **per key**: the fleet's
   mapping is deep-merged (nested mappings such as ``environment`` merge per
-  key; lists and scalars replace). An explicit ``null`` clears a fragment value.
+  key; lists and scalars replace). An explicit ``null`` clears a fragment value
+  so it falls back to the default, exactly as if neither source had set it.
 * When two plugins define the same fleet name, the plugin whose source
   (``name@marketplace``) sorts first wins and the other definition is ignored
   as a whole, with a warning. Definitions are never blended across plugins.
@@ -205,9 +206,17 @@ def discover_plugin_fragments(
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Merge ``override`` over ``base`` per key; ``None`` removes the key.
+
+    Removing (rather than storing ``None``) makes a cleared key behave exactly
+    as if neither source set it, so it falls back to the fleet default or the
+    global setting instead of reaching type conversion as a literal null.
+    """
     merged = dict(base)
     for key, value in override.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+        if value is None:
+            merged.pop(key, None)
+        elif isinstance(value, dict) and isinstance(merged.get(key), dict):
             merged[key] = _deep_merge(merged[key], value)
         else:
             merged[key] = copy.deepcopy(value)
@@ -228,11 +237,14 @@ def _leaf_sources(mapping: dict[str, Any], label: str, prefix: str = "") -> dict
 def _merged_sources(
     merged: dict[str, Any], override: dict[str, Any], base_label: str, override_label: str
 ) -> dict[str, str]:
-    overridden = set(_leaf_sources(override, override_label))
-    return {
+    overridden = _leaf_sources(override, override_label)
+    sources = {
         key: override_label if key in overridden else base_label
         for key in _leaf_sources(merged, base_label)
     }
+    # Keys cleared with an explicit null stay attributed to the override.
+    sources.update({key: label for key, label in overridden.items() if key not in sources})
+    return sources
 
 
 def merge_fragments(
@@ -313,3 +325,39 @@ def merge_fragments(
         merged["fleets"] = merged_fleets
     return merged, provenance
 
+
+
+def add_subparsers(sub: Any) -> None:
+    """Register ``config-sources`` on the agent-containers CLI."""
+    parser = sub.add_parser(
+        "config-sources",
+        help="Show the selected containers.yaml, plugin-shipped fleet fragments, "
+        "and which source supplied each fleet and key",
+    )
+    parser.add_argument("--json", action="store_true", help="Emit the provenance as JSON.")
+    parser.set_defaults(func=cmd_config_sources)
+
+
+def cmd_config_sources(args: Any) -> int:
+    from .config import load_config
+
+    provenance = load_config(strict=True).provenance
+    if args.json:
+        print(json.dumps(provenance, indent=2))
+        return 0
+    print(f"Config file: {provenance.get('config_file') or '(none)'}")
+    fragments = provenance.get("plugin_fragments") or []
+    print("Plugin fragments:" if fragments else "Plugin fragments: (none)")
+    for fragment in fragments:
+        fleets = ", ".join(fragment["fleets"]) or "-"
+        print(f"  {fragment['plugin']}: {fragment['path']} (fleets: {fleets})")
+    fleets = provenance.get("fleets") or {}
+    print("Fleets:" if fleets else "Fleets: (none)")
+    for name, entry in fleets.items():
+        line = f"  {name}: defined by {entry['defined_by']}"
+        if entry.get("overridden_by"):
+            line += f", overridden by {entry['overridden_by']}"
+        print(line)
+        for key, source in entry.get("keys", {}).items():
+            print(f"    {key}: {source}")
+    return 0

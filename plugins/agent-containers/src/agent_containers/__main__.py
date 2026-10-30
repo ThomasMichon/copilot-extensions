@@ -31,7 +31,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_flags as _creation_flags
 
-from . import claim_provider_cli, hosting_policy, rescue_capture_cli
+from . import claim_provider_cli, hosting_policy, plugin_config, rescue_capture_cli
 from . import copilot_process_auth as process_auth
 from .config import (
     RESTRICTED_PROFILE,
@@ -72,9 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command")
 
     fleet_p = sub.add_parser("fleet", help="List fleet containers + lease status")
-    fleet_p.add_argument(
-        "--json", action="store_true", help="Emit the fleet as a JSON array."
-    )
+    fleet_p.add_argument("--json", action="store_true", help="Emit the fleet as a JSON array.")
 
     up_p = sub.add_parser("up", help="Provision/top-up a fleet")
     up_p.add_argument("fleet", help="Fleet name (from containers.yaml)")
@@ -115,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--force", action="store_true", help="Force removal")
 
     claim_provider_cli.add_claim_provider_parsers(sub)
+    plugin_config.add_subparsers(sub)
     rescue_capture_cli.add_rescue_capture_parser(sub)
     borrow_p = sub.add_parser("borrow", help="Lease a free container to an effort")
     borrow_p.add_argument("effort", help="Effort name (lease holder)")
@@ -223,15 +222,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "installer-readiness",
         help="Emit the plugin-owned installer/readiness contract state as JSON",
-    )
-
-    config_sources_p = sub.add_parser(
-        "config-sources",
-        help="Show the selected containers.yaml, plugin-shipped fleet fragments, "
-        "and which source supplied each fleet and key",
-    )
-    config_sources_p.add_argument(
-        "--json", action="store_true", help="Emit the provenance as JSON."
     )
 
     sub.add_parser(
@@ -379,8 +369,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "installer-readiness":
             return _cmd_installer_readiness()
-        if args.command == "config-sources":
-            return _cmd_config_sources(args)
         if args.command == "config-migrate":
             from . import config_migrations
 
@@ -653,29 +641,6 @@ def _cmd_relay_profile() -> int:
     return 0
 
 
-def _cmd_config_sources(args: argparse.Namespace) -> int:
-    provenance = load_config(strict=True).provenance
-    if args.json:
-        print(json.dumps(provenance, indent=2))
-        return 0
-    print(f"Config file: {provenance.get('config_file') or '(none)'}")
-    fragments = provenance.get("plugin_fragments") or []
-    print("Plugin fragments:" if fragments else "Plugin fragments: (none)")
-    for fragment in fragments:
-        fleets = ", ".join(fragment["fleets"]) or "-"
-        print(f"  {fragment['plugin']}: {fragment['path']} (fleets: {fleets})")
-    fleets = provenance.get("fleets") or {}
-    print("Fleets:" if fleets else "Fleets: (none)")
-    for name, entry in fleets.items():
-        line = f"  {name}: defined by {entry['defined_by']}"
-        if entry.get("overridden_by"):
-            line += f", overridden by {entry['overridden_by']}"
-        print(line)
-        for key, source in entry.get("keys", {}).items():
-            print(f"    {key}: {source}")
-    return 0
-
-
 def _cmd_fleet(args: argparse.Namespace) -> int:
     from . import picker
     from .lease import deploy_hold_status, get_lease
@@ -740,10 +705,7 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
                 "state": c.state,
                 "status": c.status,
                 "fleet": c.fleet,
-                "fleet_source": (
-                    (getattr(config, "provenance", {}).get("fleets") or {})
-                    .get(c.fleet or "", {}).get("defined_by")
-                ),
+                "fleet_source": config.fleet_source(c.fleet),
                 "local_folder": c.local_folder,
                 "lease": lease.effort if lease else None,
                 "lifecycle_hold": hold_status,

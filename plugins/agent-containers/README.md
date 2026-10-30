@@ -571,7 +571,8 @@ graph as `codespaceConfig` and plugin-shipped `related.yaml`):
   ignored with a warning -- those stay operator-owned.
 - Your config overrides a plugin fleet **per key**: the fleet mapping is
   deep-merged, nested mappings such as `environment` merge per key, lists and
-  scalars replace, and an explicit `null` clears a shipped value. Set only what
+  scalars replace, and an explicit `null` clears a shipped value back to its
+  default (as if neither source set it). Set only what
   is personal:
 
   ```yaml
