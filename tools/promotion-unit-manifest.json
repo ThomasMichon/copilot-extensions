@@ -3184,7 +3184,11 @@
         "tools/promotion_unit_tests/test_native_owned.py::test_expired_query_never_publishes_success_and_still_retires[True]",
         "tools/promotion_unit_tests/test_native_owned.py::test_unknown_cleanup_keeps_exact_resources_and_refuses_automatic_retry[spawn]",
         "tools/promotion_unit_tests/test_native_owned.py::test_unknown_cleanup_keeps_exact_resources_and_refuses_automatic_retry[retirement]",
-        "tools/promotion_unit_tests/test_native_owned.py::test_unknown_cleanup_keeps_exact_resources_and_refuses_automatic_retry[close]"
+        "tools/promotion_unit_tests/test_native_owned.py::test_unknown_cleanup_keeps_exact_resources_and_refuses_automatic_retry[close]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_log_close_cannot_upgrade_uncertain_native_cleanup[spawn]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_log_close_cannot_upgrade_uncertain_native_cleanup[retirement]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_log_close_preserves_settled_failure",
+        "tools/promotion_unit_tests/test_native_owned.py::test_log_close_after_success_is_an_explicit_retained_failure"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3558,10 +3562,10 @@
         "plugins/agent-worktrees/src/agent_worktrees/strict_yaml.py": "98c2abc729a4544129c8fc60d723aa45fb4b49142c7194b21f41e0e84ef018d3",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_records.py": "722d48c76e5a9ac285f09868bd83291ba448fa1aa8a66c8e7854e9354e4fe4d4",
         "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py": "5824b9349a74795f99deb7c078ab2179362ff9bbd9a7f8e488e8dd2e29464e89",
-        "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "40a8ddc8ef179b057f65fa721e246136f7aa1cfe6289284c21171c7e785ddbc1",
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "6c496b46692599bf022cdbf8daecea7195fffde509bbc23f4b461d63ec18d6e6",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4",
-        "libs/agent-procutil/src/agent_procutil/_native_owned.py": "6d04447f584a7be5010c03c8b9a5b0c9c423d387d428535b818d53ea684a7c2d",
-        "tools/promotion_unit_tests/test_native_owned.py": "3b959d9fa68c748cd8598666add0300ade413a62c90a84a80e20e38dd24bff29"
+        "libs/agent-procutil/src/agent_procutil/_native_owned.py": "643c3333d3f435ece115f714c144ca6b64af571e37cc68aec9b3b8bf91bac06f",
+        "tools/promotion_unit_tests/test_native_owned.py": "da1356b2b9224d900a1535d13467ea630455d55073a1001c56c119518f7c24e1"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",

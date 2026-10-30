@@ -109,7 +109,7 @@ class ShellInstanceSession:
             try:
                 return {"returncode": run(parameters)}
             except NativeOwnedFailure as error:
-                if not error.cleanup_confirmed:
+                if not error.cleanup_confirmed or error.output is not None:
                     self._owned_cleanup = error
                     self._failed = True
                 raise

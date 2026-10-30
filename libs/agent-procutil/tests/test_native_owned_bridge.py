@@ -156,3 +156,18 @@ def test_private_session_fences_only_unconfirmed_native_outcomes(
     assert session._owned_cleanup is failure
     with pytest.raises(RuntimeError, match="replay"):
         session.dispatch({"command": "run-owned", "parameters": native_request})
+
+
+def test_private_session_retains_failed_log_closure_after_settled_target(
+    native_request: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = shell.ShellInstanceSession(Mock())
+    failure = owned.NativeOwnedFailure("log close failed", cleanup_confirmed=True)
+    failure.output = Mock()
+    failure.log_error = OSError("fixture closure")
+    monkeypatch.setattr(owned, "run", Mock(side_effect=failure))
+    with pytest.raises(owned.NativeOwnedFailure):
+        session.dispatch({"command": "run-owned", "parameters": native_request})
+    assert session._owned_cleanup is failure
+    with pytest.raises(RuntimeError, match="replay"):
+        session.dispatch({"command": "run-owned", "parameters": native_request})

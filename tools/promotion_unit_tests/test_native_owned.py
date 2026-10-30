@@ -6,7 +6,7 @@ import importlib.util
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -115,3 +115,56 @@ def test_unknown_cleanup_keeps_exact_resources_and_refuses_automatic_retry(
     assert failure.value.cleanup_confirmed is False
     assert failure.value.process is owned.process and failure.value.job is owned.job
     assert owned.process.retire_job.call_count == (0 if stage == "spawn" else 1)
+
+
+def _failing_log(owned, monkeypatch: pytest.MonkeyPatch):
+    output = MagicMock()
+    error = OSError("fixture log close failure")
+    output.close.side_effect = error
+    output.__enter__.return_value = output
+    output.__exit__.side_effect = lambda *args: output.close()
+    monkeypatch.setattr(owned.module, "open", Mock(return_value=output), raising=False)
+    return output, error
+
+
+@pytest.mark.parametrize("stage", ["spawn", "retirement"])
+def test_log_close_cannot_upgrade_uncertain_native_cleanup(
+    owned, parameters: dict, stage: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output, log_error = _failing_log(owned, monkeypatch)
+    if stage == "spawn":
+        owned.module._spawn.side_effect = UnsettledChild(owned.process, owned.job)
+    else:
+        owned.process.retire_job.side_effect = OSError("fixture retirement uncertainty")
+    with pytest.raises(owned.module.NativeOwnedFailure) as failure:
+        owned.module.run(parameters)
+    assert failure.value.cleanup_confirmed is False
+    assert failure.value.process is owned.process and failure.value.job is owned.job
+    assert failure.value.output is output and failure.value.log_error is log_error
+    output.close.assert_called_once_with()
+
+
+def test_log_close_preserves_settled_failure(
+    owned, parameters: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output, log_error = _failing_log(owned, monkeypatch)
+    ticks = iter((1.0, 3.0))
+    owned.module.time.monotonic = lambda: next(ticks)
+    with pytest.raises(owned.module.NativeOwnedFailure, match="deadline") as failure:
+        owned.module.run(parameters)
+    assert failure.value.cleanup_confirmed is True
+    assert failure.value.output is output and failure.value.log_error is log_error
+    assert "log close" in str(failure.value)
+    output.close.assert_called_once_with()
+
+
+def test_log_close_after_success_is_an_explicit_retained_failure(
+    owned, parameters: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output, log_error = _failing_log(owned, monkeypatch)
+    with pytest.raises(owned.module.NativeOwnedFailure, match="log close") as failure:
+        owned.module.run(parameters)
+    assert failure.value.cleanup_confirmed is True
+    assert failure.value.output is output and failure.value.log_error is log_error
+    owned.process.retire_job.assert_called_once_with(owned.job, 10)
+    output.close.assert_called_once_with()

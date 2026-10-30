@@ -221,6 +221,10 @@ later requests. Runspace cancellation retires unfinished request custody in
 `finally`, even when the shell bypasses `catch`. A consumer must keep
 an interrupted fence on uncertainty or owner death, not infer settlement from
 the operation lock becoming free.
+An append-log close failure cannot overwrite the original native outcome or
+upgrade unconfirmed retirement. Both errors remain explicit and the exact
+native references survive. A failed log object is retained and fences later
+requests even when target retirement itself was confirmed.
 Import is inert and refuses an already-loaded compiled owned-process adapter
 before replacing its function. Upgrade or rollback uses a fresh PowerShell
 process with a coherent source archive, not live guard migration. Python is

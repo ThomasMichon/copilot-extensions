@@ -34,6 +34,8 @@ class NativeOwnedFailure(OSError):
         super().__init__(message)
         self.cleanup_confirmed = cleanup_confirmed
         self.process, self.job = process, job
+        self.output: BinaryIO | None = None
+        self.log_error: BaseException | None = None
 
 
 def _absolute_path(value: object) -> str:
@@ -153,9 +155,38 @@ def run(value: object) -> int:
     except (TypeError, ValueError) as error:
         raise NativeOwnedFailure(str(error), cleanup_confirmed=True) from error
     try:
-        with open(request.log, "ab", buffering=0) as output:
-            return _run_target(request, output)
-    except NativeOwnedFailure:
-        raise
+        output = open(request.log, "ab", buffering=0)
     except OSError as error:
         raise _failure(error, settled=True) from error
+    result = None
+    failure = None
+    cause = None
+    try:
+        result = _run_target(request, output)
+    except BaseException as error:
+        if isinstance(error, NativeOwnedFailure):
+            failure = error
+        else:
+            cause = error
+            failure = _failure(
+                error, settled=False,
+                process=getattr(error, "process", None), job=getattr(error, "job", None),
+            )
+    finally:
+        try:
+            output.close()
+        except BaseException as error:
+            message = "native owned log close failed: " + type(error).__name__
+            if failure is None:
+                cause = error
+                failure = NativeOwnedFailure(message, cleanup_confirmed=result is not None)
+            else:
+                failure.args = (str(failure) + "; " + message,)
+            failure.output, failure.log_error = output, error
+    if failure is not None:
+        if cause is not None:
+            raise failure from cause
+        raise failure
+    if result is None:
+        raise NativeOwnedFailure("native root exit status is unconfirmed", cleanup_confirmed=False)
+    return result
