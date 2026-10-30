@@ -117,7 +117,8 @@ def _repo_is_trusted(repo_root: Path, home: Path, *, copilot_home: Path | None =
     return False
 
 
-def _strict_settings(path: Path, *, allow_line_comments: bool = False) -> dict:
+def strict_json_document(text: str, path: Path, *, allow_line_comments: bool = False):
+    """Parse JSON/JSONC with duplicate-key rejection, independently of settings validation."""
     def unique(pairs):
         data = {}
         for key, value in pairs:
@@ -126,6 +127,20 @@ def _strict_settings(path: Path, *, allow_line_comments: bool = False) -> dict:
             data[key] = value
         return data
 
+    lines = text.splitlines(keepends=True)
+    while lines and (not lines[0].strip() or lines[0].lstrip().startswith("//")):
+        lines.pop(0)
+    text = "".join(lines)
+    if allow_line_comments:
+        text = re.sub(
+            r'"(?:[^"\\]|\\.)*"|//[^\r\n]*',
+            lambda match: match[0] if match[0].startswith('"') else "",
+            text,
+        )
+    return json.loads(text, object_pairs_hook=unique)
+
+
+def _strict_settings(path: Path, *, allow_line_comments: bool = False) -> dict:
     try:
         with path.open("rb") as handle:
             raw = handle.read(2 * 1024 * 1024 + 1)
@@ -134,17 +149,9 @@ def _strict_settings(path: Path, *, allow_line_comments: bool = False) -> dict:
     if len(raw) > 2 * 1024 * 1024:
         raise ValueError(f"settings exceed the read limit: {path}")
     try:
-        lines = raw.decode("utf-8-sig").splitlines(keepends=True)
-        while lines and (not lines[0].strip() or lines[0].lstrip().startswith("//")):
-            lines.pop(0)
-        text = "".join(lines)
-        if allow_line_comments:
-            text = re.sub(
-                r'"(?:[^"\\]|\\.)*"|//[^\r\n]*',
-                lambda match: match[0] if match[0].startswith('"') else "",
-                text,
-            )
-        data = json.loads(text, object_pairs_hook=unique)
+        data = strict_json_document(
+            raw.decode("utf-8-sig"), path, allow_line_comments=allow_line_comments,
+        )
     except (UnicodeError, ValueError) as exc:
         raise ValueError(f"invalid settings: {path}: {exc}") from exc
     if not isinstance(data, dict):

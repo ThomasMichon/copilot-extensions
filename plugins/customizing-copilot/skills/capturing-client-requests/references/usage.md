@@ -182,6 +182,14 @@ Inventory never runs hooks or contacts an MCP server. Registry-backed
 marketplaces that require a catalog command are reported unavailable unless
 `--agent-worktrees-command` supplies that exact command; there is no implicit
 PATH fallback or sibling-service requirement.
+Relative custom-instruction paths are resolved from the selected harness,
+not the analyzer's caller directory. MCP candidates include wrapped or bare
+project maps along the working-directory/repository chain, user configuration
+and enabled-plugin inline or declared-file sources. Closest project definitions
+win, and `.mcp.json` takes precedence over `.github/mcp.json` in the same folder.
+Candidate MCP configuration and plugin-manifest reads share the content-read
+budget. MCP names/correlations also have collection and expansion quotas;
+unexamined candidates leave ambiguity unknown rather than proving uniqueness.
 
 Interpret a saved request without another client/provider invocation:
 

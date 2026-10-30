@@ -310,7 +310,7 @@ def _agents(
             ), remaining + 1))
             for number, bullet in enumerate(bullets):
                 stop = bullets[number + 1].start() if number + 1 < len(bullets) else end
-                # Continuations must be indented. A plain line/footer ends the record.
+                # Without a schema/source boundary, consume only the indented prefix.
                 continuation = re.match(
                     r"(?:\r?\n(?:[ \t]+[^\r\n]*|[ \t]*(?=\r?\n|$)))*",
                     text[bullet.end():stop],

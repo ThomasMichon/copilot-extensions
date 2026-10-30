@@ -90,7 +90,7 @@ def collect_inventory(
     plugins = [plugin for plugin in plugins if not plugin.error]
     always, conditional = budget._repo_instruction_files(root)
     personal = budget._personal_instruction_files(home, copilot_home=config_root)
-    custom, _aliases = budget._custom_instruction_files(home)
+    custom, _aliases = budget._custom_instruction_files(home, base_directory=directory)
     instructions = always | conditional | personal | custom
     if session_id is not None:
         from uuid import UUID
@@ -121,9 +121,14 @@ def collect_inventory(
             if not path.is_file():
                 return None
             with path.open("rb") as stream:
-                raw = stream.read(min(MAX_FILE_BYTES, remaining) + 1)
+                limit = min(MAX_FILE_BYTES, remaining)
+                if os.fstat(stream.fileno()).st_size > limit:
+                    warnings.append({"kind": "inventory_byte_limit", "path": str(path)})
+                    return None
+                raw = stream.read(limit)
+                grew_beyond_read = os.fstat(stream.fileno()).st_size > len(raw)
             total_bytes += len(raw)
-            if len(raw) > MAX_FILE_BYTES or len(raw) > remaining:
+            if grew_beyond_read:
                 warnings.append({"kind": "inventory_byte_limit", "path": str(path)})
                 return None
             return raw.decode("utf-8-sig")
@@ -170,40 +175,16 @@ def collect_inventory(
             "path": str(path), "name": name, "description": description,
             "frontmatter": frontmatter, "aliases": sorted(aliases),
         })
-    mcp_paths = {
-        config_root / "mcp-config.json", root / ".mcp.json",
-        root / ".github" / "mcp.json",
-    }
-    for plugin in plugins:
-        mcp_paths.add(plugin.payload_root / ".mcp.json")
-    for path in sorted(mcp_paths, key=str):
-        if not path.exists():
-            continue
-        try:
-            document = read_settings(path)
-            if document and "mcpServers" not in document:
-                warnings.append({"kind": "mcp_config_schema_unrecognized", "path": str(path)})
-                continue
-            servers = document.get("mcpServers", {})
-            if not isinstance(servers, dict):
-                raise ValueError("mcp_servers_not_object")
-            for name, definition in servers.items():
-                if not isinstance(name, str) or not isinstance(definition, dict):
-                    raise ValueError("mcp_server_invalid")
-                tools = definition.get("tools", [])
-                if not isinstance(tools, list):
-                    tools = []
-                inventory["mcp_servers"].append({
-                    "name": name, "tools": [
-                        tool for tool in tools
-                        if isinstance(tool, str) and not any(char in tool for char in "*?[]")
-                    ],
-                    "source": str(path),
-                })
-        except (OSError, ValueError) as error:
-            warnings.append({
-                "kind": "mcp_inventory_unreadable", "path": str(path),
-                "error_type": type(error).__name__,
-            })
+    from snapshot_mcp_inventory import collect_mcp_servers
+
+    inventory["mcp_servers"], mcp_complete = collect_mcp_servers(
+        directory, root, config_root, plugins, read,
+        lambda: file_count < MAX_FILES and total_bytes < MAX_TOTAL_BYTES,
+        source_reader.strict_json_document, warnings,
+    )
+    mcp_complete = mcp_complete and not any(warning["kind"] in {
+        "plugin_discovery_failed", "plugin_source_unavailable",
+    } for warning in warnings)
+    inventory["coverage"]["mcp_complete"] = mcp_complete
     inventory["coverage"].update(files_examined=file_count, source_bytes_read=total_bytes)
     return inventory

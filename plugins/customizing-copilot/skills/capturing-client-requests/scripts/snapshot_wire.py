@@ -36,6 +36,11 @@ MAX_MATCHES_PER_SOURCE = 256
 MAX_CANDIDATES_PER_MATCH = 16
 MAX_AMBIGUITY_REFERENCES = 4096
 MAX_COMPARISON_CHARACTERS = 128 * 1024 * 1024
+MAX_MCP_SERVERS = MAX_MCP_TOOL_NAMES_PER_SERVER = 256
+MAX_MCP_TOOL_NAMES = 8192
+MAX_MCP_CORRELATIONS_PER_TOOL = 16
+MAX_MCP_CORRELATIONS = 2048
+MAX_MCP_COMPARISON_CHARACTERS = 32 * 1024 * 1024
 
 
 def _pointer(value: str) -> str:
@@ -410,59 +415,106 @@ def _instructions(
     }, union
 
 
-def _ownership(
-    tools: list[dict[str, Any]], servers: list[dict[str, Any]],
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    configured, builtin = [], []
-    for server in servers:
-        name = server.get("name")
-        if not isinstance(name, str):
+def _ownership(tools: list[dict[str, Any]], servers: list[dict[str, Any]], collector_complete: bool = True) -> tuple[dict[str, Any], dict[str, Any]]:
+    configured, builtin, rows = [], [], []
+    codes = set() if collector_complete else {"mcp_collector_incomplete"}
+    coverage = {
+        "collector_complete": collector_complete, "candidate_inventory_complete": False,
+        "server_record_limit": MAX_MCP_SERVERS, "tool_names_per_server_limit": MAX_MCP_TOOL_NAMES_PER_SERVER,
+        "tool_name_entry_limit": MAX_MCP_TOOL_NAMES, "tool_name_entries_examined": 0, "unsearched_tool_name_entries": 0,
+        "correlation_per_tool_limit": MAX_MCP_CORRELATIONS_PER_TOOL,
+        "correlation_global_limit": MAX_MCP_CORRELATIONS, "correlations_retained": 0,
+        "comparison_character_limit": MAX_MCP_COMPARISON_CHARACTERS,
+        "comparison_characters_charged": 0, "comparison_work_complete": True, "complete": True,
+        "candidate_pairs_examined": 0, "unsearched_candidate_pairs": 0, "omitted_correlations_lower_bound": 0,
+        "candidate_pairs_scope": "supplied_server_records", "correlation_pointer_root": "analysis_report",
+    }
+    def charge(cost: int) -> bool:
+        if coverage["comparison_characters_charged"] + cost > MAX_MCP_COMPARISON_CHARACTERS:
+            coverage["comparison_work_complete"] = False
+            codes.add("mcp_comparison_work_limit")
+            return False
+        coverage["comparison_characters_charged"] += cost
+        return True
+    for index, server in enumerate(servers[:MAX_MCP_SERVERS]):
+        if not isinstance(name := server.get("name"), str) or not name:
+            codes.add("unsupported_mcp_server_name")
             continue
+        source = value if isinstance(value := server.get("source"), str) else None
+        if not charge(5 * len(name) + len(source or "") + 12):
+            break
         names = server.get("tools", [])
-        names = names if isinstance(names, list) else []
-        matches = []
-        for tool in tools:
-            tool_name = tool.get("name")
-            if not isinstance(tool_name, str):
-                continue
-            methods = []
-            if tool_name in names:
-                methods.append("configured_tool_name")
-            if tool_name.startswith((name + "__", name + "-", name + ".", "mcp__" + name + "__")):
-                methods.append("namespace_prefix")
-            if methods:
-                correlation = {
-                    "server_name": name, "match_methods": methods,
-                    "evidence": {"pointer": tool["pointer"]}, "verified": False,
-                }
-                tool.setdefault("mcp_name_correlations", []).append(correlation)
-                matches.append({"tool_name": tool_name, **correlation})
-        configured.append({
-            "name": name, "source": server.get("source"),
-            "configured_tool_name_count": len(names), "observed_name_matches": matches,
-            "connectivity": "unknown", "origin_authenticated": False,
-        })
+        if not isinstance(names, list):
+            codes.add("unsupported_mcp_tool_names")
+            names = []
+        limit = min(len(names), MAX_MCP_TOOL_NAMES_PER_SERVER,
+                    max(0, MAX_MCP_TOOL_NAMES - coverage["tool_name_entries_examined"]))
+        candidates = names[:limit]
+        examined = len(candidates) if charge(sum(len(v) + 1 if isinstance(v, str) else 1 for v in candidates)) else 0
+        indexed_names = {value for value in candidates[:examined] if isinstance(value, str)}
+        coverage["tool_name_entries_examined"] += examined
+        coverage["unsearched_tool_name_entries"] += len(names) - examined
+        if examined < len(names):
+            codes.add("mcp_tool_name_inventory_truncated")
+        if server.get("tool_names_complete", True) is not True:
+            codes.add("mcp_tool_name_inventory_incomplete")
+        row = dict(name=name, source=source, inventory_pointer=f"/inventory/mcp_servers/{index}",
+            configured_tool_name_count=len(names), observed_name_matches=[], connectivity="unknown", origin_authenticated=False,
+            configured_tool_names_complete=examined == len(names) and server.get("tool_names_complete", True) is True)
+        configured.append(row)
+        rows.append((row, indexed_names, (name + "__", name + "-", name + ".", name + "/", "mcp__" + name + "__")))
+    coverage["servers_retained"] = len(configured)
+    coverage["servers_omitted_count"] = len(servers) - len(configured)
+    if len(servers) > MAX_MCP_SERVERS:
+        codes.add("mcp_server_inventory_truncated")
+    inventory_complete = len(configured) == len(servers) and not codes
+    coverage["candidate_inventory_complete"] = inventory_complete
+    positions = {"observed": 0, "advertised": 0}
     for tool in tools:
-        is_public = tool.get("name") in _PUBLIC_BUILTINS
-        correlations = tool.get("mcp_name_correlations", [])
-        tool["ownership_ambiguous"] = len(correlations) > 1 or (is_public and bool(correlations))
-        tool["ownership_classification"] = (
-            "ambiguous_name_match" if tool["ownership_ambiguous"] else
-            "builtin_name_match" if is_public else
-            "mcp_name_correlated" if correlations else "unknown"
-        )
+        group = "advertised" if tool.get("schema_status") == "advertised_only" else "observed"
+        report_pointer = f"/tools/{group}/{positions[group]}/mcp_name_correlations"
+        positions[group] += 1
+        tool_name = tool.get("name")
+        is_public = isinstance(tool_name, str) and len(tool_name) <= 64 and tool_name in _PUBLIC_BUILTINS
+        correlations = tool.setdefault("mcp_name_correlations", [])
+        searched = 0
+        for row, names, prefixes in rows:
+            if len(correlations) >= MAX_MCP_CORRELATIONS_PER_TOOL or coverage["correlations_retained"] >= MAX_MCP_CORRELATIONS:
+                codes.add("mcp_correlation_evidence_truncated")
+                break
+            if not isinstance(tool_name, str) or not charge(len(tool_name) + 5 * len(row["name"]) + 1):
+                break
+            searched += 1
+            coverage["candidate_pairs_examined"] += 1
+            methods = [method for matched, method in (
+                (tool_name in names, "configured_tool_name"),
+                (tool_name.startswith(prefixes), "namespace_prefix")) if matched]
+            if methods:
+                canonical_pointer = report_pointer + f"/{len(correlations)}"
+                correlations.append({
+                    "server_name": row["name"], "inventory_pointer": row["inventory_pointer"],
+                    "match_methods": methods, "evidence": {"pointer": tool["pointer"]}, "verified": False,
+                })
+                row["observed_name_matches"].append({"tool_name": tool_name,
+                    "correlation_pointer": canonical_pointer, "evidence": {"pointer": tool["pointer"]}})
+                coverage["correlations_retained"] += 1
+        complete = inventory_complete and searched == len(rows) and isinstance(tool_name, str)
+        coverage["unsearched_candidate_pairs"] += len(servers) - searched
+        coverage["complete"] = coverage["complete"] and complete
+        tool.update({"mcp_name_search_complete": complete, "mcp_name_match_count": len(correlations),
+                     "mcp_name_match_count_is_lower_bound": not complete})
+        tool["ownership_ambiguous"] = True if len(correlations) > 1 or (is_public and correlations) else False if complete else None
+        tool["ownership_classification"] = "ambiguous_name_match" if tool["ownership_ambiguous"] is True else (
+            "builtin_name_match" if is_public else "mcp_name_correlated" if correlations else "unknown")
         if is_public:
-            builtin.append({
-                "name": tool["name"], "pointer": tool["pointer"],
-                "match_method": "name_based", "origin_authenticated": False,
-                "schema_status": tool["schema_status"],
-                "ownership_ambiguous": tool["ownership_ambiguous"],
-            })
-    return {
-        "configured": configured,
+            builtin.append(dict(name=tool["name"], pointer=tool["pointer"], match_method="name_based",
+                origin_authenticated=False, schema_status=tool["schema_status"], ownership_ambiguous=tool["ownership_ambiguous"]))
+    coverage["complete"] = coverage["complete"] and inventory_complete
+    for row in configured:
+        row["observed_name_matches_complete"] = coverage["complete"]
+    return {"configured": configured, "exact_server_ownership": "unknown", "coverage": coverage,
         "name_correlated": [server for server in configured if server["observed_name_matches"]],
-        "exact_server_ownership": "unknown",
-    }, {"name_matches": builtin, "allowlist_complete": False}
+        "warnings": [{"code": code, "pointer": "/inventory/mcp_servers"} for code in sorted(codes)]}, {"name_matches": builtin, "allowlist_complete": False}
 
 
 def analyze_request(request: dict[str, Any], inventory: dict[str, Any]) -> dict[str, Any]:
@@ -505,7 +557,10 @@ def analyze_request(request: dict[str, Any], inventory: dict[str, Any]) -> dict[
     metadata_coverage = metadata.pop("metadata_coverage")
     warnings.extend(metadata.pop("metadata_warnings"))
     advertised = metadata.pop("advertised_tools")
-    servers, builtins = _ownership(tools + advertised, clean_inventory["mcp_servers"])
+    collector_complete = isinstance(collector_coverage := inventory.get("coverage", {}), dict) and collector_coverage.get("mcp_complete", True) is True
+    servers, builtins = _ownership(tools + advertised, clean_inventory["mcp_servers"], collector_complete)
+    mcp_coverage = servers.pop("coverage")
+    warnings.extend(servers.pop("warnings"))
     system_bytes = sum(len(r["text"].encode("utf-8")) for r in regions if r["role"] == "system")
     return {
         "schema": "copilot-extensions.client-request-analysis", "version": 1,
@@ -538,6 +593,7 @@ def analyze_request(request: dict[str, Any], inventory: dict[str, Any]) -> dict[
             "json_byte_metrics": "ensure_ascii_false_sorted_keys_compact",
             "source_match_scope": "instruction_inventory_text_only",
             "metadata": metadata_coverage,
+            "mcp": mcp_coverage,
         },
         "warnings": warnings,
     }

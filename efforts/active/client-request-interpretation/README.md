@@ -172,3 +172,9 @@ Unavailable attribution is a visible result, not a zero or guessed origin.
   the request lacks a supported provenance boundary. Measured system bytes and
   source-matched/unclassified accounting are not relabeled as builtin content.
 - Implementation review/merge, normal release and final archival remain.
+- Implementation review found incomplete MCP source discovery and resource
+  accounting, plus caller-relative custom-instruction lookup. Added native
+  project precedence, wrapped/bare maps, plugin inline/declared MCP sources,
+  shared read quotas and bounded correlation evidence. Relative instruction
+  paths now use the selected harness while existing scanner callers retain
+  their default base. Focused regressions cover the supported forms and limits.
