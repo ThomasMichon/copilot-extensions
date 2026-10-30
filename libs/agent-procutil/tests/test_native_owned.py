@@ -199,7 +199,7 @@ def test_native_owned_publishes_one_fresh_scope_without_changing_parent_environm
     ";".join(["Local\\ce-owned-job-" + "a" * 32] * 2),
     ";".join(f"Local\\ce-owned-job-{value:032x}" for value in range(64)),
     "x" * 4097,
-])
+], ids=["empty", "malformed", "duplicate", "full", "oversized"])
 def test_native_owned_refuses_invalid_or_full_scope_chain_before_child_start(tmp_path, scopes, native_shell):
     shell = native_shell
     report = tmp_path / "unexpected.txt"
