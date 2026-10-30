@@ -3107,3 +3107,45 @@ def test_config_report_copied_context_does_not_share_collectors_between_threads(
         assert acquisition.current_observations() is outer
     assert acquisition.current_observations() is None
     assert {o.source for o in report.observations if o.stage == "config-yaml"} == {str(path)}
+
+
+@pytest.mark.parametrize("mode", ["owner", "failure", "replacement", "projects-failure"])
+def test_registered_config_helpers_preserve_owner_calls_and_independent_defaults(tmp_path, monkeypatch, mode):
+    from agent_worktrees import config_acquisition as acquisition, installer, repos as repos_mod, repos_registry_reader
+
+    path = tmp_path / "repos.yaml"
+    path.write_text("repos:\n  sample:\n    default_branch: main\n    linux: /synthetic/anchor\n", encoding="utf-8")
+    calls = []
+
+    def registered():
+        calls.append("registry")
+        if mode == "failure":
+            raise PermissionError("synthetic private registry failure")
+        if mode == "replacement":
+            return repos_mod.ReposRegistry(repos={"sample": repos_mod.RepoEntry(
+                name="sample", default_branch="main", paths={"linux": "/synthetic/anchor"},
+            )})
+        return repos_registry_reader.read_registry(path)
+
+    def projects():
+        calls.append("projects")
+        if mode == "projects-failure":
+            raise ValueError("synthetic private projects failure")
+        return {"projects": {"sample": {"default_branch": "fallback", "base_repo": True}}}
+
+    monkeypatch.setattr(repos_mod, "read_registry", registered)
+    monkeypatch.setattr(installer, "read_projects_registry", projects)
+    with acquisition.capture_config_observations() as observations:
+        anchor = cfg._resolve_anchor_from_registry("sample", "linux")
+        defaults = cfg._resolve_adoption_defaults_from_registry("sample", "linux")
+    assert calls == ["registry", "registry", "projects"]
+    assert anchor == (None if mode == "failure" else "/synthetic/anchor")
+    assert defaults == ({"default_branch": "main"} if mode == "projects-failure" else {
+        "default_branch": "fallback" if mode == "failure" else "main", "base_repo": True,
+    })
+    assert any(o.stage == "repository-registry" for o in observations) == (mode in ("owner", "projects-failure"))
+    assert any(o.source == "repository-anchor-registry" for o in observations) == (mode in ("failure", "replacement"))
+    assert any(o.source == "adoption-default-registries" for o in observations)
+    if mode in ("failure", "projects-failure"):
+        assert any(o.stage == "registry-consumer" and o.findings for o in observations)
+    assert "synthetic private" not in repr(observations)

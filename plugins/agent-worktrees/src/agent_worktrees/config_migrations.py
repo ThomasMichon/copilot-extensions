@@ -29,6 +29,7 @@ every entry point degrades to a safe no-op rather than breaking config loading.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -152,13 +153,20 @@ def migrate_loaded(doc: dict[str, Any], schema_id: str) -> dict[str, Any]:
     can never be broken by migration. The eager install/update path is where
     problems surface loudly.
     """
+    observer = getattr(sys.modules.get(f"{__package__}.config_acquisition"), "migration_outcome", None)
     if not _AVAILABLE or not isinstance(doc, dict):
+        if observer is not None:
+            observer(schema_id, unavailable=True)
         return doc
     try:
         new_doc, _changed = migrate_doc(doc, schema_id, REGISTRY)
-        return new_doc
-    except Exception:
+    except Exception as exc:
+        if observer is not None:
+            observer(schema_id, error=exc)
         return doc
+    if observer is not None:
+        observer(schema_id)
+    return new_doc
 
 
 def summarize(results: list[Any]) -> str:

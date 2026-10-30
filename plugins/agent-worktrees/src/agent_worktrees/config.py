@@ -1337,7 +1337,7 @@ def _resolve_anchor_from_registry(name: str, platform: str) -> str | None:
     machine-specific path comes from the registry, the settings from the
     repo's own in-repo config. Never raises.
     """
-    config_acquisition.opaque_source("repository-anchor-registry")
+    start = config_acquisition.registry_call_started()
     try:
         from . import repos as repos_mod
 
@@ -1346,8 +1346,11 @@ def _resolve_anchor_from_registry(name: str, platform: str) -> str | None:
         if entry is None:
             return None
         return entry.local_path(platform) or None
-    except Exception:
+    except Exception as exc:
+        config_acquisition.registry_call_failed("repository-anchor-registry", exc)
         return None
+    finally:
+        config_acquisition.registry_call_finished(start, "repository-anchor-registry")
 
 
 # E1e config.yaml knowledge overlay (#947): the portable operator-preference keys
@@ -1429,14 +1432,17 @@ def _resolve_adoption_defaults_from_registry(
     """
     config_acquisition.opaque_source("adoption-default-registries")
     out: dict[str, Any] = {}
+    start = config_acquisition.registry_call_started()
     try:
         from . import repos as repos_mod
 
         entry = repos_mod.read_registry().repos.get(name)
         if entry is not None and entry.default_branch:
             out["default_branch"] = entry.default_branch
-    except Exception:
-        pass
+    except Exception as exc:
+        config_acquisition.registry_call_failed("adoption-repository-registry", exc)
+    finally:
+        config_acquisition.registry_call_finished(start, "adoption-repository-registry")
     try:
         from . import installer
 
@@ -1446,8 +1452,8 @@ def _resolve_adoption_defaults_from_registry(
                 out["default_branch"] = str(proj["default_branch"])
             if proj.get("base_repo") is not None:
                 out["base_repo"] = bool(proj["base_repo"])
-    except Exception:
-        pass
+    except Exception as exc:
+        config_acquisition.registry_call_failed("adoption-projects-registry", exc)
     return out
 
 

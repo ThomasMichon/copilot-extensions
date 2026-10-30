@@ -43,6 +43,37 @@ def opaque_source(source: str) -> None:
            "child owner does not expose complete acquisition provenance")
 
 
+def migration_outcome(schema_id: str, *, unavailable=False, error=None) -> None:
+    """Record only the branch the original lazy migration already took."""
+    observations = current_observations()
+    if unavailable:
+        failed(observations, schema_id, "config-migration", "migration-unavailable", "original loader retained its input")
+    elif error is not None:
+        failed(observations, schema_id, "config-migration", "migration-failed", type(error).__name__)
+    else:
+        observe(observations, schema_id, "config-migration", ScanAuthority.COMPLETE)
+
+
+def registry_call_started() -> int | None:
+    """Bound diagnostics to this original consumer call, not prior observations."""
+    observations = current_observations()
+    return len(observations) if observations is not None else None
+
+
+def registry_call_finished(start: int | None, source: str) -> None:
+    """Keep replacements opaque unless this call supplied registry-owner evidence."""
+    observations = current_observations()
+    if observations is not None and start is not None and not any(
+        o.stage == "repository-registry" for o in observations[start:]
+    ):
+        opaque_source(source)
+
+
+def registry_call_failed(source: str, error: Exception) -> None:
+    """Retain an originally suppressed consumer failure without its body."""
+    failed(current_observations(), source, "registry-consumer", "registry-helper-unavailable", type(error).__name__)
+
+
 def full_load_started() -> None:
     observe(current_observations(), "load-config", "config-load", ScanAuthority.COMPLETE)
     opaque_source("execution-machine")
