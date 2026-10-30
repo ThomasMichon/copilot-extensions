@@ -1,0 +1,13 @@
+{
+  "comment": "Start Manager replacements independently and qualify installed whole-suite generation handover with attributable resident builds.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

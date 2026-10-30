@@ -721,12 +721,15 @@ class MuxDaemonRuntime:
             "status": "draining" if self.draining else "ready",
             "version": __version__,
             "runtime_generation": running_generation(),
+            "active": not self.passive and self.accepting_requests(),
             "attached_clients": attached_clients,
             "busy": active_handlers > 0 or self.picker_sessions.busy,
             "restart_recovery": self.restart_notifications.status,
         }
 
     def promote(self) -> dict:
+        if self.passive:
+            return {"adopted": False, "reason": "resident-lease-pending"}
         self.admissions_open = True
         self.picker_sessions.resume()
         return {"adopted": True}
@@ -881,13 +884,14 @@ def run_daemon_foreground(
                             lease = promoted
                             runtime.passive = False
                             runtime._self_retire_generation = generation
+                            runtime.promote()
                             runtime.activate_restart_recovery()
                 if lease is not None:
                     write_lock_data(lock, runtime.lock_extra())
                 runtime.sync_self_retire()
                 if lease is not None:
                     runtime.picker_sessions.pump()
-                if runtime.republish_enabled:
+                if lease is not None and runtime.republish_enabled:
                     with runtime.loop_mutation():
                         if runtime.republish_enabled:
                             runtime.restart_notifications.pump(admitted=lease is not None and runtime.accepting_requests())
@@ -905,7 +909,7 @@ def run_daemon_foreground(
                 status_monitor_generation = _status_monitor_generation(status_monitor_data)
                 now = time.monotonic()  # immune to clock steps; diffed only against itself
                 if (
-                    runtime.republish_enabled
+                    lease is not None and runtime.republish_enabled
                     and
                     live_mapping_republish_due(
                         status_monitor_generation, published_monitor_generation,

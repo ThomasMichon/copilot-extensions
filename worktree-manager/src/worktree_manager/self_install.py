@@ -745,18 +745,16 @@ def _complete_candidate(
 ) -> SelfInstallResult:
     slot = ready.slot
     version = payload_version(payload)
-    cleaned: tuple[str, ...] = ()
     stubs: list[Path] = []
 
     def publish_frontdoors() -> None:
-        nonlocal cleaned, stubs
+        nonlocal stubs
         publication = installer.runtime._runtime_component("versioned_runtime_publication")
         targets = [*(local_bin() / name for name in _binstub_files()),
                    _control_plane_provider_manifest_path(payload, root=root)]
         with publication.target_leases(root, targets):
             if before_publish is not None:
                 before_publish()
-            cleaned = tuple(clean_legacy_artifacts(root))
             stubs = _deploy_binstubs()
             _write_control_plane_provider_manifest(payload, root=root)
 
@@ -774,7 +772,7 @@ def _complete_candidate(
         version=version, action="already-current"
         if was_current and ready.reused and previous == slot.name else "installed",
         root=str(root), slot=str(slot), marker=slot.name,
-        binstubs=tuple(str(stub) for stub in stubs), cleaned=cleaned,
+        binstubs=tuple(str(stub) for stub in stubs),
     )
 
 
@@ -802,12 +800,11 @@ def self_install(
             selected = _selected_runtime_slot(r)
             generation, source_matches = installer.source_install_selection(pd, version, selected)
             slot = version_slot(generation, r)
-            would_clean = tuple(plan_legacy_cleanup(r))
             if source_matches and selected is not None and not needs_install(version, r):
                 return SelfInstallResult(version=version, action="already-current", root=str(r),
-                                         slot=str(selected), marker=selected.name, cleaned=would_clean)
+                                         slot=str(selected), marker=selected.name)
             return SelfInstallResult(version=version, action="planned", root=str(r),
-                                     slot=str(slot), reason="dry-run", cleaned=would_clean)
+                                     slot=str(slot), reason="dry-run")
         previous = current_version(r)
         was_current = not needs_install(version, r)
         if _reconcile_instances and not (
