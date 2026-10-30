@@ -1,0 +1,25 @@
+{
+  "comment": "Bound SSH command cancellation cleanup and retain child ownership while reaping",
+  "changes": [
+    {
+      "plugin": "libs/ssh-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

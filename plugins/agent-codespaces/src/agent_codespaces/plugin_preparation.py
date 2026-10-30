@@ -180,13 +180,15 @@ def attached_launch_command(command: str, workspace: str) -> str:
 
 
 async def require_relay_ready(manager, name: str, port: int) -> None:
+    from ssh_manager import EXEC_COMMAND_CLEANUP_TIMEOUT
     from ._ssh_retry import exec_with_retry
     script = (
         f"exec 3<>/dev/tcp/127.0.0.1/{int(port)} && "
         'printf "ping\\n\\n" >&3 && IFS= read -r -t 3 reply <&3 && [ "$reply" = "pong" ]'
     )
     command = f"timeout 3 bash -c {shlex.quote(script)}"
-    deadline = time.monotonic() + 30
+    # Cancellation must finish reaping the owned SSH child inside the total budget.
+    deadline = time.monotonic() + 30 - EXEC_COMMAND_CLEANUP_TIMEOUT
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:

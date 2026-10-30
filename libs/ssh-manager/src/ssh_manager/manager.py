@@ -43,6 +43,10 @@ log = logging.getLogger("ssh-manager")
 # closed"). Mirror the acp library's 50 MB default so remote ACP sessions match
 # local ones.
 _STDIO_CHANNEL_LIMIT_BYTES = 50 * 1024 * 1024
+_TASKKILL_TIMEOUT = 3.0
+_TERMINATE_GRACE = 5.0
+_KILL_WAIT = 2.0
+EXEC_COMMAND_CLEANUP_TIMEOUT = _TASKKILL_TIMEOUT + _TERMINATE_GRACE + _KILL_WAIT
 
 
 def _carrier_transport_identity(info: ConnectionInfo) -> str:
@@ -89,9 +93,24 @@ def _creation_flags() -> int:
 async def _terminate_process_tree(
     proc: asyncio.subprocess.Process,
     *,
-    grace: float = 5.0,
+    grace: float = _TERMINATE_GRACE,
 ) -> None:
     """Terminate an SSH child and any children it spawned."""
+    cleanup = asyncio.create_task(_reap_process_tree(proc, grace=grace))
+    cancelled = False
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            cancelled = True
+    cleanup.result()
+    if cancelled:
+        raise asyncio.CancelledError
+
+
+async def _reap_process_tree(
+    proc: asyncio.subprocess.Process, *, grace: float,
+) -> None:
     if proc.returncode is not None:
         return
     if sys.platform == "win32":
@@ -103,7 +122,12 @@ async def _terminate_process_tree(
                 stderr=subprocess.DEVNULL,
                 check=False,
                 creationflags=_creation_flags(),
+                timeout=_TASKKILL_TIMEOUT,
             )
+        except subprocess.TimeoutExpired:
+            log.warning("Process-tree termination timed out for pid %s; killing SSH root", proc.pid)
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
         except OSError:
             proc.kill()
     else:
@@ -124,7 +148,7 @@ async def _terminate_process_tree(
     else:
         proc.kill()
     try:
-        await asyncio.wait_for(proc.wait(), timeout=2.0)
+        await asyncio.wait_for(proc.wait(), timeout=_KILL_WAIT)
     except (TimeoutError, asyncio.TimeoutError):
         log.warning("Process tree rooted at pid %s did not exit", proc.pid)
 
@@ -600,34 +624,27 @@ class ConnectionManager:
             timed_out = False
             try:
                 info.child_processes.append(proc)
-                try:
-                    if on_output is None:
-                        capture = proc.communicate(input=input_bytes)
-                    else:
-                        from agent_procutil.streaming import communicate_progress
-                        capture = communicate_progress(
-                            proc, input_bytes=input_bytes, on_output=on_output,
-                        )
-                    stdout_bytes, stderr_bytes = await asyncio.wait_for(capture, timeout=timeout)
-                finally:
-                    if proc in info.child_processes and proc.returncode is not None:
-                        info.child_processes.remove(proc)
+                if on_output is None:
+                    capture = proc.communicate(input=input_bytes)
+                else:
+                    from agent_procutil.streaming import communicate_progress
+                    capture = communicate_progress(
+                        proc, input_bytes=input_bytes, on_output=on_output,
+                    )
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(capture, timeout=timeout)
             except (TimeoutError, asyncio.TimeoutError):
                 await _terminate_process_tree(proc)
                 stdout_bytes, stderr_bytes = await proc.communicate()
                 timed_out = True
-                if proc in info.child_processes:
-                    info.child_processes.remove(proc)
             except asyncio.CancelledError:
                 await _terminate_process_tree(proc)
-                if proc in info.child_processes:
-                    info.child_processes.remove(proc)
                 raise
             except Exception:
                 await _terminate_process_tree(proc)
-                if proc in info.child_processes:
-                    info.child_processes.remove(proc)
                 raise
+            finally:
+                if proc in info.child_processes and proc.returncode is not None:
+                    info.child_processes.remove(proc)
 
             result = CommandResult(
                 stdout=stdout_bytes.decode(errors="replace").rstrip(),

@@ -100,7 +100,7 @@ async def test_relay_readiness_bounds_the_retry_transport(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Credential relay is not ready"):
         await require_relay_ready(object(), "synthetic", 12001)
-    assert attempts == [20.0, 12.0]
+    assert attempts == [20.0, 2.0]
 
 
 @pytest.mark.asyncio
@@ -108,7 +108,7 @@ async def test_relay_readiness_cancels_stalled_transport_at_total_deadline(monke
     import asyncio
     from agent_codespaces.plugin_preparation import require_relay_ready
 
-    clock = iter([0.0, 29.99])
+    clock = iter([0.0, 19.99])
     cancelled = False
 
     async def execute(*args, timeout, **kwargs):
@@ -128,6 +128,60 @@ async def test_relay_readiness_cancels_stalled_transport_at_total_deadline(monke
     with pytest.raises(RuntimeError, match="Credential relay is not ready"):
         await require_relay_ready(object(), "synthetic", 12001)
     assert cancelled
+
+
+@pytest.mark.asyncio
+async def test_relay_readiness_reserves_time_to_reap_cancelled_transport(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+    from ssh_manager import ConnectionManager
+    import ssh_manager.manager as transport
+    import agent_codespaces.plugin_preparation as preparation
+
+    now = 0.0
+    child = SimpleNamespace(pid=12345, returncode=None, kill=Mock())
+
+    async def communicate(*args, **kwargs):
+        if child.returncode is None:
+            await asyncio.Event().wait()
+        return b"", b""
+
+    async def wait():
+        nonlocal now
+        await asyncio.sleep(0.02)
+        now += 7.0
+        child.returncode = -1
+        return -1
+
+    child.communicate, child.wait = communicate, wait
+    info = SimpleNamespace(
+        config=SimpleNamespace(ssh_target="synthetic"), env={},
+        multiplexed=True, child_processes=[],
+    )
+    manager = ConnectionManager.__new__(ConnectionManager)
+    manager._connections = {"synthetic": info}
+    monkeypatch.setattr(manager, "_mux_ssh_args", lambda info: [])
+    monkeypatch.setattr(transport, "create_ssh_subprocess", AsyncMock(return_value=child))
+    monkeypatch.setattr(transport, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(transport, "_creation_flags", lambda: 0)
+    monkeypatch.setattr(transport.subprocess, "run", Mock())
+
+    def clock():
+        nonlocal now
+        previous = now
+        if now == 0:
+            now = 19.99
+        return previous
+
+    monkeypatch.setattr(preparation, "time", SimpleNamespace(monotonic=clock))
+
+    with pytest.raises(RuntimeError, match="Credential relay is not ready"):
+        await asyncio.wait_for(
+            preparation.require_relay_ready(manager, "synthetic", 12001), timeout=0.2,
+        )
+    assert child.returncode is not None
+    assert info.child_processes == []
+    assert now < 30
 
 
 @pytest.mark.parametrize("bare_source", [False, True])

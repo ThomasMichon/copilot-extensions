@@ -15,6 +15,13 @@ also accepts an explicit establishment budget for one-shot probes; its default
 remains 15 seconds. OpenSSH's integer-second budget rounds up; the caller's
 outer process deadline remains authoritative.
 
+Callers with a total wall-clock budget must reserve the public
+`EXEC_COMMAND_CLEANUP_TIMEOUT` (10 seconds) for command cancellation cleanup,
+in addition to the selected execution timeout. Windows `taskkill` is bounded
+to 3 seconds, followed by up to 5 seconds of graceful wait and 2 seconds after
+forced kill. Cancellation joins this owned reaper rather than detaching it;
+children without a confirmed exit remain registered to their connection.
+
 ## Features
 
 - **Connection multiplexing** -- one ControlMaster per host, all commands

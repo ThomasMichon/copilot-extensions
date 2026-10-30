@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 from unittest.mock import AsyncMock, patch
 
@@ -68,6 +69,122 @@ class TestCommandResult:
         r = CommandResult(stdout="", stderr="", exit_code=0, timed_out=True)
         with pytest.raises(TimeoutError):
             r.check()
+
+
+@pytest.mark.asyncio
+async def test_process_cleanup_bounds_windows_taskkill(monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import ssh_manager.manager as module
+
+    child = SimpleNamespace(pid=12345, returncode=None, kill=Mock())
+
+    async def wait():
+        child.returncode = 1
+        return 1
+
+    child.wait = wait
+    kill = Mock(side_effect=subprocess.TimeoutExpired("taskkill", 3))
+    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(module, "_creation_flags", lambda: 0)
+    monkeypatch.setattr(module.subprocess, "run", kill)
+
+    await module._terminate_process_tree(child)
+
+    assert kill.call_args.kwargs["timeout"] == 3.0
+    child.kill.assert_called_once()
+    assert child.returncode is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_count", [1, 2])
+async def test_process_cleanup_finishes_reaping_before_propagating_cancellation(
+    monkeypatch, cancel_count,
+):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import ssh_manager.manager as module
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    child = SimpleNamespace(pid=12345, returncode=None, kill=Mock())
+
+    async def wait():
+        entered.set()
+        await release.wait()
+        child.returncode = 1
+        return 1
+
+    child.wait = wait
+    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(module, "_creation_flags", lambda: 0)
+    monkeypatch.setattr(module.subprocess, "run", Mock())
+    cleanup = asyncio.create_task(module._terminate_process_tree(child))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        for _ in range(cancel_count):
+            cleanup.cancel()
+            await asyncio.sleep(0)
+            assert not cleanup.done()
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await cleanup
+    assert child.returncode is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "win32", reason="Native Windows Job ownership")
+async def test_taskkill_timeout_still_reaps_the_owned_native_process_tree(monkeypatch):
+    import subprocess
+    from unittest.mock import Mock
+    from agent_procutil import spawn_in_kill_on_close_job
+    from agent_procutil.process_retirement import PinnedProcess, birth_identity
+    import ssh_manager.manager as module
+    from ssh_manager.proxy import _track_owner_job
+
+    script = (
+        "import subprocess,sys,time\n"
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'],"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,"
+        "creationflags=subprocess.CREATE_NO_WINDOW)\n"
+        "print(child.pid,flush=True)\n"
+        "time.sleep(30)\n"
+    )
+    root, job = await spawn_in_kill_on_close_job(
+        sys.executable, "-c", script,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    descendant = None
+    try:
+        assert job is not None
+        _track_owner_job(root, job)
+        pid = int(await asyncio.wait_for(root.stdout.readline(), timeout=5))
+        descendant = PinnedProcess(pid, birth_identity(pid))
+        monkeypatch.setattr(
+            module.subprocess, "run",
+            Mock(side_effect=subprocess.TimeoutExpired("taskkill", 3)),
+        )
+        started = time.monotonic()
+        await module._terminate_process_tree(root)
+        assert root.returncode is not None
+        assert await asyncio.to_thread(descendant.exited, 2)
+        assert time.monotonic() - started < module.EXEC_COMMAND_CLEANUP_TIMEOUT
+    finally:
+        if job is not None:
+            job.close()
+        if root.returncode is None:
+            root.kill()
+        await asyncio.wait_for(root.wait(), timeout=5)
+        if descendant is not None:
+            try:
+                if not descendant.exited():
+                    descendant.terminate()
+            finally:
+                descendant.close()
 
 
 class TestConnectionManagerDirect:
