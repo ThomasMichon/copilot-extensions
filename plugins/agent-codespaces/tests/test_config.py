@@ -792,17 +792,17 @@ class TestEffectiveAcpCommand:
     def test_bare_default_resolves_workspace_on_remote(self):
         """No workspace_folder / acp_command → cd into the remote-resolved
         workspace (so the session lands in the checkout, not /home/vscode; #33)
-        then launch copilot with auto-approve."""
+        then launch copilot with normal permissions."""
         config = CodespacesConfig()
         assert config.effective_acp_command == (
             'cd "${CODESPACE_VSCODE_FOLDER:-${WORKING_DIRECTORY:-${VM_REPO_PATH:-.}}}" '
-            "&& copilot --acp --stdio --allow-all --experimental"
+            "&& copilot --acp --stdio --experimental"
         )
 
     def test_workspace_folder_produces_cd_prefix(self):
         config = CodespacesConfig(workspace_folder="/workspaces/my-repo")
         assert config.effective_acp_command == (
-            "cd /workspaces/my-repo && copilot --acp --stdio --allow-all --experimental"
+            "cd /workspaces/my-repo && copilot --acp --stdio --experimental"
         )
 
     def test_explicit_acp_command_wins(self):
@@ -849,7 +849,7 @@ class TestPerRepoWorkspaceFolder:
             "/workspaces/example-web"
         )
         assert config.effective_acp_command_for("org/example-web-codespaces") == (
-            "cd /workspaces/example-web && copilot --acp --stdio --allow-all --experimental"
+            "cd /workspaces/example-web && copilot --acp --stdio --experimental"
         )
 
     def test_workspace_repo_with_owner_is_basenamed(self):
@@ -954,7 +954,7 @@ class TestPerRepoWorkspaceFolder:
         rc = config.repos["org/example-web-codespaces"]
         assert rc.workspace_repo == "example-web"
         assert config.effective_acp_command_for("org/example-web-codespaces") == (
-            "cd /workspaces/example-web && copilot --acp --stdio --allow-all --experimental"
+            "cd /workspaces/example-web && copilot --acp --stdio --experimental"
         )
 
 
@@ -966,7 +966,7 @@ class TestCrossRepoRequestFolder:
     dotfiles repo (owned by the universal bootstrap).
     """
 
-    _COPILOT = "copilot --acp --stdio --allow-all --experimental"
+    _COPILOT = "copilot --acp --stdio --experimental"
     _CS = "example-org/example-web-codespaces"
 
     def test_own_product_is_prepopulated_no_clone(self):

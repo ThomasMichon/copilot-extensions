@@ -19,6 +19,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
+import shlex
 import sys
 import time
 from typing import TYPE_CHECKING
@@ -111,12 +113,56 @@ def _repo_matches_codespace(repo: str, cs_repository: str | None) -> bool:
 
 
 _DISPATCH_DIR = RUNTIME_DIR / "dispatch"
+_PERMISSION_BYPASS = re.compile(
+    r"--(?:allow-all(?:-[a-z-]+)?|yolo|dangerously-skip-permissions|skip-permissions"
+    r"|trust-all(?:-[a-z-]+)?|disable-sandbox|no-sandbox)(?![\w-])"
+    r"|--permission-mode[=\s\"']+(?:bypassPermissions|dontAsk)(?!\w)"
+    r"|--allow-tool[=\s\"']+\*"
+    r"|--sandbox[=\s\"']+disabled(?!\w)",
+    re.IGNORECASE,
+)
 # A dispatch payload file is kept alive by use: its mtime is refreshed on every
 # launch that reads it (see the CLI's --remote-cmd-file handler), so mtime is the
 # LAST-LAUNCH time. One untouched past this window belongs to a session that is
 # gone and is safe to reclaim -- a wrongly-pruned file self-heals (the next
 # resume fails fast with a re-dispatch hint that regenerates it).
 _DISPATCH_MAX_AGE_S = 30 * 24 * 3600  # 30 days
+
+
+def _check_launch_permissions(command: str, depth: int = 0) -> None:
+    """Inspect literal POSIX launch arguments without running the command."""
+    uninspectable = "CodeSpace namespace launch cannot inspect the configured shell command."
+    if depth > 8 or re.search(r"\\\r?\n", command):
+        raise ValueError(uninspectable)
+    lexer = shlex.shlex(command, posix=True, punctuation_chars="();&|<>\n")
+    lexer.whitespace = lexer.whitespace.replace("\n", "")
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        words = list(lexer)
+    except ValueError as error:
+        raise ValueError(uninspectable) from error
+    if any(_PERMISSION_BYPASS.search(text) for text in (command, " ".join(words))):
+        raise ValueError(
+            "CodeSpace namespace launch refuses permission-bypassing options; "
+            "remove blanket grants from acp_command and use normal permissions."
+        )
+    for index, word in enumerate(words):
+        if word.rsplit("/", 1)[-1] not in ("sh", "bash", "dash", "zsh"):
+            continue
+        # Exempt directory operands only when cd is in command position.
+        cd_index = index - 1
+        if cd_index > 0 and words[cd_index] == "--":
+            cd_index -= 1
+        if (cd_index >= 0 and words[cd_index] == "cd"
+                and (cd_index == 0
+                     or re.fullmatch(r"[();&|\n]+|\{", words[cd_index - 1]))):
+            continue
+        arguments = words[index + 1:]
+        if (len(arguments) < 2 or arguments[0] not in ("-c", "-lc", "-cl")
+                or not arguments[1].strip() or re.search(r"[$`]", arguments[1])):
+            raise ValueError(uninspectable)
+        _check_launch_permissions(arguments[1], depth + 1)
 
 
 def prune_stale_dispatch_files(max_age_s: float = _DISPATCH_MAX_AGE_S) -> int:
@@ -189,7 +235,11 @@ def _build_spawn_command(
     the ``ssh`` transport stages onto the CodeSpace and folds into the launch as
     ``--plugin-dir`` -- passed as repeatable ``--stage-plugin`` args so the
     staging (which needs the SSH connection) happens transport-side, not here.
+
+    Known permission-bypass options are refused before dispatch side effects.
+    This does not establish the behavior of arbitrary custom shell wrappers.
     """
+    _check_launch_permissions(acp_command)
     payload_file = _write_remote_cmd_file(codespace_name, acp_command)
     cmd = [
         *dispatch_argv(),

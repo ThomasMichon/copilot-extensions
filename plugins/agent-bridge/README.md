@@ -924,6 +924,16 @@ optional `position`, and bounded `timeout_seconds` query parameters. A live
 manual permission can be resolved through
 `POST /api/v1/sessions/{session}/permission` using the correlated `request_id`
 and one advertised `option_id`.
+Overlapping callbacks remain independently answerable; client shutdown or buffer
+reset cancels every remaining request.
+
+ACP clients wait for this explicit answer by default rather than automatically
+approving tool requests. An upstream ACP permission callback forwards the
+request to its client; if no upstream connection is available, it reports a
+cancelled outcome and logs the cause, never a synthetic approval. The existing
+request, answer and event shapes are unchanged. This client default does not
+neutralize permission-bypass options inside a separately configured agent
+command; its venue provider must preserve normal launch permissions too.
 
 ### Phased timeouts
 

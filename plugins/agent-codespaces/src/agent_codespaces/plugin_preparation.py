@@ -82,7 +82,7 @@ def checkout_provision_command(config, repo, *, requested_repo=None, repo_remote
 
 def checkout_acp_command(config, repo, *, requested_repo=None, repo_remote=None) -> str:
     from .config import _WORKSPACE_CD
-    copilot = "copilot --acp --stdio --allow-all --experimental"
+    copilot = "copilot --acp --stdio --experimental"
     if requested_repo is not None:
         folder, _ = config.workspace_folder_for_request(repo, requested_repo)
         if folder is None:
