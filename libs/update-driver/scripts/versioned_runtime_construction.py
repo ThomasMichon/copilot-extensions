@@ -316,8 +316,7 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
         spec.loader.exec_module(provider)
         if footprint.absolute() != source.with_name("uninstall-profile.json"):
             raise ValueError("Construction requires this payload's maintained footprint")
-        provider._plain_file(footprint)
-        manifest = provider.parse(provider.decode(footprint.read_text(encoding="utf-8-sig")), plugin)
+        manifest = provider.load_manifest(footprint, plugin)
         plan = provider.plan_construction(
             manifest, root, version,
             admission=lambda root, version: runtime.check_admission(root, version, payload_hash=payload_hash),

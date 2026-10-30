@@ -35,6 +35,18 @@ def _record() -> dict[str, Any]:
     return subject.decode(PATH.read_text(encoding="utf-8"))
 
 
+def test_source_manifest_history_does_not_inherit_the_installed_marker_budget(tmp_path: Path) -> None:
+    record = _record()
+    path = tmp_path / "uninstall-profile.json"
+    text = json.dumps(record, indent=2) + "\n" * 65537
+    path.write_text(text, encoding="utf-8")
+    manifest = subject.load_manifest(path, "agent-mcp")
+    assert manifest.history == tuple(entry["snapshot"] for entry in record["history"])
+    assert path.read_text(encoding="utf-8") == text
+    with pytest.raises(subject.FootprintError, match="read budget"):
+        subject._marker_text(path)
+
+
 def _seed(root: Path) -> None:
     slot = root / "versions/1.2.3"
     slot.mkdir(parents=True)

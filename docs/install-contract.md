@@ -2546,8 +2546,9 @@ a health result. No new installed receipt is required.
 
 MCP's native installers now pass that maintained footprint into the existing
 attached construction session under the same installer lock/execution owner.
-The maintained source manifest is not subject to the small installed-marker
-read budget; its append-only history remains available to construction.
+The shared source-manifest loader keeps maintained history separate from the
+small installed-marker read budget, including construction, process retirement
+and control reset.
 PowerShell preserves an exited construction owner's captured stderr and exit
 code when its input pipe has already closed.
 A compatible layout can reuse an admitted candidate, including the selected
