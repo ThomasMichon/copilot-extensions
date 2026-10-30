@@ -21,6 +21,19 @@ from pathlib import Path, PureWindowsPath
 _WINDOWS = os.name == "nt"
 
 
+def immutable_install_arguments(arguments, pairs, *, error_type):
+    if any(option in ("-e", "--editable") for option, _ in pairs):
+        raise error_type("deployed runtimes require non-editable immutable versioned slots")
+    if any(option == "--link-mode" and value != "copy" for option, value in pairs):
+        raise error_type("deployed runtimes require copied installation artifacts")
+    result = list(arguments)
+    if not any(option == "--no-editable" for option, _ in pairs):
+        result.append("--no-editable")
+    if not any(option == "--link-mode" for option, _ in pairs):
+        result.extend(["--link-mode", "copy"])
+    return result
+
+
 def remaining_timeout(deadline, *, error_type, cap=None):
     if deadline is None:
         return cap

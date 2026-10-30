@@ -310,7 +310,8 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
         spec.loader.exec_module(provider)
         if footprint.absolute() != source.with_name("uninstall-profile.json"):
             raise ValueError("Construction requires this payload's maintained footprint")
-        manifest = provider.parse(provider.decode(provider._marker_text(footprint)), plugin)
+        provider._plain_file(footprint)
+        manifest = provider.parse(provider.decode(footprint.read_text(encoding="utf-8-sig")), plugin)
         plan = provider.plan_construction(
             manifest, root, version,
             admission=lambda root, version: runtime.check_admission(root, version, payload_hash=payload_hash),
@@ -737,14 +738,25 @@ function script:Start-RuntimeConstruction {
     }
     return $reuse
 }
+function script:Send-RuntimeConstructionCommand($Session, [string]$Message) {
+    try {
+        $Session.Process.StandardInput.WriteLine($Message)
+        $Session.Process.StandardInput.Flush()
+    } catch {
+        if ($Session.Process.HasExited) {
+            throw ("Construction owner exited (" + $Session.Process.ExitCode + "): " +
+                $Session.Errors.Result.Trim())
+        }
+        throw
+    }
+}
 function script:Complete-RuntimeConstruction([string]$PayloadHash, [switch]$RetainHelpers) {
     $session = $script:RuntimeConstructionSession
     if (-not $session) { throw 'Completion requires attached construction ownership' }
-    $session.Process.StandardInput.WriteLine(
+    Send-RuntimeConstructionCommand $session (
         (@{command='complete'; payload_hash=$PayloadHash; retain_helpers=[bool]$RetainHelpers} |
             ConvertTo-Json -Compress)
     )
-    $session.Process.StandardInput.Flush()
     $line = $session.Process.StandardOutput.ReadLine()
     if (-not $line -or -not ($line | ConvertFrom-Json).complete) {
         throw 'Construction completion refused; candidate remains non-selectable'
@@ -757,10 +769,9 @@ function script:Stop-RuntimeConstruction {
     $script:RuntimeConstructionSession = $null
     try {
         $command = if ($session.Complete) { 'settled' } else { 'abort' }
-        $session.Process.StandardInput.WriteLine(
+        Send-RuntimeConstructionCommand $session (
             (@{command=$command} | ConvertTo-Json -Compress)
         )
-        $session.Process.StandardInput.Flush()
         $line = $session.Process.StandardOutput.ReadLine()
         $session.Process.StandardInput.Close()
         $session.Process.WaitForExit()

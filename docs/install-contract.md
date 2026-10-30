@@ -1711,7 +1711,8 @@ explicit development generations. Canonical source references may use
 still install noneditable wheel content rather than references to those source
 directories. The canonical installer dependency CLI
 refuses explicit editable operands and non-copy link modes, and supplies
-`--no-editable --link-mode copy` to UV. The Python constructor enforces
+`--no-editable --link-mode copy` to UV only when the caller has not already
+supplied those options. The Python constructor enforces
 `--no-editable`, verifies installed origins and permits ordinary immutable
 wheel-cache hardlinks as described in the source-wheel cache contract below.
 Completion rejects symlink/reparse redirection, editable origins and escaping
@@ -2543,6 +2544,10 @@ a health result. No new installed receipt is required.
 
 MCP's native installers now pass that maintained footprint into the existing
 attached construction session under the same installer lock/execution owner.
+The maintained source manifest is not subject to the small installed-marker
+read budget; its append-only history remains available to construction.
+PowerShell preserves an exited construction owner's captured stderr and exit
+code when its input pipe has already closed.
 A compatible layout can reuse an admitted candidate, including the selected
 same-input replacement generation. Otherwise construction is fresh: an occupied
 target receives a distinct `repair.<id>` generation, without rewriting the
