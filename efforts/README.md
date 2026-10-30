@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Configurable AI Attribution](active/configurable-ai-attribution/README.md) | Draft; signature profiles, one owner and optional pure decorator proposal | #9633; current disclosure defaults, #2965 custody and #9627 delivery owner retained; no rollout |
 | [Client Request Interpretation](active/client-request-interpretation/README.md) | Draft; current-model snapshots and evidence-aware local analysis proposal | #9609; extends released #9589, no shared inference logging or rollout |
 | [Startup-Only Guidance](active/startup-only-guidance/README.md) | Active; provider merged, uniform selector declarations and approved adopter migration next | Bounded #5993 follow-up; preserves periodic sync and existing delivery/native owners, no rollout |
 | [PR Review Workspaces](active/pr-review-workspaces/README.md) | Draft; ADO-first vision and architecture proposal only | #9535; successor PR plugin/service cache, existing #6007/#7188 and #7051 owners retained; no implementation or rollout |
