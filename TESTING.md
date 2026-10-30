@@ -54,6 +54,19 @@ boundary, not a full interactive Picker/desktop-session launch or installed
 host rollout. The legacy broker activation lane remains a separate explicit
 compatibility test, not a prerequisite or evidence for normal native startup.
 
+The separate `PROCUTIL_NATIVE_INSTANCE_LIFETIME=1` opt-in runs
+`libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py` through the
+canonical contained runner. Its 60 cases cover both native PowerShell hosts,
+normal/test-venv PATH composition, two cold lifetime cycles, original-shell
+identity, expiry, nested/final guard close, helper/caller loss, production
+non-expiry and pre-application startup refusals without compiling interop code.
+The version refusal forces the real bootstrap guard rather than claiming an
+uninstalled older interpreter was exercised; the legacy-refusal fixture aliases
+an existing framework type, without emitting one. Process exit is observed on
+birth-verified pins before fixture cleanup. This lane remains outside required
+unit-only CI; continuous desktop observation, source/release and installed
+acceptance are separate evidence.
+
 Update-driver's `test_native_lifetime.py -k queued_installer`, admitted with
 `UPDATE_DRIVER_NATIVE_LIFETIME=1`, separately exercises the real queued executor
 launching a disposable durable daemon. It pins the native identities before
@@ -299,6 +312,23 @@ most 16 cases, retires inside that same observer and writes its own exact
 literal JUnit; all four reports must cover the declared matrix. Calibration is
 never repeated to partition tests, and the original whole deadline is not
 rearmed between workers.
+Each foreground request calls `SetForegroundWindow` once and retains its return
+separately from the observed outcome. Within a one-second sub-deadline capped
+by the existing control deadline, it pumps only its own messages and verifies
+the visible target's HWND/PID/TID/query-pinned birth at the actual foreground
+endpoint. A nonzero return without that endpoint cannot pass; an already
+matching endpoint does not by itself replace any raw calibration witness.
+The deadline is rechecked after pinning and native queries immediately before
+the foreground request, and after parent queries before visible creation.
+An expired prerequisite cannot start a late foreground or window effect.
+The [Win32 contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)
+does not document extended `GetLastError` information, and
+[activation can be asynchronous across input queues](https://devblogs.microsoft.com/oldnewthing/20161118-00/?p=94745).
+No input-queue attachment, simulated input, lock bypass or system setting change
+is used. The same pinned checks cover restoration and failure cleanup, without
+rearming the original whole/control deadline. Raw show, foreground, exact
+original restoration and retirement remain independent required witnesses;
+failed or missing evidence never becomes a passing qualification.
 The canonical arguments explicitly retain all four pytest temporary sessions,
 including failed cases, so the fourth packet cannot prune the first SDK
 packet's closed publications before final reconciliation. The policy is
