@@ -150,11 +150,14 @@ def _record(name: str, value: dict) -> dict:
             "threadContext", "pullRequestThreadContext",
         ))
         if "properties" in value:
-            if not isinstance(value["properties"], dict):
-                raise ValueError("discussion properties must be an object")
-            result["properties"] = _select(value["properties"], (
-                "CodeReviewThreadType", "CodeReviewVoteResult", "CodeReviewVotedByTfId",
-            ))
+            if value["properties"] is None:
+                result["properties"] = None
+            elif isinstance(value["properties"], dict):
+                result["properties"] = _select(value["properties"], (
+                    "CodeReviewThreadType", "CodeReviewVoteResult", "CodeReviewVotedByTfId",
+                ))
+            else:
+                raise ValueError("discussion properties must be an object or null")
         if "comments" in value:
             if not isinstance(value["comments"], list):
                 raise ValueError("discussion comments must be a list")

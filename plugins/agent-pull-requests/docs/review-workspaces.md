@@ -71,6 +71,9 @@ does not interpret them as review authorization. Other unsupported
 provider fields are not evidence of false values. Records are deterministically
 ordered; comments retain provider order. A blob's type or path is not a binary/
 text classification or proof that source was prepared.
+Native discussion property bags may be absent, `null` or objects. Absence and
+explicit null remain distinct; objects retain the selected native vote-event
+properties. Scalar/list property bags still refuse as malformed input.
 
 ## Output, freshness and synchronization
 
