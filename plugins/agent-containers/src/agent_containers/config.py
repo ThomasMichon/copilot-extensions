@@ -513,6 +513,9 @@ class ContainersConfig:
     # Host-owned restricted session-evidence retention and size limits.
     rescue: RescueConfig = field(default_factory=RescueConfig)
     fleets: dict[str, FleetConfig] = field(default_factory=dict)
+    # Where the loaded config came from: the selected file, plugin-shipped
+    # fleet fragments, and per-fleet/per-key sources (see plugin_config).
+    provenance: dict[str, Any] = field(default_factory=dict)
 
     def effective_acp_command(
         self, workspace_folder: str | None = None, acp_command: str | None = None
@@ -711,21 +714,32 @@ def _config_path() -> Path | None:
 
 
 def load_config(*, strict: bool = False) -> ContainersConfig:
-    """Load configuration from containers.yaml, merged over defaults."""
+    """Load configuration from containers.yaml, merged over defaults.
+
+    Fleet fragments shipped by active plugins (``containersConfig`` in their
+    ``plugin.json``) merge beneath the selected file, per fleet and per key;
+    see :mod:`agent_containers.plugin_config`.
+    """
+    from . import plugin_config
+
     config = ContainersConfig()
     path = _config_path()
-    if not path:
+    fragments = plugin_config.discover_plugin_fragments()
+    if not path and not fragments:
         log.debug("No containers.yaml found; using built-in defaults")
+        config.provenance = plugin_config.merge_fragments({}, [], config_path=None)[1]
         return config
 
-    try:
-        parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        if strict:
-            raise RuntimeError(f"Failed to read {path}: {exc}") from exc
-        log.warning("Failed to read %s: %s", path, exc)
-        return config
-    data = {} if parsed is None else parsed
+    data: Any = {}
+    if path:
+        try:
+            parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as exc:
+            if strict:
+                raise RuntimeError(f"Failed to read {path}: {exc}") from exc
+            log.warning("Failed to read %s: %s", path, exc)
+            return config
+        data = {} if parsed is None else parsed
     if not isinstance(data, dict):
         message = f"{path}: top-level configuration must be a mapping"
         if strict:
@@ -738,11 +752,15 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
     # the machine-local copy. A repo/cwd copy is only migrated in memory here.
     from . import config_migrations
 
-    before_mode = data.get("copilot_auth_mode")
-    data = config_migrations.migrate_loaded(data)
-    if before_mode is None and data.get("copilot_auth_mode") == "legacy":
-        log.warning("Existing configuration migrated to explicit legacy Copilot auth; "
-                    "select host-copilot and its intended account for inference isolation")
+    if path:
+        before_mode = data.get("copilot_auth_mode")
+        data = config_migrations.migrate_loaded(data)
+        if before_mode is None and data.get("copilot_auth_mode") == "legacy":
+            log.warning("Existing configuration migrated to explicit legacy Copilot auth; "
+                        "select host-copilot and its intended account for inference isolation")
+    data, config.provenance = plugin_config.merge_fragments(
+        data, fragments, config_path=path
+    )
 
     config.exec_user = data.get("exec_user", config.exec_user)
     config.workspace_folder = data.get("workspace_folder", config.workspace_folder)
@@ -906,7 +924,10 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
         fleet.validate_restricted()
         config.fleets[name] = fleet
 
-    log.debug("Loaded containers.yaml from %s (%d fleets)", path, len(config.fleets))
+    log.debug(
+        "Loaded containers.yaml from %s with %d plugin fragment(s) (%d fleets)",
+        path, len(fragments), len(config.fleets),
+    )
     return config
 
 

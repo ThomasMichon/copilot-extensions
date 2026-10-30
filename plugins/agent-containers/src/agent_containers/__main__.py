@@ -225,6 +225,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Emit the plugin-owned installer/readiness contract state as JSON",
     )
 
+    config_sources_p = sub.add_parser(
+        "config-sources",
+        help="Show the selected containers.yaml, plugin-shipped fleet fragments, "
+        "and which source supplied each fleet and key",
+    )
+    config_sources_p.add_argument(
+        "--json", action="store_true", help="Emit the provenance as JSON."
+    )
+
     sub.add_parser(
         "config-migrate",
         help="Migrate machine-local config schema (~/.agent-containers/containers.yaml)",
@@ -370,6 +379,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "installer-readiness":
             return _cmd_installer_readiness()
+        if args.command == "config-sources":
+            return _cmd_config_sources(args)
         if args.command == "config-migrate":
             from . import config_migrations
 
@@ -642,6 +653,29 @@ def _cmd_relay_profile() -> int:
     return 0
 
 
+def _cmd_config_sources(args: argparse.Namespace) -> int:
+    provenance = load_config(strict=True).provenance
+    if args.json:
+        print(json.dumps(provenance, indent=2))
+        return 0
+    print(f"Config file: {provenance.get('config_file') or '(none)'}")
+    fragments = provenance.get("plugin_fragments") or []
+    print("Plugin fragments:" if fragments else "Plugin fragments: (none)")
+    for fragment in fragments:
+        fleets = ", ".join(fragment["fleets"]) or "-"
+        print(f"  {fragment['plugin']}: {fragment['path']} (fleets: {fleets})")
+    fleets = provenance.get("fleets") or {}
+    print("Fleets:" if fleets else "Fleets: (none)")
+    for name, entry in fleets.items():
+        line = f"  {name}: defined by {entry['defined_by']}"
+        if entry.get("overridden_by"):
+            line += f", overridden by {entry['overridden_by']}"
+        print(line)
+        for key, source in entry.get("keys", {}).items():
+            print(f"    {key}: {source}")
+    return 0
+
+
 def _cmd_fleet(args: argparse.Namespace) -> int:
     from . import picker
     from .lease import deploy_hold_status, get_lease
@@ -706,6 +740,10 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
                 "state": c.state,
                 "status": c.status,
                 "fleet": c.fleet,
+                "fleet_source": (
+                    (getattr(config, "provenance", {}).get("fleets") or {})
+                    .get(c.fleet or "", {}).get("defined_by")
+                ),
                 "local_folder": c.local_folder,
                 "lease": lease.effort if lease else None,
                 "lifecycle_hold": hold_status,

@@ -26,11 +26,22 @@ dependencies = [
     "agent-zdd",
     "agent-session-liveness-probe",
     "agent-plugin-resolve",
+    "agent-plugin-activation",
+    "agent-dropin-registry",
+    "agent-single-instance-lease",
 ]
 
 [tool.uv.sources]
 agent-repository-policy = { path = "../../libs/repository-policy", editable = true }
 agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }
+# Identity-verified active-plugin discovery (module ``plugin_activation``),
+# used to find plugin-shipped ``containersConfig`` fleet fragments -- the same
+# resolver agent-codespaces and agent-worktrees use for their plugin-shipped
+# config. dropin-registry and single-instance-lease are its own transitive
+# dependencies.
+agent-plugin-activation = { path = "../../libs/plugin-activation", editable = true }
+agent-dropin-registry = { path = "../../libs/dropin-registry", editable = true }
+agent-single-instance-lease = { path = "../../libs/single-instance-lease", editable = true }
 # Shared OpenSSH process/config primitives used by the trusted-fleet
 # transport. This is a `uv`-editable canonical reference
 # (vendor-pointer-generalization effort, Phase 1): `path` escapes this

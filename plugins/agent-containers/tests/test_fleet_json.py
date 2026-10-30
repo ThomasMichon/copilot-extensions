@@ -64,6 +64,7 @@ def _patch(monkeypatch, containers, lease_effort=None):
     monkeypatch.setattr(
         lease, "get_lease", lambda name: (_Lease() if lease_effort else None)
     )
+    return config
 
 
 def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
@@ -75,7 +76,7 @@ def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
     row = data[0]
     assert set(row) == {
         "name", "container_id", "image", "state", "status",
-        "fleet", "local_folder", "lease", "security_profile",
+        "fleet", "fleet_source", "local_folder", "lease", "security_profile",
         "configured_security_profile", "security_policy_current",
         "security_policy_errors", "network", "environment_names",
         "host_credentials", "lifecycle_hold", "rescue",
@@ -85,6 +86,7 @@ def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
     assert row["name"] == "aperture-1"
     assert row["state"] == "running"
     assert row["fleet"] == "myrepo"
+    assert row["fleet_source"] is None
     assert row["lease"] == "my-effort"
     assert row["security_profile"] == "trusted"
     assert row["configured_security_profile"] == "trusted"
@@ -291,3 +293,10 @@ def test_fleet_human_table_unaffected(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "CONTAINER" in out and "aperture-1" in out       # still the table
     assert not out.lstrip().startswith("[")                  # not JSON
+
+
+def test_fleet_json_reports_the_source_that_defined_the_fleet(monkeypatch, capsys):
+    config = _patch(monkeypatch, [_container("aperture-1")])
+    config.provenance = {"fleets": {"myrepo": {"defined_by": "plugin:example@example"}}}
+    assert cli._cmd_fleet(argparse.Namespace(json=True)) == 0
+    assert json.loads(capsys.readouterr().out)[0]["fleet_source"] == "plugin:example@example"
