@@ -47,6 +47,7 @@ def handoff_launch_options(environment: dict[str, str], handoff: dict[str, str])
         from agent_procutil import no_window_kwargs
 
         options.update(no_window_kwargs())
+        # CREATE_NO_WINDOW otherwise loses redirected inherited handles.
         options.update(stdout=sys.stdout, stderr=sys.stderr)
     return options
 
