@@ -3186,6 +3186,7 @@ def projects_acquisition_sources(tmp_path, monkeypatch):
     return machine, projects, calls, options
 
 
+@pytest.mark.parametrize("presence", ["native", "direct-os"])
 @pytest.mark.parametrize("mode,body", [
     ("missing", None),
     ("disappeared", "projects: {}\n"),
@@ -3199,8 +3200,10 @@ def projects_acquisition_sources(tmp_path, monkeypatch):
     ("duplicate", "projects: {}\nprojects: {}\n"),
 ])
 def test_projects_acquisition_original_outcomes_reach_full_config_report(
-    monkeypatch, projects_acquisition_sources, mode, body,
+    monkeypatch, projects_acquisition_sources, mode, body, presence,
 ):
+    import os
+
     from dropin_registry import ScanAuthority
     from agent_worktrees import config_migrations, strict_yaml
 
@@ -3212,6 +3215,8 @@ def test_projects_acquisition_original_outcomes_reach_full_config_report(
     def exists(path):
         if path == projects:
             calls.append("exists")
+            if presence == "direct-os":
+                return os.path.exists(path)
         return native_exists(path)
 
     def stat(path, *args, **kwargs):
@@ -3242,20 +3247,23 @@ def test_projects_acquisition_original_outcomes_reach_full_config_report(
     monkeypatch.setattr(Path, "read_text", read)
     monkeypatch.setattr(strict_yaml._StrictLoader, "get_single_data", parse)
     monkeypatch.setattr(config_migrations, "migrate_doc", migrate)
-    results = []
+    results, call_records = [], []
     for loader in (cfg.load_config, cfg.load_config_report):
         if body is not None:
             projects.write_text(body, encoding="utf-8")
         calls.clear()
         results.append(loader(machine, **options))
-        expected = ["repos", "exists", "stat"]
+        expected = ["repos", "exists"]
         if mode != "missing":
             expected.append("read")
         if mode not in ("missing", "disappeared", "denied"):
             expected.append("parse")
         if mode in ("empty-mapping", "populated", "projects-shape"):
             expected.append("migrate")
-        assert calls == expected
+        assert calls.count("stat") <= 1
+        assert [call for call in calls if call != "stat"] == expected
+        call_records.append(tuple(calls))
+    assert call_records[0] == call_records[1]
     legacy, report = results
     assert report.value == legacy
     assert report.value.repos["sample"].default_branch == "machine"
