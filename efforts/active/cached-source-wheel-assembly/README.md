@@ -32,6 +32,7 @@ dependency policy, immutable generation and service activation boundaries.
 |---|---|---|
 | `buzzing-flywheel` | Proposal, isolated reproduction and non-overlapping implementation/validation | #9290 and the proposal PR |
 | `rusty-buckle` | Proposed acquisition/offline phase orchestration; preserves the existing cold-copy owner | #9290 and the phase-contract review |
+| `wobbly-wrench` | Release-first consumer proposal, ordinary artifact handoff and source-independent UV assembly qualification | #9290 and the release-first proposal review |
 | Existing installer owners | Retained-input verification, source staging and release-lock input coordination | #8873/#8949, #5851, #6937/#6941 |
 
 ## Coordination
@@ -49,6 +50,11 @@ dependency policy, immutable generation and service activation boundaries.
   before constructor edits. The phase participant owns only that orchestration;
   the current cold-copy owner retains `_tree`/`_compact` batching and existing
   dependency/source owners are not superseded.
+- **Release-first slice:** `wobbly-wrench` owns the Phase 4 consumer proposal
+  and, after review, its non-overlapping implementation. Preserve #9453's
+  contributor-owned artifact-index/profile handoff and #9032's toolkit owner;
+  cooperate on those PRs rather than pre-patching or replacing them. Reuse
+  existing bundle/index/profile identities and the closed-wheel constructor.
 
 ## Context
 
@@ -103,6 +109,15 @@ broader Manager/plugin ownership split remains outside this immediate slice.
 Reuse the existing governed-artifact and
 [core bundle](../runtime-bundle/README.md) work instead of creating another
 builder, publisher or composition plan.
+
+**Release-first clarification, verbatim:**
+> In August, I don't think we had the dev/main split, which really fixed up versioning issues and vendoring. Now that we have promotion, we should be able to leverage uv's native constructs to the max.
+
+UV was already used by both installer generations. Promotion now provides the
+boundary for packaging install-ready first-party code and publishing its stable
+input identity. Downstream should acquire missing artifacts, assemble with
+UV's native cache/link modes and stamp completion, not reproduce release
+packaging through retained-source and private build-tool construction.
 
 ## Plan
 
@@ -188,6 +203,63 @@ builder, publisher or composition plan.
   service installers with shared vendored implementation, preserving each
   service's declared lifecycle and qualification boundary.
 
+### Phase 4 - Release-first ordinary UV assembly
+
+This agent-recommended implementation slice closes the existing
+`one-verified-acquisition-path` and `complete-or-rejected-generations`
+vision items. It does not remove `governed-client-source-fallback` or make
+the optional toolkit a new installation prerequisite.
+
+The current discrepancy is at the ordinary consumer boundary, not the
+existence of UV or a missing artifact publisher. Promotion already builds
+wheel bundles and publishes an attested artifact index; a profile composer
+and closed-wheel UV constructor already exist. Ordinary marketplace
+`prepare_suite` currently returns no wheel/profile handoff. The constructor's
+wheel branch also reaches source freezing/package-root discovery before
+retaining closed wheel inputs. A native existing-constructor test failed on a
+missing source-fixture dependency before reaching UV; it is not evidence that
+UV construction is absent or that source-free assembly works.
+
+- [ ] Review and merge this amendment before architectural implementation.
+  Keep the retained source-construction optimization separate; it is not the
+  endpoint for a normal compatible release.
+- [ ] Connect the existing ordinary release selector to the existing
+  acquisition/profile machinery. First establish which complete profile is
+  actually published for the selected release and interpreter/platform;
+  cooperate with #9453 for producer handoff gaps. Carry the exact selected
+  index, profile and artifact identities into the existing installer request.
+  Do not add a competing publisher, profile format, resolver or trust root.
+- [ ] Make the existing closed-wheel constructor independent of retained
+  source-package discovery when it has a complete admitted release profile.
+  Bind generation identity to the existing release/profile/artifact identity,
+  interpreter compatibility and installation selection instead of hashing
+  unpacked source or provisioning/fingerprinting private build tooling.
+  Reuse the current transaction's UV execution and completion machinery.
+- [ ] Keep acquisition verification and extracted-input custody with their
+  existing owners. Verify newly acquired bytes against published digests;
+  reuse admitted immutable inputs under valid custody rather than repeating
+  source/tool scans or copying a second private wheel store on every assembly.
+  A release stamp identifies inputs; it never authenticates arbitrary local
+  bytes or licenses ignoring corruption.
+- [ ] Let UV manage its native cache, extraction and supported link mode.
+  Assemble into a fresh candidate without local first-party builds, dependency
+  re-resolution or a parallel custom package cache. Preserve native
+  hardlink/clone behavior and ordinary filesystem fallback; keep mutable
+  generated files private. Confirm the installed distribution set, then use
+  the existing completion stamp and activation/health/rollback boundary.
+- [ ] Preserve the authority-selected development and governed source lanes
+  with their distinct exact construction identity. Report the actual mode and
+  fallback reason; unavailable artifacts are not integrity success, and
+  integrity/provenance failure is not an ordinary availability fallback.
+- [ ] Measure the full ordinary update, including the outer Manager bootstrap,
+  acquisition, assembly, confirmation, activation and health. The previously
+  observed outer delay is not yet attributed; do not claim the inner
+  constructor change alone meets the under-sixty-second target.
+- [ ] Prove the release lane in one actual released service through its
+  existing deployment owner before resuming the serialized machine wave.
+  Keep source merge, promotion, installed identity, serving health and complete
+  update time as separate evidence, not interchangeable completion markers.
+
 ## Validation Plan
 
 - [x] The actual UV reproduction distinguishes positional directories from
@@ -210,6 +282,24 @@ builder, publisher or composition plan.
   Keep unavailable platform/venue evidence explicit rather than substituting it.
 - [ ] The adopter ledger proves actual construction paths and measured work.
   Every Plan/Validation item is resolved or transferred before this effort is Done.
+- [ ] The ordinary marketplace request carries the exact selected release
+  profile into the existing wheel constructor; an explicit test-only wheel
+  override does not count as ordinary consumer adoption.
+- [ ] A contained cold construction with source trees unavailable and
+  first-party/backend build hooks trapped succeeds from the admitted profile.
+  A second fresh candidate uses UV's warm cache/link path without source
+  scanning, backend provisioning, first-party builds or dependency resolution.
+  Repair the current native fixture's missing source-closure dependency rather
+  than waiving its failure.
+- [ ] Changed profile/artifact identity, interpreter/platform incompatibility,
+  missing or corrupt artifacts and interrupted assembly invalidate reuse or
+  produce an explicit outcome without selecting an incomplete candidate.
+  Source availability fallback, governed-feed policy and prior healthy
+  generation preservation retain focused coverage.
+- [ ] Native Windows and Linux witnesses record the actual UV invocation,
+  installed set, immutable-link behavior, cache reuse and phase timings.
+  A successful disposable venv is not a real service proof or full-update
+  performance result.
 
 ## Proposal
 
@@ -234,6 +324,23 @@ claim for that substitution. Remove only the returned task folder after its
 evidence is no longer needed.
 
 ## Journal
+
+### 2026-10-30 - Release-first consumer amendment proposed
+
+- Reconciled the clarified promotion/UV direction to the existing runtime
+  assembly vision without changing its governed source fallback policy.
+  Phase 4 proposes ordinary release handoff and source-independent consumption,
+  not a replacement artifact producer or another cache manager.
+- Existing promotion bundles, artifact index, profile composer and closed-wheel
+  UV transaction are already present. Ordinary marketplace handoff and the
+  constructor's source-graph coupling remain the concrete discrepancies.
+  Complete published profile availability still needs an exact-release witness.
+- A contained existing native constructor/reuse control stopped before UV on
+  a fixture's missing source dependency. Preserve and repair that qualification
+  failure; no source-free, hardlink or whole-update success is claimed.
+- This amendment is proposed for review before code changes. Existing source
+  optimization work, producer/toolkit ownership and installed deployment
+  authority remain separate and retained.
 
 ### 2026-10-30 - Acquisition/offline orchestration merged and qualified
 
