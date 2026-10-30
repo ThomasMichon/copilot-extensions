@@ -45,6 +45,8 @@ def _allocation_guard(conn, row):
 
 def validate_recovery(queue, conn, row, *, check_allocation=True, claimant_machine=None):
     """Apply the recovery generation fence again under the cleanup lease."""
+    from .queue_execution_wakes import require_no_wake_for_release
+    require_no_wake_for_release(queue, conn, row)
     if not _has_history(conn):
         return
     history = conn.execute(

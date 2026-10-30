@@ -15,7 +15,7 @@ import shutil
 import subprocess
 from collections.abc import Callable
 
-from . import bridge_remote, remote_dispatch
+from . import bridge_remote, remote_dispatch as remote_dispatch
 from .bridge_agent_registry import (
     _AGENT_NOT_FOUND,
     _AGENT_SHOW_UNSUPPORTED,
@@ -792,8 +792,9 @@ def redrive_embodied_worker(
     lost or never resumed. The prompt is delivered by worktree handle, guarded by
     the resolved live session id when available, and queued if the worker is busy.
     """
+    from .bridge_command_delivery import send_command
+
     bridge_argv = [
-        "agent-bridge",
         "send",
         "--no-wait",
         "--queue",
@@ -815,71 +816,10 @@ def redrive_embodied_worker(
         "--prompt-file",
         "-",
     ]
-    normalized_machine = (
-        bridge_remote.normalize_host(machine) if machine is not None else None
+    return send_command(
+        bridge_argv, prompt, machine=machine,
+        launch_prefix=_agent_bridge_launch_prefix, run_ssh=run_ssh_command, timeout=timeout,
     )
-    local_machine = remote_dispatch.local_machine()
-    normalized_local_machine = (
-        bridge_remote.normalize_host(local_machine)
-        if local_machine is not None
-        else None
-    )
-    is_remote = (
-        normalized_machine is not None
-        and normalized_local_machine is not None
-        and normalized_machine != normalized_local_machine
-    )
-    if is_remote:
-        try:
-            bridge_remote.LocalBridgeRemoteClient().send_live_message(
-                normalized_machine,
-                worktree,
-                sender=sender,
-                message=prompt,
-                kind="prompt",
-                expected_session_id=expected_session_id,
-                idempotency_key=idempotency_key,
-                timeout=timeout if timeout is not None else 20.0,
-            )
-            return True
-        except bridge_remote.RemoteBridgeUnavailable:
-            pass
-        except bridge_remote.RemoteBridgeOperationError:
-            return False
-        ssh = shutil.which("ssh")
-        if ssh is None:
-            return False
-        remote_cmd = " ".join(shlex.quote(arg) for arg in bridge_argv)
-        cmd = [
-            ssh,
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=3",
-            normalized_machine,
-            remote_cmd,
-        ]
-    else:
-        exe = _agent_bridge_launch_prefix()
-        if exe is None:
-            return False
-        cmd = [*exe, *bridge_argv[1:]]
-    try:
-        if is_remote:
-            proc = run_ssh_command(cmd, input=prompt, timeout=timeout)
-        else:
-            proc = subprocess.run(  # noqa: S603 -- fixed local argv
-                cmd,
-                input=prompt,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                **no_window_kwargs(),
-            )
-    except (subprocess.SubprocessError, OSError):
-        return False
-    return proc.returncode == 0
 
 
 def resume_steered_owner(
@@ -904,17 +844,13 @@ def resume_steered_owner(
     """
     if not owner_session_id:
         return False
+    from .bridge_command_delivery import send_command, steering_prompt
+
     machine, separator, worktree = owner.partition("/")
-    prompt = message or (
-        f"Task {task_id} received steering. Resume, run `agent-dispatch steer "
-        f"take {task_id} --all`, re-read the task for any direction or "
-        f"ambient-state changes, and continue."
-    )
+    prompt = steering_prompt(task_id, message)
     if not separator or not machine or not worktree:
         return resume_worker(owner_session_id, prompt, timeout=timeout)
-    machine = bridge_remote.normalize_host(machine)
     bridge_argv = [
-        "agent-bridge",
         "send",
         "--no-wait",
         "--queue",
@@ -933,59 +869,7 @@ def resume_steered_owner(
         "--prompt-file",
         "-",
     ]
-    local_machine = remote_dispatch.local_machine()
-    is_remote = (
-        local_machine is not None
-        and machine != bridge_remote.normalize_host(local_machine)
+    return send_command(
+        bridge_argv, prompt, machine=machine,
+        launch_prefix=_agent_bridge_launch_prefix, run_ssh=run_ssh_command, timeout=timeout,
     )
-    if is_remote:
-        try:
-            bridge_remote.LocalBridgeRemoteClient().send_live_message(
-                machine,
-                worktree,
-                sender="agent-dispatch-steer",
-                message=prompt,
-                kind="prompt",
-                expected_session_id=owner_session_id,
-                idempotency_key=idempotency_key,
-                timeout=timeout if timeout is not None else 20.0,
-            )
-            return True
-        except bridge_remote.RemoteBridgeUnavailable:
-            pass
-        except bridge_remote.RemoteBridgeOperationError:
-            return False
-        ssh = shutil.which("ssh")
-        if ssh is None:
-            return False
-        remote_cmd = " ".join(shlex.quote(arg) for arg in bridge_argv)
-        cmd = [
-            ssh,
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=3",
-            machine.lower(),
-            remote_cmd,
-        ]
-    else:
-        exe = _agent_bridge_launch_prefix()
-        if exe is None:
-            return False
-        cmd = [*exe, *bridge_argv[1:]]
-    try:
-        if is_remote:
-            proc = run_ssh_command(cmd, input=prompt, timeout=timeout)
-        else:
-            proc = subprocess.run(  # noqa: S603 -- fixed local argv
-                cmd,
-                input=prompt,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                **no_window_kwargs(),
-            )
-    except (subprocess.SubprocessError, OSError):
-        return False
-    return proc.returncode == 0

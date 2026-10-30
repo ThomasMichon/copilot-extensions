@@ -65,6 +65,72 @@ the final current-token/task/closure check. Historical qualification cannot
 silently disappear into that legacy path. A qualified caller missing canonical
 provenance or the coordinator application incarnation refuses transport visibly.
 
+## Hosted native owners and CLI owners
+
+The default owner and detached-waiter drainers select delivery from the retained
+execution facts, not from the shape of the `machine/worktree` owner address.
+For an ordinary hosted body, the current reservation must retain matching Bridge, native,
+worktree, execution-project and host identity, with no retirement or release
+intent. Incomplete or conflicting hosted facts refuse delivery; they do not
+fall back to the represented CLI inbox.
+Restricted bodies instead validate their own retained receipt and exact
+worker/native/task generation; they do not invent an ordinary worktree or
+allocation project. Native-history readers distinguish these receipt formats.
+
+Native delivery uses the standard Bridge command:
+
+```text
+agent-bridge --json send <bridge-session> --expected-native-session-id <native-session> --idempotency-key <wake-id> --prompt-file - --no-wait
+```
+
+The original prompt goes through stdin. The native session is distinct from the
+Bridge handle; the existing outbox ID is the receipt key on every retry. Bridge
+owns exact-native admission, stopped-session recovery without recreation, live
+HTTP contract negotiation (generation 51) and same-key receipt recovery. Dispatch
+does not add an inbox, resume protocol or fallback after an unsupported,
+conflicting, busy or unknown send outcome. Busy native sessions currently refuse
+delivery; native queueing is not supported. Existing retry budgets and qualified
+unknown-custody holds remain independent constraints.
+
+Explicit CLI owners retain their existing queued prompt contract. Local and
+remote delivery both use standard Bridge commands; remote commands use the
+existing SSH transport rather than a separate message API. Source release is
+provider-first: install a Bridge CLI/provider supporting native keyed sends
+before adopting this Dispatch consumer. An older CLI rejects unsupported flags,
+and a current CLI refuses an unsupported receiving daemon before effects. There
+is no safe native-to-CLI downgrade. Legacy CLI-owner sends remain available.
+
+These selectors do not change wake leases, current task/owner/generation checks
+or final execution custody. The generation stored with initial agent creation is
+not the current task generation: claiming the task advances that generation.
+Current outbox fences and retained native history govern continuation.
+
+Physical cooling and wake delivery exclude one another through the existing
+database transactions. Outbox selection defers a held cooling operation without
+spending an attempt; final wake admission checks it again before taking send
+custody. Cooling checks outstanding/current owner wakes before acquiring its
+stop token. It cannot stop a body between native acceptance and the owner's
+next lifecycle action merely because the task still appears suspended.
+A current detached-waiter wake, including one whose delivery exhausted retries,
+retains this protection until a natural newer waiter or changed task/owner
+incarnation supersedes it. Cleanup-only claim releases do not block cooling.
+There is no timeout-to-absence assumption or new delivery/cooling lease.
+
+Release and cleanup use the same outbox exclusion. A release request,
+retirement publication or cleanup claim cannot overtake an admitted wake.
+A release that wins before wake admission remains authoritative: the selector
+and final admission refuse its releasing/retired reservation, and the delivery
+adapter revalidates persisted task, target and native facts rather than using
+an earlier reservation snapshot. A pending, never-admitted wake alone does not
+prevent release: it must have zero delivery attempts and no settled acceptance.
+The existing attempt count retains uncertainty after an unqualified send or
+interrupted caller; requeueing does not turn it into proof of absence.
+Accepted `sent` custody remains acceptance even when lease recovery or waiter
+claim-release failure returns the same row to pending.
+Current accepted or attempted wakes remain protected until the natural
+owner/waiter/task lifecycle advances; unknown send custody still requires its
+original reconciliation, including after task completion.
+
 ## Remaining gates
 
 Focused tests exercise both actual drainers with synthetic transport and
