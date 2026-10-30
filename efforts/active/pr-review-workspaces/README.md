@@ -123,6 +123,8 @@ The source implementation continuation is admitted; operational effects are not.
   adopters without a qualified typed credential owner, without inventing one.
 - [ ] Add coherent cache generations, completeness/freshness, bounded recovery
   and materialized local read views.
+  The next [immutable generation-cache slice](generation-cache-slice.md) reuses
+  the existing PR storage owner and keeps operation receipts separate.
 - [ ] Attach exact shallow source/head/common-baseline workspaces through the
   existing source owner; retain previous review generations and refs.
 - [ ] Preserve existing GitHub behavior and use a provider-neutral contract.
@@ -183,6 +185,22 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-10-30 - Protected embedding merged; next cache contract
+- #9676 merged as `69064505eb9db002e462f000bcf4d8aa42ab4f47` after
+  current-head Copilot approval, resolved feedback and required green checks.
+  Review fixes covered malformed generation comparison, final identity-switch
+  refusal and unchanged in-collection owner permission errors.
+- Re-read the parent Plan/Validation Plan. The current source packet passed
+  205 cases; contained validation covered 141 Worktrees and 63 PR-domain cases,
+  followed by 29 final owner-propagation controls. These are source receipts,
+  not actual owner/live qualification or installed rollout.
+- Existing backend permission and input gates remain authoritative; context
+  isolation is not an extra permission or delegation-time/read-count limit.
+  Interface unavailability is distinct from an actual backend permission denial.
+- Proposed the next bounded immutable-cache contract, reusing current JSON,
+  atomic persistence and lock ownership without a new service/database or
+  operation ledger. Implementation awaits that contract's review.
 
 ### 2026-10-30 - Protected owner embedding source
 - #9670 merged as `9466727cd34e9eed526dc60e1dc4c7b78db4c05d` after
