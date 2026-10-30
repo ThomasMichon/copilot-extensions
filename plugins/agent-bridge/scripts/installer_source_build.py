@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 import ast
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -27,7 +28,9 @@ from installer_dependency_policy import (
     _write_toml, retain_uv_install,
 )
 from installer_source_wheel_cache import cached_source_wheel
-from installer_wheel_inputs import WheelError, WheelLimits, _check_deadline, inspect_archive
+from installer_wheel_inputs import (
+    WheelDeadlineError, WheelError, WheelLimits, _check_deadline, inspect_archive,
+)
 from installer_wheel_snapshot import _digest, _open, _ordinary, _unchanged
 
 
@@ -63,8 +66,9 @@ class SourceWheelInputs:
     def receipt(self) -> dict:
         return json.loads(self.canonical)
 
-    def verify(self) -> None:
-        deadline = time.monotonic() + self.io_timeout
+    def verify(self, *, deadline: float | None = None) -> None:
+        own_deadline = time.monotonic() + self.io_timeout
+        deadline = own_deadline if deadline is None else min(deadline, own_deadline)
         records = {record["filename"]: record for record in self.receipt().values()}
         if {path.name for path in self.archives} != records.keys():
             raise WheelError("source wheel archives differ from their construction")
@@ -310,6 +314,31 @@ def _wheel_record(path: Path, name: str, deadline: float) -> dict:
 
 
 @contextmanager
+def _source_phase(name: str, timeout: float, elapsed: dict[str, float]):
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+        raise WheelError(f"source wheel phase={name} requires a positive finite process allowance")
+    started = time.monotonic()
+    deadline = started + timeout
+    state = "failed"
+    print(f"Source wheel phase: phase={name} state=starting", file=sys.stderr, flush=True)
+    try:
+        yield deadline
+        _check_deadline(deadline)
+        state = "completed"
+    except WheelDeadlineError as error:
+        raise WheelDeadlineError(f"source wheel phase={name} deadline exhausted") from error
+    except _AdditionalBuildRequirements:
+        state = "unsupported"
+        raise
+    finally:
+        elapsed[name] = time.monotonic() - started
+        print(
+            f"Source wheel phase: phase={name} state={state} elapsed={elapsed[name]:.3f}s",
+            file=sys.stderr, flush=True,
+        )
+
+
+@contextmanager
 def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, run, timeout: float):
     """Substitute only fully built, content-bound local archives in a held install.
 
@@ -326,7 +355,6 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
         )
         yield inputs
         return
-    deadline = time.monotonic() + timeout
     runner = run
 
     def run(argv, **options):
@@ -344,16 +372,18 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
         )
         yield inputs
         return
-    cache_arguments = [
-        argument for option, value in _argument_pairs(transaction.argv[3:])
-        if option == "--cache-dir" for argument in (option, value)
-    ]
-    cache = run(
-        [str(uv), "cache", "dir", *cache_arguments],
-        environment=transaction.environment, cwd=transaction.cwd,
-    ).stdout.strip()
-    if len(cache) > 32_768 or not Path(cache).is_absolute():
-        raise WheelError("native UV did not identify an absolute cache directory")
+    elapsed = {}
+    with _source_phase("preparation", timeout, elapsed) as deadline:
+        cache_arguments = [
+            argument for option, value in _argument_pairs(transaction.argv[3:])
+            if option == "--cache-dir" for argument in (option, value)
+        ]
+        cache = run(
+            [str(uv), "cache", "dir", *cache_arguments],
+            environment=transaction.environment, cwd=transaction.cwd,
+        ).stdout.strip()
+        if len(cache) > 32_768 or not Path(cache).is_absolute():
+            raise WheelError("native UV did not identify an absolute cache directory")
     with _temporary_inputs(None) as temporary:
         workspace = _private_retained_root(Path(temporary)).resolve()
         cutoffs = [
@@ -374,25 +404,13 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
             "UV_NO_CONFIG": "1", "UV_OFFLINE": "1", "UV_CACHE_DIR": cache,
             "PYTHONDONTWRITEBYTECODE": "1",
         })
-        identity = {
-            "schema": "installer-engine.source-build", "version": 1,
-            "python": _digest_file(base_python.resolve(strict=True), 256 << 20, deadline),
-            "uv": _digest_file(uv, 256 << 20, deadline),
-            "builder": _digest_file(builder, 1 << 20, deadline),
-            # Job ancestry still reaches owned children; its per-invocation
-            # names do not describe the offline backend's build inputs.
-            "environment": hashlib.sha256(_canonical({
-                key: value for key, value in environment.items()
-                if key.upper() != "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"
-            })).hexdigest(),
-        }
         tool_sets = {}
         tools_seconds = 0.0
 
-        def build_tools(requirements):
+        def acquire_tools(requirements):
             nonlocal tools_seconds
             tools_started = time.monotonic()
-            tooling = workspace / ("tools-" + str(len(tool_sets)))
+            tooling = workspace / ("tools-" + str(len(acquired)))
             run(
                 [str(base_python), "-I", "-m", "venv", "--without-pip", "--copies", str(tooling)],
                 environment=transaction.environment, cwd=transaction.cwd,
@@ -415,9 +433,8 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
             tools_root = Path(target.pop("purelib"))
             if not tools_root.is_relative_to(tooling):
                 raise WheelError("build tools are outside their private environment")
-            tool_content = _tool_tree(tools_root, deadline)
             tools_seconds += time.monotonic() - tools_started
-            return python, tools_root, tool_content, {**identity, "target": target, "tools": tool_content}
+            return python, tools_root, target
 
         built = 0
         archives, records = {}, {}
@@ -425,101 +442,133 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
             inputs.local_packages is None
             or re.sub(r"[-_.]+", "-", data["project"]["name"]).lower() in inputs.local_packages
         ))
-        for index, package in enumerate(selected):
-            manifest = manifests[inputs.packages.index(package)]
-            requirements = tuple(sorted(set(manifest["build-system"]["requires"])))
-            if requirements not in tool_sets:
-                tool_sets[requirements] = build_tools(requirements)
-            python, tools_root, tool_content, common = tool_sets[requirements]
-            compact = workspace / ("source-" + str(index))
-            source = _tree(package, deadline, excluded={
-                path.relative_to(package).as_posix() for path in inputs.packages
-                if path != package and path.is_relative_to(package)
-            })
-            name = re.sub(r"[-_.]+", "-", manifest["project"]["name"]).lower()
+        requirements_by_package = {
+            package: tuple(sorted(set(manifests[inputs.packages.index(package)]["build-system"]["requires"])))
+            for package in selected
+        }
+        requirement_groups = dict.fromkeys(requirements_by_package.values())
+        acquired = {}
+        with _source_phase("acquisition", timeout, elapsed) as deadline:
+            for requirements in requirement_groups:
+                acquired[requirements] = acquire_tools(requirements)
 
-            def verify_source():
-                if _tree(compact, deadline) != source or _tool_tree(tools_root, deadline) != tool_content:
-                    raise WheelError("source or installed build tools changed before wheel cache publication")
+        try:
+            with _source_phase("offline", timeout, elapsed) as deadline:
+                identity = {
+                    "schema": "installer-engine.source-build", "version": 1,
+                    "python": _digest_file(base_python.resolve(strict=True), 256 << 20, deadline),
+                    "uv": _digest_file(uv, 256 << 20, deadline),
+                    "builder": _digest_file(builder, 1 << 20, deadline),
+                    # Job ancestry reaches children but does not identify build inputs.
+                    "environment": hashlib.sha256(_canonical({
+                        key: value for key, value in environment.items()
+                        if key.upper() != "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"
+                    })).hexdigest(),
+                }
 
-            def build(output):
-                nonlocal built
-                if _compact(package, inputs.packages, compact, deadline) != source:
-                    raise WheelError("source changed before its wheel build")
-                reported = run(
-                    [str(python), "-I", "-B", "-c", _BACKEND_REQUIREMENTS],
-                    environment=environment, cwd=compact,
-                ).stdout
-                if len(reported) > 65_536:
-                    raise WheelError("backend build requirements exceed their byte budget")
-                requirements = json.loads(reported)
-                if not isinstance(requirements, list) or any(
-                    not isinstance(value, str) or not value for value in requirements
-                ):
-                    raise WheelError("backend reported invalid build requirements")
-                if requirements:
-                    raise _AdditionalBuildRequirements
-                uv_output = workspace / ("build-" + str(index))
-                run(
-                    [str(uv), "build", "--wheel", "--no-build-isolation", "--no-sources",
-                     "--offline", "--python", str(python), "--out-dir", str(uv_output), str(compact)],
-                    environment=environment, cwd=compact,
+                def build_tools(requirements):
+                    nonlocal tools_seconds
+                    tools_started = time.monotonic()
+                    python, tools_root, target = acquired[requirements]
+                    tool_content = _tool_tree(tools_root, deadline)
+                    tools_seconds += time.monotonic() - tools_started
+                    return python, tools_root, tool_content, {**identity, "target": target, "tools": tool_content}
+
+                for requirements in requirement_groups:
+                    tool_sets[requirements] = build_tools(requirements)
+                for index, package in enumerate(selected):
+                    requirements = requirements_by_package[package]
+                    python, tools_root, tool_content, common = tool_sets[requirements]
+                    compact = workspace / ("source-" + str(index))
+                    source = _tree(package, deadline, excluded={
+                        path.relative_to(package).as_posix() for path in inputs.packages
+                        if path != package and path.is_relative_to(package)
+                    })
+                    name = re.sub(r"[-_.]+", "-", manifests[inputs.packages.index(package)]["project"]["name"]).lower()
+
+                    def verify_source():
+                        if _tree(compact, deadline) != source or _tool_tree(tools_root, deadline) != tool_content:
+                            raise WheelError("source or installed build tools changed before wheel cache publication")
+
+                    def build(output):
+                        nonlocal built
+                        if _compact(package, inputs.packages, compact, deadline) != source:
+                            raise WheelError("source changed before its wheel build")
+                        reported = run(
+                            [str(python), "-I", "-B", "-c", _BACKEND_REQUIREMENTS],
+                            environment=environment, cwd=compact,
+                        ).stdout
+                        if len(reported) > 65_536:
+                            raise WheelError("backend build requirements exceed their byte budget")
+                        requirements = json.loads(reported)
+                        if not isinstance(requirements, list) or any(
+                            not isinstance(value, str) or not value for value in requirements
+                        ):
+                            raise WheelError("backend reported invalid build requirements")
+                        if requirements:
+                            raise _AdditionalBuildRequirements
+                        uv_output = workspace / ("build-" + str(index))
+                        run(
+                            [str(uv), "build", "--wheel", "--no-build-isolation", "--no-sources",
+                             "--offline", "--python", str(python), "--out-dir", str(uv_output), str(compact)],
+                            environment=environment, cwd=compact,
+                        )
+                        wheels = tuple(uv_output.glob("*.whl"))
+                        if len(wheels) != 1:
+                            raise WheelError("source build did not produce exactly one wheel")
+                        target = output / wheels[0].name
+                        shutil.copyfile(wheels[0], target)
+                        built += 1
+                        return target
+
+                    def validate(path):
+                        _wheel_record(path, name, deadline)
+                        verify_source()
+
+                    archive = cached_source_wheel(
+                        root, _canonical({**common, "source": source}), None,
+                        build=build, validate=validate, max_archive_bytes=_LIMITS.max_archive_bytes,
+                        deadline=deadline,
+                    )
+                    records[name] = _wheel_record(archive, name, deadline)
+                    archives[package] = archive
+                for _python, tools_root, tool_content, _common in tool_sets.values():
+                    if _tool_tree(tools_root, deadline) != tool_content:
+                        raise WheelError("installed build tools changed during source construction")
+                arguments = []
+                selected_manifests = {package / "pyproject.toml" for package in selected}
+                for option, value in _argument_pairs(transaction.argv[3:]):
+                    if option in ("-r", "--requirements") and Path(value) in selected_manifests:
+                        continue
+                    if option:
+                        arguments.extend((option, value) if value else (option,))
+                        continue
+                    for package, archive in archives.items():
+                        suffix = f"[{','.join(inputs.extras)}]" if package == inputs.plugin and inputs.extras else ""
+                        if value == str(package) + suffix:
+                            name = re.sub(r"[-_.]+", "-", tomllib.loads(
+                                (package / "pyproject.toml").read_text(encoding="utf-8"),
+                            )["project"]["name"]).lower()
+                            value = name + suffix + " @ " + archive.as_uri() + "#" + records[name]["sha256"].replace(":", "=", 1)
+                            break
+                    arguments.append(value)
+                wheels = SourceWheelInputs(_canonical(records), tuple(archives.values()), timeout)
+                wheels.verify(deadline=deadline)
+                assembled = replace(
+                    inputs, transaction=transaction._replace(argv=(*transaction.argv[:3], *arguments)),
+                    source_wheels=wheels,
                 )
-                wheels = tuple(uv_output.glob("*.whl"))
-                if len(wheels) != 1:
-                    raise WheelError("source build did not produce exactly one wheel")
-                target = output / wheels[0].name
-                shutil.copyfile(wheels[0], target)
-                built += 1
-                return target
-
-            def validate(path):
-                _wheel_record(path, name, deadline)
-                verify_source()
-
-            try:
-                archive = cached_source_wheel(
-                    root, _canonical({**common, "source": source}), None,
-                    build=build, validate=validate, max_archive_bytes=_LIMITS.max_archive_bytes,
-                    deadline=deadline,
-                )
-            except _AdditionalBuildRequirements:
-                print(
-                    "Source wheel cache miss: backend-additional-build-requirements; "
-                    "retaining isolated source builds", file=sys.stderr, flush=True,
-                )
-                yield inputs
-                return
-            records[name] = _wheel_record(archive, name, deadline)
-            archives[package] = archive
-        for _python, tools_root, tool_content, _common in tool_sets.values():
-            if _tool_tree(tools_root, deadline) != tool_content:
-                raise WheelError("installed build tools changed during source construction")
-        arguments = []
-        selected_manifests = {package / "pyproject.toml" for package in selected}
-        for option, value in _argument_pairs(transaction.argv[3:]):
-            if option in ("-r", "--requirements") and Path(value) in selected_manifests:
-                continue
-            if option:
-                arguments.extend((option, value) if value else (option,))
-                continue
-            for package, archive in archives.items():
-                suffix = f"[{','.join(inputs.extras)}]" if package == inputs.plugin and inputs.extras else ""
-                if value == str(package) + suffix:
-                    name = re.sub(r"[-_.]+", "-", tomllib.loads(
-                        (package / "pyproject.toml").read_text(encoding="utf-8"),
-                    )["project"]["name"]).lower()
-                    value = name + suffix + " @ " + archive.as_uri() + "#" + records[name]["sha256"].replace(":", "=", 1)
-                    break
-            arguments.append(value)
-        wheels = SourceWheelInputs(_canonical(records), tuple(archives.values()), timeout)
-        wheels.verify()
+        except _AdditionalBuildRequirements:
+            print(
+                "Source wheel cache miss: backend-additional-build-requirements; "
+                "retaining isolated source builds", file=sys.stderr, flush=True,
+            )
+            yield inputs
+            return
         print(
             f"Source wheel assembly: built={built} reused={len(selected) - built} "
-            f"tools={tools_seconds:.3f}s total={time.monotonic() - started:.3f}s",
+            f"tools={tools_seconds:.3f}s acquisition={elapsed['acquisition']:.3f}s "
+            f"offline={elapsed['offline']:.3f}s total={time.monotonic() - started:.3f}s",
             file=sys.stderr, flush=True,
         )
-        yield replace(
-            inputs, transaction=transaction._replace(argv=(*transaction.argv[:3], *arguments)),
-            source_wheels=wheels,
-        )
+        yield assembled

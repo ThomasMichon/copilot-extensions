@@ -4472,6 +4472,16 @@ and frozen seasoning cutoffs admit a private copied build-tool environment.
 Its actual installed bytes and modes, selected interpreter/target, UV, build
 helper and build environment identify subsequent offline, no-isolation builds.
 An open build requirement or a backend version alone is not a cache identity.
+All selected build-requirement groups are provisioned before the offline
+construction loop. Local preparation, network-capable tool acquisition and
+offline source/tool hashing, copying, builds and verification have named
+progress and independent process allowances using the configured constructor
+child timeout; their numeric defaults and the outer request lifetime do not
+change. Acquisition time does not consume the offline allowance. Offline
+deadline errors identify that phase and retain their original cause; integrity
+refusals are not relabeled as timeouts or cache misses. Unsupported backend
+fallback and subsequent runtime installation run outside the offline phase:
+this boundary does not claim that the complete installation is network-free.
 Per-request update-driver custody stays with the constructor and its admission
 handoff. Its witness is excluded from the offline builder environment and cache
 identity, so a new update request does not invalidate unchanged project wheels.
@@ -4504,9 +4514,10 @@ then overlaps at most four held-input reads per batch. Selected file metadata,
 per-file size bounds and the shared deadline still apply, and all reads finish
 before return or error cleanup. Project builds and runtime activation stay serial.
 This storage is byte custody, not source, feed or installation authority.
-The assembly diagnostic reports built/reused project counts and tools/total
-elapsed time on stderr; those counts describe local wheels, not completed
-runtime generations or the whole update duration.
+The assembly diagnostic reports built/reused project counts and tools,
+acquisition, offline and total elapsed time on stderr; named phase transitions
+are flushed separately without altering result framing. Those counts describe
+local wheels, not completed runtime generations or the whole update duration.
 
 Ordinary immutable source candidates request UV hardlinks from its extracted
 wheel cache, with UV's normal copy fallback when linking is unavailable.
