@@ -596,7 +596,7 @@ start_update_stage() {
     admit_launch_target "$_LAUNCH_POLICY_PATH" maintenance || return 3
     automatic_maintenance_enabled || return 0
     setup_log INFO 'Starting background update stage (stage-update)'
-    ( "$PYTHON" -m agent_worktrees stage-update >/dev/null 2>&1 ) &
+    ( "$PYTHON" -m agent_worktrees stage-update --auto >/dev/null 2>&1 ) &
     _STAGE_PID=$!
 }
 
@@ -615,7 +615,7 @@ invoke_update_apply() {
     if [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]]; then
         local _automatic_args=(-m agent_worktrees)
         [[ -n "$LAUNCH_PROJECT" ]] && _automatic_args+=(--project "$LAUNCH_PROJECT")
-        _automatic_args+=(launch-update automatic --detach)
+        _automatic_args+=(launch-update automatic --auto --detach)
         local _include_reconcile=""
         [[ "$with_reconcile" == "1" && "${WORKTREE_NO_RECONCILE:-}" != "1" ]] && _include_reconcile=1
         if [[ "$_NO_UPDATE" == "1" ]]; then
@@ -679,7 +679,7 @@ for value in [
         if [[ "$stage_done" != "True" || "$skipped" == "locked" ]]; then
             automatic_maintenance_enabled || { _stop_setup_progress; return 0; }
             setup_status INFO 'Background download unavailable; downloading the plugin update now...'
-            "$PYTHON" -m agent_worktrees stage-update >/dev/null 2>&1 || true
+            "$PYTHON" -m agent_worktrees stage-update --auto >/dev/null 2>&1 || true
             _parse_stage_status
         fi
         if [[ -n "$runtime_apply_blocked" ]]; then
@@ -689,7 +689,7 @@ for value in [
         # (1) Defer self-installation until foreground maintenance is finished.
         local _project_args=()
         [[ -n "$LAUNCH_PROJECT" ]] && _project_args=(--project "$LAUNCH_PROJECT")
-        local _bootstrap_args=(launch-update bootstrap)
+        local _bootstrap_args=(launch-update bootstrap --auto)
         [[ "$plugin_changed" == "True" && -z "$runtime_apply_blocked" ]] && _bootstrap_args+=(--defer-worktrees)
 
         # (2) The executor re-derives the bootstrap plan under driver custody.
@@ -710,14 +710,14 @@ for value in [
         local _reconcile_project=()
         [[ -n "$LAUNCH_PROJECT" ]] && _reconcile_project=(--project "$LAUNCH_PROJECT")
         _run_launch_request reconcile 'Plugin reconcile' \
-            "$PYTHON" -m agent_worktrees ${_reconcile_project[@]+"${_reconcile_project[@]}"} launch-update reconcile
+            "$PYTHON" -m agent_worktrees ${_reconcile_project[@]+"${_reconcile_project[@]}"} launch-update reconcile --auto
         if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
             PYTHON="$_refreshed_python"
         fi
     fi
     # Submit last so foreground maintenance never joins our detached install.
     if [[ "$_NO_UPDATE" != "1" && "$plugin_changed" == "True" && -z "$runtime_apply_blocked" ]]; then
-        local _request_args=(launch-update staged --status "$status_file")
+        local _request_args=(launch-update staged --auto --status "$status_file")
         [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]] && _request_args+=(--detach)
         _run_launch_request installer 'Staged runtime request (applies on the next launch)' \
             "$PYTHON" -m agent_worktrees ${_project_args[@]+"${_project_args[@]}"} "${_request_args[@]}"

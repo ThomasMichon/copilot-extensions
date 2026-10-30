@@ -34,7 +34,8 @@ def test_indicator_read_retains_its_existing_stdout_contract(monkeypatch):
     assert seen[0].json
 
 
-def test_stage_records_json_in_worker_but_default_caller_stays_quiet(monkeypatch):
+@pytest.mark.parametrize("automatic", [False, True])
+def test_stage_records_json_in_worker_but_default_caller_stays_quiet(monkeypatch, automatic):
     seen = {}
 
     def dispatch(verb, flags, args, execute, **kwargs):
@@ -42,8 +43,8 @@ def test_stage_records_json_in_worker_but_default_caller_stays_quiet(monkeypatch
         return 0
 
     monkeypatch.setattr(boundary, "_run_request", dispatch)
-    assert boundary.cmd_stage_request(_args()) == 0
-    assert seen == {"verb": "stage-update", "flags": ["--json"], "emit": False}
+    assert boundary.cmd_stage_request(_args(auto=automatic)) == 0
+    assert seen == {"verb": "stage-update", "flags": ["--json", *(["--auto"] if automatic else [])], "emit": False}
 
 
 def test_apply_retains_machine_repo_status_and_payload_intent(tmp_path, monkeypatch):
@@ -57,10 +58,10 @@ def test_apply_retains_machine_repo_status_and_payload_intent(tmp_path, monkeypa
     monkeypatch.setattr(boundary, "_run_request", dispatch)
     assert boundary.cmd_reconcile_request(_args(
         apply=True, repo="repo", status="status.json", machine="fixture",
-        with_payload_refresh=True,
+        with_payload_refresh=True, auto=True,
     )) == 0
     assert seen["flags"] == [
-        "--apply", "--repo", str(tmp_path / "repo"), "--status", str(tmp_path / "status.json"),
+        "--apply", "--auto", "--repo", str(tmp_path / "repo"), "--status", str(tmp_path / "status.json"),
         "--machine", "fixture", "--with-payload-refresh",
     ]
 
@@ -344,6 +345,52 @@ def test_nested_update_participant_returns_json_without_recursive_enqueue(
         assert output == ""
         assert json.loads(boundary._result_path(request).read_text()) == {"executed": []}
     assert scoped == ["begin", "execute", "end"]
+
+
+@pytest.mark.parametrize("backend", ["manager", "engine"])
+def test_real_manual_custody_covers_inner_reconcile_under_active_auto_hold(
+    tmp_path, monkeypatch, capsys, backend,
+):
+    import update_driver
+    import sys
+    from pathlib import Path
+    from update_driver import core
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    queue = tmp_path / ".copilot-extensions" / "update-driver"
+    hold = tmp_path / "hold.json"
+    hold.write_text('{"active":true}', encoding="utf-8")
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(hold))
+    monkeypatch.setattr(core, "default_root", lambda: queue)
+    request = core.enqueue(
+        core.RequestSpec(backend, repair=True),
+        runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
+    )
+    executions = []
+
+    def reconcile(args):
+        assert args.apply
+        assert update_driver.participant_environment()
+        running = core.status(request.id)
+        assert running.state == "running" and running.spec.repair
+        executions.append(running.id)
+        print('{"executed":[]}')
+        return 0
+
+    monkeypatch.setattr(boundary.update_cli, "cmd_reconcile_plugins", reconcile)
+
+    def execute(transaction):
+        with monkeypatch.context() as environment:
+            for key, value in transaction.participant_env().items():
+                environment.setenv(key, value)
+            return boundary.cmd_reconcile_request(_args(apply=True))
+
+    assert core.drain(executor=execute) == 0
+    assert core.wait(request.id).exit_code == 0
+    assert executions == [request.id]
+    assert len(core.status()) == 1
+    assert json.loads(hold.read_text()) == {"active": True}
+    assert json.loads(capsys.readouterr().out) == {"executed": []}
 
 
 def test_actual_empty_inventory_apply_uses_worker_and_retains_json(tmp_path, monkeypatch):

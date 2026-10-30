@@ -467,6 +467,52 @@ binstub. `restore --apply` reconciles the same task presence
 declaratively, including removing tasks that have since been opted out.
 `--verbose`, and always present in `--json`.
 
+### Rolling out explicit automatic-update intent
+
+An old fleet-update task can still invoke `worktree-manager update` **without**
+`--auto`. Once the new receiver defaults to manual admission, that old action
+could bypass an automatic-update hold. Do not rely on receiver origin inference,
+the hold alone, or eventual task drift detection to protect this transition.
+The deployment owner must sequence the existing lifecycle before changing the
+receiver:
+
+1. Inspect `agent-machines fleet-update status --tier sweep --json` and
+   `agent-machines self-update status --json`. Wait for existing update executions
+   to finish, or resolve their interrupted/unknown custody through its owner;
+   never terminate a live installer merely to migrate its trigger.
+2. Before installing the new receiver, pause future managed triggers with
+   `agent-machines fleet-update uninstall --tier sweep --json` and
+   `agent-machines self-update uninstall --json`. Confirm the owner status reports
+   them unregistered, and no existing execution remains. These are normal
+   owner-scoped removals, not a new pause API: Windows removal can stop a task;
+   POSIX removal disables the timer but does not settle a running service.
+   Also quiesce any separately owned cron/task/launch producer that could still
+   submit an unmarked update. A concurrent declarative restore can recreate
+   triggers, so serialize that maintenance too.
+3. Keep the automatic hold intact. Perform the separately authorized unified
+   manual update after the corrected receiver is available. If an older receiver
+   still inhibits that call, its existing repair/recovery procedure needs its
+   own authority; this sequence does not grant force, clear a hold, settle a
+   transaction, or restart an old worker.
+4. With corrected Manager, Worktrees and Agent Machines runtimes selected,
+   reconcile the configured opt-ins
+   using `agent-machines fleet-update install --tier sweep --json` and
+   `agent-machines self-update install --json`. The existing
+   `fleet_update.reconcile_scheduled_task` owner re-registers a Windows action
+   missing `--auto`; its POSIX timer owner compares the generated service text
+   and replaces an old command. Re-read both `status --json` commands and require
+   matching registrations before restoring normal maintenance. A skipped,
+   deferred or failed registration is not migration success. Self-update tasks
+   retain their stable binstub, whose new sweep implementation submits `--auto`.
+
+These commands change scheduling and require deployment authority; publishing
+source does not execute them. An already-running old updater or producer retains
+its loaded parser/caller behavior until its owner completes the supported upgrade.
+The existing repair-capable driver already supports manual admission and the
+independent-cell scope exemption; neither requires a new shared-driver release.
+Validate the actual selected/running receiver and automatic no-op under the
+retained hold; neither a new payload nor matching task metadata proves that.
+
 ## Playwright CLI provisioning
 
 `provision-playwright-cli` converges only machine-local state for the current

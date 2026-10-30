@@ -61,6 +61,7 @@ def run_targeted_update(rest: list[str]) -> int:
 
     _options, forwarded = parse_options(rest)
     parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument("--auto", action="store_true")
     parser.add_argument("--target", required=True)
     parser.add_argument("--project")
     parser.add_argument("--no-manager", action="store_true")
@@ -87,7 +88,8 @@ def run_targeted_update(rest: list[str]) -> int:
             return run.finish(1)
         # Strictly parsed by the selected engine; an older provider rejects it.
         rc = engine_client.run_engine_passthrough(
-            args.project, ["update", "--no-manager", "--target", args.target],
+            args.project, ["update", "--no-manager", "--target", args.target,
+                           *(["--auto"] if args.auto else [])],
         )
         return run.finish(rc)
     except (engine_client.EngineError, OSError, ValueError) as error:

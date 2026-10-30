@@ -91,7 +91,7 @@ stamp="$(date -u '+%Y%m%d-%H%M%S')"
 (
     cd "$HOME" || exit 0
     PYTHONPATH="" nohup "$PYTHON" -m agent_worktrees reconcile-plugins \
-        --repo "$repo_dir" --status "$status" --apply \
+        --repo "$repo_dir" --status "$status" --apply --auto \
         >> "$log_dir/provision-$stamp.log" 2>&1 &
 ) >/dev/null 2>&1
 

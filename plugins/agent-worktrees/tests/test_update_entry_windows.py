@@ -55,6 +55,8 @@ def test_selected_update_operation_bypasses_native_repair_and_implicit_provision
     arguments = ["--project", "sample", "update", *flags]
     if front == "payload":
         entry = PLUGIN / "bin" / "payload" / "agent-worktrees.ps1"
+        # Native context resolution needs a real Python, not the POSIX repair sentinel.
+        monkeypatch.setenv("PATH", str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"])
     elif front == "installed-project":
         user_bin = home / ".local" / "bin"
         user_bin.mkdir(parents=True)

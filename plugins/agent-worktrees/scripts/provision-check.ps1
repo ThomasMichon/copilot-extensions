@@ -92,7 +92,7 @@ try {
     Start-Process -FilePath $VenvPython `
         -ArgumentList @(
             '-m', 'agent_worktrees', 'reconcile-plugins',
-            '--repo', $RepoArg, '--status', $StatusArg, '--apply'
+            '--repo', $RepoArg, '--status', $StatusArg, '--apply', '--auto'
         ) `
         -WorkingDirectory $HOME `
         -WindowStyle Hidden `

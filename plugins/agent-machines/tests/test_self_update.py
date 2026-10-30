@@ -1152,6 +1152,7 @@ def test_sweep_continues_despite_unrelated_live_session_and_uses_repo_update_and
         "-p",
         "copilot-extensions",
         "update",
+        "--auto",
         "--no-manager",
     ]
     restore_step = next(step for step in result.steps if step.name == "restore")

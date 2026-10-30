@@ -56,13 +56,17 @@ creation, not an implicit permission migration or a read-only status side effect
   cwd is normalized, while argument ordering and spelling remain significant.
   Adapters own semantic option normalization and safe-field projection. Never
   put credentials in argv, source, context, error strings, or runner metadata.
-  The optional `repair=False` boolean distinguishes an explicitly authorized
-  repair from normal work. Trusted product adapters set it for their existing
-  force/repair options; it is not an environment-variable override or a grant
-  of operator authority. Ordinary records omit the default field, preserving
-  existing identities. Legacy records without it remain normal requests.
-  An older driver rejects the new repair field before execution rather than
-  silently claiming to support its semantics.
+  The optional `repair=False` boolean is the existing wire name for explicit
+  manual admission past the automatic-update hold, including ordinary manual
+  updates and operator repair. It never adds force/recreate arguments or changes
+  construction selection. Public `update` adapters set it unless `--auto` was
+  explicitly requested; force options do not exempt automatic requests.
+  It is not an environment-variable override or a grant of operator authority.
+  Automatic records omit the default field, preserving existing identities;
+  legacy records without it retain their automatic inhibition semantics.
+  Readers already supporting `repair` need no schema migration to admit a
+  manual request. Earlier readers reject that field rather than silently
+  claiming support. Older CLI parsers reject `--auto` before installation.
   An explicit `BOOTSTRAP_KILLSWITCH_STATE_FILE` override is captured at enqueue
   as the absolute `killswitch_path`, relative to the request's original cwd
   when needed. It participates in identity; a detached or already-running
@@ -144,18 +148,18 @@ creation, not an implicit permission migration or a read-only status side effect
   and cleanup before returning. Returning an exit code certifies that cleanup
   boundary; custom-executor exceptions remain conservatively interrupted.
 
-### Automatic-update KillSwitch and repair
+### Automatic-update KillSwitch and explicit/manual admission
 
 Before each pending request becomes running, the existing owner re-reads the
 shared bootstrap KillSwitch, including its legacy-path fallback and existing
-`BOOTSTRAP_KILLSWITCH_STATE_FILE` selection. An active switch completes normal
+`BOOTSTRAP_KILLSWITCH_STATE_FILE` selection. An active switch completes automatic
 jobs with exit 3 and error `automatic-update KillSwitch active; nothing ran`.
 Their start time stays absent, no product runner or installer starts, and the
 pending position is released. Status and wait retain this non-success outcome;
-the worker continues to later jobs. Clearing the switch permits new normal
+the worker continues to later jobs. Clearing the switch permits new automatic
 requests, but does not replay jobs already retired.
 
-Explicit `repair=True` requests bypass only this automatic-update inhibition,
+Explicit/manual `repair=True` requests bypass only this automatic-update inhibition,
 under the operator authority of the submitting driver. They retain the same
 execution lock, native process containment, foundation and interruption fences.
 Switch activation does not kill a running job. Ordinary jobs require no
@@ -163,9 +167,13 @@ additional per-job provenance approval: their trusted adapter and normal
 installation admission remain responsible for source and execution integrity.
 
 As with the bootstrap guard, missing state means inactive; malformed or
-unreadable state warns and retains the existing fail-open policy. A selected
-namespaced installation context does not inherit the default installation's
-shared switch. This does not bypass that installation's own policy controls.
+unreadable state warns and retains the existing fail-open policy. The shared
+default-installation hold does not cross into independently namespaced cells:
+`COPILOT_EXTENSIONS_CONTEXT` retains its existing scope exemption, not a grant
+of manual authority or an invented per-cell hold policy. Manual/automatic
+admission above applies where that hold is applicable.
+Manual and automatic requests have different persisted identities even when
+their installer argv is identical, and therefore cannot coalesce.
 No database migration, direct queue edit, new scheduler or flag removal is
 needed. Older pending jobs are handled by the next capable worker; updating
 source alone does not upgrade a selected or already-running worker.

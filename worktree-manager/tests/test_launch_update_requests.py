@@ -101,6 +101,7 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
         f"if {mode!r}!='no-project':\n"
         " assert args[:2]==['--project','fixture-project']; args=args[2:]\n"
         "assert args[:2] in [['launch-update','automatic'],['launch-update','bootstrap'],['launch-update','staged'],['launch-update','reconcile']]\n"
+        "assert '--auto' in args\n"
         f"if {mode!r}=='old-engine':\n"
         " print('unrecognized command: launch-update',file=sys.stderr); sys.exit(2)\n"
         "print('native-progress',file=sys.stderr,flush=True)\n"
@@ -211,13 +212,13 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
         assert ("disabled" if mode == "maintenance-off" else "blocked") in report
         return
     if mode == "wait":
-        assert observed[0] == ["launch-update", "bootstrap", "--defer-worktrees"]
-        expected_stage = ["launch-update", "staged", "--status", str(stage)]
+        assert observed[0] == ["launch-update", "bootstrap", "--auto", "--defer-worktrees"]
+        expected_stage = ["launch-update", "staged", "--auto", "--status", str(stage)]
         assert observed[-1] == expected_stage
-        assert ["launch-update", "reconcile"] in observed
+        assert ["launch-update", "reconcile", "--auto"] in observed
         assert len(observed) == 3
     else:
-        expected = ["launch-update", "automatic", "--detach"]
+        expected = ["launch-update", "automatic", "--auto", "--detach"]
         if mode == "no-update":
             expected += ["--no-update"]
         if mode != "no-reconcile":

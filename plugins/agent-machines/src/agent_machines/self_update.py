@@ -568,6 +568,7 @@ def run_tier(
                         "-p",
                         repo_name,
                         "update",
+                        "--auto",
                         "--no-manager",
                     ],
                     timeout=3600,
