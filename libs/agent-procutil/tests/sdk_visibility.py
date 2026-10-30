@@ -38,6 +38,7 @@ def new_api():
 def validate_request(mode: str, value: object) -> dict:
     fields = {
         "probe": {"output", "python", "sdk_root", "sources", "visible_controls", "case_packets"},
+        "functional": {"output", "python", "sdk_root", "sources", "case_packets"},
         "canary": {"parent_pid", "parent_birth", "original", "visible_controls"},
         "worker": {"parent_pid", "parent_birth", "sdk_root", "output", "sources", "nodes", "packet"},
         "identity": {"parent_pid", "parent_birth"},
@@ -94,7 +95,7 @@ def validate_request(mode: str, value: object) -> dict:
         if len(set(paths)) != len(paths):
             raise ObservationBlocked("qualification source closure is duplicated or incomplete")
         require_sdk_sources(Path(value["sdk_root"]), files, runner=Path(__file__))
-    if mode == "probe":
+    if mode in {"probe", "functional"}:
         validate_case_packets(Path(value["sdk_root"]), value["case_packets"])
     elif mode == "worker":
         validate_case_packet(Path(value["sdk_root"]), value["nodes"])
@@ -487,6 +488,95 @@ def restore_incomplete_control(api: WinAPI, original: dict, pin, report: dict) -
         )
 
 
+def run_workers(
+    request: dict, root: Path, api: WinAPI, deadline: float, start: float,
+    report: dict, observer: DesktopObserver | None = None,
+) -> None:
+    packets = validate_case_packets(Path(request["sdk_root"]), request["case_packets"])
+    parent = api.identity()
+    child_request = {
+        "nonce": request["nonce"], "parent_pid": parent["pid"],
+        "parent_birth": parent["birth"], "deadline": deadline,
+    }
+    argv = [request["python"], "-I", "-B", "-X", "utf8", __file__]
+    (root / "pytest.ini").open("x").close()
+    report["pytest_packets"] = [
+        native_arguments(Path(request["sdk_root"]), root, nodes, index)
+        for index, nodes in enumerate(packets)
+    ]
+    report["workers"] = []
+    for index, nodes in enumerate(packets):
+        attempt = {"packet": index, "stage": "launch", "succeeded": False}
+        report["workers"].append(attempt)
+        primary_error = tests = None
+        try:
+            tests = Child(
+                api, [*argv, "worker"],
+                {**child_request, "sdk_root": request["sdk_root"], "output": str(root),
+                 "sources": request["sources"], "nodes": nodes, "packet": index},
+                root, f"worker-{index + 1:02}", evidence=attempt,
+            )
+            attempt["stage"] = "admit"
+            tests.admit(min(deadline, time.monotonic() + 5), observer)
+            attempt["stage"] = "send"
+            tests.send("run")
+            attempt["stage"] = "settle"
+            tests.settled(min(deadline, start + 150), observer)
+            attempt["stage"] = "validate-exit"
+            if tests.process.returncode != 0:
+                raise ObservationBlocked("SDK native worker failed; preserve exact JUnit and streams")
+            attempt.update(stage="completed", succeeded=True)
+        except BaseException as error:
+            primary_error = error
+            attempt["error"] = f"{type(error).__name__}: {error}"
+            raise
+        finally:
+            if tests is not None:
+                try:
+                    tests.close()
+                except BaseException as cleanup:
+                    attempt["cleanup_error"] = f"{type(cleanup).__name__}: {cleanup}"
+                    attempt["succeeded"] = False
+                    if primary_error is None:
+                        raise
+
+
+def functional(request: dict) -> int:
+    """Run source-bound kernel/lifetime checks without any desktop control."""
+    validate_request("functional", request)
+    source_before = verify_sources(request["sources"])
+    start = time.monotonic()
+    deadline = min(request["deadline"], start + 165)
+    root = Path(request["output"])
+    root.mkdir()
+    report = {
+        "kind": "sdk-functional", "passed": False, "started": start, "deadline": deadline,
+        "source_before": source_before, "visible_controls_attempted": 0,
+        "desktop_qualified": False,
+    }
+    try:
+        run_workers(request, root, new_api(), deadline, start, report)
+        report["native_junit"] = verify_native_junit(
+            root, Path(request["sdk_root"]), request["case_packets"],
+        )
+        report["source_after"] = verify_sources(request["sources"])
+        require_time(deadline, "functional qualification completion")
+        report["passed"] = True
+        return 0
+    except BaseException as error:
+        report["error"] = f"{type(error).__name__}: {error}"
+        report["traceback"] = traceback.format_exc()
+        raise
+    finally:
+        report["ended"] = time.monotonic()
+        if report["ended"] > deadline:
+            report["passed"] = False
+            report["deadline_error"] = "immutable functional deadline exceeded"
+        write_new(root / "functional-result.json", report)
+        if report.get("deadline_error") and not report.get("error"):
+            raise ObservationBlocked(report["deadline_error"])
+
+
 def probe(request: dict, allow_visible: bool) -> int:
     if not allow_visible or request.get("visible_controls") != 1:
         raise ObservationBlocked("single visible control consent is required")
@@ -502,7 +592,7 @@ def probe(request: dict, allow_visible: bool) -> int:
               "source_before": source_before}
     api = new_api()
     original_pin = None
-    control = tests = None
+    control = None
     calibration = quiet = None
     try:
         report["preflight"] = api.require_desktop()
@@ -596,48 +686,8 @@ def probe(request: dict, allow_visible: bool) -> int:
                              hwnd, thread, original_hwnd)
         require_time(min(deadline, start + 40), "calibration phase completion")
         quiet = DesktopObserver(api, "quiet-sdk")
-        (root / "pytest.ini").open("x").close()
-        report["pytest_packets"] = [
-            native_arguments(Path(request["sdk_root"]), root, nodes, index)
-            for index, nodes in enumerate(packets)
-        ]
-        report["workers"] = []
         with quiet:
-            for index, nodes in enumerate(packets):
-                attempt = {"packet": index, "stage": "launch", "succeeded": False}
-                report["workers"].append(attempt)
-                primary_error = None
-                try:
-                    tests = Child(
-                        api, [*argv, "worker"],
-                        {**child_request, "sdk_root": request["sdk_root"], "output": str(root),
-                         "sources": request["sources"], "nodes": nodes, "packet": index},
-                        root, f"worker-{index + 1:02}", evidence=attempt,
-                    )
-                    attempt["stage"] = "admit"
-                    tests.admit(min(deadline, time.monotonic() + 5), quiet)
-                    attempt["stage"] = "send"
-                    tests.send("run")
-                    attempt["stage"] = "settle"
-                    tests.settled(min(deadline, start + 150), quiet)
-                    attempt["stage"] = "validate-exit"
-                    if tests.process.returncode != 0:
-                        raise ObservationBlocked("SDK native worker failed; preserve exact JUnit and streams")
-                    attempt.update(stage="completed", succeeded=True)
-                except BaseException as error:
-                    primary_error = error
-                    attempt["error"] = f"{type(error).__name__}: {error}"
-                    raise
-                finally:
-                    if tests is not None:
-                        retiring, tests = tests, None
-                        try:
-                            retiring.close()
-                        except BaseException as cleanup:
-                            attempt["cleanup_error"] = f"{type(cleanup).__name__}: {cleanup}"
-                            attempt["succeeded"] = False
-                            if primary_error is None:
-                                raise
+            run_workers(request, root, api, deadline, start, report, quiet)
             time.sleep(0.6)
         report["native_junit"] = verify_native_junit(root, Path(request["sdk_root"]), packets)
         report["quiet"] = quiet.packet()
@@ -671,11 +721,15 @@ def probe(request: dict, allow_visible: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("probe", "canary", "worker", "passive", "identity"))
+    parser.add_argument("mode", choices=("probe", "canary", "worker", "passive", "identity", "functional"))
     parser.add_argument("--allow-visible-control-once", action="store_true")
     parser.add_argument("request", type=Path)
     args = parser.parse_args()
     request = validate_request(args.mode, json.loads(args.request.read_text("utf-8")))
+    if args.mode == "functional":
+        if args.allow_visible_control_once:
+            parser.error("functional qualification never accepts visible-control permission")
+        return functional(request)
     if args.mode == "probe":
         return probe(request, args.allow_visible_control_once)
     if args.mode == "canary":

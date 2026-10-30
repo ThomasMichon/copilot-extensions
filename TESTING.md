@@ -316,6 +316,26 @@ local unelevated desktop and the admitted outer native Job owner. Job membership
 alone does not establish that producer's limits; do not invoke the visible mode
 directly or bypass a hosted-only fixture's guard.
 
+On an actively used workstation, do not require the operator to stop using the
+desktop so an unattended qualification can pass. The visible calibration
+deliberately activates a window, and whole-desktop quiet capture can reject
+ordinary operator activity. Neither is appropriate for an active workstation
+without a separately arranged desktop-testing window.
+
+The `functional` mode runs the same exact, source-bound native packets through
+the same private parent handshake, finite workers, cleanup and JUnit checks,
+without creating a calibration window or requesting foreground activation.
+Its request has the probe's source and packet fields but **no**
+`visible_controls`; it also rejects `--allow-visible-control-once`. It writes
+`functional-result.json` with `kind: sdk-functional`,
+`visible_controls_attempted: 0` and `desktop_qualified: false`, never a
+`visibility-result.json`. This is process/protocol/lifetime evidence only:
+it does not certify the absence of unintended windows or focus changes.
+Desktop qualification remains a separate gate; do not relabel functional
+results, normal operator observations or a failed calibration as desktop proof.
+Both modes retain the existing whole deadline and 150-second worker cutoff,
+complete before/after source hashes and exact literal packet identities.
+
 The `passive` mode creates no window and changes no foreground state: it checks
 the native bindings, complete raw-event/poll capture and private-pipe identity
 handshake. After independent source review, the separately authorized visible
