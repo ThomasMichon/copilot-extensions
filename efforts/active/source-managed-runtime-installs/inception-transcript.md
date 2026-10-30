@@ -7,6 +7,32 @@ The implementation plan is a separate interpretation, not part of these quotes.
 Assistant design responses are summarized separately below; they are not
 additional operator instructions.
 
+## Independent V1-to-V2 repair acceptance
+
+Operator direction, 2026-10-29:
+
+> I think a very important test will be:
+>
+> 1. Install worktree-manager suite V1, get it all running
+> 2. Install worktree-manager suite V2 in repair mode. Avoid needing to even check the previous version's existence, just force-install
+> Applying and starting the new version without uninstalling, deleting, unregistering, or touching the old version should briefly result in both old and new versions running at one, all bunstubs replaced, and any task registrations updated. The old version *should* notice that it's outmoded and shut down on its own, after the new version starts. In theory, the install flow itself hardly needs to do anything about the old version
+
+This requests an independent repair-install acceptance test, not a live-host
+installation or teardown authorization. The earlier agent-recommended
+displaced-code-removal implementation remains unpublished while its role is
+reconciled with this start-first/self-retirement requirement.
+
+The coordinator asked whether this contract applies to ordinary updates as well
+as repair/force-install. The operator selected:
+
+```text
+update_scope=normal-and-repair
+```
+
+The same publish/start-first and old-owner self-retirement contract therefore
+governs ordinary updates and repair/force-install, not only the test's repair
+invocation.
+
 ## Disposable services and YAML maintenance banner
 
 Operator direction, 2026-10-25:

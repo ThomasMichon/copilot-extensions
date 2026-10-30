@@ -114,6 +114,18 @@ locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
 
+**Independent repair acceptance (2026-10-29), summary of operator direction:**
+install and run the complete V1 suite, then force-install V2 in repair mode
+without requiring a prior-install existence check or uninstalling, deleting,
+unregistering or touching V1. Applying and starting V2 briefly leaves both
+generations running. Replace the binstubs and update task registrations; after
+V2 starts, V1 should recognize that it is no longer current and shut down on
+its own. The installer should need little or no old-owner handling.
+The [verbatim request](inception-transcript.md#independent-v1-to-v2-repair-acceptance)
+is authoritative. The operator explicitly confirmed that this lifecycle applies
+to **ordinary updates and repair/force-install**. The test uses repair to prove
+independence from the incumbent; it does not authorize a live-host operation.
+
 **Immutable development alignment (2026-10-22), operator verbatim:**
 
 > So, mutable dev slot should probably be superseded by "immutable dev slot", and the "deploy from dev branch" effort. Basically, always deploy using an immutable venv, tagged with the hash of the source. Just set the new dev slot as current and handle cutover normally by giving the incoming version a start command and letting the old version shut off. We should endeavor to support baton-passing both ways; a version knows it's "old" simply because it's "not current", not via any ordering relationship between the active and owner versions.
@@ -123,11 +135,12 @@ locks describe different facts; no new competing artifact authority is needed.
 **Accepted alignment:** retain this effort's clean merged Dev source, Manager,
 maintenance, driver and installed-adoption owners/gates. All deployments use
 immutable venvs identified by complete source and admitted build inputs.
-Current selection starts the incoming owner through ordinary best-effort handoff;
+The incoming owner starts independently before the outgoing owner retires;
 full identity inequality, not version ordering, identifies the displaced owner.
-Reverse baton-passing prefers compatible health-gated drain, but permits bounded
-identity-checked old-owner shutdown and cold recovery when handoff contracts
-are incompatible or fail. This documentation revision neither
+Reverse baton-passing prefers compatible health-gated drain, but neither a
+matched handoff nor installer-driven old-owner shutdown is a prerequisite for
+publishing and starting the selected replacement. The 2026-10-29 clarification
+above governs ordinary updates and repair. This documentation revision neither
 restarts completed Phase 2 work nor claims remaining cutover/adoption proven.
 
 **Best-effort follow-on (2026-10-22), summary:** the operator permits outgoing
@@ -421,11 +434,21 @@ reuse/admission behavior is not an exception to the fresh-default revision.
   after its proposal clears review. Preserve winning current owners,
   configuration/durable/foreign state and incremental handoff; keep old-code
   collection and complete reactivation prevention open.
-- [ ] **Agent-recommended bounded displaced-code retirement:** review and
-  implement the [MCP code, retention-handoff and restart-route slice](fresh-default-installation.md#bounded-mcp-displaced-code-retirement---agent-recommended)
-  through the same fresh installer owner. Preserve the selected candidate,
-  independent lease owners, durable/unknown/protected state and incremental
-  behavior; do not substitute ordinary best-effort GC or whole-uninstall.
+- [ ] **Operator-requested independent repair acceptance:** install and run
+  suite V1, force-install/start V2 without prior-existence prerequisites or
+  actions against V1, replace all binstubs/update task registrations, observe
+  temporary overlap and prove V1 self-retires after V2 starts. Reconcile
+  installer-driven retirement with this [start-first test](fresh-default-installation.md#independent-v1-to-v2-repair-acceptance---operator-requested)
+  before publishing the pending removal-based implementation.
+  Apply the same publish/start-first lifecycle to ordinary updates; do not make
+  prior-version inspection, process settlement or code removal an installation
+  prerequisite. Existing completed reset/retirement source controls below are
+  historical component evidence, not the required new update sequence.
+- [x] **Agent-recommended bounded displaced-code retirement superseded as an
+  update prerequisite:** the operator-requested independent replacement
+  acceptance above replaces the proposed mandatory teardown sequence.
+  The [unpublished prototype](fresh-default-installation.md#bounded-mcp-displaced-code-retirement---agent-recommended)
+  is retained, not an accepted implementation or a cleanup assignment.
 - [x] Qualify Main bootstrap transport independently of Manager/service runtime
   source policy through the actual Linux and Windows global entry points, including
   explicit transport overrides, broken incumbents and older explicit-source callers.
@@ -1013,11 +1036,21 @@ implementation, rollout or parent completion is declared.
   including failed-reset retry remaining fresh, actual winner-state preservation,
   distinct control/code roots and post-reset on-demand serving. This is not
   full displaced-code silence, installed survival or all-tool/Manager adoption.
-- [ ] **Agent-recommended bounded displaced-code retirement:** qualify the
-  [native removal, custody and retry controls](fresh-default-installation.md#bounded-mcp-displaced-code-retirement---agent-recommended),
-  including actual old-code/restart-route absence, selected runtime health,
-  attached retention handoff, competing-owner preservation and interrupted
-  fresh retries. This does not close installed survival or the remaining portfolio.
+- [ ] **Operator-requested independent repair acceptance:** an external
+  observer confirms V1 is running before force-install, V2 is applied/started
+  without installer actions against V1, both briefly coexist, all current
+  binstubs/task registrations select V2, and V1 notices supersession and exits
+  on its own only after V2 starts. No uninstall, deletion, unregistration,
+  old-owner stop call or successful old-install probe may be a prerequisite.
+  Keep this contained suite test separate from live installed survival and
+  same-existing-data adoption.
+  Run the same lifecycle acceptance through an ordinary update as well as
+  repair/force-install. Installer execution remains serialized; runtime overlap
+  does not authorize concurrent installation writers or duplicate work ownership.
+- [x] **Mandatory update-time removal qualification superseded:** use the
+  operator-requested ordinary/repair V1-to-V2 acceptance above, not old-code
+  absence or installer-driven termination, to qualify replacement. Explicit
+  uninstall survival, durable-data adoption and the remaining portfolio stay open.
 - [ ] **Critical connectivity:** resolve the [route/removal matrix and retention acceptance](connectivity-retention.md), distinguishing provisioning code from actual SSH/Gateway transport and protecting its complete live/reconnect dependency closure. Force or purge cannot bypass it; credential relays can be removed. Source audit/vision alignment is not installed survival proof.
 
 - [ ] **Disposable services and shared maintenance hold:** resolve the [YAML banner implementation/validation sequence](maintenance-banner.md#implementation-and-validation-sequence). Prove the same applicable banner blocks actual automatic updates/reprovisioning and explains agent standby, including Manager, queued execution and missing catalog tools. Retain durable state and independently hosted session continuity, native 30-minute polling and no self-repair during an explained hold; source text, an unrelated kill switch or a merged vision is not acceptance.
@@ -1356,5 +1389,21 @@ Old-code silence, the remaining manifest portfolio, assembled entry points,
 macOS, same-existing-data all-tool/Manager adoption and live session/transport
 survival remain open. No installed cleanup, rollout, service stop, maintenance
 hold or protected-process action ran; a source merge is not deployed-state proof.
+
+### 2026-10-29 - Reviewed MCP displaced-code retirement
+
+#9556 merged as `08d062c05d79de789c67123fa2c38d14915215f2` after Copilot
+approved exact proposal head `c64211c5fe3354860e38e66979975bf1bc287562`
+without active findings. Required source and metadata checks passed before
+managed merge. The source worktree reconciled to that verified squash boundary.
+
+The next implementation follows the reviewed finite executable/restart-route
+inventory, attached predecessor-retention handoff and canonical generation/
+publication custody. Keep the candidate retained and independently owned
+leases intact; qualify actual removal, preserved scope and interrupted fresh
+retries on Windows/Linux. The displaced-code Plan and Validation items remain
+open until that implementation and qualification merge. All parent portfolio,
+installed adoption and live survival gates remain open; this proposal grants
+no concrete host cleanup or rollout.
 
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.
