@@ -480,6 +480,70 @@ def test_command_binding_teardown_foreign_owner_refuses_without_writes(binding_f
     assert _snapshot(binding_fixture["home"]) == before
 
 
+def test_teardown_cannot_retag_manifest_publication(binding_fixture: dict) -> None:
+    fixture = binding_fixture
+    binding, primitive = fixture["binding"], fixture["primitive"]
+    _publish(fixture)
+    with binding._load_lifecycle().legacy_lifecycle(
+        binding, primitive, reserve=False, teardown=True, **fixture["arguments"],
+    ):
+        before = _snapshot(fixture["home"])
+        with pytest.raises(ValueError, match="cannot override"):
+            binding.write_legacy_manifest(
+                primitive, {"schema_version": 3, "service": PLUGIN_ID},
+                operation="teardown", **fixture["arguments"],
+            )
+        assert _snapshot(fixture["home"]) == before
+
+
+@pytest.mark.parametrize("attributed", (False, True))
+def test_teardown_preserves_foreign_commands_without_publication(
+    binding_fixture: dict, attributed: bool,
+) -> None:
+    fixture = binding_fixture
+    binding, primitive = fixture["binding"], fixture["primitive"]
+    if not attributed:
+        _write(fixture["home"] / ".copilot/settings.json", {})
+    _write(fixture["payload"] / "plugin.json", {"name": PLUGIN_ID})
+    scripts = fixture["payload"] / "scripts"
+    scripts.mkdir()
+    for name in ("installer_engine_uninstall.py", "installer_engine_commands.py"):
+        shutil.copyfile(ROOT / "libs/installer-engine" / name, scripts / name)
+    shutil.copyfile(ROOT / "plugins" / PLUGIN_ID / "scripts/uninstall-profile.json",
+                    scripts / "uninstall-profile.json")
+    (fixture["payload"] / "bin").mkdir()
+    for name in (
+        "agent-worktrees", "agent-worktrees.ps1", "agent-worktrees.cmd",
+        "agent-worktrees-update-entry.sh", "agent-worktrees-update-entry.ps1",
+    ):
+        shutil.copyfile(ROOT / "plugins" / PLUGIN_ID / "bin" / name,
+                        fixture["payload"] / "bin" / name)
+    (scripts / "installation-context").mkdir()
+    shutil.copyfile(ROOT / "libs/installation-context/json-query.awk",
+                    scripts / "installation-context/json-query.awk")
+    command = fixture["home"] / ".local/bin/agent-worktrees.ps1"
+    command.parent.mkdir(parents=True)
+    command.write_text("foreign operator command\n", encoding="utf-8")
+    lifecycle = binding._load_lifecycle()
+    with lifecycle.legacy_lifecycle(
+        binding._rules(), primitive, reserve=False, teardown=True, **fixture["arguments"],
+    ) as lease:
+        lease.assert_owned()
+        assert lifecycle.borrowed_lease(
+            binding._rules(), primitive, operation="teardown", **fixture["arguments"],
+        ) is lease
+        with pytest.raises(binding.CommandOwnershipConflict, match="does not authorize publish"):
+            lease.assert_operation("publish")
+        with pytest.raises(binding.CommandOwnershipConflict, match="global commands"):
+            lifecycle.borrowed_lease(binding._rules(), primitive, **fixture["arguments"])
+    assert command.read_text(encoding="utf-8") == "foreign operator command\n"
+    before = _snapshot(fixture["home"])
+    with pytest.raises(binding.CommandOwnershipConflict, match="global commands"):
+        with lifecycle.legacy_lifecycle(binding._rules(), primitive, **fixture["arguments"]):
+            pytest.fail("A teardown exception authorized command publication")
+    assert _snapshot(fixture["home"]) == before
+
+
 @pytest.mark.parametrize("interpreter", ["parent", "child"])
 def test_command_binding_teardown_refuses_interpreters_in_erased_runtime(
     binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, interpreter: str,
@@ -687,9 +751,27 @@ def test_command_binding_inherited_ticket_requires_live_parent(
             lifecycle._CURRENT.reset(token)
 
 
+def _materialize_native_payload(fixture: dict) -> None:
+    payload = fixture["payload"]
+    source = ROOT / "plugins/agent-worktrees"
+    for name in ("scripts", "src"):
+        shutil.copytree(
+            source / name, payload / name, dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"),
+        )
+    shutil.copyfile(source / "pyproject.toml", payload / "pyproject.toml")
+    materializer = _load(ROOT / "tools/materialize_main.py", "lifecycle_payload_materializer")
+    log = materializer.materialize_uv_editable_ref_into(
+        source_consumer_dir=source, dest_consumer_dir=payload, canonical_root=ROOT,
+    )
+    assert not any(line.startswith("SKIP ") for line in log), log
+
+
 def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> list[str]:
     payload = fixture["payload"]
     _prepare_catalog(fixture)
+    if shell == "powershell":
+        _materialize_native_payload(fixture)
     if action == "uninstall":
         native_scripts = ROOT / "plugins/agent-worktrees/scripts"
         for path in (
@@ -810,28 +892,97 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
         preflight = "if ($Action -eq 'uninstall') {" + source.split(
             "\nif ($Action -eq 'uninstall') {", 1,
         )[1].split("\n}\n", 1)[0] + "\n}\n"
+        removal = "function Invoke-NativeRuntimeRemoval {" + source.split(
+            "function Invoke-NativeRuntimeRemoval {", 1,
+        )[1].split("\nif ($Action -eq 'uninstall') {", 1)[0]
         program += (
             "\n$RemoveConfig=($env:TEST_REMOVE_CONFIG -eq 'true')\n"
             "$VersionedRuntime=$true\n$LibDir=Join-Path $InstallDir 'lib'\n"
             "$ProjectName='agent-worktrees'\n$ProjectDir=Join-Path $InstallDir 'projects/example'\n"
             "$env:LOCALAPPDATA=Join-Path $InstallDir 'profile-cache'\n"
             "function Remove-Binstub {}\nfunction Remove-LegacyBinstubs {}\n"
-            + preflight + "switch ($Action) {\n'uninstall' {\n" + uninstall + "}\n"
+            + removal + "\n" + preflight + "switch ($Action) {\n'uninstall' {\n" + uninstall + "}\n"
         )
     script = payload / "scripts/install.ps1"
     script.write_text(program, encoding="utf-8")
     return [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(script), "-Action", action]
 
 
+def _refused_installer_snapshot(fixture: dict, installer: Path) -> dict:
+    from update_driver import core
+
+    home = fixture["home"]
+    snapshot = _snapshot(home)
+    audit = Path(".copilot-extensions/update-driver")
+    profile = Path("AppData/Local/Microsoft/PowerShell/StartupProfileData-NonInteractive")
+    caches: dict[Path, set[str]] = {}
+    for payload in {fixture["payload"], installer.parent.parent}:
+        for source in payload.rglob("*.py"):
+            directory = source.parent.relative_to(home) / "__pycache__"
+            caches.setdefault(directory, set()).add(source.stem)
+    directory_times = {Path("."), profile.parent, *(path.parent for path in caches)}
+    for key in list(snapshot):
+        path = Path(key)
+        if path == audit.parent or path == audit or audit in path.parents:
+            if audit in path.parents:
+                assert path.parent == audit and (
+                    path.name in {"queue.sqlite3", "queue.sqlite3-wal", "queue.sqlite3-shm", "execution.lock"}
+                    or re.fullmatch(r"[0-9a-f]{32}\.log", path.name)
+                ), f"Unexpected driver audit artifact: {path}"
+            else:
+                assert snapshot[key][0], f"Driver audit parent is not a directory: {path}"
+            del snapshot[key]
+        elif path == profile or path in caches:
+            assert snapshot[key][0] == (path in caches)
+            del snapshot[key]
+        elif path.parent in caches and (
+            match := re.fullmatch(r"(.+)\.cpython-[0-9]+(?:\.opt-[12])?\.pyc", path.name)
+        ) and match[1] in caches[path.parent]:
+            assert not snapshot[key][0]
+            del snapshot[key]
+        elif path in directory_times:
+            directory, _mtime, data = snapshot[key]
+            assert directory
+            snapshot[key] = (directory, 0, data)
+    for request in core.status(root=home / audit):
+        assert request.state == "completed" and request.exit_code not in (None, 0)
+        assert request.finished_at is not None and not request.unresolved
+    return snapshot
+
+
+@pytest.mark.parametrize("mutation", ("source", "runtime", "command"))
+def test_refusal_snapshot_excludes_bytecode_but_retains_product_bytes(
+    binding_fixture: dict, mutation: str,
+) -> None:
+    import py_compile
+
+    fixture = binding_fixture
+    source = fixture["payload"] / "src/module.py"
+    source.parent.mkdir()
+    source.write_text("x=1\n", encoding="utf-8")
+    command = fixture["home"] / ".local/bin/operator-command"
+    command.parent.mkdir(parents=True)
+    command.write_text("old\n", encoding="utf-8")
+    installer = fixture["payload"] / "scripts/install.ps1"
+    before = _refused_installer_snapshot(fixture, installer)
+    py_compile.compile(str(source), doraise=True)
+    assert _refused_installer_snapshot(fixture, installer) == before
+    target = {
+        "source": source, "runtime": fixture["legacy"] / "retained-state.json",
+        "command": command,
+    }[mutation]
+    stamp = target.stat()
+    target.write_bytes(b"y" * target.stat().st_size)
+    os.utime(target, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert _refused_installer_snapshot(fixture, installer) != before
+
+
 def _real_installer(fixture: dict, shell: str, location: str) -> tuple[Path, dict[str, str]]:
     _prepare_catalog(fixture)
+    _materialize_native_payload(fixture)
     payload = fixture["payload"]
     suffix = "sh" if shell == "bash" else "ps1"
     installer = payload / f"scripts/install.{suffix}"
-    shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/install.{suffix}", installer)
-    if shell == "powershell":
-        for name in ("installer-human-output.ps1", "install.human-output.json"):
-            shutil.copyfile(ROOT / "plugins/agent-worktrees/scripts" / name, installer.parent / name)
     _write(payload / "plugin.json", {"name": PLUGIN_ID})
     if location == "local-copy":
         copied_payload = fixture["home"] / "local-payload"
@@ -866,7 +1017,7 @@ def test_command_binding_real_installer_refuses_before_self_staging(
         _write(settings, {"extraKnownMarketplaces": {
             "example": {"source": {"source": "github", "repo": "Other/Plugins"}},
         }})
-    before = _snapshot(binding_fixture["home"])
+    before = _refused_installer_snapshot(binding_fixture, installer)
     for action in ("install", "update", "provision", "stamp", "uninstall"):
         command = (
             ["bash", str(installer), action] if shell == "bash" else
@@ -878,10 +1029,15 @@ def test_command_binding_real_installer_refuses_before_self_staging(
         )
         assert refused.returncode != 0, refused.stdout + refused.stderr
         assert "Command ownership" in refused.stdout + refused.stderr, refused.stdout + refused.stderr
-        assert _snapshot(binding_fixture["home"]) == before
+        after = _refused_installer_snapshot(binding_fixture, installer)
+        assert after == before, {
+            "added": sorted(after.keys() - before.keys()),
+            "removed": sorted(before.keys() - after.keys()),
+            "changed": sorted(key for key in after.keys() & before.keys() if after[key] != before[key]),
+        }
     if host:
         host.close()
-        assert _snapshot(binding_fixture["home"]) == before
+        assert _refused_installer_snapshot(binding_fixture, installer) == before
     settings.write_bytes(original)
 
 
@@ -956,13 +1112,10 @@ def test_command_binding_native_selfstage_preserves_human_optin(
     binding_fixture: dict, shell: str, action: str, windows_powershell: bool,
 ) -> None:
     _prepare_catalog(binding_fixture)
+    _materialize_native_payload(binding_fixture)
     payload = binding_fixture["payload"]
     suffix = "sh" if shell == "bash" else "ps1"
     installer = payload / f"scripts/install.{suffix}"
-    shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/install.{suffix}", installer)
-    if shell == "powershell":
-        for name in ("installer-human-output.ps1", "install.human-output.json"):
-            shutil.copyfile(ROOT / "plugins/agent-worktrees/scripts" / name, installer.parent / name)
     _write(payload / "plugin.json", {"name": PLUGIN_ID})
     environment = {
         **_catalog_environment(binding_fixture),

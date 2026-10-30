@@ -38,7 +38,7 @@ from manager_suite_artifacts import (
     _DELIVERY, _MATERIALIZE, _command, _configuration, _env, _task_inventory_script, _write,
 )
 from manager_suite_diagnostics import (
-    MARKERS, _engine_probe, _record, _resident_probe, _snapshot, retain_driver_logs,
+    MARKERS, _consumer_demand, _engine_probe, _record, _resident_probe, _snapshot, retain_driver_logs,
     retain_resident_logs,
 )
 
@@ -375,22 +375,22 @@ def _registration_routes(case: Path, before: dict[str, Any], after: dict[str, An
 def _watch_resident(name: str, root: Path, old_pid: int, control: Path) -> dict[str, Any]:
     # One prewarmed native observer per resident avoids mistaking interpreter
     # startup latency or a marker's last-write time for a readiness event.
-    with closing_process(old_pid) as incumbent:
+    with closing_process(old_pid) as incumbent, _consumer_demand(name, root) as demand:
         original = _resident_probe(name, root, old_pid)
         old_created, _old_exit, code = incumbent.times()
         if code != 259:
             raise RuntimeError(f"{name}: incumbent exited before observation was armed")
+        demand()
         _write(control / "ready.json", original)
         deadline = time.monotonic() + 840
         last_error = "No distinct successor was published"
-        next_demand = 0.0
+        incumbent_logs = False
         while time.monotonic() < deadline and not (control / "stop").exists():
             try:
-                if name == "agent-worktrees" and time.monotonic() >= next_demand:
-                    from agent_worktrees import list_cache
-                    list_cache.note_demand("native-suite", argparse.Namespace(),
-                                           project="example", tracking_status="active")
-                    next_demand = time.monotonic() + 15
+                demand()
+                if name == "agent-bridge" and not incumbent_logs and incumbent.times()[2] != 259:
+                    retain_resident_logs(control.parent.parent, incumbent=True)
+                    incumbent_logs = True
                 marker, _ = _record(root, name)
                 if marker["pid"] != old_pid:
                     if name in RETAINED_RESIDENTS:
@@ -413,6 +413,7 @@ def _watch_resident(name: str, root: Path, old_pid: int, control: Path) -> dict[
                             "old_exit_ns_at_ready": old_exit, "old_exit_code_at_ready": old_code,
                         }
                         while time.monotonic() < deadline and not (control / "stop").exists():
+                            demand()
                             time.sleep(0.02)
                         row["new_exit_code"] = successor.times()[2]
                         return {"observation": row}
@@ -676,15 +677,12 @@ def prepare(directory: Path, mode: str) -> None:
         _run(_command(case, "worktree-manager", "mux-daemon", "ensure"), case, timeout=30)
         before = _observe(case, declared)
         _run([_python(case / "h" / ".agent-codespaces"), "-I", "-X", "utf8", "-B", "-c",
-              "from agent_codespaces.connection_owner import hold;"
-              "hold('native-suite', 'manager-suite')"], case, timeout=30)
+              "from agent_codespaces.connection_owner import hold,ensure_owner_running;"
+              "hold('native-suite', 'manager-suite');"
+              "assert ensure_owner_running(), 'Selected Codespaces owner did not start'"], case, timeout=45)
         owner_tasks = [row for row in _tasks(case) if row["name"] == "agent-codespaces-owner"]
         if len(owner_tasks) != 1:
             raise RuntimeError("Baseline Codespaces owner requires its exact owned native task")
-        task_path = owner_tasks[0]["path"].replace("'", "''")
-        _run([shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
-              "$ErrorActionPreference='Stop'; Start-ScheduledTask -TaskName 'agent-codespaces-owner' "
-              f"-TaskPath '{task_path}'"], case, timeout=30)
         _run([_python(case / "h" / ".agent-codespaces"), "-I", "-X", "utf8", "-B", "-c",
               "import time\nfrom agent_codespaces.connection_owner import is_owner_live\n"
               "deadline=time.monotonic()+30\n"

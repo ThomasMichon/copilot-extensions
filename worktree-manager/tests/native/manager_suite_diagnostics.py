@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+from contextlib import contextmanager
 import json
 import hashlib
 import os
@@ -21,6 +23,44 @@ MARKERS = {
     "worktree-manager": "mux-daemon.lock",
     "agent-index/engine": "engine.pid",
 }
+
+
+@contextmanager
+def _consumer_demand(name: str, root: Path):
+    endpoint = None
+    next_refresh = 0.0
+    client_id = None
+
+    def refresh() -> None:
+        nonlocal endpoint, next_refresh, client_id
+        if time.monotonic() < next_refresh:
+            return
+        if name == "agent-worktrees":
+            from agent_worktrees import list_cache
+            list_cache.note_demand("native-suite", argparse.Namespace(),
+                                   project="example", tracking_status="active")
+        elif name == "worktree-manager":
+            from work_coalescing_singleton import client
+            from worktree_manager import mux_daemon_cutover as control
+            route = control.routed_endpoint(root)
+            if route is None:
+                raise RuntimeError("Manager consumer cannot resolve the current endpoint")
+            connection = control.ControlClient(route.base_url, root=root, timeout=1)
+            selected = (connection.host, connection.port, connection.token)
+            if client_id is None:
+                client_id = client.new_client_id()
+            client.subscribe(*selected, client_id, timeout=1)
+            if endpoint is not None and endpoint != selected:
+                client.release(*endpoint, client_id, timeout=1)
+            endpoint = selected
+        next_refresh = time.monotonic() + 5
+
+    try:
+        yield refresh
+    finally:
+        if endpoint is not None:
+            from work_coalescing_singleton import client
+            client.release(*endpoint, client_id, timeout=1)
 
 
 def _record(root: Path, name: str) -> tuple[dict[str, Any], int]:
@@ -213,7 +253,7 @@ def retain_driver_logs(case: Path, output: str) -> None:
         print(f"Driver diagnostic write failed: {error}", file=sys.stderr)
 
 
-def retain_resident_logs(case: Path) -> None:
+def retain_resident_logs(case: Path, *, incumbent: bool = False) -> None:
     """Keep only known fixture daemon outputs, never scan durable application data."""
     for component, names in {
         "agent-bridge": ("agent-bridge.log", "agent-bridge-err.log"),
@@ -230,7 +270,10 @@ def retain_resident_logs(case: Path) -> None:
                     size = stream.seek(0, os.SEEK_END)
                     stream.seek(max(0, size - MAX_LOG_BYTES))
                     data = stream.read(MAX_LOG_BYTES)
-                destination = case / "resident-logs" / component / name
+                relative = Path(name)
+                if incumbent:
+                    relative = relative.with_name("incumbent-" + relative.name)
+                destination = case / "resident-logs" / component / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(data)
             except FileNotFoundError:

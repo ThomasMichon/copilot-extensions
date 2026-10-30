@@ -77,9 +77,11 @@ def _publication(
     )
 
 
-def _owner(binding: Any, primitive: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+def _owner(
+    binding: Any, primitive: Any, arguments: dict[str, Any], *, operation: str = "publish",
+) -> dict[str, Any]:
     try:
-        receipt = binding.publish_legacy_binding(primitive, **arguments)
+        receipt = binding.publish_legacy_binding(primitive, operation=operation, **arguments)
     except binding.SourceProvenanceUnavailable:
         decision = primitive.probe_legacy_entrypoint(
             **{key: arguments[key] for key in (
@@ -91,7 +93,8 @@ def _owner(binding: Any, primitive: Any, arguments: dict[str, Any]) -> dict[str,
             raise binding.CommandOwnershipConflict(
                 f"Unattributed legacy runtime mutation refused: {decision['probeReason']}."
             )
-        _recovery_commands(binding, primitive, arguments)
+        if operation != "teardown":
+            _recovery_commands(binding, primitive, arguments)
         # This is only a mutation reservation, not normalized source identity
         # or selectable installation ownership.
         return {
@@ -214,7 +217,8 @@ class LifecycleLease:
             or current["pid"] != self.ticket["pid"]
             or not self.primitive._pid_is_live(current["pid"])
             or _purpose(self.binding, current) != self.purpose
-            or _owner(self.binding, self.primitive, self.arguments) != self.owner
+            or _owner(self.binding, self.primitive, self.arguments,
+                      operation=self.purpose["operation"]) != self.owner
         ):
             raise self.binding.CommandOwnershipConflict("Runtime lifecycle admission changed.")
         _reservation(self.binding, self.primitive, self.arguments, self.owner)
@@ -249,7 +253,7 @@ def borrowed_lease(
     if current is not None:
         if Path(arguments["legacy_root"]) != Path(current.arguments["legacy_root"]):
             raise binding.CommandOwnershipConflict("Runtime lifecycle root changed.")
-        if _owner(binding, primitive, arguments) != current.owner:
+        if _owner(binding, primitive, arguments, operation=operation) != current.owner:
             raise binding.CommandOwnershipConflict("Runtime lifecycle source changed.")
         current.assert_owned()
         current.assert_operation(operation)
@@ -270,7 +274,7 @@ def borrowed_lease(
         or len(ticket["token"]) != 32
     ):
         raise binding.CommandOwnershipConflict("Invalid runtime lifecycle ticket.")
-    owner = _owner(binding, primitive, arguments)
+    owner = _owner(binding, primitive, arguments, operation=operation)
     if ticket["owner"] != owner:
         raise binding.CommandOwnershipConflict("Runtime lifecycle ticket names another source.")
     lock.token = ticket["token"]
@@ -317,12 +321,14 @@ def legacy_lifecycle(
     # Refuse obvious foreign ownership without creating even a lock directory;
     # admission is repeated after acquisition to close the concurrent-writer race.
     _publication(binding, primitive, arguments, purpose)
-    _reservation(binding, primitive, arguments, _owner(binding, primitive, arguments))
+    _reservation(binding, primitive, arguments, _owner(
+        binding, primitive, arguments, operation=purpose["operation"],
+    ))
     with _lock(
         primitive, arguments,
         timeout_seconds=None if deadline is None else max(0, deadline - time.monotonic()),
     ) as lock:
-        owner = _owner(binding, primitive, arguments)
+        owner = _owner(binding, primitive, arguments, operation=purpose["operation"])
         manifest = _reservation(binding, primitive, arguments, owner)
         _publication(binding, primitive, arguments, purpose)
         primitive._atomic_write_json(

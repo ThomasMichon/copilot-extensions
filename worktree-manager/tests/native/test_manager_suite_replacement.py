@@ -171,6 +171,101 @@ def test_observer_pins_successor_until_final_native_observation(
     assert held == set()
 
 
+@pytest.mark.parametrize("name", ("agent-worktrees", "worktree-manager"))
+def test_observer_keeps_consumer_demand_after_successor_readiness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str,
+) -> None:
+    refreshes = []
+    health = {"pid": 101, "version": "v1", "ready": True,
+              "runtime_generation": "g1", "dependencies": {}, "ready_observed_ns": 10}
+
+    @contextmanager
+    def demand(component, root):
+        assert (component, root) == (name, tmp_path)
+        try:
+            yield lambda: refreshes.append(len(refreshes))
+        finally:
+            refreshes.append("closed")
+
+    def stop_after_ready(_delay):
+        assert len(refreshes) >= 3
+        (tmp_path / "stop").touch()
+
+    monkeypatch.setattr(fixture, "_consumer_demand", demand, raising=False)
+    monkeypatch.setattr(fixture, "closing_process",
+                        lambda pid: nullcontext(SimpleNamespace(times=lambda: (pid, 0, 259))))
+    monkeypatch.setattr(fixture, "_resident_probe", lambda *args: health)
+    monkeypatch.setattr(fixture, "_record", lambda *args: ({"pid": 202}, 0))
+    monkeypatch.setattr(fixture.time, "sleep", stop_after_ready)
+    row = fixture._watch_resident(name, tmp_path, 101, tmp_path)["observation"]
+    assert row["new_exit_code"] == 259
+    assert refreshes[-1] == "closed"
+
+
+def test_bridge_incumbent_logs_are_captured_before_successor_truncation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "h" / ".agent-bridge"
+    root.mkdir(parents=True)
+    stderr = root / "agent-bridge-err.log"
+    stderr.write_text("incumbent failure", encoding="utf-8")
+    control = tmp_path / "observers" / "agent-bridge"
+    control.mkdir(parents=True)
+    health = {"pid": 101, "version": "v1", "ready": True,
+              "runtime_generation": "g1", "dependencies": {}, "ready_observed_ns": 10}
+    old_samples = iter(((101, 0, 259), (101, 15, 70), (101, 15, 70)))
+
+    def record(*args):
+        stderr.write_text("successor startup", encoding="utf-8")
+        return {"pid": 202}, 0
+
+    monkeypatch.setattr(fixture, "closing_process", lambda pid: nullcontext(SimpleNamespace(
+        times=lambda: next(old_samples) if pid == 101 else (202, 0, 259),
+    )))
+    monkeypatch.setattr(fixture, "_resident_probe", lambda *args: health)
+    monkeypatch.setattr(fixture, "_record", record)
+    monkeypatch.setattr(fixture.time, "sleep", lambda _: (control / "stop").touch())
+    fixture._watch_resident("agent-bridge", root, 101, control)
+    diagnostics.retain_resident_logs(tmp_path)
+    retained = tmp_path / "resident-logs" / "agent-bridge"
+    assert (retained / "incumbent-agent-bridge-err.log").read_text() == "incumbent failure"
+    assert (retained / "agent-bridge-err.log").read_text() == "successor startup"
+
+
+def test_manager_fixture_subscriber_follows_route_and_releases_both_generations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import ExitStack
+    from work_coalescing_singleton import CoalescingServer
+    from worktree_manager import mux_daemon_cutover as control
+
+    now = [0.0]
+    monkeypatch.setattr(diagnostics.time, "monotonic", lambda: now[0])
+    token = control.load_or_create_control_token(tmp_path)
+    with ExitStack() as owned:
+        servers = [
+            CoalescingServer(lambda *args: {}, token=token),
+            CoalescingServer(lambda *args: {}, token=token),
+        ]
+        for server in servers:
+            server.start()
+            owned.callback(server.close)
+
+        def select(server):
+            port = int(server.rendezvous()["endpoint"].rsplit(":", 1)[1])
+            control.publish_route(port, root=tmp_path, pid=os.getpid(), version="fixture")
+
+        select(servers[0])
+        with diagnostics._consumer_demand("worktree-manager", tmp_path) as refresh:
+            refresh()
+            assert [server.subscriber_count() for server in servers] == [1, 0]
+            select(servers[1])
+            now[0] = 6.0
+            refresh()
+            assert [server.subscriber_count() for server in servers] == [0, 1]
+        assert [server.subscriber_count() for server in servers] == [0, 0]
+
+
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native PowerShell capture")
 @pytest.mark.parametrize("owned_count", (0, 1, 2))
 def test_task_inventory_captures_only_owned_unicode_records(

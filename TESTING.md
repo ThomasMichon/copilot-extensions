@@ -5032,6 +5032,15 @@ synthetic POSIX profiles do not establish native WSL guest identity.
 `libs/agent-procutil/tests`, including explicit native daemon wait-status controls.
 `--all` remains scoped to plugin suites.
 
+Native command-lifecycle fixtures materialize the complete installer and its
+declared driver dependency closure. The initialized PowerShell host frames its
+control replies separately from captured raw stdout, including native JSON.
+Refusal comparisons retain every product, command, staging and user-data byte;
+only declared driver audit files, the known PowerShell startup cache and Python
+bytecode for existing payload modules are accounted separately. Driver requests
+must finish nonzero without unresolved execution. Same-size/same-mtime source,
+runtime and command mutations remain detected.
+
 The copied-pane boundary controls are an explicit, non-serving native lane:
 
 ```text
@@ -5111,13 +5120,17 @@ independent engine through the native installer; ordinary Manager updates
 preserve that separately managed engine rather than provisioning it implicitly.
 Its exact native process identity, running version, healthy readiness and sealed
 slot are attested as retained; it is not misclassified as a replaced runtime.
-After cold setup, the Codespaces owner starts through its verified native
-scheduled registration, with installed liveness observed before recording V1.
+After cold setup, the Codespaces owner starts through its installed on-demand
+ensure API, retaining the controlled caller's delivery environment, with
+installed liveness observed before recording V1. Its real native scheduled
+registration is retained and its current-runtime resolver is separately verified.
 Worktrees' V1 monitor is explicitly ensured through its installed on-demand API;
 installation alone intentionally need not start an absent monitor. A
-fixture-owned Codespaces tenant hold and periodic Worktrees list demand keep
-these on-demand residents needed during the update without changing their idle
-policy. This synthetic demand does not qualify a real remote SSH channel.
+fixture-owned Codespaces tenant hold, periodic Worktrees list demand and an
+authenticated Manager subscriber keep these on-demand residents needed through
+the final observation without changing their idle policy. The Manager subscriber
+follows the current route and releases the prior and final generations.
+This synthetic demand does not qualify a real remote SSH channel.
 Settlement releases the fixture tenant,
 uses Codespaces' generation-bound `owner --stop` and waits for normal channel
 cleanup before removing the exact owned scheduled registration. Task termination
@@ -5127,6 +5140,8 @@ Observers retain each successor's native handle through the final sample rather
 than reopening a possibly exited process ID after the update. Failure artifacts
 include bounded tails of the fixture's known Bridge and Codespaces daemon logs;
 durable application data and unrelated files are not collected.
+Bridge's first observed incumbent exit also snapshots those bounded logs before
+successor startup can truncate the shared output files.
 
 Cold preparation and exercise each have a 900-second owned-process deadline;
 assertions retain a separate 300-second runner boundary and the usual pytest
@@ -5136,6 +5151,14 @@ product-daemon lifetime boundary; this flow does not run inside a restrictive
 local test Job. The workflow retains synthetic diagnostics and cannot pass on
 failed or missing settlement. Neither this test flow nor a passing component
 test asserts that whole-suite acceptance has already passed.
+
+The bootstrap RedirectionGuard controls create links as an unprivileged user:
+Windows deliberately [trusts administrator-created links](https://www.microsoft.com/en-us/msrc/blog/2025/06/redirectionguard-mitigating-unsafe-junction-traversal-in-windows).
+An elevated test host
+uses a restricted same-user thread token only during fixture link creation,
+then restores its original identity, including on failure. File-symlink cases
+retain their developer-mode/privilege prerequisite; guard and physical-path
+assertions are not relaxed.
 
 Prepared-source Manager selection/recovery has its own bounded native contract:
 
