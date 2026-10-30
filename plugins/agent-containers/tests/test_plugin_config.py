@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import textwrap
 from pathlib import Path
 
@@ -166,6 +167,45 @@ def test_null_override_clears_shipped_values_to_their_defaults(
     assert keys["size"] == f"config:{path}"
     assert keys["environment.REMOVE"] == f"config:{path}"
     assert keys["environment.KEEP"] == "plugin:example-harness@example"
+
+
+def test_null_clears_in_a_new_nested_mapping_are_dropped(tmp_path, monkeypatch, isolated):
+    root = _plugin(tmp_path / "plugins" / "example-harness", """\
+        fleets:
+          example:
+            image: example:latest
+    """)
+    isolated.append(("example-harness@example", [root]))
+    _operator_config(tmp_path, monkeypatch, """\
+        schema_version: 2
+        fleets:
+          example:
+            environment:
+              REMOVE: null
+              KEEP: "1"
+    """)
+    assert load_config(strict=True).fleets["example"].environment == {"KEEP": "1"}
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlinks unavailable")
+def test_cyclic_symlink_declaration_is_skipped(tmp_path, monkeypatch, isolated):
+    root = _plugin(tmp_path / "plugins" / "example-harness", None)
+    try:
+        os.symlink(root / "loop-b.yaml", root / "loop-a.yaml")
+        os.symlink(root / "loop-a.yaml", root / "loop-b.yaml")
+    except OSError as error:
+        pytest.skip(f"cannot create symlinks: {error}")
+    (root / "plugin.json").write_text(
+        json.dumps({"name": "example-harness", plugin_config.MANIFEST_FIELD: "loop-a.yaml"})
+    )
+    isolated.append(("example-harness@example", [root]))
+    _operator_config(tmp_path, monkeypatch, """\
+        schema_version: 2
+        fleets:
+          own:
+            image: own:latest
+    """)
+    assert list(load_config().fleets) == ["own"]
 
 
 def test_unknown_nested_mapping_keys_merge_per_key(tmp_path, monkeypatch, isolated):

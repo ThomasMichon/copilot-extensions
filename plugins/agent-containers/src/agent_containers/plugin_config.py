@@ -120,7 +120,7 @@ def _declared_fragment(source: str, root: Path) -> Path | None:
         base = root.resolve()
         target = (root / relative).resolve()
         target.relative_to(base)
-    except (OSError, ValueError):
+    except (OSError, RuntimeError, ValueError):
         log.warning(
             "Ignoring %s from %s: %r escapes the plugin root", MANIFEST_FIELD, source, declared
         )
@@ -216,8 +216,9 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     for key, value in override.items():
         if value is None:
             merged.pop(key, None)
-        elif isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _deep_merge(merged[key], value)
+        elif isinstance(value, dict):
+            current = merged.get(key)
+            merged[key] = _deep_merge(current if isinstance(current, dict) else {}, value)
         else:
             merged[key] = copy.deepcopy(value)
     return merged

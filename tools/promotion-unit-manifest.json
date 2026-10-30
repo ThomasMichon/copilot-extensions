@@ -3248,7 +3248,7 @@
         "tools/promotion_unit_tests/test_manager_launchers.py": "f31a192e5ad6d54c54964448ecd35579901ec622640ad47684f5733d0cd63707",
         "tools/promotion_unit_tests/test_manager_uninstall.py": "03ac1242560686175d4eb2174d269ee06cb8bafccd2e20115178ebad7b3b5cc6",
         "tools/promotion_unit_tests/test_mcp_home.py": "d1740e27b644f828638e8afdf6ee0f7bcec78953ca91bf969f6e5bedde0836e2",
-        "tools/promotion_unit_tests/test_namespace_contract.py": "3aec928f88a510e72883a8f791658ed7789c1548c841f8a419397ef1bfdb1bbc",
+        "tools/promotion_unit_tests/test_namespace_contract.py": "980b4c8a8d029a01f20d9eb39aba8e9e83bf13c0ee273d4e85da93dec38f4338",
         "tools/promotion_unit_tests/test_packaging_seed.py": "898e0bfa4a1bb4851a615d5ce0b9e31b1d29b653c6e82637335e5fef31f24da4",
         "tools/promotion_unit_tests/test_packet.py": "67220a14e4feb830ed59f2a42439a3eeb5c8f0375fc4e6f000fa6029047a53d6",
         "tools/promotion_unit_tests/test_peer_environment.py": "c57627017da81c3e08a18d1a85a4861a97142bdb992b30c6bc0e67944af85cb5",

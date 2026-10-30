@@ -576,6 +576,7 @@ graph as `codespaceConfig` and plugin-shipped `related.yaml`):
   is personal:
 
   ```yaml
+  schema_version: 2
   dotfiles:
     repo: ~/dotfiles
   fleets:
