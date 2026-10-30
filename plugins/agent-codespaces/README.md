@@ -133,6 +133,40 @@ alongside its PID and process-birth identity. Changing the selected runtime does
 not relabel an incumbent process. Legacy beacons without this additive field
 remain readable, but do not establish which build is running.
 
+On Windows, install/update/repair registers future login starts and separately
+ensures the selected interpreter through the owned headless daemon launcher;
+it never starts through an incumbent task's `IgnoreNew` gate or stops that task.
+Disabled configuration creates/starts nothing and leaves existing registrations
+alone. Code application and selected-process readiness do not depend on old
+beacon compatibility or channel cleanup.
+
+An immutable-slot Owner freezes its principal-owned completion identity at
+birth, using the slot's retained runtime helper. A verified selection inequality
+(including rollback or repair, not package-version ordering) ends admission of
+new reconcile cycles and drains that Owner's admitted native work before exit.
+Missing or unprovable selection evidence does not authorize retirement.
+The selected process publishes additive `runtime_identity`, `state` and
+`work_lease_version: 1` beacon fields. `passive` readiness has empty serving sets:
+it is process readiness, not proof of relay service. One OS-held work lease in
+the existing durable HOME excludes channel mutations across generations until
+predecessor cleanup settles. Legacy/unknown peers do not prevent incoming
+startup; without a compatible work lease, their observed native process birth
+is conservatively retained before activating incoming work. An unknown birth
+can leave that process passive, never license forced shutdown. Predecessors
+cannot withdraw a successor's beacon. Source/legacy layouts without immutable
+slot attribution retain the previous singleton discovery behavior.
+Lease-less process-birth exclusions are persisted separately in
+`connection-owner.predecessors.json`, under the existing registry lock, before
+replacing a legacy beacon. Passive restarts, supersession and beacon cleanup
+retain this evidence. Only positive native exit or birth mismatch retires an
+entry; corrupt, foreign, linked or unknown evidence conservatively excludes
+work without preventing passive startup or code application. Barrier updates
+are principal-validated, bounded and atomically published; an empty record is
+retained rather than deleting the last durable exclusion path.
+This record is preserved state, outside the uninstall profile's disposable
+`root_entries`. The existing uninstall custody guard refuses unresolved or
+uncertain exclusions; settled empty evidence survives ordinary runtime removal.
+
 `agent-codespaces owner --stop` requests cooperative shutdown of the verified
 local PID and process-birth identity. The running beacon advertises
 `owner_control_version: 1` for the `agent-codespaces.owner-control` contract;

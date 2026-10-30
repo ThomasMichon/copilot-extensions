@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import platform
 import py_compile
 import shutil
 import socket
@@ -106,11 +107,47 @@ def _fixture(tmp_path, plugin):
         "snapshots/operator-note.txt": b"unknown snapshot container child",
         "logs/operator.log": b"persistent operator log\n",
     }
+    if plugin == "agent-codespaces":
+        durable["connection-owner.predecessors.json"] = json.dumps({
+            "schema": "agent-codespaces.owner-predecessors", "version": 1,
+            "host": platform.node(), "predecessors": [],
+        }).encode("utf-8")
     for name, value in durable.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(value)
     return home, root, durable
+
+
+@pytest.mark.parametrize("evidence", ("unresolved", "unknown", "corrupt", "settled"))
+def test_codespaces_legacy_exclusions_are_preserved_state_and_guard_uninstall(
+    tmp_path, monkeypatch, evidence,
+):
+    module = _policy("agent-codespaces")
+    home = tmp_path / "home"
+    root = home / ".agent-codespaces"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    path = root / "connection-owner.predecessors.json"
+    value = {
+        "schema": "agent-codespaces.owner-predecessors", "version": 1,
+        "host": platform.node(), "predecessors": [],
+    }
+    if evidence == "unresolved":
+        value["predecessors"] = [{"pid": 123, "process_identity": None}]
+    elif evidence == "unknown":
+        value["version"] = 99
+    path.write_text("{" if evidence == "corrupt" else json.dumps(value), encoding="utf-8")
+    before = path.read_bytes()
+    payload = ROOT / "plugins" / "agent-codespaces"
+    if evidence == "settled":
+        module.check_under_custody(root, payload, "agent-codespaces")
+    else:
+        with pytest.raises((RuntimeError, ValueError)):
+            module.check_under_custody(root, payload, "agent-codespaces")
+    assert path.read_bytes() == before
+    profile = json.loads((payload / "scripts" / "uninstall-profile.json").read_text())
+    assert path.name not in profile["root_entries"]
 
 
 def _run(tmp_path, plugin, shell, home, root, *, preview=False, before=""):

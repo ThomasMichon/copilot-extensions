@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any
 
 from .connection_owner import (
@@ -19,6 +21,7 @@ from .connection_owner import (
     _live_snapshot,
     _owner_lock,
     _write_liveness,
+    _PROCESS_SELECTION,
 )
 
 log = logging.getLogger("agent-codespaces")
@@ -38,6 +41,8 @@ def renew_owner_singleton(
     interval: float,
     active: Iterable[str] | None = None,
     bridge_forwards: Iterable[str] | None = None,
+    *,
+    state: str = "active",
 ) -> bool:
     """Refresh this daemon's beacon -- or report that another Owner holds the machine.
 
@@ -48,6 +53,8 @@ def renew_owner_singleton(
     under the registry lock, an Owner that finds another's fresh beacon
     yields (False) instead of overwriting it."""
     with _owner_lock():
+        if _PROCESS_SELECTION and _PROCESS_SELECTION.superseded():
+            return False
         live = _live_snapshot()
         if live is not None and live.pid != os.getpid():
             return False
@@ -55,7 +62,7 @@ def renew_owner_singleton(
 
         if stop_requested():
             return False
-        _write_liveness(interval, active=active, bridge_forwards=bridge_forwards)
+        _write_liveness(interval, active=active, bridge_forwards=bridge_forwards, state=state)
         return True
 
 
@@ -79,6 +86,7 @@ class BeaconKeeper:
         self._on_yield = on_yield
         self._stop = threading.Event()
         self.yielded = False
+        self.active = False
         self._thread = threading.Thread(target=self._run, name="owner-beacon", daemon=True)
 
     def _snapshot(self) -> tuple[set[str], dict[str, int]]:
@@ -91,7 +99,10 @@ class BeaconKeeper:
 
     def beat(self) -> bool:
         active, bridges = self._snapshot()
-        if renew_owner_singleton(self._interval, active=active, bridge_forwards=bridges):
+        if renew_owner_singleton(
+            self._interval, active=active, bridge_forwards=bridges,
+            state="active" if self.active else "passive",
+        ):
             return True
         self.yielded = True
         return False
@@ -131,6 +142,88 @@ class BeaconKeeper:
         """Retain the beacon until its last native write has actually returned."""
         if self._thread.ident is not None:
             await owner_native_call(self._thread.join)
+
+
+async def run_owner_loop(
+    owner: Any, *, interval: float, stop_event: asyncio.Event | None,
+    idle_shutdown_after: float | None,
+) -> None:
+    """Keep process readiness separate from native channel-work custody."""
+    from single_instance_lease import OperationLock, OperationLockedError
+    from . import connection_owner as registry
+    from .owner_identity import legacy_work_blocked
+
+    if not registry.claim_owner_singleton(interval):
+        log.info("Connection Owner already live on this machine; not starting a second one.")
+        return
+    stop = stop_event if stop_event is not None else asyncio.Event()
+    idle_since: float | None = None
+    loop = asyncio.get_running_loop()
+    keeper = BeaconKeeper(owner, interval, lambda: loop.call_soon_threadsafe(stop.set))
+    work = OperationLock(Path(registry.RUNTIME_DIR).resolve() / "connection-owner.work.lock")
+    try:
+        keeper.start()
+        while not stop.is_set():
+            if keeper.yielded or not keeper.beat():
+                break
+            if not keeper.active:
+                with registry._owner_lock():
+                    if not legacy_work_blocked():
+                        try:
+                            work.acquire()
+                        except OperationLockedError:
+                            pass
+                        else:
+                            keeper.active = True
+                if not keeper.active:
+                    try:
+                        await asyncio.wait_for(stop.wait(), timeout=min(interval, 1.0))
+                    except (TimeoutError, asyncio.TimeoutError):
+                        pass
+                    continue
+                if not keeper.beat():
+                    break
+            work.assert_owned()
+            try:
+                await owner.reconcile()
+            except Exception as exc:
+                log.warning("Connection Owner reconcile cycle failed: %s", exc)
+            if keeper.yielded or not keeper.beat():
+                break
+            if idle_shutdown_after is not None:
+                if registry.list_holds():
+                    idle_since = None
+                else:
+                    if idle_since is None:
+                        idle_since = time.monotonic()
+                    elif time.monotonic() - idle_since >= owner.idle_limit(idle_shutdown_after):
+                        log.info("Connection Owner idle (no held CodeSpaces, no owed push) -- exiting;"
+                                 " a tenant starts it back up on demand.")
+                        break
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval)
+            except (TimeoutError, asyncio.TimeoutError):
+                pass
+    finally:
+        async def finish() -> None:
+            from .owner_control import shutdown_owner
+
+            keeper.stop()
+            await keeper.wait_stopped()
+            try:
+                await shutdown_owner(owner)
+            finally:
+                try:
+                    registry._clear_liveness()
+                finally:
+                    if keeper.active:
+                        work.release()
+
+        task = asyncio.create_task(finish())
+        cancelled = await settle_owner_task(task)
+        task.result()
+        if cancelled:
+            raise asyncio.CancelledError
 
 
 async def settle_owner_task(task: asyncio.Future[Any]) -> bool:

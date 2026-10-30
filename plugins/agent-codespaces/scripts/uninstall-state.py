@@ -6,6 +6,7 @@ import argparse
 import importlib.util
 import json
 import os
+import platform
 import stat
 import sys
 from pathlib import Path
@@ -143,6 +144,15 @@ def check_under_custody(root: Path, payload_root: Path, plugin_id: str) -> None:
     if plugin_id != PLUGIN or payload_root.resolve() != Path(__file__).resolve().parents[1]:
         raise RuntimeError("Foreign uninstall guard ownership")
     for transport_root in (root, Path.home() / ".agent-codespaces"):
+        exclusions = transport_root / "connection-owner.predecessors.json"
+        if os.path.lexists(exclusions):
+            evidence = document(exclusions)
+            if (set(evidence) != {"schema", "version", "host", "predecessors"}
+                    or evidence.get("schema") != "agent-codespaces.owner-predecessors"
+                    or type(evidence.get("version")) is not int or evidence["version"] != 1
+                    or evidence.get("host") != platform.node()
+                    or evidence.get("predecessors") != []):
+                raise RuntimeError("Uninstall refuses unresolved legacy Connection Owner exclusion custody")
         sockets = transport_root / "sockets"
         if os.path.lexists(sockets) and (not sockets.is_dir() or any(sockets.iterdir())):
             raise RuntimeError("Uninstall refuses active/reconnect transport custody (sockets)")
