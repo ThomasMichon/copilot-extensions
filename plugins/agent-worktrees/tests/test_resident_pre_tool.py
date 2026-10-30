@@ -242,13 +242,13 @@ if (name === "reads" || name === "bom") {
     "import sys\\nif sys.argv[1] == 'preToolUse': print('{}')\\n");
   const actual = make(createPythonPolicy({ scriptsRoot: root, python, environment: env }));
   const result = await actual({ ...input, toolName: "edit" });
-  if (["python-policy", "python-encoding", "python-warning"].includes(name)) {
+  if (["python-policy", "python-encoding", "python-warning", "python-missing-guard"].includes(name)) {
     assert.equal(result.permissionDecision, "deny");
     assert.equal(result.permissionDecisionReason, "real Python policy");
   } else {
     assertUnavailable(result);
   }
-  assert.equal(reports.length, ["python-policy", "python-encoding", "python-warning"].includes(name) ? 0 : 1);
+  assert.equal(reports.length, ["python-policy", "python-encoding", "python-warning", "python-missing-guard"].includes(name) ? 0 : 1);
   const diagnostic = {
     "python-empty": "policy-response-empty", "python-legacy": "policy-response-empty",
     "python-error": "policy-process-failed", "python-invalid-json": "policy-response-invalid",
@@ -296,7 +296,8 @@ console.log(JSON.stringify({ case: name, calls, reports }));
 
 @pytest.mark.parametrize("fault", [
     "missing-entry", "missing-policy", "broken-policy", "missing-runtime", "malformed-event", "none",
-    "failed-component-deny", "failed-component-ask", "activation-report-failure",
+    "failed-component-deny", "failed-component-ask", "activation-report-failure", "missing-sibling-protected",
+    "unsafe-sibling-protected",
 ])
 def test_sdk_pretool_unavailable_recovery_preserves_confirmed_violation(tmp_path, fault):
     from agent_procutil import no_window_kwargs
@@ -329,7 +330,7 @@ const hooks = selectResidentPreToolHooks({
     });
   },
 });
-const protectedEvent = fault === 'none' || fault.startsWith('failed-component-');
+const protectedEvent = fault === 'none' || fault.endsWith('sibling-protected') || fault.startsWith('failed-component-');
 const event = {
   toolName: protectedEvent ? 'create' : 'powershell',
   toolArgs: protectedEvent ? { path: cwd + '/efforts/active/fixture.md' } :
@@ -353,7 +354,7 @@ console.log(JSON.stringify(result));
         assert decision.get("permissionDecision") == fault.rsplit("-", 1)[1], decision
         assert "anchor" in decision.get("permissionDecisionReason", "").lower(), decision
         assert "statelessness_guard.py evaluation failed" in decision.get("additionalContext", ""), decision
-    elif fault == "none":
+    elif fault in ("none", "missing-sibling-protected"):
         assert decision.get("permissionDecision") == "deny", decision
         assert "personal" in decision.get("permissionDecisionReason", "").lower(), decision
     else:

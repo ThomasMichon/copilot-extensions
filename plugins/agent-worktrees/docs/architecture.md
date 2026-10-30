@@ -3013,16 +3013,18 @@ Other input retains the existing selected-runtime resolver in read-only mode
 for default installations, with the old ambient Python compatibility path when
 no slot is available. Explicit installation contexts retain the existing Python
 validator, not a legacy-root substitute. Python receives UTF-8 input explicitly
-without a CLI/binstub or self-provisioning invocation. Required policy failure
-is reported as a deny, never silently presented as a successful no-op. The
-service-unavailable Python guard fallbacks are unchanged in this slice.
+without a CLI/binstub or self-provisioning invocation. Unavailable evaluation
+returns bounded recovery `additionalContext` without a fabricated permission
+decision; it is not authorization or proof that policy was satisfied. Confirmed
+protected violations retain their existing deny/ask outcomes.
 
 Native JSON readers reject non-object roots before PowerShell can enumerate
 a singleton array. Non-exempt native fallback uses the strict entry and checks
 a bounded, typed object response before forwarding diagnostics. Empty,
-malformed and down-level unknown-entry responses deny. Child UTF-8 settings
-override inherited standard-I/O encodings, including during native fallback.
-Strict hot-stop responses explicitly acknowledge `{}` without loading guards;
+malformed and down-level unknown-entry responses report unavailable evaluation
+without a permission decision. Child UTF-8 settings override inherited
+standard-I/O encodings, including during native fallback.
+Strict hot-stop responses explicitly serialize `{}` without loading guards;
 legacy command-hook stop/no-op responses retain their empty-output behavior.
 Stop overrides must be fully qualified drive/UNC paths, and contract identifiers
 must be strings; relative overrides or array-valued identifiers retain policy.
@@ -3038,8 +3040,9 @@ native runner is unchanged; no generic installer lifetime behavior is widened.
 
 Explicit installation cells are validated through the existing native
 installation-context helper before the read-only runtime resolver selects the
-owning slot. A missing/invalid cell or unavailable owning interpreter denies
-without falling back to an ambient Python lacking the owned-process SDK.
+owning slot. A missing/invalid cell or unavailable owning interpreter produces
+nonblocking recovery context, without substituting an ambient Python lacking the
+owned-process SDK or asserting that installation validation succeeded.
 
 ### Opt-in resident pre-tool pilot
 
@@ -3063,8 +3066,9 @@ and rollback. Payload availability alone does not prove cached helper currency.
 
 Resident mode needs `AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON` to name an absolute
 existing interpreter from the owning installation's already-resolved runtime.
-If policy construction fails, the selected SDK hook returns an explicit denial;
-it never enables the command policy as a second implementation. Selection uses
+If policy construction fails, the selected SDK hook returns recovery context
+without a permission decision; a failed diagnostic reporter is retained in that
+context. It never enables the command policy as a second implementation. Selection uses
 no discovery RPC, helper process, timer, file marker or second runtime selector.
 Native hook discovery is configuration inventory, not proof of live dispatch,
 and is deliberately not used to arbitrate implementations.
@@ -3080,15 +3084,18 @@ Non-exempt operations enter `hook_policy_process.py`, which uses the existing
 owning runtime's `agent_procutil.owned_process.run_caller_owned` API to run only
 the standalone `hook_client.py`. SDK `workingDirectory` is passed as
 command-policy `cwd`. The pilot uses
-`preToolUseStrict` (the internal `--require-policy` entry): missing or failing
-fallback guards deny instead of silently
-allowing. This mode evaluates the current standalone policy directly, without
-reusing an older daemon's decision or its legacy fail-open response handling.
-Process, decoding and response failures likewise produce an explicit
-deny with a deduplicated diagnostic. Existing command-hook callers retain their
-compatibility behavior. An older client does not recognize this distinct entry
-and emits no decision, which the resident adapter rejects instead of silently
-falling back to the older client's non-strict behavior.
+`preToolUseStrict` (the internal `--require-policy` entry) evaluates current
+standalone policy directly, without reusing an older daemon decision. Missing
+individual guards reach per-component evaluation; another healthy guard can
+still confirm a protected violation. Present source files retain their bounded,
+regular-file and decoding checks. Missing core client/worker/helper files remain
+unavailable infrastructure, not successful evaluation.
+
+Process, decoding and response failures produce bounded recovery context without
+a fabricated permission decision. Diagnostic logging may be deduplicated, but
+context is returned for the current failed occurrence. An older client that does
+not recognize the strict entry emits no decision; the resident adapter reports
+that uncertainty without silently invoking the older non-strict entry.
 
 A successful strict policy evaluation always serializes its JSON object,
 including an empty no-op decision. Legacy command-hook no-ops remain silent.
@@ -3101,17 +3108,29 @@ cancellation. EOF terminates the actual worker behind a Windows venv launcher;
 the existing SDK retires the policy's owned child scope on timeout, normal
 completion and caller death. This is finite child-process custody, not a new
 daemon, runtime selector or host command-hook handback. An unavailable owning
-SDK denies explicitly without installation or provisioning. The policy budget
+SDK reports unavailable evaluation without installation or provisioning. The policy budget
 remains 25 seconds within the existing 28-second resident boundary.
 
 Each strict guard must return either no objection or a well-formed supported
-decision; malformed lists, statuses, field types and unknown responses deny
-before merging. Raw stderr is forwarded only after successful, valid policy
-responses, preserving successful warnings without repeating failing tracebacks.
+decision. Malformed lists, statuses, field types and unknown responses contribute
+an unavailable-component diagnostic rather than a permission decision. Evaluation
+continues so independently confirmed deny/ask outcomes remain intact. Raw stderr
+is forwarded only after successful, valid policy responses, preserving successful
+warnings without repeating failing tracebacks.
 
 Guard-chain evaluation lives in the standalone `hook_pre_policy.py` helper.
 Every installer declares it in the helper closure. A missing helper returns
-an explicit denial from either standalone entry, never a silent no-op.
+bounded recovery context from either standalone entry, not a silent successful
+evaluation. Errors identify the owner/boundary, effect, existing inspection path
+and retry safety without reflecting event arguments or arbitrary exception text.
+
+Compatibility command entries stream the selected helper response instead of
+buffering unbounded output. If an invoked legacy helper fails, they preserve its
+stdout and report unknown output completeness on stderr without appending another
+JSON object or evaluating policy again. A corrupt partial response is not thereby
+made valid. Actual host handling of partial JSON and model admission of pre-tool
+`additionalContext` remain qualification limits; stderr alone does not establish
+agent-visible recovery delivery.
 
 Installation-owned shim currency includes the client, both policy helpers,
 native entry, read contract and native runner. An already-current runtime must
