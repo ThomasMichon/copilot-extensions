@@ -16,7 +16,9 @@ from plugin_resolve.reflection import selection_spec, selection_json
 
 
 def add_plugin_selection_arguments(parser) -> None:
-    parser.add_argument("--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json)
+    parser.add_argument(
+        "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json, default=[],
+    )
     parser.add_argument("--stage-plugin", dest="stage_plugins", action="append", default=[])
     parser.add_argument(
         "--stage-plugin-disabled", dest="stage_plugins", action="append",
