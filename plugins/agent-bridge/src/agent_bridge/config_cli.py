@@ -174,7 +174,10 @@ def register_config_commands(sub: argparse._SubParsersAction) -> None:
     config_p = sub.add_parser("config", help="Manage configuration and topology profiles")
     config_sub = config_p.add_subparsers(dest="config_command")
 
-    mode_p = config_sub.add_parser("session-mode", help="Read or explicitly set new-session mode preferences")
+    mode_p = config_sub.add_parser(
+        "session-mode", help="Read or explicitly set new-session mode preferences",
+        description="Offline agent-bridge.session-mode/v1 preference contract",
+    )
     destination = mode_p.add_mutually_exclusive_group()
     destination.add_argument("--operator-repo", type=Path, help="Absolute operator config repository root")
     destination.add_argument("--machine-local", action="store_true", help="Explicitly write the active service config")

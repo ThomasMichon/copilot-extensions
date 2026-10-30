@@ -206,7 +206,14 @@ recorded defaults.
 ## New-session mode preference
 
 Before a **new** launch, consult the native owner instead of asking the operator
-to choose ACP versus CLI. An explicit task mode wins; otherwise read:
+to choose ACP versus CLI. An explicit task mode wins. First confirm support
+against the **selected runtime**, not the skill payload or package version:
+`<agent-bridge catalog argv[0]> config session-mode --help` must advertise
+`agent-bridge.session-mode/v1`. If an older runtime rejects this verb or reports
+another contract, report unsupported preference capability and the need for an
+authorized runtime update. Do not guess a mode, ask a routine mode question,
+automatically update/restart, or replace a retained session. Previously supported
+operations on existing sessions remain available. Once supported, read:
 
 ```bash
 <agent-bridge catalog argv[0]> config session-mode --operator-repo "<absolute-config-repo-root>" --repo example --venue codespace --default acp --json

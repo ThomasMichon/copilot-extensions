@@ -180,6 +180,93 @@ class TestSessionModes:
         assert path.read_bytes() == before
         assert not list(path.parent.glob("*.pending"))
 
+    def test_set_does_not_change_aliased_scopes_or_unrelated_values(self, tmp_path, config_home):
+        path = self.policy(tmp_path, {})
+        path.write_text(
+            "shared: &venues\n  ssh: acp\n"
+            "session_modes:\n  venues: *venues\n"
+            "  repos:\n    example:\n      venues: *venues\n"
+        )
+        write_session_mode(operator_repo=tmp_path, repo="example", venue="ssh", mode="cli")
+        actual = yaml.safe_load(path.read_text())
+        assert actual["shared"] == {"ssh": "acp"}
+        assert actual["session_modes"]["venues"] == {"ssh": "acp"}
+        assert actual["session_modes"]["repos"]["example"]["venues"] == {"ssh": "cli"}
+
+    @pytest.mark.skipif(__import__("sys").platform == "win32", reason="POSIX permission bits")
+    def test_preserves_protected_permissions_and_restricts_new_files(self, tmp_path, config_home):
+        import os
+        import stat
+
+        path = self.policy(tmp_path, {"default": "acp"}, unrelated="private")
+        path.chmod(0o600)
+        old_umask = os.umask(0o022)
+        try:
+            write_session_mode(operator_repo=tmp_path, mode="cli")
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+            path.unlink()
+            write_session_mode(operator_repo=tmp_path, mode="acp")
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        finally:
+            os.umask(old_umask)
+
+    def test_overlapping_subprocess_writers_preserve_both_scopes(self, tmp_path, config_home):
+        import subprocess
+        import sys
+
+        from agent_procutil import no_window_kwargs
+
+        self.policy(tmp_path, {"default": "acp"})
+        first_script = """
+import sys
+from pathlib import Path
+from agent_bridge import session_modes as modes
+replace = modes.os.replace
+def held_replace(*args):
+    print("ready", flush=True)
+    sys.stdin.readline()
+    replace(*args)
+modes.os.replace = held_replace
+modes.write_session_mode(operator_repo=Path(sys.argv[1]), venue="ssh", mode="cli")
+"""
+        second_script = """
+import sys
+from pathlib import Path
+from agent_bridge import session_modes as modes
+sleep = modes.time.sleep
+def contended(delay):
+    print("waiting", flush=True)
+    sleep(delay)
+modes.time.sleep = contended
+modes.write_session_mode(operator_repo=Path(sys.argv[1]), venue="container", mode="cli")
+"""
+        processes = []
+        try:
+            first = subprocess.Popen(
+                [sys.executable, "-c", first_script, str(tmp_path)],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, **no_window_kwargs(),
+            )
+            processes.append(first)
+            assert first.stdout.readline().strip() == "ready"
+            second = subprocess.Popen(
+                [sys.executable, "-c", second_script, str(tmp_path)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **no_window_kwargs(),
+            )
+            processes.append(second)
+            assert second.stdout.readline().strip() == "waiting"
+            _, error = first.communicate("\n", timeout=10)
+            assert first.returncode == 0, error
+            _, error = second.communicate(timeout=10)
+            assert second.returncode == 0, error
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=10)
+        for venue in ("ssh", "container"):
+            assert resolve_session_mode(operator_repo=tmp_path, venue=venue)["mode"] == "cli"
+
     @pytest.mark.parametrize("kwargs", [{"repo": "../example"}, {"venue": "SSH"}, {"mode": "other"}])
     def test_invalid_write_selectors(self, config_home, kwargs):
         args = {"machine_local": True, "mode": "cli", **kwargs}
@@ -204,6 +291,9 @@ class TestSessionModes:
         fresh = command()
         assert fresh.returncode == 0, fresh.stderr
         assert json.loads(fresh.stdout) == {"mode": "acp", "source": "default"}
+        help_result = command("--help")
+        assert help_result.returncode == 0, help_result.stderr
+        assert "agent-bridge.session-mode/v1" in help_result.stdout
         denied = command("--set", "cli")
         assert denied.returncode == 1
         assert "exactly one" in denied.stderr
@@ -217,6 +307,33 @@ class TestSessionModes:
         invalid = command("--operator-repo", str(tmp_path))
         assert invalid.returncode == 1
         assert "refusing authority fallback" in invalid.stderr
+
+    def test_new_request_to_legacy_runtime_reports_unsupported_without_effects(self, tmp_path, config_home):
+        import subprocess
+        import sys
+
+        from agent_procutil import no_window_kwargs
+
+        # Model the pre-capability selected parser while retaining the actual
+        # command tree. A new payload cannot infer support from its own bytes.
+        script = """
+import argparse
+from agent_bridge.__main__ import build_parser
+parser = build_parser()
+sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+config = sub.choices["config"]
+commands = next(a for a in config._actions if isinstance(a, argparse._SubParsersAction))
+del commands.choices["session-mode"]
+parser.parse_args(["config", "session-mode", "--help"])
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], cwd=tmp_path,
+            capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        )
+        assert result.returncode == 2
+        assert "invalid choice" in result.stderr and "session-mode" in result.stderr
+        assert not (config_home / "config.yaml").exists()
+        assert not (tmp_path / ".copilot-extensions").exists()
 
 
 class TestSaveConfig:

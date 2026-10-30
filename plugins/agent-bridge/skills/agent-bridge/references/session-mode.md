@@ -4,6 +4,24 @@ This offline helper is the single preference owner; adopters must not parse YAML
 themselves. Explicit task mode stays caller-owned and highest priority. No config
 operation switches existing sessions or authorizes service rollout.
 
+## Selected-runtime compatibility
+
+The additive contract is `agent-bridge.session-mode/v1`. Its supported generation
+is 1; stdout JSON has additive fields, and consumers require `mode` plus `source`
+while ignoring unknown result fields. Absent policy defaults to ACP. No prior
+command is removed or changed, and there is no deprecation window to retire.
+
+Before requiring this capability, invoke the catalog command's
+`config session-mode --help` against the runtime it actually selects. That
+runtime's parser advertises the contract identity; a newer skill payload is not
+proof that an older selected runtime supports it. An unknown subcommand (exit 2)
+or absent/unsupported contract means unsupported capability, not missing policy.
+Report the named missing capability and the need for an authorized update;
+never guess a mode, silently fall back, update/restart automatically, or block
+previously supported send/resume operations on existing sessions. After an
+authorized update, re-probe the actually selected runtime before using v1.
+This capability check does not contact a daemon.
+
 ## Read and set
 
 Global and venue-scoped machine-local settings (the flag explicitly selects the
@@ -29,7 +47,10 @@ flow. Ordinary reads may use its canonical read-only checkout.
 ```
 
 The setter changes exactly the requested scope, preserves unrelated YAML values
-and other scopes, atomically replaces the selected file and verifies readback.
+and other scopes (including aliased YAML), serializes setters with a per-config
+kernel lock, atomically replaces the selected file and verifies readback. Lock
+contention beyond five seconds fails visibly. Existing permission bits are
+preserved; newly created files use restrictive permissions.
 Its `written` result identifies the exact modified file/scope; top-level `mode`
 and `source` report the subsequent effective resolution, which can differ when a
 more specific scope or marketplace overlay wins. `--unset` removes that exact
