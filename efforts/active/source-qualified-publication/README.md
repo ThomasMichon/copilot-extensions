@@ -12,6 +12,16 @@
 - **Umbrella issue:** #7937
 - **Sub-issues:** #7936 · #7946
 
+### Private F3 checkpoint (2026-10-24)
+
+An isolated new-file-only reducer and focused `test_source_publications.py`
+candidate are unit-qualified for review, disconnected from production.
+The model boundary is documented in [implementation.md](implementation.md)
+and the bounded command evidence in [validation.md](validation.md).
+This is not source/loader integration, owner receipt support, issue closure,
+native qualification or whole-effort completion. All remaining phase and
+nominal/installed acceptance gates retain their existing status.
+
 ## Guiding Intent
 
 Refresh and successful maintenance must converge on the selected producer's
@@ -179,6 +189,25 @@ and exact shared-file owners. Its source review merged in #8139;
 it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
+
+### 2026-10-31 — Existing private checkpoint reconciled for source review
+- Fresh review of `145f5f2dae` identified two Medium private-model defects:
+  unseen-ID absence receipts remained pending, and row-local availability
+  bypassed the partition's revision/freshness admission. Four new cases fail
+  against unchanged source; the surgical correction passes the complete
+  87-case reducer/F1 packet. No production or shared parser files changed.
+- Source-only checkpoint acceptance now permits driving existing #8530 through
+  its normal current-head review, required CI and managed merge gates.
+  This does not admit production F3 wiring, F2 receipts, F4 maintenance,
+  installed/native qualification or overall effort completion.
+- Preserved unpublished `9e84151644` before the supported current-base
+  reconciliation. Rebased head `9ccc1381f2` retains identical reducer/test
+  bytes, including the quadratic order-scan correction.
+- Fresh contained execution of the reducer and actual F1 observation packet
+  passes all 83 tests; Ruff, install/version contracts, effort structure and
+  whitespace checks pass. Exact bounded evidence is in [validation.md](validation.md).
+- Publication, fresh current-head verdict, required CI and verified source
+  merge remain outstanding at this checkpoint. Existing broader gates stay open.
 
 ### 2026-10-28 - Direct retained publication outcomes, no token retirement
 
