@@ -891,14 +891,23 @@ class _SubprocessRunInstaller:
 
 
 class _SubprocessRunOutput:
-    def __init__(self, process, *, on_output, capture=True):
+    def __init__(self, process, *, on_output=None, output_fds=None, capture=True):
         self.process = process
         self.on_output = on_output
+        self.output_fds = output_fds or {}
         self.output = ("", None)
 
     def wait(self, timeout, **kwargs):
         self.output = self.process.communicate(timeout=timeout)
-        if self.output[0]:
+        if self.output[0] and "stdout" in self.output_fds:
+            content = self.output[0]
+            os.write(
+                self.output_fds["stdout"],
+                content.encode("utf-8") if isinstance(content, str) else content,
+            )
+
+    def deliver(self):
+        if self.output[0] and self.on_output is not None:
             content = self.output[0]
             self.on_output("stdout", content.encode("utf-8") if isinstance(content, str) else content)
 

@@ -2237,8 +2237,11 @@ values fail explicitly before launching the installer.
 The receipt-owned Python installer runner interprets that allowance as **inactivity**, not a maximum
 elapsed installation duration. Newly read stdout or stderr bytes renew it,
 including partial lines. It relays raw native bytes to their original channels
-or the admitted human-output descriptor; captured log callbacks receive complete
-lines and a final partial line. Retiring the owned tree precedes output drain,
+or the admitted human-output descriptor through finite cancellable relays.
+Acknowledged relay writes renew delivery inactivity, including after the
+installer exits; an undrained pipe cannot block timeout or owner-loss checks.
+Legacy Python log callbacks receive complete lines and a final partial line
+only after native process-tree and pipe settlement. Retiring the owned tree precedes output drain,
 so a root exit cannot leave a pipe-holding descendant writing a late slot.
 Receipt validation and watchdog exit `124` still determine the actual outcome.
 This does not change a native self-stage parent's separate watchdog policy or
@@ -4546,6 +4549,9 @@ constructor relays child bytes immediately, including partial lines; its
 Windows retention guardian keeps the final completion JSON on stdout and
 relays progress separately on stderr. A silent child still times out and must
 settle every owned writer before construction or retention custody is released.
+Native relay errors preserve their error codes; failed strict Job confirmation
+retains the exact process and Job rather than treating handle closure as proof.
+Legacy Python observers run after settlement and cannot perform live stdio.
 Source-cache publication reads the phase's current allowance rather than a
 stale pre-build wall-clock limit. Explicit caller-supplied absolute deadlines
 for closed-wheel acquisition/inspection remain absolute, and all byte, file,

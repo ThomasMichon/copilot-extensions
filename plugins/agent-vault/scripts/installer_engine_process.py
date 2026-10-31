@@ -13,7 +13,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import ModuleType
 
@@ -26,9 +26,9 @@ class ChildTimeoutExpired(subprocess.TimeoutExpired):
     """The child's deadline expired and every owned writer has settled."""
 
 
-def _output_capture(process, procutil, on_output):
+def _output_capture(process, procutil, on_output, output_fds=None):
     capture = import_module(procutil.__name__ + ".streaming").SyncProcessOutput
-    return capture(process, on_output=on_output)
+    return capture(process, on_output=on_output, output_fds=output_fds)
 
 
 def _settle(operation: Callable[[], object]) -> None:
@@ -56,6 +56,7 @@ def run_owned(
     runtime_path: Path | None = None,
     deadline: float | None = None,
     on_output: Callable[[str, bytes], None] | None = None,
+    output_fds: Mapping[str, int] | None = None,
 ) -> subprocess.CompletedProcess:
     """Settle owned writers before returning or propagating a timeout.
 
@@ -67,7 +68,7 @@ def run_owned(
         raise ValueError("installer child timeout must be finite and positive")
     if os.name == "nt" and procutil is None:
         raise ValueError("Windows installer children require native process utilities")
-    if on_output is not None and procutil is None:
+    if (on_output is not None or output_fds) and procutil is None:
         raise ValueError("incremental installer output requires native process utilities")
     if deadline is not None:
         if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
@@ -84,6 +85,7 @@ def run_owned(
                 argv, cwd=cwd, env=env, timeout=timeout, procutil=procutil,
                 root=runtime_root, version=runtime_version, runtime_path=runtime_path,
                 on_output=on_output,
+                output_fds=output_fds,
                 **({"deadline": deadline} if deadline is not None else {}),
             )
     options = dict(cwd=cwd, env=env, stdin=subprocess.DEVNULL,
@@ -114,8 +116,8 @@ def run_owned(
         except procutil.SyncProcessLaunchError as error:
             raise ChildLaunchError(f"Installer child could not start: {error}") from error
         try:
-            if on_output is not None:
-                capture = _output_capture(process, procutil, on_output)
+            if on_output is not None or output_fds:
+                capture = _output_capture(process, procutil, on_output, output_fds)
             stdout, stderr = communicate()
         except subprocess.TimeoutExpired as error:
             timeout_error = error
@@ -124,7 +126,7 @@ def run_owned(
                 _settle(lambda: job.terminate_and_wait(10))
             finally:
                 _settle(lambda: process.wait(timeout=10))
-                stdout, stderr = _settle_output(finish, 10)
+                stdout, stderr = _settle_output(finish, 10, capture=capture)
     else:
         owner_read, owner_write = os.pipe()
         try:
@@ -142,15 +144,15 @@ def run_owned(
             os.close(owner_read)
             owner_read = -1
             try:
-                if on_output is not None:
-                    capture = _output_capture(process, procutil, on_output)
+                if on_output is not None or output_fds:
+                    capture = _output_capture(process, procutil, on_output, output_fds)
                 stdout, stderr = communicate()
             except subprocess.TimeoutExpired as error:
                 timeout_error = error
             finally:
                 os.close(owner_write)
                 owner_write = -1
-                stdout, stderr = _settle_output(finish, 30)
+                stdout, stderr = _settle_output(finish, 30, capture=capture)
         finally:
             if owner_read >= 0:
                 os.close(owner_read)
@@ -168,15 +170,18 @@ def run_owned(
     return result
 
 
-def _settle_output(finish, grace):
+def _settle_output(finish, grace, *, capture=None):
     result = []
     _settle(lambda: result.append(finish(grace)))
+    if capture is not None:
+        capture.deliver()
     return result[0]
 
 
 def _retained_windows(
     argv, *, cwd, env, timeout, procutil, root, version, runtime_path, deadline=None,
     on_output=None,
+    output_fds=None,
 ):
     import msvcrt
 
@@ -196,7 +201,7 @@ def _retained_windows(
                      "--runtime-version", version, "--runtime-path", str(runtime_path),
                      "--procutil-path", str(Path(procutil.__file__).resolve()),
                      "--timeout", str(timeout),
-                     *(["--progress-output"] if on_output is not None else []),
+                     *(["--progress-output"] if on_output is not None or output_fds else []),
                      *(["--deadline", str(deadline)] if deadline is not None else []), "--", *argv],
                     cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
@@ -210,11 +215,14 @@ def _retained_windows(
         os.close(reader)
         reader = -1
         try:
-            if on_output is None:
+            if on_output is None and not output_fds:
                 stdout, stderr = process.communicate(timeout=timeout + 30)
             else:
                 capture = _output_capture(
-                    process, procutil, lambda name, data: on_output(name, data) if name == "stderr" else None,
+                    process, procutil,
+                    (lambda name, data: on_output(name, data) if name == "stderr" else None)
+                    if on_output is not None else None,
+                    {"stderr": output_fds["stderr"]} if output_fds and "stderr" in output_fds else None,
                 )
                 capture.wait(timeout + 30, deadline=deadline, wait_for_eof=False)
         finally:
@@ -223,7 +231,7 @@ def _retained_windows(
             # The guardian releases retention only after its Job has no writers.
             stdout, stderr = _settle_output(
                 capture.finish if capture is not None else lambda grace: process.communicate(timeout=grace),
-                30,
+                30, capture=capture,
             )
         if process.returncode != 0:
             raise RuntimeError(
@@ -322,15 +330,14 @@ def _supervise_windows(args, argv):
             capture = None
             try:
                 if args.progress_output:
-                    def relay(_name, data):
-                        sys.stderr.buffer.write(data)
-                        sys.stderr.buffer.flush()
-
                     def observe_owner():
                         if disconnected():
                             raise RuntimeError("installer caller exited during child execution")
 
-                    capture = _output_capture(process, procutil, relay)
+                    capture = _output_capture(
+                        process, procutil, None,
+                        {name: sys.stderr.fileno() for name in ("stdout", "stderr")},
+                    )
                     try:
                         capture.wait(
                             args.timeout, deadline=absolute_deadline,
@@ -356,10 +363,10 @@ def _supervise_windows(args, argv):
                     _settle(lambda: job.terminate_and_wait(10))
                 finally:
                     _settle(lambda: process.wait(timeout=10))
-            stdout, stderr = _settle_output(
-                capture.finish if capture is not None else lambda grace: process.communicate(timeout=grace),
-                10,
-            )
+                    stdout, stderr = _settle_output(
+                        capture.finish if capture is not None else lambda grace: process.communicate(timeout=grace),
+                        10, capture=capture,
+                    )
             return {
                 "returncode": process.returncode, "stdout": stdout,
                 "stderr": stderr, "timed_out": timed_out, "launch_error": None,

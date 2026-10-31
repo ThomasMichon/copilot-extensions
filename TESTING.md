@@ -8,6 +8,10 @@ and channel preservation, unchanged receipt judgment and incumbent health
 remain independent controls. Source-phase units also advance through verified
 file batches. These checks do not qualify every native self-stage watchdog,
 initial source retention or an installed whole-update footprint.
+An open undrained pipe must not starve supervision. A slow draining pipe
+separately proves acknowledged native writes renew the delivery allowance after
+installer exit. Legacy log/observer failures occur only after owned writers have
+settled; native relays retain original byte channels and explicit error receipts.
 The MCP retirement packet adds native Windows controls for one birth-checked
 incomplete-census refresh, completed processes and retained live-unknown/identity
 refusals. Its actual fresh-settlement fixture owns its complete child scope with

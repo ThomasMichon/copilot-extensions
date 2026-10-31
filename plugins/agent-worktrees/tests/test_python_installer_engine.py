@@ -10,6 +10,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -429,27 +430,46 @@ def test_productive_owned_child_renews_timeout_and_relays_before_completion(
     engine, procutil, tmp_path, retained,
 ):
     observed = []
+    native = tmp_path / "native-output"
+    first_native = []
+    stop = threading.Event()
+
+    def observe_native():
+        while not stop.wait(.02):
+            if native.stat().st_size:
+                first_native.append(time.monotonic())
+                return
+
     engine.runtime.slot(tmp_path, "1.0")
-    with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+    with native.open("wb") as stream, engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+        watcher = threading.Thread(target=observe_native)
+        watcher.start()
         started = time.monotonic()
-        result = engine.run_owned(
-            [sys.executable, "-c",
-             "import sys,time\n"
-             "for index in range(20):\n"
-             " stream=sys.stdout if index%2==0 else sys.stderr\n"
-             " stream.write(f'progress{index:02d} ');stream.flush();time.sleep(.25)\n"],
-            cwd=tmp_path, env=dict(os.environ), timeout=2,
-            procutil=procutil, construction_fd=descriptor,
-            on_output=lambda name, data: observed.append((time.monotonic(), name, data)),
-            **({
-                "runtime_root": tmp_path, "runtime_version": "1.0",
-                "runtime_path": Path(engine.runtime.__file__),
-            } if retained else {}),
-        )
+        try:
+            result = engine.run_owned(
+                [sys.executable, "-c",
+                 "import sys,time\n"
+                 "for index in range(20):\n"
+                 " stream=sys.stdout if index%2==0 else sys.stderr\n"
+                 " stream.write(f'progress{index:02d} ');stream.flush();time.sleep(.25)\n"],
+                cwd=tmp_path, env=dict(os.environ), timeout=2,
+                procutil=procutil, construction_fd=descriptor,
+                on_output=lambda name, data: observed.append((time.monotonic(), name, data)),
+                output_fds={name: stream.fileno() for name in ("stdout", "stderr")},
+                **({
+                    "runtime_root": tmp_path, "runtime_version": "1.0",
+                    "runtime_path": Path(engine.runtime.__file__),
+                } if retained else {}),
+            )
+        finally:
+            stop.set()
+            watcher.join(timeout=5)
+            assert not watcher.is_alive()
         finished = time.monotonic()
         assert result.returncode == 0 and finished - started > 4
         assert "progress18" in result.stdout and "progress19" in result.stderr
-        assert observed[0][0] < finished - 3
+        assert first_native and first_native[0] < finished - 3
+        assert observed[0][0] >= started + 4
         assert all(
             f"progress{index:02d}".encode() in b"".join(data for _at, _name, data in observed)
             for index in range(20)
@@ -554,13 +574,14 @@ def test_owned_child_timeout_reaps_descendants_before_lease_release(engine, proc
 
 
 def test_owned_child_output_callback_failure_settles_before_releasing_custody(
-    engine, procutil, tmp_path,
+    engine, procutil, tmp_path, caplog,
 ):
     marker = tmp_path / "writers"
     failure = OSError("progress sink closed")
     calls = []
 
     def failed_output(name, data):
+        _assert_writers_dead(engine, _wait_for_writer(marker))
         calls.append(name)
         raise failure
 
@@ -576,8 +597,43 @@ def test_owned_child_output_callback_failure_settles_before_releasing_custody(
             )
         assert caught.value is failure and calls == ["stdout"]
         _assert_writers_dead(engine, _wait_for_writer(marker))
+        assert "Installer teardown is unsettled" not in caplog.text
     with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
         pass
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_owned_child_undrained_sink_preserves_supervision_and_settlement(
+    engine, procutil, tmp_path, retained,
+):
+    marker = tmp_path / "writers"
+    program = _writer_tree(marker).replace(
+        "time.sleep(60)\n",
+        "while True:\n os.write(1,b'output'*4096);os.write(2,b'diagnostic'*4096)\n",
+    )
+    engine.runtime.slot(tmp_path, "1.0")
+    reader, writer = os.pipe()
+    try:
+        started = time.monotonic()
+        with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+            with pytest.raises(subprocess.TimeoutExpired):
+                engine.run_owned(
+                    [sys.executable, "-c", program],
+                    cwd=tmp_path, env=dict(os.environ), timeout=1,
+                    procutil=procutil, construction_fd=descriptor,
+                    output_fds={name: writer for name in ("stdout", "stderr")},
+                    **({
+                        "runtime_root": tmp_path, "runtime_version": "1.0",
+                        "runtime_path": Path(engine.runtime.__file__),
+                    } if retained else {}),
+                )
+            _assert_writers_dead(engine, _wait_for_writer(marker))
+        assert time.monotonic() - started < 90
+        with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
+            pass
+    finally:
+        os.close(writer)
+        os.close(reader)
 
 
 def test_teardown_retry_retains_first_failure_even_when_wait_is_interrupted(

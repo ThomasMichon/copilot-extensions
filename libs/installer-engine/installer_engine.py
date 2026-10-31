@@ -6,6 +6,7 @@ from collections.abc import Callable
 import importlib.util
 import codecs
 import hashlib
+import io
 import json
 import os
 import re
@@ -411,10 +412,15 @@ def _child(
     for attempt in range(len(delays) + 1):
         decoders = {name: codecs.getincrementaldecoder("utf-8")(errors="replace")
                     for name in ("stdout", "stderr")}
+        try:
+            output_fds = {name: sys.stderr.fileno() for name in ("stdout", "stderr")}
+        except (AttributeError, io.UnsupportedOperation):
+            output_fds = {}
 
         def relay(name, data):
-            sys.stderr.write(decoders[name].decode(data))
-            sys.stderr.flush()
+            if not output_fds:
+                sys.stderr.write(decoders[name].decode(data))
+                sys.stderr.flush()
             if on_progress is not None:
                 on_progress()
 
@@ -426,7 +432,8 @@ def _child(
             result = run_owned(
                 argv, cwd=cwd or Path(Path(argv[0]).resolve().anchor), env=env, timeout=remaining,
                 procutil=procutil, construction_fd=descriptor,
-                on_output=relay,
+                on_output=relay if on_progress is not None or not output_fds else None,
+                output_fds=output_fds,
                 **({
                     "runtime_root": candidate.parent.parent, "runtime_version": candidate.name,
                     "runtime_path": Path(runtime.__file__),
