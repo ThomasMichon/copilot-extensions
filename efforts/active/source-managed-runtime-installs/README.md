@@ -1502,4 +1502,12 @@ and 18 platform skips; its two fixture-omission failures pass after restoring
 the actual removal function. Exact-head installed-suite qualification, not an
 aggregate component count, remains the next acceptance gate.
 
+Hosted run `41146273383` at `24abb8b041` fails both preparation stages before
+replacement: the fixture called `ensure_owner_running` without its required
+config argument. Both final settlement stages succeed with no remaining tasks.
+The caller now passes the existing supported `None` argument; a focused
+execution of the actual preparation snippet covers that contract, and the
+bounded fixture packet passes 29 tests with the 2 hosted cases deselected.
+No service API is changed, and Bridge's earlier failure remains unproven.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

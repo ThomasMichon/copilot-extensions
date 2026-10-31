@@ -679,7 +679,7 @@ def prepare(directory: Path, mode: str) -> None:
         _run([_python(case / "h" / ".agent-codespaces"), "-I", "-X", "utf8", "-B", "-c",
               "from agent_codespaces.connection_owner import hold,ensure_owner_running;"
               "hold('native-suite', 'manager-suite');"
-              "assert ensure_owner_running(), 'Selected Codespaces owner did not start'"], case, timeout=45)
+              "assert ensure_owner_running(None), 'Selected Codespaces owner did not start'"], case, timeout=45)
         owner_tasks = [row for row in _tasks(case) if row["name"] == "agent-codespaces-owner"]
         if len(owner_tasks) != 1:
             raise RuntimeError("Baseline Codespaces owner requires its exact owned native task")

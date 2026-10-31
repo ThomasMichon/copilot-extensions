@@ -7,6 +7,7 @@ failure, not a skipped or reduced-portfolio success.
 from __future__ import annotations
 
 import argparse
+import ast
 from contextlib import contextmanager, nullcontext
 import json
 import os
@@ -17,7 +18,7 @@ import sys
 import shutil
 import subprocess
 import time
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -32,6 +33,31 @@ def test_fullsuite_refuses_execution_outside_the_disposable_venue(monkeypatch: p
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(RuntimeError, match="disposable GitHub-hosted Windows VM"):
         require_venue()
+
+
+def test_baseline_owner_demand_uses_the_installed_startup_contract(monkeypatch):
+    import inspect
+
+    tree = ast.parse(inspect.getsource(fixture.prepare))
+    script = next(node.value for node in ast.walk(tree) if (
+        isinstance(node, ast.Constant) and isinstance(node.value, str)
+        and "hold('native-suite', 'manager-suite')" in node.value
+    ))
+    package = ModuleType("agent_codespaces")
+    package.__path__ = []
+    owner = ModuleType("agent_codespaces.connection_owner")
+    calls = []
+    owner.hold = lambda name, tenant: calls.append(("hold", name, tenant))
+
+    def ensure(config):
+        calls.append(("ensure", config))
+        return True
+
+    owner.ensure_owner_running = ensure
+    monkeypatch.setitem(sys.modules, package.__name__, package)
+    monkeypatch.setitem(sys.modules, owner.__name__, owner)
+    exec(compile(script, "installed-baseline", "exec"), {})
+    assert calls == [("hold", "native-suite", "manager-suite"), ("ensure", None)]
 
 
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Index role readers")
