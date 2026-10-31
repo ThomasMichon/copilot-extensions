@@ -4,6 +4,28 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`agent_procutil.streaming.SyncProcessOutput` drains synchronous stdout/stderr
+in byte chunks, including output without newlines. Its optional inactivity
+window renews only on newly read bytes or acknowledged native relay writes;
+an explicitly supplied absolute cap
+remains absolute. Optional `startup_timeout` applies only before the first
+captured byte; it never lengthens subsequent quiet windows.
+The caller still owns launch, cancellation and tree retirement,
+and must retire writers before `finish()` after an error. Relay-only callers
+can disable retained capture. `output_fds` uses finite, strictly contained
+byte relays, bounded queues and cancellable input writers; an undrained borrowed
+pipe never blocks the supervising thread. Its descriptor flags are unchanged.
+Successful drain and failure/cancellation both settle the relays and their
+reader/writer threads. A failed retirement must be retried and confirmed before
+capture can be marked finished. Delivery has a quiet allowance, not a total-output cap.
+Legacy `on_output` callbacks share captured storage and run only through
+`deliver()` after `finish()` and producer settlement; they are no longer live
+stdio adapters. This helper does not create keepalive output
+or change the existing generic owned-process timeout policy.
+After retiring its writers, a POSIX caller may use `finish(stop_at_idle=True)`
+to drain available bytes without waiting for EOF from an escaped daemon that
+retained an otherwise idle pipe. This never authorizes killing that daemon.
+
 `agent_procutil.process_retirement.PinnedProcess` is a finite external-process
 primitive for application-owned incumbent retirement on Windows and Linux.
 It validates the original birth against a retained process handle/pidfd,

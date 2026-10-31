@@ -66,15 +66,22 @@ class SourceWheelInputs:
     def receipt(self) -> dict:
         return json.loads(self.canonical)
 
-    def verify(self, *, deadline: float | None = None) -> None:
-        own_deadline = time.monotonic() + self.io_timeout
-        deadline = own_deadline if deadline is None else min(deadline, own_deadline)
+    def verify(self, *, deadline: float | _SourceProgress | None = None) -> None:
+        started = time.monotonic()
+        progress = (
+            deadline if isinstance(deadline, _SourceProgress)
+            else _SourceProgress("verification", self.io_timeout, started + self.io_timeout, started)
+        )
         records = {record["filename"]: record for record in self.receipt().values()}
         if {path.name for path in self.archives} != records.keys():
             raise WheelError("source wheel archives differ from their construction")
         for path in self.archives:
-            if _digest_file(path, _LIMITS.max_archive_bytes, deadline) != records[path.name]["sha256"]:
+            selected = _source_deadline(progress)
+            if deadline is not None and not isinstance(deadline, _SourceProgress):
+                selected = min(selected, _source_deadline(deadline))
+            if _digest_file(path, _LIMITS.max_archive_bytes, selected) != records[path.name]["sha256"]:
                 raise WheelError("retained source wheel changed during installation")
+            progress.renew()
 
     def origins(self) -> dict:
         paths = {path.name: path for path in self.archives}
@@ -89,12 +96,43 @@ def _canonical(value) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
-def _digest_file(path: Path, limit: int, deadline: float, *, before=None) -> str:
+@dataclass
+class _SourceProgress:
+    name: str
+    timeout: float
+    deadline: float
+    reported_at: float
+    units: int = 0
+
+    def renew(self) -> None:
+        now = time.monotonic()
+        self.deadline = now + self.timeout
+        self.units += 1
+        if now - self.reported_at >= min(1.0, self.timeout / 4):
+            print(
+                f"Source wheel progress: phase={self.name} completed-units={self.units}",
+                file=sys.stderr, flush=True,
+            )
+            self.reported_at = now
+
+
+def _source_deadline(deadline: float | _SourceProgress) -> float:
+    selected = deadline.deadline if isinstance(deadline, _SourceProgress) else deadline
+    _check_deadline(selected)
+    return selected
+
+
+def _source_progress(deadline: float | _SourceProgress) -> None:
+    if isinstance(deadline, _SourceProgress):
+        deadline.renew()
+
+
+def _digest_file(path: Path, limit: int, deadline: float | _SourceProgress, *, before=None) -> str:
     if before is None:
         before = _ordinary(path)
     with _open(path) as stream:
         opened = _unchanged(path, before, stream)
-        digest, _size = _digest(stream, limit, deadline)
+        digest, _size = _digest(stream, limit, _source_deadline(deadline))
         _unchanged(path, before, stream, opened=opened)
     return digest
 
@@ -107,12 +145,12 @@ def _ignored_source(relative: Path, excluded: set[str]) -> bool:
     } or name.endswith((".egg-info", ".dist-info", ".pyc", ".pyo"))
 
 
-def _manifest_digest(path: Path, limit: int, deadline: float, *, before=None) -> str:
+def _manifest_digest(path: Path, limit: int, deadline: float | _SourceProgress, *, before=None) -> str:
     if before is None:
         before = _ordinary(path)
     if before.st_size > limit:
         raise WheelError("source wheel manifest exceeds its byte budget")
-    _check_deadline(deadline)
+    _source_deadline(deadline)
     with _open(path) as stream:
         opened = _unchanged(path, before, stream)
         content = stream.read(before.st_size + 1)
@@ -123,7 +161,8 @@ def _manifest_digest(path: Path, limit: int, deadline: float, *, before=None) ->
 
 
 def _tree(
-    root: Path, deadline: float, *, installed: bool = False, excluded: set[str] | None = None,
+    root: Path, deadline: float | _SourceProgress, *,
+    installed: bool = False, excluded: set[str] | None = None,
 ) -> dict:
     excluded = excluded or set()
     files, total = [], 0
@@ -142,7 +181,7 @@ def _tree(
             if name == "__pycache__":
                 children.remove(name)
         for name in names:
-            _check_deadline(deadline)
+            _source_deadline(deadline)
             path = Path(directory) / name
             relative = path.relative_to(root)
             if name.endswith((".pyc", ".pyo")) or (
@@ -154,6 +193,7 @@ def _tree(
                 raise WheelError("source wheel input tree exceeds its byte or file budget")
             files.append((path, relative, info))
             total += info.st_size
+            _source_progress(deadline)
 
     def read(item):
         path, relative, info = item
@@ -167,8 +207,9 @@ def _tree(
     result = {}
     with ThreadPoolExecutor(max_workers=4, thread_name_prefix="source-wheel-input") as pool:
         for offset in range(0, len(files), 4):
-            _check_deadline(deadline)
+            _source_deadline(deadline)
             result.update(pool.map(read, files[offset:offset + 4]))
+            _source_progress(deadline)
     return result
 
 
@@ -241,7 +282,9 @@ def _eligibility(inputs) -> tuple[list[dict], str | None]:
     return manifests, None
 
 
-def _compact(package: Path, packages: tuple[Path, ...], output: Path, deadline: float) -> dict:
+def _compact(
+    package: Path, packages: tuple[Path, ...], output: Path, deadline: float | _SourceProgress,
+) -> dict:
     """Remove nested vendored projects, not files belonging to this project."""
     excluded = {
         path.relative_to(package).as_posix()
@@ -268,14 +311,15 @@ def _compact(package: Path, packages: tuple[Path, ...], output: Path, deadline: 
             raise WheelError("compact source exceeds its byte or file budget")
         with _open(path) as incoming, Path(destination).open("xb") as target:
             opened = _unchanged(path, before, incoming)
-            _digest(incoming, _MAX_SOURCE_BYTES - total, deadline, destination=target)
+            _digest(incoming, _MAX_SOURCE_BYTES - total, _source_deadline(deadline), destination=target)
             _unchanged(path, before, incoming, opened=opened)
         shutil.copymode(source, destination)
         count += 1
         total += before.st_size
+        _source_progress(deadline)
         return destination
 
-    _check_deadline(deadline)
+    _source_deadline(deadline)
     shutil.copytree(
         _native_retained_path(package), _native_retained_path(output), ignore=ignore, copy_function=copy,
     )
@@ -290,20 +334,20 @@ def _compact(package: Path, packages: tuple[Path, ...], output: Path, deadline: 
     return _tree(output, deadline)
 
 
-def _tool_tree(root: Path, deadline: float) -> dict:
+def _tool_tree(root: Path, deadline: float | _SourceProgress) -> dict:
     return _tree(root, deadline, installed=True)
 
 
-def _wheel_record(path: Path, name: str, deadline: float) -> dict:
+def _wheel_record(path: Path, name: str, deadline: float | _SourceProgress) -> dict:
     with _open(path) as stream:
-        facts = inspect_archive(stream, limits=_LIMITS, deadline=deadline)
+        facts = inspect_archive(stream, limits=_LIMITS, deadline=_source_deadline(deadline))
     if (
         re.sub(r"[-_.]+", "-", facts.name).lower() != name or facts.tags != ("py3-none-any",)
         or facts.wheel_metadata["Root-Is-Purelib"] != "true"
         or any(".data/" in member for member in facts.member_hashes)
     ):
         raise WheelError("cached source build did not produce its ordinary pure-Python wheel")
-    return {
+    result = {
         "filename": path.name, "version": facts.version,
         "sha256": _digest_file(path, _LIMITS.max_archive_bytes, deadline),
         "files": {
@@ -311,6 +355,8 @@ def _wheel_record(path: Path, name: str, deadline: float) -> dict:
             if member != facts.prefix + "RECORD"
         },
     }
+    _source_progress(deadline)
+    return result
 
 
 @contextmanager
@@ -318,12 +364,12 @@ def _source_phase(name: str, timeout: float, elapsed: dict[str, float]):
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise WheelError(f"source wheel phase={name} requires a positive finite process allowance")
     started = time.monotonic()
-    deadline = started + timeout
+    progress = _SourceProgress(name, timeout, started + timeout, started)
     state = "failed"
     print(f"Source wheel phase: phase={name} state=starting", file=sys.stderr, flush=True)
     try:
-        yield deadline
-        _check_deadline(deadline)
+        yield progress
+        _source_deadline(progress)
         state = "completed"
     except WheelDeadlineError as error:
         raise WheelDeadlineError(f"source wheel phase={name} deadline exhausted") from error
@@ -358,8 +404,12 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
     runner = run
 
     def run(argv, **options):
-        _check_deadline(deadline)
-        return runner(argv, timeout=deadline - time.monotonic(), **options)
+        result = runner(
+            argv, timeout=_source_deadline(progress) - time.monotonic(),
+            on_progress=progress.renew, **options,
+        )
+        progress.renew()
+        return result
 
     transaction = inputs.transaction
     uv = Path(transaction.argv[0]).resolve(strict=True)
@@ -373,7 +423,7 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
         yield inputs
         return
     elapsed = {}
-    with _source_phase("preparation", timeout, elapsed) as deadline:
+    with _source_phase("preparation", timeout, elapsed) as progress:
         cache_arguments = [
             argument for option, value in _argument_pairs(transaction.argv[3:])
             if option == "--cache-dir" for argument in (option, value)
@@ -419,7 +469,7 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
             with retain_uv_install(
                 str(uv), ["--python", str(python), "--only-binary", ":all:", "--link-mode", "copy",
                           *requirements, *cutoffs],
-                env=transaction.environment, cwd=transaction.cwd, deadline=deadline,
+                env=transaction.environment, cwd=transaction.cwd, deadline=_source_deadline(progress),
             ) as admitted:
                 run(list(admitted.argv), environment=admitted.environment, cwd=admitted.cwd)
             observed = run(
@@ -448,17 +498,17 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
         }
         requirement_groups = dict.fromkeys(requirements_by_package.values())
         acquired = {}
-        with _source_phase("acquisition", timeout, elapsed) as deadline:
+        with _source_phase("acquisition", timeout, elapsed) as progress:
             for requirements in requirement_groups:
                 acquired[requirements] = acquire_tools(requirements)
 
         try:
-            with _source_phase("offline", timeout, elapsed) as deadline:
+            with _source_phase("offline", timeout, elapsed) as progress:
                 identity = {
                     "schema": "installer-engine.source-build", "version": 1,
-                    "python": _digest_file(base_python.resolve(strict=True), 256 << 20, deadline),
-                    "uv": _digest_file(uv, 256 << 20, deadline),
-                    "builder": _digest_file(builder, 1 << 20, deadline),
+                    "python": _digest_file(base_python.resolve(strict=True), 256 << 20, progress),
+                    "uv": _digest_file(uv, 256 << 20, progress),
+                    "builder": _digest_file(builder, 1 << 20, progress),
                     # Job ancestry reaches children but does not identify build inputs.
                     "environment": hashlib.sha256(_canonical({
                         key: value for key, value in environment.items()
@@ -470,7 +520,7 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                     nonlocal tools_seconds
                     tools_started = time.monotonic()
                     python, tools_root, target = acquired[requirements]
-                    tool_content = _tool_tree(tools_root, deadline)
+                    tool_content = _tool_tree(tools_root, progress)
                     tools_seconds += time.monotonic() - tools_started
                     return python, tools_root, tool_content, {**identity, "target": target, "tools": tool_content}
 
@@ -480,19 +530,19 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                     requirements = requirements_by_package[package]
                     python, tools_root, tool_content, common = tool_sets[requirements]
                     compact = workspace / ("source-" + str(index))
-                    source = _tree(package, deadline, excluded={
+                    source = _tree(package, progress, excluded={
                         path.relative_to(package).as_posix() for path in inputs.packages
                         if path != package and path.is_relative_to(package)
                     })
                     name = re.sub(r"[-_.]+", "-", manifests[inputs.packages.index(package)]["project"]["name"]).lower()
 
                     def verify_source():
-                        if _tree(compact, deadline) != source or _tool_tree(tools_root, deadline) != tool_content:
+                        if _tree(compact, progress) != source or _tool_tree(tools_root, progress) != tool_content:
                             raise WheelError("source or installed build tools changed before wheel cache publication")
 
                     def build(output):
                         nonlocal built
-                        if _compact(package, inputs.packages, compact, deadline) != source:
+                        if _compact(package, inputs.packages, compact, progress) != source:
                             raise WheelError("source changed before its wheel build")
                         reported = run(
                             [str(python), "-I", "-B", "-c", _BACKEND_REQUIREMENTS],
@@ -522,18 +572,18 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                         return target
 
                     def validate(path):
-                        _wheel_record(path, name, deadline)
+                        _wheel_record(path, name, progress)
                         verify_source()
 
                     archive = cached_source_wheel(
                         root, _canonical({**common, "source": source}), None,
                         build=build, validate=validate, max_archive_bytes=_LIMITS.max_archive_bytes,
-                        deadline=deadline,
+                        deadline=progress.deadline, progress_deadline=lambda: progress.deadline,
                     )
-                    records[name] = _wheel_record(archive, name, deadline)
+                    records[name] = _wheel_record(archive, name, progress)
                     archives[package] = archive
                 for _python, tools_root, tool_content, _common in tool_sets.values():
-                    if _tool_tree(tools_root, deadline) != tool_content:
+                    if _tool_tree(tools_root, progress) != tool_content:
                         raise WheelError("installed build tools changed during source construction")
                 arguments = []
                 selected_manifests = {package / "pyproject.toml" for package in selected}
@@ -553,7 +603,8 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                             break
                     arguments.append(value)
                 wheels = SourceWheelInputs(_canonical(records), tuple(archives.values()), timeout)
-                wheels.verify(deadline=deadline)
+                wheels.verify(deadline=progress)
+                progress.renew()
                 assembled = replace(
                     inputs, transaction=transaction._replace(argv=(*transaction.argv[:3], *arguments)),
                     source_wheels=wheels,

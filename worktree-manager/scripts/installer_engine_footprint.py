@@ -225,13 +225,21 @@ def _plain_file(path: Path) -> None:
         raise FootprintError("Footprint evidence must be an ordinary unshared file")
 
 
-def _marker_text(path: Path) -> str:
+def _bounded_text(path: Path, limit: int, kind: str) -> str:
     _plain_file(path)
     with path.open("rb") as stream:
-        content = stream.read(65537)
-    if len(content) > 65536:
-        raise FootprintError("Footprint marker exceeds its read budget")
+        content = stream.read(limit + 1)
+    if len(content) > limit:
+        raise FootprintError(f"Footprint {kind} exceeds its read budget")
     return content.decode("utf-8-sig")
+
+
+def _marker_text(path: Path) -> str:
+    return _bounded_text(path, 65536, "marker")
+
+
+def _manifest_text(path: Path) -> str:
+    return _bounded_text(path, 1 << 20, "manifest")
 
 
 def producer_problems(manifest: Manifest, payload: Path) -> list[str]:

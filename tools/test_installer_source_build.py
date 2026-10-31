@@ -33,13 +33,13 @@ def test_source_phase_allowances_are_independent_and_report_the_expired_phase(mo
     monkeypatch.setattr(wheels, "time", clock)
     elapsed = {}
     with builds._source_phase("acquisition", 10, elapsed) as acquisition:
-        assert acquisition == 110
+        assert acquisition.deadline == 110
         now[0] = 109
     with pytest.raises(wheels.WheelDeadlineError, match="offline.*deadline") as failure:
         with builds._source_phase("offline", 10, elapsed) as offline:
-            assert offline == 119
+            assert offline.deadline == 119
             now[0] = 120
-            wheels._check_deadline(offline)
+            wheels._check_deadline(offline.deadline)
     assert isinstance(failure.value.__cause__, wheels.WheelDeadlineError)
     assert elapsed == {"acquisition": 9, "offline": 11}
     output = capsys.readouterr()
@@ -59,6 +59,32 @@ def test_source_phase_integrity_failure_preserves_its_original_cause(capsys):
     output = capsys.readouterr()
     assert output.out == ""
     assert "phase=offline state=failed" in output.err
+
+
+def test_source_phase_renews_from_verified_file_batches(monkeypatch, tmp_path, capsys):
+    import installer_wheel_inputs as wheels
+
+    now = [100.0]
+    clock = SimpleNamespace(monotonic=lambda: now[0])
+    monkeypatch.setattr(builds, "time", clock)
+    monkeypatch.setattr(wheels, "time", clock)
+    digest_file = builds._digest_file
+    lock = threading.Lock()
+
+    def measured_digest(*args, **kwargs):
+        result = digest_file(*args, **kwargs)
+        with lock:
+            now[0] += 1
+        return result
+
+    monkeypatch.setattr(builds, "_digest_file", measured_digest)
+    for index in range(16):
+        (tmp_path / f"source{index}.py").write_text(f"VALUE = {index}\n")
+    elapsed = {}
+    with builds._source_phase("offline", 10, elapsed) as progress:
+        result = builds._tree(tmp_path, progress)
+    assert len(result) == 16 and elapsed["offline"] == 16
+    assert "Source wheel progress: phase=offline" in capsys.readouterr().err
 
 
 @pytest.fixture
