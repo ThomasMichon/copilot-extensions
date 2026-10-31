@@ -293,15 +293,13 @@ def render_selector(provenance: Mapping[str, object]) -> tuple[bytes, dict]:
     fallback = fallback_destination(destination)
     command = resolver_argv(destination)
     body = (
-        f"Read the current plugin copy at `{local}` when present; otherwise read "
-        f"the reviewed fallback at `{fallback}`.\n"
-        "Generated copies do not require hash, fingerprint, version, provenance or "
-        "receipt checks. A stale selector or fallback does not override an available copy.\n"
-        "Invoke `reviewing-customizations`; use its returned base and an absolute Python "
-        "interpreter if source lookup is needed. Substitute the three placeholders:\n"
+        "Guidance locator only; no instruction body is delivered here.\n"
+        f"Managed candidate: `{local}`; reviewed fallback: `{fallback}`.\n"
+        "For source lookup, invoke `reviewing-customizations`; use its returned base "
+        "and an absolute Python interpreter. Substitute the three placeholders:\n"
         + json.dumps(command, separators=(",", ":")) + "\n"
-        "Read the entire selected body unless it is already directly visible now. "
-        "Copying does not prove model admission; restart to load later replacements.\n"
+        "Acquire and follow the source's applicable guidance, including its delivery "
+        "and full-read rules. This locator does not replace those rules.\n"
     )
     header = "---\napplyTo: " + json.dumps(marker["applyTo"]) + "\n---\n"
     return _render(header, body, marker), marker
