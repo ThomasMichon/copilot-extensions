@@ -332,7 +332,12 @@ without a separately arranged desktop-testing window.
 
 The `functional` mode runs the same exact, source-bound native packets through
 the same private parent handshake, finite workers, cleanup and JUnit checks,
-without creating a calibration window or requesting foreground activation.
+without creating a calibration window, querying the foreground or requesting
+foreground activation. Its explicit `functional-worker` path checks the
+existing outer Job, local-console session, token, station and input-desktop
+prerequisites without reading a foreground HWND or window owner. The ordinary
+`worker` used by desktop qualification retains its complete foreground
+visibility and same-session checks; there is no fallback between these paths.
 Its request has the probe's source and packet fields but **no**
 `visible_controls`; it also rejects `--allow-visible-control-once`. It writes
 `functional-result.json` with `kind: sdk-functional`,

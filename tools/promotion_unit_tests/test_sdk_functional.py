@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from tools.promotion_unit_tests.test_sdk_desktop_observer import runner, source_request
+from tools.promotion_unit_tests.test_sdk_desktop_observer import load, runner, source_request
 
 
 @pytest.fixture
@@ -27,7 +28,7 @@ def functional_fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple
             self, api: Any, argv: list[str], child_request: dict, directory: Path,
             name: str, evidence: dict,
         ) -> None:
-            assert argv[-1] == "worker"
+            assert argv[-1] == "functional-worker"
             self.name, self.evidence = name, evidence
             self.process = SimpleNamespace(returncode=1 if fault["at"] == name + "-exit" else 0)
             evidence["launched"] = True
@@ -86,6 +87,194 @@ def test_functional_native_packet_never_claims_desktop_qualification(functional_
     assert not (Path(request["output"]) / "visibility-result.json").exists()
     assert len(report["workers"]) == 4
     assert events.count("worker-04-close") == 1
+
+
+def test_functional_worker_requires_console_and_private_pipe_without_foreground(monkeypatch):
+    events = []
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("functional worker queried or controlled the foreground")
+
+    api = SimpleNamespace(
+        require_console=lambda: events.append("console"),
+        require_desktop=forbidden,
+        require_parent_pipe=lambda request: events.append("pipe") or SimpleNamespace(
+            gone=lambda: False, close=lambda: events.append("closed"),
+        ),
+        identity=lambda: {"pid": 7, "birth": 8},
+    )
+    monkeypatch.setattr(runner, "require_sdk_sources", lambda *args, **kwargs: events.append("sources"))
+    monkeypatch.setattr(runner, "verify_sources", lambda *args: events.append("hash"))
+    monkeypatch.setattr(runner, "validate_case_packet", lambda *args: None)
+    monkeypatch.setattr(runner, "native_arguments", lambda *args: ["literal-node"])
+    monkeypatch.setattr(runner, "bind_sdk_import", lambda *args: events.append("import"))
+    monkeypatch.setattr(runner, "new_api", lambda: api)
+    monkeypatch.setattr(runner, "emit", lambda value: events.append("ready"))
+    monkeypatch.setattr(runner, "command", lambda *args: "run")
+    monkeypatch.setattr(pytest, "main", lambda args: events.append("pytest") or 0)
+    request = {
+        "sdk_root": "/fixture", "sources": [], "output": "/output",
+        "nodes": ["literal-node"], "packet": 0, "nonce": "1" * 32, "deadline": 180,
+    }
+    assert runner.worker(request, functional_only=True) == 0
+    assert events == ["sources", "hash", "import", "console", "pipe", "ready", "pytest", "hash", "closed"]
+
+
+@pytest.mark.parametrize("functional_only", [False, True])
+def test_worker_precondition_failure_never_falls_back_or_opens_pipe(monkeypatch, functional_only):
+    events = []
+
+    def refuse():
+        events.append("console" if functional_only else "desktop")
+        raise runner.ObservationBlocked("explicit precondition refusal")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("refused worker opened its pipe or used another precondition")
+
+    api = SimpleNamespace(
+        require_console=refuse if functional_only else forbidden,
+        require_desktop=forbidden if functional_only else refuse,
+        require_parent_pipe=forbidden,
+    )
+    monkeypatch.setattr(runner, "require_sdk_sources", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "verify_sources", lambda *args: None)
+    monkeypatch.setattr(runner, "validate_case_packet", lambda *args: None)
+    monkeypatch.setattr(runner, "native_arguments", lambda *args: [])
+    monkeypatch.setattr(runner, "bind_sdk_import", lambda *args: None)
+    monkeypatch.setattr(runner, "new_api", lambda: api)
+    request = {"sdk_root": "/fixture", "sources": [], "output": "/output", "nodes": [], "packet": 0}
+    with pytest.raises(runner.ObservationBlocked, match="explicit precondition"):
+        runner.worker(request, functional_only=functional_only)
+    assert events == ["console" if functional_only else "desktop"]
+
+
+@pytest.mark.parametrize("contained", [False, True])
+def test_functional_console_admission_never_reads_foreground(monkeypatch, contained):
+    bindings = load("unit_sdk_console", "sdk_desktop_win32.py")
+    api = bindings.WinAPI.__new__(bindings.WinAPI)
+    events = []
+
+    def in_job(process, job, output):
+        output._obj.value = contained
+        events.append("job")
+        return 1
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("console admission reached a foreground or desktop qualification query")
+
+    facts = {
+        "elevated": False, "ssh": False, "remote_session": False, "remote_control": False,
+        "station": "WinSta0", "station_visible": True, "thread_desktop": "Default",
+        "input_desktop": "Default", "session": 1, "console_session": 1,
+    }
+    api.kernel = SimpleNamespace(GetCurrentProcess=lambda: 1, IsProcessInJob=in_job)
+    api.console_facts = lambda: events.append("console-facts") or dict(facts)
+    api.facts = api.foreground = api.window_identity = api.require_desktop = forbidden
+    if contained:
+        result = api.require_console()
+        assert result == {**facts, "inherited_job_membership": True}
+        assert events == ["job", "console-facts"]
+    else:
+        with pytest.raises(runner.ObservationBlocked, match="outer Job owner"):
+            api.require_console()
+        assert events == ["job"]
+
+
+def test_actual_console_facts_retain_native_prerequisites_and_close_handles_without_foreground(monkeypatch):
+    bindings = load("unit_sdk_console_facts", "sdk_desktop_win32.py")
+    api = bindings.WinAPI.__new__(bindings.WinAPI)
+    closed = []
+
+    def value(output, selected):
+        output._obj.value = selected
+        return 1
+
+    def user_object(station, information, flags, size, written):
+        assert station == 3 and information == 1
+        flags[2] = 1
+        return 1
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("local-console facts read foreground/window state")
+
+    api.kernel = SimpleNamespace(
+        GetCurrentProcess=lambda: 1, GetCurrentThreadId=lambda: 6,
+        IsProcessInJob=lambda process, job, output: value(output, True),
+        CloseHandle=lambda token: closed.append(token.value) or 1,
+        WTSGetActiveConsoleSessionId=lambda: 1,
+    )
+    api.advapi = SimpleNamespace(
+        OpenProcessToken=lambda process, access, output: value(output, 2),
+        GetTokenInformation=lambda token, information, output, size, written: value(output, 0),
+    )
+    api.user = SimpleNamespace(
+        GetProcessWindowStation=lambda: 3, GetUserObjectInformationW=user_object,
+        OpenInputDesktop=lambda flags, inherited, access: 4,
+        GetThreadDesktop=lambda thread: 5,
+        CloseDesktop=lambda handle: closed.append(handle) or 1,
+        GetSystemMetrics=lambda metric: 0,
+        GetForegroundWindow=forbidden, GetShellWindow=forbidden,
+        IsWindowVisible=forbidden, GetWindowThreadProcessId=forbidden,
+    )
+    api.object_name = lambda handle: {3: "WinSta0", 4: "Default", 5: "Default"}[handle]
+    api.session = lambda pid: 1 if pid == os.getpid() else forbidden()
+    api.foreground = api.window_identity = forbidden
+    for name in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"):
+        monkeypatch.delenv(name, raising=False)
+    facts = api.require_console()
+    assert facts == {
+        "elevated": False, "ssh": False, "remote_session": False, "remote_control": False,
+        "station": "WinSta0", "station_visible": True, "thread_desktop": "Default",
+        "input_desktop": "Default", "session": 1, "console_session": 1,
+        "inherited_job_membership": True,
+    }
+    assert closed == [2, 4]
+
+
+@pytest.mark.parametrize("visible,same_session", [(False, True), (True, False), (True, True)])
+def test_strict_desktop_admission_keeps_foreground_visibility_and_session_requirements(visible, same_session):
+    bindings = load("unit_sdk_strict_desktop", "sdk_desktop_win32.py")
+    api = bindings.WinAPI.__new__(bindings.WinAPI)
+
+    def in_job(process, job, output):
+        output._obj.value = True
+        return 1
+
+    facts = {
+        "elevated": False, "ssh": False, "remote_session": False, "remote_control": False,
+        "station": "WinSta0", "station_visible": True, "thread_desktop": "Default",
+        "input_desktop": "Default", "session": 1, "console_session": 1,
+        "foreground_visible": visible, "same_session": same_session,
+    }
+    api.kernel = SimpleNamespace(GetCurrentProcess=lambda: 1, IsProcessInJob=in_job)
+    api.facts = lambda: dict(facts)
+    if visible and same_session:
+        assert api.require_desktop() == {**facts, "inherited_job_membership": True}
+    else:
+        with pytest.raises(runner.ObservationBlocked, match="normal local console"):
+            api.require_desktop()
+
+
+@pytest.mark.parametrize("visible_flag", [False, True])
+def test_functional_worker_dispatch_is_explicit_and_refuses_visible_permission(tmp_path, monkeypatch, visible_flag):
+    source = source_request(tmp_path)
+    request = {key: source[key] for key in ("nonce", "deadline", "sdk_root", "output", "sources")}
+    request.update(parent_pid=7, parent_birth=8, nodes=source["case_packets"][0], packet=0)
+    path = tmp_path / "functional-worker.json"
+    path.write_text(json.dumps(request), encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(runner, "worker", lambda value, **options: calls.append((value, options)) or 0)
+    arguments = ["sdk_visibility.py", "functional-worker"]
+    if visible_flag:
+        arguments.append("--allow-visible-control-once")
+    monkeypatch.setattr(runner.sys, "argv", [*arguments, str(path)])
+    if visible_flag:
+        with pytest.raises(SystemExit) as failure:
+            runner.main()
+        assert failure.value.code == 2 and calls == []
+    else:
+        assert runner.main() == 0
+        assert calls == [(request, {"functional_only": True})]
 
 
 @pytest.mark.parametrize("stage", ["launch", "admit", "settled", "exit", "cleanup"])
@@ -148,7 +337,7 @@ def test_functional_primary_error_survives_expired_final_clock(
     clock = {"now": 100}
     monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
 
-    def fail(*args: Any) -> None:
+    def fail(*args: Any, **kwargs: Any) -> None:
         clock["now"] = 111
         raise runner.ObservationBlocked("original worker failure")
 

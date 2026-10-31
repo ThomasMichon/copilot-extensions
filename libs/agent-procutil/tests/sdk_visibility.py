@@ -41,6 +41,7 @@ def validate_request(mode: str, value: object) -> dict:
         "functional": {"output", "python", "sdk_root", "sources", "case_packets"},
         "canary": {"parent_pid", "parent_birth", "original", "visible_controls"},
         "worker": {"parent_pid", "parent_birth", "sdk_root", "output", "sources", "nodes", "packet"},
+        "functional-worker": {"parent_pid", "parent_birth", "sdk_root", "output", "sources", "nodes", "packet"},
         "identity": {"parent_pid", "parent_birth"},
         "passive": {"python", "output"},
     }
@@ -97,7 +98,7 @@ def validate_request(mode: str, value: object) -> dict:
         require_sdk_sources(Path(value["sdk_root"]), files, runner=Path(__file__))
     if mode in {"probe", "functional"}:
         validate_case_packets(Path(value["sdk_root"]), value["case_packets"])
-    elif mode == "worker":
+    elif mode in {"worker", "functional-worker"}:
         validate_case_packet(Path(value["sdk_root"]), value["nodes"])
         native_arguments(
             Path(value["sdk_root"]), Path(value["output"]), value["nodes"], value["packet"],
@@ -429,7 +430,7 @@ def canary(request: dict, allow_visible: bool) -> int:
                 parent.close()
 
 
-def worker(request: dict) -> int:
+def worker(request: dict, *, functional_only: bool = False) -> int:
     require_sdk_sources(Path(request["sdk_root"]), request["sources"], runner=Path(__file__))
     verify_sources(request["sources"])
     validate_case_packet(Path(request["sdk_root"]), request["nodes"])
@@ -438,7 +439,10 @@ def worker(request: dict) -> int:
     )
     bind_sdk_import(Path(request["sdk_root"]))
     api = new_api()
-    api.require_desktop()
+    if functional_only:
+        api.require_console()
+    else:
+        api.require_desktop()
     parent = api.require_parent_pipe(request)
     try:
         emit({"kind": "ready", "nonce": request["nonce"], "identity": api.identity()})
@@ -493,6 +497,7 @@ def restore_incomplete_control(api: WinAPI, original: dict, pin, report: dict) -
 def run_workers(
     request: dict, root: Path, api: WinAPI, deadline: float, start: float,
     report: dict, observer: DesktopObserver | None = None,
+    *, functional_only: bool = False,
 ) -> None:
     packets = validate_case_packets(Path(request["sdk_root"]), request["case_packets"])
     worker_deadline = min(deadline, start + 150)
@@ -516,7 +521,7 @@ def run_workers(
         try:
             require_time(worker_deadline, f"native worker {index + 1} launch")
             tests = Child(
-                api, [*argv, "worker"],
+                api, [*argv, "functional-worker" if functional_only else "worker"],
                 {**child_request, "sdk_root": request["sdk_root"], "output": str(root),
                  "sources": request["sources"], "nodes": nodes, "packet": index},
                 root, f"worker-{index + 1:02}", evidence=attempt,
@@ -561,7 +566,7 @@ def functional(request: dict) -> int:
         "desktop_qualified": False,
     }
     try:
-        run_workers(request, root, new_api(), deadline, start, report)
+        run_workers(request, root, new_api(), deadline, start, report, functional_only=True)
         report["native_junit"] = verify_native_junit(
             root, Path(request["sdk_root"]), request["case_packets"],
         )
@@ -727,15 +732,17 @@ def probe(request: dict, allow_visible: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("probe", "canary", "worker", "passive", "identity", "functional"))
+    parser.add_argument("mode", choices=(
+        "probe", "canary", "worker", "functional-worker", "passive", "identity", "functional",
+    ))
     parser.add_argument("--allow-visible-control-once", action="store_true")
     parser.add_argument("request", type=Path)
     args = parser.parse_args()
     request = validate_request(args.mode, json.loads(args.request.read_text("utf-8")))
-    if args.mode == "functional":
+    if args.mode in {"functional", "functional-worker"}:
         if args.allow_visible_control_once:
             parser.error("functional qualification never accepts visible-control permission")
-        return functional(request)
+        return functional(request) if args.mode == "functional" else worker(request, functional_only=True)
     if args.mode == "probe":
         return probe(request, args.allow_visible_control_once)
     if args.mode == "canary":
