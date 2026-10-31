@@ -64,6 +64,17 @@ human prerequisites. `all_required_satisfied` is a different predicate.
 Unknown resolution, unreadable policy evidence, drafts and holds prevent a
 human-ready checkpoint.
 
+Native vote events may identify a reviewer directly through
+`CodeReviewVotedByTfId` or through `CodeReviewVotedByIdentity` and the thread's
+identity table. Both forms retain the native event timestamp; missing references
+or conflicting identities remain unknown.
+
+An unexpired native approval bound to the current source head may retain the
+merge candidate recorded by that evaluation when the target branch later moves.
+Its build must match that recorded candidate, the current candidate, or the
+source head. Wrong-source, expired, unevaluated and unrelated build evidence
+cannot establish a current pass.
+
 Merge consent is separate. A native auto-completion request may already be
 armed while policies are pending. This does not establish `clear_to_merge`:
 when native gate evidence is available, that flag additionally requires every
@@ -119,6 +130,13 @@ An anchorless machine `repos.<name>.pr` declaration is retained for these reads
 and layered over that name's related policy. It does not register a managed
 checkout, and a retargeted machine declaration cannot revive the old related
 endpoint or credential selection.
+
+Relationship metadata still uses whole-entry precedence, but omitting `pr` in
+a higher related entry preserves the lower PR defaults. An explicitly supplied
+`pr` value replaces the lower related PR block; an empty block clears it and
+an explicit disablement remains authoritative. Provider, endpoint and credential
+fields are never pieced together across an explicit related-entry retarget.
+The same omission rule applies to repository marketplace overlays.
 
 An absent observation block selects the ADO driver's defaults above. An explicit
 `enabled: false` opts into metadata-only legacy reads; it is not native

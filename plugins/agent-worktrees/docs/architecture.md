@@ -38,7 +38,9 @@ detail is omitted because owner parse exceptions can contain private bodies.
 
 The report siblings do not re-read inputs after calling a legacy API, hash
 inputs, introduce a cache, or decide policy. Related overlays retain ordered
-whole-entry replacement and ignore plugin-provided primary markers. Explicit
+whole-entry replacement for relationship metadata and ignore plugin-provided
+primary markers. An omitted `pr` field retains lower PR defaults; explicit PR
+blocks, including empty blocks, replace them. Explicit
 filesystem plugin discovery retains its compatibility glob; its report exposes
 unobserved directory-membership authority rather than claiming that a successful
 glob establishes completeness.

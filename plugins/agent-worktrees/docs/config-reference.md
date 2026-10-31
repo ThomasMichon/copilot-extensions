@@ -1053,11 +1053,15 @@ Reads degrade safely (a missing/malformed file yields an empty index); a bare
 `<anchor>/.agent-worktrees/related.yaml` fallback and an explicit marketplace
 overlay at
 `<anchor>/.copilot-extensions/agent-worktrees/marketplaces/<marketplace-id>/related.yaml`.
-Writes emit only non-empty fields, keeping the committed file minimal.
+Writes emit only non-empty fields, except that an explicitly empty `pr` block
+is retained to preserve clearing of inherited PR defaults.
 
 An active plugin may contribute a lowest-precedence related-repo fragment by
 shipping `.agent-worktrees/related.yaml` in its payload. The active corpus is
 resolved from the effective user plus adopted-project plugin configuration, so
 copied plugins and live directory-marketplace plugins follow the same enabled
 and identity-verified rules. Disabled or unresolved plugins contribute nothing;
-the project and knowledge layers still override plugin entries wholesale.
+the project and knowledge layers still replace relationship metadata wholesale.
+If a higher entry omits `pr`, contributed PR defaults survive; an explicit
+`pr` value replaces the lower related PR block without merging old target or
+credential fields. Empty blocks clear the inherited PR defaults.
