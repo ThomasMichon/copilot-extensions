@@ -95,6 +95,15 @@ boundary. These source tests prove the bounded logging path under controlled
 contention/storage/history/shutdown cases; they neither identify that stall's
 cause nor constitute a live fix.
 
+The watchdog thread also appends probe failures, replacement requests and terminal
+reasons to `<effective-config-root>/agent-bridge-watchdog.log`, with the actual
+PID and epoch-nanosecond timestamp. A replacement request is recorded before
+launching the replacement, so its native stdout/stderr setup cannot truncate
+that evidence. This emergency file is separate from the application queue and
+has no automatic age retention. It creates no missing parent and a write error
+does not change the watchdog's decision. Discovery through `logs` includes it;
+its existence does not establish a stall's cause or successful recovery.
+
 ## Deliberate retained-spool adoption
 
 The direct Python `telemetry.make_retained_spool_sink(directory)` is an explicit

@@ -99,6 +99,14 @@ class Channels:
     async def shutdown(self):
         (root / (label + ".draining")).touch()
         if label == "v1":
+            with owner._owner_lock():
+                live = owner.read_liveness()
+            pending = root / "v1.retirement-peer.pending"
+            pending.write_text(json.dumps({
+                "pid": live.pid if live else None, "state": live.state if live else None,
+                "runtime_identity": live.runtime_identity if live else None,
+            }), encoding="utf-8")
+            os.replace(pending, root / "v1.retirement-peer")
             while not (root / "release-v1").exists():
                 await asyncio.sleep(.02)
         (root / (label + ".active")).unlink(missing_ok=True)
@@ -127,7 +135,9 @@ asyncio.run(run())
             for label, slot in (("v1", first), ("v2", second)):
                 if slot == second:
                     selection.write_text(second.name, encoding="utf-8")
-                    _wait(lambda: (root / "v1.draining").exists(), children)
+                    time.sleep(.15)
+                    assert children[0].poll() is None
+                    assert not (root / "v1.draining").exists(), "selection alone retired incumbent before V2 launch"
                 child = subprocess.Popen(
                     [sys.executable, "-c", script, str(slot), str(root), label, old_beacon],
                     env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -141,6 +151,13 @@ asyncio.run(run())
             incoming_pid = int((root / "v2.pid").read_text(encoding="ascii"))
             _wait(lambda: json.loads(beacon.read_text()).get("pid") == incoming_pid, children)
             _wait(lambda: (root / "v1.draining").exists(), children)
+            _wait(lambda: (root / "v1.retirement-peer").exists() and bool(
+                (root / "v1.retirement-peer").read_text(),
+            ), children)
+            retirement_peer = json.loads((root / "v1.retirement-peer").read_text())
+            assert retirement_peer["pid"] == incoming_pid
+            assert retirement_peer["state"] == "passive"
+            assert retirement_peer["runtime_identity"]
             assert children[0].poll() is None
             assert (root / "v1.active").exists()
             assert not (root / "v2.active").exists()

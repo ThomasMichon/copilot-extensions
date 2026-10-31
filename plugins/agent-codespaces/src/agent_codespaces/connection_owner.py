@@ -535,7 +535,10 @@ def read_liveness() -> OwnerLiveness | None:
             runtime_identity=(
                 raw["runtime_identity"] if isinstance(raw.get("runtime_identity"), str) else ""
             ),
-            state="active" if raw.get("state", "active") == "active" else "passive",
+            state=(
+                raw.get("state", "active") if raw.get("state", "active") in ("active", "passive")
+                else "unknown"
+            ),
             work_lease_version=(
                 raw["work_lease_version"] if type(raw.get("work_lease_version")) is int else 0
             ),
@@ -590,6 +593,30 @@ def is_owner_live(now: float | None = None) -> bool:
     reads as **not live** so a tenant falls back to owning its own relay.
     """
     return _live_snapshot(now) is not None
+
+
+def verified_owner_beacon(live: OwnerLiveness | None) -> bool:
+    """Authenticate process readiness, not merely a selected slot's installation."""
+    if (live is None or live.pid <= 0 or live.host != _this_host()
+            or not live.process_identity or live.state not in ("active", "passive")):
+        return False
+    try:
+        from agent_procutil._daemon_instance_store import _plain
+
+        info = _plain(LIVE_FILE)
+        return bool(info.st_nlink == 1 and (os.name == "nt" or not info.st_mode & 0o022)
+                    and live.is_fresh() and owner_process_identity(live.pid) == live.process_identity)
+    except (OSError, ValueError):
+        return False
+
+
+def selected_successor_ready(live: OwnerLiveness | None) -> bool:
+    """Selection inequality permits retirement only after the incoming process is ready."""
+    return bool(
+        _PROCESS_SELECTION and live and live.pid != os.getpid() and verified_owner_beacon(live)
+        and (selected := _PROCESS_SELECTION.selected_identity())
+        and selected != _PROCESS_SELECTION.identity and live.runtime_identity == selected
+    )
 
 
 def owner_active_codespaces(now: float | None = None) -> set[str]:
@@ -917,8 +944,9 @@ async def run_owner_daemon(
 
     A selected incoming build starts passively alongside an incumbent, then
     acquires the shared work lease before admitting any channel mutations.
-    Selection changes make an incumbent drain and self-retire; its lease stays
-    held through native cleanup. Same-build contenders do not duplicate it.
+    Selection changes end new work admission; verified incoming readiness
+    then permits incumbent cleanup and self-retirement. Its lease stays held
+    through native cleanup. Same-build contenders do not duplicate it.
     """
     from .owner_beacon import run_owner_loop
 

@@ -133,8 +133,10 @@ beacon compatibility or channel cleanup.
 An immutable-slot Owner freezes its principal-owned completion identity at
 birth, using the slot's retained runtime helper. A verified selection inequality
 (including rollback or repair, not package-version ordering) ends admission of
-new reconcile cycles and drains that Owner's admitted native work before exit.
-Missing or unprovable selection evidence does not authorize retirement.
+new reconcile cycles, but does not alone end process lifetime. Retirement and
+cleanup wait for a fresh, principal- and process-birth-verified passive or active
+beacon matching the different selected full identity. Missing, stale, foreign
+or unprovable successor readiness does not authorize retirement.
 The selected process publishes additive `runtime_identity`, `state` and
 `work_lease_version: 1` beacon fields. `passive` readiness has empty serving sets:
 it is process readiness, not proof of relay service. One OS-held work lease in

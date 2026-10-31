@@ -478,8 +478,9 @@ def _spawn_watchdog_replacement(
 
 def _watchdog_dead(reason: str, *, active_port: int | None = None) -> None:
     """Restart the Windows frontend promptly, then hard-exit the wedged one."""
-    from .watchdog import _force_exit
+    from .watchdog import _force_exit, _record_event
 
+    _record_event("replacement-requested", reason)
     try:
         _core()._spawn_watchdog_replacement(active_port=active_port)
         import logging
