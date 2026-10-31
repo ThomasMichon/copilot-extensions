@@ -755,11 +755,13 @@ def compose(
     knowledge = Path(knowledge_path).resolve()
     _ensure_distinct_checkouts(harness, knowledge)
     output_path = harness / ".github" / "copilot" / "settings.local.json"
-    from .local_cache_refresh import complete_pair_composition, mark_pair_pending
+    from . import local_cache_refresh as refresh
 
     with _overlay_transaction(output_path):
         if pair_id:
-            mark_pair_pending(harness)
+            refresh.mark_pair_pending(harness)
+        if pair_id and pair_kind == "worktree":
+            refresh.prepare_companion_instructions(knowledge)
         summary = _compose_locked(
             harness,
             knowledge,
@@ -767,7 +769,7 @@ def compose(
             pair_kind=pair_kind,
             legacy_knowledge_path=legacy_knowledge_path,
         )
-        complete_pair_composition(harness, summary)
+        refresh.complete_pair_composition(harness, summary)
         return summary
 
 
@@ -886,23 +888,25 @@ def _is_tracked_harness(
     return bool(repo_config.stateless)
 
 
-def _retire_disabled_overlay(harness_path: str | Path) -> dict[str, Any]:
+def _retire_disabled_overlay(harness_path: str | Path, *, knowledge_path: Path | None = None) -> dict[str, Any]:
     """Retire a marker-owned overlay when composition is config-disabled
     (pair stays valid -- only composition is off; see `_retire_invalid_pair_overlay`)."""
     harness = Path(harness_path).resolve()
     output_path = harness / ".github" / "copilot" / "settings.local.json"
-    from .local_cache_refresh import complete_pair_composition, mark_pair_pending
+    from . import local_cache_refresh as refresh
 
     def completed(changed: bool) -> dict[str, Any]:
         summary = {
             "action": "disabled", "paired": True, "changed": changed,
             "settings_local": str(output_path), "harness_path": str(harness),
         }
-        complete_pair_composition(harness, summary)
+        refresh.complete_pair_composition(harness, summary)
         return summary
 
     with _overlay_transaction(output_path):
-        mark_pair_pending(harness)
+        refresh.mark_pair_pending(harness)
+        if knowledge_path is not None:
+            refresh.prepare_companion_instructions(knowledge_path)
         existing = _load_json_object(output_path)
         marker = _managed_marker(existing, output_path)
         if marker is None or not marker.get("pairId"):
@@ -971,7 +975,10 @@ def compose_from_pair(
     if repo_config is not None and not repo_config.compose_knowledge_plugins:
         # Opted out via `RepoConfig.compose_knowledge_plugins`: state-root
         # pairing stays valid; only the plugin overlay is retired/withheld.
-        summary = _retire_disabled_overlay(pair.harness_path)
+        summary = _retire_disabled_overlay(
+            pair.harness_path,
+            knowledge_path=pair.knowledge_path if pair.pair_kind == "worktree" else None,
+        )
         summary["knowledge_repo"] = pair.knowledge_repo
         return summary
 
