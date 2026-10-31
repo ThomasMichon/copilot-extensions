@@ -113,6 +113,15 @@ publication, renewal reuses the exact immutable outcome and receipt instead.
 Legacy `selection.pending` content still requires exact prefix completion;
 foreign or conflicting pending content is never overwritten or ignored.
 
+Resuming a failed terminal decision verifies its retained bridge and current
+container attachments as well as its native fingerprints, without repeating
+the readiness decision. The resulting paired observation spans final cleanup.
+Clearing original attempt metadata is followed by another full publication
+checkpoint before current completion returns. Late key, process or endpoint
+drift refuses that completion while preserving the already committed original
+terminal receipt; it never changes the decision back to UNKNOWN or appends a
+second terminal outcome.
+
 ## Status, support and rollout
 
 `repair_status` reports schema `fleet-manager.komodo-repair-status`, version 1,

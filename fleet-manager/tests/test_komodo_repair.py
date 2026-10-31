@@ -39,6 +39,8 @@ CRASHES = [
     "complete-before", "complete-after", "journal-revoke", "append-revoke", "save-revoke",
 ]
 PARTIAL_SAVES = ["save-partial-renewed", "clear-partial-renewed"]
+TERMINAL_NETWORK = ["terminal-failed-network", "terminal-failed-attachment"]
+CLEANUP_DRIFTS = ["cleanup-key", "cleanup-endpoint"]
 DRIFTS = [
     f"publication-drift-{stage}-{change}"
     for stage in ("retain", "save", "append")
@@ -66,7 +68,8 @@ REFUSALS = [
     ) else [pytest.mark.client_distribution_full])
     for mode in ("success", "failed", "mount-order", "renewed", "prior-failed",
                  "status-endpoint-drift", "status-missing-network-membership",
-                 "status-mismatched-network-attachment", *REFUSALS, *CRASHES, *PARTIAL_SAVES)
+                 "status-mismatched-network-attachment", *REFUSALS, *CRASHES, *PARTIAL_SAVES,
+                 *TERMINAL_NETWORK, *CLEANUP_DRIFTS)
 ])
 def test_original_unknown_uses_current_repair_without_native_replay(
     native_rig: Any, keys: Any, monkeypatch: Any, mode: str,
@@ -197,7 +200,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             uncertain = journal.inspect(original)
             assert uncertain.to_dict()["status"] == "unknown"
             assert uncertain.to_dict()["sequence"] == 2 and uncertain.to_dict()["result_ref"] is None
-            original_health_failure[0] = mode == "failed"
+            original_health_failure[0] = mode == "failed" or mode in TERMINAL_NETWORK
 
             def resolve(identity: Any, request: Any, role: str, installation: str) -> KomodoRepairSelection:
                 resolver_calls.append((identity.subject, role, installation))
@@ -217,7 +220,8 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             def call(*, status: bool = False) -> Any:
                 return (repair_status if status else repair_bootstrap)(
                     repair_owner(), harness.identity(), selected_request,
-                    role="client", installation="client-a", **({} if status else {"failed": mode == "failed"}))
+                    role="client", installation="client-a",
+                    **({} if status else {"failed": mode == "failed" or mode in TERMINAL_NETWORK}))
 
             selected_request = original
             if mode in ("missing-network-membership", "status-missing-network-membership"):
@@ -318,6 +322,23 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             fired: list[bool] = []
             partial_save: list[tuple[Path, bytes, int, int]] = []
             late_key = [False]
+            if mode in CLEANUP_DRIFTS:
+                save = KomodoState.save
+
+                def drift_after_cleanup(instance: Any, value: dict[str, Any]) -> None:
+                    selected = not fired and type(value["good"]) is dict and "repair" in value["good"]
+                    selected = selected and value["attempt"] is None
+                    save(instance, value)
+                    if selected:
+                        fired.append(True)
+                        if mode == "cleanup-key":
+                            (rig["material"].keys / "core.pub").write_text(PUBLIC_PEM["periphery"])
+                        else:
+                            (rig["directory"] / "endpoint-overrides.json").write_text(json.dumps({
+                                live()["core"]["Id"]: {"EndpointID": "f" * 64},
+                            }))
+
+                monkeypatch.setattr(KomodoState, "save", drift_after_cleanup)
             if mode.endswith("key-during-native"):
                 original_network = KomodoNative.network
 
@@ -485,12 +506,24 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 elif mode == "missing-selection":
                     assert not (owner_root / "selection.json").exists()
             else:
-                if mode in (*CRASHES, *PARTIAL_SAVES):
+                if mode in (*CRASHES, *PARTIAL_SAVES, *CLEANUP_DRIFTS):
                     with pytest.raises((PlanError, AdmissionError)):
                         await asyncio.to_thread(call)
                     assert fired and not harness.owner._issued
                     assert journal.inspect(original).to_dict()["sequence"] in (2, 3)
                     transition["active"] = True
+                    if mode in CLEANUP_DRIFTS:
+                        terminal_before_retry = journal.inspect(original)
+                        terminal_rows = journal.results()
+                        terminal_state = decode((owner_root / "selection.json").read_bytes())
+                        assert terminal_before_retry.to_dict()["sequence"] == 3
+                        assert terminal_state["attempt"] is None
+                        assert terminal_state["good"]["original_attempt"] == retained
+                        if mode == "cleanup-key":
+                            (rig["material"].keys / "core.pub").write_text(PUBLIC_PEM["core"])
+                        else:
+                            flag = rig["directory"] / "endpoint-overrides.json"
+                            flag.rename(flag.with_name(flag.name + ".fixture-retained"))
                     if mode in PARTIAL_SAVES:
                         before_retry = journal.inspect(original)
                         rows_before_retry = journal.results()
@@ -502,10 +535,28 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                         )),))
                         transition["revision"] = 2
                 receipt = await asyncio.to_thread(call)
-                assert receipt.to_dict()["status"] == ("failed" if mode == "failed" else "succeeded")
+                assert receipt.to_dict()["status"] == (
+                    "failed" if mode == "failed" or mode in TERMINAL_NETWORK else "succeeded")
                 assert receipt.to_dict()["sequence"] == 3
                 assert receipt.to_dict()["request_digest"] == original.request_digest
-                assert await asyncio.to_thread(call) == receipt
+                if mode in TERMINAL_NETWORK:
+                    if mode == "terminal-failed-network":
+                        path = rig["directory"] / "network.json"
+                        network = json.loads(path.read_text())
+                        network["IPAM"]["Driver"] = "foreign-terminal-network"
+                        path.write_text(json.dumps(network))
+                    else:
+                        (rig["directory"] / "endpoint-overrides.json").write_text(json.dumps({
+                            live()["core"]["Id"]: {"EndpointID": "f" * 64},
+                        }))
+                    with pytest.raises(PlanError):
+                        await asyncio.to_thread(call)
+                    assert journal.inspect(original) == receipt
+                else:
+                    assert await asyncio.to_thread(call) == receipt
+                if mode in CLEANUP_DRIFTS:
+                    assert receipt == terminal_before_retry and journal.results() == terminal_rows
+                    assert decode((owner_root / "selection.json").read_bytes()) == terminal_state
                 assert len(journal.results()) == (6 if prior_ref is not None else 3)
                 value = decode((owner_root / "receipts" / (
                     receipt.to_dict()["result_ref"] + ".json")).read_bytes())

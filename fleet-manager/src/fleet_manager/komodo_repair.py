@@ -328,6 +328,7 @@ class _Attempt:
             self.record["attempt"] = None
             self.state.save(self.record)
             self.saved = canonical(self.record)
+            self.checkpoint()
         self.owner.admission.complete(self.permit, self.request)
 
 
@@ -376,10 +377,19 @@ class KomodoRepairOwner:
                 if failed:
                     operation.native.prerequisites(
                         selected.declaration, selected.material, deadline=operation.deadline)
-                if (not native_set_matches(outcome["native"], operation.native.inspect(
-                        selected.declaration, selected.material, deadline=operation.deadline))
+                containers = operation.native.inspect(
+                    selected.declaration, selected.material, deadline=operation.deadline)
+                if (not native_set_matches(outcome["native"], containers)
                         or (current is not None and current["public_identity"] != outcome["public_identity"])):
                     raise PlanError("Komodo repair terminal native evidence has drifted")
+                if failed:
+                    network = deepcopy(operation.native.network(
+                        selected.declaration, selected.material, deadline=operation.deadline))
+                    network_reference = verify_network(
+                        network, selected, containers, outcome["network"], pending=True)
+                    operation.observation = _Observation(
+                        deepcopy(containers), network_reference,
+                        deepcopy(network["Containers"]) if network is not None else None, True)
                 operation.finish()
                 return operation.receipt
             return operation.publish(operation.evidence(failed=failed), failed=failed)
