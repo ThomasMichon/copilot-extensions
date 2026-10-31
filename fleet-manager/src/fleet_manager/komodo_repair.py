@@ -198,6 +198,9 @@ class _Attempt:
         selected = self.resolution.current().candidate
         images = self.native.prerequisites(selected.declaration, selected.material, deadline=self.deadline)
         containers = self.native.inspect(selected.declaration, selected.material, deadline=self.deadline)
+        if retained is not None and not native_set_matches(retained["native"], containers):
+            phase = "pending" if self.receipt.to_dict()["status"] == "unknown" else "terminal"
+            raise PlanError(f"Komodo repair {phase} retained native evidence is unproved")
         if failed:
             selected_native = verify_failed_candidate(
                 containers, selected, images, selected.profile(), self.original)

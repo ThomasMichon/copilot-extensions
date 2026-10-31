@@ -48,6 +48,7 @@ CLEANUP_DRIFTS = ["cleanup-key", "cleanup-endpoint"]
 REPLACED_TERMINAL = [
     "terminal-succeeded-replaced-network", "status-succeeded-replaced-network",
     "status-failed-replaced-network",
+    "terminal-succeeded-replaced-container", "terminal-failed-replaced-container",
 ]
 CONFLICTING_ATTEMPTS = [
     "terminal-succeeded-conflicting-attempt", "terminal-failed-conflicting-attempt",
@@ -241,7 +242,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             assert uncertain.to_dict()["sequence"] == 2 and uncertain.to_dict()["result_ref"] is None
             failed = mode == "failed" or mode.startswith(("publication-late-failed-", "pending-failed-")) or mode in TERMINAL_NETWORK or mode in (
                 "status-failed-replaced-network", "terminal-failed-conflicting-attempt",
-                "status-failed-conflicting-attempt")
+                "status-failed-conflicting-attempt", "terminal-failed-replaced-container")
             original_health_failure[0] = failed
 
             def resolve(identity: Any, request: Any, role: str, installation: str) -> KomodoRepairSelection:
@@ -606,8 +607,9 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                         assert status["installed"] is status["currently_healthy"] is None
                         assert "retained native" in status["health_error"]
                         assert health_requests == before_health
-                        with pytest.raises(PlanError, match="pending outcome"):
+                        with pytest.raises(PlanError, match="pending.*(outcome|native)"):
                             await asyncio.to_thread(call)
+                        assert health_requests == before_health
                         assert journal.inspect(original) == uncertain
                         assert decode((owner_root / "selection.json").read_bytes())["attempt"] == retained
                         (rig["directory"] / "live.json").write_bytes(original_native)
@@ -666,8 +668,22 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     assert journal.inspect(original) == receipt
                 elif mode in REPLACED_TERMINAL:
                     before_health = list(health_requests)
-                    replace_bridge()
-                    if mode.startswith("status"):
+                    if not mode.endswith("replaced-container"):
+                        replace_bridge()
+                    if mode.endswith("replaced-container"):
+                        terminal_state = (owner_root / "selection.json").read_bytes()
+                        terminal_rows = journal.results()
+                        original_native = replace_pending_container(rig["directory"])
+                        with pytest.raises(PlanError, match="terminal.*native"):
+                            await asyncio.to_thread(call)
+                        assert journal.inspect(original) == receipt and journal.results() == terminal_rows
+                        assert (owner_root / "selection.json").read_bytes() == terminal_state
+                        assert health_requests == before_health and not harness.owner._issued
+                        (rig["directory"] / "live.json").write_bytes(original_native)
+                        assert await asyncio.to_thread(call) == receipt
+                        assert journal.results() == terminal_rows
+                        assert (owner_root / "selection.json").read_bytes() == terminal_state
+                    elif mode.startswith("status"):
                         status = await asyncio.to_thread(call, status=True)
                         assert status["accepted"] == receipt.to_dict()["status"]
                         assert status["installed"] is status["currently_healthy"] is None
@@ -676,7 +692,9 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     else:
                         with pytest.raises(PlanError, match="retained native network"):
                             await asyncio.to_thread(call)
-                    assert journal.inspect(original) == receipt and health_requests == before_health
+                    assert journal.inspect(original) == receipt
+                    if not mode.endswith("replaced-container"):
+                        assert health_requests == before_health
                 elif mode in CONFLICTING_ATTEMPTS:
                     with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
                         record = state.read()

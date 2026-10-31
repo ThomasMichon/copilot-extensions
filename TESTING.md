@@ -159,9 +159,11 @@ permit or reconnect/disconnect the same container after immutable-evidence
 reads inside the original terminal transaction. Both success and failure must
 retain the exact UNKNOWN receipt, original attempt and two journal rows.
 Interrupted success/failure publication controls replace a container on the
-same bridge and require pending status to refuse native attribution before
-health. Restoring the retained container resumes the same original decision
-without another native apply.
+same bridge and require pending status and success/failure retries to refuse
+native attribution before any credentialed HTTP request. Successful and failed
+terminal retries have the same replacement-container control, retaining the
+exact terminal state and journal rows. Restoring the retained container resumes
+the same original decision without another native apply.
 Use the existing standalone runner with a `komodo_repair` selector and
 `-m "not client_distribution_full"` for its focused smoke/record controls;
 omit that marker filter for the full packet. Required unit-only CI is unchanged.
