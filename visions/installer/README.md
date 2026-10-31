@@ -176,7 +176,14 @@ private knowledge, machine inventory or connectivity policy. Authentication
 remains with its provider, including a genuine interactive opportunity when
 needed; access failure is not permission to substitute another account or source.
 An unfinished repository stage remains explicit without discarding a completed
-core installation or claiming full adoption.
+Manager installation or claiming full adoption.
+
+The upstream entry establishes Manager first from a trusted staged source and
+complete installation inputs, independently of Copilot, installed plugin
+payloads, an old runtime command or interactive shell initialization. Default
+selection follows live upstream Main; explicit locally promoted installation
+snapshots and admitted source checkouts/commits remain supported. Last-known-good
+Main ancestors retain their own release identity.
 
 ### harness-selected-continuity-bootstrap
 
@@ -208,9 +215,62 @@ Detects and installs the foundational prerequisites, and **prompts to restart**
 when a change requires it before continuing.
 
 ### core-install-via-real-flow
-Installs the user-global ground runtime and baseline services by driving the
-harness's **own** install flow, so the deployed core matches what the harness
-expects rather than a parallel reimplementation that can drift.
+Establishes Manager through the real upstream installation owner, then derives
+wanted local tools and services from a selected repository or an explicitly
+addressed registered-repository set. Complete per-application uv inputs and
+associated wheel closures are prepared with bounded parallelism, without
+inventing a second installer or using plugin payloads as runtime source.
+
+Setup owns completion and readiness; preparation can remain separate from
+activation. An operator-selected atomic local set admits every incoming member
+before coordinated selection, preserves the last good set and supports
+state-compatible rollback. Independent components remain usable without a
+mandatory Manager or group transaction.
+
+### owner-scoped-independent-recovery
+
+The same trusted self-install entry remains reachable when an old launcher,
+environment or redirect is broken. Read-only doctor, inventory and native
+transaction evidence precede a disruptive recovery. Positively owned incomplete
+candidates can be isolated and reconstructed fresh without wiping durable
+configuration/data or unrelated installations.
+
+Stable global command redirects and declared consumer registrations survive
+source staging and plugin removal. A running legacy launcher is not rewritten
+inside its own execution stream. Unknown, inaccessible, foreign or unsettled
+ownership is an explicit blocker, not a reason to unlink locks, kill processes,
+escalate privilege or adopt a different source.
+
+Raw self-install and rollback remain usable without the old Manager, tool
+commands, updater queue or services being replaced. Core source/toolchain
+construction comes before repository adoption and its authentication.
+Old installed wrappers/connectors either remain compatible or receive a
+supported, authorized refresh before activation; installed payload files are
+not patched ad hoc.
+
+Manual rescue authority is distinct from automatic-update admission. It does
+not clear another maintenance owner or a global automatic hold, and never grants
+unaddressed fleet rollout. Incoming native readiness, routing selection,
+preserved state and predecessor retirement are observed separately.
+
+### prepared-independent-maintenance
+
+One admitted owner prepares updates after foreground Manager load or on an
+optional long cadence. A later worktree/session launch can select a fully
+prepared toolset without first-use environment rebuilding. The caller waits
+for admitted construction/start outcomes, not complete background draining.
+
+Plugins remain bounded discovery and guidance connectors, not runtime
+installation triggers. Prepared reconciliation/instruction/hoist selections
+keep fresh worktrees correct: current managed bodies reach model discovery
+before execution, with reviewed fallbacks only when current bodies are absent.
+An optional once-per-session prepared-update notice does not create another
+maintenance loop or claim activation.
+
+Repository-derived service selection respects role, locus, provider and
+installation ownership. Missing or incomplete declarations never imply
+automatic uninstall. Automatic inhibition leaves ordinary healthy launch/use
+available, and manual rescue does not settle an unknown queue owner.
 
 ### setup-invocation-authorizes-dependencies
 A user or authorized agent directly invoking the trusted harness setup flow

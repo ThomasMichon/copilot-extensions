@@ -21,9 +21,12 @@ updates or rewriting a live environment.
 Prove the source install on a disposable container before attempting a native
 Windows runtime-only pilot and completing the adopter's installed service/tool
 transition. Keep the dedicated source healthy and current through the existing
-maintenance owner and canonical install flow. Ordinary plugin self-provisioning
-remains the default; managed deployment is a local choice, not adoption of
-another product or a change to service-supervision ownership.
+maintenance owner and canonical install flow. The [wheel-first extension](wheel-first-transition.md) proposes independently
+maintained runtime installation as the ordinary suite path, with plugins as
+connectors rather than installation sources. Its initial review is an intent
+checkpoint on one combined proposal/implementation PR, not a claim that the
+earlier optional-source deployment has already migrated or that native
+service-supervision ownership changes.
 
 ## Participants
 
@@ -35,6 +38,7 @@ another product or a change to service-supervision ownership.
 | Linux clean-room runner | Reproduces and verifies actual source installation and activation | Existing Docker clean-room rig; WSL is a supported host |
 | Windows validation runner | Verifies native installer, resolver and non-deployment hook behavior | Isolated Windows fixtures, then an explicitly authorized runtime-only pilot |
 | Independent reviewer | Reviews each coherent proposal or implementation change | Repository PR review |
+| Wheel-first transition coordinator | Owns the operator-directed combined proposal/implementation slice and its container-before-host acceptance | #7028, #9688 and the combined PR; existing source/resource custodians remain |
 
 ## Coordination
 
@@ -113,6 +117,24 @@ commits, materialized payload digests, package versions, profiles and dependency
 locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
+
+**2026-10-30 — wheel-first independent suite, settled summary:** promotion
+produces complete copyable uv projects and their associated first-party wheels;
+the upstream installer establishes Manager first, then repo-derived wanted
+services. Preparation, application-owned readiness and activation are separated
+where needed, with optional atomic local selection and last-good rollback.
+Plugin loading stops runtime installation/stamping and keeps bounded guidance.
+Whole-system install/change/reinstall/cutover/recovery is proven in Windows
+containers before an addressed manual host deployment. The automatic-update
+hold is not cleared by this work.
+
+The [verbatim request and subsequent scope summary](wheel-first-inception.md),
+[reviewable transition](wheel-first-transition.md),
+[measured performance](wheel-first-performance.md) and
+[generic recovery inputs](wheel-first-recovery-cases.md) preserve requested
+scope separately from agent-recommended implementation choices. Existing
+retained families and their custody remain; this extension does not supersede
+another contributor's open PR or silently waive an old admission check.
 
 **Independent repair acceptance (2026-10-29), summary of operator direction:**
 install and run the complete V1 suite, then force-install V2 in repair mode
@@ -302,6 +324,18 @@ receipt; unknown compatibility selects fresh installation within declared
 disposable scope while preserving config and durable data.
 
 ## Plan
+
+### Phase W — Wheel-first independent suite (proposal extension)
+- [ ] Review the [single-PR intent checkpoint and W0–W4 plan](wheel-first-transition.md#plan-and-acceptance) before implementing the new direction.
+- [ ] Deliver the Manager-only fast path and complete locally promoted uv/wheel inputs through existing source/release owners.
+- [ ] Prove whole-system Windows-container installation, source/version update, cutover, state survival and the generic recovery cases.
+- [ ] Integrate independent maintenance and bounded prepared plugin/guidance selection without foreground rebuilds/scans.
+- [ ] Complete review/CI on that same PR; consider only the separately admitted, addressed local rollout after container proof.
+
+This new direction is not retroactively qualified by completed historical
+phases or the environment-only benchmark. Its detailed acceptance matrix is
+in the [transition proposal](wheel-first-transition.md); existing unresolved
+Plan/Validation items below retain their owners and evidence.
 ### Phase 0 - Review the intent and plan
 - [x] Land the vision amendments and this canonical proposal through repository review.
 - [x] Confirm issue/slice ownership and preserve the existing dependency campaigns.
@@ -1028,6 +1062,10 @@ implementation, rollout or parent completion is declared.
   alternatives, finite metrics/venues and unchanged source/resource ownership.
 
 ## Validation Plan
+
+- [ ] Resolve every [W0–W4 acceptance item](wheel-first-transition.md#plan-and-acceptance), including actual tools/daemon health and source-change reinstall, before claiming the wheel-first transition complete.
+- [ ] Keep [construction measurements](wheel-first-performance.md) distinct from installed readiness, native lifecycle, SSH-shaped execution and rollout evidence.
+- [ ] Prove preservation/explicit refusal for all [generic recovery classes](wheel-first-recovery-cases.md), without private identifiers or unofficial workarounds.
 - [ ] **Fresh-default orchestration:** resolve the [public-entry-point and construction-path matrix](fresh-default-installation.md#validation-plan): global project update interception, upstream Main/default and explicit overrides, cold/broken old runtime, compatible incremental/ZDD and missing/incompatible recognition reaching mostly fresh installation under the same execution owner. Receipts must not become update permission.
 - [x] **Agent-recommended bounded metadata recovery:** native Windows/Linux
   construction under pending missing/corrupt receipts publishes selectable
@@ -1115,6 +1153,11 @@ implementation, rollout or parent completion is declared.
   Paper intake is not implementation, native/installed acceptance or release.
 
 ## Proposal
+
+The [wheel-first extension](wheel-first-transition.md) is proposed for initial
+intent review on one combined draft PR. That checkpoint is not a docs-only merge
+or application acceptance. Implementation remains scoped by its W0–W4 gates,
+native ownership and the explicit container-before-host requirement.
 
 Keep deployment policy, source selection and serving-generation selection
 separate. Reuse the canonical materializer, runtime construction/retention and
