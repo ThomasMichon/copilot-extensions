@@ -153,7 +153,8 @@ def test_native_direct_refusal_never_runs_foreground(tmp_path, scopes):
         "} catch { $e=$_.Exception; "
         "while ($e.InnerException -and $e -isnot [CopilotExtensions.NativeDaemonSpawnException]) "
         "{ $e=$e.InnerException }; "
-        "@{ settled=$e.CleanupConfirmed; type=$e.GetType().Name; error=$e.InnerException.Message } "
+        "@{ settled=$e.CleanupConfirmed; type=$e.GetType().Name; message=$e.Message; "
+        "error=$e.InnerException.Message } "
         "| ConvertTo-Json -Compress }"
     )
     encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
@@ -164,7 +165,7 @@ def test_native_direct_refusal_never_runs_foreground(tmp_path, scopes):
     )
     assert result.returncode == 0, result.stderr
     outcome = json.loads(result.stdout)
-    assert outcome["type"] == "NativeDaemonSpawnException"
+    assert outcome["type"] == "NativeDaemonSpawnException", outcome
     assert outcome["settled"] is True
     assert not (tmp_path / "started").exists()
 
@@ -264,7 +265,8 @@ def test_native_contained_handshake_with_credential_free_private_profile(tmp_pat
     worker = directory / "worker.ps1"
     worker.write_text(
         "$ErrorActionPreference='Stop'\n"
-        f"[IO.File]::WriteAllText({literal(directory / 'started')}, $args[0])\n"
+        f"[IO.File]::WriteAllText({literal(directory / 'starting')}, $args[0])\n"
+        f"[IO.File]::Move({literal(directory / 'starting')}, {literal(directory / 'started')})\n"
         "$deadline=[DateTime]::UtcNow.AddSeconds(15)\n"
         f"while (-not (Test-Path -LiteralPath {literal(directory / 'continue')})) {{\n"
         " if ([DateTime]::UtcNow -gt $deadline) { throw 'caller did not release worker' }\n"
@@ -322,8 +324,6 @@ def test_native_contained_handshake_with_credential_free_private_profile(tmp_pat
         process.wait(timeout=5)
         if daemon is not None:
             try:
-                if daemon.poll() is None:
-                    daemon.kill()
                 daemon.wait(timeout=5)
             finally:
                 daemon.close()
