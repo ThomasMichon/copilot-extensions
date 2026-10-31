@@ -1,0 +1,9 @@
+{
+  "comment": "Prepare the generated instruction ignore namespace during paired knowledge worktree composition through the native publication owner.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
