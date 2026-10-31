@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent proposal, implementation, and completion PRs to `dev`
 - **Created:** 2026-10-30
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `harness-guidance`: `simple-local-static-delivery` and `generated-output-is-disposable-source-is-not`
 - **Umbrella issue:** #9712
 - **Sub-issues:** None initially
@@ -90,12 +90,13 @@ standalone knowledge session is included.
 
 ### Phase 3 - Qualify and close source delivery
 
-- [ ] Complete the Validation Plan and land the reviewed implementation with
+- [x] Complete the Validation Plan and land the reviewed implementation with
   required CI green.
-- [ ] Record release status accurately without installing or activating a
+- [x] Record release status accurately without installing or activating a
   runtime; any operational rollout requires separate authorization.
-- [ ] Resolve all plan items, archive this effort as Done, close the coordination
-  issue, and finalize its controlled source worktree.
+- [x] Resolve all source plan items and prepare this effort's Done archive.
+  After its archive PR merges, close the coordination issue and finalize the
+  controlled source worktree through the native completion path.
 
 ## Validation Plan
 
@@ -110,7 +111,7 @@ the requested automatic preparation rather than merely testing a helper.
 - [x] Cover existing ignore coverage, invalid/unwritable or indirect exclude
   paths, tracked generated destinations, and a visible retryable preparation
   failure without weakening native safety checks.
-- [ ] Run focused owner/lifecycle tests, Python lint, install-contract checks,
+- [x] Run focused owner/lifecycle tests, Python lint, install-contract checks,
   and required repository CI for the final candidate.
 - [x] Run a disposable first-touch consumer check using real Git and publication;
   record platform limits and the reason for any unavailable external lane.
@@ -320,3 +321,23 @@ into the harness.
   tests and retained portable creation fixture; staged whitespace checks passed.
   The outstanding lint gap is resolved. Required CI and review still need to
   qualify the published correction.
+
+### 2026-10-30 - Source delivery completed
+
+- #9721 squash-merged to `dev` at `8c3195c71b671ad4c771d82587bfe075465d624e`
+  after exact-head Copilot approval, green required CI and resolution of both
+  review threads. The final candidate preserves shared-exclude serialization,
+  complete directory-level coverage and the final encoded-byte limit.
+- All source Plan and Validation Plan items are resolved. The existing
+  dynamic-guidance pattern records the durable behavior; no new capability,
+  renderer, ignore policy or source-discovery authority was introduced.
+- Release status: merged to `dev`; publication to `main` remains unconfirmed.
+  The normal promotion owner remains #3336. No installed runtime, service,
+  plugin activation or operational rollout was changed or authorized.
+- Pull-forward initially stopped and auto-aborted a squash-merge conflict.
+  A local backup retained the owned tip; every file in the merged patch was
+  byte-identical to that tip before advancing the same worktree onto `dev`.
+- This completion delta archives the effort as Done. The source driver retains
+  the archive PR through review and merge, then closes #9712 and releases the
+  completed effort focus before native worktree finalization. Those procedural
+  closure steps remain owned until their actual terminal results are verified.

@@ -10,7 +10,6 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Knowledge Projection Preparation](active/knowledge-projection-preparation/README.md) | Active; companion ignore prerequisite implemented and locally qualified, delivery gates open | #9712; reuses native publisher safety and paired lifecycle owners, no rollout |
 | [Startup-Only Guidance](active/startup-only-guidance/README.md) | Active; declarations released, approved adoption held on installer prerequisites | Bounded #5993 follow-up; preserves periodic sync, existing delivery/native owners and separately owned #9489 repair |
 | [PR Review Workspaces](active/pr-review-workspaces/README.md) | Active; offline generations merged, finite acquisition source slice | #9535; successor PR plugin/service cache, existing #6007/#7188 and #7051 owners retained; no rollout |
 | [Native Startup Prompts](active/native-startup-prompts/README.md) | Active; ordinary cold-launch consumer #9374 merged, native POSIX/full-mux and installed qualification remain | #9364; preserves #7116/#8375/#7942/#8669/#5579 owners; no rollout or retained-session restart |
@@ -152,6 +151,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Knowledge Projection Preparation](2026/10/30%20knowledge-projection-preparation/README.md) | Done; companion ignore preparation, shared-exclude serialization and complete namespace coverage merged with approval and required CI in #9721 | #9712; normal promotion remains #3336, main publication unconfirmed, no installed rollout |
 | [Configurable AI Attribution](2026/10/30%20configurable-ai-attribution/README.md) | Done; canonical profile/guidance/pure decorator merged and released as 0.1.5-dev1, selected adopter fork retired through reviewed configuration | #9633/#9637/#9646; #2965/#9627 custody retained; activation remains adopter-owned, no rollout |
 | [Client Request Interpretation](2026/10/30%20client-request-interpretation/README.md) | Done; current-preference snapshots, 300-second timeout and bounded local interpretation merged in #9632 and released in #9652 | #9609; exact memory/builtin origins remain explicitly unknown without provenance; no installed rollout |
 | [Launch Boundary Repairs](2026/10/30%20launch-boundary-repairs/README.md) | Done for source scope; five repair PRs merged, four repair-only worktrees finalized, coordinator retained until archive publication | #9520; #8051 relay budgets, #5761 discovery, #5512 monitor and #9322 PATH retained; no rollout or live venue retry |
