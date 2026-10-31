@@ -363,9 +363,10 @@ class ReplayStore:
             self.check_current(expires_at, checkpoint)
 
             def commit(state: dict) -> None:
+                encoded_state = self._encode(state, owner_state=document)
                 lock.assert_owned()
                 self.check_current(expires_at, checkpoint)
-                _atomic_write_json(self.path, self._encode(state, owner_state=document))
+                _atomic_write_json(self.path, encoded_state)
 
             if self.path.is_symlink():
                 raise ReplayStoreInvalid("linked replay state")

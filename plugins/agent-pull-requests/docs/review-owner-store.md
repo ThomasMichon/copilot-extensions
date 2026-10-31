@@ -102,7 +102,9 @@ these shared transitions, reloading current state for subsequent receipt commits
 Whole-file rewrite/fsync and retained-history contention still require measured
 integration qualification; this slice makes no serving latency claim.
 Current-owner checks run again after lock-ownership inspection immediately
-before mutation and before returning its result. A commit already admitted into
+before mutation and before returning its result. Owner-envelope encoding and
+validation finish before that final mutation check, including replay commits.
+A commit already admitted into
 atomic persistence may finish while the owner is withdrawn; the later denial is
 not rollback or proof of absent state. Re-read that same operation under a valid
 owner instead of inventing a replacement identity or blindly repeating effects.

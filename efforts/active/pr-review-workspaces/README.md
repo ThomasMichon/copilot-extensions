@@ -230,6 +230,9 @@ contract.
   mutation and after admitted persistence before exporting its result. Source
   controls distinguish pre-mutation withdrawal (no write) from withdrawal during
   an admitted atomic commit (denial with durable readback, not fictional rollback).
+- Finish owner-envelope encoding/validation before the last replay mutation
+  guard. Withdrawal during that preparation is refused before the atomic writer
+  starts, rather than persisting then reporting an avoidable denial.
 - The original credential/principal/discussion freshness, actual effect-specific
   reconciliation, executor/provider integration and live serving qualification
   remain open. No new ledger, issuer, daemon, hosting repair or rollout is made.

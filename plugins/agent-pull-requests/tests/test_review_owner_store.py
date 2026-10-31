@@ -454,3 +454,27 @@ def test_owner_loss_during_admitted_atomic_commit_is_denied_without_claiming_rol
             store.admit_review(selected(), expires_at=expires(), checkpoint=checkpoint)
     assert error.value is denied
     assert store.inspect_review("selected-review", SCOPE, expires_at=expires())["intent"] == selected()
+
+
+def test_replay_owner_encoding_finishes_before_the_final_mutation_check(store, monkeypatch):
+    original = store._encode
+    denied = PermissionError("existing owner withdrawn during envelope encoding")
+    allowed = [True]
+    before = store.path.read_bytes()
+
+    def encode(state, **kwargs):
+        result = original(state, **kwargs)
+        allowed[0] = False
+        return result
+
+    def checkpoint():
+        if not allowed[0]:
+            raise denied
+
+    monkeypatch.setattr(store, "_encode", encode)
+    with pytest.raises(PermissionError) as error:
+        store.execute(CONSUMER, "register", {
+            "request_id": "encoding-watch", "issued_at": time.time(), "number": 42, "until": ("merged",),
+        }, expires_at=expires(), checkpoint=checkpoint)
+    assert error.value is denied
+    assert store.path.read_bytes() == before
