@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import venv
 from types import ModuleType
 from pathlib import Path
 
@@ -59,6 +60,84 @@ def _manifest(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+@pytest.mark.parametrize("kind", ["ps1", "cmd"] if os.name == "nt" else ["sh"])
+def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
+    manifest = _manifest(tmp_path)
+    (manifest.parent / "plugin.json").write_text('{"name":"agent-example"}', encoding="utf-8")
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    root = profile / ".agent-example"
+    slot = root / "versions" / "immutable"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    site = slot / (
+        "Lib/site-packages" if os.name == "nt"
+        else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    )
+    package = site / "agent_example"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("VALUE = 42\n", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import agent_example, json, sys\n"
+        "print(json.dumps([agent_example.VALUE, agent_example.__cached__, "
+        "sys.dont_write_bytecode, sys.argv[1:]]))\n",
+        encoding="utf-8",
+    )
+    scripts = manifest.parent / "scripts"
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = '" + str(python).replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    (scripts / "resolve-runtime.sh").write_text(
+        "AGENT_RT_PY=" + shlex.quote(str(python)) + "\n", encoding="utf-8",
+    )
+    assert generator.process_manifest(manifest, check=False) == []
+    shim = manifest.parent / "bin" / ("agent-example" + ("" if kind == "sh" else "." + kind))
+    if kind == "cmd":
+        argv = [os.environ["COMSPEC"], "/d", "/c", str(shim)]
+    elif kind == "ps1":
+        host = shutil.which("pwsh") or shutil.which("powershell")
+        assert host, "native PowerShell is required"
+        argv = [host, "-NoProfile", "-NonInteractive", "-File", str(shim)]
+    else:
+        argv = ["sh", str(shim)]
+    environment = dict(os.environ)
+    child_env = {**environment, "USERPROFILE": str(profile), "HOME": str(profile)}
+    child_env.pop("PYTHONDONTWRITEBYTECODE", None)
+    child_env.pop("PYTHONPYCACHEPREFIX", None)
+
+    def snapshot():
+        return {
+            str(path.relative_to(slot)): (
+                path.read_bytes() if path.is_file() else None,
+                path.stat().st_mtime_ns, path.stat().st_ctime_ns, path.stat().st_ino,
+            )
+            for path in (slot, *slot.rglob("*"))
+        }
+
+    before = snapshot()
+    cached_before = None
+    for _ in range(2):
+        result = subprocess.run(
+            [*argv, "argument with spaces"], cwd=tmp_path, env=child_env,
+            capture_output=True, text=True, timeout=30,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout)
+        assert output[0] == 42 and output[2:] == [False, ["argument with spaces"]]
+        prefix = str(root / "cache" / "python")
+        if os.name == "nt":
+            prefix = "\\\\?\\" + prefix
+        cached = Path(output[1])
+        assert cached.is_relative_to(Path(prefix))
+        current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
+        if cached_before is not None:
+            assert current == cached_before
+        cached_before = current
+        assert snapshot() == before
+    assert dict(os.environ) == environment
 
 
 def _multi_manifest(tmp_path: Path) -> Path:
@@ -864,6 +943,68 @@ def _agent_worktrees_test_environment(
 NATIVE_POWERSHELL_HOSTS = list(dict.fromkeys(filter(None, (
     shutil.which("pwsh"), shutil.which("powershell"),
 ))))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows required-context command")
+@pytest.mark.parametrize("host", NATIVE_POWERSHELL_HOSTS or [None])
+def test_required_context_inner_command_external_cache(tmp_path: Path, host: str) -> None:
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    payload = _copied_agent_worktrees_payload(tmp_path, dispatch_only=True)
+    context = _stamp_agent_worktrees_context(tmp_path, payload)
+    home = tmp_path / "home"
+    home.mkdir()
+    root = _activate_agent_worktrees_context(tmp_path, home, context)
+    slot = root / "versions" / "immutable"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / "Scripts" / "python.exe"
+    package = slot / "Lib" / "site-packages" / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("VALUE = 42\n", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import agent_worktrees, json, sys\n"
+        "print(json.dumps([agent_worktrees.VALUE, agent_worktrees.__cached__, "
+        "sys.dont_write_bytecode, sys.argv[1:]]))\n", encoding="utf-8",
+    )
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = '" + str(python).replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    environment = dict(os.environ)
+    child_env = _agent_worktrees_test_environment(home, payload)
+    child_env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
+    for key in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "PYTHONPATH"):
+        child_env.pop(key, None)
+
+    def snapshot(directory):
+        return {
+            str(path.relative_to(directory)): (
+                path.read_bytes() if path.is_file() else None,
+                path.stat().st_mtime_ns, path.stat().st_ctime_ns, path.stat().st_ino,
+            )
+            for path in (directory, *directory.rglob("*"))
+        }
+
+    before = snapshot(slot), snapshot(payload)
+    cached_before = None
+    for _ in range(2):
+        result = subprocess.run(
+            [host, "-NoProfile", "-File",
+             str(payload / "bin" / "payload" / "agent-worktrees.ps1"), "argument with spaces"],
+            env=child_env, cwd=tmp_path, capture_output=True, text=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout)
+        assert output[0] == 42 and output[2:] == [False, ["argument with spaces"]]
+        cached = Path(output[1])
+        assert cached.is_relative_to(Path("\\\\?\\" + str(root / "cache" / "python")))
+        current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
+        if cached_before is not None:
+            assert current == cached_before
+        cached_before = current
+        assert (snapshot(slot), snapshot(payload)) == before
+    assert not (home / ".agent-worktrees" / "cache").exists()
+    assert dict(os.environ) == environment
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows context semantics")

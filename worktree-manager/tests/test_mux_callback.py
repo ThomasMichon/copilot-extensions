@@ -33,7 +33,8 @@ def test_callback_command_preserves_entry_mode(tmp_path, monkeypatch, installed,
         assert "PYTHONPATH" not in env
         assert root == tmp_path
     else:
-        assert command[1] == "-m"
+        assert command[1:3] == mux_callback.python_cache_args(root)
+        assert command[3] == "-m"
         assert env["PYTHONPATH"] == "development"
         assert root == tmp_path / "source-root"
     assert env["WORKTREE_MANAGER_ROOT"] == str(root)

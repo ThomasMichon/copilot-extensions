@@ -16,7 +16,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agent_procutil import no_window_kwargs, spawn_daemon, windowless_python, windowless_python_env
+from agent_procutil import (
+    no_window_kwargs, python_cache_args, spawn_daemon, windowless_python, windowless_python_env,
+)
 import httpx
 
 from . import http_auth
@@ -621,7 +623,10 @@ def _dispatch_to_server_venv(
     ):
         return None
 
-    cmd = [str(server_python), "-I", "-X", "utf8", "-m", "agent_index"]
+    cmd = [
+        str(server_python), "-I", *python_cache_args(os.path.abspath(install_dir())),
+        "-X", "utf8", "-m", "agent_index",
+    ]
     if raw_args is not None:
         from .index_command import absolute_hint_file_argv
 
@@ -1369,11 +1374,11 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     def spawn_passive(port: int):
         start_command = "__cell-start" if os.environ.get("AGENT_INDEX_INSTALLATION_ID") else "start"
         python = str(host_runtime_python())
+        root = Path(os.path.abspath(install_dir()))
         cmd = [
-            windowless_python(python), "-I", "-X", "utf8", "-m", "agent_index",
+            windowless_python(python), "-I", *python_cache_args(root), "-X", "utf8", "-m", "agent_index",
             start_command, "--host", cfg.host, "--port", str(port), "--passive",
         ]
-        root = Path(os.path.abspath(install_dir()))
         root.mkdir(parents=True, exist_ok=True)
         env = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "PYTHONHOME"}}
         overrides = dict(windowless_python_env(python))

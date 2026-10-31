@@ -463,7 +463,13 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python -m agent_worktrees @forwardArgs
+        $pythonCache = [IO.Path]::GetFullPath((Join-Path $runtimeRoot 'cache\python'))
+        if (-not $pythonCache.StartsWith('\\?\')) {
+            $pythonCache = if ($pythonCache.StartsWith('\\')) {
+                '\\?\UNC\' + $pythonCache.Substring(2)
+            } else { '\\?\' + $pythonCache }
+        }
+        & $Python -X "pycache_prefix=$pythonCache" -m agent_worktrees @forwardArgs
     } finally {
         $ErrorActionPreference = $previousEap
     }

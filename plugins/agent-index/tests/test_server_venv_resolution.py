@@ -214,7 +214,7 @@ def test_spawn_passive_uses_server_venv_python_when_provisioned(
         spawned["kwargs"] = kwargs
         return Handle()
 
-    monkeypatch.setattr(__main__.subprocess, "Popen", popen)
+    monkeypatch.setattr(__main__, "spawn_daemon", popen)
 
     rc = __main__.cmd_deploy(
         __main__.build_parser().parse_args(["deploy", "--json"])
@@ -224,3 +224,5 @@ def test_spawn_passive_uses_server_venv_python_when_provisioned(
     handle = captured["spawn_passive"](4555)
     assert handle.pid == 9911
     assert str(override_python) in spawned["command"][0]
+    from agent_procutil import python_cache_args
+    assert spawned["command"][1:4] == ["-I", *python_cache_args(config.install_dir())]

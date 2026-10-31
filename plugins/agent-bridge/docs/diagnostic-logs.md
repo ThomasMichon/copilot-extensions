@@ -106,8 +106,10 @@ its existence does not establish a stall's cause or successful recovery.
 
 The generated Windows `start-agent-bridge.ps1 -ResolveOnly` prints its actual
 selected interpreter and exits before PID handling, CWD/environment changes,
-log setup or process startup. Default scheduled startup is unchanged. This
-read-only selection observation does not prove service health.
+log setup or process startup. Normal scheduled and direct daemon startup use the
+[external Python bytecode cache](../../../libs/agent-procutil/README.md#managed-python-bytecode-cache)
+under the installation's durable state, not its immutable slot.
+The read-only selection observation does not prove service health.
 
 ## Deliberate retained-spool adoption
 

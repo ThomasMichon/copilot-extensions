@@ -26,6 +26,7 @@ def test_short_lived_helpers_import_without_daemon_modules(tmp_path, monkeypatch
     assert isinstance(module.no_window_flags(), int)
     assert callable(module.spawn_sync_in_kill_on_close_job)
     assert callable(module.spawn_daemon)
+    assert module.python_cache_args(tmp_path) == agent_procutil.python_cache_args(tmp_path)
     with pytest.raises(module.SyncProcessLaunchError) as raised:
         module.spawn_sync_in_kill_on_close_job([str(tmp_path / "missing-executable")])
     assert isinstance(raised.value, FileNotFoundError)

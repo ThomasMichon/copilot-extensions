@@ -127,8 +127,9 @@ def test_embedded_cli_run_never_requests_a_detached_broker(monkeypatch, tmp_path
     else:
         with pytest.raises(ReplacedProcess):
             cli.main(["engine", "run"])
+    from agent_procutil import python_cache_args
     assert calls == [[
-        str(engine_python), "-m", "agent_index_engine.app",
+        str(engine_python), *python_cache_args(tmp_path / "engine"), "-m", "agent_index_engine.app",
         "--host", "127.0.0.7", "--port", "19421",
     ]]
 

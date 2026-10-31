@@ -2843,6 +2843,10 @@ if (`$ResolveOnly) {
     Write-Output `$_py
     exit 0
 }
+`$_cache = [IO.Path]::GetFullPath((Join-Path `$_root 'cache\python'))
+if (-not `$_cache.StartsWith('\\?\')) {
+    `$_cache = if (`$_cache.StartsWith('\\')) { '\\?\UNC\' + `$_cache.Substring(2) } else { '\\?\' + `$_cache }
+}
 `$env:PYTHONUTF8 = '1'
 `$env:AGENT_DISPATCH_INSTALL_DIR = '$($InstallDir -replace "'","''")'
 Set-Location -LiteralPath `$PSScriptRoot
@@ -2893,11 +2897,11 @@ try {
 # 'Continue' for the serve invocation so stderr is captured, never fatal.
 `$ErrorActionPreference = 'Continue'
 try {
-    & `$_py -m agent_dispatch serve 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+    & `$_py -X ('pycache_prefix=' + `$_cache) -m agent_dispatch serve 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
 } catch {
     # Teeing to the log failed (e.g. it got locked after resolution) -- keep the
     # coordinator alive without the tee rather than let logging kill the service.
-    & `$_py -m agent_dispatch serve *> `$null
+    & `$_py -X ('pycache_prefix=' + `$_cache) -m agent_dispatch serve *> `$null
 }
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
@@ -3523,6 +3527,10 @@ if (`$ResolveOnly) {
     Write-Output `$_py
     exit 0
 }
+`$_cache = [IO.Path]::GetFullPath((Join-Path `$_root 'cache\python'))
+if (-not `$_cache.StartsWith('\\?\')) {
+    `$_cache = if (`$_cache.StartsWith('\\')) { '\\?\UNC\' + `$_cache.Substring(2) } else { '\\?\' + `$_cache }
+}
 `$env:PYTHONUTF8 = '1'
 `$env:AGENT_DISPATCH_INSTALL_DIR = '$($InstallDir -replace "'","''")'
 Set-Location -LiteralPath `$PSScriptRoot
@@ -3619,7 +3627,7 @@ if (`$DescribeLaunch) {
     `$description = @{
         version = 1
         executable = `$_py
-        arguments = @('-m', 'agent_dispatch') + `$argsList
+        arguments = @('-X', ('pycache_prefix=' + `$_cache), '-m', 'agent_dispatch') + `$argsList
         log_path = `$logFile
     } | ConvertTo-Json -Compress -Depth 4
     [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(`$description))
@@ -3631,10 +3639,10 @@ try {
 } catch { }
 `$ErrorActionPreference = 'Continue'
 try {
-    & `$_py -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+    & `$_py -X ('pycache_prefix=' + `$_cache) -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
 } catch {
     # Teeing to the log failed -- keep the supervisor alive without the tee.
-    & `$_py -m agent_dispatch @argsList *> `$null
+    & `$_py -X ('pycache_prefix=' + `$_cache) -m agent_dispatch @argsList *> `$null
 }
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)

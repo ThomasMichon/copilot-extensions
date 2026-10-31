@@ -108,10 +108,13 @@ def test_ordinary_start_anchors_relative_cwd_before_instance_spec(tmp_path, monk
 
 
 @pytest.mark.parametrize("with_root", [False, True])
-def test_detached_child_disables_bytecode_independently_of_parent(tmp_path, with_root):
+def test_detached_child_uses_its_durable_external_cache(tmp_path, with_root):
+    from agent_procutil import python_cache_args
+
     root = tmp_path / "manager" if with_root else None
     assert mux_daemon_process.detached_child_argv(root) == [
-        sys.executable, "-B", "-m", "worktree_manager", "mux-daemon", "run",
+        sys.executable, *python_cache_args(mux_daemon_process.selected_root(root)),
+        "-m", "worktree_manager", "mux-daemon", "run",
         *([f"--root={root}"] if root is not None else []),
     ]
 

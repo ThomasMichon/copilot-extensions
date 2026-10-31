@@ -67,11 +67,13 @@ if ($CompanionPane) {
     if (-not $Action -or -not $Cwd) { throw 'Companion pane requires Action and Cwd' }
     $invocation = Get-ManagerRuntimeInvocation -PayloadRoot (Split-Path -Parent $PSScriptRoot) `
         -RequireInstalled -ModuleArguments @('-m', 'worktree_manager', 'companion-pane', '--action', $Action, '--cwd', $Cwd)
+    # Native launch uses PowerShell's Env: cache; .NET-only changes can
+    # resurrect inherited values when the child environment is assembled.
     foreach ($name in @($invocation.ClearEnvironment) + @('GH_TOKEN', 'GITHUB_TOKEN', 'AGENT_WORKTREES_AHP_AUTH_TOKEN')) {
-        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+        Remove-Item -LiteralPath ('Env:' + $name) -ErrorAction SilentlyContinue
     }
     foreach ($name in $invocation.Environment.Keys) {
-        [Environment]::SetEnvironmentVariable($name, $invocation.Environment[$name], 'Process')
+        Set-Item -LiteralPath ('Env:' + $name) -Value $invocation.Environment[$name]
     }
     & $invocation.FileName @($invocation.Arguments)
     exit $LASTEXITCODE
@@ -81,10 +83,10 @@ if ($Companion) {
     $invocation = Get-ManagerRuntimeInvocation -PayloadRoot (Split-Path -Parent $PSScriptRoot) `
         -ModuleArguments @('-m', 'worktree_manager', 'companion')
     foreach ($name in $invocation.ClearEnvironment) {
-        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+        Remove-Item -LiteralPath ('Env:' + $name) -ErrorAction SilentlyContinue
     }
     foreach ($name in $invocation.Environment.Keys) {
-        [Environment]::SetEnvironmentVariable($name, $invocation.Environment[$name], 'Process')
+        Set-Item -LiteralPath ('Env:' + $name) -Value $invocation.Environment[$name]
     }
     # This is the popup's foreground TUI: inherit its terminal and every stream.
     & $invocation.FileName @($invocation.Arguments)

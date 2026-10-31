@@ -93,21 +93,42 @@ _JOB_SCOPE_NAME = re.compile(r"Local\\ce-owned-job-[0-9a-f]{32}\Z")
 log = logging.getLogger("agent-procutil")
 
 __all__ = [
-    "direct_python",
+    "DaemonSpawnError",
+    "JobHandle",
+    "SyncProcessLaunchError",
     "contained_test_mode",
+    "detached_kwargs",
+    "direct_python",
     "no_window_flags",
     "no_window_kwargs",
-    "JobHandle",
+    "python_cache_args",
+    "spawn_daemon",
     "spawn_in_kill_on_close_job",
     "spawn_sync_in_kill_on_close_job",
-    "SyncProcessLaunchError",
-    "detached_kwargs",
     "windowless_daemon_kwargs",
     "windowless_python",
     "windowless_python_env",
-    "spawn_daemon",
-    "DaemonSpawnError",
 ]
+
+
+def python_cache_args(root: str | os.PathLike[str]) -> list[str]:
+    """Keep enabled bytecode writes beneath the caller's durable state root.
+
+    Normalize lexically, without resolving links, creating directories, or
+    changing process settings. Windows extended paths accommodate CPython's
+    mirrored source paths without requiring machine-wide long-path settings.
+    """
+    owned_root = os.fspath(root)
+    if not os.path.isabs(owned_root):
+        raise ValueError("Python cache requires an absolute owned runtime root")
+    prefix = os.path.normpath(os.path.join(owned_root, "cache", "python"))
+    if os.name == "nt" and not prefix.startswith("\\\\?\\"):
+        prefix = (
+            "\\\\?\\UNC\\" + prefix[2:]
+            if prefix.startswith("\\\\")
+            else "\\\\?\\" + prefix
+        )
+    return ["-X", "pycache_prefix=" + prefix]
 
 
 def contained_test_mode() -> bool:
@@ -217,7 +238,7 @@ class JobHandle:
                 raise TimeoutError("Job still has active processes after termination timeout")
             time.sleep(min(0.05, remaining))
 
-    def __enter__(self) -> "JobHandle":
+    def __enter__(self) -> JobHandle:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
@@ -519,7 +540,10 @@ def spawn_sync_in_kill_on_close_job(
         try:
             return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
         except OSError as error:
-            kind = SyncProcessNotFoundError if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+            kind = (
+                SyncProcessNotFoundError
+                if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+            )
             raise kind(error) from error
 
     spawn_kwargs = dict(kwargs)
@@ -533,7 +557,10 @@ def spawn_sync_in_kill_on_close_job(
     try:
         process = subprocess.Popen(argv, **spawn_kwargs)  # noqa: S603 - argv list, no shell
     except OSError as error:
-        kind = SyncProcessNotFoundError if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+        kind = (
+            SyncProcessNotFoundError
+            if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+        )
         raise kind(error) from error
     job_handle: JobHandle | None = None
     try:

@@ -90,6 +90,7 @@ def test_monitor_spawn_preserves_direct_interpreter_environment(tmp_path, monkey
     captured = {}
     monkeypatch.setattr(cutover, "os", SimpleNamespace(name="nt", path=os.path))
     monkeypatch.setattr(runtime, "_daemon_cwd", lambda: str(tmp_path))
+    monkeypatch.setattr(runtime.cfg, "install_dir", lambda: str(tmp_path))
     monkeypatch.setattr(
         runtime, "_daemon_environment", lambda: {"KEEP": "yes", "__PYVENV_LAUNCHER__": "old"},
     )
@@ -106,10 +107,11 @@ def test_monitor_spawn_preserves_direct_interpreter_environment(tmp_path, monkey
     monkeypatch.setattr(cutover, "spawn_daemon", spawn_daemon)
     if passive:
         assert cutover.spawn_passive("venv-python", port=54321).pid == 77
-        assert captured["argv"][4:] == ["--passive", "--control-port", "54321"]
+        assert captured["argv"][6:] == ["--passive", "--control-port", "54321"]
     else:
         assert runtime._spawn_detached(["venv-python", "-m", "agent_worktrees", "status-monitor"])
     assert captured["argv"][0] == "base-python"
+    assert captured["argv"][1:3] == interpreter.python_cache_args(tmp_path)
     kwargs = captured["kwargs"]
     assert kwargs["env"]["KEEP"] == "yes"
     assert kwargs["env"]["__PYVENV_LAUNCHER__"] == "venv-python"

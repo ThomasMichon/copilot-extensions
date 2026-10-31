@@ -6,6 +6,11 @@ $_command = '@@COMMAND@@'
 $_module = '@@MODULE@@'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '@@PAYLOAD_UP_PS@@')).Path
 $_runtimeRoot = Join-Path $env:USERPROFILE '@@RUNTIME_ROOT@@'
+$_pythonCache = [IO.Path]::GetFullPath((Join-Path $_runtimeRoot 'cache\python'))
+if (-not $_pythonCache.StartsWith('\\?\')) {
+    $_pythonCache = if ($_pythonCache.StartsWith('\\')) { '\\?\UNC\' + $_pythonCache.Substring(2) }
+    else { '\\?\' + $_pythonCache }
+}
 $_bootTraceLogPath = Join-Path $_runtimeRoot '@@BOOT_TRACE_LOG_FILE_PS@@'
 
 function Get-BootTraceTimestamp {
@@ -201,7 +206,7 @@ if ($_py) {
     $_previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-@@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & $_py -m $_module @args
+@@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & $_py -X "pycache_prefix=$_pythonCache" -m $_module @args
 @@PAYLOAD_ROOT_ENV_POWERSHELL_AFTER@@    } finally {
         $ErrorActionPreference = $_previousEap
     }
@@ -283,7 +288,7 @@ if ($_provisionedPy) {
     $_previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-@@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & $_provisionedPy -m $_module @args
+@@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & $_provisionedPy -X "pycache_prefix=$_pythonCache" -m $_module @args
 @@PAYLOAD_ROOT_ENV_POWERSHELL_AFTER@@    } finally {
         $ErrorActionPreference = $_previousEap
     }

@@ -64,6 +64,7 @@ def test_companion_command_pins_runtime_and_scrubs_credentials(tmp_path, monkeyp
     tail = ["-m", "worktree_manager.mux_companion", "--cli-pane", "%42", "--cwd", "space path"]
     command, env = companion_runtime.companion_command(tail)
     assert command == [str(python), "-I", "-S", "-B", "-X", "utf8",
+                       *companion_runtime.python_cache_args(tmp_path),
                        str(prefix / ".runtime-bootstrap" / "runtime_launcher.py"), *tail]
     assert all(name not in env for name in names)
     assert env["WORKTREE_MANAGER_ROOT"] == str(tmp_path)
@@ -143,7 +144,8 @@ def test_installed_companion_pane_wrapper_uses_bootstrap_without_uv(tmp_path, ac
     slot = synthetic_runtime(root, "1.2.3", program=PROGRAM)
     env = dict(os.environ, GH_TOKEN="fixture", GITHUB_TOKEN="fixture",
                AGENT_WORKTREES_AHP_AUTH_TOKEN="fixture", PYTHONPATH="foreign",
-               VIRTUAL_ENV="foreign", __PYVENV_LAUNCHER__=sys.executable)
+               PYTHONHOME="foreign", VIRTUAL_ENV="foreign",
+               __PYVENV_LAUNCHER__=sys.executable, WORKTREE_MANAGER_ROOT="foreign-owner")
     # The interpreter and wrapper shell are absolute; no uv is available.
     env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32") if os.name == "nt" else "/usr/bin:/bin"
     if os.name == "nt":

@@ -17,14 +17,14 @@ DEFAULT_OWNER_STARTUP_TIMEOUT = 30.0
 
 def spawn_owner_process(root: Path, *, source: str) -> tuple[Popen[bytes], Path]:
     """Launch the owner with its existing durable cwd, console and log policy."""
-    from agent_procutil import spawn_daemon
+    from agent_procutil import python_cache_args, spawn_daemon
     from agent_procutil.daemon_instances import DaemonInstanceSpec
 
     root = Path(os.path.abspath(root))
     root.mkdir(parents=True, exist_ok=True)
     log_path = root / "logs" / "owner-stdio.log"
     child = spawn_daemon(
-        [sys.executable, "-I", "-m", "agent_codespaces", "owner"],
+        [sys.executable, "-I", *python_cache_args(root), "-m", "agent_codespaces", "owner"],
         instance=DaemonInstanceSpec("agent-codespaces-owner", root, Path(source).resolve()),
         cwd=os.path.expanduser("~"),
         log_path=log_path,

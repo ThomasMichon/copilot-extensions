@@ -71,6 +71,25 @@ launch envelopes. Redaction handles known credential forms and supplied known
 values after control normalization; it is best-effort, not a guarantee about
 arbitrary third-party output.
 
+## Managed Python bytecode cache
+
+`agent_procutil.python_cache_args(root)` returns `["-X",
+"pycache_prefix=<root>/cache/python"]` for an absolute, caller-owned durable
+runtime state root. Put these interpreter arguments before `-m`, `-c`, or the
+script path. Bytecode remains enabled and isolated-mode Python honors the
+explicit prefix; `-B` read-only probes and bootstrap admission still suppress
+writes. The helper normalizes paths lexically (including standard extended
+drive/UNC paths on Windows), without creating directories, resolving links,
+changing global environment or interpreter settings, or choosing another state
+owner. It rejects relative roots and remains available in standalone bundles.
+
+`cache/python` contains mutable, derived executable bytecode outside immutable
+version slots, not protected credentials, configuration, or business data.
+Cache reuse neither migrates nor deletes existing caches. Runtime inventory,
+retention, and explicit uninstall/all-code-absent accounting still belong to
+their existing lifecycle owners; external cache routing does not establish
+that those gates have passed or introduce another cleanup policy.
+
 ## Windows bootstrap and shell admission
 
 ### Compiler-free migration boundary

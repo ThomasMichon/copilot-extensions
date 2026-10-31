@@ -17,6 +17,55 @@ import pytest
 from agent_codespaces import connection_owner as owner
 
 
+def test_owner_startup_caches_isolated_imports_in_durable_state(monkeypatch, tmp_path):
+    import agent_procutil
+    from agent_codespaces import owner_startup
+
+    root = tmp_path / "owner home"
+    slot = root / "versions" / "1.0.0"
+    slot.mkdir(parents=True)
+    module = slot / "owner_cache_probe.py"
+    module.write_text("value = 7\n", encoding="utf-8")
+    before = module.read_bytes(), module.stat().st_mtime_ns, module.stat().st_ino
+    caller_env = dict(os.environ)
+    captured = {}
+
+    def spawn(command, **kwargs):
+        captured.update(command=command, **kwargs)
+        return types.SimpleNamespace(pid=123)
+
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", spawn)
+    owner_startup.spawn_owner_process(root, source=__file__)
+    command = captured["command"]
+    assert captured["env_overrides"]["AGENT_CODESPACES_HOME"] == str(root)
+    program = (
+        "import json,sys;sys.path.insert(0,sys.argv[1]);import owner_cache_probe;"
+        "print(json.dumps({'cached':owner_cache_probe.__cached__,'prefix':sys.pycache_prefix,"
+        "'enabled':not sys.dont_write_bytecode,'value':owner_cache_probe.value}))"
+    )
+    command = [*command[:command.index("-m")], "-c", program, str(slot)]
+    env = {key: value for key, value in os.environ.items() if key != "PYTHONDONTWRITEBYTECODE"}
+    env["PYTHONPYCACHEPREFIX"] = str(tmp_path / "wrong ambient cache")
+    previous = None
+    for _cycle in range(2):
+        result = subprocess.run(
+            command, env=env, capture_output=True, text=True, check=True, timeout=30,
+            **agent_procutil.no_window_kwargs(),
+        )
+        observed = json.loads(result.stdout)
+        cache = Path(observed["cached"])
+        assert observed["enabled"] and observed["value"] == 7
+        assert cache.is_relative_to(Path(observed["prefix"])) and cache.is_file()
+        assert observed["prefix"] == agent_procutil.python_cache_args(root)[1].partition("=")[2]
+        current = cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino
+        if previous is not None:
+            assert current == previous
+        previous = current
+    assert not list(slot.rglob("*.pyc"))
+    assert (module.read_bytes(), module.stat().st_mtime_ns, module.stat().st_ino) == before
+    assert dict(os.environ) == caller_env
+
+
 def _owner_slot(root: Path, version: str) -> Path:
     slot = root / "versions" / version
     package = slot / "packages" / "agent_codespaces"
@@ -453,7 +502,10 @@ while not (root / "stop").exists() and time.monotonic() < deadline:
 """
 
     def spawn_fixture(argv, **kwargs):
-        if argv != [sys.executable, "-I", "-m", "agent_codespaces", "owner"]:
+        if argv != [
+            sys.executable, "-I", *agent_procutil.python_cache_args(tmp_path),
+            "-m", "agent_codespaces", "owner",
+        ]:
             return real_spawn(argv, **kwargs)
         child = real_spawn([sys.executable, "-c", script, str(tmp_path)], **kwargs)
         children.append(child)

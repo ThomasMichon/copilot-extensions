@@ -21,6 +21,15 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows native driver admission")
+def test_unowned_internal_repair_refuses_before_construction(repair_case):
+    case = repair_case
+    (case.runtime / "bin").mkdir()
+    assert case.update.repair_engine(case.source) != 0
+    assert not case.effect.exists()
+    assert "Native driver admission must precede publication custody" in case.calls[-1][1].stderr
+
+
 @pytest.mark.parametrize("source_state", ["present", "missing-payload"])
 def test_cell_only_repair_does_not_require_a_shared_manifest(
     repair_case, monkeypatch, source_state,
@@ -32,8 +41,8 @@ def test_cell_only_repair_does_not_require_a_shared_manifest(
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(case.incumbent))
     if source_state == "missing-payload":
         case.incumbent.rename(case.incumbent.with_name("retained-payload"))
-    assert case.update.repair_engine(case.source) != 0
-    assert case.effect.is_file()
+    assert case.run_manager_request(lambda: case.update.repair_engine(case.source)) != 0
+    assert case.effect.is_file(), case.calls[-1][1].stdout + case.calls[-1][1].stderr
     assert str(root) in case.calls[-1][0]
     assert not case.manifest.exists()
     assert not (case.runtime / "bin").exists()
@@ -102,13 +111,14 @@ def test_successful_automatic_repair_keeps_cell_for_real_suite_resolution(
         engine_client, "subprocess",
         SimpleNamespace(run=execute, TimeoutExpired=subprocess.TimeoutExpired),
     )
-    assert manager._cmd_update([
+    assert case.run_manager_request(lambda: manager._cmd_update([
         "--repair-engine", str(case.source), "--project", "sample", "--force",
-    ]) == 5
+    ])) == 5
     assert len(calls) == 1
     command, options = calls[0]
     assert command == [
-        str(selected[0]), "-m", "agent_worktrees",
+        str(selected[0]), *agent_plugin_runtime.python_cache_args(selected[0].parents[3]),
+        "-m", "agent_worktrees",
         "--project", "sample", "update", "--no-manager", "--force",
     ]
     assert options["env"]["COPILOT_EXTENSIONS_CONTEXT"] == str(context)
@@ -156,9 +166,13 @@ def test_successful_shared_repair_uses_new_selection_not_inherited_old_argv(
         engine_client, "subprocess",
         SimpleNamespace(run=execute, TimeoutExpired=subprocess.TimeoutExpired),
     )
-    assert manager._cmd_update(["--repair-engine", str(case.source)]) == 0
+    assert case.run_manager_request(
+        lambda: manager._cmd_update(["--repair-engine", str(case.source)]),
+    ) == 0
     assert calls[0][0] == [
-        str(selected[0]), "-m", "agent_worktrees", "update", "--no-manager",
+        str(selected[0]), *engine_client.agent_plugin_runtime.python_cache_args(
+            selected[0].parents[3],
+        ), "-m", "agent_worktrees", "update", "--no-manager",
     ]
     assert "COPILOT_EXTENSIONS_CONTEXT" not in calls[0][1]["env"]
     assert not case.effect.exists()
