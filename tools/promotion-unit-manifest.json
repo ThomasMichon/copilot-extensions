@@ -3291,7 +3291,35 @@
         "tools/promotion_unit_tests/test_release_helper_loaders.py::test_fingerprint_normalizes_only_empty_definition_type_parameters[class]",
         "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_nonempty_type_parameters_remain_pinned[function]",
         "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_nonempty_type_parameters_remain_pinned[class]",
-        "tools/promotion_unit_tests/test_release_helper_loaders.py::test_fingerprint_preserves_type_parameter_like_string_constants"
+        "tools/promotion_unit_tests/test_release_helper_loaders.py::test_fingerprint_preserves_type_parameter_like_string_constants",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_accepts_actual_exit_and_post_capture_original_bound",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_uncorrelated_or_provisional_custody[change0]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_uncorrelated_or_provisional_custody[change1]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_uncorrelated_or_provisional_custody[change2]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_uncorrelated_or_provisional_custody[change3]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_uncorrelated_or_provisional_custody[change4]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_uncorrelated_or_provisional_custody[change5]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_uncorrelated_or_provisional_custody[change6]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_uncorrelated_or_provisional_custody[change7]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_uncorrelated_or_provisional_custody[change8]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_uncorrelated_or_provisional_custody[change9]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_uncorrelated_or_provisional_custody[change10]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_uncorrelated_or_provisional_custody[change11]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_never_substitutes_tool_success_or_old_timestamp[1-20.0]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_never_substitutes_tool_success_or_old_timestamp[False-20.0]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_never_substitutes_tool_success_or_old_timestamp[0-190.0]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_never_substitutes_tool_success_or_old_timestamp[0-9.0]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_never_substitutes_tool_success_or_old_timestamp[0-nan]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_duplicate_or_extra_terminal_publication",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_bounds_actual_stream_bytes_without_unbounded_capture",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_final_index_is_exact_and_changed_or_orphaned_bytes_refuse",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_checks_whole_prepared_closure_before_inserting_one_clock",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_command_substitution_before_creation[scope]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_command_substitution_before_creation[digest]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_command_substitution_before_creation[command]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_command_substitution_before_creation[clock]",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_settles_capture_and_handles_before_acceptance_without_new_job",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_late_settlement_and_does_not_kill_or_replay"
     ],
     "sources": {
         "libs/versioned-runtime/versioned_runtime_publication.py": "070c9db612246d8722e3f2c94487bfb63177a78e2485a7f14c5d38ed8060b79d",
@@ -3690,7 +3718,9 @@
         "fleet-manager/src/fleet_manager/release_auth.py": "ed2ba53fdc3e988af3bfb56bf7e4eb9578cbc6107118ea327dbda1281ab648bc",
         "fleet-manager/src/fleet_manager/client_deactivation.py": "b4dc9e2cc10ff8f6b11097f45463cf572d3b27a5d6e11a197dc2fa976fef77d6",
         "fleet-manager/tests/test_client_diagnostics.py": "84eb14d24bc2c62e166e0ac9478ae6d7d60925d0c8f5363c13cc2b5d8a24a089",
-        "tools/promotion_unit_tests/test_client_guardian_resources.py": "f6e6f99014df400e8b2b1efe3e51812fdfccf2425ff74703a5dbe60b65e93d28"
+        "tools/promotion_unit_tests/test_client_guardian_resources.py": "f6e6f99014df400e8b2b1efe3e51812fdfccf2425ff74703a5dbe60b65e93d28",
+        "tools/native_qualification_receiver.py": "d205fdde05e3f2c179c5ce7aaeb96d12b6c27ee9b0bfe88e20ecff979ebb4a77",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py": "271646bf8bbb20598d050cff99097adeefe275bed49baad8a74bbe808decf6f6"
     },
     "coverage_targets": [
         "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py",
@@ -3870,7 +3900,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py",
         "libs/agent-procutil/src/agent_procutil/_native_owned.py",
         "libs/installer-engine/installer_engine_process.py",
-        "fleet-manager/src/fleet_manager/client_construction.py"
+        "fleet-manager/src/fleet_manager/client_construction.py",
+        "tools/native_qualification_receiver.py"
     ],
     "max_seconds": 300
 }

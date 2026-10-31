@@ -354,6 +354,28 @@ the shared child rechecks its unchanged request deadline after publishing the
 request and immediately before native process creation. Slow hashing, parent
 queries, earlier packets or request-file writes cannot launch a late worker.
 
+`tools/native_qualification_receiver.py` supplies an explicitly selected,
+source-managed result receiver when the command transport cannot witness final
+native exit and post-capture timing. It adds one process inside the existing
+caller Job, never another Job or a larger deadline. Its immutable request has
+exact `command`, `scope`, `cwd` and `manifest_sha256` fields. The command is the
+accepted PowerShell launcher invocation with no profile, interaction or shell
+command substitution. The receiver and launcher both belong to the complete
+hash-bound prepared manifest.
+
+The launcher must accept `OriginalStartMonotonic` and `OriginalStartUtc` and
+use that same origin for every existing 165-second work, 150-second worker and
+180-second whole-bound check; it must not start a replacement clock. A terminal
+receipt remains provisional until the receiver observes the actual launcher
+exit, settles both bounded streams, closes its process handle, verifies every
+final indexed artifact and records fresh post-capture/post-verification times.
+The receiver preserves raw captured bytes and refuses an expired bound,
+uncertain cleanup, mismatched scope, changed source, duplicate evidence or
+unindexed file. It never kills, retries, creates a Job, inspects the foreground
+or upgrades functional evidence to desktop acceptance. Pure/fake-process
+receiver controls do not qualify Windows; fresh prepared-source review and
+separate native execution remain necessary.
+
 The `passive` mode creates no window and changes no foreground state: it checks
 the native bindings, complete raw-event/poll capture and private-pipe identity
 handshake. After independent source review, the separately authorized visible
