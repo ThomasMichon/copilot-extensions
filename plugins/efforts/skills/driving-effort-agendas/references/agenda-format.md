@@ -2,7 +2,9 @@
 
 Companion to [driving-effort-agendas](../SKILL.md). This version 1 convention
 uses JSON so a reader can inspect it without installing dependencies.
-It is a manual format, not a promise of executable schema enforcement.
+It is a manual format, not a promise of effect execution or stale-write
+enforcement. [Version-2 deferred branches](deferred-branches.md) extend the
+cursor while preserving version-1 boards and legacy cursors.
 
 ## Reviewed definition
 
@@ -34,7 +36,7 @@ Do not put shell commands to execute or effectful expressions into this format.
 
 The example's fields are deliberately small:
 
-- `version: 1`: format identifier. The helper accepts an omitted version only
+- `version: 1` (or `2` for deferred state): format identifier. The helper accepts an omitted version only
   for compatibility with the first manual cursor convention and reports it.
 - `revision`: monotonically increasing manual update number.
 - `status`: `working`, `waiting`, `steering` or `complete`.
@@ -43,6 +45,9 @@ The example's fields are deliberately small:
 - `frames`: ordered work stack, **root first, active frame last**.
 - `queue`: other already-authorized root agenda paths, in order.
 - `parked`: nonblocking discoveries and their tracked references.
+- Version 2 additionally carries `deferred` full saved branches and an explicit
+  finite `max_deferred`; original returns, evidence, budgets, decision/packet
+  references and attempted/revisit times are not incidental parked discoveries.
 
 A cursor records its `worktree` identity; a frame records `agenda`,
 `agenda_revision` (definition identity, not the
@@ -102,6 +107,12 @@ An already-popped child is not popped again. With manual editing there is no
 transaction: keep the pending result visible and reconcile ambiguity before
 advancing. A stale writer must reread; there is no automatic conflict merge.
 
+If a genuine effect boundary blocks the child, a version-2 reversible parking
+transition may move its complete saved chain out of active execution without
+declaring it successful. Continue decision preparation or another accepted
+avenue and recheck current conditions when due or an actual response arrives.
+Restore only after reconciling current authority, progress and original limits.
+
 If the defect is not a prerequisite, park it instead and continue the original
 feature. If repeated detours produce no parent progress or the depth budget is
 exhausted, the next action is a bounded replan/steering decision, not a deeper
@@ -133,6 +144,11 @@ and the next queued board; it does not crawl a repository or validate every
 future queue item eagerly. Each JSON object is limited to 128 KiB. Duplicate
 keys, nonfinite values, invalid active references/return points and exceeded
 budgets produce diagnostics, never an empty agenda or a repaired file.
+
+The helper supports both cursor versions. A version-1-only installed helper
+rejects required version-2 state rather than silently dropping the frontier.
+`--now` supplies a timezone-aware inspection time, not a scheduler. Deferred
+rechecks preserve active work; timestamps and response references grant nothing.
 
 No mutation is implemented: scaffolding stays a copy/edit of the examples,
 and transitions remain deliberate manual work. `--expected-revision` checks

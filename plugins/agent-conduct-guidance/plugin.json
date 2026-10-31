@@ -1,7 +1,7 @@
 {
   "name": "agent-conduct-guidance",
   "description": "Consolidated, generally-good agent conduct guidance for Copilot CLI: independent ambient modules with task-time skills where needed. Covers charter-bounded useful autonomy and durable operator pre-clearance without default deployment/data grants; per-machine maintenance standby; consented Windows elevation; scoped multi-agent authority, custody and countermand; headless process-spawn hygiene; coordinator-first delegation and evidence-backed model routing; portable owner-stamped scratch-space hygiene; and secret-pattern masking avoidance. Each module has a declared instruction projection and keeps enforcement with the existing owner. No grant broker, automatic tool approval, runtime or required companion plugin.",
-  "version": "0.1.18-dev1",
+  "version": "0.1.19-dev1",
   "runtimeScope": "none",
   "author": {
     "name": "Thomas Michon"
