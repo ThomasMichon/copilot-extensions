@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Managed proposal and implementation PRs to `dev`
 - **Created:** 2026-10-31
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `plugins/efforts` deferred agenda branches and `harness-guidance` unattended decision preparation
 - **Umbrella issue:** #9777
 
@@ -106,9 +106,9 @@ is not an approval.
   quality with its procedure and branch movement with the agenda owner.
 - [x] Preserve active/deferred references and current decisions/times through
   existing checkpoints/handoffs, without duplicating canonical effort state.
-- [ ] Run focused compatibility/scenario tests and independent review, add
+- [x] Run focused compatibility/scenario tests and independent review, add
   changefiles, then merge the implementation and archive the completed effort.
-- [ ] Record source/release status truthfully; any installed rollout remains
+- [x] Record source/release status truthfully; any installed rollout remains
   with its separately authorized adopter owner.
 
 ## Validation Plan
@@ -125,7 +125,7 @@ is not an approval.
   malformed/oversized input fail without writes or effect execution.
 - [x] Decision-packet and prompt-deferral guidance preserves all-work holds,
   privacy/resource limits, original approvals and no-busywork boundaries.
-- [ ] Public artifacts are generic, required review/CI pass, all merged gates
+- [x] Public artifacts are generic, required review/CI pass, all merged gates
   are journaled and remaining responsibility is resolved or explicitly tracked.
 
 ## Proposal
@@ -136,6 +136,35 @@ The four-hour interval is an operator example, not a universal polling cadence,
 permission renewal or promise that this helper can originate an agent turn.
 
 ## Journal
+
+### 2026-10-31 - Source effort complete
+
+- All source Plan and Validation Plan items are resolved. Proposal #9779 and
+  implementation #9786 passed their actual review and CI gates and merged.
+  The authoritative format/procedure lives with efforts, decision preparation
+  with conduct guidance and the continuity bridge with its existing owner.
+- Archived the canonical effort and updated its index through the normal
+  reviewed publication flow. The coordinator retains archive publication and
+  source custody until its own merge is confirmed; this Done record does not
+  bypass that independent gate.
+- Release disposition is merged/pending promotion at completion observation.
+  The existing #3336 release pipeline owns promotion; no extra release worker
+  or polling daemon is introduced. Installed rollout is excluded from this
+  source assignment and requires its adopter's separate authorization.
+- Cursor version 2 and structural tests do not promise a native wake, automatic
+  branch restoration, external approval verification or model compliance.
+
+### 2026-10-31 - Implementation merged; completion reconciliation
+
+- Implementation #9786 merged to `dev` at 22:52 UTC after current-head Copilot
+  approval with no open findings and required green CI. The same retained source
+  workspace synced onto the provider-confirmed merge.
+- Source scope is delivered. At this observation, `main` still contains the
+  prior inspector: promotion remains pending under the existing release
+  pipeline (#3336), not a parallel scheduler or a claimed runtime deployment.
+- The source coordinator moved from Phase 1 to Phase 3 for completion
+  reconciliation. Final archive/review and source custody settlement remain;
+  no installed rollout was authorized or performed.
 
 ### 2026-10-31 - Implementation ready for review
 
