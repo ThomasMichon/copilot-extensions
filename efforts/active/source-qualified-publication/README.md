@@ -190,6 +190,20 @@ it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
 
+### 2026-10-31 — Existing private checkpoint reconciled for source review
+- Source-only checkpoint acceptance now permits driving existing #8530 through
+  its normal current-head review, required CI and managed merge gates.
+  This does not admit production F3 wiring, F2 receipts, F4 maintenance,
+  installed/native qualification or overall effort completion.
+- Preserved unpublished `9e84151644` before the supported current-base
+  reconciliation. Rebased head `9ccc1381f2` retains identical reducer/test
+  bytes, including the quadratic order-scan correction.
+- Fresh contained execution of the reducer and actual F1 observation packet
+  passes all 83 tests; Ruff, install/version contracts, effort structure and
+  whitespace checks pass. Exact bounded evidence is in [validation.md](validation.md).
+- Publication, fresh current-head verdict, required CI and verified source
+  merge remain outstanding at this checkpoint. Existing broader gates stay open.
+
 ### 2026-10-28 - Direct retained publication outcomes, no token retirement
 
 The complete #7937/#7946 current contracts are retained through the named

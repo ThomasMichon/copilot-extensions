@@ -1,5 +1,38 @@
 # Validation contract
 
+## Existing checkpoint current-base validation (2026-10-31)
+
+The supported owned-branch sync preserved `9e84151644` and reconciled onto
+current `dev`, producing `9ccc1381f2`. The reducer and focused test bytes are
+unchanged by reconciliation. The existing changefile remains present; production
+imports of the candidate remain zero.
+
+The existing contained runner selected CPython 3.12.14:
+
+```text
+python tools/run-plugin-tests.py worktree-manager --test-file tests/test_source_publications.py --test-file tests/production_picker/test_worktree_observations.py
+```
+
+Fresh captured execution reports **83 passed in 7.49s**, exit 0, with real
+JUnit recording 83 tests and zero failures/errors/skips. JUnit SHA-256:
+`1500df6eecf818c93fbabaa7c364834f852187caed5d67a94ffcb2e2041a94c0`.
+The wrapper's total preparation/execution/cleanup time is 82.16s, not a
+production performance measurement. Initial unsupported interpreter and
+in-use environment preparation refusals did not execute tests; selecting the
+existing separate Python 3.11 runner resolved those tooling failures.
+
+Touched-file Ruff `F,E9`, install contract (13 plugins), version consistency,
+effort structure and whitespace checks pass. Missing Ruff was restored only
+in the source test environment. Captured streams and JUnit are retained as
+local evidence, not shipped artifacts.
+
+This packet exercises the actual pure F1 receiver/value contracts and private
+reducer, including producer-shaped frames, availability transitions and order
+work counts. A native CLI-to-loader/Inbox/screen, clean-room, live external or
+installed run is not admitted for this unwired checkpoint; those broader
+F2/production-F3/F4/F5 and nominal performance gates remain open. Source review,
+required CI and actual merge are still required.
+
 ## Private F3 pure checkpoint (2026-10-24)
 
 Base: `ba25d5f5d58cdc02736cce67da42a39a72737076`, with merged F1
