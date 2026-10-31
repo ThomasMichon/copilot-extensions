@@ -1,15 +1,9 @@
 . (Join-Path $PSScriptRoot 'agent-worktrees-update-entry.ps1') @args
 if ($_awUpdateHandled) { exit $LASTEXITCODE }
 $env:PYTHONUTF8 = '1'
-$_root = Join-Path $env:USERPROFILE '.agent-worktrees'
 $_awPayloadRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 if (Test-Path -LiteralPath (Join-Path $_awPayloadRoot 'plugin.json') -PathType Leaf) {
     $env:AGENT_WORKTREES_PAYLOAD_ROOT = $_awPayloadRoot
-} elseif (-not $env:AGENT_WORKTREES_PAYLOAD_ROOT -and -not $env:COPILOT_PLUGIN_ROOT) {
-    $_awPayloadMarker = Join-Path $_root 'payload-dir'
-    if (Test-Path -LiteralPath $_awPayloadMarker -PathType Leaf) {
-        $env:AGENT_WORKTREES_PAYLOAD_ROOT = (Get-Content -LiteralPath $_awPayloadMarker -Raw -ErrorAction Stop).Trim()
-    }
 }
 # Sanitize inherited Python runtime variables before dispatching to the
 # resolved, architecture-correct runtime-slot interpreter (#2411). A stray
@@ -49,6 +43,7 @@ foreach ($_pyEnvVar in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONEXECUTABLE', 'VIRTUA
 # on first use via the LEAN `install.ps1 provision` (uv + venv + package + marker)
 # from the snapshot the stamp recorded, then dispatch. Opt out with
 # AGENT_WORKTREES_NO_SELFPROVISION=1 (then falls through to a PATH python).
+$_root = Join-Path $env:USERPROFILE '.agent-worktrees'
 function _resolve_aw_py {
     $resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
     if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) { return $null }

@@ -103,12 +103,13 @@ def test_native_consumer_keeps_deployed_owner(payloads, tmp_path):
 @pytest.mark.parametrize("shell", ["powershell", "bash"])
 @pytest.mark.parametrize("inherited_payload", ["absent", "worktrees", "plugin"])
 @pytest.mark.parametrize("copied_entry", [False, True])
+@pytest.mark.parametrize("payload_label", ["marketplace with spaces", "marketplace-\u00e9"])
 def test_normal_entry_retains_selected_payload_for_relocated_runtime(
-    tmp_path, request, shell, inherited_payload, copied_entry,
+    tmp_path, request, shell, inherited_payload, copied_entry, payload_label,
 ):
     executable = request.getfixturevalue(f"native_{shell}")
     home = tmp_path / "home"
-    payload = tmp_path / "marketplace with spaces" / "agent-worktrees"
+    payload = tmp_path / payload_label / "agent-worktrees"
     peer = payload.parent / "agent-pull-requests"
     suffix = ".cmd" if os.name == "nt" else ""
     for root in (payload, peer):
@@ -117,10 +118,17 @@ def test_normal_entry_retains_selected_payload_for_relocated_runtime(
         (root / "bin" / f"{root.name}{suffix}").touch()
     runtime_bin = home / ".agent-worktrees" / "bin"
     runtime_bin.mkdir(parents=True)
+    snapshot = runtime_bin.parent / "snapshots" / payload_label
+    snapshot.mkdir(parents=True)
+    shutil.copyfile(payload / "plugin.json", snapshot / "plugin.json")
     (runtime_bin.parent / "payload-dir").write_text(
-        str(payload if inherited_payload == "absent" else tmp_path / "foreign-marker") + "\n",
+        str(snapshot) + "\n",
         encoding="utf-8",
     )
+    (runtime_bin.parent / "deploy-manifest.json").write_text(json.dumps({
+        "schema_version": 3, "service": "agent-worktrees",
+        "source": {"kind": "marketplace", "path": str(payload)},
+    }, ensure_ascii=False), encoding="utf-8")
     entry_dir = home / ".local" / "bin" if copied_entry else payload / "bin"
     entry_dir.mkdir(parents=True, exist_ok=True)
     if shell == "powershell":
@@ -153,7 +161,7 @@ def test_normal_entry_retains_selected_payload_for_relocated_runtime(
         "print(json.dumps({'peers':_payload_commands(None,None),'args':sys.argv[1:]}))\n"
         "raise SystemExit(23)\n", encoding="utf-8",
     )
-    environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+    environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
         environment.pop(key, None)
     if inherited_payload != "absent":

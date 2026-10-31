@@ -152,6 +152,41 @@ def test_legacy_paths_remain_exact_and_ignore_runtime_root(monkeypatch, tmp_path
     assert config.project_dir("example") == Path.home() / ".example"
 
 
+@pytest.mark.parametrize("manifest", [
+    {"service": "another-plugin", "source": {"path": "."}},
+    {"service": "agent-worktrees", "source": {"path": "."}},
+    {"service": "agent-worktrees", "source": []},
+])
+def test_relocated_payload_discovery_refuses_invalid_deployment(monkeypatch, tmp_path, manifest):
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    (runtime / "deploy-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_WORKTREES_PAYLOAD_ROOT", "COPILOT_PLUGIN_ROOT"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(
+        registry_paths, "__file__", str(tmp_path / "Lib" / "site-packages" / "agent_worktrees" / "registry_paths.py"),
+    )
+
+    with pytest.raises(ValueError, match="deploy"):
+        registry_paths._payload_root()
+
+
+def test_explicit_context_does_not_consult_legacy_payload_deployment(monkeypatch, tmp_path):
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    (runtime / "deploy-manifest.json").write_text("invalid", encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "")
+    for key in ("AGENT_WORKTREES_PAYLOAD_ROOT", "COPILOT_PLUGIN_ROOT"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(
+        registry_paths, "__file__", str(tmp_path / "Lib" / "site-packages" / "agent_worktrees" / "registry_paths.py"),
+    )
+
+    assert registry_paths._payload_root() == tmp_path / "Lib"
+
+
 def test_explicit_context_selects_all_three_registry_files(monkeypatch, tmp_path):
     isolated_home = tmp_path / "sandbox"
     monkeypatch.setenv("AGENT_HOME", str(isolated_home))
