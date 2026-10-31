@@ -7,17 +7,38 @@ from typing import TYPE_CHECKING
 from .komodo_owner import KomodoOwner
 from .operations import OperationIntent, TargetReceipt
 from .planning import PlanError, canonical, identifier
-from .runtime_admission import AdmissionError
-from .runtime_identity import VerifiedIdentity
+from .runtime_admission import AdmissionError, CallerIdentity
 
 if TYPE_CHECKING:
+    from .komodo_repair import KomodoRepairOwner, RepairIdentity
     from .gateway_local_handler import LocalHandlerBinding, LocalServiceRequest
     from .gateway_manifest import ServiceSlot
 
 CONTRACT = "fleet-manager.komodo-substrate-owner.v1"
+REPAIR_CONTRACT = "fleet-manager.komodo-original-repair.v1"
 
 
-def bootstrap(owner: KomodoOwner, identity: VerifiedIdentity, request: OperationIntent,
+def repair_bootstrap(owner: KomodoRepairOwner, identity: RepairIdentity, request: OperationIntent,
+                     *, role: str, installation: str, failed: bool = False) -> TargetReceipt:
+    """A separately discovered installed seam; no baseline route or native replay."""
+    from .komodo_repair import KomodoRepairOwner
+
+    if type(owner) is not KomodoRepairOwner:
+        raise PlanError("Komodo original repair contract is unsupported by this owner")
+    return owner.reconcile(identity, request, role=role, installation=installation, failed=failed)
+
+
+def repair_status(owner: KomodoRepairOwner, identity: RepairIdentity, request: OperationIntent,
+                  *, role: str, installation: str) -> dict:
+    """Report candidate, desired content and current verifier independently."""
+    from .komodo_repair import KomodoRepairOwner
+
+    if type(owner) is not KomodoRepairOwner:
+        raise PlanError("Komodo original repair contract is unsupported by this owner")
+    return owner.inspect(identity, request, role=role, installation=installation)
+
+
+def bootstrap(owner: KomodoOwner, identity: CallerIdentity, request: OperationIntent,
               *, role: str, installation: str) -> TargetReceipt:
     """Consume an existing verifier's identity before Core or Gateway exists."""
     permit = owner.admission.authorize(identity, request, role=role, installation=installation)

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tarfile
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -16,6 +18,7 @@ import pytest
 import test_continuity_bootstrap as consumer
 
 REPOSITORY = Path(__file__).resolve().parents[2]
+KOMODO_BASELINE_REVISION = "b6937bd5441ee5896ae539487269f4af94603594"
 pytestmark = [
     pytest.mark.client_distribution_full,
     pytest.mark.skipif(sys.platform != "linux", reason="Linux SDK qualification; native lanes are separate"),
@@ -27,12 +30,13 @@ from pathlib import Path
 context = json.loads(sys.argv.pop(1))
 checkout = Path(context["checkout"]).resolve()
 runtime = Path(context["runtime"]).resolve()
+denied_sources = [Path(value).resolve() for value in context["denied_sources"]]
 def deny_source(event, arguments):
     if event in {"open", "os.listdir", "os.scandir"} and arguments:
         value = arguments[0]
         if isinstance(value, (str, bytes, os.PathLike)):
             path = Path(os.fsdecode(value)).resolve()
-            if path.is_relative_to(checkout) and not path.is_relative_to(runtime):
+            if any(path.is_relative_to(source) for source in denied_sources) and not path.is_relative_to(runtime):
                 raise PermissionError("continuity SDK refused checkout access")
 sys.addaudithook(deny_source)
 if sys.argv[1:] == ["--source-import-control"]:
@@ -77,9 +81,8 @@ else:
 """
 
 
-@pytest.fixture(scope="module")
-def sdk_runtime(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, list[str]]:
-    runtime = tmp_path_factory.mktemp("continuity-installed") / "runtime"
+def build_sdk_runtime(directory: Path, source: Path) -> tuple[Path, list[str]]:
+    runtime = directory / "runtime"
     uv = shutil.which("uv")
     assert uv, "installed SDK qualification requires the maintained uv build path"
     subprocess.run(
@@ -95,9 +98,9 @@ def sdk_runtime(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, list[st
 
         run_uv_install(
             uv, ["--python", str(python), "--no-editable", ".[service-gateway]"],
-            cwd=REPOSITORY / "fleet-manager", trusted_source_roots=(REPOSITORY,),
+            cwd=source / "fleet-manager", trusted_source_roots=(source,),
             retained_resource_roots=standalone_build_resources(
-                "fleet-manager", source_root=REPOSITORY),
+                "fleet-manager", source_root=source),
             check=True, capture_output=True, text=True, timeout=180,
             **no_window_kwargs())
     finally:
@@ -109,12 +112,31 @@ def sdk_runtime(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, list[st
         check=True, capture_output=True, text=True, timeout=15, **no_window_kwargs())
     context = {
         "checkout": str(REPOSITORY), "runtime": str(runtime),
+        "denied_sources": [str(REPOSITORY), str(source)],
         "sites": json.loads(sites.stdout),
         "expected": {
             path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in (REPOSITORY / "fleet-manager/src/fleet_manager").glob("*.py")},
+            for path in (source / "fleet-manager/src/fleet_manager").glob("*.py")},
     }
     return python, [str(python), "-I", "-S", "-c", PROBE, json.dumps(context)]
+
+
+@pytest.fixture(scope="module")
+def sdk_runtime(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, list[str]]:
+    return build_sdk_runtime(tmp_path_factory.mktemp("continuity-installed"), REPOSITORY)
+
+
+@pytest.fixture(scope="module")
+def baseline_sdk_runtime(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, list[str]]:
+    directory = tmp_path_factory.mktemp("retained-sdk-baseline")
+    source = directory / "source"
+    source.mkdir()
+    archive = subprocess.run(
+        ["git", "archive", KOMODO_BASELINE_REVISION, "--", "fleet-manager", "libs"], cwd=REPOSITORY,
+        check=True, capture_output=True, timeout=30, **no_window_kwargs())
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as retained:
+        retained.extractall(source, filter="data")
+    return build_sdk_runtime(directory, source)
 
 
 def test_source_import_control_is_refused(
