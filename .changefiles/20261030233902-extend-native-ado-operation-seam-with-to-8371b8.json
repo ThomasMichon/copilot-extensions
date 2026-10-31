@@ -1,0 +1,9 @@
+{
+  "comment": "Extend native ADO operation seam with token-free pinned-context review serializers and effect-specific thread attribution",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
