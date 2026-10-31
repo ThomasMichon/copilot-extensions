@@ -578,7 +578,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "interactive_completion", "native_launch", "ssh_service",
         "ssh_headless", "update_diagnostics",
         "runtime_removal", "source_cache",
-        "windows_broker_probe", "windows_broker_consumers",
+        "windows_broker_probe", "windows_broker_consumers", "native_daemon_exit",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -620,6 +620,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "runtime-removal-macos",
         "windows-broker-portable", "windows-broker-probe", "windows-broker-consumers",
         "windows-native-process",
+        "native-daemon-exit-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
@@ -630,7 +631,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles "
             "&& !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless "
             "&& !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics "
-            "&& !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers }}"
+            "&& !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers "
+            "&& !inputs.native_daemon_exit }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
@@ -652,6 +654,19 @@ def test_real_broker_consumers_retain_native_removal_failures_without_expanding_
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
     )
     jobs = workflow["jobs"]
+    native = jobs["native-daemon-exit-windows"]
+    assert native["if"] == "${{ inputs.native_daemon_exit }}"
+    assert native["runs-on"] == "windows-latest" and native["timeout-minutes"] == 15
+    assert not native.get("continue-on-error")
+    assert native["env"] == {"PROCUTIL_NATIVE_DAEMON_LIFETIME": "1", "UV_PYTHON": "3.12"}
+    native_commands = [step["run"] for step in native["steps"] if "run" in step]
+    assert len(native_commands) == 1
+    assert shlex.split(native_commands[0]) == [
+        "python", "tools/run-plugin-tests.py", "agent-procutil",
+        "--test-file", "tests/test_native_daemon_cleanup.py",
+        "--test-file", "tests/test_native_daemon.py",
+        "--test-timeout", "60", "--timeout", "600", "--plugin-timeout", "720",
+    ]
     assert jobs["windows-broker-probe"]["timeout-minutes"] == 4
     assert jobs["windows-broker-portable"]["timeout-minutes"] == 6
     consumer = jobs["windows-broker-consumers"]

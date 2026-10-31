@@ -32,7 +32,14 @@ def test_reported_worker_reuse_never_grants_cleanup_custody(monkeypatch):
     unrelated.wait.assert_not_called()
 
 
-def test_native_worker_failure_preserves_original_error_in_redirected_log(tmp_path):
+@pytest.mark.parametrize("body,expected", [
+    pytest.param("throw 'fixture-native-original-error'\n", 1, id="throw"),
+    pytest.param("[Console]::Error.WriteLine('fixture-native-original-error'); exit 37\n", 37, id="nonzero"),
+    pytest.param("[Console]::Error.WriteLine('fixture-native-original-error'); exit -7\n", -7, id="signed"),
+    pytest.param("[Console]::Error.WriteLine('fixture-native-original-error')\n", 0, id="success"),
+])
+@pytest.mark.parametrize("cycle", range(2))
+def test_native_worker_failure_preserves_original_error_in_redirected_log(tmp_path, body, expected, cycle):
     helper = Path(__file__).resolve().parents[1] / "src" / "agent_procutil" / "native_daemon.ps1"
     shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
 
@@ -40,14 +47,26 @@ def test_native_worker_failure_preserves_original_error_in_redirected_log(tmp_pa
         return "'" + str(value).replace("'", "''") + "'"
 
     worker = tmp_path / "worker.ps1"
-    worker.write_text("throw 'fixture-native-original-error'\n", encoding="utf-8")
+    unwound = tmp_path / f"unwound-{cycle}"
+    worker.write_text(
+        "try {\n" + body + "\n} finally {\n"
+        "[Console]::Error.WriteLine('fixture-finally-entered')\n"
+        f"[IO.File]::WriteAllText({quoted(unwound)}, 'application-finally')\n"
+        "[Console]::Error.WriteLine('fixture-finally-completed')\n"
+        "}\n",
+        encoding="utf-8",
+    )
     log = tmp_path / "worker.log"
     body = (
         "$ErrorActionPreference='Stop'; $env:COPILOT_EXTENSIONS_TEST_CONTAINED='1'; "
         f". {quoted(helper)}; "
         f"$p=Start-NativeDaemon -Script {quoted(worker)} -Arguments @('fixture') "
         f"-WorkingDirectory {quoted(tmp_path)} -LogPath {quoted(log)}; "
-        "try { if (-not $p.WaitForExit(15000)) { throw 'worker did not exit' }; "
+        "try { if (-not $p.WaitForExit(15000)) { "
+        f"$stream=[IO.File]::Open({quoted(log)},'Open','Read','ReadWrite'); "
+        "$reader=New-Object IO.StreamReader($stream); "
+        "try { $details=$reader.ReadToEnd() } finally { $reader.Dispose() }; "
+        "throw ('worker did not exit: ' + $details) }; "
         "@{code=$p.ExitCode} | ConvertTo-Json -Compress } finally { $p.Dispose() }"
     )
     encoded = base64.b64encode(body.encode("utf-16le")).decode("ascii")
@@ -56,7 +75,8 @@ def test_native_worker_failure_preserves_original_error_in_redirected_log(tmp_pa
         capture_output=True, text=True, timeout=30, **pu.no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["code"] == 1
+    assert unwound.read_text(encoding="utf-8") == "application-finally"
+    assert json.loads(result.stdout)["code"] == expected
     assert "fixture-native-original-error" in log.read_text(encoding="utf-8", errors="replace")
 
 
@@ -120,7 +140,9 @@ def test_native_unconfirmed_cleanup_transfers_exact_live_handle_to_caller(tmp_pa
         "$ErrorActionPreference='Stop'; $env:COPILOT_EXTENSIONS_TEST_CONTAINED='1'; "
         f"$source=Get-Content -LiteralPath {quoted(helper)} -Raw; "
         + injection
-        + "$source=$source.Replace('exit 1','Start-Sleep -Seconds 10; exit 1'); "
+        + "$source=$source.Replace("
+        "'[CopilotExtensions.NativeDaemonAdmission]::ExitCurrentProcess(1)',"
+        "'Start-Sleep -Seconds 10; [CopilotExtensions.NativeDaemonAdmission]::ExitCurrentProcess(1)'); "
         "Invoke-Expression $source; "
         f"$script:NativeDaemonSource={quoted(helper)}; "
         "function Read-NativeDaemonFrame { "
