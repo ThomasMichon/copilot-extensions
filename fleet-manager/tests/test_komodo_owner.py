@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 import json
+import subprocess
 import sys
 import time
 from typing import Any
@@ -14,6 +15,7 @@ from aiohttp.test_utils import TestServer
 import pytest
 
 from fleet_manager.komodo_declaration import KomodoDeclaration
+from fleet_manager.komodo_evidence import FIELDS
 from fleet_manager.komodo_health import identity_digest
 from fleet_manager.komodo_network import network_fingerprint
 from fleet_manager.komodo_native import KomodoNative
@@ -21,8 +23,10 @@ from fleet_manager.komodo_owner import KomodoOwner, native_fingerprint
 from fleet_manager.komodo_profile import render_profile
 from fleet_manager.komodo_selection import KomodoSelection
 from fleet_manager.komodo_state import KomodoState
-from fleet_manager.planning import PlanError
+from fleet_manager.node_journal import NodeJournal
+from fleet_manager.planning import PlanError, digest
 from fleet_manager.runtime_admission import AdmissionError, OperationGrant
+from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
 from test_komodo_declaration import intent
 from test_komodo_native import native_rig as native_rig
 from test_runtime_admission import Harness, actor, policy
@@ -50,18 +54,27 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
     "repeat-stopped-after-health", "status-stopped-after-health", "repeat-key-drift-after-health",
     "status-stopped-periphery", "missing-key-evidence",
     "status-paused-periphery", "status-restarting-core",
+    "mount-order-after-health", "retained-mount-order", "failed-mount-order", "global-trust",
+    "legacy-readback", "legacy-order-unproved", "legacy-missing-core",
+    "endpoint-after-health", "repeat-endpoint-after-health", "status-endpoint-after-health",
+    "missing-membership-before-health", "repeat-missing-network-membership", "status-missing-network-membership",
+    "failed-short-native-1",
+    "mismatched-attachment-before-health", "repeat-mismatched-attachment", "status-mismatched-attachment",
 ])
 def test_composed_owner_preserves_original_operation_and_real_native_custody(
     native_rig: Any, keys: Any, scenario: str, monkeypatch: Any, compose_version: str,
 ) -> None:
     rig = native_rig
+    if scenario.startswith("legacy-"):
+        monkeypatch.setattr("fleet_manager.komodo_owner.native_fingerprint",
+                            lambda item: digest({name: item[name] for name in FIELDS}))
     (rig["directory"] / "compose-version").write_text(compose_version)
     (rig["directory"] / "stateful").touch()
     runtime = rig["root"] / "host-runtime"
     runtime.mkdir(mode=0o700)
     for name in ("core", "periphery"):
         if not scenario.startswith("first-"):
-            (rig["material"].keys / (name + ".pub")).write_text("fixture-public-key-" + name)
+            (rig["material"].keys / (name + ".pub")).write_text(PUBLIC_PEM[name])
 
     def live() -> dict:
         return json.loads((rig["directory"] / "live.json").read_text())
@@ -98,21 +111,33 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 "/read/GetVersion": {"version": "9.0.0" if health_failure[0]
                                     else core_version},
                 "/read/GetServer": {
-                    "id": "server-a", "name": "example-host", "config": {"enabled": True},
-                    "info": {"public_key": "fixture-public-key-periphery"},
+                    "id": "server-a", "name": "example-host", "config": {"enabled": True, "address": ""},
+                    "info": {"public_key": "" if scenario == "global-trust" else PUBLIC_DER["periphery"]},
                 },
                 "/read/GetServerState": {"status": "Ok"},
                 "/read/GetPeripheryInformation": {
                     "version": periphery_version,
-                    "public_key": "fixture-public-key-periphery", "docker_connected": True,
+                    "public_key": PUBLIC_DER["periphery"], "docker_connected": True,
                 },
             }[request.path]
+            if ((request.path == "/read/GetPeripheryInformation"
+                 and scenario == "mount-order-after-health" and not health_changes)
+                    or (request.path == "/read/GetVersion" and scenario == "failed-mount-order")):
+                health_changes.append(True)
+                changed = live()
+                for item in changed.values():
+                    item["Mounts"].reverse()
+                (rig["directory"] / "live.json").write_text(json.dumps(changed))
             if (request.path == "/read/GetPeripheryInformation" and not health_changes and health_armed[0]
                     and scenario.endswith(("stopped-after-health", "key-drift-after-health",
-                                           "restart-after-health"))):
+                                           "restart-after-health", "endpoint-after-health"))):
                 health_changes.append(True)
-                if scenario.endswith("key-drift-after-health"):
-                    (rig["material"].keys / "core.pub").write_text("changed-after-health")
+                if scenario.endswith("endpoint-after-health"):
+                    (rig["directory"] / "endpoint-overrides.json").write_text(json.dumps({
+                        live()["core"]["Id"]: {"EndpointID": "changed-during-health"},
+                    }))
+                elif scenario.endswith("key-drift-after-health"):
+                    (rig["material"].keys / "core.pub").write_text(PUBLIC_PEM["periphery"])
                 else:
                     changed = live()
                     if scenario.endswith("stopped-after-health"):
@@ -215,8 +240,6 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     adopted_network=network_fingerprint(json.loads(
                         (rig["directory"] / "network.json").read_text())))
                 if scenario.startswith("adoption-accepted-"):
-                    from fleet_manager.node_journal import NodeJournal
-
                     begin = NodeJournal.begin_external
 
                     def interrupted(journal: Any, operation: Any) -> Any:
@@ -323,7 +346,7 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                         {"core"} if scenario in ("first-partial-core", "first-partial-key-drift")
                         else set())
                 if scenario == "first-partial-key-drift":
-                    (rig["material"].keys / "core.pub").write_text("unapproved-replacement-key")
+                    (rig["material"].keys / "core.pub").write_text(PUBLIC_PEM["periphery"])
                     with pytest.raises(PlanError, match="storage, credentials or identity"):
                         await invoke(owner(), original)
                     assert effects() == 1 and not health_requests
@@ -340,11 +363,49 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 repaired = await invoke(owner(), request("compatible-first-install-repair"))
                 assert repaired.to_dict()["status"] == "succeeded" and effects() == 2
                 return
-            if scenario == "stopped-core" or scenario.startswith("failed-short-"):
+            if scenario in ("stopped-core", "failed-mount-order") or scenario.startswith("failed-short-"):
                 health_failure[0] = True
                 original = request()
-                with pytest.raises(PlanError, match="current Core version"):
-                    await invoke(owner(), original)
+                attempt = owner()
+                observations: list[tuple[list[str], float, str]] = []
+                if scenario.startswith("failed-short-"):
+                    def observe_command(arguments: list[str], **kwargs: Any) -> Any:
+                        try:
+                            result = rig["tooling"].run(arguments, **kwargs)
+                        except subprocess.SubprocessError as error:
+                            observations.append((arguments[5:7], kwargs["timeout"], type(error).__name__))
+                            raise
+                        observations.append((arguments[5:7], kwargs["timeout"], str(result.returncode)))
+                        if (scenario == "failed-short-native-1" and arguments[5] == "compose"
+                                and "up" in arguments[6:]):
+                            (rig["directory"] / "delay").touch()
+                        return result
+                    attempt.native = KomodoNative(replace(rig["tooling"], run=observe_command))
+                started = time.monotonic()
+                with pytest.raises(PlanError) as initial:
+                    await invoke(attempt, original)
+                if scenario.startswith("failed-short-"):
+                    budget = int(scenario[-1])
+                    if "current Core version" not in str(initial.value):
+                        timed_out = any(kind == "TimeoutExpired" for _, _, kind in observations)
+                        assert (str(initial.value) == "Komodo native operation failed or is uncertain" and timed_out
+                                or str(initial.value) == "Komodo native deadline exceeded"
+                                and time.monotonic() - started >= budget), observations
+                    assert all(0 < bound <= budget for _, bound, _ in observations)
+                    assert effects() == 1 and not harness.owner._issued
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        retained = state.read()["attempt"]
+                        assert retained["request"] == original.to_dict() and retained["native_settled"] is True
+                        journal = NodeJournal(
+                            state.root / "node.sqlite", authority="gateway-a", installation="install-a",
+                            target="host-a", existing_only=True)
+                        value = journal.inspect(original).to_dict()
+                        assert (value["status"], value["sequence"], value["result_ref"]) == ("unknown", 2, None)
+                    if scenario == "failed-short-native-1":
+                        assert any(kind == "TimeoutExpired" for _, _, kind in observations)
+                        (rig["directory"] / "delay").rename(rig["directory"] / "delay.retained")
+                else:
+                    assert "current Core version" in str(initial.value)
                 if scenario == "stopped-core":
                     changed = live()
                     changed["core"]["State"] = {"Status": "exited", "Running": False}
@@ -410,8 +471,22 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
 
             first = owner()
             original = request()
-            if scenario in ("stopped-after-health", "key-drift-after-health", "restart-after-health"):
-                with pytest.raises(PlanError, match="readiness|runtime|identity|process"):
+            if scenario in ("missing-membership-before-health", "mismatched-attachment-before-health"):
+                def omit_membership(arguments: list[str], **kwargs: Any) -> Any:
+                    result = rig["tooling"].run(arguments, **kwargs)
+                    if arguments[5] == "compose" and "up" in arguments[6:]:
+                        identity = live()["core"]["Id"]
+                        path = rig["directory"] / ("excluded-endpoints.json"
+                            if scenario == "missing-membership-before-health" else "endpoint-overrides.json")
+                        value = [identity] if scenario == "missing-membership-before-health" else {
+                            identity: {"EndpointID": "f" * 64}}
+                        path.write_text(json.dumps(value))
+                    return result
+                first.native = KomodoNative(replace(rig["tooling"], run=omit_membership))
+            if scenario in ("stopped-after-health", "key-drift-after-health", "restart-after-health",
+                            "endpoint-after-health", "missing-membership-before-health",
+                            "mismatched-attachment-before-health"):
+                with pytest.raises(PlanError, match="readiness|runtime|identity|process|membership"):
                     await invoke(first, original)
                 assert effects() == 1
                 with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
@@ -429,8 +504,6 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 assert status["currently_healthy"] is None and status["converged"] is False
                 assert effects() == 0
             if scenario == "lost-terminal-receipt":
-                from fleet_manager.node_journal import NodeJournal
-
                 reconcile = NodeJournal.reconcile
                 failures = []
 
@@ -451,6 +524,20 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
             assert receipt.to_dict()["status"] == "succeeded"
             original_native = live()
             assert effects() == 1
+            if scenario in ("retained-mount-order", "legacy-order-unproved"):
+                for item in original_native.values():
+                    item["Mounts"].reverse()
+                (rig["directory"] / "live.json").write_text(json.dumps(original_native))
+            if scenario == "legacy-order-unproved":
+                before_http = len(health_requests)
+                status = await invoke(owner(), original, status=True)
+                assert "legacy-native-evidence-unproved" in status["blockers"]
+                assert status["currently_healthy"] is None and not status["converged"]
+                assert len(health_requests) == before_http
+                with pytest.raises(PlanError, match="legacy native evidence does not prove"):
+                    await invoke(owner(), original)
+                assert effects() == 1 and live() == original_native
+                return
             repeated = await invoke(owner(), original)
             assert repeated == receipt and effects() == 1 and live() == original_native
             status = await invoke(owner(), original, status=True)
@@ -459,6 +546,12 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
             if scenario.startswith(("repeat-", "status-")):
                 health_armed[0] = True
                 before_http = len(health_requests)
+                if scenario.endswith("missing-network-membership"):
+                    (rig["directory"] / "excluded-endpoints.json").write_text(json.dumps([live()["core"]["Id"]]))
+                elif scenario.endswith("mismatched-attachment"):
+                    (rig["directory"] / "endpoint-overrides.json").write_text(json.dumps({
+                        live()["core"]["Id"]: {"EndpointID": "f" * 64},
+                    }))
                 if scenario in ("status-stopped-periphery", "status-paused-periphery", "status-restarting-core"):
                     changed = live()
                     if scenario == "status-stopped-periphery":
@@ -469,7 +562,7 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                         changed["core"]["State"].update(Status="restarting", Restarting=True, Pid=0)
                     (rig["directory"] / "live.json").write_text(json.dumps(changed))
                 if scenario.startswith("repeat-"):
-                    with pytest.raises(PlanError, match="readiness|runtime|identity|process"):
+                    with pytest.raises(PlanError, match="readiness|runtime|identity|process|membership"):
                         await invoke(owner(), original)
                 else:
                     status = await invoke(owner(), original, status=True)
@@ -595,7 +688,7 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     assert restored.to_dict()["status"] == "succeeded" and effects() == 2
                     assert path.read_bytes() == network and sentinel.read_text() == "must-survive"
                 return
-            if scenario == "recovery":
+            if scenario in ("recovery", "legacy-missing-core"):
                 missing = live()
                 del missing["core"]
                 (rig["directory"] / "live.json").write_text(json.dumps(missing))

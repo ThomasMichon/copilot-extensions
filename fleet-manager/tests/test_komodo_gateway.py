@@ -16,6 +16,7 @@ from fleet_manager.komodo_declaration import KomodoDeclaration
 from fleet_manager.komodo_owner import KomodoOwner
 from fleet_manager.komodo_selection import KomodoSelection
 from fleet_manager.runtime_admission import AdmissionAuthority, OperationGrant
+from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
 from gateway_service_transport_fixtures import Rig
 from test_gateway_enrolled_identity import EnrolledRig
 from test_gateway_local_handler import local_binding
@@ -36,7 +37,7 @@ def test_real_tls_original_caller_and_current_operation_policy_reach_native_owne
     runtime = rig["root"] / "host-runtime"
     runtime.mkdir(mode=0o700)
     for name in ("core", "periphery"):
-        (rig["material"].keys / (name + ".pub")).write_text("fixture-public-key-" + name)
+        (rig["material"].keys / (name + ".pub")).write_text(PUBLIC_PEM[name])
 
     async def exercise() -> None:
         root = rig["root"] / "gateway"
@@ -55,11 +56,11 @@ def test_real_tls_original_caller_and_current_operation_policy_reach_native_owne
                 "/read/GetVersion": {"version": "2.0.0"},
                 "/read/GetServer": {
                     "id": "server-a", "name": "example-host", "config": {"enabled": True},
-                    "info": {"public_key": "fixture-public-key-periphery"},
+                    "info": {"public_key": PUBLIC_DER["periphery"]},
                 },
                 "/read/GetServerState": {"status": "Ok"},
                 "/read/GetPeripheryInformation": {
-                    "version": "2.0.0", "public_key": "fixture-public-key-periphery",
+                    "version": "2.0.0", "public_key": PUBLIC_DER["periphery"],
                     "docker_connected": True,
                 },
             }[request.path])

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from .komodo_declaration import KomodoDeclaration, fingerprint
+from .komodo_evidence import native_reference
 from .komodo_native import KomodoTooling
 from .komodo_profile import DATA_NAMES, SECRET_NAMES, KomodoMaterialization, ordinary_path, render_profile
 from .planning import PlanError, digest, identifier, integer
@@ -62,7 +63,7 @@ class KomodoSelection:
         if self.adoption and {item[0] for item in self.adoption} != {"core", "mongo", "periphery"}:
             raise PlanError("Komodo adoption requires exactly the three selected services")
         for _, value in self.adoption:
-            fingerprint(value)
+            native_reference(value)
         if self.adoption:
             fingerprint(self.adopted_public_identity)
             fingerprint(self.adopted_network)

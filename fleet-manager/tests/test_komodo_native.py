@@ -19,6 +19,7 @@ from fleet_manager.komodo_declaration import KomodoDeclaration
 from fleet_manager.komodo_native import KomodoNative, KomodoTooling
 from fleet_manager.komodo_profile import DATA_NAMES, SECRET_NAMES, KomodoMaterialization, render_profile
 from fleet_manager.planning import PlanError
+from komodo_public_fixtures import PUBLIC_PEM
 from test_komodo_declaration import declaration
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host substrate contract")
@@ -62,8 +63,14 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
     if args[:2] == ["network", "inspect"]:
         network = json.loads((root / "network.json").read_text())
         live = json.loads((root / "live.json").read_text()) if (root / "live.json").exists() else {}
+        overrides = root / "endpoint-overrides.json"
+        endpoints = json.loads(overrides.read_text()) if overrides.exists() else {}
+        excluded = root / "excluded-endpoints.json"
+        exclusions = json.loads(excluded.read_text()) if excluded.exists() else []
         network["Containers"].update({
-            item["Id"]: {"Name": name} for name, item in live.items() if item["State"]["Running"]
+            item["Id"]: {"Name": name, "EndpointID": item["NetworkSettings"]["Networks"][
+                network["Name"]]["EndpointID"], **endpoints.get(item["Id"], {})}
+            for name, item in live.items() if item["State"]["Running"] and item["Id"] not in exclusions
         })
         return 0, json.dumps([network])
     if args[:2] == ["container", "ls"]:
@@ -164,7 +171,8 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
                         "StartedAt": "fixture-start-" + str(sequence),
                     },
                     "NetworkSettings": {"Networks": {
-                        network["Name"]: {"NetworkID": network["Id"]},
+                        network["Name"]: {"NetworkID": network["Id"],
+                                          "EndpointID": hashlib.sha256(f"{name}-{sequence}-endpoint".encode()).hexdigest()},
                     }},
                 }
             if (root / "corrupt-fixed").exists():
@@ -176,12 +184,13 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
                     for item in live.values():
                         item["State"] = {"Status": "created", "Running": False}
                         item["NetworkSettings"]["Networks"][network["Name"]]["NetworkID"] = ""
+                        item["NetworkSettings"]["Networks"][network["Name"]]["EndpointID"] = ""
             for name in ("core", "periphery"):
                 if name in live and live[name]["State"]["Running"]:
                     key_root = Path(profile["services"][name]["volumes"][0]["source"])
                     key = key_root / (name + ".pub")
                     if not key.exists():
-                        key.write_text("fixture-public-key-" + name)
+                        key.write_text(PUBLIC_PEM[name])
             (root / "live.json").write_text(json.dumps(live))
             if failure.get("fail"):
                 return 7, "settled-container-creation-failure"
@@ -218,7 +227,7 @@ def native_rig(tmp_path: Path, monkeypatch: Any) -> Any:
     selected = KomodoDeclaration.from_dict(declaration())
     script = tmp_path / "docker-fixture.py"
     script.write_text(
-        "import sys\n" + inspect.getsource(_docker_protocol)
+        "import sys\nPUBLIC_PEM = " + repr(PUBLIC_PEM) + "\n" + inspect.getsource(_docker_protocol)
         + "\ncode, output = _docker_protocol(sys.argv[1:], "
         + repr(str(directory)) + ")\nprint(output, end='')\nraise SystemExit(code)\n")
     executable = Path(sys.executable).resolve()

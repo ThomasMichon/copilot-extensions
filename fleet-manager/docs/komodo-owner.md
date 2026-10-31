@@ -66,9 +66,10 @@ the native child receives the OS default executable path, never ambient `PATH`.
 The existing host authority still authenticates the Docker binary and its
 system-provided plugins; constructing a tooling record does not do that.
 
-Install the SDK's `komodo-host` extra and the separately selected identity
-profile's dependencies. The host owner is Linux-only; parsing and ordinary
-thin-client planning remain platform-neutral.
+Install the SDK's `komodo-host` extra, including its public-key cryptography
+dependency, and the separately selected identity profile's dependencies.
+The host owner is Linux-only; declaration parsing and ordinary thin-client
+planning remain platform-neutral and keep the base distribution dependency-free.
 
 ## Native profile, adoption and custody
 
@@ -131,10 +132,29 @@ requires exact independently authenticated fingerprints of all three native
 containers, existing public-key identity and physical network. The network
 fingerprint covers its full stable inspection record, excluding dynamic
 container membership; membership must contain only the exact owned container
-IDs. Foreign endpoints, a replaced bridge or additional container attachments
+IDs and include every observed running container's ID. Matching two incomplete
+observations does not establish membership. Stopped containers may be absent;
+only the existing explicit pending-created exception permits an unstarted
+container without an attached network identity.
+Every running container's nonempty attachment `EndpointID` must match its
+bridge membership entry as well as the selected `NetworkID`; two consistent
+but mismatched snapshots do not establish attachment identity.
+Foreign endpoints, a replaced bridge or additional container attachments
 refuse. An existing empty network also requires explicit network adoption.
 An adopted bridge remains external in all subsequent fixed profiles, preserving
 its identity rather than relabelling or recreating it.
+
+New native fingerprints use the explicit `mounts-v2:` prefix. They retain
+container ID, image, full configuration and every mount field, sorting only
+the mount array. Duplicate or ambiguous mount destinations refuse; mount
+fields and multiplicity are never discarded. Paired readiness observations
+use the same order-independent comparison and retain process/start identity.
+Legacy unprefixed SHA-256 references remain exact raw-inspection evidence:
+unchanged legacy resources are readable, but reordered mounts do not prove
+equality to a historical opaque digest. Unproved legacy custody refuses and
+status exposes `legacy-native-evidence-unproved`; no current observation
+rewrites that baseline. Retained subsets still identify a missing owned
+service as absent rather than treating its surviving containers as foreign.
 
 Preserving adoption records an unchanged healthy incumbent without native
 writes. Its legacy configuration remains bound to the exact original native
@@ -176,7 +196,24 @@ Bounded authenticated readiness then checks
 current Core version, selected registered server, Periphery connection/version,
 Docker connection and actual retained public keys before publishing good.
 Container existence, a zero native exit or old good evidence is not readiness.
+Public identity accepts validated SubjectPublicKeyInfo `PUBLIC KEY` PEM
+(including CRLF line endings) and canonical base64-DER encodings of the same
+key. Malformed, private, non-SPKI, trailing or different key material refuses.
+Only health comparison normalizes presentation: retained text/key fingerprints
+are unchanged, so changing a retained file's encoding still changes its custody
+evidence. An empty per-server `info.public_key` is accepted only when the server
+has an explicitly empty `config.address` selecting Periphery-to-Core mode,
+inspected Core configuration proves its selected global trust, the authenticated server
+connection is `Ok`, and the live Periphery key equals the retained selected key.
+The fixed `file:/config/keys/periphery.pub` reference must resolve through the
+actual selected keys bind mount; explicit inline global keys are validated too.
+A missing or nonempty server address, or a missing or unproved global setting,
+is not a fallback to trust the live key. Core-to-Periphery mode requires the
+explicit retained per-server key.
 Current native identity/network are checked again after readiness.
+Complete network endpoint membership and attachment observations must agree
+before and after authenticated health; reconnecting on the same bridge cannot
+reuse health from the preceding attachment.
 Convergence, successful repeats and status use the same final observation:
 all three services must still be running, unpaused and non-restarting with
 positive process IDs and unchanged start identities. A stop/restart during HTTP
@@ -222,6 +259,18 @@ A new admitted convergence can restore missing owned Core/Periphery from
 retained selected storage/configuration while Core is unavailable; native
 restoration precedes final authenticated health. Credential/native replacement,
 unsettled previous work and ambiguous custody refuse rather than wipe data.
+
+An executor-only SDK repair is a separate opt-in
+[original-attempt repair contract](komodo-original-repair.md), not ordinary
+convergence with a substituted release. It retains the original request and
+candidate while separately admitting the current verifier; baseline bootstrap
+and Gateway routes remain unchanged.
+
+Mutable selection publication uses unique private staging and replaces the
+selected record atomically only after a complete checked write. Interrupted
+unpublished staging remains evidence without blocking a freshly admitted save.
+Existing legacy `selection.pending` files still require exact prefix completion;
+conflicting or foreign pending content refuses rather than being overwritten.
 
 ## Status, withdrawal and Gateway binding
 
