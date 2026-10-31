@@ -298,7 +298,7 @@ def test_cache_rebuild_cannot_erase_admitted_unknown_review_in_same_owner_root(s
     assert store.inspect_review("selected-review", SCOPE, expires_at=expires())["actions"][0]["state"] == "unknown"
 
 
-@pytest.mark.parametrize("capacity", [90000, 120000])
+@pytest.mark.parametrize("capacity", [90000, 150000])
 def test_retained_large_baseline_is_reserved_before_a_later_pending_event(tmp_path, capacity):
     from agent_pull_requests.watch_contract import PRSnapshot
     store = ReplayStore(tmp_path.resolve(), "existing-owner-namespace")
@@ -316,6 +316,20 @@ def test_retained_large_baseline_is_reserved_before_a_later_pending_event(tmp_pa
         assert store.path.read_bytes() == before
     else:
         store.observe(target, large, expires_at=expires())
+    store.observe(target, PRSnapshot(merged=True, review_decision="x" * 18000), expires_at=expires())
+    assert len(store.execute(CONSUMER, "pending", {}, expires_at=expires())["events"]) == 1
+
+
+def test_empty_baseline_to_large_firing_event_uses_reserved_growth_once(tmp_path):
+    from agent_pull_requests.watch_contract import PRSnapshot
+    store = ReplayStore(tmp_path.resolve(), "existing-owner-namespace")
+    store.provision()
+    store.adopt_review_operations(lifecycle_checkpoint=lambda: None, expires_at=expires(), replay_bytes=60000)
+    store.execute(CONSUMER, "register", {
+        "request_id": "empty-watch", "issued_at": time.time(), "number": 42, "until": ("merged",),
+    }, expires_at=expires())
+    target = store.observation_targets(expires_at=expires())[0]
+    store.observe(target, PRSnapshot(), expires_at=expires())
     store.observe(target, PRSnapshot(merged=True, review_decision="x" * 18000), expires_at=expires())
     assert len(store.execute(CONSUMER, "pending", {}, expires_at=expires())["events"]) == 1
 

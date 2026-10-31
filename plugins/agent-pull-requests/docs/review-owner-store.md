@@ -86,9 +86,10 @@ responses do not become unbounded persisted data.
 
 Replay and review byte reservations are separate. Replay admission/validation
 accounts for each active registration's existing maximum pending-event growth.
-Retained baseline bytes are counted at their actual size; only the remaining
-pending-event growth is reserved, without counting an existing pending event
-twice. A non-firing observation whose retained baseline would leave inadequate
+Retained bytes are counted at their actual size. A waiting registration reserves
+both possible unknown-baseline promotion and one pending event; once its
+noncontinuous event is frozen, only bounded acknowledgement growth remains.
+Existing pending data is not counted twice. A non-firing observation whose retained baseline would leave inadequate
 event headroom refuses before persistence, preserving the previous funded state.
 Full review capacity refuses additional intent but leaves replay transactions and
 already-reserved receipt persistence available. Neither namespace borrows or

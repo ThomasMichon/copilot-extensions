@@ -222,6 +222,10 @@ contract.
   new no-op vote intents, and target/principal-specific receipt coverage.
   Twenty-seven real-store controls now pass, including tight-capacity baseline/
   event cases and restart after reply/edit/verdict confirmations or mismatches.
+- Fund unknown-baseline promotion together with the first firing event before
+  accepting a waiting registration; once that noncontinuous event is frozen,
+  preserve its actual bytes without reserving another event. The empty-baseline/
+  large-firing-event regression passes within a tight configured store capacity.
 - The original credential/principal/discussion freshness, actual effect-specific
   reconciliation, executor/provider integration and live serving qualification
   remain open. No new ledger, issuer, daemon, hosting repair or rollout is made.

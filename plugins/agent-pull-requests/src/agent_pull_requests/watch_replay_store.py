@@ -150,18 +150,14 @@ class ReplayStore:
     @staticmethod
     def _replay_reservation(state: dict) -> int:
         from .watch_replay import MAX_BATCH_BYTES
-        active = sum(record["outcome"] == "active" for record in state["records"])
-        projected = copy.deepcopy(state)
-        for group in projected["registries"]:
+        growth = 0
+        for group in state["registries"]:
             for subscription in group["subscriptions"]:
-                if "pending" in subscription:
-                    subscription["pending"] = None
-        # Retained baselines may exceed one event budget. Keep their real bytes
-        # while reserving only the pending event's remaining growth.
-        return max(
-            len(review_intent.encoded(state)) + 1024,
-            len(review_intent.encoded(projected)) + active * (MAX_BATCH_BYTES + 2048) + 1024,
-        )
+                # A waiting observation may fill unknown baseline fields and
+                # create one bounded pending event. Once pending is frozen,
+                # noncontinuous replay cannot grow another event/baseline.
+                growth += 2048 if subscription.get("pending") is not None else 2 * MAX_BATCH_BYTES + 2048
+        return len(review_intent.encoded(state)) + growth + 1024
 
     def _validate_owner(self, document: dict) -> None:
         if (
