@@ -101,7 +101,7 @@ def test_native_consumer_keeps_deployed_owner(payloads, tmp_path):
 
 
 @pytest.mark.parametrize("shell", ["powershell", "bash"])
-@pytest.mark.parametrize("inherited_payload", [False, True])
+@pytest.mark.parametrize("inherited_payload", ["absent", "worktrees", "plugin"])
 @pytest.mark.parametrize("copied_entry", [False, True])
 def test_normal_entry_retains_selected_payload_for_relocated_runtime(
     tmp_path, request, shell, inherited_payload, copied_entry,
@@ -117,6 +117,10 @@ def test_normal_entry_retains_selected_payload_for_relocated_runtime(
         (root / "bin" / f"{root.name}{suffix}").touch()
     runtime_bin = home / ".agent-worktrees" / "bin"
     runtime_bin.mkdir(parents=True)
+    (runtime_bin.parent / "payload-dir").write_text(
+        str(payload if inherited_payload == "absent" else tmp_path / "foreign-marker") + "\n",
+        encoding="utf-8",
+    )
     entry_dir = home / ".local" / "bin" if copied_entry else payload / "bin"
     entry_dir.mkdir(parents=True, exist_ok=True)
     if shell == "powershell":
@@ -152,11 +156,9 @@ def test_normal_entry_retains_selected_payload_for_relocated_runtime(
     environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
         environment.pop(key, None)
-    if copied_entry:
-        key = "AGENT_WORKTREES_PAYLOAD_ROOT" if inherited_payload else "COPILOT_PLUGIN_ROOT"
-        environment[key] = str(payload)
-    elif inherited_payload:
-        environment["AGENT_WORKTREES_PAYLOAD_ROOT"] = str(tmp_path / "foreign-payload")
+    if inherited_payload != "absent":
+        key = "AGENT_WORKTREES_PAYLOAD_ROOT" if inherited_payload == "worktrees" else "COPILOT_PLUGIN_ROOT"
+        environment[key] = str(payload if copied_entry else tmp_path / "foreign-payload")
     result = subprocess.run(
         [*command, "pr-watch", "ownerstatus", "--json"], cwd=installed, env=environment,
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),

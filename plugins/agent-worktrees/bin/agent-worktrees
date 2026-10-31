@@ -9,9 +9,13 @@
 _aw_update_entry_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 . "$_aw_update_entry_dir/agent-worktrees-update-entry.sh"
 export PYTHONUTF8=1
+_awroot="$HOME/.agent-worktrees"
 _aw_payload_root="$(CDPATH= cd -- "$_aw_update_entry_dir/.." && pwd -P)" || exit
 if [ -f "$_aw_payload_root/plugin.json" ]; then
   AGENT_WORKTREES_PAYLOAD_ROOT="$_aw_payload_root"
+  export AGENT_WORKTREES_PAYLOAD_ROOT
+elif [ -z "${AGENT_WORKTREES_PAYLOAD_ROOT:-}" ] && [ -z "${COPILOT_PLUGIN_ROOT:-}" ] && [ -f "$_awroot/payload-dir" ]; then
+  AGENT_WORKTREES_PAYLOAD_ROOT="$(cat "$_awroot/payload-dir")" || exit
   export AGENT_WORKTREES_PAYLOAD_ROOT
 fi
 # Sanitize inherited Python runtime variables before dispatching to the
@@ -29,7 +33,6 @@ fi
 for _pyenvvar in PYTHONHOME PYTHONPATH PYTHONEXECUTABLE VIRTUAL_ENV UV_INTERNAL__PYTHONHOME __PYVENV_LAUNCHER__ AGENT_RT_ROOT; do
   unset "$_pyenvvar" 2>/dev/null || true
 done
-_awroot="$HOME/.agent-worktrees"
 _aw_exec_resolved() {
   AW_PY=""
   [ -f "$_awroot/bin/resolve-runtime.sh" ] || return 1
