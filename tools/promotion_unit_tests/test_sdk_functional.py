@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 from pathlib import Path
@@ -10,7 +11,38 @@ from typing import Any
 
 import pytest
 
-from tools.promotion_unit_tests.test_sdk_desktop_observer import load, runner, source_request
+from tools.promotion_unit_tests.test_sdk_desktop_observer import runner, source_request
+
+
+def console_bindings():
+    source = Path(runner.__file__).with_name("sdk_desktop_win32.py")
+    declared = next(node for node in ast.parse(source.read_bytes()).body
+                    if isinstance(node, ast.ClassDef) and node.name == "WinAPI")
+    methods = {"check", "console_facts", "facts", "require_console", "require_desktop"}
+    selected = [node for node in declared.body if isinstance(node, ast.FunctionDef) and node.name in methods]
+    assert {node.name for node in selected} == methods
+    owner = ast.copy_location(ast.ClassDef(
+        name="WinAPI", bases=[], keywords=[], body=selected, decorator_list=[], type_params=[],
+    ), declared)
+
+    class NumberType(type):
+        def __mul__(cls, count):
+            return lambda: [cls() for _ in range(count)]
+
+    class Number(metaclass=NumberType):
+        def __init__(self):
+            self.value = 0
+
+    # Execute the real method bodies with Python value doubles, never loading a native library.
+    namespace = {
+        "ct": SimpleNamespace(byref=lambda value: SimpleNamespace(_obj=value),
+                              sizeof=lambda value: 4, get_last_error=lambda: 0),
+        "wt": SimpleNamespace(BOOL=Number, HANDLE=Number, DWORD=Number),
+        "os": os, "ObservationBlocked": runner.ObservationBlocked,
+    }
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[owner], type_ignores=[])),
+                 str(source), "exec"), namespace)
+    return SimpleNamespace(WinAPI=namespace["WinAPI"])
 
 
 @pytest.fixture
@@ -150,7 +182,7 @@ def test_worker_precondition_failure_never_falls_back_or_opens_pipe(monkeypatch,
 
 @pytest.mark.parametrize("contained", [False, True])
 def test_functional_console_admission_never_reads_foreground(monkeypatch, contained):
-    bindings = load("unit_sdk_console", "sdk_desktop_win32.py")
+    bindings = console_bindings()
     api = bindings.WinAPI.__new__(bindings.WinAPI)
     events = []
 
@@ -181,7 +213,7 @@ def test_functional_console_admission_never_reads_foreground(monkeypatch, contai
 
 
 def test_actual_console_facts_retain_native_prerequisites_and_close_handles_without_foreground(monkeypatch):
-    bindings = load("unit_sdk_console_facts", "sdk_desktop_win32.py")
+    bindings = console_bindings()
     api = bindings.WinAPI.__new__(bindings.WinAPI)
     closed = []
 
@@ -233,7 +265,7 @@ def test_actual_console_facts_retain_native_prerequisites_and_close_handles_with
 
 @pytest.mark.parametrize("visible,same_session", [(False, True), (True, False), (True, True)])
 def test_strict_desktop_admission_keeps_foreground_visibility_and_session_requirements(visible, same_session):
-    bindings = load("unit_sdk_strict_desktop", "sdk_desktop_win32.py")
+    bindings = console_bindings()
     api = bindings.WinAPI.__new__(bindings.WinAPI)
 
     def in_job(process, job, output):

@@ -3601,7 +3601,7 @@
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4",
         "libs/agent-procutil/src/agent_procutil/_native_owned.py": "643c3333d3f435ece115f714c144ca6b64af571e37cc68aec9b3b8bf91bac06f",
         "tools/promotion_unit_tests/test_native_owned.py": "da1356b2b9224d900a1535d13467ea630455d55073a1001c56c119518f7c24e1",
-        "tools/promotion_unit_tests/test_sdk_functional.py": "2e609da0141b03df935eb1cfaac2d48c70967f1e2ab95b311173e2a72f2ecdaa",
+        "tools/promotion_unit_tests/test_sdk_functional.py": "20b31bfc943e9f6f9fd2967aa168489dbb10cd074509b980fbea79c36979d6b5",
         "tools/promotion_unit_tests/test_daemon_fixture_publication.py": "74eb81efecaffa08f0b26adfbf2825c61ab1a39ceb64653b78a22154ee0e1846",
         "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py": "ccfe54ab6c03376318535cd379a24b08ad6368aa25964bab6f3d4e498cbf11e2"
     },
