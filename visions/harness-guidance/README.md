@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-30
+- **Last revised:** 2026-10-31
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -148,6 +148,21 @@ outside the operator's control need applicable explicit effect authority.
 Current scope and circumstances remain revalidated before action; confidence,
 convenience, a copied record or expected recoverability should never create a
 grant or bypass a product gate.
+
+### decision-ready-unattended-continuation
+
+An agent approaching a genuine effect boundary should use permitted
+investigation, planning and documentation to prepare the operator's decision
+before requesting blocking input. The proposal should explain the problem and
+its cause, current evidence and uncertainty, options and conditional future
+projections, a general-class framework and the precise scope and ramifications
+of acceptance.
+
+The affected action stays gated while another authorized avenue can progress.
+An adopted agenda can preserve the branch and a revisit point without turning
+time, Autopilot or inferred operator presence into authority. Explicit all-work
+holds, privacy/resource limits and unknown-effect reconciliation still govern;
+unattended operation should not mean presence polling or unrelated busywork.
 
 ### configurable-attribution-signatures
 
