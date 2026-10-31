@@ -123,7 +123,12 @@ def test_changed_construction_package_member_refuses_before_execution(installed,
     assert set(sys.modules) == before
 
 
-@pytest.mark.parametrize("name", ["../escape.py", "/escape.py", "_construction_procutil/../escape.py"])
+@pytest.mark.parametrize("name", [
+    "../escape.py", "/escape.py", "_construction_procutil/../escape.py",
+    "\\escape.py", "C:escape.py", "C:/escape.py", "\\\\host\\share\\escape.py",
+    "_construction_procutil\\_job_scopes.py", "_construction_procutil/./_job_scopes.py",
+    "_construction_procutil//_job_scopes.py", "_construction_procutil/_job_scopes.py:stream",
+])
 def test_process_resource_rejects_path_escape_before_read(installed, monkeypatch, name):
     construction, _package, _evidence = installed_procutil(installed, monkeypatch)
 

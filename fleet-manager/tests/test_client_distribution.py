@@ -427,14 +427,24 @@ def test_gateway_docker_context_delivers_complete_procutil_source_closure(tmp_pa
 
 
 @pytest.mark.parametrize("loader", ["package", "guardian"])
-def test_standalone_construction_resource_preserves_package_relative_job_scopes(tmp_path, loader):
+def test_standalone_construction_resource_preserves_package_relative_job_scopes(tmp_path, monkeypatch, loader):
     project, _library = project_at(tmp_path / "checkout")
     output = tmp_path / "artifacts"
     result = build(project, output)
     assert result.returncode == 0, result.stderr
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    import promotion_python_artifacts as artifacts
+
+    wheel = next(output.glob("*.whl"))
+    with wheel.open("rb") as stream:
+        metadata, expanded = artifacts.inspect_wheel(
+            stream, {"filename": wheel.name}, source_dir=project,
+            component="fleet-manager", candidate_root=project.parent,
+        )
+    assert metadata["Name"] == "fleet-manager" and expanded > 0
     extracted = tmp_path / "resources"
     extracted.mkdir()
-    with zipfile.ZipFile(next(output.glob("*.whl"))) as archive:
+    with zipfile.ZipFile(wheel) as archive:
         names = {
             name for name in archive.namelist()
             if name.startswith("fleet_manager/_construction_procutil")

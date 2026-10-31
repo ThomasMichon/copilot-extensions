@@ -7,7 +7,7 @@ import importlib.util
 from importlib import metadata
 import io
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import sqlite3
 import subprocess
 import sys
@@ -173,11 +173,14 @@ def _environment(slot):
 
 
 def _process_resource_data(name, *, evidence=None):
+    if (
+        not isinstance(name, str) or not name or any(value in name for value in ("\\", ":", "\0"))
+        or PureWindowsPath(name).anchor or PurePosixPath(name).anchor
+        or ".." in PurePosixPath(name).parts or PurePosixPath(name).as_posix() != name
+    ):
+        raise PlanError("client construction process resource name must be canonical and relative")
     if evidence is None:
         evidence = artifact_staging.diagnose_client()
-    relative = Path(name)
-    if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != name:
-        raise PlanError("client construction process resource name must be canonical and relative")
     if name not in evidence["runtime_resource_sha256s"]:
         raise PlanError("client construction process resource is not RECORD-admitted")
     path = Path(__file__).absolute().parent / name

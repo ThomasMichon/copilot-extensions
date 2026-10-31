@@ -104,7 +104,10 @@ relative imports without an ambient package or a later unverified source read.
 The operation's `finally` removes only its private module entries; it does not
 discard native process/Job references retained by the existing failure owner. The standalone
 wheel and sdist ship the same pair; a lone renamed module is not a complete
-construction resource.
+construction resource. The release artifact verifier binds both members to
+their canonical sources. Process resource names must be canonical relative
+POSIX paths on every platform; rooted or drive-qualified paths, backslashes
+and alternate data streams refuse before reading resources.
 POSIX retains the construction descriptor in its existing guardian.
 On Windows a finite guardian independently retains the candidate until its
 native Job settles, including after caller death. Losing a caller's

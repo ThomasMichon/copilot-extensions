@@ -11,7 +11,38 @@ import pytest
 
 import promotion_python_artifacts as artifacts
 from artifact_source_build import validate_static_build
-from standalone_python_artifacts import artifact_label, project_key
+from standalone_python_artifacts import artifact_label, injected_resources, project_key
+
+
+@pytest.mark.parametrize("member", ["__init__.py", "_job_scopes.py"])
+@pytest.mark.parametrize("changed", [False, True])
+def test_construction_pair_source_binding_refuses_each_changed_included_member(tmp_path, member, changed):
+    root = Path(__file__).resolve().parents[2]
+    helper = tmp_path / "libs/versioned-runtime/standalone_build.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_bytes((root / "libs/versioned-runtime/standalone_build.py").read_bytes())
+    expected = {
+        "fleet_manager/_construction_procutil/" + name: (
+            tmp_path / "libs/agent-procutil/src/agent_procutil" / name
+        ) for name in ("__init__.py", "_job_scopes.py")
+    }
+    for name, source in expected.items():
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"# retained canonical construction fixture\n")
+        included = tmp_path / "fleet-manager/src" / name
+        included.parent.mkdir(parents=True, exist_ok=True)
+        included.write_bytes(source.read_bytes())
+    if changed:
+        from build_toolchain_lock import ArtifactBuildError
+
+        (tmp_path / "fleet-manager/src/fleet_manager/_construction_procutil" / member).write_bytes(
+            b"# substituted included construction fixture\n",
+        )
+        with pytest.raises(ArtifactBuildError, match="differs from canonical source"):
+            injected_resources("fleet-manager", tmp_path)
+    else:
+        actual = injected_resources("fleet-manager", tmp_path)
+        assert {name: source for name, source in actual.items() if "_construction_procutil" in name} == expected
 
 
 @pytest.mark.parametrize("record,label,key", [
