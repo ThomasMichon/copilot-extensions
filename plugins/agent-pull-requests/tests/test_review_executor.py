@@ -257,6 +257,32 @@ def test_marked_readback_without_valid_native_ids_retains_unknown(environment, t
     assert len(writes(backend)) == 1 and backend.vote is None
 
 
+@pytest.mark.parametrize("shape", ["duplicate", "source", "common", "metadata"])
+@pytest.mark.parametrize("after_effect", [False, True])
+def test_malformed_or_duplicate_iteration_evidence_retains_action_states(environment, shape, after_effect):
+    _, _, _, _, backend, _ = environment
+
+    def corrupt(value):
+        latest = max(value.iterations, key=lambda row: row["id"])
+        if shape == "duplicate":
+            conflict = copy.deepcopy(latest)
+            conflict["sourceRefCommit"]["commitId"] = "f" * 40
+            value.iterations.append(conflict)
+        elif shape == "metadata":
+            value.pr["lastMergeSourceCommit"] = "not-an-object"
+        else:
+            latest["sourceRefCommit" if shape == "source" else "commonRefCommit"] = "not-an-object"
+
+    if after_effect:
+        backend.after_write = corrupt
+    else:
+        corrupt(backend)
+    result = run(environment)
+    assert result["status"] == "unknown"
+    assert result["actions"][0]["state"] == ("confirmed" if after_effect else "unattempted")
+    assert len(writes(backend)) == int(after_effect) and backend.vote is None
+
+
 def test_real_store_and_bound_transport_complete_without_completion_or_other_reviewer_changes(environment):
     store, selected, generation, attachment, backend, _ = environment
     original = copy.deepcopy((generation, attachment, backend.pr, backend.other_reviewer))

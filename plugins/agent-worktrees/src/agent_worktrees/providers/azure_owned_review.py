@@ -150,13 +150,20 @@ class AdoReviewContext:
             raise ReviewContextUnavailable("native review evidence is incomplete")
         if any(type(row.get("id")) is not int or row["id"] <= 0 for row in iterations.records):
             raise ReviewContextUnavailable("native source iteration identity is malformed")
+        if len({row["id"] for row in iterations.records}) != len(iterations.records):
+            raise ReviewContextUnavailable("native source iteration identity is duplicated")
         latest = max(iterations.records, key=lambda row: row.get("id", 0))
-        head = (pr.get("lastMergeSourceCommit") or {}).get("commitId")
-        if (latest.get("sourceRefCommit") or {}).get("commitId") != head:
+        source = latest.get("sourceRefCommit")
+        common = latest.get("commonRefCommit")
+        merged = pr.get("lastMergeSourceCommit")
+        if any(not isinstance(value, dict) for value in (source, common, merged)):
+            raise ReviewContextUnavailable("native source commit evidence is malformed")
+        head = merged.get("commitId")
+        if source.get("commitId") != head:
             raise ReviewContextUnavailable("native head/iteration evidence drifted")
         revision = {
             "head_sha": head, "iteration": latest.get("id"),
-            "common_sha": (latest.get("commonRefCommit") or {}).get("commitId"),
+            "common_sha": common.get("commitId"),
         }
         return {"revision": revision, "discussions": copy.deepcopy(list(discussions.records)), "pr": pr}
 
