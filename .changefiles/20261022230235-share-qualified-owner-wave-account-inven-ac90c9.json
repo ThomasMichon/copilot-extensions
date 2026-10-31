@@ -1,0 +1,9 @@
+{
+  "comment": "Add unwired qualified inventory and mux-protocol foundations, invocation-local candidate read provenance, bounded inventory JSON with separate status/due hints and explicit disconnect evidence, and optional generation-fenced heartbeat; retain existing production probes",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
