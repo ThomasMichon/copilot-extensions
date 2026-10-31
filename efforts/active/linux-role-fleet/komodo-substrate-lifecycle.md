@@ -238,22 +238,22 @@ and remain subject to this plan's review before runtime edits.
 
 - [x] Review this amendment before identity, native-observation or repair edits
   (#9738).
-- [ ] Implement the focused corrections and installed, code-registered
+- [x] Implement the focused corrections and installed, code-registered
   original-attempt repair seam; preserve normal convergence and prior readers.
-- [ ] Test PEM/DER equivalence, populated/global trust, malformed/private/
+- [x] Test PEM/DER equivalence, populated/global trust, malformed/private/
   different keys, unproved configuration and unsuccessful connection controls.
-- [ ] Test mount-order equality and actual field/multiplicity/config/process
+- [x] Test mount-order equality and actual field/multiplicity/config/process
   changes; test versioned new fingerprints, exact legacy readback and explicit
   refusal when legacy semantic equivalence is unprovable.
-- [ ] Exercise the actual same-journal owner with an older retained UNKNOWN
+- [x] Exercise the actual same-journal owner with an older retained UNKNOWN
   candidate and newer authenticated executor: exact original settlement,
   no native write, current request/transition admission and distinct outcome
   identities. Include wrong request/resource/generation/release/material,
   expired/revoked appointments, unsettled process and changed native controls.
-- [ ] Interrupt before/after health and each publication boundary, then
+- [x] Interrupt before/after health and each publication boundary, then
   restart through the installed repair seam. Preserve original custody and
   show no apply replay, double terminal receipt or lost original evidence.
-- [ ] Exercise old caller/new SDK, new repair caller/unsupported SDK and
+- [x] Exercise old caller/new SDK, new repair caller/unsupported SDK and
   supported provider rollback; discover support from the executing immutable
   SDK rather than a newer payload or package version alone.
 - [ ] Publish current operating/support docs and qualify an authorized actual
@@ -335,6 +335,48 @@ Actual adopter construction, native official-image acceptance and production
 delivery remain open; no deployment or incumbent adoption is claimed here.
 
 ## Journal
+
+### 2026-10-31 - Original-attempt repair SDK source merged
+
+- #9752 merged as `6512fce29329be80c93ed6c62343d63bf16aee37` after the
+  actual current-head Copilot review reported no open findings and required
+  CI passed. Managed completion used the provider-confirmed Maintainer
+  exception to an additional CODEOWNER vote; no required check or negative
+  feedback was bypassed. Canonical post-merge reconciliation preserved the
+  pre-completion source history.
+- Re-read both this sub-plan and the parent Plan and Validation Plan.
+  The focused source and contained/installed-SDK obligations above close.
+  Operating/support documentation is merged, but normal release/acquisition
+  and qualification of an authorized actual original attempt remain open.
+  No official-image or adopter acceptance item closes, and #9735/#8860/#6030
+  retain their existing ownership.
+- Validated public-key payloads preserve raw retained receipts; explicitly
+  versioned mount evidence ignores only mount-array order while legacy hashes
+  remain exact. The code-registered existing authority separately admits the
+  original candidate/request and finite current executor/runtime transition.
+  Interrupted settlement retains original immutable history and resumes the
+  same decision without native replay or a second terminal receipt.
+- Review-driven controls cover immutable/material and current-authority drift
+  inside publication, complete retained bridge/attachment custody, conflicting
+  pending metadata and late cleanup changes. Same-profile replacement-container
+  controls first reproduced credentialed login before eventual refusal in
+  pending success/failure and successful-terminal retries. The shared evidence
+  path now checks retained native fingerprints before those health requests;
+  failed-terminal retries retain their no-health behavior.
+- The final rebuilt affected SDK qualification passes 211 cases across two
+  sequential bounded packets: 197 existing cases and fourteen late-publication/
+  pending-container/terminal-container controls. Real noneditable mixed-version
+  and fresh-process interruption/restart controls are included. The separate
+  ordinary-owner qualification remains 152 cases; repair-only follow-ups did
+  not change that owner. An earlier over-combined development packet reached
+  its aggregate limit and is not counted as a pass. Product and native-command
+  deadlines were not extended.
+- Next obtain the normal promoted release and authenticated closed artifact,
+  then qualify an existing-authority embedding's actual current executor and
+  exact-original repair transition. Never patch or execute historical code,
+  relabel new code with an old digest, replay convergence, replace keys or
+  clear the original journal. Source/component evidence is not production
+  rollout, official-image readiness or completion of the broader fleet.
 
 ### 2026-10-30 - Original-attempt repair contract reviewed
 
