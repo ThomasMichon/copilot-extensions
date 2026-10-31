@@ -107,7 +107,8 @@ authorized runtime behavior.
 
 - [x] Admit history-preserving removal of only the draft's production wave wiring,
   retaining the existing production consumer and the unwired foundations.
-- [ ] Validate the retained model/protocol/authority and legacy-consumer contracts.
+- [x] Validate the retained model/protocol/authority and legacy-consumer contracts
+  (299 targeted tests; Ruff, install-contract, module-size and docs guards).
 - [ ] Obtain current-head review, resolve the removed-path performance thread,
   pass required CI and merge existing #8143.
 - [ ] Journal the source-only result; keep the R1b/provider/transport and native

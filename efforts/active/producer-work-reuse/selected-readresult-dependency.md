@@ -2,6 +2,13 @@
 
 [Episode](s3ab.md) · [Merged contract](selected-authority-contract.md)
 
+**Current source-slicing disposition:** #8143 retains the unwired foundations
+and removes its production wave consumer/default-factory wiring. That bounded
+increment can pass source review/CI independently. All integration/performance
+blockers below remain for R1b/#7949/#5761; none is resolved by shipping an
+unwired module. The original implementation and counter fixtures are preserved
+in pre-slice source history, with their evidence frames retained unchanged.
+
 **Historical workload checkpoint:** the later design direction replaces the
 primary multi-mux workload with a representative two-account,
 one-ACP-or-Mux-session-per-venue profile and proposes durable all-venue

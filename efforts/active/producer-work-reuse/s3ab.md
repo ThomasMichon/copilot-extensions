@@ -485,7 +485,25 @@ another A/N1 native run):
   their existing owners. #5761 is not released; #7949 and this effort stay open.
 - This increment may clear source review/CI and merge independently. It does
   not complete R1b, N2/sharing/crash/native performance, release, installed
-  readiness or activation. Fresh targeted validation and publication are pending.
+  readiness or activation.
+- Fresh current-base selection: **299 passed** through the existing bounded
+  runner, 36.58 seconds in pytest and 137.16 seconds including preparation and
+  cleanup. The selection includes the 128-case model, additive candidate read,
+  scope projection, explicit foundation, and existing session/owner/lifecycle
+  consumer regressions. Real JUnit and runner output were captured before the
+  run; original accepted A/N1 receipts remain unchanged.
+- Touched Python Ruff F/E9, install-contract, changed-module-size and
+  documentation consistency pass. Ruff was unavailable in the isolated test
+  environment and was restored only after that missing-tool failure.
+- Simple consumer qualification exercises the actual default factories,
+  empty/unknown/no-wake behavior and unchanged legacy session consumer with
+  injected external boundaries. It is nominal source-contract evidence, not
+  native process/CPU evidence. Contended native locks, N2/sharing/crash,
+  clean-room installation and live external venues are not exercised: this
+  source-only increment neither changes installation nor admits native/live
+  qualification or activation. Existing contention/history remains separate.
+- Current-head forge review, required CI and existing-PR publication remain
+  pending; no source-merge or runtime-readiness claim is made.
   `units.stdout.log`:
   `1280256ba9c23c5b470ebc28f71ce94be687935270e393e0ae73d34bcfa5bf21`.
   Unit stderr is empty; individual guard hashes are in the closed index.
