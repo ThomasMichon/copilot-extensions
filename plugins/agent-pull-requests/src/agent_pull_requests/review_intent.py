@@ -84,8 +84,8 @@ def intent(value):
                 raise ValueError("review requires a positive native identity")
         if "expected_content_id" in action:
             identifier(action["expected_content_id"])
-        if kind == "verdict" and action["verdict"] not in ("APPROVED", "CHANGES_REQUESTED", "COMMENTED"):
-            raise ValueError("review requires an explicit named verdict")
+        if kind == "verdict" and action["verdict"] not in ("APPROVED", "CHANGES_REQUESTED"):
+            raise ValueError("review requires a supported explicit vote; COMMENTED has no vote action")
     if len(encoded(result)) > MAX_INTENT_BYTES:
         raise ValueError("review intent exceeds its byte limit")
     return result

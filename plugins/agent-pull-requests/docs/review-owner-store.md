@@ -41,6 +41,9 @@ There is no automatic downgrade or receipt deletion.
 `scope`, full `generation_id`/`source_id`, head/common/iteration revision and
 ordered unique action IDs. The first action shapes are a comment, reply,
 owned-comment edit with an expected content hash, and named verdict.
+Vote actions currently support `APPROVED` and `CHANGES_REQUESTED`. `COMMENTED`
+casts no native vote and is not admitted as a vote action; a comment-only
+selection contains its explicit comment actions and no invented vote.
 Unsupported extra fields, completion-setting writes and malformed identities
 refuse. Data validation does not prove source review, ownership, consent,
 permission or current backend eligibility.

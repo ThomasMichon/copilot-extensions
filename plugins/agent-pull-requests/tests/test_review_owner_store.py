@@ -237,3 +237,62 @@ def test_partial_native_response_retains_known_ids_without_confirming_or_repeati
                                            response(comment_id=1), expires_at=expires())
     assert completed["state"] == "confirmed"
     assert completed["receipt"]["platform_ids"] == {"thread_id": 20, "comment_id": 1}
+
+
+def test_replay_admission_reserves_large_pending_growth_before_acceptance(tmp_path):
+    from agent_pull_requests.watch_contract import PRSnapshot
+    store = ReplayStore(tmp_path.resolve(), "existing-owner-namespace")
+    store.provision()
+    store.adopt_review_operations(lifecycle_checkpoint=lambda: None, expires_at=expires(), replay_bytes=30000)
+    request = {"request_id": "watch", "issued_at": time.time(), "number": 42, "until": ("merged",)}
+    before = store.path.read_bytes()
+    with pytest.raises(ReplayStoreInvalid, match="reserved capacity"):
+        store.execute(CONSUMER, "register", request, expires_at=expires())
+    assert store.path.read_bytes() == before
+    larger = ReplayStore((tmp_path / "larger").resolve(), "existing-owner-namespace")
+    larger.provision()
+    larger.adopt_review_operations(lifecycle_checkpoint=lambda: None, expires_at=expires(),
+                                   replay_bytes=90000, review_bytes=13000)
+    larger.admit_review(selected(), expires_at=expires())
+    with pytest.raises(ValueError, match="capacity"):
+        larger.admit_review(selected("capacity-refusal"), expires_at=expires())
+    larger.execute(CONSUMER, "register", request, expires_at=expires())
+    target = larger.observation_targets(expires_at=expires())[0]
+    larger.observe(target, PRSnapshot(merged=True, review_decision="x" * 18000), expires_at=expires())
+    pending = larger.execute(CONSUMER, "pending", {}, expires_at=expires())
+    assert len(pending["events"]) == 1
+    event = pending["events"][0]
+    larger.execute(CONSUMER, "acknowledge", {
+        "request_id": request["request_id"], "issued_at": request["issued_at"],
+        "registration_id": event["registration_id"], "event_id": event["event_id"],
+    }, expires_at=expires())
+    assert larger.execute(CONSUMER, "pending", {}, expires_at=expires())["events"] == []
+    assert larger.inspect_review("selected-review", SCOPE, expires_at=expires())["intent"] == selected()
+
+
+def test_comment_only_selection_does_not_admit_a_nonexistent_vote_action(store):
+    selection = selected()
+    before = store.path.read_bytes()
+    selection["actions"][1]["verdict"] = "COMMENTED"
+    with pytest.raises(ValueError, match="no vote action"):
+        store.admit_review(selection, expires_at=expires())
+    assert store.path.read_bytes() == before
+    selection["actions"].pop()
+    assert store.admit_review(selection, expires_at=expires())["status"] == "admitted"
+
+
+def test_cache_rebuild_cannot_erase_admitted_unknown_review_in_same_owner_root(store):
+    from pathlib import Path
+    from agent_pull_requests.generation_cache import GenerationCache
+    from agent_pull_requests.review_workspace import build_generation
+    store.admit_review(selected(), expires_at=expires())
+    store.begin_review_action("selected-review", SCOPE, "comment-a", expires_at=expires())
+    before = store.path.read_bytes()
+    cache = GenerationCache(store.root, store.namespace, max_bytes=100000, max_generations=10)
+    cache.provision()
+    example = Path(__file__).resolve().parents[1] / "docs" / "review-evidence.example.json"
+    generation = build_generation(json.loads(example.read_text()))["generation"]
+    assert cache.publish(generation, expected_current=None)["status"] == "published"
+    cache.rebuild()
+    assert store.path.read_bytes() == before
+    assert store.inspect_review("selected-review", SCOPE, expires_at=expires())["actions"][0]["state"] == "unknown"

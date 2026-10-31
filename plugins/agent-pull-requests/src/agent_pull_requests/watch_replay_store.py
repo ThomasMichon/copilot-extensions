@@ -151,7 +151,18 @@ class ReplayStore:
     def _replay_reservation(state: dict) -> int:
         from .watch_replay import MAX_BATCH_BYTES
         active = sum(record["outcome"] == "active" for record in state["records"])
-        return len(review_intent.encoded(state)) + active * MAX_BATCH_BYTES + 1024
+        projected = copy.deepcopy(state)
+        for group in projected["registries"]:
+            for subscription in group["subscriptions"]:
+                for field in ("pending", "baseline", "pull_baseline"):
+                    if field in subscription:
+                        subscription[field] = None
+        # Reserve mutable observation/baseline/pending growth once, rather than
+        # adding a fresh reservation on top of an already retained event.
+        return max(
+            len(review_intent.encoded(state)) + 1024,
+            len(review_intent.encoded(projected)) + active * (3 * MAX_BATCH_BYTES + 4096) + 1024,
+        )
 
     def _validate_owner(self, document: dict) -> None:
         if (

@@ -210,8 +210,13 @@ contract.
 - Real file/legacy-reader/source consumers validate reader-lifecycle exclusion,
   native/service restart, replay coexistence, no blind replay after uncertain
   persistence, original owner-denial propagation and full-capacity persistence.
-  Initial contained replay/cache/new-owner packet passed 89 cases; final added
-  fence/partial-native-ID controls remain under validation.
+  Final contained replay/cache/new-owner packet passed 94 cases with unchanged
+  budgets, including pending-growth admission/acknowledgement, comment-only
+  selection and cache rebuild with an unknown review in the same owner file.
+- Fixed review findings about replay growth double-counting and unsupported
+  `COMMENTED` vote actions. An existing disconnect-consumer cold dependency
+  import timed out once; its unchanged narrow selector passed three cases,
+  then the entire unchanged-budget consumer packet passed 94 cases.
 - The original credential/principal/discussion freshness, actual effect-specific
   reconciliation, executor/provider integration and live serving qualification
   remain open. No new ledger, issuer, daemon, hosting repair or rollout is made.
