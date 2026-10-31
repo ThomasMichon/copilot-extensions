@@ -36,7 +36,7 @@ implementation constraints, not evidence of installed or catalog-wide coverage.
 | Dispatch `src/agent_dispatch/telemetry.py::task_lifecycle_event` | Existing structural allowlist includes `owner`, routing targets, repo and exclusive key, but not `owner_session_id`. Its legacy privacy contract is not sufficient for shared export. Do not infer actor location from targets or treat the collector's ambient session as the task owner's. |
 | Dispatch `client.py::claim/start`, `acquisition_receipts.py`, `script_worker.py::ScriptTaskRuntime` | Claim accepts worker/machine/worktree; start separately accepts native owner session. Acquired-start checks compare native conversation identity to the existing receipt. Script runtime remembers returned owner-session context, but cannot invent one for a service-only script. Existing receipt/task authority supplies facts; telemetry does not create authority. |
 | `libs/process-telemetry/src/process_telemetry/emission.py::SinkSlot` | Per-consumer process-local sink slot, not ambient per-request caller context. Plugins import this as `SinkSlot`; no separate `SharedSinkSlot` class is needed. Keep legacy synchronous callback payloads and behavior unchanged unless explicitly opting into an adapter. |
-| Shared `buffer.py`, `configured_spool.py`, `retained_spool.py`, `append.py` | Existing bounded worker, producer admission snapshots, epoch-ms default timestamps, owner cleanup and atomic append/retention are the extension seams. Accepted #8495/#8577 retained configuration is only `{"retained_spool":{"directory":"<absolute base>"}}`; extra options are currently rejected. |
+| Shared `buffer.py`, `configured_spool.py`, `retained_spool.py`, `append.py` | Existing bounded worker, producer admission snapshots, epoch-ms default timestamps, owner cleanup and atomic append/retention are the extension seams. Accepted #8495/#8577 retained configuration is only `{"retained_spool":{"directory":"<absolute base>"}}`; unknown nested retained options are rejected, but top-level `attribution` is currently ignored. The buffered adapter and final retained sink stamp missing `ts` with precise milliseconds. Neither behavior establishes attribution or shared timestamp-policy support. |
 | Worktrees `codename_tracking.py`, `providers/attribution.py`, `identity_marker.py` | Codenames are random persisted project-local aliases; AWI1 is encrypted recovery identity, not a hash-label scheme. Reuse opacity and user-custody concepts, never the public PR alias, recovery payload or PR recovery key as shared telemetry labels/secrets. Public PR correlation could identify authors. |
 
 Paths in the first four rows are under their named `plugins/agent-{bridge,dispatch}/`
@@ -74,8 +74,13 @@ These are proposed signatures, not executable examples or existing imports.
   proof of another actor. References use explicit authority namespaces; native
   and Bridge sessions remain separate even if their strings happen to match.
 
-Role records have only declared identity slots (machine, worktree, native
-session, Bridge session and, for task correlation, task), not arbitrary mappings.
+Role records have only declared identity slots (machine, process/instance,
+runtime/generation, worktree, native session, Bridge session and, for task
+correlation, task), not arbitrary mappings. Process/instance and generation
+references use the owning producer's admitted identity, not a bare reusable PID;
+mark unavailable when that owner cannot establish them. Distinct concurrent
+daemon generations must remain distinguishable even when observing the same
+subject session on the same machine.
 The local context also names its consenting telemetry owner through an
 owner-provided local handle. That handle is never serialized to shared output.
 An owner token identifies the consenting key holder's telemetry collection,
@@ -103,6 +108,13 @@ factory. The shared branch always invokes `project_shared` before its destinatio
 can serialize or spool anything. Compose with the existing worker; do not add a
 second buffer/thread or insert enrichment into frozen Bridge constructors.
 Capture event/ownership context before it can drift across a delayed drain.
+Admission also covers the complete sink chain: a downstream worker, retained
+sink or serializer must not reintroduce a precise timestamp after projection.
+Rounding a timestamp must not advance the exact elapsed 30-day retention cutoff.
+Until the existing storage owner supplies compatible privacy and retention
+semantics, refuse that sink for shared output rather than silently timestamping
+or shortening retention. Internal capture keeps its existing exact-age contract;
+this proposal does not invent a second storage system.
 
 Recommended future additive configuration, **not accepted by today's loader**:
 
@@ -122,6 +134,11 @@ boundary before accepting this declaration; a declaration alone is not consent.
 Missing `attribution` preserves current behavior. Invalid/mixed modes do not
 replace the active owned writer. No key, key reference, vault-entry name,
 username or local owner handle belongs in this JSON example or shared records.
+Older loaders may ignore the top-level object entirely. Before treating an
+explicit policy as effective, the configuration owner must verify support in the
+actual selected writer, including rollback/mixed-version cases; unsupported or
+unknown support refuses policy activation and reports a bounded diagnostic.
+Configuration acceptance alone is not active-writer or privacy proof.
 The initial shared projection is caller-injected Python only: explicit key,
 collection policy and destination, with no automatic shared config, key lookup,
 fan-out or network transport. A future shared loader needs its own review.
@@ -137,7 +154,7 @@ from the key itself and fixed domain/scope/version, not a raw username.
 This supports different login names on approved machines without uploading
 the key or constructing a central identity directory.
 
-For machine/worktree/task/native-session/Bridge-session tokens, consume only
+For machine/process-instance/runtime-generation/worktree/task/native-session/Bridge-session tokens, consume only
 truthful canonical inputs in their actual authority namespaces (including
 project/installation scope where needed). Do not case-fold identities unless
 their authority defines that normalization. Separate domains prevent equal
@@ -234,6 +251,16 @@ No forced process restart, owner transfer, rollout or new service is authorized.
   target routing and ambient collector identity. Verify old lifecycle callback
   payloads are unchanged without opt-in; exercise actual emit/storage consumers,
   not just a helper that mocks past them.
+- [ ] Exercise two concurrent producer/collector process generations observing
+  the same subject; preserve owner-bound instance/generation distinctions and
+  their separately namespaced shared tokens, with unavailable evidence explicit.
+- [ ] Reject attribution activation when the actual writer ignores or lacks
+  the policy, including mixed-version and rollback cases; preserve the existing
+  writer and distinguish parse acceptance from effective support.
+- [ ] Inspect final serialized/spooled bytes after every downstream stamping
+  boundary. Prove policy-admitted timestamp precision and exact elapsed-age
+  retention coexist, or refuse that shared sink without changing internal
+  retention or falling back to precise/raw output.
 - [ ] Test deterministic same-key/scope across approved synthetic machines,
   different keys/scopes/versions/domains/namespaces, canonicalization boundaries,
   and unknown identities. Key A selects only A's fixture rows without username;
@@ -264,6 +291,12 @@ No forced process restart, owner transfer, rollout or new service is authorized.
 
 ## Journal
 
+- 2026-10-31 - Reconciled the planning slice with current source while preserving
+  newer fleet plans and the earlier API acceptance journal. Corrected the
+  top-level loader baseline, admitted owner-bound process/generation identity,
+  and made mixed-version policy support and final-spool timestamp/retention
+  compatibility explicit validation gates. This is planning only; no runtime,
+  key, exporter or deployment was implemented or activated.
 - 2026-10-25 UTC — The coordinator accepted the proposed API family and
   configuration boundary for a later bounded implementation: closed immutable
   role records, owner-bound admitted in-memory keys, separated full-length
