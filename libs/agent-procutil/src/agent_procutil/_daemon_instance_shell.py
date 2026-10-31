@@ -93,6 +93,8 @@ class ShellInstanceSession:
 
     def dispatch(self, request: dict) -> dict | list | str | None:
         if self._failed:
+            if self._owned_cleanup is not None:
+                raise OSError("finite process cleanup is unsettled; replay is refused")
             raise RuntimeError("original shell lifetime admission failed; replay is refused")
         self.owner.require_live()
         command = request["command"]

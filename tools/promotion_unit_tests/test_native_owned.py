@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
+import io
+import json
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
@@ -221,3 +224,97 @@ def test_log_close_after_success_is_an_explicit_retained_failure(
     assert failure.value.output is output and failure.value.log_error is log_error
     owned.process.retire_job.assert_called_once_with(owned.job, 10)
     output.close.assert_called_once_with()
+
+
+@pytest.fixture
+def shell(owned, monkeypatch: pytest.MonkeyPatch):
+    package = ModuleType("agent_procutil")
+    package.__path__ = []
+    package._native_owned = owned.module
+    store = ModuleType("agent_procutil._daemon_instance_store")
+    store.registry_root = lambda: "fixture-registry"
+    clock = ModuleType("agent_procutil._daemon_instance_clock")
+    clock.WallLeaseObservation = object
+    records = ModuleType("agent_procutil._daemon_instance_records")
+    records.ProcessIdentity = object
+    for name in ("admit_for_process", "bind_for_process", "finish_for_process", "reserve_for_process"):
+        setattr(records, name, Mock(side_effect=AssertionError("unselected daemon operation")))
+    instances = ModuleType("agent_procutil.daemon_instances")
+    instances.INSTANCE_ENV, instances.REGISTRY_ENV, instances.TEST_CONTEXT_ENV = (
+        "fixture-instance", "fixture-registry", "fixture-context",
+    )
+    instances.DaemonInstanceReceipt = instances.DaemonInstanceSpec = instances.DaemonLeasePolicy = object
+    for module in (package, store, clock, records, instances):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setitem(sys.modules, "agent_procutil._native_owned", owned.module)
+    name = "agent_procutil._unit_finite_shell"
+    spec = importlib.util.spec_from_file_location(name, SOURCE.with_name("_daemon_instance_shell.py"))
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("kind", ["unconfirmed", "retained-log", "settled"])
+def test_wire_finite_fence_preserves_custody_and_correlated_responses(
+    owned, shell, parameters: dict, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    failure = owned.module.NativeOwnedFailure(
+        "fixture finite failure", cleanup_confirmed=kind != "unconfirmed",
+        process=owned.process, job=owned.job,
+    )
+    output = Mock() if kind == "retained-log" else None
+    failure.output = output
+    failure.log_error = OSError("fixture close failure") if output else None
+    run = Mock(side_effect=failure)
+    monkeypatch.setattr(owned.module, "run", run)
+    owner = Mock()
+    session = shell.ShellInstanceSession(owner)
+    nonce = "a" * 32
+    requests = [
+        {"command": "run-owned", "parameters": parameters},
+        {"command": "root"},
+        {"command": "run-owned", "parameters": parameters},
+    ]
+    payload = b"".join(base64.b64encode(json.dumps({
+        **request, "nonce": nonce, "sequence": sequence,
+    }).encode()) + b"\n" for sequence, request in enumerate(requests, 1))
+    monkeypatch.setattr(shell.sys, "stdin", SimpleNamespace(buffer=SimpleNamespace(raw=io.BytesIO(payload))))
+    stream = io.StringIO()
+    monkeypatch.setattr(shell.sys, "stdout", stream)
+    assert shell._serve_requests(session, nonce) == 0
+    responses = [json.loads(line) for line in stream.getvalue().splitlines()]
+    assert [value["sequence"] for value in responses] == [1, 2, 3]
+    assert all(value["nonce"] == nonce for value in responses)
+    assert responses[0]["cleanup_confirmed"] is failure.cleanup_confirmed
+    if kind == "settled":
+        assert responses[1]["ok"] is True and responses[1]["result"] == "fixture-registry"
+        assert run.call_count == 2 and session._owned_cleanup is None and not session._failed
+    else:
+        assert all(value["ok"] is False for value in responses)
+        assert all("replay is refused" in value["error"] for value in responses[1:])
+        assert responses[2]["cleanup_confirmed"] is False
+        assert session._owned_cleanup is failure and session._failed
+        assert failure.process is owned.process and failure.job is owned.job and failure.output is output
+        assert run.call_count == owner.require_live.call_count == 1
+    owned.process.retire_job.assert_not_called()
+    owned.process.close.assert_not_called()
+    if output is not None:
+        output.close.assert_not_called()
+
+
+def test_wire_unrelated_fatal_admission_is_not_changed_into_replay_response(
+    shell, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = shell.ShellInstanceSession(Mock())
+    session._failed = True
+    nonce = "b" * 32
+    raw = base64.b64encode(json.dumps({
+        "command": "root", "nonce": nonce, "sequence": 1,
+    }).encode()) + b"\n"
+    monkeypatch.setattr(shell.sys, "stdin", SimpleNamespace(buffer=SimpleNamespace(raw=io.BytesIO(raw))))
+    output = io.StringIO()
+    monkeypatch.setattr(shell.sys, "stdout", output)
+    with pytest.raises(RuntimeError, match="original shell lifetime admission failed"):
+        shell._serve_requests(session, nonce)
+    assert not output.getvalue() and session._owned_cleanup is None

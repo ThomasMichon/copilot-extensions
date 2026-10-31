@@ -34,6 +34,12 @@ failed finite operation. Unconfirmed native cleanup retains its exact process
 and Job objects and fences the channel. Cancellation of an unfinished request
 closes helper custody from `finally`, including runspace stop that bypasses
 `catch`; an already-received uncertain outcome is retained, not replayed.
+Later correlated requests at that finite-cleanup fence return an explicit
+replay refusal without exiting the helper or retrying cleanup. The retained
+process, Job and failed-log objects remain owned by that original session.
+Unrelated fatal lifetime-admission failures retain their existing fatal path;
+a settled finite failure without retained log custody does not fence the
+session.
 The finite target's monotonic deadline starts before target creation and is
 never reset after spawning. A completion observed after that deadline remains
 a timeout; the separate ten-second retirement allowance does not grant more
