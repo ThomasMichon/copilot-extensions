@@ -44,6 +44,10 @@ breakaway. A restrictive external Job still refuses escape, and contained tests
 retain strict cleanup. Completion confirms the installer scope, not termination
 of independently owned service daemons. There is no Task, COM or UAC fallback.
 
+The private executor shim places generated Python bytecode beneath the existing
+driver root's `cache/python`, outside the invoking runtime's immutable slot.
+Its pinned product invocation and installation custody remain unchanged.
+
 New Windows queue directories are created atomically with the actual process
 TokenUser as owner and protected, inheritable FullControl for that account,
 SYSTEM and Administrators. Elevated execution therefore does not leave a

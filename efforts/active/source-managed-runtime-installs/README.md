@@ -1658,4 +1658,17 @@ full-dispatch mapping repair passes 78 dispatch/publication-label tests.
 These remain local source results, not hosted cache-retention qualification,
 merge, rollout or completion of the Plan and Validation Plan.
 
+Hosted run `41186916815` qualifies exact source `e99370d60a` in separate
+normal and repair Windows jobs. Repair passes; normal preparation, exercise
+and settlement pass, but strict retention still fails on two added Manager-slot
+bytecode files, with no changed or removed originals. The canonical driver's
+private executor starts an isolated interpreter without cache routing before
+loading its participant and Windows process helper. That hop now uses the
+existing driver-owned durable cache root, without changing custody or product
+arguments. A real queued cold/warm executor regression and settlement controls
+pass 36 tests with 3 skips and verified cleanup. Canonical archive regeneration
+finds no additional derived changes. Both complete hosted modes must qualify
+the corrected head before this draft becomes ready; no acceptance assertion is
+weakened and no live rollout is authorized.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.
