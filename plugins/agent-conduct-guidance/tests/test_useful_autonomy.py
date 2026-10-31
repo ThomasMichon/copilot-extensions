@@ -14,6 +14,7 @@ pytestmark = pytest.mark.guard
 _PLUGIN = Path(__file__).resolve().parents[1]
 _SKILL = _PLUGIN / "skills/using-standing-authority/SKILL.md"
 _RECORD = _SKILL.parent / "references/approval-evidence.md"
+_DECISION = _SKILL.parent / "references/decision-preparation.md"
 _TEMPLATE = _PLUGIN / "instructions/useful-autonomy.instructions.md"
 _SCRIPTS = _PLUGIN.parent / "customizing-copilot/skills/reviewing-customizations/scripts"
 if str(_SCRIPTS) not in sys.path:
@@ -62,7 +63,7 @@ def test_skill_and_record_are_discoverable_without_a_runtime():
     assert len(content.splitlines()) < 500
     assert "references/approval-evidence.md" in content
     assert "../SKILL.md" in _RECORD.read_text()
-    for path in (_TEMPLATE, _SKILL, _RECORD):
+    for path in (_TEMPLATE, _SKILL, _RECORD, _DECISION):
         text = path.read_text()
         assert text.isascii()
         for forbidden in ("COPILOT_AGENT_SESSION_ID", "C:\\", "/home/", "session-state/"):
@@ -114,3 +115,30 @@ def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
 ])
 def test_record_preserves_explicit_decision_cases(situation, required):
     assert f"| {situation} | {required} |" in _RECORD.read_text()
+
+
+def test_blocking_question_follows_decision_preparation_not_presence_polling():
+    kernel = " ".join(_TEMPLATE.read_text().split())
+    for clause in (
+        "Defer a blocking question",
+        "conditional future projections",
+        "Autopilot is continuation, not operator-presence evidence",
+        "do not default to presence polling",
+        "Explicit all-work holds",
+    ):
+        assert clause in kernel
+    skill = " ".join(_SKILL.read_text().split())
+    assert "Before a blocking question, build the" in skill
+    assert "references/decision-preparation.md" in skill
+    packet = " ".join(_DECISION.read_text().split())
+    for clause in (
+        "proposal, not",
+        "actual new response",
+        "does not authorize unrelated data access",
+        "absent trend data stays unavailable",
+        "general class",
+        "exact operations/resources/effects/owners/limits",
+        "when only a draft exists",
+        "not a daemon, approval renewal",
+    ):
+        assert clause in packet.lower()

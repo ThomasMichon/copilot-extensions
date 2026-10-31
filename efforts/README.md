@@ -10,7 +10,6 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Deferred Agenda Continuation](active/deferred-agenda-continuation/README.md) | Draft; reversible blocked branches, timed rechecks and decision-ready unattended work | #9777; existing agenda/conduct owners; no polling daemon, effect execution or rollout |
 | [Startup-Only Guidance](active/startup-only-guidance/README.md) | Active; declarations released, approved adoption held on installer prerequisites | Bounded #5993 follow-up; preserves periodic sync, existing delivery/native owners and separately owned #9489 repair |
 | [PR Review Workspaces](active/pr-review-workspaces/README.md) | Active; offline generations merged, finite acquisition source slice | #9535; successor PR plugin/service cache, existing #6007/#7188 and #7051 owners retained; no rollout |
 | [Native Startup Prompts](active/native-startup-prompts/README.md) | Active; ordinary cold-launch consumer #9374 merged, native POSIX/full-mux and installed qualification remain | #9364; preserves #7116/#8375/#7942/#8669/#5579 owners; no rollout or retained-session restart |
@@ -152,6 +151,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Deferred Agenda Continuation](2026/10/31%20deferred-agenda-continuation/README.md) | Done; reversible deferred branches, bounded due/response inspection and decision-ready preparation merged with approval and required CI in #9786 | #9777; promotion remains #3336, installed rollout separately authorized; no polling daemon or effect execution |
 | [Durable Scope Authorization](2026/10/30%20durable-scope-authorization/README.md) | Done; charter-bounded useful autonomy, optional Scope Approvals and checkpoint/handoff carriers merged with approval and required CI in #9741 | #9736; promotion remains #3336, installed rollout adopter-owned; oversized-skill follow-up #9742 |
 | [Knowledge Projection Preparation](2026/10/30%20knowledge-projection-preparation/README.md) | Done; companion ignore preparation, shared-exclude serialization and complete namespace coverage merged with approval and required CI in #9721 | #9712; normal promotion remains #3336, main publication unconfirmed, no installed rollout |
 | [Configurable AI Attribution](2026/10/30%20configurable-ai-attribution/README.md) | Done; canonical profile/guidance/pure decorator merged and released as 0.1.5-dev1, selected adopter fork retired through reviewed configuration | #9633/#9637/#9646; #2965/#9627 custody retained; activation remains adopter-owned, no rollout |
