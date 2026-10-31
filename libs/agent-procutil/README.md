@@ -16,7 +16,8 @@ can disable retained capture. `output_fds` uses finite, strictly contained
 byte relays, bounded queues and cancellable input writers; an undrained borrowed
 pipe never blocks the supervising thread. Its descriptor flags are unchanged.
 Successful drain and failure/cancellation both settle the relays and their
-reader/writer threads. Delivery has a quiet allowance, not a total-output cap.
+reader/writer threads. A failed retirement must be retried and confirmed before
+capture can be marked finished. Delivery has a quiet allowance, not a total-output cap.
 Legacy `on_output` callbacks share captured storage and run only through
 `deliver()` after `finish()` and producer settlement; they are no longer live
 stdio adapters. This helper does not create keepalive output

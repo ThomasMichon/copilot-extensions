@@ -619,7 +619,8 @@ def test_owned_child_undrained_sink_preserves_supervision_and_settlement(
             with pytest.raises(subprocess.TimeoutExpired) as failure:
                 engine.run_owned(
                     [sys.executable, "-c", program],
-                    cwd=tmp_path, env=dict(os.environ), timeout=1,
+                    # The fixture creates a native grandchild before emitting output.
+                    cwd=tmp_path, env=dict(os.environ), timeout=5,
                     procutil=procutil, construction_fd=descriptor,
                     output_fds={name: writer for name in ("stdout", "stderr")},
                     **({

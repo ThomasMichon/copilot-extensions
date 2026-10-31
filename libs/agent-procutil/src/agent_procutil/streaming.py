@@ -250,6 +250,8 @@ class SyncProcessOutput:
             # queue even when the sink failed or its delivery deadline expired.
             self.wait(None, deadline=time.monotonic() + 10)
             deadline = time.monotonic() + 10
+        if self._relay_failed:
+            self._abort_relays()
         for reader in self._readers:
             reader.join(max(0, deadline - time.monotonic()))
             if reader.is_alive():

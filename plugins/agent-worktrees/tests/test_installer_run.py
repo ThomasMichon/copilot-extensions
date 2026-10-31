@@ -288,12 +288,19 @@ def test_output_pipe_failure_cannot_starve_installer_supervision(tmp_path, monke
     try:
         started = time.monotonic()
         arguments = dict(
-            cwd=tmp_path, env=os.environ, deadline_s=1,
+            # Let a closed sink report its native error before the quiet watchdog.
+            cwd=tmp_path, env=os.environ, deadline_s=5 if sink == "closed" else 1,
             output_fd=writer, require_tree_exit=os.name == "nt",
         )
         if sink == "closed":
             with pytest.raises((OSError, installer_run.InstallerCleanupError)):
-                installer_run.run_installer([sys.executable, str(script), str(ready)], **arguments)
+                result = installer_run.run_installer(
+                    [sys.executable, str(script), str(ready)], **arguments,
+                )
+                pytest.fail(
+                    f"closed sink returned {result.status} after {result.duration_s:.2f}s "
+                    "instead of its native error",
+                )
         else:
             run = installer_run.run_installer([sys.executable, str(script), str(ready)], **arguments)
             assert run.status.startswith("timed out")
@@ -384,6 +391,64 @@ def test_failed_sink_retains_inflight_output_once(tmp_path, monkeypatch, backpre
     assert len(attempts) == (2 if backpressure else 1)
     assert captures[0].output()[0] == "inflight diagnostic"
     assert all(not reader.is_alive() for reader in captures[0]._readers)
+
+
+@pytest.mark.parametrize("retirement_failures", [1, 2])
+def test_finish_retries_unverified_relay_retirement(tmp_path, monkeypatch, retirement_failures):
+    from agent_procutil._output_relay import OutputRelayCleanupError
+
+    reader, writer = os.pipe()
+    os.close(reader)
+    proc, job = installer_run._spawn(
+        [sys.executable, "-c", "import os;os.write(1,b'closed sink diagnostic')"],
+        tmp_path, os.environ, True, require_tree_exit=os.name == "nt",
+    )
+    capture = relay = original_abort = None
+    try:
+        capture = installer_run.SyncProcessOutput(proc, output_fds={"stdout": writer})
+        relay = capture._relays["stdout"]
+        original_abort = relay.abort
+        failure = OutputRelayCleanupError(relay)
+        attempts = []
+
+        def abort(timeout):
+            attempts.append(timeout)
+            if len(attempts) <= retirement_failures:
+                raise failure
+            original_abort(timeout)
+
+        monkeypatch.setattr(relay, "abort", abort)
+        with pytest.raises(OutputRelayCleanupError) as caught:
+            capture.wait(5)
+        assert caught.value is failure
+        assert not capture._finished and not relay._closed
+        if job is not None:
+            job.terminate_and_wait(10)
+        proc.wait(timeout=10)
+        if retirement_failures == 2:
+            with pytest.raises(OutputRelayCleanupError) as caught:
+                capture.finish(5)
+            assert caught.value is failure
+            assert not capture._finished and not relay._closed
+        capture.finish(5)
+        assert len(attempts) == retirement_failures + 1
+        assert capture._finished and relay._closed
+        assert not relay._writer.is_alive() and not relay._reader.is_alive()
+        assert relay.process.stdin.closed and relay.process.stderr.closed
+        assert capture.output()[0] == "closed sink diagnostic"
+    finally:
+        if original_abort is not None:
+            monkeypatch.setattr(relay, "abort", original_abort)
+        if job is not None and job.handle:
+            job.terminate_and_wait(10)
+        elif proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=10)
+        if relay is not None:
+            relay.abort(10)
+        if capture is not None:
+            capture.finish(10)
+        os.close(writer)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX high-numbered pipes")
