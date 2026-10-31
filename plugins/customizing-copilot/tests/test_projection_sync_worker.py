@@ -149,12 +149,12 @@ def test_over_budget_sync_reports_audit_debt_without_repeat_prs(
             body="x" * 2700 + "\n",
             apply_to=f"policy-{index}/**",
         )[1]
-        for index in range(10)
+        for index in range(16)
     ]
     first = worker.run_sync_pass(
         repo, sources, trusted_marketplaces=["copilot-extensions"],
     )
-    assert len(first.changed) == 20
+    assert len(first.changed) == 2 * len(sources)
     assert first.bypass_eligible
     assert not first.needs_conflict_dispatch
     assert first.audit_warnings
