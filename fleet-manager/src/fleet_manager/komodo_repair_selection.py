@@ -53,7 +53,8 @@ class KomodoRepairSelection:
     def binding(self) -> tuple[str, ...]:
         return (self.request_digest, self.candidate.deployment_digest,
                 self.executor.deployment_digest, self.executor_runtime,
-                self.candidate.resource, self.transition_reference)
+                self.candidate.resource, str(self.candidate.host_runtime),
+                str(self.executor.host_runtime), self.transition_reference)
 
     def provenance(self, *, admission_revision: int) -> dict:
         return {

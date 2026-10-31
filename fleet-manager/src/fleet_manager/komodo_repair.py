@@ -15,11 +15,12 @@ from .komodo_declaration import SERVICES, fingerprint
 from .komodo_evidence import native_fingerprint, native_reference, native_set_matches, same_native_observation
 from .komodo_health import current_health, public_key_fingerprints, public_keys
 from .komodo_native import KomodoNative
-from .komodo_network import verify_network
+from .komodo_network import same_network_observation, verify_network
 from .komodo_owner import KomodoOwner, native_running, verify_attempt_keys, verify_candidate, verify_failed_candidate
 from .komodo_repair_selection import KomodoRepairSelection
 from .komodo_repair_evidence import (
     original_file, original_history, read_outcome, retained_shape, validate_history,
+    validate_retained_outcomes,
 )
 from .komodo_state import KomodoState
 from .node_journal import NodeJournal
@@ -144,6 +145,7 @@ class _Attempt:
         self.native = KomodoNative(selected.tooling)
         self.deadline = time.monotonic() + selected.declaration.to_dict()["outfitting_seconds"]
         self.observation: _Observation | None = None
+        self.retained: tuple[str, dict[str, Any]] | None = None
         self.checkpoint()
 
     def checkpoint(self) -> None:
@@ -172,6 +174,10 @@ class _Attempt:
                 if (network["Containers"] if network is not None else None) != self.observation.endpoints:
                     raise PlanError("Komodo repair native network endpoints changed during publication")
                 self.permit = self.owner.admission.revalidate(self.permit, self.request)
+            validate_retained_outcomes(self.state.root, self.record)
+            validate_history(self.state.root, self.history)
+            if self.retained is not None and read_outcome(self.state.root, self.retained[0]) != self.retained[1]:
+                raise PlanError("Komodo repair retained outcome changed during publication")
         except BaseException:
             self.owner.admission.discard(self.permit)
             raise
@@ -187,8 +193,9 @@ class _Attempt:
         else:
             verify_candidate(containers, selected, images, selected.profile(), self.original)
             selected_native = True
-        network = verify_network(self.native.network(
-            selected.declaration, selected.material, deadline=self.deadline),
+        before_network = deepcopy(self.native.network(
+            selected.declaration, selected.material, deadline=self.deadline))
+        network = verify_network(before_network,
             selected, containers, self.original["network_before"], created=True, pending=failed)
         self.checkpoint()
         health = None
@@ -218,6 +225,8 @@ class _Attempt:
         after_network = self.native.network(
             selected.declaration, selected.material, deadline=self.deadline)
         verify_network(after_network, selected, after, network, pending=failed)
+        if not same_network_observation(before_network, after_network):
+            raise PlanError("Komodo repair native network endpoints changed during readiness")
         self.observation = _Observation(
             deepcopy(after), network,
             deepcopy(after_network["Containers"]) if after_network is not None else None, failed)
@@ -287,6 +296,7 @@ class _Attempt:
             raise PlanError("Komodo repair cannot change an interrupted terminal decision")
         self.checkpoint()
         reference = self.state.retain(value)
+        self.retained = reference, deepcopy(value)
         self.checkpoint()
         if not failed:
             if (self.record["good"] is not None
@@ -391,8 +401,9 @@ class KomodoRepairOwner:
                         raise PlanError("Komodo repair retained native evidence is unproved")
                     selected_native = retained.get("selected_native", True)
                 installed, observed = set(containers) == set(SERVICES), selected.deployment_digest
-                network = verify_network(operation.native.network(
-                    selected.declaration, selected.material, deadline=operation.deadline),
+                before_network = deepcopy(operation.native.network(
+                    selected.declaration, selected.material, deadline=operation.deadline))
+                network = verify_network(before_network,
                     selected, containers, operation.original["network_before"], created=True, pending=True)
                 if installed and selected_native and all(map(native_running, containers.values())):
                     observer = KomodoOwner(
@@ -412,9 +423,12 @@ class KomodoRepairOwner:
                     selected.declaration, selected.material, deadline=operation.deadline)
                 if not same_native_observation(containers, after):
                     raise PlanError("Komodo repair native process changed during status inspection")
-                verify_network(operation.native.network(
-                    selected.declaration, selected.material, deadline=operation.deadline),
+                after_network = operation.native.network(
+                    selected.declaration, selected.material, deadline=operation.deadline)
+                verify_network(after_network,
                     selected, after, network, pending=True)
+                if not same_network_observation(before_network, after_network):
+                    raise PlanError("Komodo repair native network endpoints changed during status inspection")
             except PlanError as detail:
                 if operation.native.native_failure is not None:
                     raise

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from copy import deepcopy
 import os
 import time
 from typing import Any
@@ -15,7 +16,7 @@ from .komodo_evidence import (
 )
 from .komodo_health import current_health, identity_digest, public_key_fingerprints, public_keys
 from .komodo_native import KomodoImage, KomodoNative
-from .komodo_network import retained_network, verify_network
+from .komodo_network import retained_network, same_network_observation, verify_network
 from .komodo_selection import KomodoSelection
 from .komodo_state import KomodoState
 from .node_journal import NodeJournal
@@ -188,6 +189,8 @@ class KomodoOwner:
             raise PlanError("Komodo native readiness owner is unavailable")
         if set(containers) != set(SERVICES) or not all(map(native_running, containers.values())):
             raise PlanError("Komodo native runtime is not ready")
+        before_network = deepcopy(native.network(declaration, selected.material, deadline=deadline))
+        verify_network(before_network, selected, containers, network)
         health = asyncio.run(current_health(
             declaration, selected.material, deadline=deadline, core=containers["core"]))
         after = native.inspect(declaration, selected.material, deadline=deadline)
@@ -195,8 +198,10 @@ class KomodoOwner:
             raise PlanError("Komodo native runtime changed during readiness inspection")
         if not same_native_observation(containers, after):
             raise PlanError("Komodo native process changed during readiness inspection")
-        verify_network(native.network(declaration, selected.material, deadline=deadline),
-                       selected, after, network)
+        after_network = native.network(declaration, selected.material, deadline=deadline)
+        verify_network(after_network, selected, after, network)
+        if not same_network_observation(before_network, after_network):
+            raise PlanError("Komodo native network endpoints changed during readiness inspection")
         if (identity_digest(selected.material) != health["public_identity"]
                 or (identity is not None and health["public_identity"] != identity)):
             raise PlanError("Komodo native public identity changed during readiness inspection")

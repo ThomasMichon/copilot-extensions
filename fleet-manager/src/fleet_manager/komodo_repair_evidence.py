@@ -59,11 +59,8 @@ def validate_history(root: Path, value: object) -> dict[str, str]:
     return result
 
 
-def original_history(root: Path, record: dict[str, Any], request_digest: str) -> dict[str, str]:
-    for name in ("good", "failed"):
-        value = record[name]
-        if (type(value) is dict and value.get("repair", {}).get("request_digest") == request_digest):
-            return validate_history(root, value.get("prior_outcomes"))
+def validate_retained_outcomes(root: Path, record: dict[str, Any]) -> dict[str, str]:
+    """Re-read each referenced immutable outcome, including a pending repair."""
     result: dict[str, str] = {}
     for name in SLOTS:
         value = record[name]
@@ -72,4 +69,13 @@ def original_history(root: Path, record: dict[str, Any], request_digest: str) ->
             if read_outcome(root, reference) != value:
                 raise PlanError("Komodo repair original outcome history changed")
             result[name] = reference
+    return result
+
+
+def original_history(root: Path, record: dict[str, Any], request_digest: str) -> dict[str, str]:
+    result = validate_retained_outcomes(root, record)
+    for name in ("good", "failed"):
+        value = record[name]
+        if (type(value) is dict and value.get("repair", {}).get("request_digest") == request_digest):
+            return validate_history(root, value.get("prior_outcomes"))
     return result

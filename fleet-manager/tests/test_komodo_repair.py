@@ -22,7 +22,7 @@ from fleet_manager.komodo_repair_selection import KomodoRepairSelection
 from fleet_manager.komodo_selection import KomodoSelection
 from fleet_manager.komodo_state import KomodoState
 from fleet_manager.node_journal import NodeJournal
-from fleet_manager.planning import PlanError, decode
+from fleet_manager.planning import PlanError, canonical, decode, digest
 from fleet_manager.runtime_admission import AdmissionError, AdmissionAuthority, OperationGrant
 from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
 from test_komodo_declaration import intent
@@ -40,7 +40,9 @@ CRASHES = [
 DRIFTS = [
     f"publication-drift-{stage}-{change}"
     for stage in ("retain", "save", "append")
-    for change in ("stop", "restart", "resource", "network", "endpoint", "attachment", "disconnect")
+    for change in ("stop", "restart", "resource", "network", "endpoint", "attachment", "disconnect",
+                   "immutable-outcome-missing", "immutable-outcome-corrupt", "immutable-history-missing",
+                   "immutable-history-corrupt", "host-runtime")
 ]
 REFUSALS = [
     "different-request", "different-generation", "changed-candidate", "changed-executor", "same-executor",
@@ -50,6 +52,7 @@ REFUSALS = [
     "unsettled", "not-fixed", "changed-profile", "changed-native", "wrong-journal",
     "revoke-after-health", "grant-after-health", "expiry-after-health", "key-after-health",
     "process-after-health", "state-after-health", "executor-after-health", "runtime-after-health",
+    "health-endpoint-drift", "host-root-after-health",
 ] + DRIFTS
 
 
@@ -57,7 +60,8 @@ REFUSALS = [
     pytest.param(mode, marks=[] if mode in (
         "success", "revoked-transition", "revoke-after-health", "journal-revoke",
     ) else [pytest.mark.client_distribution_full])
-    for mode in ("success", "failed", "mount-order", "renewed", "prior-failed", *REFUSALS, *CRASHES)
+    for mode in ("success", "failed", "mount-order", "renewed", "prior-failed",
+                 "status-endpoint-drift", *REFUSALS, *CRASHES)
 ])
 def test_original_unknown_uses_current_repair_without_native_replay(
     native_rig: Any, keys: Any, monkeypatch: Any, mode: str,
@@ -121,6 +125,15 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     runtime_identity[0] = "8" * 64
                 elif mode == "key-after-health":
                     (rig["material"].keys / "core.pub").write_text(PUBLIC_PEM["periphery"])
+                elif mode in ("health-endpoint-drift", "status-endpoint-drift"):
+                    (rig["directory"] / "endpoint-overrides.json").write_text(json.dumps({
+                        live()["core"]["Id"]: {"EndpointID": "changed-during-health"},
+                    }))
+                elif mode == "host-root-after-health":
+                    shifted = rig["root"] / "shifted-runtime"
+                    shifted.mkdir(mode=0o700)
+                    candidate[0], executor[0] = (
+                        replace(item, host_runtime=shifted) for item in (candidate[0], executor[0]))
                 elif mode in ("process-after-health", "mount-order"):
                     changed = live()
                     if mode == "mount-order":
@@ -144,7 +157,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             baseline = KomodoOwner(
                 current=lambda: candidate[0], admission=harness.owner,
                 authority="gateway-a", clock=harness.clock)
-            if mode == "prior-failed":
+            if mode == "prior-failed" or "immutable-history-" in mode:
                 candidate[0] = replace(candidate[0], release_digest="d" * 64)
                 before = intent("prior-failed", generation=1, deployment=candidate[0].deployment_digest)
                 harness.current = policy(enrollments=(actor(operations=(
@@ -334,7 +347,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 monkeypatch.setattr(target, name, interrupted)
 
             if mode in DRIFTS:
-                _, _, stage, change = mode.split("-")
+                _, _, stage, change = mode.split("-", 3)
                 target, name = ((NodeJournal, "_append") if stage == "append"
                                 else (KomodoState, stage))
                 original_method = getattr(target, name)
@@ -349,6 +362,23 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                               else original_method(instance, *args, **kwargs))
                     if selected:
                         fired.append(True)
+                        if change == "host-runtime":
+                            shifted = rig["root"] / "shifted-runtime"
+                            shifted.mkdir(mode=0o700)
+                            candidate[0], executor[0] = (
+                                replace(item, host_runtime=shifted) for item in (candidate[0], executor[0]))
+                            return result
+                        if change.startswith(("immutable-outcome-", "immutable-history-")):
+                            _, scope, corruption = change.split("-")
+                            reference = prior_ref if scope == "history" else (
+                                result if name == "retain" else digest(args[0]["good"])
+                                if name == "save" else args[2].to_dict()["result_ref"])
+                            path = owner_root / "receipts" / (reference + ".json")
+                            path.rename(path.with_name(path.name + ".fixture-retained"))
+                            if corruption == "corrupt":
+                                path.touch(mode=0o600)
+                                path.write_bytes(canonical({"changed": True}))
+                            return result
                         if change in ("attachment", "disconnect"):
                             identity = live()["core"]["Id"]
                             path = rig["directory"] / (
@@ -376,7 +406,13 @@ def test_original_unknown_uses_current_repair_without_native_replay(
 
                 monkeypatch.setattr(target, name, drifted)
 
-            if mode in REFUSALS:
+            if mode == "status-endpoint-drift":
+                status = await asyncio.to_thread(call, status=True)
+                assert status["accepted"] == "unknown" and status["unresolved_effects"]
+                assert status["installed"] is status["currently_healthy"] is None
+                assert "original-candidate-custody-unproved" in status["blockers"]
+                assert journal.inspect(original) == uncertain and not harness.owner._issued
+            elif mode in REFUSALS:
                 if mode == "busy-owner":
                     with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]):
                         with pytest.raises(PlanError, match="owner is busy"):
@@ -388,8 +424,10 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 if mode not in ("missing-owner", "missing-journal", "wrong-journal"):
                     assert journal.inspect(original) == uncertain
                 if mode in DRIFTS:
-                    assert fired and len(journal.results()) == 2
+                    assert fired and len(journal.results()) == (5 if prior_ref is not None else 2)
                     assert decode((owner_root / "selection.json").read_bytes())["attempt"] == retained
+                if mode == "host-root-after-health" or mode.endswith("host-runtime"):
+                    assert not (rig["root"] / "shifted-runtime" / candidate[0].resource).exists()
                 if mode == "missing-owner":
                     assert not owner_root.exists()
                 elif mode == "missing-journal":

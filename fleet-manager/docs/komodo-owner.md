@@ -204,6 +204,9 @@ A missing or nonempty server address, or a missing or unproved global setting,
 is not a fallback to trust the live key. Core-to-Periphery mode requires the
 explicit retained per-server key.
 Current native identity/network are checked again after readiness.
+Complete network endpoint membership and attachment observations must agree
+before and after authenticated health; reconnecting on the same bridge cannot
+reuse health from the preceding attachment.
 Convergence, successful repeats and status use the same final observation:
 all three services must still be running, unpaused and non-restarting with
 positive process IDs and unchanged start identities. A stop/restart during HTTP

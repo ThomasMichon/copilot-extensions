@@ -54,6 +54,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
     "status-paused-periphery", "status-restarting-core",
     "mount-order-after-health", "retained-mount-order", "failed-mount-order", "global-trust",
     "legacy-readback", "legacy-order-unproved", "legacy-missing-core",
+    "endpoint-after-health", "repeat-endpoint-after-health", "status-endpoint-after-health",
 ])
 def test_composed_owner_preserves_original_operation_and_real_native_custody(
     native_rig: Any, keys: Any, scenario: str, monkeypatch: Any, compose_version: str,
@@ -124,9 +125,13 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 (rig["directory"] / "live.json").write_text(json.dumps(changed))
             if (request.path == "/read/GetPeripheryInformation" and not health_changes and health_armed[0]
                     and scenario.endswith(("stopped-after-health", "key-drift-after-health",
-                                           "restart-after-health"))):
+                                           "restart-after-health", "endpoint-after-health"))):
                 health_changes.append(True)
-                if scenario.endswith("key-drift-after-health"):
+                if scenario.endswith("endpoint-after-health"):
+                    (rig["directory"] / "endpoint-overrides.json").write_text(json.dumps({
+                        live()["core"]["Id"]: {"EndpointID": "changed-during-health"},
+                    }))
+                elif scenario.endswith("key-drift-after-health"):
                     (rig["material"].keys / "core.pub").write_text(PUBLIC_PEM["periphery"])
                 else:
                     changed = live()
@@ -425,7 +430,8 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
 
             first = owner()
             original = request()
-            if scenario in ("stopped-after-health", "key-drift-after-health", "restart-after-health"):
+            if scenario in ("stopped-after-health", "key-drift-after-health", "restart-after-health",
+                            "endpoint-after-health"):
                 with pytest.raises(PlanError, match="readiness|runtime|identity|process"):
                     await invoke(first, original)
                 assert effects() == 1

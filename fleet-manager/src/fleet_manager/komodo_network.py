@@ -12,6 +12,14 @@ def network_fingerprint(network: dict[str, Any]) -> str:
     return digest({key: value for key, value in network.items() if key != "Containers"})
 
 
+def same_network_observation(before: dict[str, Any] | None, after: dict[str, Any] | None) -> bool:
+    """Compare paired verified bridge identity and complete endpoint observations."""
+    if before is None or after is None:
+        return before is after
+    return (network_fingerprint(before) == network_fingerprint(after)
+            and before["Containers"] == after["Containers"])
+
+
 def verify_network(network: dict[str, Any] | None, selected: KomodoSelection,
                    containers: dict[str, dict[str, Any]], expected: str | None, *,
                    created: bool = False, pending: bool = False) -> str | None:

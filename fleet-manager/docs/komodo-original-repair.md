@@ -21,6 +21,10 @@ repair-only transition through the existing configuration/release/runtime/
 host/storage/credential/public-identity owners. A request cannot select a
 resolver, module, callback or serialized grant.
 
+Both authenticated host-runtime paths form part of the stable transition
+binding. Moving both subjects to another root does not authorize continued
+publication through the original root's already-open lock and journal.
+
 `KomodoRepairSelection` is the resolver's checked result, not authorization:
 
 | Subject or field | Required binding |
@@ -63,7 +67,12 @@ The final paired container/process observation, network fingerprint and complete
 endpoint membership/attachments remain in memory only. Publication checkpoints reread and compare them across
 immutable retention, state publication and the journal transaction before append
 and commit, within the original deadline. Current authority is revalidated
-after those reads. Pre-commit drift preserves UNKNOWN and rolls back an attempted
+after those reads. Endpoint observations also span authenticated health in repair
+and healthy status, rather than taking the first snapshot only after health.
+Every checkpoint rereads current/pending immutable outcome references and the
+original historical references; the just-retained outcome is compared with its
+in-memory expected value before state publication. Missing or corrupted evidence
+refuses without reconstruction. Pre-commit drift preserves UNKNOWN and rolls back an attempted
 terminal append; any pending immutable/state outcome retains the original
 attempt for fresh verification. Post-commit cleanup resumes only the already
 recorded terminal decision and does not append another receipt.

@@ -162,3 +162,24 @@ def test_history_retains_exact_immutable_evidence(tmp_path: Path) -> None:
     path.write_bytes(canonical({**value, "deployment": "c" * 64}))
     with pytest.raises(PlanError, match="missing or changed"):
         read_outcome(tmp_path, reference)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux physical host runtime")
+def test_repair_binding_preserves_selected_physical_owner(native_rig: Any) -> None:
+    rig = native_rig
+    for name in ("original-runtime", "shifted-runtime"):
+        (rig["root"] / name).mkdir(mode=0o700)
+    candidate = KomodoSelection(
+        rig["selected"], "fleet-a", "install-a", 1, "policy-a", 1900001000,
+        "a" * 64, rig["root"] / "original-runtime", rig["tooling"], rig["material"])
+    executor = replace(candidate, release_digest="b" * 64)
+    original = KomodoRepairSelection(candidate, executor, "c" * 64, "d" * 64,
+                                     "transition-a", 1, 1900001000)
+    shifted = replace(original,
+        candidate=replace(candidate, host_runtime=rig["root"] / "shifted-runtime"),
+        executor=replace(executor, host_runtime=rig["root"] / "shifted-runtime"))
+    assert shifted.candidate.deployment_digest == original.candidate.deployment_digest
+    assert shifted.executor.deployment_digest == original.executor.deployment_digest
+    assert shifted.candidate.resource == original.candidate.resource
+    assert shifted.binding != original.binding
+    assert not (rig["directory"] / "calls.jsonl").exists()
