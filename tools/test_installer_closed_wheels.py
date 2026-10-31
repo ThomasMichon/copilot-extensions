@@ -41,6 +41,7 @@ def plugin(tmp_path):
     root = tmp_path / "sources"
     procutil = root / "procutil"
     shutil.copytree(Path(__file__).resolve().parents[1] / "libs" / "agent-procutil", procutil)
+    shutil.copytree(Path(__file__).resolve().parents[1] / "libs" / "zdd", root / "zdd")
     plugin = root / "plugin"
     plugin.mkdir()
     (plugin / "pyproject.toml").write_text(

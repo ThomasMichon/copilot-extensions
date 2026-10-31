@@ -616,7 +616,7 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-def fingerprint_source(paths, *, _normalize_windows_extended_path) -> str:
+def fingerprint_source(paths, *, _normalize_windows_extended_path, on_progress=None) -> str:
     """Return a stable sha256 fingerprint over a frozen set of source paths.
 
     Covers the FULL attributable runtime install input, not just one
@@ -975,6 +975,8 @@ def fingerprint_source(paths, *, _normalize_windows_extended_path) -> str:
         # only by unframed leading bytes.
         digest.update(_frame(entries[f].encode("utf-8")))
         digest.update(_frame(data))
+        if on_progress is not None:
+            on_progress()
 
     ordered = sorted(entries, key=_label)
     if len(ordered) < 2:

@@ -6,8 +6,14 @@ Real children emit stdout/stderr without newlines beyond their quiet window;
 quiet stalls, failed output sinks, retained guardian settlement, native byte
 and channel preservation, unchanged receipt judgment and incumbent health
 remain independent controls. Source-phase units also advance through verified
-file batches. These checks do not qualify every native self-stage watchdog,
-initial source retention or an installed whole-update footprint.
+file batches. Focused source-phase controls also retain an actual fresh source
+graph through native UV settings inspection, copying and fingerprinting. A
+productive copy outlives the real quiet window; a silent copy is stopped through
+the same process owner, preserving source bytes and confirmed writer exit.
+Deterministic controls separately refuse late completed work and changed source,
+and closed-wheel deadline controls retain their absolute bounds. These checks
+do not qualify deferred source stamping, every native self-stage watchdog or
+an installed whole-update footprint.
 An open undrained pipe must not starve supervision. A slow draining pipe
 separately proves acknowledged native writes renew the delivery allowance after
 installer exit. Legacy log/observer failures occur only after owned writers have

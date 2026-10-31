@@ -4563,6 +4563,16 @@ for closed-wheel acquisition/inspection remain absolute, and all byte, file,
 identity, seasoning and publication checks remain unchanged. No supervisor
 generates periodic output to conceal an idle backend.
 
+Initial source selection and UV-input retention use the same phase reporter.
+Completed directory scans, file copies, matching source comparisons and
+deterministic fingerprint entries renew the constructor's quiet allowance;
+the check precedes renewal, so late completion cannot erase a silent expiry.
+Retention reporting finishes before construction starts, while the original
+retained-input owner keeps its files until construction and native cleanup
+settle. The optional fingerprint callback does not change framing or digest
+bytes, and CLI stdout remains unchanged. Deferred source stamping and native
+self-stage watchdog integration remain separate boundaries.
+
 Ordinary immutable source candidates request UV hardlinks from its extracted
 wheel cache, with UV's normal copy fallback when linking is unavailable.
 Mutable development refresh and the private build-tool environment retain

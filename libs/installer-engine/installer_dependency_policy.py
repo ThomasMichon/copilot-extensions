@@ -596,10 +596,11 @@ def _config_inputs(arguments, environment, base):
     )
 
 
-def _copy_retained_file(source, destination, *, deadline=None):
+def _copy_retained_file(source, destination, *, deadline=None, on_progress=None):
     return _configuration.copy_retained_file(
         source, destination, native_path=_native_retained_path,
         deadline=deadline, error_type=DependencyPolicyError,
+        on_progress=on_progress,
     )
 
 
@@ -641,6 +642,7 @@ def retain_uv_install(
     _operation: str = "install",
     deadline: float | None = None, native_target: bool = False,
     _projection: list[str] | None = None,
+    on_progress=None,
 ):
     """Own the admitted graph and optional first-party exclusion constraints."""
     with _configuration.retain_local_exclusions(
@@ -651,6 +653,7 @@ def retain_uv_install(
         **({"deadline": deadline} if deadline is not None else {}),
         **({"native_target": True} if native_target else {}),
         **({"_projection": _projection} if _projection is not None else {}),
+        **({"on_progress": on_progress} if on_progress is not None else {}),
     ) as transaction:
         yield transaction
 
@@ -665,6 +668,7 @@ def _retain_uv_install(
     _generated_constraints: tuple[Path, ...] = (),
     deadline: float | None = None, native_target: bool = False,
     _projection: list[str] | None = None,
+    on_progress=None,
 ):
     """Own the admitted graph until the caller's execution and health settle."""
     check_time = partial(_configuration.remaining_timeout, deadline, error_type=DependencyPolicyError)
@@ -730,6 +734,8 @@ def _retain_uv_install(
         **({"_operation": _operation} if _operation != "install" else {}),
         **execution,
     )
+    if on_progress is not None:
+        on_progress()
     if editables and re.search(r'"editable_mode"\s*:', _resolver_configuration(original_projection[0], now=now)):
         raise DependencyPolicyError("retained editable metadata owns the setuptools editable mode")
     temporary_parent = None
@@ -757,7 +763,10 @@ def _retain_uv_install(
         )
         remap = _configuration.retained_source_remapper(projects | files, mirror)
 
-        copy = partial(_copy_retained_file, deadline=deadline) if deadline is not None else _copy_retained_file
+        copy = (
+            partial(_copy_retained_file, deadline=deadline, on_progress=on_progress)
+            if deadline is not None or on_progress is not None else _copy_retained_file
+        )
         for project in sorted(projects, key=lambda path: len(path.parts)):
             check_time()
             destination = mirror(project)
@@ -791,6 +800,8 @@ def _retain_uv_install(
                         raise DependencyPolicyError("source content changed while retaining UV inputs")
                     source_hashes[original_path] = retained_hash
                     verified_pairs.add(pair)
+                    if on_progress is not None:
+                        on_progress()
         for project in projects:
             check_time()
             manifest = mirror(project) / "pyproject.toml"
@@ -901,6 +912,8 @@ def _retain_uv_install(
         if original_configuration != retained_configuration:
             raise DependencyPolicyError("retained UV configuration differs from the configured resolver")
         check_time()
+        if on_progress is not None:
+            on_progress()
         if editables:
             admitted.extend(["--config-setting", "editable_mode=compat"])
         if _projection is not None:
