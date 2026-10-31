@@ -220,6 +220,62 @@ def test_selector_has_no_body_receipt_and_fallback_is_not_discovered(tmp_path: P
     assert selection["modelAdmission"] == "unknown"
 
 
+@pytest.mark.parametrize("template_generation", ["legacy", "current"])
+def test_selector_does_not_override_its_catchall_delivery_contract(
+    tmp_path: Path, template_generation: str,
+) -> None:
+    repo, source, spec = fixture(tmp_path)
+    if template_generation == "legacy":
+        template = (
+            b'---\napplyTo: "**"\n---\n\n'
+            b"Before dependent action, acquire authoritative applicable guidance.\n"
+            b"Authenticate local bytes against the enabled canonical template.\n"
+            b"Compare source identity, scope, version and hash; on a tie prefer\n"
+            b"matching local bytes, otherwise use the owned reviewed fallback.\n"
+            b"Read the full selected body. Skip a read only with complete opening\n"
+            b"provenance and its matching closing receipt visible in context.\n"
+        )
+    else:
+        template = (
+            Path(__file__).resolve().parents[1]
+            / "instructions/local-cache-catchall.instructions.md"
+        ).read_bytes()
+    (source.payload_root / spec.template).write_bytes(template)
+    assert not projections.sync_repository(repo, [source]).blocking
+    selector = (repo / spec.destination).read_bytes()
+    marker = delivery.parse_marker(selector)
+    locator = selector.split(
+        (delivery.MARKER_PREFIX + delivery._json(marker) + " -->\n\n").encode(), 1,
+    )[1].decode()
+    fallback_path = delivery.fallback_destination(spec.destination)
+    fallback = (repo / fallback_path).read_bytes()
+    fallback_marker = delivery.parse_marker(fallback)
+    delivery.validate_local_template(fallback, fallback_marker)
+    assert delivery.complete_body(fallback, fallback_marker)
+    assert template.split(b"---\n", 2)[2] in fallback
+    assert delivery.managed_destination(spec.destination, spec.plugin) in locator
+    assert fallback_path in locator
+    assert delivery.resolver_argv(spec.destination) == next(
+        json.loads(line) for line in locator.splitlines() if line.startswith('["<python>"')
+    )
+    from context_budget import _repo_instruction_files
+    automatic, conditional = _repo_instruction_files(repo)
+    assert repo / spec.destination in automatic
+    assert repo / fallback_path not in automatic | conditional
+    assert projections.resolve_instruction_source(repo, spec.destination)["selectedPath"] == fallback_path
+    assert not projections.render_local_cache(repo, lambda: [source]).blocking
+    managed = repo / delivery.managed_destination(spec.destination, spec.plugin)
+    assert managed.read_bytes() == template
+    selected = projections.resolve_instruction_source(repo, spec.destination, [source])
+    assert selected["selectedPath"] == managed.relative_to(repo).as_posix()
+    assert selected["bodySha256"] is None and selected["receiptBindingSha256"] is None
+    assert (repo / fallback_path).read_bytes() == fallback
+    assert not any(term in locator.lower() for term in (
+        "hash", "fingerprint", "version", "provenance", "receipt",
+        "prefer", "override", "restart", "unless", "when present", "otherwise",
+    )), locator
+
+
 @pytest.mark.parametrize("old_state", ["missing", "corrupt-lock", "corrupt-selector", "corrupt-fallback"])
 def test_managed_copy_selection_needs_no_content_or_reviewed_admission(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, old_state: str,

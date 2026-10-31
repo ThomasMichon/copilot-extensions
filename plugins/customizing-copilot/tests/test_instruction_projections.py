@@ -2100,11 +2100,11 @@ def test_template_budget_blocks_but_selector_aggregate_is_advisory(tmp_path: Pat
             f"policy-{index}",
             body="x" * 2700 + "\n",
         )[1]
-        for index in range(10)
+        for index in range(16)
     ]
     aggregate_result = projections.sync_repository(aggregate_repo, sources)
     assert aggregate_result.blocking == 0
-    assert len(aggregate_result.changed) == 20
+    assert len(aggregate_result.changed) == 2 * len(sources)
     assert aggregate_result.lock_updated
     assert any(
         finding.check == "projection-aggregate-budget"
@@ -2194,13 +2194,14 @@ def test_repository_config_raises_the_aggregate_budget(tmp_path: Path) -> None:
             f"policy-{index}",
             body="x" * 2700 + "\n",
         )[1]
-        for index in range(10)
+        for index in range(16)
     ]
 
     result = projections.sync_repository(repo, sources)
 
     assert not any(
-        finding.check == "projection-budget" for finding in result.findings
+        finding.check in {"projection-budget", "projection-aggregate-budget"}
+        for finding in result.findings
     )
     assert result.blocking == 0
 
@@ -2247,7 +2248,7 @@ def test_over_budget_plugin_update_and_adoption_reproject_immediately(
         _write_plugin(
             tmp_path, "market", f"policy-{index}", body="x" * 2700 + "\n",
         )[1]
-        for index in range(10)
+        for index in range(16)
     ]
     monkeypatch.setattr(
         manager, "discover_enabled_sources", lambda *args, **kwargs: sources,
@@ -2255,7 +2256,7 @@ def test_over_budget_plugin_update_and_adoption_reproject_immediately(
     assert manager.main(["sync", str(repo), "--json"]) == 0
     initial = json.loads(capsys.readouterr().out)
     assert initial["blocking"] == 0
-    assert len(initial["changed"]) == 20
+    assert len(initial["changed"]) == 2 * len(sources)
     assert any(
         f["check"] == "projection-aggregate-budget"
         and f["severity"] == projections.WARNING for f in initial["findings"]
@@ -2347,7 +2348,7 @@ def test_malformed_or_out_of_range_config_is_blocking_and_uses_default(
             f"policy-{index}",
             body="x" * 2700 + "\n",
         )[1]
-        for index in range(10)
+        for index in range(16)
     ]
 
     result = projections.sync_repository(repo, sources)
