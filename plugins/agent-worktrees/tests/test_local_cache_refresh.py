@@ -1543,7 +1543,7 @@ def test_exclude_append_near_limit_never_invalidates_next_preparation(
         assert exclude.read_bytes() == expected
 
 
-@pytest.mark.parametrize("fault", ["directory", "oversize", "unwritable", "indirect", "tracked", "negated"])
+@pytest.mark.parametrize("fault", ["directory", "oversize", "unwritable", "indirect", "tracked", "negated", "selective"])
 def test_companion_ignore_failure_is_visible_pending_and_retryable(
     copy_workspace, tmp_path, monkeypatch, fault,
 ):
@@ -1565,6 +1565,16 @@ def test_companion_ignore_failure_is_visible_pending_and_retryable(
         exclude.write_bytes(b"#" * (2 * 1024 * 1024 + 1))
     elif fault == "negated":
         (knowledge / ".gitignore").write_text("!**/\n!*.local.instructions.md\n", encoding="utf-8")
+    elif fault == "selective":
+        (knowledge / ".gitignore").write_text(
+            "!**/\n*.local.instructions.md\n!fallback.local.instructions.md\n", encoding="utf-8",
+        )
+        for path, expected in ((knowledge / static.NAMESPACE / "preparation.local.instructions.md", 0), (output, 1)):
+            ignored = subprocess.run(
+                ["git", "-C", str(knowledge), "check-ignore", "--no-index", str(path)],
+                capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            assert ignored.returncode == expected
     elif fault == "tracked":
         output.parent.mkdir(parents=True)
         output.write_bytes(b"tracked source, not disposable")
@@ -1607,7 +1617,7 @@ def test_companion_ignore_failure_is_visible_pending_and_retryable(
             assert not output.exists()
     if fault == "directory":
         exclude.rmdir()
-    elif fault == "negated":
+    elif fault in ("negated", "selective"):
         (knowledge / ".gitignore").unlink()
     elif fault == "tracked":
         subprocess.run(
@@ -1621,6 +1631,118 @@ def test_companion_ignore_failure_is_visible_pending_and_retryable(
     assert not static.pair_pending_path(harness).exists()
     assert lcr.refresh_local_cache(knowledge).status == "ready"
     assert output.read_bytes() == template.read_bytes()
+
+
+@pytest.mark.parametrize("operations", [("prepare", "prepare"), ("publish", "publish"), ("prepare", "publish")])
+def test_linked_companions_serialize_shared_exclude_at_byte_limit(
+    copy_workspace, tmp_path, operations,
+):
+    _, home = copy_workspace
+    bare = tmp_path / "shared.git"
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "--git-dir", str(bare), *args], input=b"", check=True,
+            capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout.decode().strip()
+
+    subprocess.run(
+        ["git", "init", "--bare", "--quiet", str(bare)], check=True, capture_output=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    commit = git(
+        "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit-tree", git("mktree"), "-m", "Empty fixture",
+    )
+    roots = [tmp_path / "first", tmp_path / "second"]
+    for index, root in enumerate(roots):
+        git("worktree", "add", "--quiet", "-b", f"companion-{index}", str(root), commit)
+        provider(root, home, name=f"demo-{index}")
+    exclude = bare / "info" / "exclude"
+    addition = f"{os.linesep}/{static.NAMESPACE}/{os.linesep}".encode("utf-8")
+    length = static._MAX_EXCLUDE_BYTES - len(addition)
+    previous = b"#" + b"\xc3\xa9" * ((length - 1) // 2) + b"x" * ((length - 1) % 2)
+    exclude.parent.mkdir(exist_ok=True)
+    exclude.write_bytes(previous)
+    release = tmp_path / "release"
+    code = (
+        "import pathlib,sys,time; from agent_worktrees import static_instructions as s\n"
+        "root,home,entered,started,release=map(pathlib.Path,sys.argv[1:6]); operation=sys.argv[6]\n"
+        "native=s._read_exclude; calls=0\n"
+        "def held(path):\n"
+        " global calls\n"
+        " content=native(path); calls+=1\n"
+        " if calls==2:\n"
+        "  entered.touch(); until=time.monotonic()+20\n"
+        "  while not release.exists():\n"
+        "   if time.monotonic()>until: raise TimeoutError('fixture release missing')\n"
+        "   time.sleep(.01)\n"
+        " return content\n"
+        "s._read_exclude=held; started.touch()\n"
+        "if operation=='publish': s.publish(root,home)\n"
+        "else: s.prepare_output_namespace(root)\n"
+    )
+    children = []
+    entered = [tmp_path / f"read-{index}" for index in range(2)]
+
+    def wait_for(path):
+        until = time.monotonic() + 15
+        while not path.exists():
+            assert time.monotonic() < until, f"child did not reach {path.name}"
+            time.sleep(.01)
+
+    try:
+        for index, (root, operation) in enumerate(zip(roots, operations)):
+            started = tmp_path / f"started-{index}"
+            children.append(subprocess.Popen(
+                [sys.executable, "-B", "-c", code, str(root), str(home), str(entered[index]),
+                 str(started), str(release), operation],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            ))
+            wait_for(started)
+            if index == 0:
+                wait_for(entered[0])
+        until = time.monotonic() + 3
+        while not entered[1].exists() and time.monotonic() < until:
+            time.sleep(.01)
+        overlapped = entered[1].exists()
+        release.touch()
+        results = [child.communicate(timeout=20) for child in children]
+        assert all(child.returncode == 0 for child in children), results
+        assert not overlapped, "separate workspace locks allowed concurrent shared-exclude readers"
+        assert exclude.read_bytes() == previous + addition
+        assert exclude.stat().st_size == static._MAX_EXCLUDE_BYTES
+        for root in roots:
+            static.prepare_output_namespace(root)
+        assert exclude.read_bytes() == previous + addition
+    finally:
+        release.touch()
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.communicate(timeout=10)
+
+
+@pytest.mark.parametrize("publication", [False, True])
+def test_shared_exclude_lock_deadline_refuses_before_read_or_append(copy_workspace, monkeypatch, publication):
+    root, home = copy_workspace
+    provider(root, home)
+    exclude = root / ".git" / "info" / "exclude"
+    previous = exclude.read_bytes()
+
+    def unexpected_read(path):
+        pytest.fail("exclude read before acquiring shared resource lock")
+
+    monkeypatch.setattr(static, "_read_exclude", unexpected_read)
+    with static._exclude_lock(exclude), ThreadPoolExecutor(max_workers=1) as worker:
+        operation = static.publish if publication else static.prepare_output_namespace
+        args = (root, home) if publication else (root,)
+        future = worker.submit(operation, *args, deadline=time.monotonic() + 2)
+        with pytest.raises(TimeoutError, match="lock"):
+            future.result(timeout=5)
+    assert exclude.read_bytes() == previous
+    assert not (root / static.NAMESPACE).exists()
 
 
 @pytest.mark.parametrize("kind,existing", [("worktree", False), ("worktree", True), ("anchor", False)])

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from contextlib import ExitStack
 from pathlib import Path
 import stat
 import subprocess
@@ -383,12 +384,24 @@ def _read_exclude(exclude: Path) -> str:
     return content.decode("utf-8")
 
 
-def _namespace_preflight(root: Path, *, deadline: float | None) -> tuple[Path, dict]:
-    _safe_path(root, root / NAMESPACE)
+def _exclude_path(root: Path, *, deadline: float | None) -> Path:
     exclude = Path(os.fsdecode(_git(root, "rev-parse", "--git-path", "info/exclude", deadline=deadline)).strip())
     if not exclude.is_absolute():
         exclude = root / exclude
     exclude = Path(os.path.abspath(exclude))
+    _safe_path(Path(exclude.anchor), exclude)
+    return exclude
+
+
+def _exclude_lock(exclude: Path, *, deadline: float | None = None):
+    """Use the existing file-lock owner for the common Git exclude resource."""
+    return publication_lock(exclude.resolve(), deadline=deadline)
+
+
+def _namespace_preflight(root: Path, exclude: Path, *, deadline: float | None) -> dict:
+    _safe_path(root, root / NAMESPACE)
+    if _exclude_path(root, deadline=deadline) != exclude:
+        raise ValueError("Git exclude identity changed before preflight; retry preparation")
     # Git's index queries may read ignore rules before our later append.
     _read_exclude(exclude)
     validated_git = preparation.git_state(root, deadline=deadline)
@@ -407,7 +420,7 @@ def _namespace_preflight(root: Path, *, deadline: float | None) -> tuple[Path, d
         path = os.fsdecode(raw).casefold()
         if path and (path == namespace or path.startswith(namespace + "/") or namespace.startswith(path + "/")):
             raise ValueError(f"tracked instruction output is protected: {os.fsdecode(raw)}")
-    return exclude, validated_git
+    return validated_git
 
 
 def _ensure_output_ignored(
@@ -426,13 +439,22 @@ def _ensure_output_ignored(
         for path in validated_git:
             if Path(path).resolve() == exclude.resolve():
                 validated_git[path] = preparation.stamp(Path(path), deadline=deadline)
-    paths = {os.fsencode(f"{NAMESPACE}/{relative}") for relative in relatives}
+    paths = {os.fsencode(f"{NAMESPACE}/")}
+    paths.update(os.fsencode(f"{NAMESPACE}/{relative}") for relative in relatives)
     if paths:
         ignored = _git(
-            root, "check-ignore", "--no-index", "-z", "--stdin",
+            root, "check-ignore", "--no-index", "-z", "-v", "--stdin",
             input=b"\0".join(sorted(paths)) + b"\0", deadline=deadline,
         )
-        if paths - set(ignored.split(b"\0")):
+        fields = ignored.rstrip(b"\0").split(b"\0")
+        if len(fields) % 4:
+            raise ValueError("instruction Git ignore evidence is malformed")
+        # A negative or empty-pattern match is not directory exclusion.
+        covered = {
+            fields[index + 3] for index in range(0, len(fields), 4)
+            if fields[index + 2] and not fields[index + 2].startswith(b"!")
+        }
+        if paths - covered:
             raise ValueError("instruction output namespace is not completely ignored by Git")
     preparation.require_git_state(root, validated_git, deadline=deadline)
 
@@ -441,16 +463,15 @@ def prepare_output_namespace(root: Path, *, deadline: float | None = None) -> No
     """Prepare a companion's disposable namespace without discovering its sources."""
     root = root.resolve()
     with publication_lock(root, deadline=deadline):
-        exclude, validated_git = _namespace_preflight(root, deadline=deadline)
-        _ensure_output_ignored(
-            root, exclude, validated_git, ("preparation.local.instructions.md",),
-            deadline=deadline,
-        )
+        exclude = _exclude_path(root, deadline=deadline)
+        with _exclude_lock(exclude, deadline=deadline):
+            validated_git = _namespace_preflight(root, exclude, deadline=deadline)
+            _ensure_output_ignored(root, exclude, validated_git, (), deadline=deadline)
 
 
 def publish(root: Path, home: Path, *, deadline: float | None = None) -> preparation.Publication:
     """Resolve inside the publication lock; preflight the whole set before copying."""
-    with publication_lock(root, deadline=deadline):
+    with publication_lock(root, deadline=deadline), ExitStack() as locks:
         try:
             pair_pending_path(root).lstat()
         except FileNotFoundError:
@@ -482,7 +503,9 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
         )
         stale = set() if desired.failures else existing - desired.keys()
         removable_files = {output / relative for relative in stale}
-        exclude, validated_git = _namespace_preflight(root, deadline=deadline)
+        exclude = _exclude_path(root, deadline=deadline)
+        locks.enter_context(_exclude_lock(exclude, deadline=deadline))
+        validated_git = _namespace_preflight(root, exclude, deadline=deadline)
         for relative in desired:
             path = output / relative
             _safe_path(root, path, removable_files=removable_files)

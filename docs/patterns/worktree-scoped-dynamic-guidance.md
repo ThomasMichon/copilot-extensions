@@ -132,8 +132,16 @@ preserves existing rules, adds the reserved rule at most once, and checks
 effective ignore coverage without discovering or publishing companion sources.
 This preparation runs even when plugin overlay composition is disabled; it
 does not enable plugins. Anchor pairs are not companion write targets.
-The overlay transaction remains outermost, followed by the companion publication
-lock. Tracked namespace conflicts, indirect/nonregular or oversized exclude
+The overlay transaction remains outermost, followed by the worktree publication
+lock and then the shared-exclude lock. The last lock reuses the native file-lock
+owner, keyed by the safely resolved actual Git exclude path, so separately locked
+linked companions cannot duplicate the rule or race past the byte limit. Resolve
+that Git path again under the shared lock before reading/index preflight, and
+retain the lock through final Git-state validation for both preparation and
+publication. Effective coverage requires a positive, nonempty Git ignore rule
+for the generated namespace directory itself, not a guessed filename; selective
+repository-owned unignore rules cannot falsely qualify companion preparation.
+Tracked namespace conflicts, indirect/nonregular or oversized exclude
 inputs (over 2 MiB), and unwritable excludes fail visibly, retain the harness's
 pending-pair marker, and can be retried through normal composition after repair.
 No tracked ignore file, settings declaration, or source roster is changed by

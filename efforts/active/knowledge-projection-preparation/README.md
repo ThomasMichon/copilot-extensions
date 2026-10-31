@@ -255,3 +255,68 @@ into the harness.
 - The previously encountered cross-drive failures are now resolved by this
   staged fix. Source publication, required CI, review/merge, release tracking,
   archival and operational rollout remain outside this implementation slice.
+
+### 2026-10-30 - Shared-exclude and complete-coverage review corrections
+
+- Started from clean exact head `15bb7ad89972db99135195af984f85b3d9a7fb91`,
+  retaining the coordinator's explicit UTF-8/platform-newline byte append,
+  pre-effect 2 MiB size check, binary append mode, and permission-fixture fix.
+- Reused the native publication/file-lock owner for a second, shared-resource
+  key: the safely resolved actual Git `info/exclude` path. Lock order remains
+  overlay (when present), worktree publication, then shared exclude. Both native
+  publication and companion preparation acquire the shared lock before the
+  first exclude read/index snapshot, revalidate Git's selected exclude path,
+  and retain the lock through final Git-state validation. No new writer,
+  manager, daemon, policy surface or overwrite operation was introduced.
+- Complete source-independent coverage now checks the generated namespace
+  directory itself, alongside any actual native destinations. Verbose NUL-framed
+  Git evidence must name a positive nonempty ignore pattern. Git on Windows can
+  report a trailing-directory match against an empty CRLF exclude line; neither
+  that match nor a negation proves parent exclusion. Companion preparation still
+  discovers/publishes no source roster and does not override repository unignore
+  policy.
+- Regression proof before source corrections: the selective real-destination
+  case falsely reported ready; three independent-process linked-companion
+  combinations (prepare/prepare, publish/publish, prepare/publish) failed under
+  controlled overlapping reads at the exact append byte limit. A new fixture's
+  duplicate provider-directory setup was corrected before recording the
+  actual three concurrency failures.
+- Focused qualification:
+  `py -3.11 tools/run-plugin-tests.py agent-worktrees --test-file tests/test_local_cache_refresh.py -k 'linked_companions_serialize_shared_exclude or selective or shared_exclude_lock_deadline or exclude_append_near_limit or companion_ignore_failure' --timeout 240 --plugin-timeout 300`
+  passed **20 tests**, with 137 deselected, in 87.26 seconds. Both processes
+  settle successfully with exactly one append, all prefix bytes preserved,
+  final size exactly 2 MiB, and valid subsequent preparation. Deadline cases
+  retain the shared lock elsewhere and reject both callers before read/append
+  with a two-second caller budget; permission, indirection and retry cases
+  remain covered.
+- Updated the existing dynamic-guidance pattern; the existing same-plugin PR
+  changefile remains sufficient. Source effort remains Active in Phase 3.
+- Install contract: `py -3.11 tools/check-install-contract.py` passed for all
+  13 plugins. `uv tool run --offline ruff check --select F,E9` for the two
+  touched Python files could not resolve Ruff because no cached package is
+  available. No dependency or runtime installation was attempted; this lint
+  gap remains explicit for coordinator qualification.
+- Changed-owner qualification:
+  `py -3.11 tools/run-plugin-tests.py agent-worktrees --test-file tests/test_local_cache_refresh.py --test-file tests/test_knowledge_plugins.py --test-file tests/test_static_instructions_standalone.py --test-file tests/test_creation_pair_completion.py --timeout 900 --plugin-timeout 1080`
+  passed **225 tests**, with **10 platform skips** (4 POSIX FIFO and 6 Linux
+  process-cleanup cases), in 331.97 seconds of pytest execution.
+- Relevant real creation and retained-pair recovery:
+  `py -3.11 tools/run-plugin-tests.py agent-worktrees --test-file tests/test_creation_tail_repair.py -k 'test_creation_real_cli_first_touch_report_and_fix or test_creation_restores_native_pair_permissions_and_is_idempotent or test_creation_repairs_original_native_pair_after_optional_naming or (test_creation_repair_preserves_only_proven_local_parent_refs and relative)' --timeout 360 --plugin-timeout 480`
+  passed **14 tests**, with 119 deselected, in 173.95 seconds. The original
+  portable-cwd fixture remains intact. This packet selects the actual consumer
+  entry points affected by publisher preparation rather than rerunning the
+  unrelated remainder of the previously qualified creation-tail file.
+- All test failures encountered during these corrections were fixed; no
+  test timeout or unresolved test failure remains. Staged whitespace checks
+  and Python AST syntax checks pass. The shared-lock acquisition ceiling
+  remains 30 seconds or the caller's shorter remaining deadline; Git retains
+  its operation-specific bounds. No broader startup deadline was introduced.
+- Review findings remain open for coordinator verification and publication.
+  Required CI, review/merge, release tracking and effort closure remain pending;
+  no runtime rollout or operational mutation was attempted.
+- Coordinator verification: the contained runner independently passed all six
+  linked-companion, selective-negation and shared-lock deadline cases, with 151
+  deselected, in 41.34 seconds. Ruff F/E9 passed for the publisher, local-cache
+  tests and retained portable creation fixture; staged whitespace checks passed.
+  The outstanding lint gap is resolved. Required CI and review still need to
+  qualify the published correction.
