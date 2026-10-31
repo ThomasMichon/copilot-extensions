@@ -213,6 +213,10 @@ live claim token. No new blanket ACK or executor appointment is created.
 - [x] Select the [startup and retry budgets](assignment-startup-amendment.md#selected-startup-and-retry-policy),
       including reset of both counters on successful `STARTED`; source
       implementation and qualification remain separate.
+- [ ] Review the [selected pool scope and priority](assignment-startup-amendment.md#selected-pool-scope-and-ordering)
+      and complete-effective-set prerequisite before affected source work;
+      normalized definitions, provider publication and caller migration remain
+      distinct acceptance slices.
 - [ ] Resolve the amendment's remaining policy choices and complete its validation matrix
       at the stated source, mixed-version and installed/native evidence tiers.
 
@@ -1228,3 +1232,22 @@ The existing supervisor owns cadence; scheduling and historical custody remain
 separate. This amendment is reviewed before affected behavior is implemented.
 Atomic placement, decline closeout, remaining independent policies and the
 complete source/mixed-version/installed validation gates stay open.
+
+The selected-policy amendment merged in
+[#9769](https://github.com/ThomasMichon/copilot-extensions/pull/9769) as
+`29aa3cd82fbc1e1f471714e61e8385463cc244ff` after current-head approval
+and required checks. The source worktree pulled forward to that exact merge.
+Implementation resumes with the coordinator-owned atomic placement boundary;
+the policy merge itself does not enable it or qualify running workers.
+
+### 2026-10-31 - Pool instance scope and priority selected
+
+The source trace found that raw registrations lose declaration filters and do
+not include the daemon's final precedence/deduplication/override result.
+Captured the operator's per-machine/environment instance capacity and
+configurable priority in the
+[canonical amendment](assignment-startup-amendment.md#selected-pool-scope-and-ordering),
+with numeric ordering and representation recommendations distinguished from
+the selected policy. Review precedes source implementation. The complete
+effective-set/provider/mixed-cohort boundary and all parent gates remain open;
+there is no live activation or claim that metadata alone enforces placement.
