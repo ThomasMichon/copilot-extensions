@@ -62,7 +62,7 @@ def check(repo: Path) -> list[str]:
         path = payload / "scripts/uninstall-profile.json"
         try:
             inventory._plain(path, file=True)
-            manifest = contract.parse(contract.decode(path.read_text(encoding="utf-8-sig")), plugin)
+            manifest = contract.parse(contract.decode(contract._manifest_text(path)), plugin)
             if set(manifest.producers) != {"scripts", "src"}:
                 raise ValueError("MCP producer coverage must include the complete scripts and src trees")
             inventory.profile_for(payload, plugin, path)

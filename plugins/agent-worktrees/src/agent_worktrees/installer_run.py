@@ -22,14 +22,21 @@ Statuses keep the shapes :func:`update_events.classify_status` already maps:
 from __future__ import annotations
 
 import dataclasses
+import codecs
+import io
 import os
 import signal
 import subprocess
+import sys
+import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import ExitStack
 from pathlib import Path
+from typing import BinaryIO
 
-from agent_procutil import contained_test_mode, no_window_kwargs, spawn_sync_in_kill_on_close_job
+from agent_procutil import JobHandle, contained_test_mode, no_window_kwargs, spawn_sync_in_kill_on_close_job
+from agent_procutil.streaming import SyncProcessOutput
 
 from . import push_timeout
 
@@ -49,7 +56,15 @@ class InstallerRun:
 
 
 class InstallerCleanupError(RuntimeError):
-    """The owned process tree could not be confirmed empty."""
+    """Post-launch failure; retain native custody when cleanup is unverified."""
+
+    def __init__(
+        self, message: str, *, process: subprocess.Popen | None = None,
+        job: JobHandle | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.process = process
+        self.job = job
 
 
 class InstallerLaunchError(RuntimeError):
@@ -60,9 +75,8 @@ def _spawn(
     argv: Sequence[str], cwd: Path | None, env: Mapping[str, str], capture: bool,
     output_fd: int | None = None, *, require_tree_exit: bool = False,
 ):
-    # Captured output is merged into one text stream; otherwise stdio stays
-    # inherited (the installer reports to the updater's console).
-    stdio = {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True,
+    # Keep channels distinct while observing their raw bytes for progress.
+    stdio = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True,
              "encoding": "utf-8", "errors": "replace"} if capture else {}
     if output_fd is not None:
         stdio = {"stdout": output_fd, "stderr": output_fd}
@@ -206,19 +220,38 @@ def _sweep_exited_session(proc: subprocess.Popen) -> None:
         _kill_session(proc)
 
 
-def _kill_tree(proc: subprocess.Popen, job) -> str:
+def _kill_tree(proc: subprocess.Popen, job, capture: SyncProcessOutput | None = None) -> str:
     """Kill the whole tree; return whatever captured output remains."""
     if job is not None:
         job.close()
     elif os.name != "nt" and not contained_test_mode():
-        _kill_session(proc)
+        if proc.returncode is None or _start_time(proc.pid) is None:
+            _kill_session(proc)
     else:
         push_timeout._kill_tree(proc)
     try:
-        out, _ = proc.communicate(timeout=_REAP_GRACE_S)
+        out, _ = (
+            capture.finish(_REAP_GRACE_S, stop_at_idle=os.name != "nt") if capture is not None
+            else proc.communicate(timeout=_REAP_GRACE_S)
+        )
     except subprocess.TimeoutExpired:
+        if capture is not None:
+            raise InstallerCleanupError("installer output did not settle after process-tree retirement") from None
         out = None
     return out or ""
+
+
+def _settle_strict_tree(
+    proc: subprocess.Popen, job: JobHandle | None, capture: SyncProcessOutput | None,
+) -> None:
+    if job is None:
+        raise RuntimeError("owned Windows Job is unavailable")
+    deadline = time.monotonic() + _REAP_GRACE_S
+    job.terminate_and_wait(_REAP_GRACE_S)
+    if capture is not None:
+        capture.finish(max(0, deadline - time.monotonic()))
+    else:
+        proc.communicate(timeout=max(0, deadline - time.monotonic()))
 
 
 def _judge(
@@ -254,14 +287,38 @@ def run_installer(
     output_fd: int | None = None,
     require_tree_exit: bool = False,
 ) -> InstallerRun:
-    """Run ``argv`` until it exits or ``deadline_s`` passes; never raises for a
+    """Keep native output live; deliver legacy logs after verified producer settlement."""
+    if log is not None and output_fd is not None:
+        raise ValueError("installer output_fd and log are mutually exclusive")
+    with ExitStack() as resources:
+        spools = {
+            name: resources.enter_context(tempfile.TemporaryFile())
+            for name in ("stdout", "stderr")
+        } if log is not None else None
+        return _run_installer(
+            argv, cwd=cwd, env=env, deadline_s=deadline_s,
+            target_version=target_version, receipt=receipt, log=log,
+            output_fd=output_fd, require_tree_exit=require_tree_exit,
+            output_spools=spools,
+        )
+
+
+def _run_installer(
+    argv: Sequence[str], *, cwd: Path | None, env: Mapping[str, str],
+    deadline_s: float, target_version: str | None,
+    receipt: Callable[[], str | None] | None, log: Callable[[str], None] | None,
+    output_fd: int | None, require_tree_exit: bool,
+    output_spools: Mapping[str, BinaryIO] | None,
+) -> InstallerRun:
+    """Run ``argv`` until it exits or emits nothing for ``deadline_s``; never raises for a
     spawn failure (it becomes the status).
 
     ``receipt`` returns the runtime's published version (``None`` when there is
     none); with ``target_version`` it decides success. Without a target the
     exit code alone decides, as before. With ``log``, stdout and stderr are
-    captured and passed to it line by line once the run ends (also after a
-    deadline kill); otherwise they stay inherited. ``output_fd`` streams both
+    passed to it as complete lines after process-tree settlement (with a final
+    partial line); native output remains live through a cancellable relay.
+    ``output_fd`` streams both
     channels to an owning human-output adapter without bypassing containment
     or receipt judgment. It cannot be combined with ``log``.
 
@@ -279,58 +336,121 @@ def run_installer(
     from update_driver import participant_environment
 
     env = {**env, **participant_environment()}
+    decoders = {name: codecs.getincrementaldecoder("utf-8")(errors="replace")
+                for name in ("stdout", "stderr")}
+    pending = {"stdout": "", "stderr": ""}
+    inherited = {"stdout": sys.stdout, "stderr": sys.stderr}
+    descriptors = {}
+    if log is None and output_fd is None:
+        for name, stream in inherited.items():
+            try:
+                descriptors[name] = stream.fileno()
+            except (AttributeError, io.UnsupportedOperation):
+                descriptors[name] = None
+    if output_fd is not None:
+        descriptors = {name: output_fd for name in ("stdout", "stderr")}
+    elif output_spools is not None:
+        descriptors = {name: spool.fileno() for name, spool in output_spools.items()}
+
+    def relay(name: str, chunk: bytes) -> None:
+        if log is not None or descriptors.get(name) is None:
+            text = decoders[name].decode(chunk)
+            if log is None:
+                inherited[name].write(text)
+                inherited[name].flush()
+            else:
+                pending[name] += text
+                while "\n" in pending[name]:
+                    line, pending[name] = pending[name].split("\n", 1)
+                    log(line.rstrip("\r"))
+
+    def deliver_output() -> None:
+        capture.deliver()
+        for name, spool in (output_spools or {}).items():
+            spool.seek(0)
+            while chunk := spool.read(4096):
+                relay(name, chunk)
+
     try:
         strict = {"require_tree_exit": True} if require_tree_exit else {}
-        if output_fd is None:
-            proc, job = _spawn(argv, cwd, env, log is not None, **strict)
-        else:
-            proc, job = _spawn(argv, cwd, env, False, output_fd=output_fd, **strict)
+        proc, job = _spawn(argv, cwd, env, True, **strict)
     except (OSError, RuntimeError) as exc:
         if require_tree_exit:
             if isinstance(exc, OSError):
                 raise
             raise InstallerLaunchError(str(exc)) from exc
         return InstallerRun(str(exc)[:120], None, None, False, time.monotonic() - started)
-    expired, out = False, ""
+    capture = None
+    expired = False
     try:
+        capture = SyncProcessOutput(
+            proc, on_output=relay if output_spools is None and any(
+                fd is None for fd in descriptors.values()
+            ) else None,
+            output_fds={name: fd for name, fd in descriptors.items() if fd is not None},
+            capture=False,
+        )
         try:
-            out = proc.communicate(timeout=deadline_s)[0] or ""
+            capture.wait(deadline_s, wait_for_eof=False)
             rc: int | None = proc.returncode
         except subprocess.TimeoutExpired:
             expired, rc = True, None
             if not require_tree_exit:
-                out = _kill_tree(proc, job)
+                _kill_tree(proc, job, capture)
                 job = None
-        if require_tree_exit:
-            try:
-                if job is None:
-                    raise RuntimeError("owned Windows Job is unavailable")
-                cleanup_deadline = time.monotonic() + _REAP_GRACE_S
-                job.terminate_and_wait(_REAP_GRACE_S)
-                job = None
-                out = proc.communicate(timeout=max(0, cleanup_deadline - time.monotonic()))[0] or ""
-            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-                raise InstallerCleanupError(f"process-tree cleanup unverified: {exc}") from exc
+        if not require_tree_exit and not expired:
+            _kill_tree(proc, job, capture)
+            job = None
     except BaseException as exc:
         if require_tree_exit:
-            if job is not None:
-                job.close()
+            try:
+                _settle_strict_tree(proc, job, capture)
+            except BaseException as cleanup_error:
+                failure = InstallerCleanupError(
+                    f"process-tree cleanup unverified: {cleanup_error}", process=proc, job=job,
+                )
+                failure.add_note(f"cleanup failed after {type(exc).__name__}: {exc}")
+                job = None
+                raise failure from exc
         else:
-            _kill_tree(proc, job)
+            _kill_tree(proc, job, capture)
         job = None
+        if capture is not None:
+            try:
+                deliver_output()
+            except BaseException as delivery_error:
+                exc.add_note(f"deferred output delivery failed: {delivery_error}")
         if require_tree_exit and isinstance(exc, OSError):
-            raise InstallerCleanupError(f"process-tree cleanup unverified after launch: {exc}") from exc
+            raise InstallerCleanupError(f"installer output failed after verified cleanup: {exc}") from exc
         raise
+    else:
+        if require_tree_exit:
+            try:
+                _settle_strict_tree(proc, job, capture)
+            except BaseException as exc:
+                failure = InstallerCleanupError(
+                    f"process-tree cleanup unverified: {exc}", process=proc, job=job,
+                )
+                job = None
+                raise failure from exc
+            job = None
     finally:
         if job is not None:
             # Everything the installer left behind dies with it; daemons it
             # started have broken away.
             job.close()
+    deliver_output()
     if rc == _WATCHDOG_EXIT and os.name != "nt" and not contained_test_mode():
         _sweep_exited_session(proc)
-    if log is not None:
-        for line in out.splitlines():
-            log(line)
+    if output_fd is None:
+        for name, decoder in decoders.items():
+            tail = decoder.decode(b"", final=True)
+            if log is not None:
+                if pending[name] or tail:
+                    log((pending[name] + tail).rstrip("\r"))
+            elif tail:
+                inherited[name].write(tail)
+                inherited[name].flush()
     deployed = receipt() if receipt is not None else None
     status, complete = _judge(rc, expired, target_version, deployed)
     return InstallerRun(status, rc, deployed, complete, time.monotonic() - started)

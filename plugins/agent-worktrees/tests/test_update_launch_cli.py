@@ -603,6 +603,7 @@ def test_actual_staged_install_survives_submitter_job_and_preserves_two_results(
     assert len(set(request_ids)) == 2
 
 
+@pytest.mark.real_installer_processes
 @pytest.mark.parametrize("phase", ["bootstrap", "reconcile"])
 def test_native_phase_streams_real_installer_before_completion(tmp_path, monkeypatch, capfd, phase):
     import threading

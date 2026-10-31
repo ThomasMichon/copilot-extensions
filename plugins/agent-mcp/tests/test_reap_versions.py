@@ -20,6 +20,168 @@ rv = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(rv)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows process observation")
+@pytest.mark.parametrize("observation", [
+    "recovered", "recovered-root-child", "recovered-root-foreign-child", "exited", "unknown", "changed",
+    "exited-root-child", "exited-root-foreign-child",
+    "owner-exited-root-child", "owner-exited-root-foreign-child",
+])
+def test_native_windows_census_refresh_keeps_identity_and_unknown_owner_refusal(
+    tmp_path, observation,
+):
+    import base64
+
+    from agent_procutil.owned_process import run_owned
+
+    root = Path(__file__).resolve().parents[3]
+    source = root / "libs/installer-engine/installer_engine_uninstall_windows.py"
+    spec = importlib.util.spec_from_file_location("native_windows_census_test", source)
+    inspector = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inspector)
+    shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    image = str(tmp_path / "python.exe").replace("'", "''")
+    python = sys.executable.replace("'", "''")
+    parent_source = (
+        "import os,subprocess,sys\n"
+        "child=subprocess.Popen([sys.executable,'-I','-c',"
+        "'import time;print(\"ready\",flush=True);time.sleep(60)'],"
+        "stdout=subprocess.PIPE,text=True,creationflags=subprocess.CREATE_NO_WINDOW)\n"
+        "assert child.stdout.readline().strip()=='ready'\n"
+        "child.stdout.close()\n"
+        "print(child.pid,flush=True)\n"
+        "sys.stdin.read(1)\n"
+    )
+    encoded = base64.b64encode(parent_source.encode()).decode()
+    preamble = r"""
+$observation='OBSERVATION'
+$target=$PID
+$current=[Diagnostics.Process]::GetCurrentProcess()
+try { $stamp=$current.StartTime.ToUniversalTime().ToFileTimeUtc() } finally { $current.Dispose() }
+$finished=$null
+$child=$null
+if ($observation.Contains('exited-root-')) {
+    $start=[Diagnostics.ProcessStartInfo]::new()
+    $start.FileName='PYTHON'
+    $start.Arguments='-I -c "import base64;exec(base64.b64decode(''ENCODED''))"'
+    $start.UseShellExecute=$false
+    $start.CreateNoWindow=$true
+    $start.RedirectStandardInput=$true
+    $start.RedirectStandardOutput=$true
+    $finished=[Diagnostics.Process]::Start($start)
+    $target=$finished.Id
+    $stamp=$finished.StartTime.ToUniversalTime().ToFileTimeUtc()
+    $child=[Diagnostics.Process]::GetProcessById([int]$finished.StandardOutput.ReadLine())
+} elseif ($observation -eq 'exited' -or $observation.StartsWith('recovered-root-')) {
+    $start=[Diagnostics.ProcessStartInfo]::new()
+    $start.FileName='PYTHON'
+    $start.Arguments=if($observation -eq 'exited'){'-I -c pass'}else{'-I -c "import time;time.sleep(60)"'}
+    $start.UseShellExecute=$false
+    $start.CreateNoWindow=$true
+    $launched=[Diagnostics.Process]::Start($start)
+    if ($observation -eq 'exited') {
+        $finished=$launched
+        $target=$finished.Id
+        $stamp=$finished.StartTime.ToUniversalTime().ToFileTimeUtc()
+        if (-not $finished.WaitForExit(10000)) { throw 'Fixture child did not exit' }
+    } else { $child=$launched }
+}
+$created=[datetime]::FromFileTimeUtc($stamp-($stamp%10))
+$script:observations=0
+function Exit-FixtureRoot {
+    $finished.StandardInput.Write('x')
+    $finished.StandardInput.Flush()
+    if (-not $finished.WaitForExit(10000)) { throw 'Fixture root did not exit' }
+    if ($child.HasExited) { throw 'Fixture child exited with its root' }
+}
+function Get-CimInstance {
+    param($ClassName,$Filter,$ErrorAction)
+    $script:observations+=1
+    if ($script:observations -gt 2) { throw 'Census repeated its refresh' }
+    if ($Filter -and $observation -eq 'exited') { return }
+    if ($Filter -and $observation.Contains('exited-root-')) { Exit-FixtureRoot; return }
+    $complete=$Filter -and $observation -ne 'unknown'
+    $birth=if ($Filter -and $observation -eq 'changed') { $created.AddSeconds(1) } else { $created }
+    [pscustomobject]@{
+        ProcessId=$target;ParentProcessId=0;Name='python.exe';CreationDate=$birth
+        ExecutablePath=$(if($complete -or $observation.Contains('exited-root-')){'IMAGE'}else{''})
+        CommandLine=$(if($complete){'fixture-census'}else{''})
+    }
+    if (-not $Filter -and $child) {
+        $childStamp=$child.StartTime.ToUniversalTime().ToFileTimeUtc()
+        [pscustomobject]@{
+            ProcessId=$child.Id;ParentProcessId=$target;Name='node.exe'
+            CreationDate=[datetime]::FromFileTimeUtc($childStamp-($childStamp%10))
+            ExecutablePath='PYTHON';CommandLine='native-child'
+        }
+    }
+}
+function Invoke-CimMethod {
+    param($InputObject,$MethodName,$ErrorAction)
+    if ($observation.StartsWith('owner-exited-root-') -and $InputObject.ProcessId -eq $target) {
+        Exit-FixtureRoot
+        throw 'Fixture root exited during ownership inspection'
+    }
+    $ownerSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    if ($observation.EndsWith('-foreign-child') -and $InputObject.ProcessId -eq $child.Id) {
+        $ownerSid='S-1-5-21-0'
+    }
+    [pscustomobject]@{ReturnValue=0;Sid=$ownerSid}
+}
+""".replace("OBSERVATION", observation).replace("PYTHON", python).replace("IMAGE", image).replace("ENCODED", encoded)
+
+    def run(argv):
+        argv = [*argv[:-1], preamble + "\ntry {\n" + argv[-1] + r"""
+} finally {
+    if($finished){
+        try {
+            if(-not $finished.HasExited){$finished.Kill()}
+            if(-not $finished.WaitForExit(10000)){throw 'Fixture root did not settle'}
+        } finally {$finished.Dispose()}
+    }
+    if($child){
+        try {
+            if(-not $child.HasExited){$child.Kill()}
+            if(-not $child.WaitForExit(10000)){throw 'Fixture child did not settle'}
+        } finally {$child.Dispose()}
+    }
+}
+"""]
+        result = run_owned(argv, timeout=30)
+        if result.returncode:
+            raise subprocess.CalledProcessError(
+                result.returncode, argv, output=result.stdout, stderr=result.stderr,
+            )
+        return result.stdout
+
+    if observation in {"unknown", "changed"} or observation.endswith("-foreign-child"):
+        with pytest.raises(subprocess.CalledProcessError) as caught:
+            inspector.inspect_processes(tmp_path, str(shell), "fixture", run, descendants=True)
+        expected = {
+            "unknown": "candidate process (pid=", "changed": "identity changed",
+            "recovered-root-foreign-child": "another user",
+            "exited-root-foreign-child": "another user",
+            "owner-exited-root-foreign-child": "another user",
+        }[observation]
+        assert expected in caught.value.stderr
+    else:
+        rows = inspector.inspect_processes(tmp_path, str(shell), "fixture", run, descendants=True)
+        if observation == "exited":
+            assert rows == []
+        elif observation == "recovered-root-child":
+            assert len(rows) == 2
+            parent = next(row for row in rows if row["inspectionHost"])
+            child = next(row for row in rows if not row["inspectionHost"])
+            assert parent["image"] == str(tmp_path / "python.exe")
+            assert child["ppid"] == parent["pid"] and child["image"] == sys.executable
+            assert parent["created"] > 0 and child["created"] > 0
+        elif "exited-root-" in observation:
+            assert len(rows) == 1 and rows[0]["image"] == sys.executable
+            assert rows[0]["created"] > 0 and not rows[0]["inspectionHost"]
+        else:
+            assert len(rows) == 1 and rows[0]["image"] == str(tmp_path / "python.exe")
+            assert rows[0]["created"] > 0 and rows[0]["inspectionHost"]
+
+
 def _row(pid, parent, image, *, created=None):
     return {
         "pid": pid, "ppid": parent, "image": str(image), "argv": [str(image)],
@@ -494,6 +656,7 @@ def test_real_dead_main_thread_cannot_hide_a_live_runtime(
         process.stdout.close()
 
 
+@pytest.mark.timeout(90 if os.name == "nt" else 30)
 def test_real_tree_exit_spares_original_parent(tmp_path):
     if os.name != "nt" and not sys.platform.startswith("linux"):
         pytest.skip("External identity-pinned retirement requires Windows or Linux")

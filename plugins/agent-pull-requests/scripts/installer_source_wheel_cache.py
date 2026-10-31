@@ -7,6 +7,7 @@ No UV cache files or completed runtime generations are modified.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
@@ -103,6 +104,7 @@ def _copy_wheel(
 def cached_source_wheel(
     owner_root: Path, binding: bytes, output: Path | None, *, build, validate,
     max_archive_bytes: int, deadline: float,
+    progress_deadline: Callable[[], float] | None = None,
 ) -> Path:
     """Build once and select an immutable exact wheel, optionally copying it.
 
@@ -113,7 +115,12 @@ def cached_source_wheel(
     With no output directory, retain the stable content-bound archive URL so UV
     can reuse its extracted wheel. Published entries are never replaced.
     """
-    _check_deadline(deadline)
+    def current_deadline():
+        selected = progress_deadline() if progress_deadline is not None else deadline
+        _check_deadline(selected)
+        return selected
+
+    current_deadline()
     if (
         not isinstance(binding, bytes) or not binding
         or type(max_archive_bytes) is not int or max_archive_bytes <= 0
@@ -127,21 +134,21 @@ def cached_source_wheel(
     cache = owner_root / ".source-wheel-cache"
     cache.mkdir(mode=0o700, exist_ok=True)
     _directory(cache)
-    with runtime.construction_lease(cache, "cache-root", timeout=deadline - time.monotonic()):
+    with runtime.construction_lease(cache, "cache-root", timeout=current_deadline() - time.monotonic()):
         root = cache / "inputs"
         if not os.path.lexists(root):
             _private_retained_root(cache)
         _directory(root)
-    with runtime.construction_lease(cache, key, timeout=deadline - time.monotonic()):
+    with runtime.construction_lease(cache, key, timeout=current_deadline() - time.monotonic()):
         entry = root / key
         if os.path.lexists(entry):
             wheel, expected, size = _read_receipt(entry, key, max_archive_bytes)
-            return _copy_wheel(wheel, output, expected, size, deadline)
+            return _copy_wheel(wheel, output, expected, size, current_deadline())
         with tempfile.TemporaryDirectory(prefix=".build-", dir=root) as temporary:
             candidate = Path(temporary) / "entry"
             candidate.mkdir()
             wheel = build(candidate)
-            _check_deadline(deadline)
+            current_deadline()
             if (
                 not isinstance(wheel, Path) or wheel.parent != candidate
                 or _FILENAME.fullmatch(wheel.name) is None
@@ -152,7 +159,7 @@ def cached_source_wheel(
             before = _ordinary(wheel)
             with _open(wheel) as stream:
                 opened = _unchanged(wheel, before, stream)
-                expected, size = _digest(stream, max_archive_bytes, deadline)
+                expected, size = _digest(stream, max_archive_bytes, current_deadline())
                 _unchanged(wheel, before, stream, opened=opened)
             if not size:
                 raise WheelError("source build produced an empty wheel")
@@ -160,7 +167,7 @@ def cached_source_wheel(
                 "schema": _SCHEMA, "version": 1, "key": key, "filename": wheel.name,
                 "sha256": expected, "size": size,
             }, sort_keys=True, separators=(",", ":")) + "\n", encoding="ascii")
-            _check_deadline(deadline)
+            current_deadline()
             candidate.rename(entry)
         wheel, expected, size = _read_receipt(entry, key, max_archive_bytes)
-        return _copy_wheel(wheel, output, expected, size, deadline)
+        return _copy_wheel(wheel, output, expected, size, current_deadline())

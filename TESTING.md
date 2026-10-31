@@ -1,5 +1,25 @@
 # Testing copilot-extensions
 
+The optional `update_diagnostics` lane runs the native installer inactivity
+packet separately from the focused constructor packet on Linux and Windows.
+Real children emit stdout/stderr without newlines beyond their quiet window;
+quiet stalls, failed output sinks, retained guardian settlement, native byte
+and channel preservation, unchanged receipt judgment and incumbent health
+remain independent controls. Source-phase units also advance through verified
+file batches. These checks do not qualify every native self-stage watchdog,
+initial source retention or an installed whole-update footprint.
+An open undrained pipe must not starve supervision. A slow draining pipe
+separately proves acknowledged native writes renew the delivery allowance after
+installer exit. Legacy log/observer failures occur only after owned writers have
+settled; native relays retain original byte channels and explicit error receipts.
+The MCP retirement packet adds native Windows controls for one birth-checked
+incomplete-census refresh, completed processes and retained live-unknown/identity
+refusals. An actual native parent exits during either ownership inspection or
+metadata refresh while its child stays alive; snapshot ancestry must retain
+that child and the foreign-owner refusal. Its actual fresh-settlement fixture owns its complete child scope with
+the existing 60-second child bound; that case's 90-second outer guard allows
+owned timeout cleanup and reporting instead of preempting them.
+
 The optional `update_diagnostics` lane includes Manager's actual scoped
 engine handoff under a no-window captured parent. It verifies repeated stdout
 and stderr, the unchanged native nonzero result and unaffected unscoped
@@ -21,8 +41,16 @@ not perform full installation, old-owner retirement or installed-host rollout.
 The same optional lane separately executes MCP's `test_reap_versions.py` and
 procutil's `test_process_retirement.py` and `test_retirement_custody.py` on Windows and Linux. A real synthetic
 tree (including Windows-owned headless console hosts) must exit through retained
-kernel identities while its original parent survives. Native pause/rollback
-and both shell adapters' fresh-failure propagation are distinct controls.
+kernel identities while its original parent survives. Retirement uses two
+complete censuses; measured Windows owner queries made steady progress
+but exceeded the default 30-second item guard. That native tree fixture uses
+the same 90-second guard as fresh settlement, retaining its 60-second children,
+full census, identity checks and owned cleanup. Production deadlines, unit-only
+packet policy, non-Windows item and aggregate runner budgets are unchanged.
+Native pause/rollback and both shell adapters' fresh-failure propagation are
+distinct controls. The Linux writer-exit observer treats a disappearing proc
+stat file as completed exit, but still propagates an unreadable observation;
+the hard-owner-death controls retain their original process settlement bounds.
 Abrupt caller death after its first native pause must resume the original target,
 settle the finite custodian, and leave the observing parent alive. A separate
 hosted Linux control in `tools/retirement_custody_acceptance.py` closes an actual

@@ -35,6 +35,24 @@ def _record() -> dict[str, Any]:
     return subject.decode(PATH.read_text(encoding="utf-8"))
 
 
+def test_complete_history_uses_manifest_budget_without_expanding_marker_budget(tmp_path: Path) -> None:
+    path = tmp_path / "uninstall-profile.json"
+    content = json.dumps(_record(), indent=4).encode("utf-8")
+    assert len(content) > 65536
+    path.write_bytes(content)
+    observed = subject.parse(subject.decode(subject._manifest_text(path)), "agent-mcp")
+    assert observed.history == subject.parse(_record(), "agent-mcp").history
+    with pytest.raises(subject.FootprintError, match="marker exceeds"):
+        subject._marker_text(path)
+
+
+def test_oversized_manifest_is_refused_before_decode(tmp_path: Path) -> None:
+    path = tmp_path / "uninstall-profile.json"
+    path.write_bytes(b" " * ((1 << 20) + 1))
+    with pytest.raises(subject.FootprintError, match="manifest exceeds"):
+        subject._manifest_text(path)
+
+
 def _seed(root: Path) -> None:
     slot = root / "versions/1.2.3"
     slot.mkdir(parents=True)
@@ -441,10 +459,13 @@ def test_changed_producer_scope_cannot_hide_new_output(monkeypatch: pytest.Monke
         record["history"][-2]["snapshot"] if len(record["history"]) > 1 else None,
         record["history"][-1]["snapshot"],
     )
-    original = Path.read_text
+    original = Path.open
     monkeypatch.setattr(
-        Path, "read_text",
-        lambda path, *args, **kwargs: json.dumps(record) if path == PATH else original(path, *args, **kwargs),
+        Path, "open",
+        lambda path, mode="r", *args, **kwargs: (
+            io.BytesIO(json.dumps(record).encode("utf-8"))
+            if path == PATH and mode == "rb" else original(path, mode, *args, **kwargs)
+        ),
     )
     problems = guard.check(ROOT)
     assert len(problems) == 1
