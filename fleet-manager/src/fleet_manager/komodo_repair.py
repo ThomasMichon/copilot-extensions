@@ -187,8 +187,10 @@ class _Attempt:
             self.owner.admission.discard(self.permit)
             raise
 
-    def evidence(self, *, failed: bool) -> dict[str, Any]:
+    def evidence(self, *, failed: bool, retained: dict[str, Any] | None = None) -> dict[str, Any]:
         self.checkpoint()
+        if retained is None:
+            retained = self.pending_outcome(failed=failed)
         selected = self.resolution.current().candidate
         images = self.native.prerequisites(selected.declaration, selected.material, deadline=self.deadline)
         containers = self.native.inspect(selected.declaration, selected.material, deadline=self.deadline)
@@ -200,8 +202,9 @@ class _Attempt:
             selected_native = True
         before_network = deepcopy(self.native.network(
             selected.declaration, selected.material, deadline=self.deadline))
+        expected_network = self.original["network_before"] if retained is None else retained["network"]
         network = verify_network(before_network,
-            selected, containers, self.original["network_before"], created=True, pending=failed)
+            selected, containers, expected_network, created=retained is None, pending=failed)
         self.checkpoint()
         health = None
         if failed:
@@ -283,22 +286,27 @@ class _Attempt:
         validate_history(self.state.root, value.get("prior_outcomes"))
         return value
 
+    def pending_outcome(self, *, failed: bool | None = None) -> dict[str, Any] | None:
+        pending = [name for name in ("good", "failed")
+                   if type(self.record[name]) is dict and self.record[name].get(
+                       "repair", {}).get("request_digest") == self.request.request_digest]
+        if not pending:
+            return None
+        if (len(pending) != 1
+                or failed is not None and pending[0] != ("failed" if failed else "good")):
+            raise PlanError("Komodo repair cannot change an interrupted terminal decision")
+        return self.outcome("failed" if pending[0] == "failed" else "succeeded")
+
     def publish(self, value: dict[str, Any], *, failed: bool) -> TargetReceipt:
         status, key = ("failed", "failed") if failed else ("succeeded", "good")
-        pending = self.record[key]
-        if (type(pending) is dict and pending.get("repair", {}).get("request_digest")
-                == self.request.request_digest):
-            pending = self.outcome(status)
+        pending = self.pending_outcome(failed=failed)
+        if pending is not None:
             if (pending["native"] != value["native"] or pending["material"] != value["material"]
                     or pending["public_identity"] != value["public_identity"]
                     or pending["network"] != value["network"]
                     or pending["original_attempt"] != value["original_attempt"]):
                 raise PlanError("Komodo repair pending outcome no longer proves the original candidate")
             value = pending
-        elif any(type(self.record[name]) is dict and self.record[name].get(
-                "repair", {}).get("request_digest") == self.request.request_digest
-                for name in ("good", "failed")):
-            raise PlanError("Komodo repair cannot change an interrupted terminal decision")
         self.checkpoint()
         reference = self.state.retain(value)
         self.retained = reference, deepcopy(value)
@@ -373,7 +381,7 @@ class KomodoRepairOwner:
                 if prior != ("failed" if failed else "succeeded"):
                     raise PlanError("Komodo repair cannot change the original terminal decision")
                 outcome = operation.outcome(prior)
-                current = operation.evidence(failed=False) if not failed else None
+                current = operation.evidence(failed=False, retained=outcome) if not failed else None
                 if failed:
                     operation.native.prerequisites(
                         selected.declaration, selected.material, deadline=operation.deadline)
@@ -410,16 +418,21 @@ class KomodoRepairOwner:
                     verify_candidate(containers, selected, images, selected.profile(),
                                      operation.original, ready=False)
                     selected_native = True
+                    retained = operation.pending_outcome()
+                    expected_network = (operation.original["network_before"]
+                                        if retained is None else retained["network"])
                 else:
                     retained = operation.outcome(status)
                     if not native_set_matches(retained["native"], containers):
                         raise PlanError("Komodo repair retained native evidence is unproved")
                     selected_native = retained.get("selected_native", True)
+                    expected_network = retained["network"]
                 installed, observed = set(containers) == set(SERVICES), selected.deployment_digest
                 before_network = deepcopy(operation.native.network(
                     selected.declaration, selected.material, deadline=operation.deadline))
                 network = verify_network(before_network,
-                    selected, containers, operation.original["network_before"], created=True, pending=True)
+                    selected, containers, expected_network,
+                    created=status == "unknown" and retained is None, pending=True)
                 if installed and selected_native and all(map(native_running, containers.values())):
                     observer = KomodoOwner(
                         current=lambda: operation.resolution.current().candidate,
@@ -444,6 +457,9 @@ class KomodoRepairOwner:
                     selected, after, network, pending=True)
                 if not same_network_observation(before_network, after_network):
                     raise PlanError("Komodo repair native network endpoints changed during status inspection")
+                operation.observation = _Observation(
+                    deepcopy(after), network,
+                    deepcopy(after_network["Containers"]) if after_network is not None else None, True)
             except PlanError as detail:
                 if operation.native.native_failure is not None:
                     raise

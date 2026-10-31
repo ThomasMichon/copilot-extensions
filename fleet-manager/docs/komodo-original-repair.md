@@ -122,6 +122,18 @@ drift refuses that completion while preserving the already committed original
 terminal receipt; it never changes the decision back to UNKNOWN or appends a
 second terminal outcome.
 
+Successful terminal retries, terminal status and interrupted pending-outcome
+retries/status bind the retained outcome's bridge, not the pre-apply attempt's
+network-before observation.
+A missing or replaced bridge refuses before credentialed health, even when
+all current container attachments consistently point at the replacement.
+Only the original UNKNOWN's attributed creation path can recognize a bridge
+where network-before was absent; a terminal observation cannot establish a new
+bridge baseline.
+The completed status observation also spans the final authority/custody
+checkpoint before return. A bridge replaced immediately after its final
+inspection snapshot cannot be reported as a healthy installation.
+
 ## Status, support and rollout
 
 `repair_status` reports schema `fleet-manager.komodo-repair-status`, version 1,

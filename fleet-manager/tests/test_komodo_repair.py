@@ -16,6 +16,7 @@ import pytest
 from fleet_manager import komodo_state
 from fleet_manager.komodo_control import CONTRACT, REPAIR_CONTRACT, repair_bootstrap, repair_status
 from fleet_manager.komodo_declaration import KomodoDeclaration
+from fleet_manager.komodo_evidence import native_fingerprint
 from fleet_manager.komodo_native import KomodoNative
 from fleet_manager.komodo_owner import KomodoOwner
 from fleet_manager.komodo_repair import KomodoRepairOwner
@@ -37,10 +38,15 @@ CRASHES = [
     "native-before", "health-after", "retain-before", "retain-after", "save-before", "save-after",
     "journal-before", "journal-after", "clear-before", "clear-after",
     "complete-before", "complete-after", "journal-revoke", "append-revoke", "save-revoke",
+    "pending-succeeded-replaced-network",
 ]
 PARTIAL_SAVES = ["save-partial-renewed", "clear-partial-renewed"]
 TERMINAL_NETWORK = ["terminal-failed-network", "terminal-failed-attachment"]
 CLEANUP_DRIFTS = ["cleanup-key", "cleanup-endpoint"]
+REPLACED_TERMINAL = [
+    "terminal-succeeded-replaced-network", "status-succeeded-replaced-network",
+    "status-failed-replaced-network",
+]
 DRIFTS = [
     f"publication-drift-{stage}-{change}"
     for stage in ("retain", "save", "append")
@@ -67,9 +73,10 @@ REFUSALS = [
         "success", "revoked-transition", "revoke-after-health", "journal-revoke",
     ) else [pytest.mark.client_distribution_full])
     for mode in ("success", "failed", "mount-order", "renewed", "prior-failed",
+                 "status-late-network",
                  "status-endpoint-drift", "status-missing-network-membership",
                  "status-mismatched-network-attachment", *REFUSALS, *CRASHES, *PARTIAL_SAVES,
-                 *TERMINAL_NETWORK, *CLEANUP_DRIFTS)
+                 *TERMINAL_NETWORK, *CLEANUP_DRIFTS, *REPLACED_TERMINAL)
 ])
 def test_original_unknown_uses_current_repair_without_native_replay(
     native_rig: Any, keys: Any, monkeypatch: Any, mode: str,
@@ -90,12 +97,29 @@ def test_original_unknown_uses_current_repair_without_native_replay(
     transition = {"active": True, "revision": 1, "expiry": harness.clock() + 1000}
     runtime_identity = ["9" * 64]
     resolver_calls: list[tuple[str, str, str]] = []
+    health_requests: list[str] = []
 
     def live() -> dict[str, Any]:
         return json.loads((rig["directory"] / "live.json").read_text())
 
+    def replace_bridge() -> tuple[bytes, bytes]:
+        path = rig["directory"] / "network.json"
+        original_network, original_native = path.read_bytes(), (rig["directory"] / "live.json").read_bytes()
+        network = json.loads(original_network)
+        network["Id"] = "f" * 64
+        path.write_text(json.dumps(network))
+        changed = live()
+        for item in changed.values():
+            for attachment in item["NetworkSettings"]["Networks"].values():
+                attachment["NetworkID"] = network["Id"]
+        assert {name: native_fingerprint(item) for name, item in changed.items()} == {
+            name: native_fingerprint(item) for name, item in json.loads(original_native).items()}
+        (rig["directory"] / "live.json").write_text(json.dumps(changed))
+        return original_network, original_native
+
     async def exercise() -> None:
         async def handler(request: web.Request) -> web.Response:
+            health_requests.append(request.path)
             if request.path == "/auth/login/LoginLocalUser":
                 assert await request.json() == {
                     "username": "admin_username-fixture-material",
@@ -200,7 +224,8 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             uncertain = journal.inspect(original)
             assert uncertain.to_dict()["status"] == "unknown"
             assert uncertain.to_dict()["sequence"] == 2 and uncertain.to_dict()["result_ref"] is None
-            original_health_failure[0] = mode == "failed" or mode in TERMINAL_NETWORK
+            failed = mode == "failed" or mode in TERMINAL_NETWORK or mode == "status-failed-replaced-network"
+            original_health_failure[0] = failed
 
             def resolve(identity: Any, request: Any, role: str, installation: str) -> KomodoRepairSelection:
                 resolver_calls.append((identity.subject, role, installation))
@@ -221,7 +246,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 return (repair_status if status else repair_bootstrap)(
                     repair_owner(), harness.identity(), selected_request,
                     role="client", installation="client-a",
-                    **({} if status else {"failed": mode == "failed" or mode in TERMINAL_NETWORK}))
+                    **({} if status else {"failed": failed}))
 
             selected_request = original
             if mode in ("missing-network-membership", "status-missing-network-membership"):
@@ -322,6 +347,20 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             fired: list[bool] = []
             partial_save: list[tuple[Path, bytes, int, int]] = []
             late_key = [False]
+            if mode == "status-late-network":
+                status_network = KomodoNative.network
+                finished_health_networks: list[bool] = []
+
+                def replaced_after_inspection(instance: Any, *args: Any, **kwargs: Any) -> Any:
+                    result = status_network(instance, *args, **kwargs)
+                    if health_changes:
+                        finished_health_networks.append(True)
+                        if len(finished_health_networks) == 2:
+                            fired.append(True)
+                            replace_bridge()
+                    return result
+
+                monkeypatch.setattr(KomodoNative, "network", replaced_after_inspection)
             if mode in CLEANUP_DRIFTS:
                 save = KomodoState.save
 
@@ -375,7 +414,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     target, name = KomodoOwner, "_ready"
                 elif mode.startswith("retain"):
                     target, name = KomodoState, "retain"
-                elif mode.startswith(("save", "clear")):
+                elif mode.startswith(("save", "clear", "pending")):
                     target, name = KomodoState, "save"
                 elif mode.startswith("complete"):
                     target, name = AdmissionAuthority, "complete"
@@ -402,7 +441,8 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     if selected and mode in ("append-revoke", "save-revoke"):
                         fired.append(True)
                         transition["active"] = False
-                    elif selected and mode.endswith(("-after", "-after-health")):
+                    elif selected and (mode.endswith(("-after", "-after-health"))
+                                       or mode == "pending-succeeded-replaced-network"):
                         fired.append(True)
                         raise PlanError("fixture publication interrupted")
                     return result
@@ -472,7 +512,11 @@ def test_original_unknown_uses_current_repair_without_native_replay(
 
                 monkeypatch.setattr(target, name, drifted)
 
-            if mode in ("status-endpoint-drift", "status-missing-network-membership",
+            if mode == "status-late-network":
+                with pytest.raises(PlanError, match="native.*network"):
+                    await asyncio.to_thread(call, status=True)
+                assert fired and journal.inspect(original) == uncertain and not harness.owner._issued
+            elif mode in ("status-endpoint-drift", "status-missing-network-membership",
                         "status-mismatched-network-attachment"):
                 status = await asyncio.to_thread(call, status=True)
                 assert status["accepted"] == "unknown" and status["unresolved_effects"]
@@ -512,6 +556,20 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     assert fired and not harness.owner._issued
                     assert journal.inspect(original).to_dict()["sequence"] in (2, 3)
                     transition["active"] = True
+                    if mode == "pending-succeeded-replaced-network":
+                        before_health = list(health_requests)
+                        original_network, original_native = replace_bridge()
+                        status = await asyncio.to_thread(call, status=True)
+                        assert status["accepted"] == "unknown" and status["unresolved_effects"]
+                        assert status["installed"] is status["currently_healthy"] is None
+                        assert "retained native network" in status["health_error"]
+                        assert health_requests == before_health
+                        with pytest.raises(PlanError, match="retained native network"):
+                            await asyncio.to_thread(call)
+                        assert journal.inspect(original) == uncertain and health_requests == before_health
+                        assert decode((owner_root / "selection.json").read_bytes())["attempt"] == retained
+                        (rig["directory"] / "network.json").write_bytes(original_network)
+                        (rig["directory"] / "live.json").write_bytes(original_native)
                     if mode in CLEANUP_DRIFTS:
                         terminal_before_retry = journal.inspect(original)
                         terminal_rows = journal.results()
@@ -535,8 +593,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                         )),))
                         transition["revision"] = 2
                 receipt = await asyncio.to_thread(call)
-                assert receipt.to_dict()["status"] == (
-                    "failed" if mode == "failed" or mode in TERMINAL_NETWORK else "succeeded")
+                assert receipt.to_dict()["status"] == ("failed" if failed else "succeeded")
                 assert receipt.to_dict()["sequence"] == 3
                 assert receipt.to_dict()["request_digest"] == original.request_digest
                 if mode in TERMINAL_NETWORK:
@@ -552,6 +609,19 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     with pytest.raises(PlanError):
                         await asyncio.to_thread(call)
                     assert journal.inspect(original) == receipt
+                elif mode in REPLACED_TERMINAL:
+                    before_health = list(health_requests)
+                    replace_bridge()
+                    if mode.startswith("status"):
+                        status = await asyncio.to_thread(call, status=True)
+                        assert status["accepted"] == receipt.to_dict()["status"]
+                        assert status["installed"] is status["currently_healthy"] is None
+                        assert "original-candidate-custody-unproved" in status["blockers"]
+                        assert "retained native network" in status["health_error"]
+                    else:
+                        with pytest.raises(PlanError, match="retained native network"):
+                            await asyncio.to_thread(call)
+                    assert journal.inspect(original) == receipt and health_requests == before_health
                 else:
                     assert await asyncio.to_thread(call) == receipt
                 if mode in CLEANUP_DRIFTS:
@@ -588,7 +658,8 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             assert sentinel.read_text() == "original-data"
             assert (rig["directory"] / "effects").read_text() == expected_effects
             assert not (rig["directory"] / "retire-effects").exists()
-            if mode not in ("mount-order", "changed-native", "process-after-health", *DRIFTS):
+            if mode not in ("mount-order", "changed-native", "process-after-health", "status-late-network",
+                            *DRIFTS, *REPLACED_TERMINAL):
                 assert live() == native_before
             if mode not in ("revoked-transition",):
                 assert resolver_calls
