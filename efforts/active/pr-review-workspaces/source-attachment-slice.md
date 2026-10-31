@@ -101,17 +101,22 @@ adding another process owner or passing blob bytes through newline normalization
 
 ## Acceptance and rollout boundary
 
-- [ ] Synthetic real Git repositories prove exact common/head, additions,
+- [x] Synthetic real Git repositories prove exact common/head, additions,
   edits, deletion, rename coverage, text/binary, symlink/gitlink classification,
   and complete native-to-local path/blob mapping without checkout/build/fetch.
-- [ ] Wrong scope/range, incomplete changes, missing objects, unsupported
+- [x] Wrong scope/range, incomplete changes, missing objects, unsupported
   paths/folders, contradictory IDs and budget exhaustion cannot claim readiness.
-- [ ] Same-range retries preserve immutable refs, conflicting refs refuse,
+- [x] Same-range retries preserve immutable refs, conflicting refs refuse,
   prior ranges remain retained, and owner permission errors remain original.
-- [ ] Exercise the actual Worktrees reader through the PR-domain attachment
+- [x] Exercise the actual Worktrees reader through the PR-domain attachment
   envelope; metadata-only discussion incompleteness does not block ready source.
-- [ ] Run contained source tests, relevant existing controls and source gates;
+- [x] Run contained source tests, relevant existing controls and source gates;
   drive contract and implementation PRs through assessed review/CI/merge.
+  Implemented in #9708, merged as `71ea35ed429a57d41808c7c2f6693446c77a822c`;
+  final contained source/tree/native-evidence packet: 101 passed, two existing
+  opt-in skips. The process-owner packet passed 88 cases with 12 platform skips.
+  Required CI and an actual current-head approving review passed after all six
+  findings and source-admission/generated-footprint guard failures were fixed.
 
 Actual owner adoption, source fetching/credential use, product checkouts,
 real backend qualification and runtime rollout remain with their current

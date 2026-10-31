@@ -133,9 +133,14 @@ The source implementation continuation is admitted; operational effects are not.
   The [exact local source-attachment slice](source-attachment-slice.md) starts
   with already prepared objects through the existing workspace/resource owner;
   it does not invent a fetcher or silently adopt a read-only reference checkout.
+- [x] Implement the admitted exact local source inspector, native mapping/blob
+  verification, immutable ref retention and separate generation-bound attachment
+  envelope (#9708); fetching, owner adoption and live qualification stay open.
 - [ ] Preserve existing GitHub behavior and use a provider-neutral contract.
 
 ### Phase 3 - Build explicit submission and reconciliation after admission
+The [explicit submission/reconciliation slice](submission-slice.md) selects an
+extension of the existing `ReplayStore` envelope, not a second posting ledger.
 - [ ] Accept selected comments, owned-thread updates and a named verdict bound
   to the reviewed candidate; preserve caller/repository authority boundaries.
 - [ ] Perform fresh required checks and readback inside the operation, without
@@ -193,6 +198,16 @@ contract.
 ## Journal
 
 ### 2026-10-30 - Exact source contract and implementation continuation
+- Implementation #9708 merged as `71ea35ed429a57d41808c7c2f6693446c77a822c`
+  after actual current-head approval, all review threads resolved and passing
+  required CI. Final contained source/tree/native-evidence controls: 101 passed,
+  two existing opt-in skips. The source-slice acceptance is resolved, not the
+  broader Phase 2, Phase 3 or end-to-end objective.
+- Next original source work is explicit submission/reconciliation admission:
+  reuse the existing PR storage/provider owners, keep durable effect receipts
+  separate from cache, preserve unknown writes and native platform identities,
+  and do not wrap the legacy string-returning provider submission primitive as
+  if it already provided safe partial-outcome or replay semantics.
 - Contract #9703 merged as `5267c7010200a53acaee48dfe9e9e6876a2cb790`
   after an actual current-head approval, resolved feedback and passing CI.
   Corrected the distinction between absent paths and existing zero-byte blobs.
