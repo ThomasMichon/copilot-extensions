@@ -51,16 +51,21 @@ def _runtime_process_inventory_script(slots: dict[str, str]) -> str:
 
 def _runtime_process_trace_script(home: Path, ready: Path, stop: Path, report: Path) -> str:
     quoted = [str(path).replace("'", "''") for path in (home, ready, stop, report)]
+    window = str(home.parent / "process-trace-window").replace("'", "''")
     return (
         "$ErrorActionPreference='Stop';"
         "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);"
         f"$homePrefix='{quoted[0]}\\';$readyPath='{quoted[1]}';"
         f"$stopPath='{quoted[2]}';$reportPath='{quoted[3]}';"
+        f"$windowPath='{window}';$windowArmed=$false;"
         "$seen=[Collections.Generic.HashSet[string]]::new();"
         "$rows=[Collections.Generic.List[object]]::new();$scanErrors=0;$truncated=$false;"
         "$deadline=[DateTime]::UtcNow.AddSeconds(3300);"
         "[IO.File]::WriteAllText($readyPath,'ready');"
         "while(-not [IO.File]::Exists($stopPath) -and [DateTime]::UtcNow -lt $deadline){"
+        "if(-not $windowArmed){"
+        "if([IO.File]::Exists($windowPath)){$windowArmed=$true}"
+        "else{Start-Sleep -Milliseconds 100;continue}};"
         "try{"
         "Get-CimInstance Win32_Process -Filter \"Name LIKE 'python%.exe'\" "
         "-OperationTimeoutSec 1 | ForEach-Object {"
@@ -86,7 +91,7 @@ def _runtime_process_trace_script(home: Path, ready: Path, stop: Path, report: P
         "Start-Sleep -Milliseconds 100};"
         "$result=@{schema='worktree-manager.native-process-trace.v1';"
         "records=@($rows.ToArray());scan_errors=$scanErrors;truncated=$truncated;"
-        "stop_observed=[IO.File]::Exists($stopPath)};"
+        "stop_observed=[IO.File]::Exists($stopPath);window_armed=$windowArmed};"
         "[IO.File]::WriteAllText($reportPath,"
         "(ConvertTo-Json -InputObject $result -Depth 4),[Text.UTF8Encoding]::new($false));"
         "if(-not $result.stop_observed -or $scanErrors -gt 0){exit 1}"

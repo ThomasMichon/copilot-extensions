@@ -89,6 +89,42 @@ def test_phase_diagnostics_report_pre_update_mutation_without_resealing(
     assert result["runtime_processes"] == []
 
 
+@pytest.mark.parametrize("assembled", (False, True))
+def test_assembled_update_capture_preserves_genuine_progress_with_a_finite_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, assembled: bool,
+) -> None:
+    from agent_procutil import _caller_owned
+    from agent_procutil.owned_process import OutputLimitExceeded
+
+    original = _caller_owned.run
+
+    def contained(*args, **options):
+        options["allow_daemon_breakaway"] = False
+        return original(*args, **options)
+
+    monkeypatch.setattr(_caller_owned, "run", contained)
+    (tmp_path / "project").mkdir()
+    program = (
+        "import sys;sys.path.insert(0,sys.argv[1]);"
+        "import installer_source_build as builds;"
+        "progress=builds._SourceProgress('source-selection',180,0);"
+        "[progress.renew() for _ in range(100000)];print('settled')"
+    )
+    command = [
+        sys.executable, "-I", "-B", "-c", program,
+        str(fixture.REPO / "worktree-manager" / "scripts"),
+    ]
+    if not assembled:
+        with pytest.raises(OutputLimitExceeded):
+            fixture._run(command, tmp_path)
+    else:
+        result = fixture._run(command, tmp_path, max_stderr_bytes=3 * 4 * 1024 * 1024)
+        assert result.returncode == 0 and result.stdout == "settled\n"
+        assert len(result.stderr.encode("utf-8")) > 4 * 1024 * 1024
+        assert result.stderr.count("Source wheel progress:") == 100000
+        assert "completed-units=100000\n" in result.stderr
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
 @pytest.mark.parametrize("extra", (0, 512))
 def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path: Path, extra: int) -> None:
@@ -97,6 +133,7 @@ def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path:
 
     home = tmp_path / "h"
     ready, stop, report = [tmp_path / name for name in ("ready", "stop", "report.json")]
+    (tmp_path / "process-trace-window").write_text("baseline", encoding="utf-8")
     interpreter = home / ".agent-worktrees" / "versions" / "v1" / "Scripts" / "python.exe"
     private = "synthetic-sensitive-argument"
     extra_records = (
@@ -128,6 +165,7 @@ def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path:
     trace = json.loads(raw)
     assert private not in raw and "CommandLine" not in raw and "foreign_module" not in raw
     assert trace["stop_observed"] and trace["scan_errors"] == 0
+    assert trace["window_armed"]
     assert trace["truncated"] is bool(extra)
     records = trace["records"]
     assert len(records) == (512 if extra else 2)
@@ -135,6 +173,28 @@ def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path:
     assert records[0]["pid"] == records[1]["pid"] == 7
     assert records[0]["created_ticks"] != records[1]["created_ticks"]
     assert [row["no_bytecode"] for row in records[:2]] == [True, False]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
+def test_process_trace_does_not_consume_its_bound_before_the_baseline_window(tmp_path: Path) -> None:
+    from agent_procutil import no_window_kwargs
+    from manager_suite_artifacts import _runtime_process_trace_script
+
+    ready, stop, report = [tmp_path / name for name in ("ready", "stop", "report.json")]
+    prefix = (
+        "function Get-CimInstance {throw 'must not scan before baseline'};"
+        "function Start-Sleep {param($Milliseconds);"
+        f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');}}"
+    )
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+         prefix + _runtime_process_trace_script(tmp_path / "h", ready, stop, report)],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    trace = json.loads(report.read_text(encoding="utf-8"))
+    assert trace["stop_observed"] and trace["scan_errors"] == 0 and not trace["window_armed"]
+    assert trace["records"] == [] and not trace["truncated"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process inventory")
@@ -360,7 +420,7 @@ def test_native_stop_uses_installed_selection_when_payload_generation_is_not_ins
         "import json,sys;from pathlib import Path;"
         f"p=Path({str(record)!r});"
         "p.open('a',encoding='utf-8').write(json.dumps("
-        "{'prefix':sys.prefix,'args':sys.argv[1:]})+'\\n')"
+        "{'prefix':sys.prefix,'args':sys.argv[1:],'cache':sys.pycache_prefix})+'\\n')"
     )
     (package / ("service.py" if component == "agent-vault" else "__main__.py")).write_text(code)
 
@@ -371,7 +431,7 @@ def test_native_stop_uses_installed_selection_when_payload_generation_is_not_ins
         "$ErrorActionPreference='Stop';$tokens=$null;$errors=$null;"
         "$ast=[System.Management.Automation.Language.Parser]::ParseFile("
         f"{quote(scripts / 'install.ps1')},[ref]$tokens,[ref]$errors);"
-        "foreach($name in @('Get-ActiveSlotPython','Invoke-Stop')){"
+        "foreach($name in @('Get-ActiveSlotPython','Get-IndexPythonCacheArgs','Invoke-Stop')){"
         "$function=$ast.Find({param($node)"
         "$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and "
         "$node.Name -eq $name},$true);"
@@ -392,6 +452,8 @@ def test_native_stop_uses_installed_selection_when_payload_generation_is_not_ins
     assert [call["args"] for call in calls] == (
         [["stop"], ["engine", "stop"]] if component == "agent-index" else [["--stop"]]
     )
+    if component == "agent-index":
+        assert all(Path(call["cache"]).samefile(root / "cache" / "python") for call in calls)
 
 
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Bridge task resolver")

@@ -5160,12 +5160,17 @@ identity for every file. Failure diagnostics name added, removed and changed
 paths after update and after settlement, with exact counts and bounded metadata
 samples rather than file contents. No cache-file exemption or resealing converts
 a changed immutable slot into retained evidence.
-The outer VM coordinator also retains a bounded process trace across preparation,
-exercise and settlement: at most 512 process birth identities with component,
+The outer VM coordinator retains a bounded process trace beginning immediately
+before baseline observation and sealing, through exercise and settlement.
+Construction noise does not consume its at-most-512 process birth identities with component,
 module and cache-flag observations. Raw command lines and argument values are
 not retained. Readiness and the final stop/report are checked; scan failures
 remain explicit failures. This trace supplies candidate launch evidence, not
 proof that a particular process wrote a changed file.
+The assembled Manager update retains a finite stderr allowance of 4 MiB per
+declared component plus Manager, rather than applying one component's 4 MiB
+capture to the entire suite. Other fixture calls and stdout keep their existing
+limits; execution deadlines and per-unit source progress remain unchanged.
 
 Cold preparation has an 1800-second owned-process deadline; exercise has 900 seconds.
 Assertions retain a separate 300-second runner boundary and the usual pytest

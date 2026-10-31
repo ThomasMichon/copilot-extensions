@@ -72,6 +72,7 @@ def _read(path: Path) -> Any:
 def _run(
     argv: list[Any], case: Path, *, timeout: float = 240, check: bool = True,
     extra_env: dict[str, str] | None = None,
+    max_stderr_bytes: int = 4 * 1024 * 1024,
 ) -> Any:
     from agent_procutil._caller_owned import run
 
@@ -82,7 +83,7 @@ def _run(
         list(map(str, argv)), timeout=timeout, input_text=None, capture=True,
         cwd=case / "project", env={**_env(case), **(extra_env or {})},
         allow_daemon_breakaway=True,
-        max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=4 * 1024 * 1024,
+        max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=max_stderr_bytes,
     )
     with _COMMAND_LOG_LOCK, (case / "commands.jsonl").open("a", encoding="utf-8") as stream:
         stream.write(json.dumps({
@@ -749,6 +750,7 @@ def prepare(directory: Path, mode: str) -> None:
         _run([shutil.which("pwsh"), "-NoProfile", "-File", payload.with_name("agent-index") / "scripts" / "install.ps1",
               "engine"], case, timeout=600)
         _run(_command(case, "worktree-manager", "mux-daemon", "ensure"), case, timeout=30)
+        (case / "process-trace-window").write_text("baseline", encoding="utf-8")
         before = _observe(case, declared)
         _run([_python(case / "h" / ".agent-codespaces"), "-I", "-X", "utf8", "-B", "-c",
               "from agent_codespaces.connection_owner import hold,ensure_owner_running;"
@@ -866,7 +868,10 @@ def exercise(directory: Path, mode: str) -> None:
                     shutil.copytree(case / "candidate", case / "published", dirs_exist_ok=True,
                                     ignore=shutil.ignore_patterns(".git"))
                     _commit(case, case / "published")
-                    result = _run(command, case, timeout=840, check=False)
+                    result = _run(
+                        command, case, timeout=840, check=False,
+                        max_stderr_bytes=(len(setup["declared"]) + 1) * 4 * 1024 * 1024,
+                    )
                     report["update"] = {"arguments": arguments, "returncode": result.returncode,
                                         "command": list(map(str, command)),
                                         "stdout": result.stdout, "stderr": result.stderr}
