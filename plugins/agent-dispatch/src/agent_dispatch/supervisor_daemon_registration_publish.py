@@ -61,6 +61,22 @@ class BoundedDeclarationPublisher:
         self.seen_ids.difference_update(cleared)
         return cleared
 
+    def confirmed_for(self, registrations: list[dict]) -> bool:
+        """Confirm this complete target set, not a previously settled batch."""
+        wanted = {
+            reg["id"]: reg for reg in registrations
+            if reg.get("kind") in RegistrationKind.DIRECT
+        }
+        return (
+            self.future is None and not self.withdrawn_ids
+            and self.records.keys() == wanted.keys()
+            and all(
+                self.records[rid]["state"] == "confirmed"
+                and self.records[rid]["target"] == target
+                for rid, target in wanted.items()
+            )
+        )
+
     def poll(self, client, registrations: list[dict], *, executor: Executor, deadline: float) -> set[str]:
         wanted = {reg["id"]: reg for reg in registrations if reg.get("kind") in RegistrationKind.DIRECT}
         self.seen_ids.update(wanted)

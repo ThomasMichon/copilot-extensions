@@ -11,11 +11,12 @@ from concurrent.futures import CancelledError, Executor, Future, ThreadPoolExecu
 from typing import Any
 
 from .companion import CompanionIndeterminate
+from .supervisor_sources import SupervisorSources
 
 log = logging.getLogger("agent-dispatch.supervisor-daemon")
 
 
-class BoundedReconciliation:
+class BoundedReconciliation(SupervisorSources):
     """Internal master mixin; futures remain in the existing shutdown accounting."""
 
     def _init_bounded_reconciliation(self) -> None:
@@ -41,7 +42,7 @@ class BoundedReconciliation:
         self._resolution_futures = {}
         self._selection_futures = {}
         self._discovery_futures = {}
-        self._last_store_registrations: list[dict] | None = None
+        self._init_source_collection()
         self._progress_callback = None
         self._phase_name = "idle"
         self._progress_warning_after: dict[str, float] = {}
@@ -240,85 +241,6 @@ class BoundedReconciliation:
         finally:
             if self._declaration_publisher.future is not None:
                 self._probe_inflight.add(self._declaration_publisher.future)
-
-    def _bounded_read(self, key: str, read: Callable[[], Any]) -> Any:
-        if self._reconcile_deadline is None:
-            return read()
-        future = self._discovery_futures.get(key)
-        if future is None:
-            future = self._read_pool().submit(read)
-            self._discovery_futures[key] = future
-            self._probe_inflight.add(future)
-        try:
-            return future.result(timeout=max(0.0, self._reconcile_deadline - time.monotonic()))
-        finally:
-            if future.done():
-                self._discovery_futures.pop(key, None)
-
-    def _store_registrations(self) -> list[dict]:
-        publisher = self._declaration_publisher
-        epoch = publisher.withdrawal_epoch if publisher is not None else 0
-
-        def read():
-            registrations = self.client.list_registrations(
-                machine=self.machine, env=self.env, include_paused=False,
-            )
-            return epoch, registrations, copy.deepcopy(registrations)
-
-        try:
-            started_epoch, registrations, snapshot = self._bounded_read(
-                "registrations", read,
-            )
-        except (CancelledError, TimeoutError) as exc:
-            if self._last_store_registrations is None:
-                raise CompanionIndeterminate(
-                    "registration discovery pending; no confirmed registry snapshot"
-                ) from exc
-            log.warning(
-                "registration discovery unavailable: error_type=%s; retaining confirmed registrations",
-                type(exc).__name__,
-            )
-            return self._last_store_registrations
-        if publisher is not None:
-            cleared = publisher.observe_registry({reg["id"] for reg in registrations}, started_epoch)
-            if cleared is None:
-                log.warning("registration discovery predates confirmed withdrawal; discarding stale snapshot")
-                if self._last_store_registrations is None:
-                    raise CompanionIndeterminate("registration discovery has no confirmed current snapshot")
-                return self._last_store_registrations
-            self._published_declared_ids.difference_update(cleared)
-        self._last_store_registrations = snapshot
-        return registrations
-
-    def _declared(self) -> list[dict]:
-        if self.declared_source is None:
-            return []
-        from .registrar_reconcile import declared_registrations
-
-        try:
-            registrations = self._bounded_read("declarations", lambda: declared_registrations(
-                list(self.declared_source()), machine=self.machine, env=self.env,
-            ))
-        except TimeoutError as exc:
-            if self._last_declared is None:
-                raise CompanionIndeterminate(
-                    "declaration discovery pending; no confirmed declaration snapshot"
-                ) from exc
-            log.warning("declaration discovery remains pending; retaining confirmed declarations")
-            return self._last_declared
-        except Exception as exc:
-            log.warning(
-                "failed to read declared profile set: error_type=%s; retaining confirmed declarations",
-                type(exc).__name__,
-            )
-            if self._last_declared is None:
-                raise CompanionIndeterminate(
-                    "declaration discovery unavailable; no confirmed declaration snapshot"
-                ) from exc
-            return self._last_declared
-        self._last_declared = registrations
-        self._published_declared_ids = self._publish_declarations(registrations)
-        return registrations
 
     def _receipt_pool(self) -> Executor:
         if self._receipt_executor is None:

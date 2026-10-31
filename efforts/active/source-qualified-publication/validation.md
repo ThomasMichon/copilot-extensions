@@ -1,5 +1,211 @@
 # Validation contract
 
+## Existing checkpoint current-base validation (2026-10-31)
+
+### Fresh-review correction
+
+Current-head review of `145f5f2dae` found two Medium private-model defects.
+Four focused regressions ran fail-first against unchanged source:
+**4 failed, 58 deselected in 1.08s**, exit 1. Snapshot and feed absence for
+never-retained IDs could not settle a covered `not-found` intent; equal-healthy
+and older-stale point interleavings bypassed partition-admitted availability
+in returned records.
+
+The correction consults committed complete-roster absence only when an identity
+is absent from both the published roster and retained point rows. Returned
+records now expose the partition's already-admitted availability. The expanded
+same two-file contained packet reports **87 passed in 3.03s**, exit 0.
+It also proves a retained newer point prevents old absence confirmation and a
+later authoritative absence confirms again. Existing heartbeat/order controls
+remain selected. No shared parser, public API or production importer changed.
+Captured fail-first/passing streams and real JUnit are retained separately.
+
+### Reconciled unchanged-source packet
+
+The supported owned-branch sync preserved `9e84151644` and reconciled onto
+current `dev`, producing `9ccc1381f2`. The reducer and focused test bytes are
+unchanged by reconciliation. The existing changefile remains present; production
+imports of the candidate remain zero.
+
+The existing contained runner selected CPython 3.12.14:
+
+```text
+python tools/run-plugin-tests.py worktree-manager --test-file tests/test_source_publications.py --test-file tests/production_picker/test_worktree_observations.py
+```
+
+Fresh captured execution reports **83 passed in 7.49s**, exit 0, with real
+JUnit recording 83 tests and zero failures/errors/skips. JUnit SHA-256:
+`1500df6eecf818c93fbabaa7c364834f852187caed5d67a94ffcb2e2041a94c0`.
+The wrapper's total preparation/execution/cleanup time is 82.16s, not a
+production performance measurement. Initial unsupported interpreter and
+in-use environment preparation refusals did not execute tests; selecting the
+existing separate Python 3.11 runner resolved those tooling failures.
+
+Touched-file Ruff `F,E9`, install contract (13 plugins), version consistency,
+effort structure and whitespace checks pass. Missing Ruff was restored only
+in the source test environment. Captured streams and JUnit are retained as
+local evidence, not shipped artifacts.
+
+This packet exercises the actual pure F1 receiver/value contracts and private
+reducer, including producer-shaped frames, availability transitions and order
+work counts. A native CLI-to-loader/Inbox/screen, clean-room, live external or
+installed run is not admitted for this unwired checkpoint; those broader
+F2/production-F3/F4/F5 and nominal performance gates remain open. Source review,
+required CI and actual merge are still required.
+
+## Private F3 pure checkpoint (2026-10-24)
+
+Base: `ba25d5f5d58cdc02736cce67da42a39a72737076`, with merged F1
+contracts. Functional edits are limited to the new private
+`worktree-manager/src/worktree_manager/production_picker/picker_tui/source_publications.py`
+and new `worktree-manager/tests/test_source_publications.py`, plus this
+effort's documentation and the required Manager changefile.
+
+The selected contained source-runner commands (new files staged first):
+
+```powershell
+python tools\run-plugin-tests.py worktree-manager --test-file tests/test_source_publications.py
+# 35 passed in 1.88s; exit 0 (initial checkpoint).
+python tools\run-plugin-tests.py worktree-manager --test-file tests/test_source_publications.py --test-file tests/production_picker/test_worktree_observations.py
+# 63 passed in 9.60s; exit 0 (expanded reducer plus actual F1 contracts).
+python -m ruff check --select F,E9 worktree-manager\src\worktree_manager\production_picker\picker_tui\source_publications.py worktree-manager\tests\test_source_publications.py
+# All checks passed; exit 0.
+```
+
+The source runner selected CPython 3.12.14 and isolated its state. Tests are
+deterministic objects with no live endpoint, GUI, process, timing measurement
+or storage fixture. The reducer imports only stdlib and Manager-owned pure
+F1 value/receiver modules. Production importer count is zero.
+
+### Captured follow-up and source-only review
+
+The earlier command summaries above are **transcript-only**: no separate raw
+logs or review artifacts were captured for those runs. A new unchanged-source
+execution at `a2377bd8b7074f0d2fd65d8994490c1c5215bbbf` ran the same focused
+selection with stdout/stderr opened before launch and the existing
+`PYTEST_ADDOPTS` JUnit option. It reported **63 passed in 3.10s**, exit 0;
+real JUnit recorded 63 tests, zero failures/errors/skips, SHA-256
+`3e3ccd373eff0a4a27dcb5216064afe1c4a3cd3f927ced91df4c4f297b51923b`.
+This is fresh evidence, not reconstruction of earlier output.
+
+The normal provider review identified four private-model defects: the F1
+producer's `phase: current` row frame was rejected; newer complete absence
+did not fence unseen IDs or advance old tombstones; equal-cursor snapshots
+could change roster/order; and snapshot reconstruction dropped validated stale
+availability. Corrections remain in the same two owned Python files and this
+effort's documentation, with no production importer or F2 wire API added.
+
+The same focused source runner plus the six added regressions reports
+**69 passed in 4.53s**, exit 0, with real JUnit recording 69 tests and zero
+failures/errors/skips. Canonical producer-shaped frames are now used by the
+test helper. Ruff remains clean. Raw command streams, real JUnit, invocation
+metadata and review/CI responses are retained as local evidence by the
+submitting worktree; those artifacts are not part of the shipped product.
+Source-only review/CI is not integration, native/GUI/installed qualification
+or authorization to merge.
+
+### Second source-review correction and heartbeat work control
+
+The original captured 63-test and 69-test streams/JUnit remain immutable.
+A separate timestamped follow-up evidence directory inventories their hashes
+before the next execution; it does not replace either historical JUnit file.
+
+Six new focused cases were run **fail first** against the unchanged
+`62d2c55ef15efa8b8d76c07da3834ddba5b22385` module. Captured output and real
+JUnit record **5 failed, 1 passed, 44 deselected** (exit 1), demonstrating:
+snapshot/feed replacement erased the previous absence fence before validating
+incoming rows; source staleness ignored feed/point availability; and twenty
+valid heartbeats performed forty reducer-level deep-copy calls (twenty
+partitions and twenty frame lists). The rejection control already passed.
+
+The private-module correction validates incoming rows before replacing those
+fences, tracks revision-qualified availability independently of reset/reload
+staleness, and delegates a lone heartbeat to the existing receiver validation
+without copying committed state. The expanded focused selection reports
+**75 passed in 2.83s**, exit 0, with real JUnit recording 75 tests and zero
+failures/errors/skips. The deterministic 1,000-row fixture proves twenty
+valid heartbeats cause **zero** partition/frame/row deep copies, preserving
+cursor, floors, observations, receipts and committed object identities.
+Malformed shape, wrong generation/cursor, open-barrier and stale-epoch cases
+remain covered. This is a work-count assertion, not a stopwatch/native or
+installed performance qualification. No shared parser, production importer
+or public API changed.
+
+### Canonical availability-control follow-up
+
+The newly missed provider finding on `24a99623ecbe3f3d4f0fc28e02f386b7cc8d558d`
+was treated as blocking despite the review's "No open issues" headline.
+The actual F1 producer emits standalone `availability` frames when availability
+changes without a new cursor. This correction is confined to the private
+reducer, its existing focused test file and these direct effort documents.
+
+Six new cases ran fail-first against unchanged prior module source:
+**5 failed, 1 passed, 50 deselected**, exit 1, with captured streams and real
+JUnit. Canonical controls were rejected by the old private allowlist.
+After the bounded correction, the same expanded source selection reports
+**81 passed in 10.60s**, exit 0; real JUnit records 81 tests and zero
+failures/errors/skips. Cases cover stale-to-clear at unchanged revision,
+metadata-only row updates, point/snapshot availability floors, empty-roster
+tombstones/absence receipts, malformed/cross-generation/cross-project controls,
+open barriers, old epochs and preserved reset fences. The existing twenty
+heartbeats over 1,000 rows still asserts zero copies and no state mutation.
+
+All earlier 63/69/75 and fail-first artifacts are preserved. A new timestamped
+directory inventories **200** prior artifact files and hashes before this run;
+new raw logs/JUnit use separate names. Historical pre-capture runs remain
+transcript-only. No shared producer/receiver semantics, wire fields or public
+API changed. This remains private source compatibility qualification, not UI,
+Inbox, F2/F4, native, installed or whole-effort acceptance.
+
+### Full-roster order work-count correction
+
+The review summary's quadratic order-scan observation was confirmed in the
+private row insertion path and treated as blocking without waiting for an
+inline severity label. Two deterministic cases instrument the actual order
+list membership operation on fresh and refreshed 100/1,000-row snapshots.
+Captured fail-first output against unchanged
+`a1c3d2760654c593a818e53465096a50debc90bc` records **2 failed, 56 deselected**:
+
+| Rows | Fresh membership calls / equality checks | Refresh calls / checks |
+|---|---|---|
+| 100 | 100 / 4,950 | 100 / 5,050 |
+| 1,000 | 1,000 / 499,500 | 1,000 / 500,500 |
+
+The surgical fix uses the existing previous-row dictionary lookup to decide
+whether to append, preserving the live-row/order invariant without a new
+persistent index. Corrected captured output records **zero membership calls
+and zero order equality checks** for both sizes and both paths. The expanded
+focused packet reports **83 passed in 7.97s**, exit 0, with real JUnit and
+captured passing work-count output. Existing exact reorder/front insertion,
+empty/deletion/recreation, point-only-tail, revision/absence/availability,
+atomicity and twenty-heartbeat zero-copy controls remain selected.
+
+All **283** prior captured artifact files are inventoried before this run and
+remain immutable, including the earlier 63/69/75/81 and fail-first evidence.
+New raw streams/JUnit are separately named. These are operation counts, not a
+native or wall-clock performance benchmark. The source-only, unwired boundary,
+remaining phase/installed gates and explicit merge hold are unchanged.
+
+Coverage includes A10 locked → point A11 unlocked → twenty heartbeat/read
+ticks, independent B11 and feed base10, A12 new-owner supersession, source/
+project collisions, selected-identity refusal, epoch cancellation,
+same-generation reconnect, complete fresh generation reset, exact order and
+point-only tail, revision-qualified tombstones, equal-version conflicts
+without partial mutation, semantic/fact/closure-version regressions,
+observation-only publications, partial/unavailable fact freshness, exact-row
+receipt fences, pending/degraded non-proof, generation invalidation,
+unknown/filtered/incomplete/bounded wire refusal and detached immutable values.
+
+This proves the private pure model only. The actual loader/Inbox/screen
+twenty-tick test, source command/transport routing, F2 owner receipt production,
+F4 maintenance convergence, native end-to-end, fresh-runtime, GUI, external,
+installed and nominal performance qualification are **not run: outside this
+new-file-only checkpoint's admission**. No production receipt endpoint or
+request-correlation evidence is claimed. Existing v1 paths are unmodified;
+the private candidate explicitly refuses v1 rather than claiming v1
+integration. This checkpoint is for acceptance before integration or merge;
+the remaining F2/F3/F4/F5 and whole-effort gates stay open.
+
 Back to [the effort](README.md) and [implementation contract](implementation.md).
 Tests below are implementation obligations, not claims that new tests exist
 or have passed. New test basenames are proposed explicitly.
