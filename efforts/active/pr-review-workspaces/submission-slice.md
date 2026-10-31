@@ -26,6 +26,15 @@ Every subsequent registration transaction must preserve review operations, and
 every review transaction must preserve replay state. Never treat an unsupported
 outer schema as an empty store.
 
+Conversion has an **existing lifecycle-owner prerequisite**: incompatible
+long-lived readers must be drained, or the executing owner/readers must already
+support v2. The transaction lock alone does not satisfy this condition; a legacy
+`WatchService` can otherwise reject the new layout on its next transaction and
+exit. Expand reader support first, then use the current lifecycle owner's normal
+drain/transition safety check before conversion. A caller flag, package version
+or storage binding does not prove that a live reader is compatible or drained.
+This does not grant deployment, service-stop or source-hosting authority.
+
 Old readers fail closed on the new envelope; they cannot silently discard it or
 rewrite it as v1. No automatic downgrade or rollback erases review receipts,
 including terminal receipts. Capability discovery reports actual codec/adoption
@@ -172,6 +181,10 @@ batch is an automatic response to drift or an ambiguous write.
 
 - [ ] Explicit legacy adoption and new-code restart preserve replay and review
   namespaces; old/unsupported/corrupt readers fail without fallback or data loss.
+- [ ] A finite source fixture with an actual v1-only reader active between
+  transactions proves conversion is refused until the lifecycle owner drains it
+  or transitions to a running v2-capable reader. Lock availability is not enough;
+  stale/label-only compatibility claims cannot authorize adoption.
 - [ ] Same-ID intent replay, mismatched intent, exact source/principal drift,
   selected action/ownership validation and unchanged-head follow-up are explicit.
 - [ ] Credential/account changes between identity checks and writes refuse before
