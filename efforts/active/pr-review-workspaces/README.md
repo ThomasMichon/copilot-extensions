@@ -226,6 +226,10 @@ contract.
   accepting a waiting registration; once that noncontinuous event is frozen,
   preserve its actual bytes without reserving another event. The empty-baseline/
   large-firing-event regression passes within a tight configured store capacity.
+- Recheck current-owner authority after lock inspection immediately before a
+  mutation and after admitted persistence before exporting its result. Source
+  controls distinguish pre-mutation withdrawal (no write) from withdrawal during
+  an admitted atomic commit (denial with durable readback, not fictional rollback).
 - The original credential/principal/discussion freshness, actual effect-specific
   reconciliation, executor/provider integration and live serving qualification
   remain open. No new ledger, issuer, daemon, hosting repair or rollout is made.

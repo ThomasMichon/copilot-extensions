@@ -406,3 +406,51 @@ def test_verdict_receipt_principal_and_attribution_are_action_specific(store, or
     assert restarted.inspect_review("selected-review", SCOPE, expires_at=expires())["actions"][0] == result
     assert not restarted.begin_review_action("selected-review", SCOPE, "verdict-a", expires_at=expires())["new_attempt"]
     assert restarted.begin_review_action("selected-review", SCOPE, "comment-a", expires_at=expires())["new_attempt"] is matching
+
+
+def test_mutation_rechecks_current_owner_after_lock_ownership_inspection(store, monkeypatch):
+    from contextlib import contextmanager
+    before = store.path.read_bytes()
+    denied = PermissionError("owner withdrawn during lock inspection")
+    allowed = [True]
+    original_lock = store._lock
+
+    @contextmanager
+    def lock():
+        with original_lock() as actual:
+            class Guard:
+                def assert_owned(self):
+                    actual.assert_owned()
+                    allowed[0] = False
+            yield Guard()
+
+    def checkpoint():
+        if not allowed[0]:
+            raise denied
+
+    monkeypatch.setattr(store, "_lock", lock)
+    with pytest.raises(PermissionError) as error:
+        store.admit_review(selected(), expires_at=expires(), checkpoint=checkpoint)
+    assert error.value is denied
+    assert store.path.read_bytes() == before
+
+
+def test_owner_loss_during_admitted_atomic_commit_is_denied_without_claiming_rollback(store, monkeypatch):
+    original = storage._atomic_write_json
+    denied = PermissionError("owner withdrawn during admitted commit")
+    allowed = [True]
+
+    def write(path, document):
+        original(path, document)
+        allowed[0] = False
+
+    def checkpoint():
+        if not allowed[0]:
+            raise denied
+
+    with monkeypatch.context() as patch:
+        patch.setattr(storage, "_atomic_write_json", write)
+        with pytest.raises(PermissionError) as error:
+            store.admit_review(selected(), expires_at=expires(), checkpoint=checkpoint)
+    assert error.value is denied
+    assert store.inspect_review("selected-review", SCOPE, expires_at=expires())["intent"] == selected()

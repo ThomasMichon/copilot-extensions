@@ -197,6 +197,7 @@ class ReplayStore:
             document = self._read_document()
             if document.get("schema") == OWNER_SCHEMA:
                 self._validate_owner(document)
+                self.check_current(expires_at, checkpoint)
                 return {"status": "already_adopted", "version": 2}
             replay = self._decode_legacy(document)
             WatchReplay(self.namespace, state=replay, commit=lambda _state: None, clock=self.clock)
@@ -211,6 +212,7 @@ class ReplayStore:
             lifecycle_checkpoint()
             self.check_current(expires_at, checkpoint)
             _atomic_write_json(self.path, adopted)
+            self.check_current(expires_at, checkpoint)
             return {"status": "adopted", "version": 2}
 
     def _review_transaction(self, operation, *, expires_at, checkpoint=None, persist=True):
@@ -228,7 +230,9 @@ class ReplayStore:
             self.check_current(expires_at, checkpoint)
             if persist:
                 lock.assert_owned()
+                self.check_current(expires_at, checkpoint)
                 _atomic_write_json(self.path, document)
+            self.check_current(expires_at, checkpoint)
             return copy.deepcopy(result)
 
     @staticmethod
