@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Managed, independent proposal and implementation PRs to `dev`
 - **Created:** 2026-10-30
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `harness-guidance` useful autonomy and `plugins/efforts` durable scoped authorization
 - **Umbrella issue:** #9736
 
@@ -54,6 +54,11 @@ source evidence separately from a participant's interpretation.
 
 Public-safe verbatim excerpt of the operator's request:
 
+> I like the guidance you supply above; we can apply it generally in
+> agent-conduct-guidance upstream, except as it pertains to "deploy" or
+> manipulating content that isn't obviously source-controlled, or is data and
+> services not controlled by the Operator.
+>
 > In general, agents will have standing authority to file issues in specific
 > places, make PRs to specific places, etc., based on their charter. Efforts
 > should be able to pre-qualify scope approvals, and pre-approvals should be
@@ -64,36 +69,50 @@ The operator also selected generic useful-autonomy guidance without blanket
 deployment or uncontrolled-content authority. Specific deployment risk
 preferences remain adopter-owned and are not defaults of this public plugin.
 
+## Scope Approvals
+
+The original operator instruction above authorizes the generic source change.
+The coordinator's current-owner checkpoint retains its original reference and
+the private, task-specific context without publishing it here.
+
+- **Allowed:** the Plan's generic source/docs changes, bounded synthetic tests
+  and source corrections, and normal issue/PR publication in this repository.
+- **Excluded:** runtime rollout, personal/non-source-controlled content,
+  disclosure, external-owner effects, new privileges and policy bypasses.
+- **Continuity:** retain the original decision and these bounds through
+  checkpoint/handoff; review, CI and existing execution owners remain binding.
+- **Changes:** no effect-scope expansion has been granted.
+
 ## Plan
 
 ### Phase 1 - Reviewed authority contract
 
-- [ ] Reconcile standing intent and land this proposal before implementation.
-- [ ] Define one procedural approval-evidence contract: original source,
+- [x] Reconcile standing intent and land this proposal before implementation.
+- [x] Define one procedural approval-evidence contract: original source,
   objective/charter, operations and destinations, resource/executing owners,
   effects and accepted blast radius, exclusions, limits, repetition/revision
   policy, validity and later narrowing/revocation.
-- [ ] Preserve legacy efforts and existing valid approvals without requiring a
+- [x] Preserve legacy efforts and existing valid approvals without requiring a
   new runtime evaluator, trust chain or approval schema adoption.
 
 ### Phase 2 - Useful autonomy and effort capture
 
-- [ ] Add a concise, declared conduct module and task-time procedure for ordinary
+- [x] Add a concise, declared conduct module and task-time procedure for ordinary
   in-charter investigation, source fixes, bounded validation and designated
   issue/PR publication.
-- [ ] Distinguish source/test authority from deployment, content mutation,
+- [x] Distinguish source/test authority from deployment, content mutation,
   disclosure, access enrollment and external-owner effects.
-- [ ] Add optional canonical effort approval capture and reuse, with original
+- [x] Add optional canonical effort approval capture and reuse, with original
   source validation and explicit holds, revision pins, single-attempt limits,
   expiry, revocation and uncertain-outcome handling.
-- [ ] Reuse existing charter/peer/elevation ownership and replace contradictory
+- [x] Reuse existing charter/peer/elevation ownership and replace contradictory
   repeated-confirmation guidance only within the approved generic scope.
 
 ### Phase 3 - Continuity and delivery
 
-- [ ] Carry approval evidence and limits in both custom handoff shapes and the
+- [x] Carry approval evidence and limits in both custom handoff shapes and the
   existing host-owned native checkpoint procedure.
-- [ ] Update generator/emergency-draft and inherited-continuation guidance to
+- [x] Update generator/emergency-draft and inherited-continuation guidance to
   retain available evidence or explicitly name its absence; missing evidence
   requires bounded recovery before effects, not inferred permission.
 - [ ] Update authoritative documentation and focused tests, add changefiles and
@@ -103,17 +122,17 @@ preferences remain adopter-owned and are not defaults of this public plugin.
 
 ## Validation Plan
 
-- [ ] Declaration, bounded kernel, discovery and offline fallback contracts pass.
-- [ ] Synthetic cases distinguish ordinary charter work, explicit deployment/data
+- [x] Declaration, bounded kernel, discovery and offline fallback contracts pass.
+- [x] Synthetic cases distinguish ordinary charter work, explicit deployment/data
   pre-clearance, widened targets/effects/owners, current holds, revocation,
   expiry, revision pins, exhausted single attempts and unknown prior effects.
-- [ ] Effort/template compatibility preserves absent optional sections and
+- [x] Effort/template compatibility preserves absent optional sections and
   valid original approvals without promoting plans or summaries into grants.
-- [ ] Both handoff shapes and native checkpoint guidance preserve evidence and
+- [x] Both handoff shapes and native checkpoint guidance preserve evidence and
   exclusions; actual custom storage round-trips them without silent loss.
-- [ ] Automatic drafts report unavailable evidence honestly; no test claims
+- [x] Automatic drafts report unavailable evidence honestly; no test claims
   host checkpoint persistence or model compliance merely from text assertions.
-- [ ] Public examples, issue/PR descriptions and source remain generic; no
+- [x] Public examples, issue/PR descriptions and source remain generic; no
   deployment/data grant, automatic tool approval, service or new dependency is
   introduced.
 - [ ] Required review/CI pass, merged changes are journaled and every remaining
@@ -126,6 +145,29 @@ are **agent-recommended implementation details**, not additional operator grants
 Actual permission enforcement stays with the existing execution/resource owners.
 
 ## Journal
+
+### 2026-10-30 - Source and focused validation
+
+- Implemented the declared conduct module and procedural record, optional effort
+  capture/charter/template linkage, native checkpoint guidance and both handoff
+  carriers. Original grants remain distinct from plans, caches and receipts.
+- Added bounded optional `authorization_evidence` generation input. The actual
+  formatter/codec and SDK event path preserve provided evidence; missing input
+  remains explicit. Reconnect/refork loses only the documented convenience cache,
+  not the required canonical checkpoint/effort record.
+- Focused conduct, effort and continuity checks passed, including invalid-input,
+  native-window clear and actual module-reimport cases. Existing source-contract,
+  documentation and customization checks passed.
+- Independent critique found only a cache-lifetime documentation/test gap; the
+  source now states that limit and tests its recovery behavior. Review/merge and
+  truthful release disposition remain open; no installed rollout occurred.
+
+### 2026-10-30 - Reviewed implementation admission
+
+- Proposal #9737 merged after current-head Copilot approval and required green
+  CI. The same managed source worktree advanced onto the reviewed plan.
+- Began the conduct/effort/continuity source implementation; deployment and
+  uncontrolled-content effects remain excluded.
 
 ### 2026-10-30 - Proposal
 

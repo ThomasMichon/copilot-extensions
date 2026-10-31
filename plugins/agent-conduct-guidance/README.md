@@ -21,6 +21,7 @@ owns publication, recovery and provider upgrade/rollback mechanics.
 
 | Module | Instruction projection | Skill | What it covers |
 |--------|------------------------|-------|-----------------|
+| Useful autonomy and standing authority | [`useful-autonomy`](instructions/useful-autonomy.instructions.md) | [`using-standing-authority`](skills/using-standing-authority/SKILL.md) | Ordinary charter-bounded work without repeated permission questions; explicit effect-scope pre-clearance with original evidence, blast radius, limits and non-widening continuity |
 | Per-machine maintenance standby | [`maintenance-standby`](instructions/maintenance-standby.instructions.md) | Projection only | Read an owner-attributed local maintenance notice and wait using native Copilot 30-minute scheduled prompts when supporting agent tools are intentionally unavailable |
 | Consented Windows elevation | [`elevation-fallback`](instructions/elevation-fallback.instructions.md) | [`requesting-windows-elevation`](skills/requesting-windows-elevation/SKILL.md) | One reviewed administrator operation through a temporary limited interactive task, genuine RunAs consent, specified private output log, matching terminal marker and scoped task cleanup; no persistent elevation grant |
 | Multi-agent rules of engagement | [`multi-agent-rules-of-engagement`](instructions/multi-agent-rules-of-engagement.instructions.md) | [`using-multi-agent-rules-of-engagement`](skills/using-multi-agent-rules-of-engagement/SKILL.md) | In-scope same-operator peer authority without redundant approval, scope attenuation, real custody and gates, collective decisions/handoff, authoritative countermand, external ingress and minimal provenance |
@@ -51,6 +52,7 @@ patches or weakened update gates.
 
 | Entry point | When it applies | What it does |
 |-------------|-----------------|--------------|
+| [`using-standing-authority`](skills/using-standing-authority/SKILL.md) skill | Pre-clearing scope, receiving upfront/one-time approval, or recovering it through continuity | Captures original evidence, qualifies current effects and reuses only the approved scope; no automatic tool approval or default deployment/data grant |
 | [`requesting-windows-elevation`](skills/requesting-windows-elevation/SKILL.md) skill | Windows UAC, run as administrator, or an approved headless operation that cannot reach the user's consent desktop | Uses Windows and PowerShell 7.2+ only; stages a limited interactive task, requests RunAs, streams both outputs, waits for the actual result and removes the confirmed owned task |
 | startup-generated instruction copies | Every prepared adopting repository | Loads each module's complete owner-marked reminder; an unavailable current copy uses its separately maintained offline fallback |
 | [`using-multi-agent-rules-of-engagement`](skills/using-multi-agent-rules-of-engagement/SKILL.md) skill | peer work directives, repeated-approval questions, conflicting directives, leadership handoff or external-domain instructions | Resolves the existing domain/scope/custody evidence and applies bounded authority rules without adding an authorization service |
@@ -111,6 +113,28 @@ own concatenation, and combine it with the token in a separate statement --
 never a single scheme-plus-secret literal or f-string -- then verify the
 real header value landed with a non-rendering byte/boolean check rather
 than a plain read-back, per the secret-masking skill.
+
+## Useful autonomy and durable pre-clearance
+
+An established charter covers ordinary inspection, source fixes, bounded
+validation and issue/PR publication to designated destinations. Agents should
+not ask permission to continue that work or invent one-shot consent for each
+ordinary revision or corrected command.
+
+Deployment, personal/non-source-controlled content, disclosure and external-owner
+resources require an applicable explicit effect scope. An operator may accept a
+whole owned tooling deployment/fix loop and its known recovery costs without
+also clearing a prototype's data mutations. The
+[approval-evidence record](skills/using-standing-authority/references/approval-evidence.md)
+retains the original decision, selectors/owners/effects, limits and later
+changes in an existing effort, charter or checkpoint.
+
+Record upfront approvals and one-time answers immediately; carry references,
+exclusions and current changes through checkpoints/handoffs. A copied record,
+receipt, plan or model summary does not grant permission. Current applicability,
+explicit pins, use limits, holds and revocation remain binding. The procedure
+works without a runtime, broker or companion plugin; it does not certify model
+compliance or replace execution-owner enforcement.
 
 ## Per-machine maintenance notice
 
@@ -300,6 +324,9 @@ agent, MCP, bridge, or dispatch plugins separately when a task needs them.
 
 | Path | Purpose |
 |------|---------|
+| [`instructions/useful-autonomy.instructions.md`](instructions/useful-autonomy.instructions.md) | Concise charter-bounded continuation and explicit effect-authority policy |
+| [`skills/using-standing-authority/SKILL.md`](skills/using-standing-authority/SKILL.md) | Capture, qualify, reuse and recover original scoped operator approvals |
+| [`skills/using-standing-authority/references/approval-evidence.md`](skills/using-standing-authority/references/approval-evidence.md) | Procedural record fields, synthetic pre-clearance and decision cases; not a grant API |
 | [`instructions/maintenance-standby.instructions.md`](instructions/maintenance-standby.instructions.md) | Static per-machine missing-tool standby policy, independent of removed payload helpers |
 | [`examples/maintenance.json`](examples/maintenance.json) | Inert owner-attributed local maintenance-notice example; never automatically activated |
 | [`skills/using-multi-agent-rules-of-engagement/SKILL.md`](skills/using-multi-agent-rules-of-engagement/SKILL.md) | Bounded peer-authority, conflict, handoff and external-ingress procedure with policy decision examples |

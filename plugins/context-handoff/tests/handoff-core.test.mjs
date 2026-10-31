@@ -55,6 +55,7 @@ import {
   abortFileHandoff,
 } from "../extensions/context-handoff/handoff-core.mjs";
 import { extractRecoveryLocatorFromPrompt } from "../extensions/context-handoff/cutover-seed.mjs";
+import { formatHandoffMarkdown } from "../extensions/context-handoff/handoff-markdown.mjs";
 
 function triggerHandoff(options) {
   return realTriggerHandoff({ checkHosting: () => ({ ok: true }), ...options });
@@ -194,6 +195,37 @@ test("encode/decode round-trips metadata + text", () => {
   const { metadata, text } = decodeHandoffPayload(encoded);
   assert.deepEqual(metadata, meta);
   assert.equal(text, body);
+});
+
+test("durable handoff storage and consumption preserve original approval limits", () => {
+  withTempHome((home) => {
+    const evidence = [
+      "Original source: canonical operator decision reference",
+      "Scope: reviewed tooling only; no personal data or external-owner effects",
+      "Limits: one approved attempt; later rollout hold remains binding",
+    ].join("\n");
+    const body = formatHandoffMarkdown({
+      sessionId: "synthetic-approval-source", cwd: "/source",
+      authorizationEvidence: evidence, filesModified: {},
+    });
+    const stored = {
+      storage: "file", id: "synthetic-approval-baton",
+      metadata: { stateDir: join(home, "state"), title: "Continue source work" },
+    };
+    const written = writeSessionStateHandoff({
+      sid: "synthetic-approval-source", promptText: body, stored,
+      seed: "Task: Continue | Resume: /consume-handoff to take over | Recovery: context-handoff file:synthetic-approval-baton",
+    });
+    assert.equal(written.ok, true);
+    assert.equal(readSessionStateHandoff("synthetic-approval-source").record.promptText, body);
+    markSessionStateHandoffConsumed("synthetic-approval-source", {
+      consumedBySession: "synthetic-successor", handoffId: stored.id,
+    });
+    const consumed = readSessionStateHandoff("synthetic-approval-source").record;
+    assert.equal(consumed.consumed, true);
+    assert.equal(consumed.promptText, body);
+    assert.ok(consumed.promptText.includes(evidence));
+  });
 });
 
 test("buildSeedForStored keeps the bounded three-part locator", () => {
