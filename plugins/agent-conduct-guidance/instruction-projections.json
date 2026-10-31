@@ -3,6 +3,15 @@
   "version": 1,
   "projections": [
     {
+      "id": "useful-autonomy",
+      "deliveryMode": "selector",
+      "template": "instructions/useful-autonomy.instructions.md",
+      "destination": ".github/instructions/agent-conduct-guidance/useful-autonomy.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    },
+    {
       "id": "maintenance-standby",
       "deliveryMode": "selector",
       "template": "instructions/maintenance-standby.instructions.md",
