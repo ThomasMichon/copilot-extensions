@@ -80,9 +80,11 @@ The owner must bind the identity check and selected write to the **same actual
 current write credential/transport context**. An identity read under a separate
 observer credential does not prove the writer principal. Credential renewal,
 account switching or a changed binding requires re-verification at the mutation
-boundary before sending. For ADO the namespace is the effective native
+boundary before sending. The ADO effective principal identity is the native
 `connectionData.authorizedUser.id`, not `authenticatedUser.id` or an Entra object
-ID. This is enforced inside the existing credential/auth pipeline; no credential
+ID. It is a review-scope identity, separate from the existing store namespace's
+fleet/service/installation binding. That storage binding remains unchanged.
+This is enforced inside the existing credential/auth pipeline; no credential
 bytes, fabricated issuer label or new universal verifier is passed to the caller.
 
 ## Effect and persistence ordering
