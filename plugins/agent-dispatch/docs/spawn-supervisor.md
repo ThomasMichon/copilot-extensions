@@ -162,8 +162,9 @@ owns the target transition ordering, decline closeout, retry-policy choices,
 compatibility sequence and validation matrix. It retains bounded startup
 attempts under the selected pool, periodic decision nudges through existing
 supervision, and return to `QUEUED` on exhaustion without prematurely freeing
-capacity or replaying unresolved effects. Retry duration, backoff and task-wide
-versus pool-specific scope remain open design choices. There is no new retry
+capacity or replaying unresolved effects. Its selected startup/decision budgets,
+task-wide cooldown sequence and successful-`STARTED` counter resets are
+**implementation-pending policy**, not current provider behavior. There is no new retry
 timer or pool-owned `CLAIMED` transition in the due-time admission fix, and
 source support does not establish installed adoption.
 
