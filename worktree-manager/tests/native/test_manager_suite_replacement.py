@@ -264,6 +264,110 @@ def test_native_stop_uses_installed_selection_when_payload_generation_is_not_ins
     )
 
 
+@pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Bridge task resolver")
+def test_bridge_task_resolves_actual_selected_slot_without_startup(tmp_path: Path) -> None:
+    from agent_procutil import no_window_kwargs
+
+    root = tmp_path / "bridge"
+    slot = root / "versions" / "2.0.0"
+    python = slot / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fixture must never execute")
+    (root / "current-version").write_text("2.0.0")
+    pid_file = root / "agent-bridge.pid"
+    pid_file.write_text(str(os.getpid()))
+    launcher = root / "start-agent-bridge.ps1"
+
+    def quote(value: object) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+
+    installer = fixture.REPO / "plugins" / "agent-bridge" / "scripts" / "install.ps1"
+    render = (
+        "$ErrorActionPreference='Stop';$tokens=$null;$errors=$null;"
+        "$ast=[System.Management.Automation.Language.Parser]::ParseFile("
+        f"{quote(installer)},[ref]$tokens,[ref]$errors);"
+        "$assignment=$ast.Find({param($node)"
+        "$node -is [System.Management.Automation.Language.AssignmentStatementAst] -and "
+        "$node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and "
+        "$node.Left.VariablePath.UserPath -eq 'launcherBody'},$true);"
+        f"$InstallDir={quote(root)};$PidFile={quote(pid_file)};"
+        ". ([scriptblock]::Create($assignment.Extent.Text));"
+        f"[IO.File]::WriteAllText({quote(launcher)},$launcherBody)"
+    )
+    rendered = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", render],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert rendered.returncode == 0, rendered.stdout + rendered.stderr
+    before = {str(path.relative_to(root)): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    resolved = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-File", str(launcher), "-ResolveOnly"],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert resolved.returncode == 0, resolved.stdout + resolved.stderr
+    assert Path(resolved.stdout.strip()) == python
+    assert {str(path.relative_to(root)): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("variant", ("current", "old-slot", "different-action"))
+def test_native_broker_task_requires_current_code_and_its_exact_owned_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str,
+) -> None:
+    root = tmp_path / "h" / ".agent-bridge"
+    prefix = root / "versions" / "2.0.0"
+    old = root / "versions" / "1.0.0"
+    entrypoint = prefix / "Lib" / "site-packages" / "agent_procutil" / "windows_broker_entry.py"
+    pythonw = tmp_path / "base" / "pythonw.exe"
+    task_name = "CE-LaunchBroker-" + "a" * 64
+    arguments = subprocess.list2cmdline([
+        "-I", str(entrypoint), str(root / "windows-launch-broker.json"), "$(Arg0)", "$(Arg1)", "$(Arg2)",
+    ])
+    import xml.etree.ElementTree as ET
+
+    xml = ET.Element("Task")
+    action = ET.SubElement(ET.SubElement(xml, "Actions"), "Exec")
+    for tag, value in (("Command", pythonw), ("Arguments", arguments), ("WorkingDirectory", root)):
+        ET.SubElement(action, tag).text = str(value)
+    ET.SubElement(ET.SubElement(ET.SubElement(xml, "Principals"), "Principal"), "UserId").text = "S-1-5-21-1"
+    expected = {
+        "task_name": task_name, "pythonw": str(pythonw), "arguments": arguments,
+        "cwd": str(root), "principal": "S-1-5-21-1",
+    }
+    if variant == "different-action":
+        expected["arguments"] += " unexpected"
+    metadata = {
+        "task": expected,
+        "entrypoint": str(entrypoint if variant != "old-slot" else old / "Lib" / "windows_broker_entry.py"),
+        "root": str(root),
+    }
+    monkeypatch.setattr(fixture, "_tasks", lambda case: [{
+        "name": task_name, "xml": ET.tostring(xml, encoding="unicode"),
+    }])
+    calls = []
+
+    def run(argv, case, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(stdout=(
+            "agent-procutil.windows-launch-broker.runtime-ready.v1\n"
+            if "--check-runtime" in argv else json.dumps(metadata)
+        ))
+
+    monkeypatch.setattr(fixture, "_run", run)
+    monkeypatch.setattr(fixture, "_python", lambda root: str(prefix / "Scripts" / "python.exe"))
+    before = {"slots": {"agent-bridge": str(old)}, "index_engine": {"slot": str(root / "engine" / "v1")}}
+    after = {"roots": {"agent-bridge": str(root)}, "origins": {"agent-bridge": {"prefix": str(prefix)}}}
+    if variant == "current":
+        rows = fixture._registration_routes(tmp_path, before, after)
+        assert rows[0]["routes_current"] is True
+        assert calls[-1] == [
+            str(pythonw.with_name("python.exe")), "-I", "-X", "utf8", "-B", str(entrypoint), "--check-runtime",
+        ]
+    else:
+        with pytest.raises(RuntimeError):
+            fixture._registration_routes(tmp_path, before, after)
+        assert not any("--check-runtime" in call for call in calls)
+
+
 @pytest.mark.parametrize("exit_code", (259, 0))
 def test_retained_engine_attests_original_health_and_native_lifetime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int,

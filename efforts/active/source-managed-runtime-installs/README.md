@@ -1623,4 +1623,21 @@ The combined fixture/coordinator packet passes 48 tests with 2 hosted cases
 deselected; all 11 focused failures pass after correction. Full hosted
 qualification and final settlement remain open.
 
+Run `41158624541` at `6a3fa4881b` completes both real update operations with
+exit 0. In both modes, all seven replaced residents become ready before their
+incumbents exit 0, the independent engine remains healthy in the same process,
+and final settlement has no errors or remaining tasks. Qualification still
+fails on the fixture's unsupported scheduled-task resolver assumption.
+
+Bridge's real marker-resolving task launcher now supports a read-only
+`-ResolveOnly` observation before any startup effects. Native broker tasks use
+their actual installed V2 entrypoint, not the PowerShell resolver shape:
+verification loads bounded owned registration, checks exact XML action/root/
+principal agreement and the selected prefix, then executes the existing
+`--check-runtime` observation through the task interpreter's console companion
+without bytecode writes. Unknown shapes and old/changed registrations still
+refuse. Both new positive controls fail before correction; the updated bounded
+fixture/coordinator packet passes 52 tests with 2 hosted cases deselected.
+This source correction still requires exact-head hosted qualification.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.
