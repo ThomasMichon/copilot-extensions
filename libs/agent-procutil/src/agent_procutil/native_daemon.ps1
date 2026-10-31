@@ -116,8 +116,10 @@ namespace CopilotExtensions {
         }
         public static void ValidateOwnedJobScopes() {
             const string key = "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES";
-            var environment = Environment.GetEnvironmentVariables();
-            if (environment.Contains(key)) ValidateOwnedJobScopes((string)environment[key]);
+            foreach (DictionaryEntry item in Environment.GetEnvironmentVariables()) {
+                if (String.Equals((string)item.Key, key, StringComparison.OrdinalIgnoreCase))
+                    ValidateOwnedJobScopes((string)item.Value);
+            }
         }
         public static Child Start(string executable, string arguments, string cwd, string log, bool contained) {
             const string key = "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES";

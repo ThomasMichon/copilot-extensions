@@ -130,7 +130,10 @@ def test_native_bootstrap_refuses_strict_escape_and_preserves_contained_custody(
     "x" * 4097,
     "Local\\ce-owned-job-" + "a" * 32,
 ])
-def test_native_direct_refusal_never_runs_foreground(tmp_path, scopes):
+@pytest.mark.parametrize("scope_key", [
+    "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES", "copilot_extensions_owned_job_scopes",
+], ids=["canonical-key", "lowercase-key"])
+def test_native_direct_refusal_never_runs_foreground(tmp_path, scopes, scope_key):
     base = Path(__file__).resolve().parents[2]
     helper = base / "agent-procutil" / "src" / "agent_procutil" / "native_daemon.ps1"
     fixture = tmp_path / "entry.ps1"
@@ -143,10 +146,23 @@ def test_native_direct_refusal_never_runs_foreground(tmp_path, scopes):
         f"[IO.File]::WriteAllText({quoted(tmp_path / 'started')}, 'unexpected entry point')",
         encoding="utf-8",
     )
+    reservation_guard = ""
+    if scopes != "Local\\ce-owned-job-" + "a" * 32:
+        # The adapter dot-sources its instance functions in its own scope.
+        assert helper.read_text().count("New-DaemonInstanceReservation -Service") == 1
+        reservation_guard = (
+            f"$source=Get-Content -LiteralPath {quoted(helper)} -Raw; "
+            "$source=$source.Replace('New-DaemonInstanceReservation -Service',"
+            "'Fail-NativeFixtureReservation -Service'); "
+            "function Fail-NativeFixtureReservation { throw 'fixture reservation reached' }; "
+            "Invoke-Expression $source; "
+            f"$script:NativeDaemonSource={quoted(helper)}; "
+        )
     script = (
         f"$ErrorActionPreference='Stop'; . {quoted(helper)}; "
         "$env:COPILOT_EXTENSIONS_TEST_CONTAINED=$null; "
-        "try { "
+        + reservation_guard
+        + "try { "
         f"$p = Start-NativeDaemon -Script {quoted(fixture)} -Arguments @('worker') "
         f"-WorkingDirectory {quoted(tmp_path)} -LogPath {quoted(tmp_path / 'worker.log')}; "
         "$p.Dispose(); exit 91 "
@@ -161,7 +177,10 @@ def test_native_direct_refusal_never_runs_foreground(tmp_path, scopes):
     result = subprocess.run(
         [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
         capture_output=True, text=True, timeout=45, **pu.no_window_kwargs(),
-        env={**os.environ, "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES": scopes},
+        env={
+            **{key: value for key, value in os.environ.items() if key.lower() != scope_key.lower()},
+            scope_key: scopes,
+        },
     )
     assert result.returncode == 0, result.stderr
     outcome = json.loads(result.stdout)

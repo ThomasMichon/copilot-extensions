@@ -181,8 +181,9 @@ tracked launcher-owned cleanup Job and closes the temporary query handles.
 A current-user-only, bounded named-pipe handshake checks both actual endpoint
 PIDs against the retained native child identity. No WMI, COM, Scheduled Task,
 UAC or automatic inherited-lifetime fallback participates.
-Owned Job-scope syntax is checked before instance reservation, so malformed
-scope metadata cannot start the instance helper ahead of native refusal.
+Owned Job-scope environment keys are matched case-insensitively and scope
+syntax is checked before instance reservation, so malformed metadata cannot
+start the instance helper ahead of native refusal.
 
 The result is a `System.Diagnostics.Process`; keep it for observation and
 dispose it afterward. Spawn/admission is not application readiness or
