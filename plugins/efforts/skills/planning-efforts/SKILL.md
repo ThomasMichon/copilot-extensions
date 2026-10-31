@@ -193,7 +193,10 @@ Explicit pins, single attempts, budgets, expiry, revocation and holds remain
 binding; unknown effects need owner-led reconciliation, not replay. A plan or
 receipt is not permission. Carry references, limits and current changes through
 every checkpoint/handoff, and continue independent authorized work rather than
-asking another generic continue-or-pause question.
+asking another generic continue-or-pause question. Prepare a pending decision
+through permitted research/planning/docs before a blocking prompt; an adopted
+agenda preserves its branch/return, packet and attempt/revisit references while
+another authorized avenue progresses. Explicit all-work holds remain binding.
 
 ## Plan an effort
 

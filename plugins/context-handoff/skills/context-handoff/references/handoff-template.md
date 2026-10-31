@@ -25,6 +25,8 @@ phase or pull request is progress, not the effort completion gate.>
 - **Completed since the effort journal:** <only material facts not yet durable>
 - **In flight:** <uncommitted edits / active command / pending review>
 - **Blockers or decisions:** <only unresolved material blockers or decisions>
+- **Adopted agenda:** <state/cursor locator, active and deferred branch/packet
+  references, actual attempt/revisit times and original returns; none if not adopted>
 - **Gotchas / failed approaches:** <session-local facts not yet in the Journal>
 - **Required confirmations:** <safety, approval, or administrative gates; "none"
   when none>
@@ -90,6 +92,10 @@ key decisions, so they aren't re-litigated.>
 1. <Immediate next action — begin here after consuming the handoff>
 2. <Additional slice or phase already authorized by the original request>
 3. <Continue listing known actionable work; do not stop at the latest milestone>
+
+<If an agenda is adopted, carry its state/cursor locator, active/deferred
+branches, decision packets, actual attempt/revisit times and original returns.
+A due time or response is reinspection, not consent or source completion.>
 
 ### Outstanding Background Flows & External State
 <Never silently drop these -- list each as resumable (how the successor picks
