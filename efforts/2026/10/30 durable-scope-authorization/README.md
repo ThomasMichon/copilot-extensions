@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Managed, independent proposal and implementation PRs to `dev`
 - **Created:** 2026-10-30
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `harness-guidance` useful autonomy and `plugins/efforts` durable scoped authorization
 - **Umbrella issue:** #9736
 
@@ -115,9 +115,9 @@ the private, task-specific context without publishing it here.
 - [x] Update generator/emergency-draft and inherited-continuation guidance to
   retain available evidence or explicitly name its absence; missing evidence
   requires bounded recovery before effects, not inferred permission.
-- [ ] Update authoritative documentation and focused tests, add changefiles and
+- [x] Update authoritative documentation and focused tests, add changefiles and
   drive implementation through normal review and merge.
-- [ ] Record source/release status truthfully. Installed rollout remains with
+- [x] Record source/release status truthfully. Installed rollout remains with
   each adopter's separately authorized update owner, outside this source effort.
 
 ## Validation Plan
@@ -135,7 +135,7 @@ the private, task-specific context without publishing it here.
 - [x] Public examples, issue/PR descriptions and source remain generic; no
   deployment/data grant, automatic tool approval, service or new dependency is
   introduced.
-- [ ] Required review/CI pass, merged changes are journaled and every remaining
+- [x] Required review/CI pass, merged changes are journaled and every remaining
   gate is resolved or transferred to a named tracked objective before Done.
 
 ## Proposal
@@ -145,6 +145,39 @@ are **agent-recommended implementation details**, not additional operator grants
 Actual permission enforcement stays with the existing execution/resource owners.
 
 ## Journal
+
+### 2026-10-31 - Release verification and archive
+
+- Verified the exact changed conduct kernel/declaration, effort procedure/template
+  and continuity implementation in released Main content. Released versions are
+  `agent-conduct-guidance 0.1.18-dev1`, `efforts 0.1.9-dev1` and
+  `context-handoff 0.5.16-dev1`; no installed-machine rollout was performed here.
+- A later, unrelated promotion candidate failed its remote-ref verification.
+  The existing watchdog tracker [#9748](https://github.com/ThomasMichon/copilot-extensions/issues/9748)
+  already has a focused repair owner. Earlier successful release content is
+  preserved; no retry, branch mutation or guard bypass is part of this effort.
+- Archived the completed source scope with original operator evidence and
+  exclusions intact. Remaining adopter updates require their applicable
+  pre-clearance and existing deployment owner.
+
+### 2026-10-30 - Source completion
+
+- Implementation #9741 merged after current-head Copilot approval with no open
+  findings and required green CI. The managed source branch advanced onto the
+  merged development commit.
+- The exact published-head conduct packet passed 40 cases, effort packet passed
+  74 with one platform-specific skip, and continuity packet passed 134. Actual
+  durable file readback and consumption preserved the original approval limits.
+- Source delivery is complete. Promotion remains with the existing
+  [release-pipeline objective #3336](https://github.com/ThomasMichon/copilot-extensions/issues/3336):
+  the latest observed workflow is queued; availability of this specific change
+  on Main has not yet been verified. No installed rollout is claimed or authorized
+  by this source effort.
+- The pre-existing oversized continuity-skill advisory is tracked separately in
+  [#9742](https://github.com/ThomasMichon/copilot-extensions/issues/9742); no broader
+  workflow refactor or deployment is part of this completed source scope.
+- Original operator evidence and effect exclusions are preserved. No deployment,
+  personal-data, disclosure, access or external-owner grant was introduced.
 
 ### 2026-10-30 - Source and focused validation
 
