@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path, PureWindowsPath
@@ -28,7 +29,7 @@ def test_sandbox_cleanup_supports_both_stdlib_signatures(tmp_path, monkeypatch, 
         shutil.rmtree(name, ignore_errors=ignore_errors)
 
     monkeypatch.setattr(
-        plugin_test_containment.tempfile.TemporaryDirectory,
+        tempfile.TemporaryDirectory,
         "_rmtree", staticmethod(current if supports_repeated else legacy),
     )
     sandbox = tmp_path / "owned-sandbox"
