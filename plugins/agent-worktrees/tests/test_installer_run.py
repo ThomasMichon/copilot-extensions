@@ -320,7 +320,8 @@ def test_output_pipe_failure_cannot_starve_installer_supervision(tmp_path, monke
 
 
 def test_slow_productive_sink_renews_delivery_after_installer_exit(tmp_path, monkeypatch):
-    monkeypatch.setattr(installer_run, "_REAP_GRACE_S", 1)
+    quiet_window = 1
+    monkeypatch.setattr(installer_run, "_REAP_GRACE_S", quiet_window)
     reader, writer = os.pipe()
     received = bytearray()
 
@@ -335,11 +336,11 @@ def test_slow_productive_sink_renews_delivery_after_installer_exit(tmp_path, mon
         started = time.monotonic()
         run = installer_run.run_installer(
             [sys.executable, "-c", "import os;os.write(1,b'x'*163840)"],
-            cwd=tmp_path, env=os.environ, deadline_s=1, output_fd=writer,
+            cwd=tmp_path, env=os.environ, deadline_s=quiet_window, output_fd=writer,
             require_tree_exit=os.name == "nt",
         )
         assert run.status == "OK"
-        assert time.monotonic() - started > 3
+        assert time.monotonic() - started > quiet_window
         assert os.get_blocking(writer), "a borrowed descriptor's flags must remain unchanged"
     finally:
         os.close(writer)
@@ -347,6 +348,68 @@ def test_slow_productive_sink_renews_delivery_after_installer_exit(tmp_path, mon
         os.close(reader)
     assert not consumer.is_alive()
     assert received == b"x" * 163840
+
+
+@pytest.mark.parametrize("backpressure", [False, True])
+def test_failed_sink_retains_inflight_output_once(tmp_path, monkeypatch, backpressure):
+    from agent_procutil._output_relay import ByteRelay
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    original_capture = installer_run.SyncProcessOutput
+    captures = []
+    failure = OSError("native output sink failed")
+    attempts = []
+
+    def capture(*args, **kwargs):
+        kwargs["capture"] = True
+        result = original_capture(*args, **kwargs)
+        captures.append(result)
+        return result
+
+    def offer(_relay, chunk):
+        attempts.append(chunk)
+        if backpressure and len(attempts) == 1:
+            return False
+        raise failure
+
+    monkeypatch.setattr(installer_run, "SyncProcessOutput", capture)
+    monkeypatch.setattr(ByteRelay, "offer", offer)
+    with (tmp_path / "output").open("wb") as output:
+        with pytest.raises(OSError) as caught:
+            installer_run.run_installer(
+                [sys.executable, "-c", "import os;os.write(1,b'inflight diagnostic')"],
+                cwd=tmp_path, env=os.environ, deadline_s=10, output_fd=output.fileno(),
+            )
+    assert caught.value is failure
+    assert len(attempts) == (2 if backpressure else 1)
+    assert captures[0].output()[0] == "inflight diagnostic"
+    assert all(not reader.is_alive() for reader in captures[0]._readers)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX high-numbered pipes")
+def test_capture_accepts_high_numbered_pipe_descriptors(tmp_path, monkeypatch):
+    import fcntl
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    proc, job = installer_run._spawn(
+        [sys.executable, "-c",
+         "import os;os.write(1,b'high output');os.write(2,b'high diagnostic')"],
+        tmp_path, os.environ, True,
+    )
+    capture = None
+    try:
+        descriptor = fcntl.fcntl(proc.stdout.fileno(), fcntl.F_DUPFD, 1024)
+        os.set_inheritable(descriptor, False)
+        stream = os.fdopen(descriptor, "r", encoding="utf-8", errors="replace")
+        proc.stdout.close()
+        proc.stdout = stream
+        assert stream.fileno() >= 1024
+        capture = installer_run.SyncProcessOutput(proc)
+        capture.wait(5)
+        assert capture.output() == ("high output", "high diagnostic")
+    finally:
+        installer_run._kill_tree(proc, job, capture)
+    assert all(not reader.is_alive() for reader in capture._readers)
 
 
 def test_output_relays_do_not_inherit_unrelated_pipe_handles(tmp_path):
@@ -507,8 +570,7 @@ def test_startup_grace_ends_when_real_output_begins(tmp_path, stall):
             capture.wait(1, startup_timeout=10)
             assert capture.output()[0].count("progress") == 6
     finally:
-        installer_run._kill_tree(proc, job)
-        capture.finish(10)
+        installer_run._kill_tree(proc, job, capture)
     assert all(not reader.is_alive() for reader in capture._readers)
 
 

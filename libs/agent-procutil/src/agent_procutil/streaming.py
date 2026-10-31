@@ -5,11 +5,12 @@ from __future__ import annotations
 import math
 import os
 import queue
-import select
+import selectors
 import subprocess
 import threading
 import time
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -82,22 +83,25 @@ class SyncProcessOutput:
         try:
             binary = getattr(stream, "buffer", stream)
             read = getattr(binary, "read1", binary.read)
-            while True:
-                if os.name != "nt":
-                    ready, _, _ = select.select(
-                        [binary], [], [], 0 if self._stop_at_idle.is_set() else .1,
-                    )
-                    if not ready:
+            with (
+                selectors.DefaultSelector() if os.name != "nt" else nullcontext()
+            ) as poller:
+                if poller is not None:
+                    poller.register(binary, selectors.EVENT_READ)
+                while True:
+                    if poller is not None and not poller.select(
+                        0 if self._stop_at_idle.is_set() else .1,
+                    ):
                         if self._stop_at_idle.is_set():
                             return
                         continue
-                chunk = read(4096)
-                if not chunk:
-                    return
-                with self._lock:
-                    self._last_output = time.monotonic()
-                    self._has_output = True
-                self._events.put((name, chunk))
+                    chunk = read(4096)
+                    if not chunk:
+                        return
+                    with self._lock:
+                        self._last_output = time.monotonic()
+                        self._has_output = True
+                    self._events.put((name, chunk))
         except BaseException as error:
             self._events.put((name, error))
         finally:
@@ -110,8 +114,14 @@ class SyncProcessOutput:
             raise chunk
         else:
             relay = self._relays.get(name)
-            if not self._relay_failed and relay is not None and not relay.offer(chunk):
-                return False
+            if not self._relay_failed and relay is not None:
+                try:
+                    accepted = relay.offer(chunk)
+                except BaseException:
+                    self._pending = (name, chunk)
+                    raise
+                if not accepted:
+                    return False
             if self._capture or self.on_output is not None:
                 self._output[name].extend(chunk)
         return True

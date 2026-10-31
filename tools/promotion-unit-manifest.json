@@ -3514,7 +3514,7 @@
         "libs/agent-procutil/tests/sdk_desktop_observer.py": "94611376383991ec78de7a1d29eb4256c592a4aa9be0bcf98b7df6f6e415e022",
         "libs/agent-procutil/tests/sdk_visibility.py": "ef36a2c6548e7cd671b770f06e0e4db0a0b403b409e75a34b3fa4f89cb0f2062",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py": "2f54f9e1af5c2a32ad6e385848827b7e455cdfc6e44e6ef117d3691b438af201",
-        "libs/agent-procutil/tests/sdk_visibility_sources.py": "1369a38abd05304d5bb1c9dfd546a0ac1c2f7b4463d90024d07374b5ab08aa7d",
+        "libs/agent-procutil/tests/sdk_visibility_sources.py": "fbb475a10518ee8e2b13d2c119996fa82fc3aec301537d9953777a7a0ac77f57",
         "libs/agent-procutil/tests/sdk_visibility_cases.py": "6cf438b387e7123eca6baeec1fed5d14e4297a1c336f029de4ec66dc99ad2972",
         "libs/installation-context/_installation_context_worker.py": "6c10396cb0555736155b25bf3f52d507c9e36b189eb06a175d0a27fc778f6c8d",
         "libs/agent-procutil/tests/test_shell_caller_owned_native.py": "9387ec4b81c5b5fe0d834493309b2863f1f0deac8001bf2b8b6df1c0e13b13e1",
