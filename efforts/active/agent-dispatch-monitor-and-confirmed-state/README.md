@@ -213,10 +213,11 @@ live claim token. No new blanket ACK or executor appointment is created.
 - [x] Select the [startup and retry budgets](assignment-startup-amendment.md#selected-startup-and-retry-policy),
       including reset of both counters on successful `STARTED`; source
       implementation and qualification remain separate.
-- [ ] Review the [selected pool scope and priority](assignment-startup-amendment.md#selected-pool-scope-and-ordering)
+- [x] Review the [selected pool scope and priority](assignment-startup-amendment.md#selected-pool-scope-and-ordering)
       and complete-effective-set prerequisite before affected source work;
       normalized definitions, provider publication and caller migration remain
-      distinct acceptance slices.
+      distinct acceptance slices. Merged in
+      [#9773](https://github.com/ThomasMichon/copilot-extensions/pull/9773).
 - [ ] Resolve the amendment's remaining policy choices and complete its validation matrix
       at the stated source, mixed-version and installed/native evidence tiers.
 
@@ -1251,3 +1252,27 @@ with numeric ordering and representation recommendations distinguished from
 the selected policy. Review precedes source implementation. The complete
 effective-set/provider/mixed-cohort boundary and all parent gates remain open;
 there is no live activation or claim that metadata alone enforces placement.
+
+The pool-policy amendment merged in
+[#9773](https://github.com/ThomasMichon/copilot-extensions/pull/9773) as
+`3f61379fa11dd93b310470b5354a494144f77d10` after current-head approval
+and required checks. Managed pull-forward reached the exact merge without a
+remaining diff. The first source prerequisite is normalized pool-instance
+definitions with lossless filters and priority; effective-set publication,
+atomic capacity and task placement remain separate implementation gates.
+
+### 2026-10-31 - Normalized pool definitions source slice
+
+Implemented the reviewed first prerequisite: validated version-1 pool-instance
+definitions, independent machine/environment keys, complete effective filters,
+declarative priority and deterministic ordering. The metadata stays outside
+legacy subprocess specs and restart fingerprints; incomplete legacy definitions
+are not promoted from labels. Definition validation is not provider enrollment
+or an executing-runtime capability.
+
+The bounded disconnected registrar packet passes 162 cases, including the new
+definition controls; focused lint/type checks pass. Source review/merge remains
+separate. The coordinator publisher still drops top-level metadata and does not
+publish the final effective set. Its revision-fenced publication, atomic
+capacity/claim transaction and conditional caller migration are the next
+implementation stretch, not inferred completion of this amendment.

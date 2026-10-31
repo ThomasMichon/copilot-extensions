@@ -59,7 +59,9 @@ closeout policy.
 
 ### Selected pool scope and ordering
 
-**Operator-selected policy, 2026-10-31; review and implementation pending:**
+**Operator-selected policy, 2026-10-31; reviewed in
+[#9773](https://github.com/ThomasMichon/copilot-extensions/pull/9773);
+implementation pending:**
 Capacity is separate for each **machine/environment pool instance**, not one
 shared cap across hosts. When multiple eligible instances have capacity, use
 **configurable pool priority**, not registration-ID order alone.
