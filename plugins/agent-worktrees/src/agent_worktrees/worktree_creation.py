@@ -37,6 +37,7 @@ from lazy_cli_dispatch import self_override as _self_override
 from . import (
     activity,
     codename_tracking,
+    creation_diagnostics,
     git_ops,
     local_cache_refresh,
     permissions,
@@ -50,6 +51,7 @@ from .creation_allocation import AdmittedAllocation, creation_parameters
 from .creation_identity import IdentityMode, new_machine_identity, require_same_machine_identity, validate_mode
 from .worktree_machine_identity import WorktreeMachineIdentity
 from .receiving_allocation import ReceivingAllocation
+from .creation_owner_claim import _journal_owner_reciprocal_claim as _journal_owner_reciprocal_claim
 
 
 class LaunchSeedStagingFailure(RuntimeError):
@@ -408,28 +410,6 @@ def _stamp_and_compose_paired_knowledge(
         return {"action": "error", "error": str(exc)}
 
 
-def _journal_owner_reciprocal_claim(
-    config: cfg.Config,
-    worktree_id: str,
-    owner_ref: str | None,
-    *,
-    owner_locked: bool = False,
-    machine_identity: WorktreeMachineIdentity | None = None,
-) -> bool:
-    """Preserve the compatibility-root owner resolver for reciprocal claims."""
-    if not owner_ref:
-        return False
-    core = _core()
-    from . import claims_cli as _claims_cli
-    from .creation_owner_claim import journal_owner_claim
-
-    resolve_owner = _self_override(vars(core), "_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
-    return journal_owner_claim(
-        config, worktree_id, owner_ref, resolve_owner=resolve_owner,
-        owner_locked=owner_locked, machine_identity=machine_identity,
-    )
-
-
 @step("Synchronizing repository source")
 def _prepare_worktree_source(
     anchor: str | Path,
@@ -773,7 +753,7 @@ def _create_worktree_core(
         cfg.tracking_dir(config.repo_name) if creation_intent is not None else cfg.tracking_dir()
     )
     tracking_path.mkdir(parents=True, exist_ok=True)
-    with step("Allocating worktree identity", worktree_id=worktree_id), codename_tracking.allocation_lock(
+    with step("Allocating worktree identity", worktree_id=worktree_id, creation_advisory=True), codename_tracking.allocation_lock(
         tracking_path,
     ):
         # Second revalidation (round-13/14 finding, sharpened by a PR
@@ -861,8 +841,11 @@ def _create_worktree_core(
             ):
                 raise RuntimeError(f"owner {owner_ref} cannot accept a new worktree obligation")
 
-            print(f"Creating worktree on branch {branch}...", file=sys.stderr)
-            with step("Creating Git worktree", worktree_id=worktree_id):
+            creation_diagnostics.emit(
+                "branch_notice", lambda: print(f"Creating worktree on branch {branch}...", file=sys.stderr),
+                worktree_id=worktree_id,
+            )
+            with step("Creating Git worktree", worktree_id=worktree_id, creation_advisory=True):
                 git_ops.create_worktree(
                     repo.anchor,
                     worktree_path,

@@ -6,7 +6,9 @@ from collections.abc import Callable
 from pathlib import Path
 import sys
 
-from . import config as cfg, obligations, tracking
+from lazy_cli_dispatch import self_override as _self_override
+
+from . import config as cfg, creation_diagnostics, obligations, tracking
 from .creation_identity import require_same_machine_identity
 from .execution_spaces import (
     ExecutionSpaceError, current_execution_context, project_record_config,
@@ -66,8 +68,40 @@ def journal_owner_claim(
         else:
             with tracking._RecordLock(owner_path, require_sidecar=True):
                 write_claim()
-        print(f"Journaled this worktree as an obligation on {owner_ref}.", file=sys.stderr)
-        return True
     except Exception as exc:  # Retain the existing best-effort reporting contract.
-        print(f"owner-claim journaling failed (non-fatal): {exc}", file=sys.stderr)
+        creation_diagnostics.record_failure("owner_claim_persistence", exc, worktree_id=worktree_id)
+        creation_diagnostics.emit(
+            "owner_claim_notice",
+            lambda: print("owner-claim journaling failed (non-fatal).", file=sys.stderr),
+            worktree_id=worktree_id,
+        )
         return False
+    creation_diagnostics.emit(
+        "owner_claim_notice",
+        lambda: print(f"Journaled this worktree as an obligation on {owner_ref}.", file=sys.stderr),
+        worktree_id=worktree_id,
+    )
+    return True
+
+
+def _journal_owner_reciprocal_claim(
+    config: cfg.Config,
+    worktree_id: str,
+    owner_ref: str | None,
+    *,
+    owner_locked: bool = False,
+    machine_identity: WorktreeMachineIdentity | None = None,
+) -> bool:
+    """Preserve the compatibility-root owner resolver for reciprocal claims."""
+    if not owner_ref:
+        return False
+    from . import claims_cli as _claims_cli
+    from .worktree_creation import _core
+
+    core = _core()
+
+    resolve_owner = _self_override(vars(core), "_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
+    return journal_owner_claim(
+        config, worktree_id, owner_ref, resolve_owner=resolve_owner,
+        owner_locked=owner_locked, machine_identity=machine_identity,
+    )
