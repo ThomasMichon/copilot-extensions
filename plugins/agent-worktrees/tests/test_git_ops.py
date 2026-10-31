@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import types
 import typing
 from pathlib import Path
@@ -12,8 +13,11 @@ from agent_worktrees.git_ops import (
     GitError,
     WorktreeState,
     WorktreeStateInfo,
+    create_worktree,
     git,
     is_cwd_inside,
+    list_worktree_paths,
+    local_branch_exists,
     merge_squash,
     refine_state_with_session,
     resolve_to_anchor,
@@ -1725,3 +1729,217 @@ class TestMergeSquash:
         subject = git("log", "-1", "--format=%s", cwd=repo).stdout.strip()
         assert worktree_id not in subject
         assert subject == "squash: merge worktree 3a94"
+
+
+# ---------------------------------------------------------------------------
+# create_worktree -- a failed checkout must not leak the branch it created
+# ---------------------------------------------------------------------------
+
+class TestCreateWorktree:
+    """A failed checkout leaves behind the branch created for it, so
+    ``create_worktree`` must delete a branch it created itself -- and never any
+    other branch, nor a tip another process advanced."""
+
+    BRANCH = "worktree/new"
+
+    @pytest.fixture(autouse=True)
+    def _hermetic_git(self, monkeypatch, tmp_path: Path):
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+
+    def _anchor(self, tmp_path: Path, *, broken_filter: bool) -> Path:
+        """Clone a one-commit repository so ``origin/main`` is the start point.
+
+        With *broken_filter*, checking out ``data.bin`` requires a smudge
+        filter whose command does not exist.
+        """
+        source = tmp_path / "source"
+        source.mkdir()
+        git("init", "-b", "main", cwd=source)
+        git("config", "user.email", "t@example.com", cwd=source)
+        git("config", "user.name", "Test", cwd=source)
+        (source / ".gitattributes").write_text("*.bin filter=broken\n")
+        (source / "data.bin").write_text("payload\n")
+        git("add", "-A", cwd=source)
+        git("commit", "-m", "initial", cwd=source)
+        anchor = tmp_path / "anchor"
+        git("clone", "--quiet", str(source), str(anchor), cwd=tmp_path)
+        if broken_filter:
+            git("config", "filter.broken.smudge", "missing-filter-tool smudge %f", cwd=anchor)
+            git("config", "filter.broken.required", "true", cwd=anchor)
+        return anchor
+
+    def _tip(self, anchor: Path) -> str:
+        """The branch's commit, read with the unpatched ``git``; ``""`` if absent."""
+        result = git(
+            "rev-parse", "--verify", "--quiet", f"refs/heads/{self.BRANCH}",
+            cwd=anchor, check=False,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    def test_failed_add_deletes_the_branch_it_created(self, tmp_path: Path):
+        anchor = self._anchor(tmp_path, broken_filter=True)
+        target = tmp_path / "wt"
+
+        with pytest.raises(GitError) as exc_info:
+            create_worktree(anchor, str(target), self.BRANCH, "origin/main")
+
+        # git's own checkout error still surfaces unchanged.
+        assert exc_info.value.cmd[1:3] == ["worktree", "add"]
+        assert "broken" in exc_info.value.stderr
+        assert not local_branch_exists(self.BRANCH, cwd=anchor)
+        upstream = git(
+            "config", "--get-regexp", rf"^branch\.{self.BRANCH}\.",
+            cwd=anchor, check=False,
+        )
+        assert upstream.stdout.strip() == ""
+        assert not target.exists()
+        assert len(list_worktree_paths(cwd=anchor)) == 1
+
+    def test_failed_add_keeps_a_preexisting_branch(self, tmp_path: Path):
+        anchor = self._anchor(tmp_path, broken_filter=False)
+        git("branch", self.BRANCH, "origin/main", cwd=anchor)
+        tip = git("rev-parse", self.BRANCH, cwd=anchor).stdout.strip()
+
+        # Creating the branch fails when it already exists; that branch is not
+        # ours to delete, even though it points at the start point.
+        with pytest.raises(GitError):
+            create_worktree(anchor, str(tmp_path / "wt"), self.BRANCH, "origin/main")
+
+        assert git("rev-parse", self.BRANCH, cwd=anchor).stdout.strip() == tip
+
+    def test_failed_add_keeps_a_branch_another_process_created(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        """Another process creates the branch just before this call would; the
+        failure that follows must not delete that process's branch."""
+        anchor = self._anchor(tmp_path, broken_filter=False)
+        base = git("rev-parse", "origin/main", cwd=anchor).stdout.strip()
+        real_git = go.git
+        raced: list[tuple[str, ...]] = []
+
+        def git_losing_the_creation_race(*args, **kwargs):
+            creates_branch = args[:2] == ("branch", self.BRANCH) or (
+                args[:2] == ("worktree", "add") and "-b" in args and self.BRANCH in args
+            )
+            if creates_branch and not raced:
+                raced.append(args)
+                git("branch", self.BRANCH, base, cwd=anchor)  # the other process
+            return real_git(*args, **kwargs)
+
+        monkeypatch.setattr(go, "git", git_losing_the_creation_race)
+        with pytest.raises(GitError) as exc_info:
+            create_worktree(anchor, str(tmp_path / "wt"), self.BRANCH, "origin/main")
+
+        assert raced
+        assert "already exists" in exc_info.value.stderr
+        assert self._tip(anchor) == base
+
+    def test_failed_add_keeps_a_created_branch_that_moved(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        anchor = self._anchor(tmp_path, broken_filter=True)
+        moved = git(
+            "-c", "user.name=Test", "-c", "user.email=t@example.com",
+            "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "elsewhere",
+            cwd=anchor,
+        ).stdout.strip()
+        real_git = go.git
+
+        def git_moving_the_new_branch(*args, **kwargs):
+            try:
+                return real_git(*args, **kwargs)
+            except GitError:
+                if args[:2] == ("worktree", "add"):
+                    real_git("branch", "--force", self.BRANCH, moved, cwd=anchor)
+                raise
+
+        monkeypatch.setattr(go, "git", git_moving_the_new_branch)
+        with pytest.raises(GitError):
+            create_worktree(anchor, str(tmp_path / "wt"), self.BRANCH, "origin/main")
+
+        assert real_git("rev-parse", self.BRANCH, cwd=anchor).stdout.strip() == moved
+
+    def test_failed_add_keeps_a_branch_advanced_before_deletion(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        """Another process advances the created branch after any inspection of
+        its tip but before the delete; the newer tip and its config survive."""
+        anchor = self._anchor(tmp_path, broken_filter=True)
+        base = git("rev-parse", "origin/main", cwd=anchor).stdout.strip()
+        advanced = git(
+            "-c", "user.name=Test", "-c", "user.email=t@example.com",
+            "commit-tree", f"{base}^{{tree}}", "-p", base, "-m", "other",
+            cwd=anchor,
+        ).stdout.strip()
+        real_git = go.git
+        raced: list[tuple[str, ...]] = []
+
+        def git_advancing_before_deletion(*args, **kwargs):
+            deletes_branch = (
+                args[:1] == ("branch",) and ("-D" in args or "-d" in args)
+                and self.BRANCH in args
+            ) or (
+                args[:1] == ("update-ref",) and "-d" in args
+                and f"refs/heads/{self.BRANCH}" in args
+            )
+            if deletes_branch and not raced:
+                raced.append(args)
+                # the other process
+                git("update-ref", f"refs/heads/{self.BRANCH}", advanced, cwd=anchor)
+            return real_git(*args, **kwargs)
+
+        monkeypatch.setattr(go, "git", git_advancing_before_deletion)
+        with pytest.raises(GitError) as exc_info:
+            create_worktree(anchor, str(tmp_path / "wt"), self.BRANCH, "origin/main")
+
+        assert exc_info.value.cmd[1:3] == ["worktree", "add"]
+        assert raced
+        assert self._tip(anchor) == advanced
+        merge = git(
+            "config", "--get", f"branch.{self.BRANCH}.merge", cwd=anchor, check=False,
+        )
+        assert merge.stdout.strip() == "refs/heads/main"
+
+    def test_failed_add_keeps_a_branch_checked_out_elsewhere(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        """A created branch that another worktree checks out before the rollback
+        is never deleted, even though it still points at the start point."""
+        anchor = self._anchor(tmp_path, broken_filter=True)
+        base = git("rev-parse", "origin/main", cwd=anchor).stdout.strip()
+        other = tmp_path / "other"
+        real_git = go.git
+
+        def git_checking_out_the_new_branch(*args, **kwargs):
+            try:
+                return real_git(*args, **kwargs)
+            except GitError:
+                if args[:2] == ("worktree", "add"):
+                    git(
+                        "worktree", "add", "--no-checkout", str(other), self.BRANCH,
+                        cwd=anchor,
+                    )
+                raise
+
+        monkeypatch.setattr(go, "git", git_checking_out_the_new_branch)
+        with pytest.raises(GitError):
+            create_worktree(anchor, str(tmp_path / "wt"), self.BRANCH, "origin/main")
+
+        listing = git("worktree", "list", "--porcelain", cwd=anchor).stdout
+        assert f"branch refs/heads/{self.BRANCH}" in listing.splitlines()
+        assert self._tip(anchor) == base
+
+    def test_successful_add_unchanged(self, tmp_path: Path):
+        anchor = self._anchor(tmp_path, broken_filter=False)
+        target = tmp_path / "wt"
+
+        create_worktree(anchor, str(target), self.BRANCH, "origin/main")
+
+        assert (target / "data.bin").is_file()
+        head = git("rev-parse", "--abbrev-ref", "HEAD", cwd=target).stdout.strip()
+        assert head == self.BRANCH
+        merge = git("config", "--get", f"branch.{self.BRANCH}.merge", cwd=anchor)
+        assert merge.stdout.strip() == "refs/heads/main"
+        assert len(list_worktree_paths(cwd=anchor)) == 2
