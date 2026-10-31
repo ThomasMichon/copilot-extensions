@@ -4,7 +4,7 @@
   for multi-session, multi-wave work.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-28
+- **Last revised:** 2026-10-30
 - **Reality docs:** [`efforts/README.md`](../../../efforts/README.md) ·
   [`docs/harness-runbook.md`](../../../docs/harness-runbook.md) ·
   [`plugins/efforts/README.md`](../../../plugins/efforts/README.md) ·
@@ -75,6 +75,13 @@ contain similarly named files or directories.
 A substantial objective has one canonical, versioned effort containing the goal,
 plan, validation, coordination, and progress needed for another participant to
 resume it without relying on conversation history.
+
+### durable-scoped-authorization
+
+An effort can preserve explicit operator pre-clearance for an objective's
+operations, destinations, owners, effects, accepted blast radius and limits.
+Original approval evidence and later narrowing or revocation remain distinct
+from the plan, execution evidence and a participant's interpretation.
 
 ### effort-scoped-session-loop
 
@@ -163,6 +170,16 @@ A successor first loads the active effort and resumes from its next incomplete
 slice or explicitly adopted agenda position. It uses predecessor-session
 ramp-up as a bounded supplement for immediate actions and observations, never
 as the durable source of truth.
+
+### authority-survives-within-scope
+
+Upfront approvals and one-time answers remain usable through ordinary revisions,
+bounded retries, checkpoints and handoffs while the real action fits their
+original scope. Explicit pins, single-attempt limits, expiry, revocation and
+holds remain binding. Unknown prior effects require reconciliation, not replay.
+Missing authority does not block independent already-authorized work and does
+not authorize deployment, content mutation or actions on externally controlled
+resources.
 
 ### cooperative-agenda-movement
 
