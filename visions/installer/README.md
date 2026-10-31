@@ -176,7 +176,14 @@ private knowledge, machine inventory or connectivity policy. Authentication
 remains with its provider, including a genuine interactive opportunity when
 needed; access failure is not permission to substitute another account or source.
 An unfinished repository stage remains explicit without discarding a completed
-core installation or claiming full adoption.
+Manager installation or claiming full adoption.
+
+The upstream entry establishes Manager first from a trusted staged source and
+complete installation inputs, independently of Copilot, installed plugin
+payloads, an old runtime command or interactive shell initialization. Default
+selection follows live upstream Main; explicit locally promoted installation
+snapshots and admitted source checkouts/commits remain supported. Last-known-good
+Main ancestors retain their own release identity.
 
 ### harness-selected-continuity-bootstrap
 
@@ -208,9 +215,68 @@ Detects and installs the foundational prerequisites, and **prompts to restart**
 when a change requires it before continuing.
 
 ### core-install-via-real-flow
-Installs the user-global ground runtime and baseline services by driving the
-harness's **own** install flow, so the deployed core matches what the harness
-expects rather than a parallel reimplementation that can drift.
+Establishes Manager through the real upstream installation owner, then derives
+wanted local tools and services from a selected repository or an explicitly
+addressed registered-repository set. Complete per-application uv inputs and
+associated wheel closures are prepared with bounded parallelism, without
+inventing a second installer or using plugin payloads as runtime source.
+
+Setup owns completion and readiness; preparation can remain separate from
+activation. An operator-selected atomic local set admits every incoming member
+before coordinated selection, preserves the last good set and supports
+state-compatible rollback. Independent components remain usable without a
+mandatory Manager or group transaction.
+
+### owner-scoped-independent-recovery
+
+The same trusted self-install entry remains reachable when an old launcher,
+environment or redirect is broken. Read-only doctor, inventory and native
+transaction evidence precede a disruptive recovery. Positively owned incomplete
+candidates can be isolated and reconstructed fresh without wiping durable
+configuration/data or unrelated installations.
+
+Stable global command redirects and declared consumer registrations survive
+source staging and plugin removal. A running legacy launcher is not rewritten
+inside its own execution stream. Unknown, inaccessible, foreign or unsettled
+ownership is an explicit blocker, not a reason to unlink locks, kill processes,
+escalate privilege or adopt a different source.
+
+Raw self-install and rollback remain usable without the old Manager, tool
+commands, updater queue or services being replaced. Core source/toolchain
+construction comes before repository adoption and its authentication.
+Old installed wrappers/connectors either remain compatible or receive a
+supported, authorized refresh before activation; installed payload files are
+not patched ad hoc.
+
+Manual rescue authority is distinct from automatic-update admission. It does
+not clear another maintenance owner or a global automatic hold, and never grants
+unaddressed fleet rollout. Incoming native readiness, routing selection,
+preserved state and predecessor retirement are observed separately.
+
+### prepared-independent-maintenance
+
+One admitted owner prepares updates after foreground Manager load or on an
+optional long cadence. A later worktree/session launch can select a fully
+prepared toolset without first-use environment rebuilding. The caller waits
+for admitted construction/start outcomes, not complete background draining.
+
+Plugins remain bounded discovery and guidance connectors, not runtime
+installation triggers. Prepared reconciliation/instruction/hoist selections
+keep fresh worktrees correct: current managed bodies reach model discovery
+before execution, with reviewed fallbacks only when current bodies are absent.
+An optional once-per-session prepared-update notice does not create another
+maintenance loop or claim activation.
+
+Repository-derived service selection respects role, locus, provider and
+installation ownership. Missing or incomplete declarations never imply
+automatic uninstall. Automatic inhibition leaves ordinary healthy launch/use
+available, and manual rescue does not settle an unknown queue owner.
+
+Only an explicitly automatic update request is inhibited by the update switch.
+Manual update without the automatic flag, raw self-install, setup/install-source,
+doctor/list and ordinary launch still reach their normal owner. A launch's
+skipped automatic preparation is not a launch failure. This distinction never
+removes independent source, privilege, active-owner or unsettled-effect guards.
 
 ### setup-invocation-authorizes-dependencies
 A user or authorized agent directly invoking the trusted harness setup flow
@@ -271,12 +337,13 @@ lightweight plugin carries or assumes any of these dependencies.
 
 ### plugin-updating-and-alignment
 Keeps the installed plugin set **current and mutually consistent** — updates
-plugins and their user-global runtimes, and checks that versions, shared
+connector content and independently installed runtimes, and checks that capabilities, shared
 contracts, and configuration across plugins **align**, offering to reconcile
-drift or a half-upgraded set. It **complements** each plugin's own
-self-provisioning/self-reconciliation rather than replacing it: a plugin still
-keeps *itself* healthy alone; the configurator is the place a human can see and
-true-up the *whole set* at once. On a host that adopts the integrated
+drift or a half-upgraded set. Runtime installation is independently invoked;
+plugin discovery does not construct or reconcile it. Each independently
+installed component keeps its declared daemon healthy without requiring Manager.
+The configurator presents the whole set and requests work from its owner.
+On a host that adopts the integrated
 coordination product, the app is a client of that product's release authority
 and installer. It shows what is selected, ready, and serving, and it can
 request an update. It does not keep its own record of which release the host
@@ -629,9 +696,10 @@ the plugins' prerequisites and interop, never to be a thing they are wired to.
 ### control-plane-is-optional-plugins-are-self-sufficient
 The worktree/agent **control-plane** (picker and provider-backed session launch)
 is a convenience layer, not a foundation. With it absent, every plugin still
-**provisions and manages itself — its runtime *and* its daemons — and exposes the
-in-session tools an agent needs**, driven by the plugins' own self-provisioning
-model (see [plugin-services](../plugin-services/README.md)). The control-plane
+resolves independently installed tools, while each runtime's own installation
+and supervision owner remains sufficient without Manager. Missing backends
+remain explicit rather than being installed by plugin loading
+(see [plugin-services](../plugin-services/README.md)). The control-plane
 makes the fleet *legible and launchable by a human*; it never becomes a
 precondition for a plugin — or an agent using that plugin's tools — to function.
 This is the same one-way, dependency-free rule as *knows-the-plugins*, applied to
@@ -644,8 +712,10 @@ session and from the plugin pipe**. It never relies on a session, an agent, or a
 plugin to install or refresh the launcher; a plugin, conversely, never relies on
 the app to keep *itself* current.
 
-Out-of-band self-maintenance still honors the shared maintenance hold. It is not
-an exemption that recreates Manager during an operator's intentional removal.
+Out-of-band automatic self-maintenance carries the explicit automatic-update
+classification and honors its hold. Manual setup/update is not vetoed solely
+by that hold, but still respects actual installation authority, live native
+ownership and unsettled effects.
 
 ## Non-Goals / Boundaries
 
@@ -660,16 +730,17 @@ an exemption that recreates Manager during an operator's intentional removal.
   the same as being one.
 - **Its control-plane role is optional and additive, never a foundation.** The
   picker / provider-backed session-launch surface is a convenience for a human
-  running the fleet. The plugins provide the in-session tools agents use and
-  **self-provision and self-manage — daemons included — with this app absent**;
+  running the fleet. Plugins provide bounded in-session connection/knowledge
+  surfaces, and independently installed runtimes supervise their own daemons
+  with this app absent;
   the app must never become a prerequisite for a plugin (or an agent using its
   tools) to work. (The launcher-half of the worktree runtime relocating *into*
   this app must not smuggle in such a dependency.)
-- **It does not replace per-plugin installers or own their runtimes.** It
-  *orchestrates and guarantees* the harness's real install flows and each
-  plugin's prerequisites, and can **update the set and true-up cross-plugin
-  alignment**; it does not reimplement plugin runtime logic, and each plugin still
-  keeps *itself* provisioned and reconciled alone. The relationship carries **no
+- **It does not duplicate per-component installation or supervision owners.** It
+  coordinates the real application install flows and their prerequisites, and
+  can update the selected set and true-up compatibility. It does not reimplement
+  runtime logic or turn plugin loading into installation; independent component
+  setup remains available. The relationship carries **no
   dependency in either direction**: a plugin never requires the installer to be
   present, and the installer never becomes a link in a plugin's dependency chain —
   it is a knowing outsider, not a layer in the graph.
