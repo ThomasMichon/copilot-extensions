@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import math
 import time
+from collections import Counter
 
 from . import review_intent
 from .review_workspace import _digest, _generation, _record, _revision, _scope
@@ -92,6 +93,32 @@ def _expected_discussions(baseline, actual, operation):
             expected[thread_id]["lastUpdatedDate"] = actual[thread_id]["lastUpdatedDate"]
         else:
             expected[thread_id].pop("lastUpdatedDate", None)
+    votes = Counter(
+        {"APPROVED": 10, "CHANGES_REQUESTED": -10}[action["verdict"]]
+        for action, state in zip(operation["intent"]["actions"], operation["actions"])
+        if action["kind"] == "verdict" and state["state"] == "confirmed"
+    )
+    for identity, thread in actual.items():
+        if identity in expected:
+            continue
+        properties = thread.get("properties") or {}
+
+        def property_value(name):
+            value = properties.get(name)
+            return value.get("$value") if isinstance(value, dict) else value
+
+        vote = property_value("CodeReviewVoteResult")
+        if isinstance(vote, str) and vote in ("10", "-10"):
+            vote = int(vote)
+        if (
+            property_value("CodeReviewThreadType") == "VoteUpdate"
+            and property_value("CodeReviewVotedByTfId") == principal
+            and type(vote) is int and votes[vote] > 0
+            and not thread.get("isDeleted")
+            and thread["comments"] and all(comment.get("commentType") == 2 for comment in thread["comments"])
+        ):
+            expected[identity] = copy.deepcopy(thread)
+            votes[vote] -= 1
     return expected
 
 

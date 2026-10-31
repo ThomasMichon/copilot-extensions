@@ -105,6 +105,7 @@ class AdoReviewContext:
         if len(json.dumps(result.body, allow_nan=False).encode()) > MAX_RESPONSE_BYTES:
             raise ReviewContextUnavailable("native review response exceeds its byte bound")
         self.check()
+        self.remaining()
         return result
 
     def read_state(self):
@@ -203,8 +204,11 @@ class AdoReviewContext:
                 "PUT", base + "/reviewers/" + quote(self.scope["principal_id"], safe="") + "?api-version=7.1",
                 {"vote": vote},
             )
-            ids = {"reviewer_id": result.body.get("id")} if result.body.get("vote") == vote else {}
-            verified = type(result.body.get("vote")) is int and result.body["vote"] == vote
+            ids = {"reviewer_id": result.body.get("id")}
+            verified = (
+                type(result.body.get("vote")) is int and result.body["vote"] == vote
+                and result.body.get("id") == self.scope["principal_id"]
+            )
         if result.status not in (200, 201):
             raise ReviewContextUnavailable("native review effect reply is not confirmed")
         ids = {key: value for key, value in ids.items() if value is not None}

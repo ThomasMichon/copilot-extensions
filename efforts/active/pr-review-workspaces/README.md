@@ -218,6 +218,10 @@ contract.
   109 passed, including 24 synthetic transport consumers. The native source
   adapter creates no HTTP/auth client, and no installed operational command
   or write-context adoption is claimed.
+- Review required explicit handling of confirmed own native vote-system deltas
+  and retention of known reviewer IDs from incomplete/contradictory vote replies.
+  Twenty-nine source transport cases pass, including other-voter rejection and
+  no attribution/replay of an unknown vote despite matching current values.
 
 ### 2026-10-30 - Existing-store Phase 3 data realization
 - Merged #9731 as `5b4e8770cf18e0fb3cab202dc3fca12ada28640c`

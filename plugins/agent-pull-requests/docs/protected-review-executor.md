@@ -91,6 +91,10 @@ comment changes. Unrelated replies, edits, deletion, ownership or status changes
 stop remaining actions. Server last-update timestamps are accommodated only on
 the explicitly changed owned targets; stricter audit/freshness policy stays with
 the existing caller guard. Source/metadata generations are never rewritten.
+For an already confirmed vote response, one new native `VoteUpdate` system thread
+with the same native voter/result may be included per confirmed vote. Other
+voters/results, extra events or user comments are not silently ignored. This
+expected-delta handling is never used to confirm an unknown vote.
 
 There is no atomic multi-action or head-CAS guarantee. Post-effect readback can
 report candidate drift while retaining a confirmed native effect; no compensating

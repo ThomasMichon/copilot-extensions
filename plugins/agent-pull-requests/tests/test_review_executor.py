@@ -61,6 +61,9 @@ def environment(tmp_path, monkeypatch):
         mismatched_reply = False
         require_policy = False
         policy_failed = False
+        emit_vote_thread = False
+        vote_reply = "complete"
+        vote_thread_actor = None
 
         def __init__(self):
             self.pr = copy.deepcopy(evidence["sections"]["pull_request"]["data"])
@@ -112,6 +115,20 @@ def environment(tmp_path, monkeypatch):
             assert action["attempt_id"], "backend entered before durable in-flight persistence"
             if method == "PUT":
                 self.vote = body["vote"]
+                if self.emit_vote_thread:
+                    self.threads.append({
+                        "id": 200 + len(self.threads), "status": 1,
+                        "properties": {
+                            "CodeReviewThreadType": {"$value": "VoteUpdate"},
+                            "CodeReviewVoteResult": {"$value": str(self.vote)},
+                            "CodeReviewVotedByTfId": {"$value": self.vote_thread_actor or scope["principal_id"]},
+                        },
+                        "comments": [{"id": 1, "commentType": 2, "content": "Synthetic vote system event"}],
+                    })
+                if self.vote_reply == "missing":
+                    return NativeReviewResponse(200, {"id": scope["principal_id"]})
+                if self.vote_reply == "contradictory":
+                    return NativeReviewResponse(200, {"id": scope["principal_id"], "vote": 0})
                 return NativeReviewResponse(200, {"id": scope["principal_id"], "vote": self.vote})
             if method == "POST" and "/threads?" in url:
                 thread = {"id": 100 + len(self.threads), "status": 1, "properties": body["properties"],
@@ -388,3 +405,45 @@ def test_ambiguous_native_marker_matches_remain_unknown_without_new_writes(envir
     before = len(writes(backend))
     result = run(environment)
     assert result["status"] == "unknown" and len(writes(backend)) == before
+
+
+def test_late_native_reply_does_not_report_success_or_repeat_a_write(environment):
+    store, selected, generation, attachment, backend, _ = environment
+    now = [1.0]
+    backend.after_write = lambda value: now.__setitem__(0, 200.0)
+    result = execute_review(store, selected, generation, attachment, context_factory=backend.context,
+                            checkpoint=backend.checkpoint, expires_at=int(time.time()) + 600,
+                            budget_seconds=120, clock=lambda: now[0])
+    assert result["status"] == "unknown"
+    assert result["actions"][0]["state"] == "unknown"
+    assert len(writes(backend)) == 1 and backend.vote is None
+
+
+@pytest.mark.parametrize("other_actor", [False, True])
+def test_only_confirmed_own_vote_system_events_advance_expected_discussions(environment, other_actor):
+    _, selected, _, _, backend, _ = environment
+    selected["actions"].reverse()
+    backend.emit_vote_thread = True
+    if other_actor:
+        backend.vote_thread_actor = "another-native-reviewer"
+    result = run(environment)
+    assert result["status"] == ("candidate_changed" if other_actor else "complete"), result
+    assert result["actions"][0]["state"] == "confirmed"
+    assert len(writes(backend)) == (1 if other_actor else 2)
+    if not other_actor:
+        assert run(environment)["status"] == "complete" and len(writes(backend)) == 2
+
+
+@pytest.mark.parametrize("reply", ["missing", "contradictory"])
+def test_unverified_vote_reply_keeps_native_reviewer_id_without_value_based_confirmation(environment, reply):
+    _, selected, _, _, backend, _ = environment
+    selected["actions"].reverse()
+    backend.emit_vote_thread = True
+    backend.vote_reply = reply
+    result = run(environment)
+    assert result["status"] == "unknown"
+    assert result["actions"][0]["receipt"]["platform_ids"] == {"reviewer_id": selected["scope"]["principal_id"]}
+    assert result["actions"][0]["state"] == "unknown"
+    assert backend.vote == 10
+    count = len(writes(backend))
+    assert run(environment)["status"] == "unknown" and len(writes(backend)) == count
