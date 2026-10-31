@@ -311,6 +311,10 @@ The daemon shell-lifetime fixture uses the same admission boundary: `ready.close
 is published after the `ready.json` rename returns, and its reader does not open
 the report before that marker. The original wait and identity-pinned cleanup
 bounds remain unchanged.
+`tools/promotion_unit_tests/test_daemon_fixture_publication.py` supplies five
+admitted Python reader/wait controls. Its separate producer-order assertion reads
+the PowerShell fixture and runs through the bounded source-check path, not the
+promotion packet's Python/build-data input contract.
 
 The separate opt-in desktop witness is
 `libs/agent-procutil/tests/sdk_visibility.py`, with its co-located pure observer
