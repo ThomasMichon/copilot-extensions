@@ -69,6 +69,10 @@ immutable retention, state publication and the journal transaction before append
 and commit, within the original deadline. Current authority is revalidated
 after those reads. Endpoint observations also span authenticated health in repair
 and healthy status, rather than taking the first snapshot only after health.
+The shared verifier requires every running container in the bridge membership
+before readiness; two observations with the same missing member cannot prove
+successful repair. The existing pending-created and stopped-container custody
+exceptions remain separate from running readiness.
 Every checkpoint rereads current/pending immutable outcome references and the
 original historical references; the just-retained outcome is compared with its
 in-memory expected value before state publication. Missing or corrupted evidence

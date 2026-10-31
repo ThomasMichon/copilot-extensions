@@ -53,6 +53,7 @@ REFUSALS = [
     "revoke-after-health", "grant-after-health", "expiry-after-health", "key-after-health",
     "process-after-health", "state-after-health", "executor-after-health", "runtime-after-health",
     "health-endpoint-drift", "host-root-after-health",
+    "missing-network-membership",
 ] + DRIFTS
 
 
@@ -61,7 +62,7 @@ REFUSALS = [
         "success", "revoked-transition", "revoke-after-health", "journal-revoke",
     ) else [pytest.mark.client_distribution_full])
     for mode in ("success", "failed", "mount-order", "renewed", "prior-failed",
-                 "status-endpoint-drift", *REFUSALS, *CRASHES)
+                 "status-endpoint-drift", "status-missing-network-membership", *REFUSALS, *CRASHES)
 ])
 def test_original_unknown_uses_current_repair_without_native_replay(
     native_rig: Any, keys: Any, monkeypatch: Any, mode: str,
@@ -215,6 +216,8 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     role="client", installation="client-a", **({} if status else {"failed": mode == "failed"}))
 
             selected_request = original
+            if mode in ("missing-network-membership", "status-missing-network-membership"):
+                (rig["directory"] / "excluded-endpoints.json").write_text(json.dumps([live()["core"]["Id"]]))
             if mode == "success":
                 baseline.current = lambda: executor[0]
                 calls = (rig["directory"] / "calls.jsonl").read_bytes()
@@ -270,7 +273,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 harness.current = policy(revision=2, enrollments=())
             elif mode == "missing-owner":
                 owner_root.rename(owner_root.with_name("retained-owner"))
-            elif mode.startswith("missing-"):
+            elif mode in ("missing-lock", "missing-journal", "missing-selection", "missing-profile"):
                 path = (owner_root / {"missing-lock": "owner.lock", "missing-journal": "node.sqlite",
                                      "missing-selection": "selection.json"}[mode]
                         if mode != "missing-profile" else Path(retained["profile"]))
@@ -406,7 +409,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
 
                 monkeypatch.setattr(target, name, drifted)
 
-            if mode == "status-endpoint-drift":
+            if mode in ("status-endpoint-drift", "status-missing-network-membership"):
                 status = await asyncio.to_thread(call, status=True)
                 assert status["accepted"] == "unknown" and status["unresolved_effects"]
                 assert status["installed"] is status["currently_healthy"] is None

@@ -132,7 +132,11 @@ requires exact independently authenticated fingerprints of all three native
 containers, existing public-key identity and physical network. The network
 fingerprint covers its full stable inspection record, excluding dynamic
 container membership; membership must contain only the exact owned container
-IDs. Foreign endpoints, a replaced bridge or additional container attachments
+IDs and include every observed running container's ID. Matching two incomplete
+observations does not establish membership. Stopped containers may be absent;
+only the existing explicit pending-created exception permits an unstarted
+container without an attached network identity.
+Foreign endpoints, a replaced bridge or additional container attachments
 refuse. An existing empty network also requires explicit network adoption.
 An adopted bridge remains external in all subsequent fixed profiles, preserving
 its identity rather than relabelling or recreating it.

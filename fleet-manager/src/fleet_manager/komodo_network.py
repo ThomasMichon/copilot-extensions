@@ -39,6 +39,9 @@ def verify_network(network: dict[str, Any] | None, selected: KomodoSelection,
     identities = {item["Id"] for item in containers.values()}
     if not set(network["Containers"]).issubset(identities):
         raise PlanError("Komodo native network has foreign endpoints")
+    running = {item["Id"] for item in containers.values() if item["State"].get("Running") is True}
+    if not running.issubset(network["Containers"]):
+        raise PlanError("Komodo running native container network membership is missing")
     for item in containers.values():
         attachments = item.get("NetworkSettings", {}).get("Networks")
         if (not isinstance(attachments, dict) or set(attachments) != {name}
