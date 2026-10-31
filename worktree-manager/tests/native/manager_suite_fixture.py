@@ -38,7 +38,8 @@ from manager_suite_artifacts import (
     _DELIVERY, _MATERIALIZE, _command, _configuration, _env, _task_inventory_script, _write,
 )
 from manager_suite_diagnostics import (
-    MARKERS, _consumer_demand, _engine_probe, _record, _resident_probe, _snapshot, retain_driver_logs,
+    MARKERS, _consumer_demand, _engine_probe, _record, _resident_probe, _snapshot, _snapshot_difference,
+    retain_driver_logs,
     retain_resident_logs,
 )
 
@@ -844,16 +845,42 @@ def exercise(directory: Path, mode: str) -> None:
                                         "command": list(map(str, command)),
                                         "stdout": result.stdout, "stderr": result.stderr}
                     after = report["after"] = _observe(case, setup["declared"])
+                    # Keep the real consumer subscriptions through every final
+                    # routing/work-custody probe, not only the identity sample.
+                    report["commands"] = _frontdoors(case, after)
+                    report["registrations"] = _registration_routes(case, before, after)
+                    report["exclusive_writers"] = {
+                        name: _exclusive(case, root) for name, root in roots.items()
+                    }
+                    lease = _run([
+                        _python(roots["worktree-manager"]), "-I", "-X", "utf8", "-B", "-c",
+                        "import json;from pathlib import Path;import sys;"
+                        "from worktree_manager import mux_daemon_process as p;"
+                        "root=Path(sys.argv[1]);lease=p.acquire_daemon_lease(root);"
+                        "print(json.dumps({'root':str(root),'held':lease is None}));"
+                        "p.release_daemon_lease(lease) if lease is not None else None",
+                        roots["worktree-manager"],
+                    ], case, timeout=30)
+                    report["exclusive_work_probe"] = json.loads(lease.stdout)
+                    report["exclusive_work"] = report["exclusive_work_probe"]["held"]
                 finally:
                     for control in controls.values():
                         (control / "stop").touch()
-                observed = {name: json.loads(future.result().stdout)
-                            for name, future in futures.items()}
-                report["resident_results"] = observed
+                    observed = {}
+                    for name, future in futures.items():
+                        try:
+                            observed[name] = json.loads(future.result().stdout)
+                        except Exception as error:
+                            observed[name] = {"error": f"{type(error).__name__}: {error}"}
+                    report["resident_results"] = observed
             report["applicability"] = after["portfolio"]
-            report["retained"] = {
-                name: _snapshot(Path(slot)) == before["sealed"][name]
+            report["retention_differences"] = {
+                name: {"after_update": _snapshot_difference(before["sealed"][name], _snapshot(Path(slot)))}
                 for name, slot in before["slots"].items()
+            }
+            report["retained"] = {
+                name: stages["after_update"]["unchanged"]
+                for name, stages in report["retention_differences"].items()
             }
             deadline = time.monotonic() + 30
             for name, process in old.items():
@@ -872,23 +899,10 @@ def exercise(directory: Path, mode: str) -> None:
                 _created, exited, code = process.times()
                 row.update(old_exit_ns=exited, old_exit_code=code)
                 report["residents"][name] = row
-            report["commands"] = _frontdoors(case, after)
-            report["registrations"] = _registration_routes(case, before, after)
             dependency = before["index_engine"]
             report["index_engine_retained"] = (
                 _snapshot(Path(dependency["slot"])) == dependency["sealed"]
             )
-            report["exclusive_writers"] = {
-                name: _exclusive(case, root) for name, root in roots.items()
-            }
-            lease = _run([
-                _python(roots["worktree-manager"]), "-I", "-X", "utf8", "-B", "-c",
-                "import json;from worktree_manager import mux_daemon_process as p;"
-                "lease=p.acquire_daemon_lease(p.default_root());"
-                "print(json.dumps({'held':lease is None}));"
-                "p.release_daemon_lease(lease) if lease is not None else None",
-            ], case, timeout=30)
-            report["exclusive_work"] = json.loads(lease.stdout)["held"]
         report["durable_after"] = _durable(durable)
         with closing(sqlite3.connect(f"file:{witness.as_posix()}?mode=ro", uri=True)) as connection:
             report["witness"] = {
@@ -909,7 +923,9 @@ def exercise(directory: Path, mode: str) -> None:
         if "retained" in report:
             for name, slot in before["slots"].items():
                 try:
-                    report["retained"][name] &= _snapshot(Path(slot)) == before["sealed"][name]
+                    difference = _snapshot_difference(before["sealed"][name], _snapshot(Path(slot)))
+                    report["retention_differences"][name]["post_settlement"] = difference
+                    report["retained"][name] &= difference["unchanged"]
                 except Exception as error:
                     report["retained"][name] = False
                     report["cleanup_errors"].append(f"Post-settlement V1 evidence {name}: {error}")

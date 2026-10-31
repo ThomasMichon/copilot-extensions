@@ -35,6 +35,40 @@ def test_fullsuite_refuses_execution_outside_the_disposable_venue(monkeypatch: p
         require_venue()
 
 
+@pytest.mark.parametrize("mutation", ("none", "same-stat-content", "added", "removed"))
+def test_retention_diagnostics_preserve_strict_byte_and_identity_comparison(
+    tmp_path: Path, mutation: str,
+) -> None:
+    code = tmp_path / "module.py"
+    code.write_bytes(b"before")
+    before = diagnostics._snapshot(tmp_path)
+    if mutation == "same-stat-content":
+        previous = code.stat()
+        code.write_bytes(b"after!")
+        os.utime(code, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+    elif mutation == "added":
+        (tmp_path / "module.pyc").write_bytes(b"cache")
+    elif mutation == "removed":
+        code.unlink()
+    difference = diagnostics._snapshot_difference(before, diagnostics._snapshot(tmp_path))
+    assert difference["unchanged"] is (mutation == "none")
+    assert not difference["truncated"]
+    category = {"none": None, "same-stat-content": "changed", "added": "added", "removed": "removed"}[mutation]
+    if category:
+        assert difference["counts"][category] == 1
+        assert set(difference[category]) == {"module.pyc" if mutation == "added" else "module.py"}
+    else:
+        assert difference["counts"] == {"added": 0, "removed": 0, "changed": 0}
+
+
+def test_retention_diagnostics_bound_metadata_without_hiding_mutation_counts() -> None:
+    after = {f"{number}.pyc": ["hash", 1, 2, 3, 4] for number in range(200)}
+    difference = diagnostics._snapshot_difference({}, after)
+    assert difference["unchanged"] is False
+    assert difference["counts"] == {"added": 200, "removed": 0, "changed": 0}
+    assert len(difference["added"]) == 128 and difference["truncated"]
+
+
 def test_baseline_owner_demand_uses_the_installed_startup_contract(monkeypatch):
     import inspect
 
@@ -834,7 +868,10 @@ def test_installed_manager_replaces_the_whole_applicable_suite(mode: str) -> Non
         assert set(report[generation]["versions"]) == declared | {"worktree-manager"}
     for name in declared | {"worktree-manager"}:
         assert report["before"]["versions"][name] != report["after"]["versions"][name]
-        assert report["retained"][name], f"{name}: V1 sealed content changed or disappeared"
+        assert report["retained"][name], (
+            f"{name}: V1 sealed content changed or disappeared\n"
+            + json.dumps(report.get("retention_differences", {}).get(name, {}), indent=2)
+        )
         expected = {
             entry["command"] + ("." + extension if extension else "")
             for entry in report["after"]["commands"][name] for extension in entry["variants"]

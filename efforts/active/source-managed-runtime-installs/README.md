@@ -1589,4 +1589,15 @@ effects, with native controls covering current selection, last-known-good and
 unresolved selection without file changes. The task-routing proof remains
 required; this is not a hosted-suite pass.
 
+Run `41165376625` at `d7d0601416` completes preparation and replacement in
+both modes, including all actual task-routing probes, the seven ready-before-exit
+replacements, the retained healthy engine and clean settlement. Formal assertions
+now expose changed V1 sealed-content evidence in four provider slots in both modes
+and Manager in normal mode. The report has no changed-path metadata to identify
+the cause, so bounded before/after hashes and native file metadata are now retained
+without weakening comparison. The normal exclusive-work probe also ran after
+releasing the fixture subscriber; final routing/work checks now remain inside the
+existing live consumer-demand scope. The updated local fixture packet passes
+54 tests with the 2 hosted-only cases deselected. Full qualification remains open.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.
