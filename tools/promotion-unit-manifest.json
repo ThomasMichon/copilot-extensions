@@ -3202,7 +3202,13 @@
         "tools/promotion_unit_tests/test_sdk_functional.py::test_functional_request_expired_by_hashing_cannot_reach_native_binding",
         "tools/promotion_unit_tests/test_sdk_functional.py::test_functional_request_expired_by_parent_identity_cannot_launch",
         "tools/promotion_unit_tests/test_sdk_functional.py::test_functional_request_expired_between_packets_cannot_launch_next",
-        "tools/promotion_unit_tests/test_sdk_functional.py::test_owned_child_request_expired_during_request_write_cannot_spawn"
+        "tools/promotion_unit_tests/test_sdk_functional.py::test_owned_child_request_expired_during_request_write_cannot_spawn",
+        "tools/promotion_unit_tests/test_daemon_fixture_publication.py::test_daemon_ready_name_does_not_admit_unclosed_publication",
+        "tools/promotion_unit_tests/test_daemon_fixture_publication.py::test_daemon_closed_publication_admits_actual_report",
+        "tools/promotion_unit_tests/test_daemon_fixture_publication.py::test_daemon_admitted_read_error_is_not_retried[error0]",
+        "tools/promotion_unit_tests/test_daemon_fixture_publication.py::test_daemon_admitted_read_error_is_not_retried[error1]",
+        "tools/promotion_unit_tests/test_daemon_fixture_publication.py::test_daemon_producer_closes_ready_before_publishing_admission",
+        "tools/promotion_unit_tests/test_daemon_fixture_publication.py::test_daemon_lifetime_wait_uses_actual_closed_publication_reader"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3580,9 +3586,13 @@
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4",
         "libs/agent-procutil/src/agent_procutil/_native_owned.py": "643c3333d3f435ece115f714c144ca6b64af571e37cc68aec9b3b8bf91bac06f",
         "tools/promotion_unit_tests/test_native_owned.py": "da1356b2b9224d900a1535d13467ea630455d55073a1001c56c119518f7c24e1",
-        "tools/promotion_unit_tests/test_sdk_functional.py": "56cdac384a8ab460a8ced19564c844e31b709fcc0b104e2f9ad5065c01b952a6"
+        "tools/promotion_unit_tests/test_sdk_functional.py": "56cdac384a8ab460a8ced19564c844e31b709fcc0b104e2f9ad5065c01b952a6",
+        "tools/promotion_unit_tests/test_daemon_fixture_publication.py": "9e9a26ca656065457a274a4f44458552dbacea3b826a6ddd1e1ad9626495bea9",
+        "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py": "ccfe54ab6c03376318535cd379a24b08ad6368aa25964bab6f3d4e498cbf11e2",
+        "libs/agent-procutil/tests/fixture_daemon_instance_shell.ps1": "23406f261eb248cb5fd176e9824575a0e876dfff9bb2b64d6e023eb208067a7f"
     },
     "coverage_targets": [
+        "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py",
         "tools/core_runtime_profile.py",
         "tools/core_python_artifacts.py",
         "tools/python_project_inventory.py",

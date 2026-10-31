@@ -307,6 +307,10 @@ not admitted promotion units or Windows desktop qualification.
 The fixture's identity report is admitted only after a separate marker confirms
 the producer completed its closed-file publication. A failed admitted read stays
 an error; the fixture does not suppress permissions failures or retry them as a pass.
+The daemon shell-lifetime fixture uses the same admission boundary: `ready.closed`
+is published after the `ready.json` rename returns, and its reader does not open
+the report before that marker. The original wait and identity-pinned cleanup
+bounds remain unchanged.
 
 The separate opt-in desktop witness is
 `libs/agent-procutil/tests/sdk_visibility.py`, with its co-located pure observer
