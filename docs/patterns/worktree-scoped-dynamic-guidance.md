@@ -324,6 +324,13 @@ be a native `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` or
 `copilot-instructions.md` name. This path is outside instruction discovery and
 is referenced using code spans rather than auto-expanding links.
 
+Selectors are locators, not independent delivery policy. They name candidate
+paths and the existing resolver argv without adding selection precedence,
+admission waivers or full-read exceptions. New authoring may consume an older
+complete catch-all template: its reviewed fallback retains that template's
+rules unchanged, rather than contradicting them in the locator. This does not
+change the current provider's raw-copy publication or managed-copy-first lookup.
+
 The version-2 lock owns both artifacts, their digests and byte counts. Sync
 validates legacy version-1 lock/preimages before migrating; fallback, selector
 and lock participate in the same compare-before-replace rollback transaction.
