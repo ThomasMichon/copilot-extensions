@@ -2446,6 +2446,19 @@ response without an advisory roster must remain retryable, including the
 initial read of a concurrent caller. The live caller does not launch another
 resident; malformed live peers and refused launches do not gain that retry.
 
+For native daemon qualification alone, dispatch
+`installation-context-acceptance.yml` with `native_daemon_exit=true` on the
+candidate ref. This selects only `native-daemon-exit-windows`, not broker,
+Worktrees/Manager recovery or the default diagnostic matrix. It exercises both
+native daemon test files in a disposable Windows profile: two cycles of signed,
+positive, throwing and successful target statuses require application `finally`
+cleanup before observing exit; refusal, original Job custody and pre-acknowledgement
+cleanup controls remain active. Worker completion, outer subprocess and test
+deadlines remain 15, 30 and 60 seconds respectively. The 15-minute job includes
+tooling preparation; its canonical runner has a 600-second suite bound and
+720-second aggregate bound. This is source qualification, not installed-host
+reconstruction, whole-product acceptance or rollout.
+
 ## Native file-link prerequisites
 
 `tools/test_dependency_uv_executable_native.py` qualifies both absolute and

@@ -77,6 +77,9 @@ namespace CopilotExtensions {
         private static void Check(bool success) {
             if (!success) throw new Win32Exception(Marshal.GetLastWin32Error());
         }
+        public static void ExitCurrentProcess(int code) {
+            Check(TerminateProcess(new IntPtr(-1), unchecked((uint)code)));
+        }
         private static void Stage(FileStream output, string stage) {
             byte[] data = Encoding.UTF8.GetBytes("native-daemon-stage:" + stage + "\n");
             output.Write(data, 0, data.Length);
@@ -100,23 +103,31 @@ namespace CopilotExtensions {
                 }
             }
         }
+        private static void ValidateOwnedJobScopes(string scopes) {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            if (String.IsNullOrEmpty(scopes) || scopes.Length > 4096)
+                throw new NativeDaemonSpawnException("invalid owned Job scopes", null, true);
+            foreach (string name in scopes.Split(';')) {
+                if (!Regex.IsMatch(name, @"\ALocal\\ce-owned-job-[0-9a-f]{32}\z") || !names.Add(name))
+                    throw new NativeDaemonSpawnException("invalid owned Job scopes", null, true);
+            }
+            if (names.Count > 64)
+                throw new NativeDaemonSpawnException("owned Job scope limit exceeded", null, true);
+        }
+        public static void ValidateOwnedJobScopes() {
+            const string key = "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES";
+            foreach (DictionaryEntry item in Environment.GetEnvironmentVariables()) {
+                if (String.Equals((string)item.Key, key, StringComparison.OrdinalIgnoreCase))
+                    ValidateOwnedJobScopes((string)item.Value);
+            }
+        }
         public static Child Start(string executable, string arguments, string cwd, string log, bool contained) {
             const string key = "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES";
             var environment = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (DictionaryEntry item in Environment.GetEnvironmentVariables())
                 environment[(string)item.Key] = (string)item.Value;
-            var names = new HashSet<string>(StringComparer.Ordinal);
             string scopes;
-            if (environment.TryGetValue(key, out scopes)) {
-                if (String.IsNullOrEmpty(scopes) || scopes.Length > 4096)
-                    throw new NativeDaemonSpawnException("invalid owned Job scopes", null, true);
-                foreach (string name in scopes.Split(';')) {
-                    if (!Regex.IsMatch(name, @"\ALocal\\ce-owned-job-[0-9a-f]{32}\z") || !names.Add(name))
-                        throw new NativeDaemonSpawnException("invalid owned Job scopes", null, true);
-                }
-                if (names.Count > 64)
-                    throw new NativeDaemonSpawnException("owned Job scope limit exceeded", null, true);
-            }
+            if (environment.TryGetValue(key, out scopes)) ValidateOwnedJobScopes(scopes);
             if (!contained) environment.Remove(key);
             var block = new StringBuilder();
             foreach (var item in environment) block.Append(item.Key).Append('=').Append(item.Value).Append('\0');
@@ -275,6 +286,7 @@ function Start-NativeDaemon {
     $shell = Join-Path $PSHOME 'powershell.exe'
     if (-not [IO.File]::Exists($shell)) { throw 'Native daemon admission cannot resolve its interpreter.' }
     $contained = $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1'
+    [CopilotExtensions.NativeDaemonAdmission]::ValidateOwnedJobScopes()
     $instances = Join-Path ([IO.Path]::GetDirectoryName($script:NativeDaemonSource)) 'daemon_instances.ps1'
     . $instances
     $receipt = New-DaemonInstanceReservation -Service ([IO.Path]::GetFileNameWithoutExtension($Script)) `
@@ -329,17 +341,22 @@ try {
         if (`$ack[0] -ne 1) { throw 'Native daemon adoption was refused.' }
     } finally { `$pipe.Dispose() }
     . `$d.instances
+    [Console]::Error.WriteLine('native-daemon-stage:entering-instance')
     `$env:COPILOT_EXTENSIONS_DAEMON_INSTANCE = `$d.instance
     `$env:COPILOT_EXTENSIONS_DAEMON_REGISTRY = `$d.registry
     `$instanceGuard = Enter-DaemonInstance -Service ([IO.Path]::GetFileNameWithoutExtension(`$d.script)) ``
         -RuntimeRoot `$d.working -Source `$d.script
+    [Console]::Error.WriteLine('native-daemon-stage:instance-entered')
     `$forward = [string[]]`$d.arguments
     & `$d.script @forward
-    if (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE }
+    [Console]::Error.WriteLine('native-daemon-stage:target-returned')
+    # Host/CLR teardown can race helper custody or wait on its lifetime pipes.
+    if (`$null -ne `$LASTEXITCODE) { [CopilotExtensions.NativeDaemonAdmission]::ExitCurrentProcess([int]`$LASTEXITCODE) }
 } catch {
     [Console]::Error.WriteLine((`$_ | Out-String))
-    exit 1
+    [CopilotExtensions.NativeDaemonAdmission]::ExitCurrentProcess(1)
 }
+[CopilotExtensions.NativeDaemonAdmission]::ExitCurrentProcess(0)
 "@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($body))
     $commandArgs = "-NoLogo -NoProfile -NonInteractive -EncodedCommand $encoded"

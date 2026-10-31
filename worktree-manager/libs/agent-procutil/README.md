@@ -181,11 +181,19 @@ tracked launcher-owned cleanup Job and closes the temporary query handles.
 A current-user-only, bounded named-pipe handshake checks both actual endpoint
 PIDs against the retained native child identity. No WMI, COM, Scheduled Task,
 UAC or automatic inherited-lifetime fallback participates.
+Owned Job-scope environment keys are matched case-insensitively and scope
+syntax is checked before instance reservation, so malformed metadata cannot
+start the instance helper ahead of native refusal.
 
 The result is a `System.Diagnostics.Process`; keep it for observation and
 dispose it afterward. Spawn/admission is not application readiness or
 installation completion. `LogPath` records bootstrap failures; the entry point
-owns its continuing progress/result log. A
+owns its continuing progress/result log. After the target script returns or
+unwinds, the native host terminates only itself with the target's signed exit
+status (or `1` for an unhandled exception, `0` for normal completion). This
+avoids PowerShell/CLR shutdown changing or delaying the observable status.
+Application cleanup must run in the target's own `finally` blocks, not deferred
+process-exit handlers; native termination does not run CLR shutdown callbacks. A
 `NativeDaemonSpawnException.CleanupConfirmed` value of false preserves
 uncertainty, including failed native cleanup or a lost return after
 acknowledgement; only an explicit refusal or observed cleanup clears that
