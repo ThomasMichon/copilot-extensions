@@ -118,6 +118,14 @@ locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
 
+**Intentional footprint evolution (2026-10-31), operator refinement:**
+make schema changes deliberately, retain backward compatibility when practical,
+and permit obsolete support to retire rather than carrying an unlimited chain.
+The [verbatim refinement](inception-transcript.md#intentional-footprint-schema-evolution)
+and [bounded proposal](footprint-contract-evolution.md) retain the original
+disposable-inventory and incremental-recognition goals. This source rework
+does not authorize host cleanup, native execution or rollout.
+
 **2026-10-30 — wheel-first independent suite, settled summary:** promotion
 produces complete copyable uv projects and their associated first-party wheels;
 the upstream installer establishes Manager first, then repo-derived wanted
@@ -437,6 +445,12 @@ The [execution-driver slice](execution-driver.md), tracked by #7758, separates
 transaction execution from the existing recurring-maintenance assignment.
 Completed items below retain earlier source evidence; their conservative
 reuse/admission behavior is not an exception to the fresh-default revision.
+
+- [ ] Review and implement [current footprint contracts and deliberate compatibility](footprint-contract-evolution.md):
+  separate current source hashes from semantic footprint/schema changes, retain
+  explicit supported legacy transitions and permit deliberate support retirement.
+  The existing append-only provider below remains historical source evidence,
+  not a requirement to ship every prior source snapshot indefinitely.
 
 - [x] Review the [fresh-default upstream contract](fresh-default-installation.md) before changing
   its routing or recovery implementation: global update interception, upstream

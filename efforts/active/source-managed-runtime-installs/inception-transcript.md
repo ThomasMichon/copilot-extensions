@@ -208,3 +208,18 @@ delta/migration updates, rather than leaving new artifacts or old layouts
 untracked. This refines the fresh-default direction above; it does not turn
 recognizer mismatch into permission to erase unknown data or into a veto on
 the scoped fresh installation.
+
+## Intentional footprint schema evolution
+
+Operator refinement, 2026-10-31:
+
+> I think append-only might be the wrong pattern here; let's understand what we needed that for
+
+> Yes, let's do some rework here. We need to be intentional about schema changes and allow backwards compatibility when practical, but let's not let that chain us down long-term
+
+This refines the original manifest/migration request: maintain the current
+contract and useful legacy transitions deliberately, rather than requiring a
+full runtime snapshot for every source change. The
+[bounded implementation proposal](footprint-contract-evolution.md) separates
+operator intent from recommended schema, compatibility and validation choices.
+It grants no concrete installation, cleanup, service or rollout action.
