@@ -35,7 +35,7 @@ def _payload_root() -> Path:
         return root
     if manifest_path.is_symlink():
         raise ValueError("agent-worktrees deploy manifest is a symlink")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
     if not isinstance(manifest, dict) or manifest.get("service") != "agent-worktrees":
         raise ValueError("agent-worktrees deploy manifest belongs to another plugin")
     source = manifest.get("source")

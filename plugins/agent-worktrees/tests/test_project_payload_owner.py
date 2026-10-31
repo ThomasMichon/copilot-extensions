@@ -101,11 +101,14 @@ def test_native_consumer_keeps_deployed_owner(payloads, tmp_path):
 
 
 @pytest.mark.parametrize("shell", ["powershell", "bash"])
-@pytest.mark.parametrize("inherited_payload", ["absent", "worktrees", "plugin"])
-@pytest.mark.parametrize("copied_entry", [False, True])
+@pytest.mark.parametrize("inherited_payload,copied_entry,manifest_encoding", [
+    (inherited, copied, "utf-8")
+    for inherited in ("absent", "worktrees", "plugin")
+    for copied in (False, True)
+] + [("absent", True, "utf-8-sig")])
 @pytest.mark.parametrize("payload_label", ["marketplace with spaces", "marketplace-\u00e9"])
 def test_normal_entry_retains_selected_payload_for_relocated_runtime(
-    tmp_path, request, shell, inherited_payload, copied_entry, payload_label,
+    tmp_path, request, shell, inherited_payload, copied_entry, manifest_encoding, payload_label,
 ):
     executable = request.getfixturevalue(f"native_{shell}")
     home = tmp_path / "home"
@@ -128,7 +131,7 @@ def test_normal_entry_retains_selected_payload_for_relocated_runtime(
     (runtime_bin.parent / "deploy-manifest.json").write_text(json.dumps({
         "schema_version": 3, "service": "agent-worktrees",
         "source": {"kind": "marketplace", "path": str(payload)},
-    }, ensure_ascii=False), encoding="utf-8")
+    }, ensure_ascii=False), encoding=manifest_encoding)
     entry_dir = home / ".local" / "bin" if copied_entry else payload / "bin"
     entry_dir.mkdir(parents=True, exist_ok=True)
     if shell == "powershell":
