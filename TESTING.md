@@ -2633,6 +2633,19 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+`tools/promotion_unit_tests/test_komodo_repair_authorization.py` exercises the
+repair phase controller with synthetic verified-identity records and the real
+common admission owner. It counts one producer and six current resolutions per
+completed phase, checks the unchanged individual permit ceilings and retires
+only the retained exact handle. It starts no actor and needs no cryptographic
+or HTTP tooling. This is work-count evidence, not signature verification.
+The separate Fleet Manager authorization tests use real machine proofs; its
+opt-in `client_distribution_full` repair matrix retains actual subprocess,
+HTTP, original journal, interruption and late-publication witnesses. Advancing
+signature/admission/native clocks cover full status and terminal composition
+over 30 seconds inside the original selected deadline. Actual installed and
+cold/warm adopter qualification remain separate from these synthetic controls.
+
 `tools/promotion_unit_tests/test_git_config_transaction.py` exercises the
 canonical Machines Git-configuration declaration, consent digest, pre-effect
 refusals, lock identity, rollback receipt and bounded Git adapter with synthetic

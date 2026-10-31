@@ -49,7 +49,7 @@ identity, old-proof or baseline-operation fallback.
 
 ## Plan
 
-- [ ] Review this opt-in amendment before changing repair behavior.
+- [x] Review this opt-in amendment before changing repair behavior (#9778).
 - [ ] Implement fresh checkpoint identity acquisition inside the existing
   repair owner. Without the opt-in producer, preserve the current whole-operation
   behavior and its expiry refusals.
@@ -121,3 +121,50 @@ identity, old-proof or baseline-operation fallback.
   data, native resources, journal owner/location or deadline. Only the supported
   original terminal publication changes its receipt. This is not ordinary
   deployment convergence or completion of Linux Role Fleet.
+
+## Journal
+
+### 2026-10-31 - Checkpoint authorization proposal reviewed
+
+#9778 merged as `dba8729ff61c83f639b2f73022eead714ce40989` after the actual
+current-head Copilot approval, no inline or blocking findings and all required
+checks. Managed completion verified the merge and reconciled the same source
+worktree while retaining its pre-complete backup. The complete parent Plan and
+Validation Plan were re-read; only this proposal's review gate closes.
+
+Implement the opt-in fresh-identity composition through the existing repair,
+signing and common-admission owners next. Keep the baseline expiry behavior,
+exact original custody, each permit's unextended lifetime and the complete
+advancing-clock/installed/native validation obligations. No executing support,
+runtime change, actual original repair or broader delivery is claimed.
+The #9735 and #6030 trackers remain open. #8860 was previously consolidated
+through #9475 into this effort's complete substrate Plan and Validation Plan;
+its administrative closure is not technical completion or an ownership change.
+
+### 2026-10-31 - Opt-in source composition awaiting review
+
+The local SDK source composes fresh identities into explicit admitted phases
+through the existing repair and common-admission owners. The baseline
+whole-operation behavior remains unchanged. Every fresh phase retains exact
+original caller/enrollment/transition bindings, full paired custody checks and
+its unextended permit; journal transitions validate the preceding phase before
+admitting append or commit. An aborted opt-in status phase preserves its
+original refusal rather than producing a report under a replacement permit.
+
+All 131 opt-in synthetic native/HTTP/journal controls pass, including advancing
+full status and terminal publication, expiry between completed phases,
+late pre-commit withdrawal and interrupted terminal cleanup. The 28 separate
+real-machine-proof/common-admission controls pass. Deterministic composition
+checks require exactly four initial resolver calls and six per fresh phase.
+The positively admitted unit-only packet adds one dependency-light work-count
+case. Its complete canonical packet passes all 3,175 admitted units with
+9,525 successful phase reports, no actor effects and one coverage capture,
+within the unchanged five-minute packet budget. All 129 baseline repair
+controls also pass without the producer.
+The native fixture uses a short, private, context-managed socket path so an
+owner-stamped temporary root does not exceed the Unix socket address bound.
+
+Source review, normal release/acquisition, installed mixed-version witnesses,
+the existing embedding's producer integration and actual cold/warm adopter
+qualification remain open. No actual original terminal repair or broader
+delivery is credited. Keep the complete parent Plan and Validation Plan active.

@@ -5,12 +5,36 @@ from __future__ import annotations
 from collections.abc import Callable
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 from fleet_manager import komodo_repair
 from fleet_manager.komodo_profile import KomodoMaterialization
 from fleet_manager.komodo_evidence import native_fingerprint
 from fleet_manager.node_journal import NodeJournal
+
+
+class AdvancingRepairClock:
+    """One elapsed time source for signatures, admission and native deadlines."""
+
+    def __init__(self, epoch: int) -> None:
+        self.epoch = epoch
+        self.started = time.monotonic()
+        self.offset = 0.0
+
+    def monotonic(self) -> float:
+        return time.monotonic() + self.offset
+
+    def __call__(self) -> int:
+        return self.epoch + int(self.monotonic() - self.started)
+
+    @property
+    def value(self) -> int:
+        return self()
+
+    @value.setter
+    def value(self, value: int) -> None:
+        self.offset += value - self()
 
 
 def late_publication_drift(monkeypatch: Any, change: Callable[[], None]) -> list[bool]:
