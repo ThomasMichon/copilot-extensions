@@ -154,14 +154,13 @@ class ReplayStore:
         projected = copy.deepcopy(state)
         for group in projected["registries"]:
             for subscription in group["subscriptions"]:
-                for field in ("pending", "baseline", "pull_baseline"):
-                    if field in subscription:
-                        subscription[field] = None
-        # Reserve mutable observation/baseline/pending growth once, rather than
-        # adding a fresh reservation on top of an already retained event.
+                if "pending" in subscription:
+                    subscription["pending"] = None
+        # Retained baselines may exceed one event budget. Keep their real bytes
+        # while reserving only the pending event's remaining growth.
         return max(
             len(review_intent.encoded(state)) + 1024,
-            len(review_intent.encoded(projected)) + active * (3 * MAX_BATCH_BYTES + 4096) + 1024,
+            len(review_intent.encoded(projected)) + active * (MAX_BATCH_BYTES + 2048) + 1024,
         )
 
     def _validate_owner(self, document: dict) -> None:
@@ -286,6 +285,9 @@ class ReplayStore:
                 raise ValueError("selected review action missing")
             if state["state"] != "unattempted":
                 return {"status": state["state"], "new_attempt": False, "action": state}
+            chosen = next(row for row in operation["intent"]["actions"] if row["id"] == action_id)
+            if chosen.get("verdict") == "COMMENTED":
+                return {"status": "unsupported_legacy_action", "new_attempt": False, "action": state}
             if any(row["state"] != "confirmed" for row in operation["actions"][:operation["actions"].index(state)]):
                 return {"status": "blocked_by_previous", "new_attempt": False, "action": state}
             state.update(state="unknown", attempt_id=str(uuid.uuid4()))

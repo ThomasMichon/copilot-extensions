@@ -42,7 +42,7 @@ def revision(value):
     return copy.deepcopy(value)
 
 
-def intent(value):
+def intent(value, *, persisted=False):
     """Validate selected data, not authority or evidence that it was reviewed."""
     if not isinstance(value, dict) or set(value) != {
         "schema", "version", "operation_id", "scope", "generation_id", "source_id", "revision", "actions",
@@ -84,7 +84,8 @@ def intent(value):
                 raise ValueError("review requires a positive native identity")
         if "expected_content_id" in action:
             identifier(action["expected_content_id"])
-        if kind == "verdict" and action["verdict"] not in ("APPROVED", "CHANGES_REQUESTED"):
+        votes = ("APPROVED", "CHANGES_REQUESTED", "COMMENTED") if persisted else ("APPROVED", "CHANGES_REQUESTED")
+        if kind == "verdict" and action["verdict"] not in votes:
             raise ValueError("review requires a supported explicit vote; COMMENTED has no vote action")
     if len(encoded(result)) > MAX_INTENT_BYTES:
         raise ValueError("review intent exceeds its byte limit")
@@ -143,7 +144,7 @@ def validate_operations(operations, *, receipt_bytes, review_bytes):
             "intent", "intent_id", "reserved_bytes", "created_at", "actions",
         }:
             raise ValueError("invalid persisted review operation")
-        selected = intent(operation["intent"])
+        selected = intent(operation["intent"], persisted=True)
         identity = selected["operation_id"]
         if identity in identities or operation["intent_id"] != _digest(selected):
             raise ValueError("persisted review intent identity mismatch")

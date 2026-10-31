@@ -217,6 +217,11 @@ contract.
   `COMMENTED` vote actions. An existing disconnect-consumer cold dependency
   import timed out once; its unchanged narrow selector passed three cases,
   then the entire unchanged-budget consumer packet passed 94 cases.
+- Subsequent review required counting actual retained baseline bytes separately
+  from pending-event growth, retaining old `COMMENTED` data without admitting
+  new no-op vote intents, and target/principal-specific receipt coverage.
+  Twenty-seven real-store controls now pass, including tight-capacity baseline/
+  event cases and restart after reply/edit/verdict confirmations or mismatches.
 - The original credential/principal/discussion freshness, actual effect-specific
   reconciliation, executor/provider integration and live serving qualification
   remain open. No new ledger, issuer, daemon, hosting repair or rollout is made.

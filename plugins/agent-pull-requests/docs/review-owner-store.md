@@ -44,6 +44,9 @@ owned-comment edit with an expected content hash, and named verdict.
 Vote actions currently support `APPROVED` and `CHANGES_REQUESTED`. `COMMENTED`
 casts no native vote and is not admitted as a vote action; a comment-only
 selection contains its explicit comment actions and no invented vote.
+Existing persisted `COMMENTED` intents remain readable. Their unattempted vote
+action is unsupported rather than creating a new unknown attempt; existing
+unknown state is retained without replay.
 Unsupported extra fields, completion-setting writes and malformed identities
 refuse. Data validation does not prove source review, ownership, consent,
 permission or current backend eligibility.
@@ -83,6 +86,10 @@ responses do not become unbounded persisted data.
 
 Replay and review byte reservations are separate. Replay admission/validation
 accounts for each active registration's existing maximum pending-event growth.
+Retained baseline bytes are counted at their actual size; only the remaining
+pending-event growth is reserved, without counting an existing pending event
+twice. A non-firing observation whose retained baseline would leave inadequate
+event headroom refuses before persistence, preserving the previous funded state.
 Full review capacity refuses additional intent but leaves replay transactions and
 already-reserved receipt persistence available. Neither namespace borrows or
 silently shrinks the other's capacity. Unknown/terminal receipts are not evicted.
