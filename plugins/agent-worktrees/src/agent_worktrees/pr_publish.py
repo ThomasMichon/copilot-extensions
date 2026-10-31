@@ -164,11 +164,11 @@ def _tip(remote: str, branch: str, worktree_path: str) -> str | None:
     pattern as a tail glob (``feature/x`` also matches ``archive/feature/x``)."""
     ref = f"refs/heads/{branch}"
     try:
-        from .git_push_transport import captured_urls, published_ref
+        from .git_push_transport import captured_urls, observed_ref
 
         destinations = captured_urls(remote)
         if destinations:
-            return published_ref(remote, destinations, ref, worktree_path)
+            return observed_ref(remote, destinations, ref, worktree_path)
         out = git_ops.git(*git_ops._auth_config_args(remote, cwd=worktree_path),
                           "ls-remote", remote, ref, cwd=worktree_path,
                           check=False, timeout=PROBE_TIMEOUT, kill_tree=True)
@@ -663,6 +663,10 @@ def record_pushed_head(
         config, record, pushed_pr, head_sha, remote=remote,
         head_repo=head_repo, head_identity=head_identity, rebase_base_sha=rebase_base_sha,
     )
+    from . import pr_publication_labels
+    labels = pr_publication_labels.refresh(config, record, pushed_pr)
+    if labels and not labels["ok"]:
+        output.warn(f"PR head was pushed; publication labels need repair: {labels['error']}")
     from . import pr_ops
 
     observation_error = pr_ops.refresh_head_observation(config, record, pushed_pr, head_sha)

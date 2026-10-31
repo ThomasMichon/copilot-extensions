@@ -54,15 +54,15 @@ def mixed_registry_config(tmp_path: Path, monkeypatch) -> cfg.Config:
 @pytest.mark.parametrize(("name", "local"), [
     ("EXAMPLE-HOST", True), ("peer-space", False), ("example-host-wsl", False),
 ])
-def test_mixed_registry_locality_does_not_grant_mutation_authority(
+def test_mixed_registry_locality_keeps_local_context_and_foreign_refusals(
     mixed_registry_config, name, local,
 ):
     from agent_worktrees import execution_spaces
 
     config = mixed_registry_config
     assert machine_identity.is_local_machine(name, config) is local
-    with pytest.raises(execution_spaces.ExecutionSpaceError, match="owned mutation requires"):
-        execution_spaces.require_current_execution_space(config)
+    execution_spaces.require_current_execution_space(config)
+    assert execution_spaces.require_owner_identity(name, config) is local
 
 
 def test_mixed_registry_locality_retains_guest_context(mixed_registry_config, monkeypatch):

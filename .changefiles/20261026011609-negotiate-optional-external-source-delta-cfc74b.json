@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate optional external source deltas through current-commit metadata",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

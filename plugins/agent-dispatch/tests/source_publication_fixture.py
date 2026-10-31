@@ -70,8 +70,10 @@ def function(ext: str, name: str) -> str:
 def script(ext: str) -> str:
     if ext == "ps1":
         names = (
+            "Assert-DispatchActions",
             "Install-Runtime", "Get-PayloadHash", "Get-BootstrapPython",
             "Invoke-VersionedSlotClean", "Invoke-VersionedMarkComplete",
+            "Invoke-RuntimeBrokerAdoption",
             "New-PluginBuildSnapshot", "Enter-PluginSnapshotLock", "Publish-FileAtomically",
             "Invoke-VersionedActivate", "Get-VersionedCurrent", "Test-ActivationSupersededNow",
             "Get-VerTuple", "Test-VersionLt", "Write-Manifest",
@@ -83,6 +85,8 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = $PSScriptRoot
 $PluginDir = Split-Path -Parent $ScriptDir
 $InstallDir = Join-Path $env:USERPROFILE '.agent-dispatch'
+$legacyInstallDir = $InstallDir
+$publishLegacyNames = $true
 $LocalBin = Join-Path $env:USERPROFILE '.local/bin'
 $PkgSrcDir = Join-Path $PluginDir 'src'
 $SrcVersion = '1.2.3-dev4'
@@ -90,6 +94,7 @@ $VenvDir = Join-Path $InstallDir '.venv'
 $LinkDir = $VenvDir
 $VersionedRuntime = $true
 $Force = $false
+$PreserveSupervisors = $env:FIXTURE_PRESERVE_SUPERVISORS -eq '1'
 $script:ActivationSuperseded = $false
 $script:GlobalActivationLockTimeoutSeconds = 5
 $script:InstallerDependencyPolicy = Join-Path $ScriptDir 'installer_dependency_policy.py'
@@ -114,6 +119,7 @@ function Set-CopilotPersistentEnvironmentVariable { throw 'Forbidden host enviro
 Initialize-SourceRuntime
 try {
     if ($Action -eq 'stamp') { Invoke-Stamp }
+    elseif ($Action -eq 'prepare') { Install-Runtime -PrepareOnly }
     elseif ($Action -in @('install', 'provision', 'update')) { Install-Runtime }
     else { throw 'Unsupported fixture lifecycle action' }
 } finally {
@@ -131,6 +137,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_DIR="$HOME/.agent-dispatch"
+LEGACY_INSTALL_DIR="$INSTALL_DIR"
+SERVICE_SUFFIX=""
 LOCAL_BIN="$HOME/.local/bin"
 PKG_SRC_DIR="$PLUGIN_DIR/src"
 SRC_VERSION="{PACKAGE}"
@@ -140,6 +148,7 @@ BOARD_STUB="$LOCAL_BIN/agent-dispatch-board"
 VERSIONED_RUNTIME=1
 ACTIVATION_SUPERSEDED=0
 FORCE=0
+PRESERVE_SUPERVISORS="${{FIXTURE_PRESERVE_SUPERVISORS:-0}}"
 AGENT_DISPATCH_SUPERVISE_MACHINE=fixture
 _ok() {{ :; }}; _skip() {{ :; }}; _warn() {{ :; }}; _step() {{ :; }}
 _fail() {{ printf '%s\\n' "$*" >&2; }}
@@ -154,9 +163,11 @@ _ensure_uv_index() {{ :; }}
 _supervisor_audit() {{ :; }}
 _register_pivot() {{ :; }}
 _versioned_gc() {{ :; }}
+ACTION="${{1:-provision}}"
 _initialize_source_runtime
 case "${{1:-provision}}" in
     stamp) do_stamp ;;
+    prepare) _ensure_runtime 1 ;;
     install|provision|update) _ensure_runtime ;;
     *) exit 2 ;;
 esac
@@ -251,6 +262,17 @@ def environment(tmp_path: Path) -> dict[str, str]:
         system = Path(env["SYSTEMROOT"])
         paths.extend((str(system / "System32"), str(system)))
     else:
+        env["WSL_DISTRO_NAME"] = "Fixture Distro"
+        test_bin = Path(env["HOME"]) / "test-bin"
+        test_bin.mkdir(exist_ok=True)
+        getent = test_bin / "getent"
+        getent.write_text(
+            "#!/bin/sh\n"
+            'printf "fixture:x:%s:%s:fixture:%s:/bin/sh\\n" "$(id -u)" "$(id -g)" "$HOME"\n',
+            encoding="utf-8",
+        )
+        getent.chmod(0o755)
+        paths.insert(0, str(test_bin))
         paths.extend(os.defpath.split(os.pathsep))
     env["PATH"] = os.pathsep.join(dict.fromkeys(paths))
     env["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
@@ -278,26 +300,40 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
         for relative in (
+            "action_controls.py",
             "source-runtime.sh", "source-runtime.ps1", "base-python.ps1", "versioned_runtime_native.ps1",
             "versioned_runtime.py", "versioned_runtime_leases.py",
             "versioned_runtime_construction.py", "versioned_runtime_source.py",
             "versioned_runtime_publication.py",
             "resolve-runtime.sh", "resolve-runtime.ps1",
+            "runtime-gate.sh", "runtime-gate.ps1",
             "delegated-waiter-callback.sh", "delegated-waiter-callback.ps1",
         ):
             shutil.copy2(SCRIPTS / relative, scripts / relative)
+        shutil.copytree(SCRIPTS / "installation-context", scripts / "installation-context")
+        if os.name != "nt":
+            helper = scripts / "installation-context/installation-context.ps1"
+            text = helper.read_text(encoding="utf-8")
+            original = "$passwdHome = [CePosixAccount]::Home()"
+            assert text.count(original) == 1
+            helper.write_text(text.replace(original, "$passwdHome = $env:HOME"), encoding="utf-8")
         for ext in ("sh", "ps1"):
             (scripts / f"install.{ext}").write_bytes(script(ext).encode("utf-8"))
         package = payload / "src" / "agent_dispatch"
         package.mkdir(parents=True)
         (package / "__init__.py").write_text("", encoding="utf-8")
+        for module in ("action_policy.py", "action_controls.py", "install_paths.py"):
+            shutil.copy2(PLUGIN / "src" / "agent_dispatch" / module, package / module)
         (package / "embody.py").write_text("", encoding="utf-8")
         (package / "__main__.py").write_text(
             'import sys\nfrom pathlib import Path\nif __name__ == "__main__":\n'
             '    print("agent-dispatch " + Path(sys.prefix).name)\n', encoding="utf-8",
         )
         (payload / "plugin.json").write_text(
-            json.dumps({"name": "agent-dispatch", "version": PACKAGE}), encoding="utf-8",
+            json.dumps({
+                "name": "agent-dispatch", "version": PACKAGE,
+                "repository": "https://github.com/ThomasMichon/copilot-extensions",
+            }), encoding="utf-8",
         )
         (payload / "pyproject.toml").write_text(
             f'[project]\nname = "agent-dispatch"\nversion = "{PACKAGE}"\n',
@@ -324,6 +360,7 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
         installed = Path(query.stdout.strip()) / "agent_dispatch"
         shutil.copytree(package, installed)
         full_identity = json.dumps(api.manifest_fields(identity), sort_keys=True)
+        api._runtime().retain_runtime_helpers(slot, complete=False)
         api._runtime().mark_complete(
             root, identity.runtime_version,
             payload_hash=hashlib.sha256(full_identity.encode()).hexdigest(),
@@ -354,7 +391,9 @@ def activate(env: dict[str, str], root: Path, version: str) -> None:
     )
 
 
-def run(ext: str, entry: Path, args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def run(
+    ext: str, entry: Path, args: list[str], env: dict[str, str], *, cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     from agent_dispatch.procutil import run_background_capture
 
     executable = (
@@ -372,7 +411,7 @@ def run(ext: str, entry: Path, args: list[str], env: dict[str, str]) -> subproce
         file=sys.stderr, flush=True,
     )
     result = run_background_capture(
-        [executable, *prefix, str(entry), *args], env=env, timeout=90,
+        [executable, *prefix, str(entry), *args], env=env, cwd=cwd, timeout=90,
         max_output=65536,
     )
     assert result is not None, "publication fixture exceeded 90s or could not start"

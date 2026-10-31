@@ -54,6 +54,12 @@ class HandoffFallbackMixin:
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if conn.execute(
+                "SELECT 1 FROM handoff_fallback_attempts WHERE task_id = ?", (task_id,),
+            ).fetchone() is not None:
+                conn.execute("COMMIT")
+                return False
+            self.require_worker_admission()
             try:
                 conn.execute(
                     "INSERT INTO handoff_fallback_attempts"

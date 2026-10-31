@@ -643,12 +643,12 @@ def test_spawn_passive_never_pins_cwd_inside_the_target_slot(tmp_path, monkeypat
             captured["kwargs"] = kwargs
             self.pid = 123456
 
-    monkeypatch.setattr(mdc.subprocess, "Popen", _FakePopen)
+    monkeypatch.setattr(mdc, "spawn_daemon", _FakePopen)
 
     mdc.spawn_passive(slot, root=root, port=54321)
 
     cwd = captured["kwargs"]["cwd"]
-    assert cwd == str(root), "spawn_passive must launch from the stable root, not the slot"
+    assert Path(cwd) == root, "spawn_passive must launch from the stable root, not the slot"
     assert not str(Path(cwd).resolve()).startswith(str(slot.resolve())), (
         "spawn_passive's cwd must never be inside the target version slot"
     )

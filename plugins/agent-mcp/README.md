@@ -17,6 +17,36 @@ policy for custom agents or the runtime decision to delegate. Use
 ownership, readiness sections, and anti-self-delegation; use
 `delegation-guidance:delegating-work` for task decomposition.
 
+## Legacy state home
+
+The supported legacy layout uses `~/.agent-mcp` when `AGENT_MCP_HOME` is
+unset or empty. A nonempty override selects that directory; a relative value
+is made absolute against the launch directory, collapsing `..` lexically
+without expanding literal path text or dereferencing symlinks. Selection alone
+creates nothing. Resident admission still refuses a linked runtime parent.
+
+Named bridge configs, overlays, default file storage, shared token caches,
+materialization and source-digest keys use this common home. The resident
+`serve` command binds the absolute selection into its process environment
+before changing cwd, so lazy consumers and descendants do not resolve a
+relative home a second time. Explicit socket paths keep their launch-directory
+meaning and may intentionally put socket-associated routing and lease files
+outside the home. This compatibility behavior neither activates installation
+cells nor migrates existing state.
+After argument validation, resident CLI admission checks the selected socket's
+state directory before changing cwd or constructing the server. A nested server
+borrows that admission rather than inheriting an unrelated code-directory root.
+Forwarding and passive cutover reserve that same socket-state directory before
+creating the child, including when an explicit socket lives outside the home.
+Socket/log spellings stay lexical so linked parents cannot be hidden by resolution.
+
+Resident shutdown stops accepting new work and joins accepted connections.
+In-flight `call`/`list` requests and attached sessions retain their existing
+natural-drain boundary; idle connections close. A single shielded cleanup owner
+retains the instance admission and singleton lease until upstream/session,
+listener and background-task teardown settles, including repeated caller
+cancellation and partial control-listener startup failure.
+
 ## Standalone quick start
 
 agent-mcp is the **standalone** MCP-wrapper path: it is launched directly from a
@@ -63,6 +93,83 @@ server from repository-committed, machine-portable frontmatter that has no
 plugin-root interpolation contract and may run before or independently of
 session command-catalog context. That surface cannot consume the payload-local
 argv until the host provides a plugin-root-capable MCP launcher contract.
+
+### Constructing a replacement
+
+Install/provision uses the maintained footprint to choose compatible incremental
+construction or a fresh immutable candidate through the existing installer
+transaction. Missing/corrupt reuse evidence does not require a separate repair
+flag: an occupied target is preserved and the constructor chooses a distinct
+replacement generation. The original source identity remains pinned. This is
+construction admission, not permission to clear unknown content or proof of
+old-process retirement. Existing cutover, command ownership and publication
+checks still apply.
+
+On the fresh path, the installer skips ZDD, confirms displaced-process
+settlement and clears only declared disposable control state under the existing
+cutover, serve-instance and routing locks. The socket home can differ from the
+code root, including an explicit `AGENT_MCP_SERVE_SOCKET` override. Configuration,
+durable data, logs, unknown files and lock identities
+are preserved. A winning current daemon, live endpoint or uncertain passive
+owner makes reset incomplete without deleting its state. Deployment metadata
+is published only after reset and global-command publication; inconsistent
+deployment/current-generation evidence selects fresh construction on retry.
+MCP remains on-demand. This control reset does not collect old code slots or
+by itself prove that every old reactivation route has been retired.
+
+### Removing a legacy runtime
+
+Run `scripts/init.ps1 uninstall [-InstallDir PATH]` on Windows or
+`bash scripts/init.sh uninstall [--install-dir PATH]` on Linux. Uninstall uses
+the same transaction lock as install/provision/stamp and requires an existing
+Python 3.10+ interpreter outside the installation. It does not provision a
+runtime, reconcile instances, terminate processes, or stop upstream services.
+Windows also supports a launcher-only `py.exe` installation; uninstall skips
+installed-runtime interpreter candidates. Bash accepts `--install-dir PATH`,
+not `--install-dir=PATH`; unsupported flags (including `--dry-run`), missing
+values, repeated root selections and conflicting actions are rejected before
+dispatch. Uninstall must be explicit, never inherited from the environment.
+Destructive roots containing a `..` path component are refused before
+normalization or lock creation. Ordinary relative roots and names such as
+`release..dev` remain supported; spell the intended root without parent traversal.
+Windows relative roots bind to PowerShell's current filesystem-provider location
+before locking, independently of the process working directory.
+Windows requires native CIM process inspection; Linux requires readable
+current-user `/proc` process information. Other platforms and unavailable or
+ambiguous inspection fail closed. A base-interpreter MCP process without an
+attributable runtime path also blocks removal, even if it may belong to another
+installation. Close active MCP runtime processes through their normal owner
+before retrying. Concurrent launches must remain quiescent; this is not
+reference-safe whole-harness removal or a session shutdown command.
+
+The action removes only installed generations, `.venv`, source snapshots,
+selected-runtime markers and the deploy manifest, plus generated resolvers and
+recognizable default-root compatibility wrappers. It preserves the install root,
+lock/lease files, bridge configuration, databases, authentication, caches,
+materialized fleets and unknown content. It refuses linked roots/ancestors,
+unrecognized generation/snapshot inventory, missing or foreign deployment/stamped
+ownership, foreign lifecycle ownership, installation-cell or managed-deployment
+metadata, and mutable `dev` generations. Stamped ownership must identify this
+plugin inside the runtime home's own snapshots. An absent installation
+is a no-op; the same source can be installed again. Disable automatic bootstrap
+in the consuming harness first if removal should persist. Installation-cell
+lifecycle and harness reference accounting remain separate operations.
+
+Source-qualified snapshot generations are removed under the same construction
+leases used by their publisher. The persistent `snapshots/.construction-leases`
+directory and its lock inodes remain; they are coordination, not generations.
+Resolver and compatibility-command cleanup precedes runtime/ownership removal.
+Cleanup errors are reported, retaining or restoring the exact previously
+validated manifest or stamped ownership evidence so a subsequent uninstall can
+authenticate and retry. This recovery restores ownership evidence only, not
+already removed runtime contents; it creates no new owner or activation policy.
+The packaged plugin includes the canonical native removal helpers and finite
+process supervisor through the existing installer-engine synchronization owner;
+uninstall does not require a source checkout alongside the payload.
+POSIX cleanup children use the shared owned-process runner, which settles their
+process group before returning or propagating a timeout while the caller keeps
+uninstall custody. This caller-held mode does not claim lease retention after
+abrupt caller termination.
 
 ## Reliable transport: one bridge, two surfaces
 
@@ -1421,6 +1528,16 @@ are forwarded literally without opening console windows. Failed native commands
 retain their stderr diagnostics. Failed construction reclaims only its owned
 incomplete candidate, leaves the active runtime unchanged, and preserves the
 original error if cleanup also reports a failure.
+
+On Windows, explicit `install`/`init`/`provision` enters the shared execution
+owner and adopts this installation's finite launch broker after immutable
+completion, before selecting the runtime or starting a successor. Ordinary
+forwarding and passive-service launch only consume that adoption; they never
+register or repair it. This component does not make the optional `serve` daemon
+a prerequisite. `init.ps1 -Action broker-remove` removes only the owned launch
+broker under the same execution custody, preserving runtime files, configuration
+and the optional serving process. It refuses contained or non-Windows use.
+`stamp` remains runtime- and registration-free.
 
 ## Architecture
 

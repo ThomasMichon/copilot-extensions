@@ -11,6 +11,11 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+Source repositories can veto managed authoring agents without losing source
+worktree and contribution operations. See
+[repository hosting policy](docs/repository-agent-policy.md) for `expose_agent`,
+read-only admission checks, and the allocation/launch distinction.
+
 For optional encrypted PR attribution with an already configured agent-vault
 KeePass database, use `identity-vault setup/status/verify` or the
 [setting-up-pr-identity skill](skills/setting-up-pr-identity/SKILL.md).
@@ -25,6 +30,15 @@ reported separately; no consumer-specific watcher is required for those reads.
 The same surface provides [built-in publication checks](docs/pr-publication-checks.md)
 and [bounded ADO remediation](docs/pr-remediation.md), without casting human
 approvals or creating pipeline runs.
+
+For a complete repository-open census and original claim paths across selected
+configured cells, use the [one-shot PR sweep](docs/pr-sweep.md). Configuration
+inspection is separate from execution, and unavailable cells never become
+empty successful inventories. This adds no watcher or deployment.
+
+The [origin-owned worktree allocation provider](docs/worktree-allocation.md)
+retains creator responsibility before receiving creation and separates optional
+claim acknowledgement from local child admission. It starts no agent.
 
 Resolved machine topology treats native Windows and WSL as independent logical
 machines, conventionally `host` and `host-wsl`. The shared machine owner
@@ -44,6 +58,11 @@ This keeps detached provisioning from a neutral/HOME directory on the same
 front-door route as the already repo-aware handler. Without an explicit repo,
 ordinary project resolution remains required; the change does not start
 reconciliation or installation merely by resolving the route.
+
+For explicit source acquisition and repository-owned check/apply/final-check,
+use [`repos setup`](docs/repository-setup.md). It is plan-only by default,
+requires consent before repository code runs, and preserves editing/agent
+preferences rather than silently adopting the selected source.
 
 Portable installation-mode probes and selected-context validation run the
 selected Python with `-I -S` and explicit UTF-8 output. Their payload-owned
@@ -66,6 +85,36 @@ Marketplace refresh, inventory browsing, plugin acquisition and their summary
 therefore do not extend the auth report's phase or human scope. These timing
 boundaries do not change authentication, acquisition or failure semantics.
 
+Authentication cleanup consumes the selected repository's existing
+agent-machines `git-config` policy; it supplies no helper, account or host
+defaults. Ordinary updates only offer a preview when authentication needs
+fallback or repair. No policy means `not_configured`, not an invented fix.
+
+```text
+agent-worktrees update --auth-report --auth-cleanup --json
+agent-worktrees update --auth-report --apply-auth-cleanup <preview-plan-sha> --json
+agent-worktrees update --auth-report --revert-auth-cleanup <backup-receipt> --json
+agent-worktrees update --auth-report --revert-auth-cleanup <backup-receipt> --apply-auth-cleanup <rollback-plan-sha> --json
+```
+
+Apply is a separate explicit operation, never forwarded into an update or a
+Manager environment export. The exact current preview digest is mandatory.
+Machines owns the strict resource-only transaction, backup and rollback;
+Worktrees rechecks source authentication and requests that same owner's rollback
+if directly working authentication or a previously available fallback is lost.
+Losing direct authentication is still a regression even if a fallback remains.
+Failed/unconfirmed mutation or
+rollback remains a failure with recovery evidence, not an unchanged result.
+Neither path switches accounts, signs in, stores tokens, or provisions a missing
+policy runtime. `CE_UPDATE_AUTH=off` or `report-only` blocks cleanup application.
+Cleanup selects an explicit `--auth-cwd` first, then the update's selected
+repository, then process CWD. Automatic offers and plain authentication reports
+show before/after hashes, never Git values that can contain inline helper
+credentials. Only the explicit `--auth-cleanup` preview displays the owner's
+value diff; that output can contain secrets and is not retained in telemetry.
+Large telemetry preview bodies use a bounded hash-checked reference beside the
+run's events, preserving the consent digest without enlarging event-line limits.
+
 ## How It Works
 
 The public `update` command submits to the shared durable execution driver
@@ -83,6 +132,58 @@ for its bounded scope and remaining takeover/foundation limitations.
 `--no-manager` selects the standalone updater but still queues it.
 `--supervised-debug` uses the same exclusive authority under foreground
 supervision, never a second installation writer.
+
+### Diagnose one update phase
+
+`update --phase` selects a fixed piece of the existing updater without running
+Manager self-update or the other phases. It still uses the same durable queue,
+selected installation context, native installer plans, deadlines and custody.
+The published shell front doors bypass ordinary repair bootstrap for these
+selections. A missing engine is reported as unavailable rather than implicitly
+provisioned; use ordinary `update` when repairing the engine itself is intended.
+Use repeatable `--plugin NAME` with `payloads`, `preflight` or `runtimes` to
+select only those registered plugins:
+
+```text
+agent-worktrees update --phase payloads --plugin agent-bridge
+agent-worktrees update --phase preflight --plugin agent-bridge
+agent-worktrees update --phase runtimes --plugin agent-bridge
+agent-worktrees update --phase integration
+```
+
+`payloads` acquires only selected payloads; `preflight` validates the selected
+runtime plan without executing it; `runtimes` executes that collected plan
+against already-installed payloads without downloading other plugins.
+`anchors`, `prune` and `integration` independently run their existing local
+owners. Anchor/prune phases do not enumerate registered plugins, and local
+phases do not eagerly discover unrelated network authentication.
+Filtered payload requests prepare authentication only when acquiring their
+selected contexts, including when refresh fails; they never fall back to an
+unrelated project's marketplace context. Unknown selections refuse before auth
+discovery. Engine runtime phases require an installer with targeted-update
+support and suppress adopted Manager recovery as well as local integration.
+
+An eligible Bridge runtime reaches its existing installer even when its
+deployment receipt is current. That owner reuses completed content and
+separately probes/reconciles the serving runtime; slot completion is not
+serving-current evidence. A failed Bridge update never falls back to `install`
+and hides a refused serving transition. Other runtime quick-skips are unchanged.
+
+A successful selected phase is **partial**, not full-update convergence.
+Detached/status JSON includes `phase`, `plugins` and `full_update: false`;
+telemetry does not report the whole suite as verified-current. Run ordinary
+`update` after diagnosis to qualify the complete Manager/payload/runtime/
+integration path. Existing skip and force options retain their normal meaning;
+conflicting or ineligible selections refuse rather than silently widening scope.
+Phase selection cannot combine with `--target`, `--inventory` or complete
+prepared `--runtime-sources` packets; those keep their own update contracts.
+
+Credential-routing helpers use the selected interpreter's base on Windows
+with explicit owned code roots, isolated/site-free startup and no bytecode
+writes. Simple host authorities do not load account/registry discovery or the
+general URL parser; child-process machinery is loaded only for helper replay.
+Git requests end at their protocol blank line, without waiting for EOF.
+An expired subprocess or unfinished pipe capture never reports status zero.
 The [Manager's update reference](../../worktree-manager/README.md#durable-update-execution)
 owns the shared request/lifetime contract and its current migration boundary.
 
@@ -132,6 +233,13 @@ activation. Missing bootstrap Python, an unavailable input fingerprint, or a
 publication refusal stops before selector, last-known-good, monitor, and GC
 changes. A successful health probe alone does not authorize activation.
 
+The retained legacy activation wrappers also fail the installer when the
+status-monitor transition fails, is refused or remains busy. They retain the
+completed slot and installed selectors for recovery; those selectors do not
+certify serving convergence. Disabled or absent monitors remain valid no-ops.
+This reporting correction does not change the cutover algorithm, add readiness
+or predecessor-retirement proof, or replace the current Python lifecycle owner.
+
 Agent Worktrees has three shipped pieces:
 
 - **Plugin payload** (skills, hooks, live-pulse extension) -- loaded by Copilot
@@ -148,6 +256,39 @@ Old or unattributed installations retain their command but report unresolved
 ownership, not invented readiness. See the
 [shared binding contract](../../libs/payload-invocation/README.md#source-qualified-command-binding)
 for selection/refusal semantics and consumer compatibility.
+
+### Interrupted unattributed lifecycle recovery
+
+A failed legacy install can retain a pending unattributed reservation. If the
+same payload subsequently gains marketplace provenance, ordinary update refuses
+to silently replace that owner. The selected payload's
+`scripts/recover_command_lifecycle.py` provides explicit, metadata-only recovery:
+
+```text
+<python> <selected-payload>/scripts/recover_command_lifecycle.py inspect --payload-root <selected-payload> --runtime-root <existing-runtime> --project-root <launch-project>
+<python> <selected-payload>/scripts/recover_command_lifecycle.py repair --payload-root <selected-payload> --runtime-root <existing-runtime> --project-root <launch-project> --expected-evidence <inspection.expectedEvidence>
+```
+
+Use an existing Python 3 interpreter and absolute paths. Read the inspection's
+payload, runtime, environment and source before authorizing repair. Inspection
+is read-only and refuses existing publication locks. Repair revalidates the
+exact manifest bytes, source and scope under the existing publication lock;
+it never borrows a live lease or recovers stale/foreign lock custody.
+Missing or foreign provenance, another payload/root/environment, already-bound
+ownership, completed or malformed reservations, inherited context from another
+marketplace, namespaced policy and managed publication refusals remain protected.
+
+Repair replaces only the exact pending unattributed owner with the verified
+source-qualified owner. Other manifest fields and runtime/configuration files
+are preserved. The reservation remains **pending**: no command binding,
+installation success or runtime readiness is published. Retry the ordinary
+authorized update afterward and verify the actual consumer contract. A failed
+retry remains incomplete, not automatically recovered.
+
+Use only the recovery helper shipped in the selected payload, not a source
+checkout, another payload or an edited installed helper. If it is unavailable,
+the repair requires a released payload containing it; do not remove reservation
+or lock files or change installation policy to bypass that release boundary.
 
 The installation-owned runtime deployment policy also gates native bootstrap
 stamping, legacy lib-copy reconciliation and payload-local first-use
@@ -247,6 +388,39 @@ reached over a process boundary. The small `packaging` dependency is explicit
 so reconciliation preserves version ordering and downgrade protection without
 relying on UI dependencies.
 
+Manager version-probe failures retain bounded, credential-redacted startup
+details on stderr, including resolver, spawn and exhausted-timeout errors.
+Terminal controls and URL credentials are removed before bounding; useful
+stdout is retained when stderr is empty. Nonprinting separators retain word
+boundaries, and incomplete credential-looking URL authorities are masked
+conservatively. URL userinfo is masked before separator normalization; bounded
+source labels retain the provider and registration prefix. First-run onboarding,
+the absent/failed/ready health model, explicit provider selection, real bundled
+fallback and child exit status are unchanged. This reporting does not itself
+repair a dependency or interpreter-policy failure.
+
+## Background Update Staging
+
+The launch path stages marketplace payload updates separately from runtime
+installation. One stage holds an OS lease for its entire download, fingerprint
+and completion-publication transaction. Its `updater.lock.guard` file remains
+in place after release so concurrent callers always arbitrate the same file;
+the kernel releases ownership when the staging process exits or crashes.
+
+The separate `updater.lock` record contains diagnostic PID, process birth and
+attempt identity. Age never authorizes taking a live lease. A live legacy
+PID-only owner is preserved during migration; malformed ownership metadata and
+I/O failures refuse staging explicitly. A contending stage returns
+`skipped: locked` without replacing the owner's shared completion result.
+Acquisition failures likewise leave shared status untouched; stderr, the
+caller's JSON result and its nonzero exit report the failure.
+Lock and status records publish atomically, and the picker stops reporting
+`checking` once no live owner remains. This is a staging-only lease, not the
+installer's slot-admission lock or a machine-wide update-writer protocol.
+The standalone session-start hook also recognizes live stages regardless of
+age and verifies a recorded process birth identity before deferring its own
+reconciliation; it does not load or invoke the stale installed runtime.
+
 ## Authoritative Repository Roots
 
 Consumers requiring authoritative repository roots use
@@ -329,6 +503,16 @@ plan is not launch authority. Mux embodiment takes that same per-worktree guard
 before creating a new execution leg. Older owners reject the new flag rather
 than silently returning an unfenced launch. The caller-facing mode contract is
 owned by the [Bridge resume reference](../agent-bridge/skills/agent-bridge/references/cli-commands.md#session-management).
+
+Native mux embodiment additionally holds a per-worktree kernel lifecycle lease
+through its final check and mux invocation. Cleanup, managed removal and
+finalization take the same lease before their fresh retirement checks and hold
+it through removal, including forced removal. This is a provider-first expansion:
+launch still retains the repository finalization lock for older retirement
+owners, including already-running daemons. Removing that compatibility barrier
+requires separately qualified peer support; source publication alone does not
+activate different-worktree launch parallelism. The new lease is distinct from
+seed/native admission and the Windows mux check/create lease.
 
 ### Explicit restart Resume
 
@@ -630,6 +814,13 @@ Shell commands excluded by the guard's existing write-verb classifier skip
 topology discovery. Cold discovery can still exceed its budget; this cache
 does not change the guard's fail-open policy or guarantee cold-call latency.
 
+`related list --json` includes each entry's `registry` object (`class`, `remote`,
+and the current platform's `path`), matching `related show --json`; `null` means
+no registered repository. The command guard consumes this batched result in one
+CLI lookup on a cache miss. An older runtime that omits `registry` retains the
+per-repository `show` fallback. Cache scope, lifetime and completeness rules are
+unchanged, and break-glass grants are still read live for every decision.
+
 Session registration defaults to the hook's 1.5-second request budget with
 zero daemon boot-wait. Explicit `bind-session` selects the existing normal
 tracking-write request budget of 8 seconds instead; deregistration is unchanged.
@@ -756,6 +947,22 @@ Ordinary `install`, `provision`, and `update` construct a numbered runtime once,
 reuse exact healthy content, or refuse drift. `-Force` / `--force` reconciles
 configuration; it never authorizes rewriting a completed numbered slot.
 
+On Windows, explicit native construction joins the suite execution driver's
+live custody before taking legacy or namespaced publication locks. A cold
+explicit invocation submits its fixed installer operation to that same finite
+driver; it does not install from a daemon-launch fallback. The source driver
+uses the declared dependency closure and Python 3.11+; no sibling runtime is
+required. Live authentication and publication tickets remain inherited, never
+journaled. The internal Python construction/settlement APIs require that owner.
+
+A retained, completed numbered candidate adopts its finite, user-scoped
+on-demand launch broker before helper publication, Manager recovery or monitor
+activation. Unsupported registration fails explicitly without elevation.
+Application rollback does not roll back that independently retained broker
+action. Mutable `dev` slots never become broker actions. Contained tests do not
+register Tasks, and the ordinary daemon-launch default remains unchanged pending
+the separate consumer and lifetime qualification gates.
+
 Both native installers also expose `repair`, `dev`, and `dev-release`:
 
 ```powershell
@@ -847,3 +1054,35 @@ workspace has been removed. Missing legacy receipts retain the older
 installation-local frozen-origin check; malformed or conflicting evidence
 requires explicit repair. Long interpreter paths are launched with an explicit
 application path, not inferred from the command-line token.
+
+
+### Emergency pre-tool relief
+
+The default installation supports `agent-machines pretool-killswitch on
+"<reason>"`, `status --json` and `off`. This explicitly pauses suite-owned
+preToolUse workflow guards, not native Copilot permissions or other hook events.
+For scope, hot-session delivery, installation-cell isolation and rollback, see
+[`libs/bootstrap-killswitch/README.md`](../../libs/bootstrap-killswitch/README.md#emergency-pre-tool-workflow-guard-switch).
+The control is inactive until explicitly enabled; a deployed release alone does
+not activate it.
+
+
+### Pre-tool implementation selection
+
+`AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION=command` is the default. Exact
+`resident` selects the experimental SDK pre-tool implementation; command entries
+then return before policy work. The host and all extension/command children must
+inherit the same launch-time value. Setting only
+`AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON` does not register a second hook.
+Resident mode also needs that interpreter; invalid policy construction produces
+an explicit SDK denial, not a second command-policy evaluation. No live settings
+are changed and automatic hot handback is not provided. Keep command mode until
+matched complete-path measurements demonstrate a gain and the host's lifecycle
+is qualified. See the [resident pre-tool contract](docs/architecture.md#opt-in-resident-pre-tool-pilot)
+for selection, conservative failure behavior and lifetime limitations.
+
+ACP and other hosts without a qualified extension registration/lifecycle keep
+`command` mode. Do not export `resident` as a machine-wide default: the ENV value
+selects a qualified session launch, not a feature-detection or failover mechanism.
+ACP command-hook compatibility and measured whole-path gains remain transition
+gates, not inferred benefits of moving code into an extension.

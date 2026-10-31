@@ -118,6 +118,35 @@ def test_local_evidence_batch_refuses_invalid_ids_before_process(batch_evidence,
         batch_evidence.prefetch_objects(["not-an-object"])
 
 
+def test_capture_git_show_reads_exact_object_under_long_checkout(batch_evidence, tmp_path):
+    evidence = importlib.import_module("bridge_http47_evidence")
+    root = tmp_path / ("workspace-" + "x" * 40)
+    environment = batch_evidence.clean_git_environment()
+
+    def run(*arguments, data=None):
+        result = subprocess.run(
+            ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+             "-C", str(root), *arguments],
+            input=data, capture_output=True, check=True, timeout=10, env=environment,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        return result.stdout.decode().strip()
+
+    root.mkdir()
+    run("init", "--quiet")
+    content = b'{"evidence":"retained"}\r\n'
+    blob = run("hash-object", "-w", "--stdin", data=content)
+    filename, directory = "e" * 100 + ".json", "directory-" + "d" * 48
+    child = run("mktree", data=f"100644 blob {blob}\t{filename}\n".encode())
+    tree = run("mktree", data=f"040000 tree {child}\t{directory}\n".encode())
+    commit = run("commit-tree", tree, "-m", "capture evidence")
+    expression = f"{commit}:{directory}/{filename}"
+    assert len(str(root)) + len(expression) > 260
+    assert evidence.git(root, "show", expression) == content
+    with pytest.raises(ValueError, match="local capture Git evidence unavailable"):
+        evidence.git(root, "show", commit + ":missing.json")
+
+
 @pytest.mark.timeout(180)
 def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
     snapshot = tmp_path / "repo"
@@ -131,8 +160,9 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
         REPO / PLUGIN / "src", snapshot / PLUGIN / "src",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
-    registry_path = snapshot / CONTRACT / "registry.json"
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    import agent_bridge_contract_registry as registry_codec
+    registry_snapshot = registry_codec.load(snapshot)
+    registry = registry_snapshot.materialized
     fixture_paths = {
         fixture["path"]
         for contract in registry["contracts"] for fixture in contract["fixtures"]
@@ -149,19 +179,27 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
             destination = snapshot / deferred["reference_path"]
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / deferred["reference_path"], destination)
-    closure = json.loads(
-        (REPO / CONTRACT / "fixtures/http/current/http47-owned-cold-drain.json").read_text(
-            encoding="utf-8",
-        )
-    )["execution_closure"]
-    for relative in closure:
-        destination = snapshot / relative
-        if not destination.exists():
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(REPO / relative, destination)
+    for packet in (
+        "http47-owned-cold-drain.json", "http48-retained-inbox.json", "http49-retained-producer.json",
+        "http50-retained-recovery.json",
+    ):
+        source = REPO / CONTRACT / "fixtures/http/current" / packet
+        if not source.exists():
+            continue
+        closure = json.loads(source.read_text(encoding="utf-8"))["execution_closure"]
+        for relative in closure:
+            destination = snapshot / relative
+            if not destination.exists():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(REPO / relative, destination)
     for name in ("check-agent-bridge-contracts.py", "agent_bridge_contract_git.py",
                  "bridge_http45_evidence.py", "bridge_http47_evidence.py",
-                 "bridge_http47_validation.py"):
+                 "bridge_http47_validation.py", "bridge_http48_evidence.py",
+                 "bridge_http49_evidence.py", "bridge_http_retained_evidence.py",
+                 "bridge_http50_evidence.py",
+                 "bridge_http48_installation.py",
+                 "agent_bridge_contract_registry.py",
+                 "agent_bridge_contract_paths.py", "agent_bridge_contract_publication.py"):
         destination = snapshot / "tools" / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO / "tools" / name, destination)
@@ -211,7 +249,10 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
         sha256=hashlib.sha256(canonical).hexdigest(), semantic=False,
         non_semantic_reason="Comment-only flow maintenance; wire behavior and floors are unchanged.",
     )
-    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+    for relative, data in registry_codec.plan(snapshot, registry_snapshot, registry).items():
+        path = snapshot / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
     run(["git", "add", "-A"])
     run(["git", "commit", "-qm", "implementation-only update"])
     assert set(run(["git", "diff", "--name-only", baseline, "HEAD"]).splitlines()) == {

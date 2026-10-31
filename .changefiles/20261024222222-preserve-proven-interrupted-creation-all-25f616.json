@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve proven interrupted creation allocations across optional naming changes, revalidating receiving companion authority and retained New intent before repair effects.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

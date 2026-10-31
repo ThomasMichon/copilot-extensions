@@ -887,6 +887,8 @@ def _session_files(
 def _iter_regular_source_files(
     root: Path,
     excluded_roots: tuple[Path, ...] = (),
+    *,
+    directory_filter: Callable[[Path], bool] | None = None,
 ):
     """Yield regular source files without descending through links/reparse points."""
     pending = [root]
@@ -902,7 +904,8 @@ def _iter_regular_source_files(
                 if is_excluded(relative, excluded_roots):
                     continue
                 if stat.S_ISDIR(mode):
-                    pending.append(path)
+                    if directory_filter is None or directory_filter(relative):
+                        pending.append(path)
                 elif stat.S_ISREG(mode):
                     yield path
 
@@ -929,6 +932,19 @@ def _copy_session_tree(
         copied += 1
         nbytes += os.stat(_windows_extended_path(src_file)).st_size
     return copied, nbytes
+
+
+def _iter_publication_source_files(source, excluded_roots, include_sessions, *, batch_mode):
+    def directory_in_scope(relative: Path) -> bool:
+        if relative in (Path("session-state"), Path("provenance")):
+            return True
+        return relative.parts[0] == "session-state" and is_session_path_included(
+            relative, include_sessions, batch_mode=batch_mode,
+        )
+
+    return _iter_regular_source_files(
+        source, excluded_roots, directory_filter=directory_in_scope,
+    )
 
 
 def _session_needs_replace(
@@ -1724,7 +1740,10 @@ class FilesystemTarget(Target):
                 )
             try:
                 marker_name_casefold = publication_admission.PUBLICATION_IDENTITY_MARKER.casefold()
-                source_files = _iter_regular_source_files(source, detritus.roots)
+
+                source_files = _iter_publication_source_files(
+                    source, detritus.roots, include_sessions, batch_mode=batch_mode,
+                )
                 for src_file in source_files:
                     rel = src_file.relative_to(source)
                     # Marker reserved only for identified publications (see

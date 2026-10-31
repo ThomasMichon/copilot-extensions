@@ -27,21 +27,27 @@ Preserve provider-specific launch protocols and standalone installation.
 - **Host (owns PRs):** Campaign owner.
 - **Delegates:** Evidence only; no shared-worktree git or edit authority.
 - **Handoff:** Resume the first unresolved item from this canonical README.
-- **Concurrent work:** #5689 introduces shared host/WSL execution identity for
-  agent-machines and agent-worktrees. Do not supersede its still-open change.
-  It must land before the Dispatch and agent-machines integration slices; it
-  must not wait for those slices or for the independent Bridge/publication
-  repair. The original PR owner retains implementation and merge stewardship.
+- **Concurrent work:** Current qualified issue refinements credit #5689's
+  merged shared host/WSL execution-identity source for agent-machines and
+  agent-worktrees. Reuse that delivered prerequisite rather than treating it
+  as indefinitely open. Original source, release and installed stewardship
+  remain with their actual owners; no overlapping source takeover follows.
   The negotiated direction retires the duplicate `machine-identity` library:
   shared matching, locality and host/WSL qualification live in `machine-transport`,
   with consumer-specific discovery and diagnostics in thin adapters.
 - **Additional consumer slices:** #5972 covers Worktrees and Picker decisions,
   #5973 covers SSH WSL/mesh identity, and #5974 reviews Index designated-host
   routing. The campaign owner reserved #5972 before implementation; filing the
-  other two issues does not reserve them. Do not modify peer-owned claimant,
-  handoff or host/WSL paths while #5689 remains open. Independent Picker
-  identity matching can proceed after this extension clears review, without
-  changing the peer's execution-identity contract.
+  other two issues did not itself reserve them. The later explicit #5974
+  claim remains active. Preserve peer-owned claimant, handoff and host/WSL
+  source/resource scope even after a prerequisite merges. Independent Picker
+  identity matching does not change the peer's execution-identity contract.
+- **Direct retained acceptance:** Keep all #5738/#5972/#5973/#5974/#6039
+  original/refined/inherited clauses in the
+  [consumer acceptance Plan and Validation](retained-consumer-acceptance.md)
+  under these same custodians. #5972/#5974's specific active issue/claim
+  conditions remain; #6039 is still unreserved. Tracker intake neither
+  appoints an implementer nor releases a source/resource reservation.
 
 ## Context
 
@@ -130,11 +136,11 @@ unreviewed changes to Logger's native/WSL compatibility behavior.
 - [ ] Implement and resolve #5974's reviewed Index designated-host identity
   boundary after the shared contract lands; preserve explicit indexer
   configuration and standalone operation.
-- [ ] Complete the independent design review/merge gate for #6039's Logger
-  boundary proposal; this gate does not wait for #5689.
+- [x] Complete the independent design review/merge gate for #6039's Logger
+  boundary proposal in #6043, as recorded by its qualified refinement.
   _(agent-recommended inventory finding; operator-approved tracking/review)_
 - [ ] Resolve #6039's Logger ramp-up execution-locality and named-machine SSH
-  implementation after the shared contract lands; preserve
+  implementation using the delivered shared contract; preserve
   session-corpus filtering and standalone operation.
   _(agent-recommended inventory finding; operator-approved tracking/review)_
 - [ ] Inventory other agent-* named-machine operation paths for remaining
@@ -143,11 +149,14 @@ unreviewed changes to Logger's native/WSL compatibility behavior.
   _(agent-recommended verification of the requested all-consumer objective)_
 - [ ] Land any remaining proven overlap, or transfer a specifically bounded
   item to a named tracked objective with explicit rationale.
+- [ ] Complete every directly retained #5738/#5972/#5973/#5974/#6039
+  [per-source Plan row](retained-consumer-acceptance.md#plan), preserving the
+  complete original/refined/inherited scope, delivered credit, alternatives,
+  venues, finite bounds and exact source-token conditions.
 - [ ] Complete deployment evidence, journal outcomes, and mark the effort Done
   only after every implementation and validation item is resolved.
 
 ## Validation Plan
-
 - [ ] Per migrated consumer, run existing relevant contracts before edits and
   targeted regressions plus the full affected suite after edits.
 - [ ] Prove key/alias/hostname/case matching, known-local direct operation,
@@ -166,6 +175,12 @@ unreviewed changes to Logger's native/WSL compatibility behavior.
 - [ ] Verify merged provider state, refresh installed consumers through the
   unified update flow after promotion, reconcile harness projections, and
   finalize only settled worktrees.
+
+- [ ] Complete every matching
+  [direct consumer Validation row](retained-consumer-acceptance.md#validation-plan)
+  for #5738/#5972/#5973/#5974/#6039 at its original evidence tier. Retain the
+  full corresponding Plan scope and same custodians; tracker consolidation
+  is not implementation, native/installed acceptance or claim release.
 
 ## Proposal
 
@@ -889,19 +904,36 @@ implementation or claim final all-consumer inventory completeness.
 The source slices #5737/#5740 and the publication repair are settled; the
 additional #5972 Picker matching slice is merged in #6002, with complete
 affected-suite evidence, green publication gates and verified promotion and
-deployment. Remaining #5972 paths and
-#5973/#5974 are not implemented. #5974 is now reserved with its portable
-composition proposal reviewed and merged in #6023; implementation must follow
-the original peer's shared identity contract. The campaign extension is merged.
-#5689 retains its original host/WSL
-implementation owner and remains the overlapping-consumer prerequisite.
-Logger #6039's proposal has its own independent review/merge gate in the Plan.
-Once that gate is complete, do not repeat design review: implementation waits
-only for the original shared contract. Neither its runtime nor its native/WSL
-compatibility change is implemented or reserved.
+deployment. Current qualified refinements also credit the WSL emitter,
+self-probe/error-source protections, #5689 shared source and #6043 Logger
+design. Those are finite delivered boundaries, not complete operational-mesh,
+fleet/roster, Index or Logger runtime/native adoption. #5974 remains reserved
+with its #6023 design complete; reuse the delivered shared contract rather
+than reopening that source/design prerequisite.
+
+The [direct consumer acceptance ledger](retained-consumer-acceptance.md)
+retains the complete remaining outcomes in this Plan **and** Validation under
+the original owners. Logger runtime/native-WSL integration remains distinct
+and explicitly unreserved. Within Index's forwarded SSH child, ending routing
+means reaching the selected destination, not terminating a live process.
 
 #5885 is merged and #5911 is closed: do not rework that completed remediation.
 Normal promotion and installed-consumer refresh are verified; consumer projection
 reconciliation and the new Picker slice's deployment are complete. The effort
 and the #5972/#5974 issue claims remain active until their complete scopes are resolved
 or explicitly transferred; no single planning or implementation PR closes them.
+
+### 2026-10-28 - Direct retained consumer contract
+
+The complete #5738/#5972/#5973/#5974/#6039 original/refined/inherited outcomes
+are retained in the named Plan/Validation ledger and continuing Coordination.
+The bounded read-only study verified eighteen current texts against actual
+provider responses and the admitted whole contracts, under stable complete
+actor/roster/nested guards. Existing delivered source/design and partial
+consumer results are credited; no runtime, native or installed run occurred.
+
+#5972/#5974's exact source-token conditions remain open and unchanged.
+Normal review, actual merge and whole-current-parent readback precede any
+separately supported administrative supersession of another source tracker.
+This intake does not close either held token, transfer a claim, complete
+this effort or authorize implementation/rollout.

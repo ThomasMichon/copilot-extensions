@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original native-session observations for exact epoch-qualified launch executions without inferring prompt acceptance.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

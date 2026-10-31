@@ -1,0 +1,9 @@
+{
+  "comment": "Repair isolated quota-test prerequisites and installer contract fixtures",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

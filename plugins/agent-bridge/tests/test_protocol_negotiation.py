@@ -110,6 +110,55 @@ def test_caller_session_id_capability_is_advertised() -> None:
     assert CALLER_SESSION_ID_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
+def test_retained_producer_capability_is_distinct_from_transport() -> None:
+    from agent_bridge.protocol import (
+        RETAINED_INBOX_PROTOCOL_VERSION, RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION,
+    )
+
+    assert RETAINED_INBOX_PROTOCOL_VERSION == 48
+    assert RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION == 49
+    assert RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
+    assert HTTP_PROTOCOL_MIN_SUPPORTED == 1
+
+
+@pytest.mark.parametrize("generation,transport,producer", [
+    (0, False, False), (47, False, False), (48, True, False),
+    (49, True, True), (50, True, True),
+])
+def test_retained_producer_mixed_version_detection(generation, transport, producer) -> None:
+    from agent_bridge.protocol import (
+        RETAINED_INBOX_PROTOCOL_VERSION, RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION,
+    )
+
+    health = {"status": "ok"}
+    if generation:
+        health.update(protocol_version=generation, min_protocol_version=1)
+    client = _client(health)
+    assert client.daemon_supports(RETAINED_INBOX_PROTOCOL_VERSION) is transport
+    assert client.daemon_supports(RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION) is producer
+
+
+@pytest.mark.parametrize("generation,supported", [(0, False), (48, False), (49, False), (50, True)])
+def test_retained_recovery_has_its_own_advertised_floor(generation, supported) -> None:
+    from agent_bridge.protocol import RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION
+
+    assert RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION == 50
+    assert RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
+    assert _client({"protocol_version": generation, "min_protocol_version": 1}).daemon_supports(
+        RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION,
+    ) is supported
+
+
+@pytest.mark.parametrize("generation,supported", [(0, False), (50, False), (51, True)])
+def test_native_send_idempotency_is_an_independent_capability(generation, supported) -> None:
+    from agent_bridge.protocol import NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION
+
+    assert NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION == HTTP_PROTOCOL_VERSION == 51
+    assert _client({"protocol_version": generation, "min_protocol_version": 1}).daemon_supports(
+        NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION,
+    ) is supported
+
+
 def _app(tmp_path):
     cfg = ServiceConfig(
         port=0,
@@ -150,6 +199,43 @@ def test_daemon_supports_gates_on_version():
     assert c.daemon_supports(1) is True
     assert c.daemon_supports(2) is True
     assert c.daemon_supports(3) is False  # newer client feature, older daemon
+
+
+@pytest.mark.parametrize("version,minimum,supported", [
+    (REMOTE_OPERATIONS_PROTOCOL_VERSION, 1, True),
+    (HTTP_PROTOCOL_VERSION - 1, 1, True),
+    (HTTP_PROTOCOL_VERSION + 2, 1, True),
+    (HTTP_PROTOCOL_VERSION + 2, HTTP_PROTOCOL_VERSION, True),
+    (HTTP_PROTOCOL_VERSION + 2, HTTP_PROTOCOL_VERSION + 1, False),
+    (HTTP_PROTOCOL_VERSION - 1, HTTP_PROTOCOL_VERSION, False),
+    (HTTP_PROTOCOL_VERSION, -1, False),
+])
+def test_daemon_supports_requires_overlapping_ranges(version, minimum, supported):
+    client = _client({"protocol_version": version, "min_protocol_version": minimum})
+    assert client.daemon_supports(REMOTE_OPERATIONS_PROTOCOL_VERSION) is supported
+
+
+def test_daemon_supports_refresh_rechecks_the_peer_minimum():
+    health = {"protocol_version": HTTP_PROTOCOL_VERSION + 2, "min_protocol_version": 1}
+    client = _client(health)
+    assert client.daemon_supports(REMOTE_OPERATIONS_PROTOCOL_VERSION)
+    health["min_protocol_version"] = HTTP_PROTOCOL_VERSION + 1
+    assert not client.daemon_supports(REMOTE_OPERATIONS_PROTOCOL_VERSION, refresh=True)
+
+
+def test_client_support_rejects_an_invalid_advertised_range():
+    client = _client({"protocol_version": 2, "min_protocol_version": 3})
+    with pytest.raises(BridgeClientError) as error:
+        client.assert_client_supported()
+    assert error.value.status == 426
+
+
+def test_client_support_honors_its_own_minimum(monkeypatch):
+    monkeypatch.setattr("agent_bridge.protocol.HTTP_PROTOCOL_MIN_SUPPORTED", 3)
+    client = _client({"protocol_version": 2, "min_protocol_version": 1})
+    with pytest.raises(BridgeClientError) as error:
+        client.assert_client_supported()
+    assert error.value.status == 426
 
 
 def test_conditional_idle_end_refuses_daemon_before_capability_version():

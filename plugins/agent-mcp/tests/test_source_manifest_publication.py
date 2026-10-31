@@ -69,7 +69,7 @@ def _initialize(plugin: str, language: str) -> str:
             start = text.index("$sourceMetadata = Join-Path")
             end = text.index("\nfunction Assert-SourceRuntimeIdentity", start)
         else:
-            start = text.index('if [[ -e "$PLUGIN_DIR/runtime-source.json"')
+            start = text.index('if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}"')
             end = text.index("\n_assert_source_runtime_identity()", start)
         return text[start:end] + "\n"
     name = "Initialize-SourceRuntime" if language == "ps1" else "_initialize_source_runtime"
@@ -109,16 +109,16 @@ def _writer(plugin: str, language: str) -> str:
             if language == "sh" else
             text.index("\n$sourcePath =", text.index("# Source manifest inputs"))
         )
-        end = text.index("\necho ''" if language == "sh" else "\nWrite-Host ''", start)
+        end = text.index("\necho ''" if language == "sh" else "\n$prevEAP =", start)
     elif plugin == "agent-pull-requests":
         start = text.index(
             'source_fields="$(_source_manifest_fields)"' if language == "sh" else
             "$sourceFields = Get-SourceManifestFields",
         )
-        end = text.index('\necho ""' if language == "sh" else "\n    Write-Host ''", start)
+        end = text.index('\necho ""' if language == "sh" else "\n    $prevEAP =", start)
     elif plugin == "budget-guidance":
         start = text.index('KIND="$(_source_kind "$PLUGIN_DIR")"' if language == "sh" else "$kind = Get-SourceKind")
-        end = text.index("\necho ''" if language == "sh" else "\nWrite-Host ''", start)
+        end = text.index("\necho ''" if language == "sh" else "\n$prevEAP =", start)
     else:
         start = text.index("# -- 5. Deploy manifest" if language == "sh" else "# -- 5. Write deploy manifest")
         end_marker = (
@@ -182,6 +182,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $env:COMPUTERNAME = 'fixture'
 $PluginDir = {q(payload)}
+$sourceManifestPath = $PluginDir
 $ScriptDir = Join-Path $PluginDir 'scripts'
 $PSScriptRoot = $ScriptDir
 $InstallDir = {q(root)}
@@ -248,6 +249,7 @@ $payloadHash = if ({'$true' if plugin in SHARED else '$false'}) {{ Get-PayloadHa
     return f"""
 set -euo pipefail
 PLUGIN_DIR={q(payload)}
+SOURCE_MANIFEST_PATH="$PLUGIN_DIR"
 SCRIPT_DIR="$PLUGIN_DIR/scripts"
 INSTALL_DIR={q(root)}
 MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"
@@ -290,18 +292,33 @@ profile_result={q('provider-exec' + chr(9) + runtime + chr(9) + native._quote(sl
 {_profile_mapping(language) if plugin == 'agent-containers' else ''}
 [[ "$VENV_DIR" == {q(slot)} ]]
 _assert_source_runtime
+VENV_PYTHON={q(sys.executable)}
 PAYLOAD_HASH="$({ '_payload_hash' if plugin in SHARED else "printf ''" })"
 """
 
 
-@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize("plugin,repair", [(plugin, False) for plugin in PLUGINS] + [("agent-mcp", True)])
 @pytest.mark.parametrize("language", ["ps1", "sh"])
 def test_actual_manifest_writer_uses_precommit_source_facts(
-    tmp_path: Path, plugin: str, language: str,
+    tmp_path: Path, plugin: str, language: str, repair: bool,
 ) -> None:
     payload, fields = _payload(tmp_path, plugin)
     script = _setup(tmp_path, plugin, language, payload, fields)
     script += _prepare(plugin, language)
+    if repair:
+        suffix = ".repair." + "d" * 32
+        if language == "ps1":
+            script += (
+                f"\n$SrcVersion += '{suffix}'\n"
+                "$VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion\n"
+                "$LinkDir = $VenvDir\n"
+            )
+        else:
+            script += (
+                f'\nSRC_VERSION+="{suffix}"\n'
+                'VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"\n'
+                'LINK_DIR="$VENV_DIR"\n'
+            )
     if language == "ps1":
         selected_variable = "$profileResult.runtimeVersion" if plugin == "agent-containers" else "$SrcVersion"
         script += f"""
@@ -330,6 +347,8 @@ printf 'version = "9.9.9"' > "$PLUGIN_DIR/pyproject.toml"
     assert manifest["source"]["path"].replace("\\", "/") == owner.replace("\\", "/")
     assert manifest["source"]["kind"] == "local"
     expected = fields["runtime_version"]
+    if repair:
+        expected += suffix
     if plugin == "agent-containers":
         expected = native.IDENTITY.runtime_version(
             native.VERSION + "+provider-exec", "a" * 40, fields["runtime_source"]["assembly_hash"],

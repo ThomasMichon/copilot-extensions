@@ -42,6 +42,17 @@ planes such as a worktree manager, agent-bridge, or a human operator.
 
 This plugin ships six cooperating payload pieces:
 
+**Repository hosting veto:** live arming (`mode: auto` or explicit `force`) and
+cutover retry require a fresh, read-only `agent-worktrees agent-policy check
+--path <cwd> --operation handoff --json` through the attributed peer command.
+Unsupported or refusing receivers block automatic pickup; `force` does not
+bypass repository policy. A trigger stores the baton and session-state copy
+first. On refusal it records manual-only lineage and returns the seed, without
+logging a live request or pinging Bridge. Save, consume and history remain
+independent of hosting eligibility. The actual successor receiver must recheck
+before launch. Configuration semantics are owned by the shared
+[repository-policy library](../../libs/repository-policy/README.md).
+
 The custom-transfer thresholds/workflows described below apply when native
 continuity is not selected, or the operator explicitly requests owner/process
 transfer. The native-first selection above takes precedence for context-only
@@ -81,6 +92,104 @@ It does **not** own:
 If a control plane is present, it can watch the pending handoff state this
 plugin leaves behind and perform the actual cutover. If not, the plugin still
 returns a short handoff seed a human can use manually.
+
+## Authorization evidence and limits
+
+Capture upfront approvals and one-time answers in the existing current-owner
+checkpoint or canonical effort/charter when received. Both custom handoff
+shapes and native checkpoint guidance carry **Authorization Evidence & Limits**:
+original operator/charter source, applicable operations/destinations/owners and
+effects, accepted blast radius, exclusions, limits and later changes.
+
+The [carrier procedure](skills/context-handoff/references/authorization-continuity.md)
+keeps original evidence separate from interpretation and requires current
+authority before effects. A copied baton or consumption receipt does not grant
+deployment/content/external-owner permission; absent evidence remains explicit,
+while independent already-authorized work can continue.
+
+The offered `generate_handoff_prompt` tool optionally accepts
+`authorization_evidence`: compact existing approval references and exact
+applicable scope/limits/holds, at most 8192 UTF-8 bytes. Persist originals first.
+The extension retains that carrier for later generation/emergency drafting
+only within the current module lifetime. Reconnect/refork loses the convenience
+cache; the canonical checkpoint/effort remains the durable source and the new
+module reports **Not captured** until evidence is supplied again. Recover the
+existing record, not fresh operator consent. The cache is not a durable grant
+or current-authority evaluator. Empty text clears it;
+invalid or oversized input fails explicitly rather than truncating constraints.
+Without it, automatic drafts name evidence **Not captured** and direct bounded
+recovery. Older providers remain usable by placing the section in authored
+Markdown; the storage/consume contract is unchanged. Native checkpoint
+persistence remains host-owned, not implemented or certified by this plugin.
+
+## Recovery prompt receipts
+
+The first root user message captures its recovery locator without invoking a
+CLI. Production registration first restores one pending slot from the actual
+local SDK session's private client metadata (`rpc.metadata.snapshot()`,
+`getClientMetadata()` and `updateClientMetadata({set})`). Unsupported/remote
+hosts, corrupt or over-capacity data, session mismatches and storage errors
+permit no receipt mutation; there is no file or CLI persistence fallback.
+
+The metadata API has no CAS. Up to three immutable identity/phase records
+commute: capture, qualified possibly-sent identity, and monotonic confirmation.
+Each prospective record admission atomically re-publishes the identical
+qualified key and verifies the committed bag plus read-back; a stale read must
+not downgrade confirmation. Conflicting identities refuse new mutation.
+Only own keys are set, never cleared/removed; terminal markers remain so a
+late pending write cannot reopen them. Own values are bounded to 8 KiB within
+native limits (256-byte keys, 16-KiB values, 128 entries, 64-KiB serialized bag),
+without evicting other clients.
+
+A first prompt without a recovery seed stores a terminal checked capture
+without storing its text. The slot covers one logical first prompt per actual
+native session, not a history of handoff episodes. Missing pre-protocol state
+cannot reconstruct already-lost identity or prove historical first-message
+order. Fresh qualified state queries only its original identity before any
+later record; known in-memory uncertainty with lost native records is not
+silently initialized as a new capture. Fresh capture-only state without a
+qualified tuple stays unavailable rather than selecting a replacement binding.
+
+One coalesced asynchronous observer uses an optional, already-delivered
+resident-control candidate from this session's Worktrees guidance. It reads
+only the selected active route and existing credential, negotiates the closed
+receipt capability, then uses the existing loopback TCP JSON-lines service.
+It never starts a runtime, installer, credential producer, service or helper.
+Missing trusted project/incarnation/session delivery remains unavailable; no
+nonce, path or head identity is guessed.
+
+The **2,000 ms whole-observation ceiling** includes metadata restore/commit,
+guidance, token and route reads, health, admission, response and confirmation.
+The client reserves 100 ms for local
+settlement rather than extending that ceiling. A later user, idle or tool
+completion event may reconcile after a 30-second cooldown; there is no periodic
+poll or per-event queue. Successful receipt suppresses further attempts.
+Once a record may have been sent, only an exact query may reconcile it; source
+or incarnation changes do not silently redirect that pending identity.
+Install/activation generations are revalidated against the current health and
+expected-owner handshake, not treated as a different durable installation.
+A retry within the same source, installation, runtime root and subject may
+therefore reconcile after a generation change without issuing a second record.
+Matching incarnation/session/locator receipts are reconciled and appended by
+the [worktrees receipt backend](../agent-worktrees/docs/prompt-receipts.md).
+It reuses the existing durable handoff trace and its cross-process lock, returns
+bounded lookup output, and refuses legacy matching rows without qualified
+incarnation evidence. A missing captured session identity may be filled from the
+same live session later; an already-known identity is never replaced.
+Shutdown destroys the local socket but retains uncertain identity for a later
+registration, including fresh extension state. Uncancellable metadata RPCs
+retain their single-flight owner until actual settlement; disposal/deadlines
+suppress follow-up calls and socket admission. SDK persisted atomic commit is
+not a claim of power-loss/fsync durability; real-host process/refork
+qualification is separate from RPC-owner-double tests.
+It does not claim server rollback or cancellable fsync. Server
+in-flight ownership lasts until settlement; a local timeout is not completion.
+An exact replay is acknowledged only after the backend successfully synchronizes
+the existing receipt; a row left readable by a failed fsync stays uncertain.
+The compatibility activity query enforces the same durability requirement.
+Unsettled local file reads retain a single-flight fence rather than admitting
+more reads. These receipts are
+observational evidence, not ownership or consumption authorization.
 
 ## Why the monitor is an extension
 

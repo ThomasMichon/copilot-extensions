@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh actual setup prerequisites after provisioning and preserve prerequisite/core installer failures before reporting readiness",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

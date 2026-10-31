@@ -392,7 +392,9 @@ def _publish_protected(
     try:
         marker_name_casefold = publication_admission.PUBLICATION_IDENTITY_MARKER.casefold()
         receipt_dir_casefold = _protection.RECEIPT_DIR.casefold()
-        for src_file in _fs._iter_regular_source_files(source, detritus.roots):
+        for src_file in _fs._iter_publication_source_files(
+            source, detritus.roots, include_sessions, batch_mode=batch_mode,
+        ):
             rel = src_file.relative_to(source)
             is_root_marker = (
                 rel.parent == Path(".")

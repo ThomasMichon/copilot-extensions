@@ -1,19 +1,23 @@
 """Actual bootstrap publication and caller loss on disposable native runners."""
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from types import SimpleNamespace
 
 import agent_procutil
 import pytest
-from update_driver import foundation_status, status
+from update_driver import RequestSpec, StateError, TrustedRunner, drain, enqueue, foundation_status, status
+from update_driver import core
 
 from test_first_use_genesis import observe
 from test_first_use_native import native_command
@@ -26,8 +30,78 @@ from test_first_use_vault import (
 ACKNOWLEDGEMENT = "[agent-vault] driver launch acknowledgement: "
 
 
+def ordinary_receipt(log):
+    if not log.is_file():
+        return None
+    for line in log.read_text(encoding="utf-8-sig").splitlines(keepends=True):
+        if line.startswith('{"request_id"') and line.endswith("\n"):
+            document = json.loads(line)
+            assert set(document) == {"request_id", "state"}
+            assert isinstance(document["request_id"], str)
+            assert document["state"] in {"pending", "running"}
+            return document["request_id"]
+    return None
+
+
+def receipt_completed_count(root, count, log):
+    receipt = ordinary_receipt(log)
+    if receipt is None:
+        return False
+    requests = status(root=root)
+    assert any(item.id == receipt for item in requests), "durable receipt has no ordinary request"
+    return len(requests) == count and all(item.state == "completed" for item in requests)
+
+
+def test_bootstrap_observer_waits_for_committed_receipt_without_masking_bad_state(area, monkeypatch):
+    root = area / "queue"
+    log = area / "first-use.log"
+    entered, release = threading.Event(), threading.Event()
+    validate = core._validate_db
+
+    def pause_initial_commit(db):
+        if db.in_transaction:
+            entered.set()
+            assert release.wait(10), "fixture database release missing"
+        validate(db)
+
+    monkeypatch.setattr(core, "_validate_db", pause_initial_commit)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            enqueue, RequestSpec("bootstrap-receipt-control"), root=root,
+            runner=TrustedRunner((sys.executable, "-c", "pass"), str(area)),
+        )
+        try:
+            assert entered.wait(10), "fixture did not enter initialization"
+            with closing(sqlite3.connect(
+                f"{(root / 'queue.sqlite3').as_uri()}?mode=ro", uri=True,
+            )) as db:
+                assert db.execute("PRAGMA user_version").fetchone()[0] == 0
+            with pytest.raises(StateError, match="unsupported update-driver schema"):
+                status(root=root)
+            log.write_text('{"launched":true}\n', encoding="utf-8")
+            assert not receipt_completed_count(root, 1, log)
+            log.write_text('{"request_id":"partial"', encoding="utf-8")
+            assert not receipt_completed_count(root, 1, log)
+        finally:
+            release.set()
+        request = future.result(timeout=15)
+    log.write_text(json.dumps({"request_id": request.id, "state": "pending"}) + "\n", encoding="utf-8")
+    assert not receipt_completed_count(root, 1, log)
+    drain(root=root, executor=lambda _transaction: 0)
+    assert receipt_completed_count(root, 1, log)
+    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
+        db.execute("PRAGMA user_version=999")
+    before = (root / "queue.sqlite3").read_bytes()
+    with pytest.raises(StateError, match="unsupported update-driver schema"):
+        receipt_completed_count(root, 1, log)
+    assert (root / "queue.sqlite3").read_bytes() == before
+
+
 @contextmanager
-def owned_hook(command, *, env, project, directory, timeout, diagnostic):
+def owned_hook(
+    command, *, env, project, directory, timeout, diagnostic,
+    acknowledgement_prefix=ACKNOWLEDGEMENT,
+):
     directory.mkdir()
     output = directory / "stdout"
     errors = directory / "stderr"
@@ -81,19 +155,22 @@ def owned_hook(command, *, env, project, directory, timeout, diagnostic):
             elapsed = time.monotonic() - started
             text = errors.read_text(encoding="utf-8", errors="replace")
             frame = next(
-                (line.partition(ACKNOWLEDGEMENT)[2] for line in text.splitlines()
-                 if line.startswith(ACKNOWLEDGEMENT)), "",
+                (line.partition(acknowledgement_prefix)[2] for line in text.splitlines()
+                 if line.startswith(acknowledgement_prefix)), "",
             )
             assert frame, diagnostic()
             if os.name == "nt":
-                owner = pinned_worker(json.loads(frame))
+                acknowledgement = json.loads(frame)
+                owner = pinned_worker(acknowledgement)
+                receipt_log = Path(acknowledgement["log"])
             else:
                 assert frame.startswith("launched:"), diagnostic()
                 descriptor = open_pidfd(int(frame.split()[0].partition(":")[2]))
+                receipt_log = Path(frame.partition(" log:")[2])
             assert json.loads(output.read_text(encoding="utf-8-sig")) == {}, diagnostic()
             # Pin the launched owner before asserting the budget, so a failure still settles it.
             assert elapsed <= timeout, f"bootstrap took {elapsed:.2f}s; hook deadline is {timeout}s\n{diagnostic()}"
-            yield SimpleNamespace(close_caller=close_caller, exited=exited)
+            yield SimpleNamespace(close_caller=close_caller, exited=exited, receipt_log=receipt_log)
         finally:
             close_caller()
             if owner is not None:
@@ -201,7 +278,8 @@ def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service
             assert operation.state == "running", diagnostic()
             cold.close_caller()
             assert not cold.exited(), diagnostic()
-            observe(lambda: completed_count(1) or cold.exited(), 850, diagnostic)
+            observe(lambda: receipt_completed_count(root, 1, cold.receipt_log) or cold.exited(), 850, diagnostic)
+            assert ordinary_receipt(cold.receipt_log), diagnostic()
             assert completed_count(1), diagnostic()
             stamp = status(root=root)[0]
             assert_request(stamp, "stamp")
@@ -237,7 +315,8 @@ def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service
             timeout=deadline, diagnostic=diagnostic,
         ) as drift:
             drift.close_caller()
-            observe(lambda: completed_count(3) or drift.exited(), 850, diagnostic)
+            observe(lambda: receipt_completed_count(root, 3, drift.receipt_log) or drift.exited(), 850, diagnostic)
+            assert ordinary_receipt(drift.receipt_log), diagnostic()
             assert completed_count(3), diagnostic()
             request = next(item for item in status(root=root) if item.id not in {stamp.id, client.id})
             assert_request(request, "provision")

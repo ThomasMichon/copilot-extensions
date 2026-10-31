@@ -3299,12 +3299,32 @@ def test_restart_explicit_candidate_interpreter_preserves_bootstrap_identity(mon
     assert sys.executable == bootstrap
 
 
-def test_cmd_restart_always_exits_zero(monkeypatch, capsys):
-    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
-    _wire_restart(monkeypatch, lock_data=None, live=False, superseded=False)
-    rc = m.cmd_status_monitor_restart(argparse.Namespace())
-    assert rc == 0
-    assert "status-monitor:" in capsys.readouterr().out
+@pytest.mark.parametrize(
+    ("disabled", "already_current", "spawn_ok", "expected_rc", "summary"),
+    [
+        (False, False, True, 0, "spawned current monitor"),
+        (False, False, False, 1, "spawn failed"),
+        (True, False, False, 0, "disabled for this test run -- skipped"),
+        (False, True, False, 0, "a current monitor already owns the host"),
+    ],
+)
+def test_cmd_restart_exit_status(
+    monkeypatch, capsys, disabled, already_current, spawn_ok, expected_rc, summary,
+):
+    if disabled:
+        monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+    else:
+        monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    spawned, _, _ = _wire_restart(
+        monkeypatch,
+        lock_data={"pid": 999, "prefix": "/cur/slot"} if already_current else None,
+        live=already_current,
+        superseded=False,
+        spawn_ok=spawn_ok,
+    )
+    assert m.main(["status-monitor-restart"]) == expected_rc
+    assert summary in capsys.readouterr().out
+    assert (spawned["argv"] is not None) is (not disabled and not already_current)
 
 
 # ---------------------------------------------------------------------------
@@ -4798,17 +4818,29 @@ def test_self_retire_softly_closes_admission_before_hard_closing_on_final_exit(
     monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", lambda *a, **k: None)
 
     events: list[tuple[str, str]] = []
+    classify_servers = []
+    closed_servers = []
+    real_start = classify_daemon.start_server
     real_close_admission = classify_daemon.CoalescingServer.close_admission
     real_close = classify_daemon.CoalescingServer.close
 
+    def _record_start(*args, **kwargs):
+        server = real_start(*args, **kwargs)
+        classify_servers.append(server)
+        return server
+
     def _spy_close_admission(self, reason="superseded"):
-        events.append(("close_admission", reason))
+        if self in classify_servers:
+            events.append(("close_admission", reason))
         real_close_admission(self, reason)
 
     def _spy_close(self):
-        events.append(("close", ""))
+        closed_servers.append(self)
+        if self in classify_servers:
+            events.append(("close", ""))
         real_close(self)
 
+    monkeypatch.setattr(classify_daemon, "start_server", _record_start)
     monkeypatch.setattr(classify_daemon.CoalescingServer, "close_admission", _spy_close_admission)
     monkeypatch.setattr(classify_daemon.CoalescingServer, "close", _spy_close)
 
@@ -4824,7 +4856,7 @@ def test_self_retire_softly_closes_admission_before_hard_closing_on_final_exit(
     # once each (classify_server + worktree_status_server + managed_mux_server
     # + tracking_write_server), same invariant as the sibling test above --
     # soft-closing never skips the eventual real teardown.
-    assert kinds.count("close") == 4
+    assert len(closed_servers) == len(set(closed_servers)) == 4
 
 
 def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generation_change(

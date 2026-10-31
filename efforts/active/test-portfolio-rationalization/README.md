@@ -55,6 +55,35 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The finite #4395 ordinary developer-entry diagnostic OR supported-local-setup
+contract continues through Phase5 workflow and Phase7 migration-intake/domain
+review below, its actual global Validation and Journal. Preserve the existing
+primary, Worktrees/runner/dependency/documentation/platform, audit/source/
+cohort/periodic-failure and release/control custodians, #1303 and actual
+source/resource holds. No new runner, implementation assignment, owner
+contact, universal signature condition or resource transfer is created.
+
+The finite #609 connection-owner witness and #4056 real MCP chaos family enter
+the existing Phase7 migration-intake and Phase4 Vault/MCP waves below, with
+direct local and actual global Validation and Journal. Existing primary,
+clean-room, Vault/MCP warmth/cutover/IPC/installer, audit/source/cohort,
+periodic-failure/native/release and resource custodians retain their scopes.
+Keep #609 canonical until an exact eligible stronger receiver accepts every
+residual; #4056 narrowing/closure requires every residual in an accepted
+DIRECT FINAL-OPEN canonical. Those are source-specific conditions, not new
+universal ACKs. OPEN #1303, all incumbent families/holds and excluded
+#4036/#4049 custody remain; this intake grants no execution, assignment,
+credential transport, rollout or resource release.
+
+The directly retained #5921 finite clean-room verdict-completeness family continues through this SAME Active ROOT's Phase4 payload/harness/tools wave and Phase7 migration-intake/domain-Plan acceptance, its actual global Validation and append-only Journal. Existing primary maintainer, clean-room rig/reducer/script, audit/source/cohort/native/periodic-failure and release/control custodians retain their exact scopes; OPEN #1303 and every incumbent inheritance/hold remain. #5922/#8511 and #4312/#688/#1475 remain independent. This is tracking acceptance only, not implementation, execution, source/resource reassignment, a new generic ACK or a parent-completion waiver.
+
+The direct retained #4123 acceptance continues through this SAME existing Active ROOT's
+Plan, own and actual global Validation, and Journal under the incumbent domain, source,
+native and resource custodians. Every prior phase, alternative, hold and responsibility
+remains. Administrative supersession retires only duplicate tracking; a closed source is
+historical provenance, not a required live claim token. This intake grants no
+implementation, rollout, process action, reassignment or new blanket approval gate.
+
 The complete #3991 retained finite family continues through this existing Active ROOT's
 reviewed Plan, actual global Validation and Journal/open bounded-source process under
 the SAME declared and source-specific custodians. Preserve every incumbent alternative,
@@ -222,6 +251,38 @@ suites first.
   observable features per process launch.
 - [ ] Keep each plugin's contract map, inventory, and TESTING coverage summary
   current as its wave lands.
+
+#### Finite clean-room verdict completeness retained from #5921
+
+<!-- backlog-reconciliation:7556:transfer:5921:to:efforts/active/test-portfolio-rationalization/README.md -->
+
+This finite case enters the existing Phase4 payload/harness/tools wave through Phase7 migration-intake and domain-Plan review. It preserves the ORIGINAL #5921 source/API contract; this checklist is not a new test programme, a reducer implementation or execution authority.
+
+##### Direct unchecked Plan
+
+- [ ] L5921-P1: Map the ACTUAL documented clean-room scenario-report -> verdict -> consuming setup/publish path and required report evidence. Preserve scenario/version/phase, counters, environment, jams/results and any judgment/completeness fields as appropriate to that EXISTING protocol. Parsed file existence is not completion; do not invent a new universal report schema or a new provider API.
+- [ ] L5921-P2: Make the actual Python reducer validate supported version/schema, object/field shapes and required completed/judged evidence BEFORE deriving ok/counters/exit. Malformed, incomplete, unsupported or unjudged reports, including a parsed empty object, stay explicit NON-PASS. Missing scenario/counters/evidence must not be replaced with blank or zero values that manufacture success.
+- [ ] L5921-P3: Apply the SAME evidence-complete/non-pass contract to the actual Python-less fallback and its real callers. No absent grep match or missing counter may default to a zero-failure PASS. Preserve its supported dependency-light operation, explicit diagnostics and legitimate control behavior rather than merely fixing the Python arm.
+- [ ] L5921-P4: Preserve legitimate success/failure/usage and classified/degraded jam outcomes and their correct documented structured results/0-1-2 exits. At the ACTUAL consuming scenario-then-verdict boundary, missing stage/report/judgment or incomplete upstream outcome cannot be hidden by a final reducer command. Keep literal-mode separation and no self-healing; zero inferred failures is not evidence of success. Programmatic Tier P does not acquire an unrequested agent/Tier E judgment requirement.
+- [ ] L5921-P5: Provide source-safe, bounded actionable diagnostics and deterministic missing-field, wrong-shape and valid-control coverage through the ACTUAL reducers and documented report/caller seam, not a mock that bypasses construction/reduction. Preserve original finite source/API acceptance without a live box, driven model, real downstream distribution, native fleet or all-host trial.
+- [ ] L5921-P6: Keep recorded documentation-only #5931 and the completed source-reconciliation sweep credited only at their actual scope; they are not reducer implementation receipts. Preserve current unit eligibility/effect/resource rules and separate owning clean-room/script contracts. Do not absorb independent #5922/#8511 or #4312/#688/#1475 into this finite case or claim any was fixed by intake.
+
+##### Local Validation
+
+- [ ] L5921-V1: Use deterministic fixtures covering absent/malformed/unsupported/incomplete reports, empty object, missing required fields, wrong top-level/field/counter shapes and explicitly unjudged/missing-stage evidence. Require explicit non-pass from the actual Python reducer and real report consumer; no absent-evidence success.
+- [ ] L5921-V2: Retain genuine complete success, failure, usage and classified/degraded-jam controls with correct structured ok/counters and documented exits. Preserve literal-mode semantics and safe diagnostics. Do not impose a new universal positive passed-count threshold, agent judgment on a declared programmatic report, or leak report contents/secrets merely to diagnose a refused report.
+- [ ] L5921-V3: Exercise the actual Python-less reduction path against equivalent complete/incomplete/wrong-shape/control fixtures. A Python-only pass or successful JSON parse cannot stand in for this fallback; use the least expensive faithful bounded existing lane without host changes or a fresh platform programme.
+- [ ] L5921-V4: Check the documented scenario/report/verdict caller shape and final consuming status: a missing or incomplete report, failed required stage or unjudged result is never replaced by a final inferred-zero-failures green. Preserve valid control/jam outcomes and separate primary failure from diagnostic/reducer failure; no real installer/model/distribution is needed.
+- [ ] L5921-V5: Record exact source, owning test/caller boundary, chosen protocol requirements, actual outcomes and any unavailable case when the separately authorized implementation owner qualifies this finite family. Source inspection, documentation merge or a generic runner is not executed reducer/caller proof. Preserve current budgets/effects and all incumbent portfolio/native/periodic owners; no test/import/reducer execution occurs during this intake.
+
+##### Continuing Coordination and receiving gate
+
+- [ ] L5921-C1: Continue through the SAME Active ROOT primary maintainer, existing clean-room rig/reducer/script custodians, live #1303 and existing migration-intake/serial-wave boundaries. Preserve all incumbent Plan/actual global Validation/Participants/Coordination, completed rows, issue-body inheritances and full inline/linked historical Journal; no implementation assignment or resource/source claim transfer is made by this proposal.
+- [ ] L5921-C2: Keep #5922 and #8511 independent, and retain #4312's paired setup/judged evaluation, #688 Tier-E and #1475 WinGet acceptance with their owners. A missing-report defect is not permission to rerun a rig, widen native gates, change admission/CI policy or declare the portfolio Done. No old hold is released by age, silence or an empty assignee.
+- [ ] L5921-C3: BEFORE administrative #5921 supersession, obtain a NEW normally reviewed ACTUAL merge delivering ALL this direct local Plan, local Validation, ACTUAL level-two ROOT global Validation entry, continuing Coordination and dated Journal. Then FULLY read back the CURRENT whole ROOT and ALL linked historical journals plus current source/#1303 member-author/state/lock/assignees/eligible discussion/actual claims. Old effort creation, old unrelated intake, a title/link/child-only note or this artifact is not receipt. If any clause, tier, current custody, Active fit or complete delivery is uncertain, RETAIN #5921.
+
+Sources: https://github.com/ThomasMichon/copilot-extensions/issues/5921 and https://github.com/ThomasMichon/copilot-extensions/issues/5921#issuecomment-6331529524 . Existing OPEN #1303 remains the live portfolio coordination token.
+
 
 ### Phase 5 — Tiered developer and review workflows
 
@@ -572,7 +633,284 @@ be verified, RETAIN #3991. Original technical reconciliation stays unresolved af
 administrative intake; no test, checker, collection, import, native,
 Vault/credential/service/provider or source effect is authorized.
 
+<!-- backlog-reconciliation:7556:transfer:4123:to:efforts/active/test-portfolio-rationalization/README.md -->
+
+### Direct complete fixture-origin temporary-link cleanup family from #4123
+
+Accept this finite family through the existing Phase7 migration-intake
+deduplication/domain-ownership gate into the SAME reviewed Active ROOT's Phase4
+Worktrees wave. Preserve the ENTIRE incumbent ROOT Plan, actual global Validation,
+Coordination and Journal, OPEN #1303, all direct inherited
+native/mock/order/history/unknown-case families and every actual
+audit/source/cohort/periodic-failure/release owner. This is proposed documentation
+intake only; it does not claim cleanup, run a test or confer source/resource/claim
+custody.
+
+#### Numbered unchecked Plan
+
+- [ ] Recover the actual supported pytest temporary-root/current-alias and explicit
+  fixture-created symlink routes that can place run-owned debris in a plugin directory.
+  Preserve the historical empty-pivots/empty-plugins origin and exact source/profile
+  evidence without inspecting real private targets or assuming today's leak from a
+  historical filename. Framework-created current aliases and explicit symlink_to calls
+  are different producers.
+- [ ] Establish ownership-qualified fixture finalization OR an appropriate
+  autouse/framework boundary, preserving the original alternatives. Register cleanup
+  early enough for setup failure as well as after yield; environment restoration is not
+  deletion proof and each individual test need not delete a framework-owned target
+  blindly.
+- [ ] Remove only the addressed run's proven-owned temporary link/artifact. Preserve
+  pre-existing authored files, foreign links, external targets and other runs'
+  retained/live/unknown ownership. Do not follow a link, remove its target or sweep a
+  shared plugin/temp root. Uncertain ownership is an explicit retained residual, not
+  deletion permission.
+- [ ] Preserve cleanup after success, primary test failure, setup failure, after-yield
+  failure and interruption/timeout through the supported bounded teardown boundary. Do
+  not mask the original failure, weaken assertions/budgets or use retry/skip/xfail as
+  cleanup proof.
+- [ ] When cleanup cannot finish, expose truthful residual ownership and actionable
+  diagnostics; preserve primary result separately. A nominal pytest exit or successful
+  environment reset does not mean no plugin-directory debris remains.
+- [ ] Keep this fixture-origin implementation with its actual owning fixture/Worktrees
+  portfolio custodians. #4122 installer-source tolerance, historical #5869 runner
+  sandbox-status suppression and long-run descendant/handle cleanup retain their
+  separate scopes and current owners. Do not reopen a closed historical token or use it
+  as a required live claim.
+- [ ] Preserve current runner-owned roots, declared effects, item/group/plugin/storage
+  limits and proper least-expensive faithful tiers. Genuine unit rules may use existing
+  unit admission; actual Linux/WSL filesystem/native integration retains its supported
+  bounded contained/periodic lane. No mandatory broad integration release gate, all-host
+  requirement or whole-portfolio prerequisite is introduced.
+- [ ] Document exact original/current producer, fixture and cleanup authority mapping,
+  historical hygiene fixes versus real behavior, supported/unavailable outcomes and any
+  remaining unknown. Git removal, ignore policy, missing literal .pytmp strings,
+  unrelated green suite counts and runner cleanup code are not the actual
+  fixture-cleanup postcondition.
+
+#### Numbered unchecked local Validation
+
+- [ ] Qualify the actual addressed fixture/framework routes with owned synthetic data in
+  the existing separately authorized lane. Record exact source, profile, platform and
+  producer; prove the run's own plugin-directory aliases/artifacts are gone without
+  following or changing targets.
+- [ ] Cover success, primary failure, setup-before-yield failure, after-yield failure
+  and supported bounded interruption/timeout. Demonstrate cleanup sensitivity rather
+  than a return-code-only assertion; preserve exact primary errors and no new arbitrary
+  deadlines.
+- [ ] Prove pre-existing authored files, foreign links, external targets, another run
+  and unresolved ownership are protected. A refused unsafe cleanup remains visible and
+  retained, not falsely successful.
+- [ ] Exercise cleanup refusal/failure and truthful residual ownership/diagnostics
+  separately from the original primary result. Keep #5869 runner status and #4122
+  installer tolerance distinct; neither supplies a substitute positive for this family.
+- [ ] Record actual bounded Linux/WSL/faithful contained results and unavailable-tier
+  reasons independently from source/ignore/merge/release evidence. Maintain current
+  admission, effect and budget rules; no fixture, import, collection, checker or test is
+  executed by this intake.
+
+#### Numbered continuing Coordination and delivery gate
+
+- [ ] Keep the existing fixture/test/Worktrees wave and portfolio
+  audit/source/cohort/failure custodians. Do not assign implementation to the
+  documentation planner or transfer process/resource leases. Apply the existing Phase7
+  deduplication and domain-Plan review acceptance; no new generic ACK is required.
+- [ ] Continue through current ROOT Plan/Validation/Journal and eligible OPEN
+  bounded-source coordination, retaining OPEN #1303 and all incumbent
+  native/mock/order/history/unknown-case and release holds. Preserve historical #4123
+  provenance without leaving a closed #4123 as a required live claim token.
+- [ ] Obtain a NEW normal reviewed ACTUAL source merge delivering this complete direct
+  unchecked Plan, local Validation, actual global ROOT Validation entry and continuing
+  Coordination. Old ROOT creation, #8178's unrelated intake, a title, child-only note,
+  Draft/Done target or this proposal is not delivery.
+- [ ] BEFORE #4123 supersession, read back the FULL CURRENT Active ROOT Plan/own
+  Validation/Coordination/Journal and verify all original/inherited requirements,
+  alternatives, unknowns, evidence tiers, actual current owners/holds and live #1303
+  survive. Journal only the actual administrative intake; preserve every old row and
+  historical outcome. If any genuine hold requires the source live, intake is
+  incomplete, eligibility changes or custody cannot be preserved, RETAIN #4123. No
+  cleanup, test, implementation or parent completion is claimed.
+
+### Direct retained preparation lifetime from #5868
+
+**Agent-recommended tracking amendment.** Preserve the complete original and
+current refined preparation contract, existing primary maintainer and runner/
+UV/containment/source/native/periodic-failure custodians. #7408's separately
+delivered finite selector-routing result and Done container foundations are not
+the remaining preparation-lifetime proof.
+
+#### Plan
+
+- [ ] **P5868-1:** Own/bound preparation process tree, wall time, memory,
+  temporary/mutable state, cancellation/failure/cleanup for cold, drift/rebuild
+  and prepare-only before child work.
+- [ ] **P5868-2:** Retain #7382 setup-through-cleanup ordinary accounting and
+  provide meaningful enforced/recorded preparation budget rather than
+  post-return observation; environment admission and reuse do not replace
+  holder-lifetime ownership.
+- [ ] **P5868-3:** Preserve canonical governed editable dependency acquisition,
+  expressly supported preparation networking without fixture/test imports or
+  collection, guards/collection modes, leased-cache directory identity and safe
+  reuse.
+
+#### Local Validation
+
+- [ ] **V5868-1:** Use synthetic UV/build fixtures for cold/rebuild/prepare-only
+  timeout, descendant settlement, cancellation/failure, mutable-state/temp
+  boundary and admission release; no live package/provider credentials or host
+  process storm.
+- [ ] **V5868-2:** Retain accounting/admission/no-pytest controls, cached reuse/
+  editable source and disconnected execution selectors; do not regress shared-
+  state protection or count lease ownership as resource-lifetime proof.
+
+#### Continuing Coordination
+
+Existing primary maintainer and runner/UV/containment/source/native/periodic-
+failure custodians remain. Use the current migration-intake deduplication/
+ownership gate and explicit per-origin Plan, local AND global Validation and
+Journal readback. The delivered #7408 routing result remains finite credit,
+not another patch or whole preparation acceptance. Normal reviewed merge and
+full current receiving readback precede a separate source judgment; this paper
+amendment executes no fixture, resource action or implementation and releases
+no claim.
+
+### Finite Vault warm connection-owner witness from #609
+
+**Agent-recommended tracking amendment.** Receive the complete original and
+current refined contract through Phase7 and the Phase4 Vault/clean-room wave,
+without replacing the existing scenario contract or creating another effort.
+
+- [ ] **P609-1:** Qualify warm TTL/no-reunlock continuity AND non-resumable
+  in-flight work surviving OR deliberately draining cleanly, with actual
+  admitted activation/routing, old-generation retirement and interruption/
+  breadcrumb recovery. Preserve owner-gated safe transport and explicit
+  platform/degrade limits at the finite Tier-P connection-owner boundary.
+- [ ] **P609-2:** Credit #634 rendezvous/forward-ready INFO and #2486
+  POSIX/systemd handoff plus its recorded isolated KeePass update/no-reunlock
+  witness at their delivered scopes. Do not rebuild completed warm handoff
+  or equate INFO/import/marker success with the remaining acceptance battery.
+  #873 Windows DACL/cross-user security, #688 Tier-E and #743 implementation
+  remain independent; none substitutes for every residual here.
+
+#### Local Validation for #609
+
+- [ ] **V609-1:** At the existing separately authorized finite Tier-P venue,
+  record exact source/generation, warm TTL/no-reunlock, in-flight survival OR
+  clean-drain, routing, retirement and interrupted-recovery outcomes.
+  Preserve explicit unavailable platform/degrade facts and safe transport;
+  no unsafe secret transfer, live credential/store access or whole-parent/
+  native-every-host prerequisite is introduced by this intake.
+
+### Finite four-case real MCP chaos family from #4056
+
+**Agent-recommended tracking amendment.** Receive all remaining cases through
+Phase7 and the Phase4 MCP wave; keep the warmth half credited as delivered,
+not a new daemon design or latency benchmark.
+
+- [ ] **P4056-1:** Retain ALL FOUR original real-consumer cases: supported
+  immutable-runtime update/cutover mid-call with a warm daemon; client-connect
+  versus idle eviction; Windows stale listener/token/generation; upstream
+  failure during a pooled call followed by isolated recovery of later calls.
+  Do not force obsolete in-place venv mutation or treat an atomic marker as
+  complete consumer evidence.
+- [ ] **P4056-2:** Use ONE caller deadline. Distinguish known pre-admission
+  failure from accepted-but-unknown work; timeout, lost reply or EOF after
+  transmission never permits automatic consequential-call replay. Preserve
+  winner handles/active attachments, unrelated warm sessions and truthful
+  results. Keep exact daemon/child/config/endpoint/control-token/runtime-
+  generation custody across repeated/concurrent updates, orchestrator
+  failure, drain/undrain, failed passive promotion and stale recovery.
+  Unknown native evidence and active/non-expiring work remain holds, not
+  age-prune targets; do not extend bounds to hide a hang.
+- [ ] **P4056-3:** Specify reproducible isolated real-consumer evidence using
+  admitted harmless MCP subjects, exact source/installed generation and all
+  four outcomes, deadline measurements, failures and postconditions.
+  Preserve warmth credit: optional cross-platform IPC, on-demand/single-
+  instance/refcount/idle lifecycle (recorded default 300 seconds without
+  references), stateless fallback, per-key serialization, configuration-
+  replacement lease drain and poisoned-entry isolation. Shared component,
+  helper and Bridge controls are partial evidence, not proof no rig exists
+  anywhere or that the whole MCP rig passed.
+
+#### Local Validation for #4056
+
+- [ ] **V4056-1:** Qualify EACH of the four original cases with bounded
+  outcome/deadline/effect/ownership/postcondition evidence, explicit
+  unavailable Windows/installed/native facts and positive absence versus
+  unknown. Endpoint file presence, parser success or PID age proves neither
+  listener readiness nor cleanup authority.
+- [ ] **V4056-2:** Preserve at-most-once negatives, unrelated-session recovery
+  and every exact custody/hold above. Use the original faithful contained/
+  periodic/explicit/native boundary without live consequential subjects,
+  increased budgets or restored integration-as-required-CI. Keep compatible
+  handoff OR bounded cold recovery and separately owned installer/old-daemon
+  bootstrap/backstop policy; this does not waive #609's explicit warm witness.
+
+Both finite families retain the existing Phase7 deduplication/domain-Plan
+acceptance and serial-wave process. Normal reviewed actual merge, complete
+current receiving readback and separate literal source-condition judgments
+precede administrative supersession. This is direct planning intake, not
+acceptance of an executed battery, current liveness or a new implementation
+appointment. Preserve every incumbent Plan, Validation, Request, participant,
+checked credit, journal, source and resource obligation.
+
+### Finite ordinary developer-entry and collection semantics from #4395
+
+**Agent-recommended tracking amendment.** Preserve the whole original and
+current refinements through the existing Phase5/Phase7 boundaries.
+
+- [ ] **P4395-1:** At the actual ordinary developer entry, provide an
+  actionable package-missing/collection-time diagnostic pointing to the
+  sanctioned bounded runner OR document a working supported plugin-local
+  dependency/setup route after which ordinary pytest works without manual
+  `PYTHONPATH` surgery. Choose one supported realization; both are not
+  required. Dependency declarations or a separately known TESTING guide
+  alone do not supply this caller-visible outcome.
+- [ ] **P4395-2:** Reuse the existing runner, governed UV/vendored dependency
+  preparation and documentation/Worktrees owners. Preserve dependency
+  seasoning, containment, supervision, declared effects, runner-owned state
+  and item/group/plugin budgets. Do not invent a pip-compatible recipe,
+  ambient environment patch, new runner or whole-suite prerequisite, or
+  reopen delivered admission/isolation/budget controls.
+- [ ] **P4395-3:** Preserve accurate collection guidance: supported
+  `--test-file` bounds selected file collection, whereas `-k` filters tests
+  after those selected files are imported. Preparation, code-executing
+  collection and execution are distinct. Credit runner/file-selection
+  progress; the historical 300-second/about-five-file observation is not a
+  fresh timeout, performance SLA or universal speedup claim.
+
+#### Local Validation for #4395
+
+- [ ] **V4395-1:** Qualify the ONE chosen original alternative at the real
+  ordinary entry/setup boundary using the least expensive faithful
+  separately authorized bounded lane. The diagnostic gives an actionable
+  supported next step rather than a bare missing-module error; the setup
+  arm verifies its documented supported dependency route without manual
+  `PYTHONPATH`. A helper that bypasses the failing boundary proves neither.
+- [ ] **V4395-2:** Preserve selected-file versus `-k` semantics and narrow-
+  iteration guidance, including the preparation/collection/execution
+  distinction. Record exact original/source/caller evidence and any
+  separately authorized measurements; no present 300-second failure,
+  mandatory timing experiment or broad benchmark is inferred.
+- [ ] **V4395-3:** Preserve existing runner/dependency/file-selection credit,
+  unit/contained/periodic boundaries, effect/state/resource budgets and
+  owning cleanup. Source/docs are not actual caller/setup evidence.
+  Intake authorizes no import, collection, dependency install, test,
+  native trial or host operation and adds no unrelated whole-portfolio/
+  every-host prerequisite.
+
 ## Validation Plan
+
+- [ ] G5921: Resolve EVERY direct #5921 P1-P6, V1-V5 and C1-C3 clause in the Phase4 finite clean-room verdict family at its ORIGINAL source/API consumer tier: actual Python AND Python-less version/schema/evidence-complete reduction and real caller shape, explicit malformed/incomplete/unjudged NON-PASS, correct valid control/classified-jam results/exits, literal-mode separation and source-safe diagnostics. Preserve all incumbent Plan/Validation, OPEN #1303, same owners and independent #5922/#8511/#4312/#688/#1475 gates. Administrative intake is not a reducer fix or executed evidence; no live box/model/all-host/native programme or unrelated whole-portfolio prerequisite is added, and this does not waive the ROOT's own whole completion gate.
+
+- [ ] Resolve EVERY directly retained #4123 fixture-origin Plan/local Validation clause
+  above, preserving original finalizer-OR-autouse/framework alternatives, same
+  custodians, ownership/foreign-target safety, setup/pass/failure/interruption/residual
+  outcomes and original bounded Linux/WSL evidence tier. Administrative intake is not
+  cleanup, native proof or implementation. Preserve EVERY incumbent ROOT Plan AND own
+  Validation obligation; mark the parent Done only after all are resolved OR explicitly
+  transferred to named accepted tracked objectives. This parent gate does not delay
+  completion of the finite fixture family on unrelated portfolio work.
+
 
 - [ ] Resolve EVERY direct #3991 three-case historical Vault Linux Plan/Validation
   clause at its original scope/evidence tier and alternatives, including all-three
@@ -618,6 +956,37 @@ Vault/credential/service/provider or source effect is authorized.
   falsify.
 - [ ] Repository documentation and contribution guidance prevent silent
   unbudgeted regrowth.
+- [ ] **G5868:** Resolve every directly retained #5868 preparation Plan/local
+  Validation row at its original synthetic/contained evidence tier: actual
+  preparation lifetime/resources, accounting and cleanup, no fixture/test
+  import or collection, governed editable acquisition and safe cache reuse.
+  Preserve the same owners and current migration-intake gates. #7408's finite
+  routing credit and Done container foundations do not complete this duty;
+  unrelated whole-portfolio, native-every-host or new ACK gates are not added.
+
+- [ ] **G609:** Resolve EVERY direct #609 Plan/local Validation clause at its
+  finite Tier-P connection-owner scope: warm continuity AND non-resumable
+  survival OR deliberate clean drain, real routing/retirement/recovery,
+  safe owner/platform boundaries and preserved completed partials. Retain
+  independent #873/#688/#743 scope and the exact stronger-receiver condition.
+  Tracker intake is not a run or source acceptance; unrelated portfolio work
+  is not an added finite-family gate.
+- [ ] **G4056:** Resolve EVERY direct #4056 four-case Plan/local Validation
+  clause under ONE caller deadline, pre-admission versus accepted-but-unknown/
+  no consequential replay, exact ownership/generation and preserved warmth
+  credit. Routing to a contained/periodic/explicit/native lane is not a pass.
+  Retain every original alternative/hold, excluded coordinator scope and the
+  accepted DIRECT FINAL-OPEN all-residual condition without adding a whole-
+  portfolio prerequisite or waiving this ROOT's own completion gate.
+- [ ] **G4395:** Resolve EVERY direct #4395 Plan/local Validation clause:
+  actionable ordinary-entry diagnostic OR documented working supported
+  local setup without manual `PYTHONPATH`, truthful `-k` versus explicit
+  `--test-file` collection semantics and preparation/execution separation.
+  Preserve existing UV/runner/dependency/file-selection credit, current
+  tiers/budgets and the same custodians. Normal reviewed receiving delivery
+  and complete current readback precede a separate source judgment;
+  documentation is not an implemented fix or executed result. No new
+  generic ACK or unrelated native/whole-parent gate is added or waived.
 
 ## Proposal
 
@@ -627,6 +996,54 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-28 - Finite ordinary developer-entry intake
+
+- Added direct #4395 Plan/local Validation, actual level-two global
+  Validation and continuing coordination. Preserve diagnostic OR working
+  supported setup, exact `-k`/`--test-file` collection semantics and all
+  existing owners, rows, checked credit and first gates.
+- Existing UV/vendored dependency preparation and explicit-file guidance
+  are credit, not an ordinary-entry diagnostic or verified local recipe.
+  No product-code audit, test/import/collection, install, benchmark,
+  native operation or source/resource disposition occurs here.
+
+### 2026-10-28 - Finite Vault and real MCP witness intake
+
+- Added complete direct #609 and #4056 Plan/local Validation, actual global
+  Validation and continuing coordination under the existing Phase7/Phase4
+  owners, retaining every incumbent row and checked foundation.
+- Preserved #609's warm continuity AND survival OR clean drain, full
+  routing/retirement/recovery and stronger-receiver condition; kept #4056's
+  ALL FOUR cases, one deadline, ambiguous-effect/no-replay custody and
+  accepted direct final-open canonical condition. Existing warm/partial
+  source credit is not missing implementation or a fresh run.
+- Normal reviewed actual delivery and complete current readback precede
+  separate source judgments. No test/import/collection, scenario, credential/
+  endpoint/token/native probe, service operation, implementation, rollout or
+  source/resource release occurs here. The effort remains Active.
+
+### 2026-10-28 - Direct retained preparation lifetime
+
+- Added complete #5868 preparation Plan/local Validation, actual global
+  Validation and continuing Coordination under the existing primary and
+  source/resource custodians. Original Request, status, participants, checked
+  credit and first unresolved gates remain unchanged.
+- Retained #7382 ordinary setup-through-cleanup accounting and #7408's delivered
+  finite routing credit while keeping bounded preparation process/resource
+  ownership open. No test/collection/import, native process, package/provider,
+  implementation, source disposition or resource release is performed here.
+  Normal reviewed delivery and full receiving readback precede a separate
+  administrative judgment.
+
+### 2026-10-24 - Direct retained clean-room verdict acceptance from #5921
+
+- Plan the complete finite #5921 report/Python/Python-less/consuming-caller acceptance directly in this existing Phase4 ROOT Plan, local Validation, actual global Validation and continuing Coordination. Preserve every incumbent byte/checked row, original alternative/evidence tier, live #1303 claim and entire inline/linked historical Journal.
+- Keep #5922 without-base composition and #8511 concurrent artifact ownership independent; #4312 paired setup AND judged evaluation, #688 Tier-E and #1475 WinGet keep their owners and gates. Documentation-only historical receipts are not reducer implementation or a live consumer PASS.
+- This is proposed tracker intake only. NEW normal review, ACTUAL merge and FULL CURRENT receiving/root/history/source coordination readback must precede #5921 administrative supersession. Record that real receiving identity/readback only after it exists; no test, import, reducer, rig, model, installer, provider, runtime or resource operation was performed or authorized here.
+- The effort remains Active. Existing owners continue the next genuinely unfinished domain Plan item through their separately admitted lane; this finite source/API contract neither depends on unrelated whole-programme completion nor waives it.
+
+- [2026-10-24 - Direct retained acceptance from #4123](<journal/2026/10.24 backlog-intake-85-86.md>)
 
 ### 2026-10-23 - Direct retained acceptance from #3991
 

@@ -9,6 +9,11 @@
 _aw_update_entry_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 . "$_aw_update_entry_dir/agent-worktrees-update-entry.sh"
 export PYTHONUTF8=1
+_aw_payload_root="$(CDPATH= cd -- "$_aw_update_entry_dir/.." && pwd -P)" || exit
+if [ -f "$_aw_payload_root/plugin.json" ]; then
+  AGENT_WORKTREES_PAYLOAD_ROOT="$_aw_payload_root"
+  export AGENT_WORKTREES_PAYLOAD_ROOT
+fi
 # Sanitize inherited Python runtime variables before dispatching to the
 # resolved, architecture-correct runtime-slot interpreter (#2411 parity with
 # the Windows binstub fix). A stray mismatched-architecture PYTHONHOME/
@@ -32,6 +37,10 @@ _aw_exec_resolved() {
   [ -n "$AW_PY" ] && exec "$AW_PY" -m agent_worktrees "$@"
 }
 _aw_exec_resolved "$@"
+if [ "${_aw_update_diagnostic:-0}" = 1 ]; then
+  printf '%s\n' '[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.' >&2
+  exit 127
+fi
 
 # No runtime slot exists -> self-provision on first use (runtime-self-provisioning
 # pattern). This is the confined-host path: a Copilot app / cloud agent where the

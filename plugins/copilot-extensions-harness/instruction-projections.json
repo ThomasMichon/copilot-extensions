@@ -4,7 +4,7 @@
   "projections": [
     {
       "id": "contribution-boundary",
-      "deliveryMode": "inline",
+      "deliveryMode": "selector",
       "template": "instructions/contribution-boundary.instructions.md",
       "destination": ".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md",
       "customizationKind": "instructions",

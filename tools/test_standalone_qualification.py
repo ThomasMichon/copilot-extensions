@@ -8,8 +8,114 @@ from _promotion_workflow_test_support import source_workflow
 from test_run_standalone_tests import SCRIPT, runner
 
 
+def test_bridge_contracts_portfolio_keeps_existing_budgets_and_explicit_scope():
+    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
+    triggers = workflow["on"] if "on" in workflow else workflow[True]
+    inputs = triggers["workflow_dispatch"]["inputs"]
+    assert "bridge-contracts" in inputs["portfolio"]["options"]
+    assert inputs["portfolio"]["default"] == "context"
+    job = workflow["jobs"]["bridge-contracts-linux"]
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-contracts'"
+    )
+    assert job["runs-on"] == "ubuntu-latest"
+    commands = [step["run"] for step in job["steps"] if "run" in step]
+    assert commands[0] == "python tools/check-agent-bridge-contracts.py"
+    assert commands[1].split()[:3] == ["python", "tools/run-plugin-tests.py", "agent-bridge"]
+    assert "--timeout" not in commands[1] and "--test-timeout" not in commands[1]
+    assert commands[1].count("--test-file") == 3
+    assert "shared_capture_seed_has_owned_committed_inputs" in commands[1]
+    assert "capture_reproducible_real_commit_preserves_history" in commands[1]
+
+
+def test_pane_argv_portfolio_is_manual_pinned_and_keeps_work_scoped():
+    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
+    triggers = workflow["on"] if "on" in workflow else workflow[True]
+    inputs = triggers["workflow_dispatch"]["inputs"]
+    assert "pane-argv" in inputs["portfolio"]["options"]
+    assert inputs["portfolio"]["default"] == "context"
+    job = workflow["jobs"]["pane-argv-windows"]
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pane-argv'"
+    )
+    assert job["runs-on"] == "windows-latest"
+    assert job["timeout-minutes"] == 10 and not job.get("strategy")
+    prepare, qualify = [step for step in job["steps"] if "run" in step]
+    assert "/v3.3.6/psmux-v3.3.6-windows-x64.zip" in prepare["run"]
+    assert "Get-FileHash" in prepare["run"] and "SHA256" in prepare["run"]
+    assert "a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947" in prepare["run"]
+    assert qualify["env"]["PSMUX_FILE_LAUNCH_E2E"] == "1"
+    assert qualify["env"]["EXPECTED_SOURCE"] == "${{ github.sha }}"
+    assert "actual == os.environ['EXPECTED_SOURCE']" in qualify["run"]
+    assert qualify["run"].splitlines()[-1].split() == [
+        "python", "tools/run-plugin-tests.py", "worktree-manager",
+        "--test-file", "tests/test_pane_args_file.py",
+        "-k", "real_psmux", "--allow-explicit-tiers",
+    ]
+
+
+def test_manager_uninstall_portfolio_is_manual_and_keeps_native_owner():
+    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
+    triggers = workflow["on"] if "on" in workflow else workflow[True]
+    inputs = triggers["workflow_dispatch"]["inputs"]
+    assert "manager-uninstall" in inputs["portfolio"]["options"]
+    assert inputs["portfolio"]["default"] == "context"
+    job = workflow["jobs"]["manager-uninstall-windows"]
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-uninstall'"
+    )
+    assert job["runs-on"] == "windows-latest" and job["timeout-minutes"] == 15
+    assert not job.get("strategy")
+    commands = [step for step in job["steps"] if "run" in step]
+    assert commands[0]["env"]["EXPECTED_SOURCE"] == "${{ github.sha }}"
+    assert "actual == os.environ['EXPECTED_SOURCE']" in commands[0]["run"]
+    assert commands[1]["run"].split() == [
+        "python", r"tools\run-manager-runtime-acceptance.py",
+        "--root", ".validation", "--contract", "uninstall",
+    ]
+
+
+def test_chat_preparation_retains_both_canonical_build_resource_owners(tmp_path):
+    assert runner.standalone_build_resources("services/chat", source_root=tmp_path) == (
+        tmp_path / "libs" / "versioned-runtime",
+        tmp_path / "libs" / "installer-engine",
+    )
+
+
+def test_chat_native_lanes_are_explicit_complete_and_bound_to_the_selected_python():
+    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-acceptance.yml")
+    triggers = workflow["on"] if "on" in workflow else workflow[True]
+    assert set(triggers) == {"workflow_dispatch"}
+    selected = triggers["workflow_dispatch"]["inputs"]["chat_construction"]
+    assert selected["type"] == "boolean" and selected["default"] is False
+    jobs = workflow["jobs"]
+    for suffix, host in (("linux", "ubuntu-latest"), ("windows", "windows-latest")):
+        job = jobs["chat-construction-" + suffix]
+        assert job["if"] == "${{ inputs.chat_construction }}"
+        assert job["runs-on"] == host
+        assert job["strategy"] == {
+            "fail-fast": False, "matrix": {"python": ["3.10", "3.11"]},
+        }
+        setup = next(step for step in job["steps"] if step.get("id") == "chat-python")
+        assert setup["with"]["python-version"] == "${{ matrix.python }}"
+        acceptance, full = [step for step in job["steps"] if "run" in step]
+        assert acceptance["env"]["UV_PYTHON"] == "${{ steps.chat-python.outputs.python-path }}"
+        assert acceptance["run"].split() == [
+            "python", "tools/run-standalone-tests.py", "services/chat", "--prepare",
+            "--chat-suite", "acceptance", "--timeout", "180",
+        ]
+        assert full["run"].split() == [
+            "python", "tools/run-standalone-tests.py", "services/chat",
+            "--chat-suite", "full", "--timeout", "600",
+        ]
+    for name in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
+        assert "!inputs.chat_construction" in jobs[name]["if"]
+        assert "!inputs.wheel_inputs" in jobs[name]["if"]
+        assert "!inputs.runtime_profiles" in jobs[name]["if"]
+
+
 @pytest.mark.parametrize("profile,timeout,explicit", [
-    ("acceptance", 120, False), ("full", 600, False),
+    ("acceptance", 180, False), ("full", 600, False),
     ("acceptance", 45, True), ("full", 45, True),
 ])
 @pytest.mark.parametrize("outcome", [0, 1])
@@ -132,7 +238,10 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
     if "unit-tests" in ci:
         assert set(ci) == {"checks", "unit-tests", "pr-gate"}
         assert set(ci["pr-gate"]["needs"]) == {"checks", "unit-tests"}
-        for jobs, owner in ((ci, "unit-tests"), (promotion, "source-units")):
+        for jobs, owner, producer in (
+            (ci, "unit-tests", "tools/ci_pr_unit_reuse.py"),
+            (promotion, "source-units", "tools/run-promotion-unit-tests.py"),
+        ):
             commands = [
                 step["run"] for job in jobs.values() for step in job.get("steps", [])
                 if "run" in step
@@ -141,12 +250,37 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
             assert not any("run-plugin-tests.py" in command for command in commands)
             packets = [
                 step["run"] for step in jobs[owner]["steps"]
-                if "tools/run-promotion-unit-tests.py" in step.get("run", "")
+                if producer in step.get("run", "")
             ]
             assert len(packets) == 1
             assert "--source-sha" in packets[0] and "--output-dir" in packets[0]
         return
     _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(ci, promotion)
+
+
+def test_ssh_manual_lane_selects_only_bounded_disposable_native_acceptance():
+    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-acceptance.yml")
+    events = workflow.get("on", workflow.get(True))
+    assert events["workflow_dispatch"]["inputs"]["ssh_service"]["default"] is False
+    for suffix in ("linux", "windows"):
+        job = workflow["jobs"]["ssh-service-" + suffix]
+        assert job["if"] == "${{ inputs.ssh_service }}"
+        commands = [step for step in job["steps"] if "run-standalone-tests.py" in step.get("run", "")]
+        assert len(commands) == 1
+        assert "services/ssh" in commands[0]["run"] and "--timeout 180" in commands[0]["run"]
+        if suffix == "linux":
+            assert commands[0]["env"] == {"SSH_SERVICE_NATIVE_ACCEPTANCE": "1"}
+            native = [step for step in job["steps"]
+                      if "run-plugin-tests.py agent-ssh" in step.get("run", "")]
+            assert len(native) == 1
+            assert native[0]["env"] == {"AGENT_SSH_NATIVE_DISPOSABLE": "1"}
+            assert "--allow-host-state --allow-explicit-tiers" in native[0]["run"]
+            assert "--test-file tests/test_gateway_authorization_native.py" in native[0]["run"]
+            assert "--test-file tests/test_gateway_sshd_native.py" in native[0]["run"]
+        else:
+            assert not commands[0].get("env")
+    for suffix in ("posix", "windows"):
+        assert "!inputs.ssh_service" in workflow["jobs"]["derived-diagnostics-" + suffix]["if"]
 
 
 def _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(ci, promotion):

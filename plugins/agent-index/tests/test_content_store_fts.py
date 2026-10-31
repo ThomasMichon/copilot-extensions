@@ -261,11 +261,10 @@ def test_optimize_failure_on_full_path_is_swallowed(tmp_path, monkeypatch):
     assert "t.create_fts_index('content', replace=True)" in calls[0]
 
 
-def test_restart_detects_durable_fts_index_and_skips_full_rebuild(tmp_path, monkeypatch):
+def test_restart_reuses_covered_fts_then_updates_only_new_rows(tmp_path, monkeypatch):
     """A fresh ContentStore (simulating a process restart) must detect an
-    already-durable FTS index via LanceDB's own metadata and take the
-    incremental path, instead of assuming _fts_available=False and paying
-    for another full-corpus rebuild."""
+    already-covered FTS index via LanceDB metadata without a maintenance pass,
+    then retain the incremental path when real unindexed rows arrive."""
     db_path = str(tmp_path / "db")
 
     # Real (unmocked) first build in one ContentStore "process".
@@ -291,6 +290,10 @@ def test_restart_detects_durable_fts_index_and_skips_full_rebuild(tmp_path, monk
     assert second.fts_available is True, (
         "must detect the durable on-disk FTS index left by the prior process"
     )
+    assert calls == [], "a covered restart must not schedule even incremental maintenance"
+    second.upsert([_chunk(1)])
+    second.mark_fts_dirty()
+    assert second.ensure_fts_index() is True
     assert len(calls) == 1
     assert "create_fts_index" not in calls[0], (
         "restart detection must find the durable index and take the "

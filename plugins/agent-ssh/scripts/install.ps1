@@ -71,6 +71,31 @@ function Set-CopilotPersistentEnvironmentVariable {
 }
 # === end install-contract:test-persistent-environment ===
 
+if ($Action -eq 'uninstall' -and -not $DryRun -and
+    -not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
+    if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE '.agent-ssh' }
+    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    $teardownPython = Get-UninstallPython
+    if (-not $teardownPython) { throw 'Uninstall requires an existing external Python; nothing removed' }
+    $teardownPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $teardownProject = if ($env:COPILOT_PROJECT_DIR) {
+        $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:COPILOT_PROJECT_DIR)
+    } else { $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath }
+    $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $teardownProject
+    $forward = @('-Action', 'uninstall', '-InstallDir', $InstallDir)
+    if ($Force) { $forward += '-Force' }
+    Invoke-Hidden -FilePath $teardownPython -ArgList (@(
+        '-I', '-S', '-B', '-X', 'utf8', (Join-Path $PSScriptRoot 'command_binding.py'),
+        '--payload-root', $teardownPayload, '--plugin-id', 'agent-ssh',
+        '--legacy-root', $InstallDir, '--source-payload-root', $teardownPayload,
+        '--project-root', $teardownProject, '--teardown', '--run-lifecycle', '--',
+        (Get-Process -Id $PID).Path, '-NoProfile', '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath
+    ) + $forward) -StreamOutput
+    exit $LASTEXITCODE
+}
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -611,7 +636,7 @@ function Get-SourceRuntimeIdentity {
         '--plugin', 'agent-ssh', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
     $nativeError = ''
-    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     $code = $LASTEXITCODE
     if ($code -ne 0) { throw "Source runtime identity validation failed: $detail$nativeError" }
     return $detail.Trim()
@@ -622,9 +647,9 @@ function Initialize-SourceRuntime {
     try {
         [IO.File]::GetAttributes((Join-Path $PluginDir 'runtime-source.json')) | Out-Null
     } catch [IO.FileNotFoundException] {
-        return
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
     } catch [IO.DirectoryNotFoundException] {
-        return
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
     }
     $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
     $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
@@ -726,7 +751,7 @@ function Materialize-SnapshotLibs {
     param([Parameter(Mandatory)][string]$SnapshotDir)
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
-    foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport', 'plugin-resolve')) {
+    foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport', 'plugin-resolve', 'update-driver', 'single-instance-lease')) {
         $source = Resolve-VendoredLib -LibName $lib
         if (-not $source) { throw "Cannot locate required snapshot library: $lib" }
         $destination = Join-Path $libsDir $lib
@@ -746,7 +771,7 @@ function Materialize-SnapshotLibs {
         $text = [regex]::Replace($text, '(?ms)(^\[tool\.uv\.sources\][ \t]*\r?\n)(.*?)(?=^\[|\z)', {
             param($table)
             $body = $table.Groups[2].Value
-            foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport', 'plugin-resolve')) {
+            foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport', 'plugin-resolve', 'update-driver', 'single-instance-lease')) {
                 $pattern = '(?m)^(?![ \t]*#)([^\r\n]*?)path\s*=\s*"\.\./\.\./libs/' + [regex]::Escape($lib) + '"([^\r\n]*)(\r?)$'
                 $body = [regex]::Replace($body, $pattern, {
                     param($entry)
@@ -944,7 +969,8 @@ function Invoke-Stamp {
         New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
         # Copy everything needed to `uv pip install .` from the slot (src, libs,
         # scripts, pyproject, plugin.json, hooks, README); skip VCS/build/test junk.
-        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests',
+            'snapshot-provenance.json')
         if ($SourceRuntimeIdentity) { $exclude = @() }
         Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
@@ -1075,6 +1101,10 @@ function Exit-InstallLock {
 
 $PackageVersion = $SrcVersion
 Initialize-SourceRuntime
+if ($Action -eq 'uninstall') {
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    Invoke-StatePreservingUninstall -AdmissionOnly
+}
 $needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision')) -or
     ($Action -eq 'uninstall' -and -not $DryRun)
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
@@ -1084,6 +1114,10 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 
 try {
 Assert-SourceRuntimeIdentity
+if ($Action -in @('install', 'update', 'provision') -and -not $DryRun) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 if ($Action -eq 'status') {
@@ -1097,20 +1131,13 @@ if ($Action -eq 'status') {
 }
 
 if ($Action -eq 'uninstall') {
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    Invoke-StatePreservingUninstall -Preview:$DryRun
     if ($DryRun) {
-        Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow
-        $ps1 = Join-Path $LocalBin 'agent-ssh.ps1'
-        $cmd = Join-Path $LocalBin 'agent-ssh.cmd'
-        if (Test-Path $ps1) { Write-Host "[dry-run] would remove binstub: $ps1" }
-        if (Test-Path $cmd) { Write-Host "[dry-run] would remove binstub: $cmd" }
-        if (Test-Path $InstallDir) { Write-Host "[dry-run] would remove runtime/config contents (coordination retained): $InstallDir" }
         Write-Host 'agent-ssh uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow
         exit 0
     }
-    Remove-Item (Join-Path $LocalBin 'agent-ssh.ps1') -Force -ErrorAction SilentlyContinue
-    Remove-Item (Join-Path $LocalBin 'agent-ssh.cmd') -Force -ErrorAction SilentlyContinue
-    Remove-InstallRuntimeContent -InstallRoot $InstallDir
-    Write-Ok 'agent-ssh runtime removed (transaction/staging coordination retained)'
+    Write-Ok 'agent-ssh runtime removed (durable, unknown and coordination state retained)'
     exit 0
 }
 
@@ -1154,7 +1181,7 @@ if (-not $script:RuntimeConstructionReuse) {
 if ($Force -or -not (Test-Path $VenvPython)) {
     Invoke-VersionedSlotClean
     if ($uvPath) {
-        if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true)) {
+        if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true -WithoutPip)) {
             Write-Step 'uv/signed-Python venv creation failed -- falling back to system python -m venv'
             $fallback = Invoke-NativeCapture { & $pythonCmd -m venv $VenvDir }
             if ($fallback.ExitCode -ne 0) {
@@ -1271,7 +1298,8 @@ if ($SourceRuntimeIdentity) {
 } elseif (Test-Path $snapshotSourceMarker) {
     $sourcePath = (Get-Content -LiteralPath $snapshotSourceMarker -Raw).Trim()
 }
-Write-DeployManifest `
+$sourcePublication = [bool]$env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN
+$manifest = Write-DeployManifest `
     -Service 'agent-ssh' `
     -Plugin 'agent-ssh' `
     -InstallPath $InstallDir `
@@ -1290,7 +1318,23 @@ Write-DeployManifest `
         ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $fields[$_.Name] = $_.Value }
         $fields
     } else { @{} }) `
-    -PayloadHash $(if ($SourceRuntimeIdentity) { $sourceManifestHash } else { Get-PayloadHash })
+    -PayloadHash $(if ($SourceRuntimeIdentity) { $sourceManifestHash } else { Get-PayloadHash }) `
+    -PassThru:$sourcePublication
+if ($sourcePublication) {
+    $publicationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+        $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+    } else { (Get-Location).Path }
+    $result = Invoke-Hidden -FilePath (Get-BootstrapPython) -ArgList @(
+        '-I', '-B', '-X', 'utf8', (Join-Path $sourcePath 'scripts/command_binding.py'),
+        '--payload-root', $sourcePath, '--source-payload-root', $sourcePath,
+        '--plugin-id', 'agent-ssh', '--legacy-root', $InstallDir,
+        '--project-root', $publicationProject, '--publish-legacy', '--write-manifest'
+    ) -InputText ($manifest | ConvertTo-Json -Depth 8 -ErrorAction Stop)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command ownership validation refused SSH source manifest publication: $result"
+    }
+    Write-Ok "Deploy manifest written (source: $($manifest.source.kind))"
+}
 
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'

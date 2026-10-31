@@ -1,0 +1,9 @@
+{
+  "comment": "Allow contained native policy lifetime controls to qualify an explicitly selected installed interpreter without changing it.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

@@ -2688,7 +2688,11 @@ def test_background_gc_auto_recovers_gone_owner(tmp_path, monkeypatch):
     # queued on its own, with no manual recover.
     from agent_dispatch.coordinator import create_app
 
-    monkeypatch.setattr("agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "gone")
+    owner_gone = threading.Event()
+    monkeypatch.setattr(
+        "agent_dispatch.tracking.liveness_verdict",
+        lambda *a, **k: "gone" if owner_gone.is_set() else "unknown",
+    )
     q = TaskQueue(tmp_path / "tasks.db")
     url, stop = _boot(create_app(q, sweep_interval=0.3, enable_mcp=False))
     try:
@@ -2696,6 +2700,7 @@ def test_background_gc_auto_recovers_gone_owner(tmp_path, monkeypatch):
         tid = c.create("leased")["id"]
         assert c.claim(worker_id="m/wt", repo=TEST_REPO)["id"] == tid
         assert c.get(tid)["status"] == Status.CLAIMED
+        owner_gone.set()
         deadline = time.time() + 5
         while time.time() < deadline:
             if c.get(tid)["status"] == Status.QUEUED:
@@ -2715,12 +2720,12 @@ def test_gc_disabled_by_default(tmp_path, monkeypatch):
 
     monkeypatch.setattr("agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "gone")
     q = TaskQueue(tmp_path / "tasks.db")
-    url, stop = _boot(create_app(q))  # no sweep_interval -> no GC loop
+    url, stop = _boot(create_app(q))  # no sweep_interval -> task GC disabled
     try:
         c = DispatchClient(url)
         tid = c.create("leased")["id"]
         c.claim(worker_id="m/wt", repo=TEST_REPO)
-        time.sleep(0.5)  # no GC loop running, so nothing requeues on its own
+        time.sleep(0.5)  # diagnostics maintenance never enables task reconciliation
         assert c.get(tid)["status"] == Status.CLAIMED
         assert c.recover()["recovered"] == 1  # manual recover still works
         assert c.get(tid)["status"] == Status.QUEUED
@@ -2910,9 +2915,13 @@ def test_health_loops_report_handoff_fallback_when_enabled(tmp_path, monkeypatch
             # wait for the loop to both record a run AND clear in_progress
             # before breaking out, rather than racing the loop's own
             # completion.
+            # A cold first cycle can exceed its 0.2s budget; observe a healthy
+            # completed cycle within the unchanged outer deadline.
             if (
                 loops.get("handoff_fallback", {}).get("total_runs", 0) >= 1
                 and loops.get("handoff_fallback", {}).get("in_progress") is False
+                and loops.get("handoff_fallback", {}).get("last_error") is None
+                and loops.get("handoff_fallback", {}).get("consecutive_failures") == 0
             ):
                 break
             time.sleep(0.1)

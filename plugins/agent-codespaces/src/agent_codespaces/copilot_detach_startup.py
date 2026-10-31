@@ -2,10 +2,78 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import shlex
 import asyncio
 import uuid
+
+
+# --help builds Worktrees' full command surface, unlike command-v or --version.
+VENUE_TOOLING = """\
+prepare_venue_tooling() {
+    local P="$HOME/.copilot/installed-plugins/copilot-extensions" action=install
+    if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
+        printf 'Selected installation requires its own venue tooling preparation\\n' >&2
+        return 1
+    fi
+    export PATH="$HOME/.local/bin:$PATH"
+    if [ ! -d "$P/agent-bridge" ]; then
+        copilot plugin install agent-bridge@copilot-extensions >&2 || {
+            local status=$?
+            printf 'agent-bridge payload installation failed (exit %s)\\n' "$status" >&2
+            return "$status"
+        }
+        [ -d "$P/agent-bridge" ] || {
+            printf 'agent-bridge payload is still missing after installation\\n' >&2
+            return 1
+        }
+    fi
+    if command -v agent-worktrees >/dev/null 2>&1; then
+        if agent-worktrees --help >/dev/null; then
+            return 0
+        fi
+        action=repair
+    fi
+    [ -f "$P/agent-worktrees/scripts/install.sh" ] || {
+        printf 'agent-worktrees owning installer is unavailable\\n' >&2
+        return 1
+    }
+    bash "$P/agent-worktrees/scripts/install.sh" "$action" >&2 || {
+        local status=$?
+        printf 'agent-worktrees %s failed (exit %s)\\n' "$action" "$status" >&2
+        return "$status"
+    }
+    hash -r
+    agent-worktrees --help >/dev/null || {
+        printf 'agent-worktrees command health failed after preparation\\n' >&2
+        return 1
+    }
+}
+prepare_venue_tooling"""
+
+
+def ssh_namespace(
+    args: argparse.Namespace, remote_cmd: str, *, timeout: float,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        name=args.name,
+        stdio=False,
+        remote_cmd=remote_cmd,
+        timeout=timeout,
+        connect_timeout=None,
+        no_provision=False,
+        no_relay=False,
+        auth_cache_warmup=True,
+        repo=None,
+        effort=getattr(args, "effort", None),
+        session_id=None,
+        stage_plugins=list(getattr(args, "stage_plugins", []) or []),
+        plugin_roots=list(getattr(args, "plugin_roots", []) or []),
+        skip_plugin_preparation=bool(getattr(args, "stop", False)),
+        force=getattr(args, "force", False),
+        force_claim=getattr(args, "force_claim", False),
+    )
 
 
 def recover_pending_delivery(

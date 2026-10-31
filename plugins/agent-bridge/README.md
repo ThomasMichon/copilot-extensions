@@ -1,5 +1,25 @@
 # Agent Bridge
 
+Native `uninstall` removes explicitly named runtime slots, snapshots, selectors,
+generated resolver files and deployment metadata, rather than treating the
+installation root as disposable. Configuration, databases, authentication,
+sessions, logs, route/PID receipts and unknown files are retained by default.
+`--purge` / `-Purge` remains explicit and retains transaction coordination.
+Dry runs do not stop processes or remove files. Unattributed processes,
+foreign manifests, linked roots and live child transports refuse removal.
+The adapters use the shared finite-removal owner described in the
+[install contract](../../docs/install-contract.md). Released runtime lease
+registries remain in place; held construction, retention or publication
+custody refuses removal.
+This is not acceptance evidence for uninstall/reinstall around a running session
+or reconnecting SSH transport.
+
+The optional local `account-relay.json` policy enables a separate **account-only**
+listener under this daemon's existing lifecycle. See the
+[source/worker contract](../agent-index/docs/account-relay.md). Do not
+forward the legacy relay as an account-scoped endpoint or infer credential
+permission from ordinary Bridge/Gateway membership.
+
 Persistent inter-agent communication service for Copilot CLI. One instance per
 machine, providing session management, SSE event streaming, live-session
 messaging, and agent subprocess spawning across local, SSH, CodeSpace, and
@@ -13,6 +33,28 @@ targets share one policy catalog; enabled plugins can contribute inert target
 requirements while adopters retain instance and credential-source bindings.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
+
+New-session ACP/CLI preferences are readable and explicitly writable offline
+with `config session-mode`. Operator policy can be global, venue-scoped or
+repository-scoped; missing policy defaults to ACP without a mode-choice prompt.
+See the [session-mode schema and commands](skills/agent-bridge/references/session-mode.md).
+Existing sessions and their launch/authentication owners are unchanged.
+
+The interactive extension's [retained SDK consumer](docs/retained-sdk-consumer.md)
+is explicitly opt-in. Legacy defaults are unchanged; selected retained delivery
+requires HTTP 50 recovery and never silently downgrades or resends an ambiguous
+original. Native qualification and installed adoption remain separate.
+
+Remote credential-relay admission and persisted-session reconnect use
+`timeouts.session_host_ready` (90 seconds by default) as a bounded readiness
+budget, including fresh SSH establishment and retries. Each probe receives
+that budget rather than a separate five- or ten-second transport ceiling;
+the outer monotonic deadline cancels an unfinished probe and awaits its owned
+process cleanup. The remote ping still requires the exact relay `pong` within
+three seconds once the command runs. Inconclusive readiness remains a failure;
+periodic supervisor probes retain their existing transport-error health-hint
+semantics and a bounded execution budget. This is startup/readiness policy,
+not a turn execution timeout or a progress-renewed communication clock.
 
 Windows installation captures unavailable optional Python-launcher versions as
 verbose diagnostics, not install failures. Signed-base discovery stops at the
@@ -34,6 +76,22 @@ requires a completed runtime slot and refuses retired installation ownership;
 installation-cell launches retain same-cell provenance validation. This does
 not change runtime selection, provision a missing owner, or adopt another
 marketplace's runtime.
+
+The Windows native install/update/provision entry joins the existing execution
+owner before self-staging; an explicit cold caller uses that same finite driver,
+not a second installation queue. Its source bootstrap requires Python 3.11+.
+Completion retains the canonical runtime helpers and launcher inside the
+immutable slot. Broker adoption then runs from the installed interpreter under
+complete-slot retention, before selection, serving reconciliation or launch
+callbacks. Reuse verifies the helper bytes without repairing a completed slot;
+an adoption failure remains inside update rollback. The independent broker
+retains its own generation references. Native uninstall removes the owned
+registration under that same driver before deleting runtime files; pending
+publication recovery refuses deletion, and dry-run never enters the driver.
+Ordinary daemon launch still uses its
+existing default, and never installs a broker as a spawn fallback. This source
+integration does not establish full cold-construction, desktop or rollout
+qualification.
 
 Internal owner-driven deployment and service restart accept optional
 `conditional`/`routing_dir` keyword arguments using the shared
@@ -581,14 +639,26 @@ inherited as bytes, including framed carrier traffic and quoted, multiline
 `--prompt-file -` bodies; an actual PowerShell object pipeline remains text
 input rather than a binary transport.
 
-Cold first use checks the selected installation's runtime-deployment policy
-before provision traces, status, roots or locks, then revalidates after acquiring
-the provision lock. Healthy managed runtimes remain callable without publication
-permission. Missing or older admission/resolver support reports readiness instead
-of provisioning. Generated global wrappers retain the exact publisher or an
-owned snapshot; if neither is available, only a healthy legacy runtime may run
-through its deployed resolver. A requested installation context never falls
-back to that legacy runtime.
+Cold legacy first use checks the selected installation's runtime-deployment
+policy before acquisition, queue or plugin writes, then submits the fixed
+`provision` action through its packaged installation driver and synchronously
+observes that caller-independent owner. It owns no outer provisioning lock or
+private provision-status writer. The `::agent-provisioning::` stderr cue points
+to driver-owned progress; it is not readiness or a completion estimate.
+Healthy managed runtimes remain callable read-only without publication permission
+or a new request. Pinned/nested calls, cold cells/custom roots and missing or
+older dispatch/admission/driver support refuse rather than falling back to a
+direct installer.
+
+Generated global wrappers retain the exact publisher or their source-qualified
+selected snapshot; unreceipted Windows copies require their exact publisher
+for cold execution. If that source is unavailable, only a healthy legacy runtime
+may run through its qualified deployed resolver. A requested installation context
+never falls back to that legacy runtime. Both primary wrappers clear ambient
+`PYTHONPATH`/`PYTHONHOME` before resolver-only fallback, matching the payload gate.
+Explicit installers and bootstrap have
+their own action contracts; command adoption does not change their service
+options or enroll maintenance.
 
 The legacy global wrappers remain explicit compatibility and management
 boundaries for callers that do not inherit session catalogs: daemon and service
@@ -646,6 +716,11 @@ with `create <agent> --creation-key <key> --provider-instance` (HTTP protocol
 Ordinary keyed creation remains local-worktree-only. See
 [session creation contracts](docs/session-acquisition.md#exact-provider-instance-creation)
 for pending/terminal recovery and the separate first-prompt boundary.
+
+New owned SSH workspaces use the
+[origin-owned Worktrees allocation consumer](docs/owned-workspace-allocation.md)
+before resolving the existing child. This does not enable keyed remote
+embodiment or relocate a foreign caller's origin ledger.
 
 ### Namespace reader observations
 
@@ -915,6 +990,17 @@ retention:
 ```
 
 ## Connection pipeline & diagnostics
+
+`agent-bridge logs` discovers local application, archived and known unmanaged
+native/fallback diagnostic locations as JSON, without starting a service or
+creating files. Explicit daemon startup adopts bounded, off-thread application
+logging under the effective config root's `logs/diagnostics/daemon.jsonl`.
+The shared owner-injected policy retains records by 30 elapsed UTC days;
+ordinary `diagnostic_buffer_callbacks` log records expose buffer counters and
+sanitized storage errors without changing the health wire contract.
+This does not adopt raw stdout/stderr, installer attempts or session-child logs.
+See [Application diagnostics](docs/diagnostic-logs.md) for async bounds, text/
+JSON compatibility, explicit retained-spool API and remaining qualification.
 
 For carrier EOF/timeouts and apparently unavailable peers, use
 [transport failure classification](docs/transport-diagnostics.md) before

@@ -159,7 +159,8 @@ def test_native_launcher_logs_passthrough_count_not_values(tmp_path, shell, stdi
         prefix = source[:source.index("# Recovery escape hatch resolves")]
         script = tmp_path / "prefix.sh"
         script.write_text(
-            prefix + '\nprintf "%s\\0" "$@" __PASSTHROUGH__ "${COPILOT_PASSTHROUGH[@]}"\n',
+            prefix + '\ninitialize_launch_diagnostics\n'
+            'printf "%s\\0" "$@" __PASSTHROUGH__ "${COPILOT_PASSTHROUGH[@]}"\n',
             encoding="utf-8",
         )
         command = ["/bin/bash", str(script), *argv]
@@ -168,7 +169,7 @@ def test_native_launcher_logs_passthrough_count_not_values(tmp_path, shell, stdi
         prefix = source[:source.index("# Recovery fast-path: skip resolve/picker")]
         script = tmp_path / "prefix.ps1"
         script.write_text(
-            prefix + "\nConvertTo-Json -Compress -InputObject "
+            prefix + "\nInitialize-LaunchDiagnostics\nConvertTo-Json -Compress -InputObject "
             "@{filtered=@($CopilotArgs);passthrough=@($CopilotPassthrough)}\n",
             encoding="utf-8-sig",
         )
@@ -216,7 +217,7 @@ def test_native_pane_preparation_logs_count_without_changing_argv(tmp_path, shel
     fixture = tmp_path / "pane.ps1"
     fixture.write_text(
         prefix
-        + "\n$sessName='fixture-session'\n"
+        + "\nInitialize-LaunchDiagnostics\n$sessName='fixture-session'\n"
         "$cmd=@(foreach($item in (Get-Content -Raw -LiteralPath $env:FIXTURE_COMMAND | ConvertFrom-Json)){[string]$item})\n"
         + source[start:end]
         + '\n"ARGV=" + (ConvertTo-Json -InputObject @($paneCmd) -Compress)\n',
@@ -264,7 +265,7 @@ def test_native_direct_launch_logs_count_and_preserves_child_argv(tmp_path, shel
     fixture = tmp_path / "direct.ps1"
     fixture.write_text(
         prefix
-        + "\n$noMux=$true; $ahpArgs=@()\n"
+        + "\nInitialize-LaunchDiagnostics\n$noMux=$true; $ahpArgs=@()\n"
         "$plan=[pscustomobject]@{worktree_id='fixture';post_exit=$false}\n"
         "function Write-ActivityLog { param($Event,$WorktreeId,$Fields) }\n"
         "$CopilotPassthrough=@(foreach($item in "

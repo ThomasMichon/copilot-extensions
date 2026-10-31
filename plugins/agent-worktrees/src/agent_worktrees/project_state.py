@@ -59,7 +59,13 @@ def _normalized_repository_remote(project: str) -> str:
         raise ValueError(f"repository {project!r} is not registered")
     if not isinstance(entry.remote, str):
         raise ValueError(f"repository {project!r} has no usable remote")
-    raw_remote = entry.remote.strip()
+    return _normalize_repository_remote(project, entry.remote)
+
+
+def _normalize_repository_remote(project: str, remote: str) -> str:
+    if not isinstance(remote, str):
+        raise ValueError(f"repository {project!r} has no usable remote")
+    raw_remote = remote.strip()
     try:
         parsed = urlsplit(raw_remote)
         default_port = {
@@ -93,11 +99,14 @@ def _normalized_repository_remote(project: str) -> str:
     return normalized
 
 
-def _identity(project: str) -> RepositoryIdentity:
+def _identity(project: str, *, remote: str | None = None) -> RepositoryIdentity:
     context = registry_paths.installation_context()
     if context is None:
         raise ValueError("repository identity requires namespaced context")
-    normalized = _normalized_repository_remote(project)
+    normalized = (
+        _normalized_repository_remote(project) if remote is None
+        else _normalize_repository_remote(project, remote)
+    )
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
     repository_id = f"repo-{digest}"
     try:
@@ -118,6 +127,23 @@ def _identity(project: str) -> RepositoryIdentity:
         state_root=repository_root / "agent-worktrees",
         marketplace_id=marketplace_id,
     )
+
+
+def existing_adoption_state(project: str, remote: str) -> Path | None:
+    """Read prospective retained state without enrolling or creating a receipt."""
+    identity = _identity(project, remote=remote)
+    if any(_is_link_or_reparse(path) for path in (
+        identity.repository_root.parent, identity.repository_root, identity.state_root,
+    )):
+        raise ValueError("prospective project state is a link or reparse point")
+    if not identity.repository_root.exists():
+        return None
+    _validate_receipt(identity)
+    if not identity.state_root.exists():
+        return None
+    if not identity.state_root.is_dir():
+        raise ValueError("prospective project state is not a directory")
+    return identity.state_root
 
 
 def _receipt(identity: RepositoryIdentity) -> dict:

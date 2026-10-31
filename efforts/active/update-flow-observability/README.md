@@ -22,6 +22,7 @@ while retaining installation, ownership, policy and health contracts.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Coordinator | Owns synthesis, shared contracts, integration, review and completion | The source worktree associated with #6812 |
+| Launch compatibility implementer | Only #8702's normal launch defaults, supported version-drift adapter and directly dependent regressions; no journal-campaign takeover or installed recovery authority | Source-only workspace `curious-latch`; public coordination on #8702 and #8375 |
 | Orchestration evidence reader | Audits unified update and launch-maintenance ordering | Coordinator's bounded read-only delegation |
 | Installer evidence reader | Audits runtime construction, activation and healthy no-op work | Coordinator's bounded read-only delegation |
 | Output evidence reader | Audits existing output helpers, protocols and formatting ownership | Coordinator's bounded read-only delegation |
@@ -29,6 +30,8 @@ while retaining installation, ownership, policy and health contracts.
 | Human-progress implementation owner | Shared timing/line rendering, actual output adapters and focused proofs; no Git, PR or host lifecycle writes | Coordinator's bounded code delegation |
 | Bridge serving source implementer | Only #6826 in an independent managed worktree and source PR; no production update or recovery authority | Coordinator's bounded cooperating-session delegation |
 | Updater failure-boundary implementer | Only the two reached stdio hops and native-owner settlement of positively confirmed pre-spawn failure under #7743; no shared broker or installed recovery authority | Managed source handle `rusty-kiln`; public coordination on #7743 |
+| Directory-evidence cost implementer | Only #8679's repeated directory-marketplace parsing in native source admission and directly dependent generated consumers; no policy, provider, archival or runtime lifecycle redesign | Managed source handle `eager-widget`; public coordination on #8679 |
+| POSIX bootstrap no-op implementer | Only marker-aware completed-runtime readiness and directly dependent hook-family coverage under #7743; existing admission/lifetime owners retained | Managed source handle `tinkling-capacitor`; public coordination on #7743 |
 
 ## Coordination
 
@@ -58,6 +61,11 @@ while retaining installation, ownership, policy and health contracts.
   installer-engine convergence; seasoned-dependencies-and-transactional-installs
   owns its dependency and transaction changes. Existing open repair PRs are
   not superseded. Coordinate any necessary overlapping change before editing.
+- **Launch compatibility detour:** #8702 restores the existing version-skew
+  tolerant Manager/engine boundary. #8375 retains journal storage, native
+  outcomes and retention; #6057 retains remote prompt admission. Compatibility
+  must preserve those contracts, not manufacture target-owned evidence or
+  reinterpret an uncertain launch as permission to repeat it.
 
 ## Context
 
@@ -87,6 +95,12 @@ while retaining installation, ownership, policy and health contracts.
 The operator confirmed the slug `update-flow-observability` and requested:
 
 > Audit every line of that update flow and identify why it's needed and figure out how we can speed things up. We likely should prefix every line of the install/update flow with the time, and post-fix with the duration, ideally using some consistent, elegant formatting. There's also mixes of formatting, messaging, and status reporting which need cleanup now that we report more overall update progress.
+
+On 2026-10-24, the operator added the following compatibility requirements:
+
+> We should never let ourselves get into a state where we reject a current installation of agent-* plugins. We need backwards-compatibility to account for version-drift.
+
+> Flags like `--require-launch-attempt` and `--launch-attempt-id` also seem odd, like we're adding opt-in flags which should be the norm. I guess `launch-attempt-id` is good to maintain a contract with a programmatic caller, but we should avoid needing too many speciality arguments to launch a worktree from worktree manager.
 
 ## Plan
 
@@ -187,6 +201,13 @@ not replace the held #6859 / #7833 lifetime repair.
 
 ### Phase 3 - Remove proven unnecessary work
 
+- [ ] Complete the [bounded POSIX marker-only bootstrap readiness](posix-bootstrap-marker-readiness.md)
+  repair, retaining first-touch, changed, fallback, refusal and guidance behavior
+  without requiring legacy links or relaxing startup deadlines.
+  The staged implementation and host-only validation are recorded in that plan;
+  native POSIX/clean-room proof, a dependency-vendoring guard defect, integration
+  and publication remain open under their respective owners.
+
 - [x] Verify existing final-integration deferral with native invocation counts
   and current/changed/first-touch aggregate ordering (#6933).
 - [x] Verify Codespaces source-level admitted reuse and health/content/schema
@@ -216,8 +237,81 @@ not replace the held #6859 / #7833 lifetime repair.
   fallbacks.
 - [ ] Measure before/after execution count and cost for the same scenarios.
 
+### Bounded directory-evidence parsing reduction
+
+The #8679 diagnostic reached the actual Bridge history HTTP request and its
+registered Logger cold-store child. The provider remained in the native
+installation-context `status` command, reparsing the whole directory marketplace
+for each plugin name/type lookup, before entering its Python runtime. The
+standalone provider also exceeded its caller's deadline. This is measured
+source-admission cost, not proof that every history, bootstrap or allocation
+failure shares one cause.
+
+The implementation details below are _(agent-recommended)_. This slice closes
+the existing Phase 3 repeated-probing reduction and the installation contract's
+dependency-light, attributable default-legacy path. It does not change standing
+installation intent, require cells, weaken provenance, or transfer #1096's
+Phase 8 or universal-coexistence acceptance. The #7743 marker-only hook no-op,
+#4195 hook admission and stale-owner recovery, #6812 Manager startup, and
+held #6859 / #7833 lifetime work remain independently owned.
+
+- [x] Obtain review of this bounded plan before implementation (#8693; exact-head
+  Copilot approval with no open issues and all required checks green).
+- [x] Reuse the canonical shell/awk parser to obtain directory-marketplace
+  candidate entries in one parse, rather than reparsing all entries per
+  lookup. Retain the shell-only bootstrap and its supported native
+  interpreters; add no Python/jq prerequisite or persistent readiness cache.
+- [x] Preserve strict JSON and schema behavior, duplicate/ambiguous match
+  refusal, metadata.pluginRoot, source normalization, path containment and
+  selected-snapshot ownership. Missing, unsupported or invalid evidence must
+  remain an explicit refusal, never an inferred source or legacy bypass.
+- [x] Synchronize only the canonical helper's existing generated consumers.
+  Preserve publication consent, source ownership, runtime selection, health,
+  structured output and all original deadlines.
+- [x] Qualify real native resolver/wrapper calls with small and large directory
+  marketplaces, valid and refused identities, and actual parser/child counts.
+  Record equivalent before/after timing, not a mocked runtime or a wider budget.
+- [x] Source-redeploy into the isolated full-plugin playground and exercise the
+  same history consumer after caller exit. A faster source probe alone is not
+  successful archival retrieval; retain any subsequent availability,
+  configuration or lifecycle failure as its own unresolved gate.
+- [x] Drive required review, CI and normal containing release; keep authorized
+  installed rollout and parent-effort completion separate from source merge.
+
+### Compatibility detour - Keep normal launches usable across version drift
+
+The following decomposition is _(agent-recommended)_; the two compatibility
+requirements above are operator-requested. This slice closes the existing
+version-skew-tolerant process boundary and Picker's durable-launch-attempt
+intent without changing session, seed or publication authority.
+
+- [ ] Reproduce the newer Manager/older engine parser failure through a real
+  process boundary, including ordinary New and the local re-resolve.
+- [ ] Negotiate the supported launch contract before resolution effects.
+  Make normal hosting and attempt retention defaults, keep useful caller
+  correlation, and adapt supported older/current installations without
+  requiring speciality safety flags or a forced whole-runtime update.
+- [ ] Reuse canonical repository policy and the existing durable Manager
+  intent when bridging a legacy local contract. Distinguish caller
+  observations from unavailable engine-owned receipts; never fabricate
+  proof, weaken negative policy or retry an allocating call after an
+  ambiguous outcome. Preserve existing remote/native prompt capability
+  refusals where the requested primitive is genuinely unavailable.
+- [ ] Route both native shell re-resolves through the same compatibility
+  owner, using the Manager payload's existing runtime invocation helper.
+  Preserve the selected worktree and staged seed identity rather than
+  repeating New or changing the launcher's native control boundary.
+- [ ] Land the reviewed source fix and its changefiles, confirm its containing
+  release, and report installed adoption separately. This source slice grants
+  no host update, original operator-launch replay or lock-recovery authority.
+
 ### Phase 4 - Land, prove and finish
 
+- [x] Land #8411's bounded source-only compatibility repair in #8462,
+  retaining exact unit evidence, normal Main-derived allocation and the
+  existing release owner's authority.
+- [x] Prove #8411's exact gate through a subsequent natural promotion
+  containing #8462 before closing the issue or completing its repair claim.
 - [ ] Update source-owned documentation and per-plugin changefiles, then drive
   each implementation through required review, CI, merge and source-worktree
   finalization.
@@ -235,6 +329,15 @@ not replace the held #6859 / #7833 lifetime repair.
 - [x] Qualify #8409's complete native repair/scoped/snapshot and interpreter
   controls on Windows and Linux, recording temporary congested-CPU
   watchdogs separately from original-limit performance evidence.
+- [ ] Qualify #8702 against older/current real parsers and programmatic
+  callers, with ordinary defaults and explicit attempt correlation.
+  Preserve current receipt validation, policy/marketplace denial, durable
+  pre-effect intent, local seed fencing and honest unknown outcomes.
+- [ ] Exercise both PowerShell and Bash local second hops with the existing
+  Manager runtime helper, showing no duplicate New, no unsupported flags sent
+  to an older receiver and no weaker retry after possible resolution effects.
+  Record clean-room, native and live-lane coverage or explicit reasons that
+  those lanes remain unavailable.
 - [ ] Cover Windows and POSIX installer entrypoints and synchronized vendored
   formatter copies; run the relevant install-contract and formatting guards.
 - [ ] Exercise real unchanged, changed-version and first-touch consumer
@@ -294,6 +397,212 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-25 - Fresh integration accepted; bootstrap source merged
+
+- The fresh full-plugin consumer passed all six stages and independent literal
+  evaluation against committed development source. Real normal installers,
+  harness/knowledge pairing, registrar/emitter/evaluator/pool discovery, two
+  original first-attempt workers, trusted confirmations and both original
+  native histories are corroborated. There were no parent work submissions,
+  self-repairs, resends or setup-recovery entries in this fresh run.
+- #8889 actually merged as `86c5e69c5e26412fbcce6c7a031061b4d75d0ae8`
+  after exact-head Copilot approval with no open findings and all required CI
+  green. Published head `cd47ef39ba60837fee814666c90fb45a798c2ffe`
+  additionally passed the complete native 76-case selection with one
+  intentional skip after canonical-owner integration. The existing budgets
+  were not increased.
+- Re-read the Plan and Validation Plan. #8828 is contained in normal promotion
+  #8850, Main `76adf54f21a9dc48029fb5b230a4e8e27d84d3e2`, from Dev
+  `fc31c399a2e7b2375bb560ec6188f84ff054067f`; the annotated promotion tag
+  agrees. Its exact changed directory-evidence function and parser body match
+  that snapshot. Additional unrelated released helper changes are not
+  misrepresented as whole-file equality.
+- #8889's containing promotion and both slices' qualified installed rollout
+  remain open. The managed post-merge sync safely refused an unavailable
+  deleted PR head; no forced reconciliation or finalization followed.
+  The independent registration-root warning, one-minute startup, normal
+  retirement, native Manager cost and the broader effort remain unresolved.
+
+### 2026-10-24 - Directory repair merged; integrated bootstrap proof continues
+
+- #8828 actually merged as `2a7414cfea162a3d55293922de8765dbb984fd0d`
+  after exact-head Copilot approval, all required CI green and the
+  documentation-impact finding addressed and resolved. Re-read the Plan and
+  Validation Plan: only the bounded source implementation and recovered
+  source-consumer proof are accepted. Its containing promotion, authorized
+  installed rollout and broader effort acceptance remain open.
+- The independently owned #7743 ordinary POSIX readiness slice now preserves
+  #8716's complete Logger Driver implementation rather than overwriting it.
+  The remaining three ordinary adopters passed native integration controls;
+  the [bounded record](posix-bootstrap-marker-readiness.md) retains exact
+  results, earlier failures and open real-consumer/deployment gates.
+- A corrected fresh full-plugin trial is running against the integrated
+  source. This is not a replay of a completed worker or a repair of an earlier
+  failed report. No production updater or fleet activation followed this
+  source merge, and this effort is still Active.
+
+### 2026-10-24 - Review the launch-version compatibility correction
+
+- The operator reported ordinary New failing because a newer Manager
+  unconditionally sends hosting/attempt capability fences to an older
+  installed engine. The Manager then refuses the installation rather than
+  using a supported version-skew contract. #8702 owns only this correction;
+  its source-only participant is reserved and the #8375 owner has been
+  notified before overlapping call sites change.
+- The operator additionally required normal launch guarantees to be defaults,
+  not a growing collection of opt-in flags. Explicit programmatic attempt
+  correlation remains useful. Canonical repository policy already exists as
+  a shared library; Manager intent and boundary observations already have
+  their own durable owner. A bridge must preserve those actual guarantees
+  without pretending the older engine produced new receipts.
+- This is the compatibility proposal, not an implementation or an installed
+  recovery result. Source changes follow review of this amendment. The
+  normal update/no-op and parent launch-validation gates remain open, and
+  unrelated native ownership or recovery restrictions remain unchanged.
+
+### 2026-10-24 - Qualify the bounded directory-evidence implementation
+
+- Implemented #8679's reviewed plan from #8693 in the existing shell/awk
+  source-admission path. One strict parse emits candidate fields for the
+  existing normalization, containment and ambiguity checks; no Python/jq
+  dependency, durable cache, consent change or deadline extension was added.
+  Synchronized the 13 existing plugin consumers and the update-driver parser,
+  with patch changefiles for every affected plugin.
+- Native targeted coverage passed 24 cases with one PowerShell-only skip.
+  A separate eight-case strict-JSON corpus retained explicit refusal and
+  empty output for BOM, invalid UTF-8, unpaired surrogates, trailing documents,
+  invalid numbers and case-colliding identities. Canonical sync, install
+  contract and touched-Python lint checks passed.
+- The same real 24-entry marketplace, native `status` command and 30-second
+  deadline measured 54 whole-manifest parses and 25.583s before, versus one
+  parse and 1.322s / 0.976s afterward. All three decoded status objects were
+  equal and ready, with no newly created durable installation state.
+- Redeployed the candidate through the real installers in an isolated
+  full-plugin consumer. After correcting separately owned fixture setup,
+  the original manual and emitted tasks each completed on their first
+  attempt, and their original session histories were retrieved through
+  Bridge's supported transcript API after caller exit. An independent
+  literal evaluation passed those recovered worker/history outcomes but
+  correctly failed the initial fresh setup. This is source-consumer
+  evidence, not a clean fresh-install pass or production adoption.
+- A separate corrected fresh trial stopped during Bridge package
+  construction at its unchanged 300-second deadline, before activation,
+  binding or tasks. Preserve that failure independently; it does not
+  invalidate the measured parse reduction or prove its underlying cause.
+  Required implementation review, CI, containing promotion and authorized
+  installed rollout remain open. This effort is still Active.
+
+### 2026-10-24 - Containing release verified; installed gates remain held
+
+- Natural run `40085094788` qualified Dev
+  `442c9d38c8826bbb59947b225367e85a884f2fa1`, which contains #8462 and the
+  independently owned evidence repair #8508. Every required release job
+  succeeded, including exact immutable-candidate reuse, publication/readback
+  and Main merge. Generated PR #8550 actually merged at
+  `e549f040e3e3f7b82cfeade3f1446fb000aed162`; the annotated
+  `promote-dev-442c9d38c8826bbb59947b225367e85a884f2fa1` tag resolves to
+  that landed commit. The complete run took 9m29s, not an installed-update
+  or equivalent before/after performance measurement.
+- The profile actually exercised was `candidate-units-v3`, not retired
+  `source-units-v2`. All 1,494 admitted units passed with zero prohibited
+  effects in 39.424 seconds under the unchanged 300-second unit budget.
+  Main/helper adoption remained with #3336's owner: #8543 selected the
+  reviewed #8508 merge `60e2f720930a8f249c71c54af73e6ec91ed7955b`.
+  This session neither changed Main nor dispatched or retried the run.
+- The operator-selected finite bound is 128 MiB per generated evidence
+  file, distinct from the unchanged 64 supplementary-asset inventory
+  limit. The actual complete expanded version-1 coverage report is
+  68,424,911 bytes, below 134,217,728 bytes. No test, context, source,
+  phase, effect rule or execution deadline was omitted or waived.
+  Independent final-head controls passed all 36 affected packet and
+  publisher cases, including real byte thresholds, capacity-before-upload
+  refusal, existing-at-capacity readback/reuse and failure-before-success
+  output.
+- Independently downloaded the durable evidence asset from the existing
+  Dev-owned GitHub Release: 1,006,225 bytes, SHA-256
+  `59eb13263259a34b2ae6cae3c07107b5018e241a8569b4c7a628105cd68e7252`.
+  Its qualification bytes exactly match the producing Actions receipt.
+  The unchanged frozen-candidate importer validated the actual bundle;
+  a fresh manifest derived from both authoritative source roots and the
+  full packet verifier independently accepted all three retained files.
+  Deterministic archive reconstruction matched the downloaded bytes,
+  including the actual qualification, not a synthetic receipt.
+- This satisfies #8411's containing-release gate and permits completing
+  its discussion-only repair claim. It does not complete this effort or
+  parent #6600. Installed update, healthy no-op, normal-load, remaining
+  output boundaries and equivalent cost measurements remain open. Prior
+  authorized host windows are exhausted; no further update, verification
+  or recovery is inferred from publication. A fresh bounded operator
+  authorization and safe native ownership are required before another
+  live host operation. The active effort worktree is retained.
+
+### 2026-10-24 - Metadata repair merged; containing release still required
+
+- #8462 merged to `dev` at `33baf5fde3914a80c7e0407c3c6775f2c04c84c7`
+  after current-head Copilot approval, resolved findings and green required
+  CI. The managed merge exercised the repository's authorized review-rule
+  exception, not a failed-check bypass. The complete original import
+  closure and raw source-byte equivalence verifier remain required.
+- Review regressions now count metadata declarations independently of
+  value validity, handle simply quoted keys and commented/quoted table
+  headers, and refuse unsupported escaped, dotted, multiline-string and
+  array-table syntax explicitly. No duplicate or hidden project table is
+  treated as successful source metadata. Installed metadata remains the
+  primary version owner; Python 3.10 and the dependency-free core remain.
+- Pull-forward retained #8471's canonical construction resources and
+  independent sdist qualification. Windows passed 107 focused controls.
+  Linux passed the same 104 non-artifact controls and three actual artifact
+  cases, including both source-removed version variants and the canonical
+  resource sdist. An initial mounted-environment sdist timeout remains a
+  failed attempt, not a pass: measured setuptools import cost was 11.177
+  seconds there versus 1.010 seconds in a private native-filesystem copy.
+  The three remaining cases passed with unchanged 30-second artifact
+  deadlines in that isolated, automatically cleaned test environment.
+- A later pull-forward retained #8454's complete expanded positive
+  inventory and independently governed candidate-v3 proposal. The Chat
+  code, tests and fixture patches were byte-identical across that rebase.
+  The final required Linux packet passed all 1,385 units in 84.727 seconds,
+  with coverage once under the unchanged 300-second budget. Only Chat's
+  initializer digest differs from the upstream manifest; no node, source,
+  effect rule, coverage target or deadline was removed.
+- The containing natural release is the next gate. #8454 does not itself
+  activate Main, and historical source-units-v2 verification is unchanged.
+  #3336 retains Main/control, signing and publication custody. The effort,
+  #8411 repair claim and parent installed/normal-load gates remain open;
+  no forced workflow, host update or live recovery is authorized.
+
+### 2026-10-23 - Keep the release-byte repair in source metadata
+
+- The operator accepted a bounded source-only #8411 repair. The public
+  discussion claim is recorded on that issue; Main control/adoption,
+  signing, publication and installed acceptance remain with their existing
+  owners. This closes the existing once-only source-unit/versioning intent,
+  not a new release controller or an exception to qualification.
+- Real Git promotion reproduced the exact initializer byte mismatch for
+  both first-release and Main-seeded version allocation. Chat now resolves
+  its existing version through installed metadata or its matching source
+  project instead of a rewritten Python literal. The version guard requires
+  that declared metadata resolver and rejects literal/missing/substituted
+  assignments. Other consumers' version contracts are unchanged.
+- Every unit node and source remains enrolled. Only Chat's declared
+  initializer digest changes; the raw equivalence verifier, normal version
+  allocation and unit effect/no-skip/300-second rules are unchanged.
+  Candidate code mutation still refuses through the actual verifier.
+- The complete required Linux packet passed all 1,156 nodes with coverage
+  recorded once in 68.134 seconds, under the original 300-second limit.
+  Focused version/allocation/catalog/membership controls and both actual
+  source-removed wheel versions pass on Windows and Linux. Native fixture
+  cohorts retain the separately authorized congested-CPU allowances.
+- An extra Windows packet remained unqualified: 874 cases passed, one
+  platform skip occurred, then the observer refused the existing native
+  preservation adapter's `ctypes.dlopen`. The already claimed #1303/#6234
+  wrapper repair in #8399 owns that exact boundary. Shared the fresh
+  observation there without changing its wrappers, native implementation,
+  observer or manifest scope. It is not counted as Windows packet proof.
+- Source review, required CI and an actual subsequent natural promotion
+  remain required before this repair closes the release failure. No
+  installed update, forced rerun, tag mutation or Main edit was performed.
 
 ### 2026-10-23 - Repair source merged; release remains blocked
 

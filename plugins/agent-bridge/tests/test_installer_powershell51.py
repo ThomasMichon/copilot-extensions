@@ -27,11 +27,76 @@ def _function_source(source: str, name: str, next_marker: str) -> str:
     return source[start:end]
 
 
-@pytest.mark.skipif(
-    not (shutil.which("pwsh") or shutil.which("powershell.exe")),
-    reason="PowerShell is unavailable",
+@pytest.mark.parametrize(
+    "host",
+    [host for host in (shutil.which("powershell.exe"), shutil.which("pwsh")) if host],
 )
-def test_codec_snapshot_embeds_every_declared_library_under_real_powershell(tmp_path):
+def test_stop_daemon_final_verdict_handles_listener_cardinality(host):
+    source = INSTALLER.read_text(encoding="utf-8-sig")
+    functions = _function_source(
+        source, "Get-PortListeners", "\nfunction Stop-DaemonProcesses {",
+    ) + _function_source(
+        source, "Stop-DaemonProcesses", "\nfunction Invoke-Drain {",
+    )
+    script = """
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+$Port = 41001
+$RelayPort = 41002
+$VenvPython = ''
+$LinkPython = ''
+function Get-NetTCPConnection {
+    param([int]$LocalPort, [string]$ErrorAction)
+    $script:probeCalls++
+    if ($script:probeCalls -le 2) {
+        [pscustomobject]@{ State = 'Listen'; OwningProcess = 12345 }
+    } else {
+        $listeners = if ($LocalPort -eq $Port) { $case.service } else { $case.relay }
+        foreach ($listener in $listeners) {
+            [pscustomobject]@{ State = 'Listen'; OwningProcess = $listener }
+        }
+    }
+}
+function Stop-Process {
+    param([int]$Id, [switch]$Force, [string]$ErrorAction)
+    $script:stopped += $Id
+}
+function Start-Sleep { param([int]$Milliseconds) }
+""" + functions + """
+$cases = @(
+    @{ service = @(); relay = @(); expected = $true },
+    @{ service = @(12345); relay = @(); expected = $false },
+    @{ service = @(); relay = @(12345); expected = $false },
+    @{ service = @(12345, 12346); relay = @(); expected = $false },
+    @{ service = @(); relay = @(12345, 12346); expected = $false }
+)
+foreach ($case in $cases) {
+    $script:probeCalls = 0
+    $script:stopped = @()
+    $result = Stop-DaemonProcesses -MaxAttempts 1
+    if ($result -isnot [bool] -or $result -ne $case.expected) {
+        throw 'Incorrect final listener verdict'
+    }
+    if ($script:stopped.Count -ne 1 -or $script:stopped[0] -ne 12345) {
+        throw 'Unexpected stop targets'
+    }
+}
+Write-Output 'listener verdicts passed'
+"""
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "listener verdicts passed"
+
+
+@pytest.mark.parametrize("host_name", ["powershell.exe", "pwsh"])
+def test_codec_snapshot_embeds_every_declared_library_under_real_powershell(tmp_path, host_name):
+    host = shutil.which(host_name)
+    if not host:
+        pytest.skip(f"{host_name} is unavailable")
     references = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))[
         "tool"
     ]["uv"]["sources"]
@@ -75,7 +140,7 @@ Materialize-SnapshotVendoredLibs -SnapshotDir '{target}'
 """
     result = subprocess.run(
         [
-            shutil.which("pwsh") or shutil.which("powershell.exe"),
+            host,
             "-NoProfile", "-NonInteractive", "-Command", script,
         ],
         capture_output=True, text=True, timeout=30,

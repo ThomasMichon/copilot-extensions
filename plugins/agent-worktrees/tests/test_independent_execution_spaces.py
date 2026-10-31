@@ -4,6 +4,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 import json
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 import yaml
@@ -319,6 +320,7 @@ def test_parent_settlement_cannot_mutate_wrong_ledger(owner, scoped_config, monk
     record = SimpleNamespace(
         machine="workstation-windows", platform="windows", worktree_id="wt-child",
         owner_ref=f"{owner}/project/wt-parent",
+        owner_claim_ref=tracking.parse_claim_ref(f"{owner}/project/wt-parent"),
     )
     monkeypatch.setattr(
         cfg, "project_dir",
@@ -431,11 +433,15 @@ def test_project_record_mutation_holds_a_lock_around_active_project_mutation(
         )
 
     monkeypatch.setattr(_cfg, "load_project_config", fake_load_project_config)
+    monkeypatch.setattr(_cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(_cfg, "load_machines_yaml", lambda *_a, **_k: {})
+    completed = []
 
     def run():
         execution_spaces.require_project_record_mutation(
             SimpleNamespace(repo="a", machine="m", platform="wsl", owner_ref=None),
         )
+        completed.append(True)
 
     thread = threading.Thread(target=run)
     thread.start()
@@ -444,6 +450,8 @@ def test_project_record_mutation_holds_a_lock_around_active_project_mutation(
     thread.join(timeout=5)
 
     assert held_during_call is True
+    assert not thread.is_alive()
+    assert completed == [True]
     assert not execution_spaces._project_config_lock.locked()
 
 
@@ -505,10 +513,9 @@ def test_handoff_equal_physical_labels_do_not_bypass_space_selection(scoped_conf
     )
 
 
-def test_hostname_cannot_autoselect_declared_execution_space(scoped_config, monkeypatch):
+def test_hostname_can_select_local_customization_without_selecting_guest(scoped_config, monkeypatch):
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "workstation")
-    with pytest.raises(execution_spaces.ExecutionSpaceError, match="explicit machine"):
-        cfg.detect_machine(scoped_config.default_repo.anchor)
+    assert cfg.detect_machine(scoped_config.default_repo.anchor) == "workstation-windows"
 
 
 def test_legacy_multi_environment_registry_keeps_lifecycle_behavior(tmp_path, monkeypatch):
@@ -520,7 +527,10 @@ def test_legacy_multi_environment_registry_keeps_lifecycle_behavior(tmp_path, mo
         ],
     )}
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: entries)
-    config = SimpleNamespace(machine="workstation", default_repo=SimpleNamespace(anchor=tmp_path))
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    config = SimpleNamespace(
+        machine="workstation", platform="windows", default_repo=SimpleNamespace(anchor=tmp_path),
+    )
     record = SimpleNamespace(
         machine="workstation", worktree_id="legacy", owner_ref="workstation/project/parent",
     )
@@ -621,6 +631,103 @@ def test_known_parent_io_failure_reports_unconfirmed_settlement(
     assert len(warnings) == 1
     assert "Cannot confirm" in warnings[0]
     assert "PermissionError" in warnings[0]
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+def test_sibling_only_map_settles_actual_parent_without_target_enrollment(
+    tmp_path, monkeypatch, platform,
+):
+    from agent_worktrees import creation_identity, obligations, worktree_creation
+
+    (tmp_path / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        "sibling-space": {
+            "hostname": "raw-host", "physical_host": "friendly-host",
+            "execution_platform": "windows" if platform == "wsl" else "wsl",
+        },
+    }}))
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / (name or "project"))
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda _anchor: {})
+    path = cfg.project_dir("project") / "config.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text(yaml.safe_dump({
+        "repo_name": "project", "repos": {"project": {
+            "anchor": str(tmp_path), "worktree_root": str(tmp_path / "trees"),
+        }},
+    }))
+    config = cfg.load_config(
+        path, project="project",
+        include_control_plane_related_pr=False, include_knowledge_preferences=False,
+    )
+    assert config.machine == ("friendly-host-wsl" if platform == "wsl" else "raw-host")
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+    identity = creation_identity.new_machine_identity(config, "tuple-v1")
+    records = cfg.tracking_dir("project")
+    parent = tracking.create_new_record(
+        "parent", "worktree/parent", str(tmp_path / "trees" / "parent"),
+        "project", identity.machine, platform, records, machine_identity=identity,
+    )
+    assert worktree_creation._journal_owner_reciprocal_claim(
+        config, "child", f"{identity.execution_machine}/project/parent",
+        machine_identity=identity,
+    )
+    parent = tracking.load_record(parent.yaml_path)
+    assert parent.resources[0].state == obligations.ACTIVE
+    assert parent.resources[0].ref == f"{identity.execution_machine}/project/child"
+    child = tracking.create_new_record(
+        "child", "worktree/child", str(tmp_path / "trees" / "child"),
+        "project", identity.machine, platform, records, machine_identity=identity,
+        owner_ref=f"{identity.execution_machine}/project/parent",
+    )
+    successes, warnings = [], []
+    execution_spaces.settle_parent_obligation(
+        child, config, "child", output=SimpleNamespace(ok=successes.append, warn=warnings.append),
+    )
+    assert warnings == []
+    assert len(successes) == 1
+    saved = tracking.load_record(parent.yaml_path)
+    assert saved.resources[0].state == obligations.AT_REST
+    assert saved.resources[0].ref == f"{identity.execution_machine}/project/child"
+
+
+@pytest.mark.parametrize(("actual", "override"), [
+    ("windows", "wsl"), ("windows", "linux"),
+    ("wsl", "windows"), ("wsl", "linux"),
+    ("linux", "windows"), ("linux", "wsl"),
+])
+def test_legacy_platform_override_requires_actual_record_platform(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, actual: str, override: str,
+) -> None:
+    (tmp_path / "machines.yaml").write_text(
+        "machines:\n  peer-space:\n    physical_host: peer\n    execution_platform: windows\n",
+    )
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="raw-host", platform=override, repo_name="project",
+        repos={"project": cfg.RepoConfig(
+            anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"),
+        )},
+    )
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: actual)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / "state" / "project")
+    records = cfg.project_dir("project") / "worktrees"
+    paths = []
+    for name, platform in (("foreign", override), ("local", actual)):
+        checkout = Path(config.default_repo.worktree_root) / name
+        checkout.mkdir(parents=True)
+        record = tracking.create_new_record(
+            name, f"worktree/{name}", str(checkout), "project",
+            config.machine, platform, records,
+        )
+        paths.append(record.yaml_path)
+    before = {path: path.read_bytes() for path in paths}
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="execution platform"):
+        execution_spaces.require_record_mutation(tracking.load_record(paths[0]), config)
+    execution_spaces.require_record_mutation(tracking.load_record(paths[1]), config)
+    assert all(path.read_bytes() == contents for path, contents in before.items())
 
 
 @pytest.mark.parametrize(("body", "error"), [
@@ -996,9 +1103,10 @@ def test_seed_transaction_rechecks_owner_after_acquiring_lock(
     target.write_text("seed before", encoding="utf-8")
     record = SimpleNamespace(
         machine=scoped_config.machine, platform="windows", repo="project", worktree_id=path.stem,
-        owner_ref=None,
+        owner_ref=None, worktree_path=str(tmp_path),
     )
     lock_held = False
+    reads_under_lock = []
 
     @contextmanager
     def raced_lock(*args, **kwargs):
@@ -1011,7 +1119,7 @@ def test_seed_transaction_rechecks_owner_after_acquiring_lock(
             lock_held = False
 
     def fresh_record(record_path):
-        assert lock_held
+        reads_under_lock.append(lock_held)
         return record
 
     monkeypatch.setattr(tracking, "_RecordLock", raced_lock)
@@ -1027,6 +1135,7 @@ def test_seed_transaction_rechecks_owner_after_acquiring_lock(
     result = tracking_write.run_direct(verb, {
         "worktree_id": path.stem, "yaml_path": str(path), "remove_record": True,
     }, reason="fixture authority race")
+    assert any(reads_under_lock)
     assert result["error"] == "execution_space"
     assert "cross-space" in result["message"]
     assert path.read_text(encoding="utf-8") == "record before"

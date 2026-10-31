@@ -43,11 +43,19 @@ from .connection_owner import (
 )
 from ._ssh_retry import exec_with_retry
 from .owner_availability import AvailabilityGate
+from .owner_beacon import (
+    build_owner_channel,
+    owner_native_call,
+    settle_owner_task,
+    stop_owner_channel,
+)
 
 log = logging.getLogger("agent-codespaces")
 
 
-async def _off_loop(factory: Callable[..., RelayChannel], *args: Any) -> RelayChannel:
+async def _off_loop(
+    factory: Callable[..., RelayChannel], *args: Any, retain: Callable[[RelayChannel], None],
+) -> RelayChannel:
     """Build a channel in a worker thread.
 
     The real factories run ``gh codespace ssh --config``, which waits up to
@@ -55,7 +63,7 @@ async def _off_loop(factory: Callable[..., RelayChannel], *args: Any) -> RelayCh
     also stall every ssh ProxyCommand pump the Owner carries, so every other
     CodeSpace's relay and bridge would stop forwarding, and keepalives would
     then kill them."""
-    return await asyncio.to_thread(factory, *args)
+    return await build_owner_channel(factory, *args, retain=retain)
 
 # Build a (not-yet-started) reverse forward into a CodeSpace:
 # ``(codespace, codespace_listen_port[, host_port]) -> channel``. Without
@@ -127,6 +135,8 @@ class SessionForwards:
         self._local: dict[tuple[str, int], tuple[int, RelayChannel]] = {}
         self._local_failures: dict[tuple[str, int], int] = {}
         self._last_probe: dict[str, float] = {}
+        self._retiring: list[RelayChannel] = []
+        self._shutdown_task: asyncio.Task[None] | None = None
 
     async def usable(self, holds: dict[str, OwnerHold], relays: Any = None) -> dict[str, OwnerHold]:
         """``holds`` without CodeSpaces the availability gate shows stopped.
@@ -192,12 +202,16 @@ class SessionForwards:
         try:
             await channel.start()
             return True
+        except asyncio.CancelledError:
+            await stop_owner_channel(channel)
+            raise
         except Exception as exc:
             log.warning("Connection Owner: failed to ensure %s: %s", label, exc)
             try:
-                await channel.stop()
+                await stop_owner_channel(channel)
             except Exception:
                 log.debug("%s stop after failed start also failed", label)
+                self._retiring.append(channel)
             return False
 
     async def reconcile(self, holds: dict[str, OwnerHold]) -> None:
@@ -206,14 +220,17 @@ class SessionForwards:
         for codespace, (port, channel) in list(self._channels.items()):
             hold = holds.get(codespace)
             if hold is None or hold.daemon_port != port:
+                await stop_owner_channel(channel)
                 self._channels.pop(codespace, None)
-                await channel.stop()
         for codespace, hold in holds.items():
             if not hold.daemon_port:
                 continue
             entry = self._channels.get(codespace)
             if entry is None:
-                channel = await _off_loop(self._daemon_factory, codespace, hold.daemon_port)
+                channel = await _off_loop(
+                    self._daemon_factory, codespace, hold.daemon_port,
+                    retain=lambda ch: self._channels.__setitem__(codespace, (hold.daemon_port, ch)),
+                )
                 entry = (hold.daemon_port, channel)
                 self._channels[codespace] = entry
             if not await self._ensure(f"bridge forward for {codespace}", entry[1]):
@@ -241,9 +258,9 @@ class SessionForwards:
         }
         for key, (venue, channel) in list(self._local.items()):
             if wanted.get(key) != venue or self._local_factory is None:
+                await stop_owner_channel(channel)
                 self._local.pop(key, None)
                 self._local_failures.pop(key, None)
-                await channel.stop()
         if self._local_factory is None:
             from .owner_local_forwards import write_active_local_forwards
 
@@ -252,7 +269,10 @@ class SessionForwards:
         for key, venue in wanted.items():
             entry = self._local.get(key)
             if entry is None:
-                entry = (venue, await _off_loop(self._local_factory, key[0], key[1], venue))
+                entry = (venue, await _off_loop(
+                    self._local_factory, key[0], key[1], venue,
+                    retain=lambda ch: self._local.__setitem__(key, (venue, ch)),
+                ))
                 self._local[key] = entry
             if not await self._ensure(f"local forward {key[1]}->{venue} for {key[0]}", entry[1]):
                 self._local.pop(key, None)
@@ -266,6 +286,7 @@ class SessionForwards:
                 continue
             self._local_failures.pop(key, None)
             if not self._record_assigned_local_port(key, venue, entry[1], fixed_hosts):
+                self._retiring.append(entry[1])
                 self._local.pop(key, None)
                 await self._stop_untracked_local_forward(entry[1])
         from .owner_local_forwards import write_active_local_forwards
@@ -283,10 +304,13 @@ class SessionForwards:
         if self._local_factory is None:
             return
         try:
-            await old_channel.stop()
+            await stop_owner_channel(old_channel)
         except Exception:
             log.debug("old dynamic local forward stop failed for %s:%s", key[0], key[1])
-        entry = (venue, await _off_loop(self._local_factory, key[0], 0, venue))
+            self._retiring.append(old_channel)
+        entry = (venue, await _off_loop(
+            self._local_factory, key[0], 0, venue, retain=self._retiring.append,
+        ))
         if not await self._ensure(f"replacement local forward 0->{venue} for {key[0]}", entry[1]):
             await self._stop_untracked_local_forward(entry[1])
             return
@@ -308,12 +332,15 @@ class SessionForwards:
             )
             self._local_failures.pop(key, None)
             self._local[(key[0], assigned)] = entry
+            self._retiring.remove(entry[1])
         else:
             await self._stop_untracked_local_forward(entry[1])
 
     async def _stop_untracked_local_forward(self, channel: RelayChannel) -> None:
         try:
-            await channel.stop()
+            await stop_owner_channel(channel)
+            if channel in self._retiring:
+                self._retiring.remove(channel)
         except Exception:
             log.debug("untracked local forward stop failed")
 
@@ -345,12 +372,15 @@ class SessionForwards:
         }
         for key, (host, channel) in list(self._extra.items()):
             if wanted.get(key) != host:
+                await stop_owner_channel(channel)
                 self._extra.pop(key, None)
-                await channel.stop()
         for key, host in wanted.items():
             entry = self._extra.get(key)
             if entry is None:
-                entry = (host, await _off_loop(self._daemon_factory, key[0], key[1], host))
+                entry = (host, await _off_loop(
+                    self._daemon_factory, key[0], key[1], host,
+                    retain=lambda ch: self._extra.__setitem__(key, (host, ch)),
+                ))
                 self._extra[key] = entry
             if not await self._ensure(f"reverse forward {key[1]}->{host} for {key[0]}", entry[1]):
                 self._extra.pop(key, None)
@@ -451,6 +481,8 @@ class SessionForwards:
         label: str,
     ) -> bool:
         """Start one mirror-related background task for ``codespace`` if none is running."""
+        if self._shutdown_task is not None:
+            return False
         running = self._mirroring.get(codespace)
         if running is not None and not running.done():
             return False
@@ -485,26 +517,43 @@ class SessionForwards:
                 "Connection Owner: the bridge forward for %s is up but not serving; rebuilding it",
                 codespace,
             )
+            await stop_owner_channel(channel)
             self._channels.pop(codespace, None)
-            await channel.stop()
 
     async def shutdown(self) -> None:
         """Stop every daemon and extra forward (Owner shutdown). The registry is untouched."""
-        for task in self._mirroring.values():
+        if self._shutdown_task is None:
+            self._shutdown_task = asyncio.create_task(self._shutdown())
+        cancelled = await settle_owner_task(self._shutdown_task)
+        self._shutdown_task.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _shutdown(self) -> None:
+        tasks = tuple(self._mirroring.values())
+        for task in tasks:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         self._mirroring.clear()
-        for codespace, (_port, channel) in list(self._channels.items()):
-            self._channels.pop(codespace, None)
-            await channel.stop()
-        for key, (_host, channel) in list(self._extra.items()):
-            self._extra.pop(key, None)
-            await channel.stop()
-        for key, (_venue, channel) in list(self._local.items()):
-            self._local.pop(key, None)
-            await channel.stop()
+        errors: list[Exception] = []
+        for channels in (self._channels, self._extra, self._local):
+            for key, (_port, channel) in list(channels.items()):
+                try:
+                    await stop_owner_channel(channel)
+                    channels.pop(key, None)
+                except Exception as exc:
+                    errors.append(exc)
+        for channel in list(self._retiring):
+            try:
+                await stop_owner_channel(channel)
+                self._retiring.remove(channel)
+            except Exception as exc:
+                errors.append(exc)
         from .owner_local_forwards import clear_active_local_forwards
 
         clear_active_local_forwards()
+        if errors:
+            raise errors[0]
 
 
 def owner_serves_bridge(codespace: str, now: float | None = None) -> bool:
@@ -667,7 +716,7 @@ async def _open_codespace(codespace: str) -> Any:
     from .lifecycle import account_for_codespace
 
     manager = ConnectionManager()
-    source = await asyncio.to_thread(
+    source = await owner_native_call(
         lambda: CodespaceSource(codespace, account=account_for_codespace(codespace)))
     await manager.ensure_connected(codespace, source, [])
     return manager
@@ -741,7 +790,7 @@ def make_remote_mux_probe(
     async def probe(codespace: str, mux_sessions: list[str]) -> dict[str, bool | None]:
         unknown: dict[str, bool | None] = {m: None for m in mux_sessions}
         try:
-            rows = await asyncio.to_thread(lambda: list(list_codespaces()))
+            rows = await owner_native_call(lambda: list(list_codespaces()))
             states = {cs.name: str(cs.state) for cs in rows}
         except Exception as exc:
             log.debug("session probe: listing CodeSpaces failed: %s", exc)

@@ -18,11 +18,11 @@ import time
 from pathlib import Path as Path  # noqa: F401 -- compatibility export for tests
 from typing import Any
 
-from .delegated_waiter_contract import CALLBACK_COMMAND
+if __name__ == "__main__":
+    from .early_cli import dispatch
 
-if __name__ == "__main__" and sys.argv[1:2] == [CALLBACK_COMMAND]:
-    from .delegated_waiter_callback import main as callback_main
-    raise SystemExit(callback_main(sys.argv[2:]))
+    if (result := dispatch(sys.argv[1:])) is not None:
+        raise SystemExit(result)
 
 import httpx
 
@@ -147,6 +147,7 @@ from .task_query_cli import (  # noqa: F401 -- re-exported for existing call sit
     _cmd_find,
     _cmd_inbox,
     _cmd_list,
+    register_list_command,
     _cmd_lookup,
     _cmd_mcp,
     _cmd_payload,
@@ -192,7 +193,6 @@ from .task_lifecycle_cli import (  # noqa: F401 -- re-exported for existing call
     _cmd_reattach,
     _cmd_release,
     _cmd_reopen,
-    _cmd_reset,
     _cmd_resume,
     _cmd_show,
     _cmd_start,
@@ -201,6 +201,13 @@ from .task_lifecycle_cli import (  # noqa: F401 -- re-exported for existing call
     _cmd_unpause,
     _cmd_worktree_status,
     _cmd_yield,
+)
+from .task_recovery_cli import (  # noqa: F401 -- CLI registration and compatibility exports
+    _cmd_detach_agent,
+    _cmd_reconcile_wake,
+    _cmd_reset,
+    _cmd_task_diagnostics,
+    register_task_recovery_commands,
 )
 
 from .execution_cli import (  # noqa: F401 -- re-exported for existing call sites/tests
@@ -666,35 +673,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--local", action="store_true", help="target only the local task authority; never fail over")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    from .action_controls_cli import register_commands as register_actions
+    register_actions(sub)
+    from .diagnostic_logs import register_log_commands
+    register_log_commands(sub)
     register_coordinator_commands(sub)
     register_create_commands(sub)
     register_registrar_commands(sub)
 
     register_task_lifecycle_commands(sub)
+    register_task_recovery_commands(sub)
 
     register_steering_commands(sub)
     register_attention_commands(sub)
     from .category_cli import register_category_commands
     register_category_commands(sub, client_factory=_client, scope_repo=_scope_repo)
 
-    p = sub.add_parser("list", help="list tasks (scoped to the calling repo by default)")
-    p.add_argument("--category", choices=("work", "maintenance", "all"), default="work")
-    p.add_argument("--repo", help="lane to list (local name or remote URL); default: calling repo")
-    p.add_argument(
-        "--status",
-        help="filter by status; comma-separate for several (e.g. queued,started)",
-    )
-    p.add_argument("--target-machine")
-    p.add_argument("--target-repo")
-    p.add_argument("--label")
-    p.add_argument("--evaluator-ref")
-    p.add_argument("--limit", type=int, default=200)
-    p.add_argument(
-        "--machine",
-        help="read another machine's queue over the SSH mesh (peer browse); "
-        "default: this machine's local coordinator",
-    )
-    p.set_defaults(func=_cmd_list)
+    register_list_command(sub, handler=_cmd_list)
 
     p = sub.add_parser(
         "doctor",
@@ -752,6 +747,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="machine to scope to; a *remote* machine reads that peer's queue "
         "over the SSH mesh (default: this machine, resolved via agent-worktrees)",
     )
+    p.add_argument("--limit-per-category", action="store_true", help="With --board --category all, retain --limit rows per category.")
     p.add_argument(
         "--status",
         default="proposed",

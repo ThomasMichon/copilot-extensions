@@ -43,6 +43,7 @@ function Copy-InstallerStageDirectory {
 }
 # === end install-contract:v4 payload-copy ===
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+. (Join-Path $PSScriptRoot 'installer-engine.ps1')
 
 if (-not $PSBoundParameters.ContainsKey('Action')) {
     $PSBoundParameters['Action'] = $Action
@@ -562,7 +563,7 @@ function Get-SourceRuntimeIdentity {
         '--plugin', 'budget-guidance', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
     $nativeError = ''
-    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     $code = $LASTEXITCODE
     if ($code -ne 0) { throw "Source runtime identity validation failed (exit ${code}): $detail$nativeError" }
     return $detail.Trim()
@@ -571,8 +572,11 @@ function Get-SourceRuntimeIdentity {
 function Initialize-SourceRuntime {
     try {
         [IO.File]::GetAttributes((Join-Path $PluginDir 'runtime-source.json')) | Out-Null
-    } catch [IO.FileNotFoundException] { return
-    } catch [IO.DirectoryNotFoundException] { return }
+    } catch [IO.FileNotFoundException] {
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
+    } catch [IO.DirectoryNotFoundException] {
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
+    }
     $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
     $fields = $SourceRuntimeIdentity | ConvertFrom-Json
     if (-not $fields.PSObject.Properties['runtime_version']) {
@@ -943,6 +947,10 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 }
 try {
 if ($Action -in @('install', 'update', 'stamp', 'provision')) { Test-SourceRuntimeUnchanged }
+if ($Action -in @('install', 'update', 'provision')) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 if ($Action -eq 'status') {
@@ -955,13 +963,35 @@ if ($Action -eq 'status') {
     exit 0
 }
 
+function Remove-BudgetRuntimeCode {
+    Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
+}
+
+function Remove-BudgetHelperFiles {
+    param([string]$Directory, [string[]]$Names)
+    $item = Get-Item -LiteralPath $Directory -Force -ErrorAction Stop
+    if (-not $item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Refusing linked or non-directory runtime helpers'
+    }
+    foreach ($name in $Names) {
+        $path = Join-Path $Directory $name
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+            throw "Refusing linked or non-file runtime helper: $path"
+        }
+    }
+    foreach ($name in $Names) {
+        $path = Join-Path $Directory $name
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+    }
+}
+
 if ($Action -eq 'uninstall') {
-    Remove-Item (Join-Path $LocalBin 'budget-guidance.ps1') -Force -ErrorAction SilentlyContinue
-    Remove-Item (Join-Path $LocalBin 'budget-guidance.cmd') -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -LiteralPath $InstallDir -Force | Where-Object {
-        $_.Name -notin @('.install.lock', '.install.lock.pid', '.install.lock.pid.reap', '.install-stage')
-    } | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop }
-    Write-Ok 'budget-guidance runtime removed (transaction/staging coordination retained)'
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir -Check
+    Remove-BudgetRuntimeCode
+    Write-Ok 'budget-guidance runtime removed (data, unknown files and coordination retained)'
     exit 0
 }
 

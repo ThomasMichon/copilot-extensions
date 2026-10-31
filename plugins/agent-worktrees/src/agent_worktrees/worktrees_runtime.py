@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import sqlite3
+import subprocess
 import threading
 import time
 from contextlib import closing
 from pathlib import Path
 
 from . import config as cfg
+from . import worktrees_observation_contract as observations
 from .worktrees_projection import WorktreesProjection, _identity
 from .worktrees_projection_index import (
     ProjectionError,
@@ -20,6 +22,7 @@ from .worktrees_projection_index import (
 CONTRACT_VERSION = 1
 READ_ACTION = "worktrees-read"
 CAPABILITY = "worktrees-current-v1"
+_DEMAND_LINGER_SECONDS = 30.0
 _FIELDS = frozenset(
     {
         "contract_version",
@@ -38,7 +41,7 @@ def request_selection(payload: dict) -> tuple[str, dict]:
         raise ProjectionError("invalid current-roster request fields")
     if type(payload.get("contract_version")) is not int:
         raise ProjectionError("missing current-roster contract version")
-    if payload["contract_version"] != CONTRACT_VERSION:
+    if payload["contract_version"] not in (CONTRACT_VERSION, observations.VERSION):
         raise ProjectionError("unsupported current-roster contract version")
     project = _identity(payload.get("project"), name="project")
     if cfg._PROJECT_NAME_RE.fullmatch(project) is None:
@@ -101,6 +104,7 @@ class WorktreesRuntime:
         self._error: str | None = None
         self._publication_errors: dict[str, str] = {}
         self._demand: dict[str, float] = {}
+        self._unready_demand: set[str] = set()
         self._wake = wake
         self._now = now
         self._elected = elected
@@ -145,6 +149,7 @@ class WorktreesRuntime:
                 self._admitting = True
                 self._reason = "ready"
                 self._error = None
+                self._unready_demand.clear()
             self.feed.activate()
             if self._wake is not None:
                 self._wake.set()
@@ -160,7 +165,9 @@ class WorktreesRuntime:
 
         with self._lock:
             return {
-                "capabilities": [CAPABILITY, FEED_CAPABILITY],
+                "capabilities": [
+                    CAPABILITY, FEED_CAPABILITY, observations.CAPABILITY, "picker-bootstrap-v1",
+                ],
                 "worktrees": {
                     "contract_version": CONTRACT_VERSION,
                     "status": self._reason,
@@ -168,6 +175,33 @@ class WorktreesRuntime:
                     "error": self._error,
                 },
             }
+
+    def picker_bootstrap(self, payload: dict) -> dict:
+        from . import picker_bootstrap_runtime
+        from .execution_spaces import ExecutionSpaceError
+
+        if self._elected is not None and not self._elected():
+            self.close_admission("superseded")
+        with self._lock:
+            if not self._admitting:
+                return self._failure(self._reason, "resident bootstrap admission closed")
+            generation = self.store.generation
+        try:
+            result = picker_bootstrap_runtime.build(payload)
+        except (ExecutionSpaceError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+            return self._failure("unavailable", str(error))
+        if self._elected is not None and not self._elected():
+            self.close_admission("superseded")
+        with self._lock:
+            if not self._admitting or self.store.generation != generation:
+                return self._failure("superseded", "resident changed during bootstrap")
+            self._demand[payload["project"]] = self._now()
+        if self._wake is not None:
+            self._wake.set()
+        return {
+            "ok": True, "contract_version": 1, "generation": generation,
+            "runtime_root": str(cfg.install_dir()), **result,
+        }
 
     def handle(self, payload: dict) -> dict:
         try:
@@ -181,17 +215,28 @@ class WorktreesRuntime:
                 return self._failure(
                     self._reason, self._error or "current-roster admission closed"
                 )
-            self._demand[project] = self._now()
+            now = self._now()
+            previous = self._demand.get(project)
+            if previous is None or previous < now - _DEMAND_LINGER_SECONDS:
+                self._unready_demand.discard(project)
+            self._demand[project] = now
             publication_error = self._publication_errors.get(project)
         try:
-            result = self.store.read(project, **selection)
+            result = self.store.read(
+                project, **selection, contract_version=payload["contract_version"],
+            )
         except ProjectionUnavailable as exc:
-            if self._wake is not None:
-                self._wake.set()
+            with self._lock:
+                if self._admitting and project not in self._unready_demand:
+                    self._unready_demand.add(project)
+                    if self._wake is not None:
+                        self._wake.set()
             return self._failure("unready", publication_error or str(exc))
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))
-        result = {"ok": True, "contract_version": CONTRACT_VERSION, **result}
+        result = {"ok": True, "contract_version": payload["contract_version"], **result}
+        if payload["contract_version"] == observations.VERSION:
+            result["project"] = project
         if publication_error is not None:
             result["availability"] = {"status": "stale", "reason": publication_error}
         return result
@@ -204,10 +249,11 @@ class WorktreesRuntime:
             "generation": self.store.generation,
         }
 
-    def demand_projects(self, *, linger: float = 30.0) -> set[str]:
+    def demand_projects(self, *, linger: float = _DEMAND_LINGER_SECONDS) -> set[str]:
         with self._lock:
             cutoff = self._now() - linger
             self._demand = {p: at for p, at in self._demand.items() if at >= cutoff}
+            self._unready_demand.intersection_update(self._demand)
             projects = set(self._demand)
         return projects | self.feed.projects()
 
@@ -228,6 +274,7 @@ class WorktreesRuntime:
                 raise
         with self._lock:
             self._publication_errors.pop(project, None)
+            self._unready_demand.discard(project)
         self.feed.changed(project)
 
     def publication_failed(self, project: str, error: Exception) -> None:

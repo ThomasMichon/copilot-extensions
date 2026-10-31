@@ -7,9 +7,18 @@
 - **Status:** Active - submission/output/delivery amendment proposed 2026-10-08
 - **Source umbrella:** #3681; continuing coordination is this Active ROOT's
   reviewed Plan/Validation/Journal and eligible OPEN bounded-source issues
-- **Sub-issues:** _none yet_
+- **Sub-issues:** #9709 (bounded assignment/startup documentation and repair design)
 
 ## Guiding Intent
+
+**Continuing direction (2026-10-30):** the
+[assignment/startup amendment](assignment-startup-amendment.md) distinguishes
+pool-owned placement before embodiment from worker acceptance, and adds bounded
+startup, scoped decline routing/closeout and retry-eligibility design. The existing
+queued due-time admission fix merged in
+[#9755](https://github.com/ThomasMichon/copilot-extensions/pull/9755);
+atomic placement and the remaining design are not implemented or installed-qualified.
+Existing submission/conversation phases and their custodians remain unchanged.
 
 **Current direction (2026-10-08):** extend the existing lifecycle, result
 storage, evaluator, and steering machinery into a durable task conversation.
@@ -100,6 +109,12 @@ particularly for Phase 3's crash-recovery behavior.
 
 ## Request
 
+The 2026-10-30 operator-directed intent is captured as a generic summary in the
+[assignment/startup amendment](assignment-startup-amendment.md#requested-direction).
+Its requested requirements, agent-recommended implementation means and unresolved
+policy choices are separated; it does not settle result-rejection reassignment
+or terminal-worktree policy.
+
 The 2026-10-07/08 direction is captured in
 [operator-direction.md](operator-direction.md), with settled decisions and
 agent-recommended implementation safeguards separated in
@@ -141,6 +156,13 @@ known end-states; a `monitors` system should complement `emitters`/
 
 ## Coordination
 
+The finite #4464 producing-harness guidance contract below continues through
+existing producer/task-command/guidance owners and this ROOT's reviewed
+Plan, actual global Validation and Journal. Preserve backend versus
+Tasks-pane custody and current SUBMITTED/COMPLETED direction. This intake
+does not appoint an implementation owner, adopt a code target as a harness,
+move a task, change routing defaults or release a source/resource claim.
+
 The complete #3681 retained finite family continues through this existing Active ROOT's
 reviewed Plan, actual global Validation and Journal/open bounded-source process under
 the SAME declared and source-specific custodians. Preserve every incumbent alternative,
@@ -157,7 +179,47 @@ successor. The current planning slice does not adopt responsibility for
 executing every historical open phase. Reconcile #5701/#5668 after merge rather
 than opening competing implementations.
 
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### Continuing source-specific Transport/Bridge custody
+
+#### Source #2885
+
+The planning owner retains documentation only; separately approved
+backend owners retain reason/lifecycle/history/output/monitor/delivery
+implementation, and existing Tasks-pane, general Worktree Manager viewer
+and native-session hosting owners retain their boundaries. Preserve
+#2879's specific resource/complete-transfer and #2887's reviewer-policy
+reservations without absorbing or expiring them. This is LONG-TERM intent,
+not immediate implementation authority. #3681 is provenance, not a required
+live claim token. No new blanket ACK or executor appointment is created.
+
 ## Plan
+
+### Continuing slice - Pool-owned assignment/startup and retry eligibility
+
+- [x] Land the #9709 vision/current-versus-target architecture and
+      [repair amendment](assignment-startup-amendment.md) through normal review,
+      without behavioral changes. Merged in
+      [#9710](https://github.com/ThomasMichon/copilot-extensions/pull/9710).
+- [ ] Execute the amendment's implementation/compatibility plan only through
+      separately claimed, reviewed source slices, preserving incumbent startup,
+      idle-worker, pool-capacity and submission owners.
+- [x] Implement and source-test existing queued `not_before` enforcement at fresh
+      reservation admission; preserve active replay and suspended re-embodiment.
+      This bounded admission fix does not complete atomic pool placement,
+      retry-policy selection or installed qualification. Reviewed and merged in
+      [#9755](https://github.com/ThomasMichon/copilot-extensions/pull/9755).
+- [x] Select the [startup and retry budgets](assignment-startup-amendment.md#selected-startup-and-retry-policy),
+      including reset of both counters on successful `STARTED`; source
+      implementation and qualification remain separate.
+- [x] Review the [selected pool scope and priority](assignment-startup-amendment.md#selected-pool-scope-and-ordering)
+      and complete-effective-set prerequisite before affected source work;
+      normalized definitions, provider publication and caller migration remain
+      distinct acceptance slices. Merged in
+      [#9773](https://github.com/ThomasMichon/copilot-extensions/pull/9773).
+- [ ] Resolve the amendment's remaining policy choices and complete its validation matrix
+      at the stated source, mixed-version and installed/native evidence tiers.
 
 ### Phase 1 — The monitor vocabulary only (data only, no `Status`/table change)
 _(agent-recommended: sequencing shape, revised 2026-09-25 after actually
@@ -522,7 +584,169 @@ independent owners remain, and no genuine hold still requires the source live. O
 RETAIN #3681. No task/claim/configuration/native/model/process/service/source effect or
 implementation authority is created by this proposal.
 
+### Finite producing-harness versus code-target guidance from #4464
+
+**Agent-recommended tracking amendment.** Preserve the original guidance-only
+realization and current lane-versus-target foundations, not a new resolver
+or a mandatory default redesign.
+
+- [ ] **P4464-1:** Explicitly reason about the PRODUCING harness lane whenever
+  work touches or is authored from multiple repository worktrees. When CWD
+  is not unambiguously that harness, pass `--repo <harness>` together with
+  `--target-repo <code-target>`. Legitimate target-repository CWD does not
+  adopt that repository as another operating harness.
+- [ ] **P4464-2:** Put the cross-CWD warning in the existing owning skill
+  and/or pick-and-claim guidance, retaining supported unambiguous defaults.
+  Root-versus-delegate resolver enrichment is optional; no task movement,
+  new registry/resolver, harness reconfiguration or restoration of historical
+  task enum/API direction is required.
+
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### Direct retained Transport/Bridge acceptance
+
+**Agent-recommended additive tracking amendment.** Preserve every incumbent
+Request, status, checked credit, original row and first unresolved gate. The
+direct rows below retain unfinished work at its original finite scope,
+alternatives and evidence tiers. They do not authorize implementation,
+native/installed trials, operational changes, source closure, reassignment
+or claim/resource release. Normal review, actual merge and complete current
+receiving readback precede any separate source-specific disposition.
+
+
+#### Source #2885
+
+- [ ] **P.2885.semantic-reason:** Every suspended task carries lifecycle-authoritative
+  STRUCTURED/QUERYABLE semantic reason/category AND concise human explanation. Preserve all original
+  steer/review, external/yielded wait, clarification, dependency, hold and legacy-unknown
+  distinctions; example enums are examples, not a closed monitor-kind/status mandate.
+
+- [ ] **P.2885.authoritative-source-and-incarnation:** Recipe/emitter or another actual lifecycle
+  owner supplies/updates/resolves the reason with the original task/attempt/owner/incarnation and
+  outstanding question/answer. Safe intent-seeded defaults must not guess categories from ordinary
+  card/progress prose or treat a supplied description as semantic authority.
+
+- [ ] **P.2885.query-age-attention:** Expose the same semantic reason to lightweight task
+  query/API/CLI and Tasks-pane list AND/OR supported notification/operator-attention surface.
+  Present actual current-state duration/age alongside reason and an obvious route to the outstanding
+  question; aggregate churn or opening every card is not discoverability.
+
+- [ ] **P.2885.historical-awaitingfalse-clarification:** Structurally distinguish
+  explicit-instruction/clarification-needed from routine pending review, ordinary steer/approve and
+  external wait, including original BOTH SUSPENDED with awaiting_steer=false shape. A single boolean
+  or parsing status/title/body is not equivalent semantic classification.
+
+- [ ] **P.2885.fresh-elicitation-and-resolution:** Any genuinely ambiguous/unresolved answer
+  surfaces as a FRESH explicit question/elicitation, never guessed/treated as approval. Keep the
+  question/reason/current incarnation correlated; update/clear only through accepted/resolved
+  lifecycle, not transport delivery alone. Re-carding mitigates but does not prove complete reason
+  visibility.
+
+- [ ] **P.2885.hold-not-death-resource-release:** Semantic reason/presentation is separate from
+  monitor/resolution/wake metadata and user Pause/hold. Adding or clearing a reason NEVER expires
+  claims, frees a lane/resource, resumes/requeues without required instruction, authorizes a
+  verdict, or infers death from age. Existing legitimate monitor-resume behavior remains with its
+  original owner.
+
+- [ ] **P.2885.GENERAL-session-viewer-compatibility:** Preserve original LONG-TERM general inline
+  per-session Worktree Manager agent-chat/tool-call/user-elicitation viewer direction, for agent
+  sessions rather than only task results. Pending steer card is a first-class event; reason/event
+  interface must compose with that future view, not freeze today's bespoke card or equate
+  task-output history with a general-session viewer.
+
+- [ ] **P.2885.retained-whole-union:** Retain the complete current #2885 original, BOTH refinements
+  and ALL eight adopted2878 clarification rows plus seven residual-refinement checks, original
+  alternatives/venues/finite scope/history/query/presentation/custody. It remains LONG-TERM
+  planning, not immediate implementation authority. Do NOT absorb2879
+  nudges/resource/complete-transfer or2887 recipe/native/policy scope.
+
+- [ ] **P.2885.r0-check-20:** Give the explicit-instruction-required/clarification-needed state a
+  real structurally queryable semantic distinction from routine pending review, ordinary
+  operator-steer/approve waiting and an external wait. It must work for the historical shape where
+  both cases were SUSPENDED with awaiting_steer=false; a boolean awaiting_steer or parsing card
+  status/title/body is not an equivalent fix.
+
+- [ ] **P.2885.r0-check-21:** Carry a concise human-readable explanation alongside the structured
+  reason, supplied by the recipe/emitter or another lifecycle-authoritative source. Preserve the
+  relation to the actual outstanding question/answer and current task incarnation. A prompt,
+  free-text recommendation or normal card alone is not the shared reason contract.
+
+- [ ] **P.2885.r0-check-22:** Make clarification visibly attention-requiring through the Tasks-pane
+  list and/or a supported notification, with an obvious path to the outstanding question. An
+  operator must not have to open/read every card to discover that a prior answer was ambiguous. Keep
+  the signal distinct from routine review waiting, and make the same semantic reason queryable by
+  lightweight consumers.
+
+- [ ] **P.2885.r0-check-23:** Preserve the short-term follow-up invariant: any genuinely unresolved
+  or ambiguous answer is surfaced as a fresh explicit question/elicitation, not silently guessed,
+  treated as approval, or left implicit. Re-carding is a mitigation, not proof of the broader
+  structural/discoverability outcome. Do not require adopting a private reviewer charter or
+  provider-specific business policy upstream.
+
+- [ ] **P.2885.r0-check-24:** Keep clarification separate from a user hold/Pause and from task
+  death. Presenting a reason must not change ownership, expire a claim, free a lane, resume work
+  without the needed instruction, or authorize a review/verdict action. Update/clear the visible
+  reason through the corresponding accepted/resolved lifecycle, not simply because a transport
+  reports delivery.
+
+- [ ] **P.2885.r0-check-25:** Preserve the operator's accepted longer-term shape: a general inline
+  per-session agent-chat viewer within Worktree Manager, usable for agent sessions rather than only
+  a task-result viewer, with a pending steer card represented as a first-class
+  tool-call/user-elicitation event. Design the reason/event interface to compose into that future
+  view; do not freeze today's bespoke card representation as the only supported model or claim a
+  task-output history alone fulfills the general-session direction.
+
+- [ ] **P.2885.r0-check-26:** Compose existing backend task-output/history/delivery contracts and
+  Tasks-pane presentation ownership, preserving native/hosting authority. #2887 remains the separate
+  reviewer-recipe convergence owner; this generic semantic/UI acceptance is not a transfer of its
+  domain policy or a declaration that its native adoption gates passed.
+
+- [ ] **P.2885.r0-check-27:** Preserve observable distinctions for ordinary pending review, ordinary
+  operator steer, explicit clarification after an ambiguous answer, external-event/yielded waiting,
+  dependency blocking, explicit user hold and legacy unknown reason. Check reason
+  persistence/query/presentation and its resolution/repeated-follow-up behavior with the current
+  accepted schema, rather than requiring an obsolete card-only method.
+
+- [ ] **P.2885.r1-check-8:** Represent why each SUSPENDED task is dormant through structured,
+  queryable semantics and short human-readable explanation. Preserve at least operator-steer,
+  external-event/yielded-wait, clarification and dependency-blocked cases, with explicit
+  unknown/legacy handling rather than guessed categories parsed from prose.
+
+- [ ] **P.2885.r1-check-9:** Have the lifecycle-owning recipe/emitter supply the reason, and define
+  any safe default seeded by run/create intent. Preserve attribution and current task/attempt/owner
+  context; an ordinary description or current card title is not by itself a semantic classification
+  contract.
+
+- [ ] **P.2885.r1-check-10:** Make the reason available to task query/API/CLI and Tasks-pane
+  presentation or another authoritative operator-attention surface. Combine the actual state
+  duration/age with the actual reason so an operator need not open cards/progress logs merely to
+  learn the blocker. Do not confuse aggregate churn reporting with a task's own age.
+
+- [ ] **P.2885.r1-check-11:** Keep monitor/resolution metadata distinct from semantic suspension
+  reason and from a user hold. Preserve current cooldown/external-wait behavior, explicit operator
+  holds, pending input and existing custody; adding presentation must not release/requeue work or
+  infer death from age.
+
+- [ ] **P.2885.r1-check-12:** Accept the full transferred #2878 checklist before retiring its
+  wrapper: structurally distinguish clarification from routine review/steer, visibly request
+  attention, handle ambiguous follow-up as a fresh explicit elicitation, and clear/update the reason
+  only through the appropriate lifecycle.
+
+- [ ] **P.2885.r1-check-13:** Preserve the longer-term general Worktree Manager per-session
+  agent-chat/tool-call viewer intent, including a pending card as a first-class elicitation event.
+  Task-output history alone is not that general viewer. Compose the backend task-output/history
+  owners and UI owners without replacing native/hosting authority or mandating today's card
+  representation forever.
+
+- [ ] **P.2885.r1-check-14:** Cover persistence/readback, repeated suspension/reason updates, legacy
+  unknown reasons, each category, follow-up clarification and subsequent resolution across the
+  supported producer/query/UI surfaces. Intent documents or a narrow suspend fixture do not prove
+  the complete integration or deployed behavior.
+
 ## Validation Plan
+
+- [ ] Complete the [assignment/startup validation matrix](assignment-startup-amendment.md#validation-plan);
+      documentation approval alone does not establish runtime conformance.
 
 - [ ] GLOBAL ROOT GATE: resolve EVERY incumbent ROOT Plan AND own Validation item, ALL
   direct acceptance above and original amendment matrix at their retained evidence tiers
@@ -557,6 +781,199 @@ implementation authority is created by this proposal.
       Provenance-adjacent reality docs once code lands (per envisioning's
       "close the loop" step) — no vision *edit* needed unless Phase 2's
       risk-audit surfaces a genuine blind spot the vision failed to state.
+- [ ] **V4464-1:** Qualify the actual supported neutral/cross-CWD and explicit
+  target examples: producing `--repo` identity stays independent of
+  `--target-repo` code metadata. Generic project examples or a spawn/task-
+  state receipt do not substitute for the exact lane warning.
+- [ ] **V4464-2:** Resolve every direct #4464 Plan clause through its original
+  guidance-only option, existing routing defaults and task/source custody,
+  without adoption, lane/task mutation or a competing resolver. Finite
+  source/consumer evidence is separate from unrelated backend/UI/native or
+  whole-parent acceptance; no generic owner ACK or task operation is added.
+
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### Global validation of retained Transport/Bridge acceptance
+
+#### Source #2885
+
+- [ ] **V.2885.semantic-reason:** Qualify the COMPLETE matching original/refined clause at its
+  ORIGINAL finite supported producer/query/UI/native tier and alternatives, preserving delivered
+  credit and same source/resource custody: Every suspended task carries lifecycle-authoritative
+  STRUCTURED/QUERYABLE semantic reason/category AND concise human explanation. Preserve all original
+  steer/review, external/yielded wait, clarification, dependency, hold and legacy-unknown
+  distinctions; example enums are examples, not a closed monitor-kind/status mandate.
+
+- [ ] **V.2885.authoritative-source-and-incarnation:** Qualify the COMPLETE matching
+  original/refined clause at its ORIGINAL finite supported producer/query/UI/native tier and
+  alternatives, preserving delivered credit and same source/resource custody: Recipe/emitter or
+  another actual lifecycle owner supplies/updates/resolves the reason with the original
+  task/attempt/owner/incarnation and outstanding question/answer. Safe intent-seeded defaults must
+  not guess categories from ordinary card/progress prose or treat a supplied description as semantic
+  authority.
+
+- [ ] **V.2885.query-age-attention:** Qualify the COMPLETE matching original/refined clause at its
+  ORIGINAL finite supported producer/query/UI/native tier and alternatives, preserving delivered
+  credit and same source/resource custody: Expose the same semantic reason to lightweight task
+  query/API/CLI and Tasks-pane list AND/OR supported notification/operator-attention surface.
+  Present actual current-state duration/age alongside reason and an obvious route to the outstanding
+  question; aggregate churn or opening every card is not discoverability.
+
+- [ ] **V.2885.historical-awaitingfalse-clarification:** Qualify the COMPLETE matching
+  original/refined clause at its ORIGINAL finite supported producer/query/UI/native tier and
+  alternatives, preserving delivered credit and same source/resource custody: Structurally
+  distinguish explicit-instruction/clarification-needed from routine pending review, ordinary
+  steer/approve and external wait, including original BOTH SUSPENDED with awaiting_steer=false
+  shape. A single boolean or parsing status/title/body is not equivalent semantic classification.
+
+- [ ] **V.2885.fresh-elicitation-and-resolution:** Qualify the COMPLETE matching original/refined
+  clause at its ORIGINAL finite supported producer/query/UI/native tier and alternatives, preserving
+  delivered credit and same source/resource custody: Any genuinely ambiguous/unresolved answer
+  surfaces as a FRESH explicit question/elicitation, never guessed/treated as approval. Keep the
+  question/reason/current incarnation correlated; update/clear only through accepted/resolved
+  lifecycle, not transport delivery alone. Re-carding mitigates but does not prove complete reason
+  visibility.
+
+- [ ] **V.2885.hold-not-death-resource-release:** Qualify the COMPLETE matching original/refined
+  clause at its ORIGINAL finite supported producer/query/UI/native tier and alternatives, preserving
+  delivered credit and same source/resource custody: Semantic reason/presentation is separate from
+  monitor/resolution/wake metadata and user Pause/hold. Adding or clearing a reason NEVER expires
+  claims, frees a lane/resource, resumes/requeues without required instruction, authorizes a
+  verdict, or infers death from age. Existing legitimate monitor-resume behavior remains with its
+  original owner.
+
+- [ ] **V.2885.GENERAL-session-viewer-compatibility:** Qualify the COMPLETE matching
+  original/refined clause at its ORIGINAL finite supported producer/query/UI/native tier and
+  alternatives, preserving delivered credit and same source/resource custody: Preserve original
+  LONG-TERM general inline per-session Worktree Manager agent-chat/tool-call/user-elicitation viewer
+  direction, for agent sessions rather than only task results. Pending steer card is a first-class
+  event; reason/event interface must compose with that future view, not freeze today's bespoke card
+  or equate task-output history with a general-session viewer.
+
+- [ ] **V.2885.retained-whole-union:** Qualify the COMPLETE matching original/refined clause at its
+  ORIGINAL finite supported producer/query/UI/native tier and alternatives, preserving delivered
+  credit and same source/resource custody: Retain the complete current #2885 original, BOTH
+  refinements and ALL eight adopted2878 clarification rows plus seven residual-refinement checks,
+  original alternatives/venues/finite scope/history/query/presentation/custody. It remains LONG-TERM
+  planning, not immediate implementation authority. Do NOT absorb2879
+  nudges/resource/complete-transfer or2887 recipe/native/policy scope.
+
+- [ ] **V.2885.r0-check-20:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Give the explicit-instruction-required/clarification-needed state a
+  real structurally queryable semantic distinction from routine pending review, ordinary
+  operator-steer/approve waiting and an external wait. It must work for the historical shape where
+  both cases were SUSPENDED with awaiting_steer=false; a boolean awaiting_steer or parsing card
+  status/title/body is not an equivalent fix.
+
+- [ ] **V.2885.r0-check-21:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Carry a concise human-readable explanation alongside the structured
+  reason, supplied by the recipe/emitter or another lifecycle-authoritative source. Preserve the
+  relation to the actual outstanding question/answer and current task incarnation. A prompt,
+  free-text recommendation or normal card alone is not the shared reason contract.
+
+- [ ] **V.2885.r0-check-22:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Make clarification visibly attention-requiring through the
+  Tasks-pane list and/or a supported notification, with an obvious path to the outstanding question.
+  An operator must not have to open/read every card to discover that a prior answer was ambiguous.
+  Keep the signal distinct from routine review waiting, and make the same semantic reason queryable
+  by lightweight consumers.
+
+- [ ] **V.2885.r0-check-23:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Preserve the short-term follow-up invariant: any genuinely
+  unresolved or ambiguous answer is surfaced as a fresh explicit question/elicitation, not silently
+  guessed, treated as approval, or left implicit. Re-carding is a mitigation, not proof of the
+  broader structural/discoverability outcome. Do not require adopting a private reviewer charter or
+  provider-specific business policy upstream.
+
+- [ ] **V.2885.r0-check-24:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Keep clarification separate from a user hold/Pause and from task
+  death. Presenting a reason must not change ownership, expire a claim, free a lane, resume work
+  without the needed instruction, or authorize a review/verdict action. Update/clear the visible
+  reason through the corresponding accepted/resolved lifecycle, not simply because a transport
+  reports delivery.
+
+- [ ] **V.2885.r0-check-25:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Preserve the operator's accepted longer-term shape: a general inline
+  per-session agent-chat viewer within Worktree Manager, usable for agent sessions rather than only
+  a task-result viewer, with a pending steer card represented as a first-class
+  tool-call/user-elicitation event. Design the reason/event interface to compose into that future
+  view; do not freeze today's bespoke card representation as the only supported model or claim a
+  task-output history alone fulfills the general-session direction.
+
+- [ ] **V.2885.r0-check-26:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Compose existing backend task-output/history/delivery contracts and
+  Tasks-pane presentation ownership, preserving native/hosting authority. #2887 remains the separate
+  reviewer-recipe convergence owner; this generic semantic/UI acceptance is not a transfer of its
+  domain policy or a declaration that its native adoption gates passed.
+
+- [ ] **V.2885.r0-check-27:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Preserve observable distinctions for ordinary pending review,
+  ordinary operator steer, explicit clarification after an ambiguous answer, external-event/yielded
+  waiting, dependency blocking, explicit user hold and legacy unknown reason. Check reason
+  persistence/query/presentation and its resolution/repeated-follow-up behavior with the current
+  accepted schema, rather than requiring an obsolete card-only method.
+
+- [ ] **V.2885.r1-check-8:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Represent why each SUSPENDED task is dormant through structured,
+  queryable semantics and short human-readable explanation. Preserve at least operator-steer,
+  external-event/yielded-wait, clarification and dependency-blocked cases, with explicit
+  unknown/legacy handling rather than guessed categories parsed from prose.
+
+- [ ] **V.2885.r1-check-9:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Have the lifecycle-owning recipe/emitter supply the reason, and
+  define any safe default seeded by run/create intent. Preserve attribution and current
+  task/attempt/owner context; an ordinary description or current card title is not by itself a
+  semantic classification contract.
+
+- [ ] **V.2885.r1-check-10:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Make the reason available to task query/API/CLI and Tasks-pane
+  presentation or another authoritative operator-attention surface. Combine the actual state
+  duration/age with the actual reason so an operator need not open cards/progress logs merely to
+  learn the blocker. Do not confuse aggregate churn reporting with a task's own age.
+
+- [ ] **V.2885.r1-check-11:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Keep monitor/resolution metadata distinct from semantic suspension
+  reason and from a user hold. Preserve current cooldown/external-wait behavior, explicit operator
+  holds, pending input and existing custody; adding presentation must not release/requeue work or
+  infer death from age.
+
+- [ ] **V.2885.r1-check-12:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Accept the full transferred #2878 checklist before retiring its
+  wrapper: structurally distinguish clarification from routine review/steer, visibly request
+  attention, handle ambiguous follow-up as a fresh explicit elicitation, and clear/update the reason
+  only through the appropriate lifecycle.
+
+- [ ] **V.2885.r1-check-13:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Preserve the longer-term general Worktree Manager per-session
+  agent-chat/tool-call viewer intent, including a pending card as a first-class elicitation event.
+  Task-output history alone is not that general viewer. Compose the backend task-output/history
+  owners and UI owners without replacing native/hosting authority or mandating today's card
+  representation forever.
+
+- [ ] **V.2885.r1-check-14:** Qualify the COMPLETE matching original/refined clause at its ORIGINAL
+  finite supported producer/query/UI/native tier and alternatives, preserving delivered credit and
+  same source/resource custody: Cover persistence/readback, repeated suspension/reason updates,
+  legacy unknown reasons, each category, follow-up clarification and subsequent resolution across
+  the supported producer/query/UI surfaces. Intent documents or a narrow suspend fixture do not
+  prove the complete integration or deployed behavior.
+
+- [ ] **G2885:** Resolve every directly retained #2885 Plan and Validation clause at its original
+  finite evidence tier, preserving alternatives, completed credit and existing custodians.
+  Administrative tracking is not technical completion or claim release.
 
 ## Proposal
 
@@ -582,6 +999,39 @@ extension policy are in the 2026-10-08 amendment):
 Phase 3/4's shapes are still pending their own design pass.
 
 ## Journal
+
+### 2026-10-30 - Assignment/startup design reviewed and merged
+
+- #9710 merged to `dev` as `d1f5b7c02db18f741d19751207f8b1b53fa3382b`
+  after a clean current-head Copilot approval and required checks. The existing
+  source worktree was pulled forward through the managed sync operation.
+- Closed only the documentation/review Plan item. #9709, the remaining
+  implementation/compatibility work, open policy choices, complete validation
+  matrix and parent effort remain open. No runtime or installed acceptance is
+  inferred from the documentation merge.
+
+### 2026-10-30 - Assignment/startup and retry-eligibility proposal
+
+- Added the bounded #9709 design slice and amendment under this existing
+  lifecycle effort, rather than a competing task authority or repair campaign.
+- Separated the intended pre-embodiment `CLAIMED` transaction from current
+  reservation/worker-claim operations. Recorded existing `not_before` selection
+  and claim enforcement, and the reservation-admission gap.
+- Retained numeric retry policy and result-rejection/terminal-worktree choices
+  as open, preserved incumbent owners, and claimed no implementation, root
+  cause, release or running-system qualification.
+
+### 2026-10-28 - Finite producing-lane guidance intake
+
+- Added direct #4464 Plan and actual global Validation with continuing
+  coordination, retaining explicit multi-worktree-CWD lane reasoning,
+  `--repo` producer versus `--target-repo` metadata and the guidance-only
+  realization. Existing task-owned routing/claim/policy foundations remain
+  credit, not proof the exact warning is delivered.
+- Preserve every original row, checked credit, amendment and independent
+  custodian. Normal reviewed actual merge and complete current readback
+  precede a separate source judgment. No source audit, task move, provider
+  operation, peer contact, implementation or resource release occurs here.
 
 ### 2026-10-23 - Direct retained acceptance from #3681
 
@@ -742,3 +1192,118 @@ Card revisions, task-owned output schemas, policy separation, and completed-task
 follow-ups remain explicit implementation deltas. #5701 owns existing
 idempotent-steer work; #5668 owns the attention aggregation interface. No
 runtime changes or delivery fixes are claimed by this documentation update.
+
+<!-- backlog-reconciliation:7556:transport-bridge-receiving -->
+
+### 2026-10-28 - Additive Transport/Bridge tracking contracts
+
+Authored direct finite Plan and actual global Validation with continuing
+
+custody after complete current receiving-document and source-contract
+
+research. Normal review, actual merge and complete current readback remain
+
+separate publication gates; no future delivery or disposition is claimed.
+
+Credited existing monitor/review/result/history/delivery foundations while retaining the complete long-term semantic-reason, age, clarification and GENERAL per-session viewer direction.
+
+### 2026-10-31 - Fresh reservation due-time admission
+
+Claimed the bounded #9709 source slice and enforced the stored queued-task
+deadline under the existing reservation write transaction. Thirteen fake-clock
+and HTTP controls plus the incumbent reservation packet pass (100 cases);
+four new refusal controls failed against the prior source. Active/exclusive
+replay, suspended owned-workspace reuse and retry allocation identity remain
+unchanged. Source review/merge, release and installed qualification remain
+separate; no retry duration, startup cap or pool-placement policy was selected.
+
+The bounded source fix merged in #9755 as
+`921b945df694404e80ca225412c87673b0abc3c1` after current-head Copilot
+approval and required checks. Managed pull-forward reached that exact merge
+with no surviving diff or replayed paragraph. The next stretch is atomic
+pool-owned placement; numerical startup/retry policy still requires a decision.
+The complete parent and amendment validation matrices remain open.
+
+### 2026-10-31 - Startup and cooldown policy selected
+
+Captured the operator's startup/decision budgets, task-wide escalating cooldown
+and successful-`STARTED` reset of both counters in the
+[canonical amendment](assignment-startup-amendment.md#selected-startup-and-retry-policy).
+The existing supervisor owns cadence; scheduling and historical custody remain
+separate. This amendment is reviewed before affected behavior is implemented.
+Atomic placement, decline closeout, remaining independent policies and the
+complete source/mixed-version/installed validation gates stay open.
+
+The selected-policy amendment merged in
+[#9769](https://github.com/ThomasMichon/copilot-extensions/pull/9769) as
+`29aa3cd82fbc1e1f471714e61e8385463cc244ff` after current-head approval
+and required checks. The source worktree pulled forward to that exact merge.
+Implementation resumes with the coordinator-owned atomic placement boundary;
+the policy merge itself does not enable it or qualify running workers.
+
+### 2026-10-31 - Pool instance scope and priority selected
+
+The source trace found that raw registrations lose declaration filters and do
+not include the daemon's final precedence/deduplication/override result.
+Captured the operator's per-machine/environment instance capacity and
+configurable priority in the
+[canonical amendment](assignment-startup-amendment.md#selected-pool-scope-and-ordering),
+with numeric ordering and representation recommendations distinguished from
+the selected policy. Review precedes source implementation. The complete
+effective-set/provider/mixed-cohort boundary and all parent gates remain open;
+there is no live activation or claim that metadata alone enforces placement.
+
+The pool-policy amendment merged in
+[#9773](https://github.com/ThomasMichon/copilot-extensions/pull/9773) as
+`3f61379fa11dd93b310470b5354a494144f77d10` after current-head approval
+and required checks. Managed pull-forward reached the exact merge without a
+remaining diff. The first source prerequisite is normalized pool-instance
+definitions with lossless filters and priority; effective-set publication,
+atomic capacity and task placement remain separate implementation gates.
+
+### 2026-10-31 - Normalized pool definitions source slice
+
+Implemented the reviewed first prerequisite: validated version-1 pool-instance
+definitions, independent machine/environment keys, complete effective filters,
+declarative priority and deterministic ordering. The metadata stays outside
+legacy subprocess specs and restart fingerprints; incomplete legacy definitions
+are not promoted from labels. Definition validation is not provider enrollment
+or an executing-runtime capability.
+
+The bounded disconnected registrar packet passes 162 cases, including the new
+definition controls; focused lint/type checks pass. Source review/merge remains
+separate. The coordinator publisher still drops top-level metadata and does not
+publish the final effective set. Its revision-fenced publication, atomic
+capacity/claim transaction and conditional caller migration are the next
+implementation stretch, not inferred completion of this amendment.
+
+The normalized-definition source merged in
+[#9774](https://github.com/ThomasMichon/copilot-extensions/pull/9774) as
+`ce207738304506b0f980bda9b6c341f2734f8ff8` after current-head approval
+and required checks. Managed pull-forward reached that exact merge with no
+surviving diff. This closes only the definition prerequisite; the next stretch
+is the existing owner's complete effective-set publication and provider
+admission, not a live pool migration.
+
+### 2026-10-31 - Internal pool catalog provider boundary
+
+Implemented the [internal provider storage expansion](../../../plugins/agent-dispatch/docs/pool-publication.md):
+machine/environment generation CAS, whole-scope publication revision CAS,
+retained generation/publication history and original definition attribution.
+Registry mutations invalidate accepted snapshots in their existing transaction;
+idempotent writes preserve freshness. Pending, unavailable, registry-stale and
+expired expected scopes block the global view without freeing incumbent work.
+Expiry is an admission observation, not a liveness or retirement verdict.
+
+The final bounded disconnected packet passes 137 cases across catalog,
+registration and reservation controls, including 49 catalog cases. Focused
+lint/type, install-contract and documentation checks pass. The daemon's actual
+singleton is an OS lock, not a shared renewable lease; existing schedule and
+producer-runtime mechanisms cannot be relabeled as supervisor enrollment.
+
+This source prerequisite has no HTTP route, capability advertisement or
+production caller. The controlling owner's complete expected-scope membership,
+fresh effective-source collection, authenticated transport and mixed-cohort
+qualification remain the next stretch before atomic placement. It does not
+claim that a caller-supplied correlation proves completeness or that a source
+merge enables a live pool.

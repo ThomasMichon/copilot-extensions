@@ -21,7 +21,6 @@ import asyncio
 import fnmatch
 import json
 import logging
-import os
 import subprocess
 import urllib.request
 import uuid
@@ -32,6 +31,7 @@ from urllib.parse import urlparse
 from agent_procutil import no_window_kwargs
 
 from .._exec import expand_python_token
+from ..home import default_home_dir
 from ._catalog import tool_call_args, tool_call_name
 from ._jsonutil import (
     MISSING,
@@ -46,8 +46,7 @@ from .base import BridgeContext, Decorator, Next, error_response, result_respons
 
 log = logging.getLogger("agent-mcp.storage")
 
-_LEGACY_ROOT = ".agent-mcp"  # marketplace-isolation: allow legacy compatibility root
-_DEFAULT_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / _LEGACY_ROOT)) / "storage"
+_DEFAULT_DIR = default_home_dir() / "storage"
 
 
 class StreamBackend:

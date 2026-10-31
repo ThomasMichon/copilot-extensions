@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit consumer source-retirement policy and retain completed full-run markers on acquisition failure",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

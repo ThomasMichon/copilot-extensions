@@ -1,0 +1,9 @@
+{
+  "comment": "Retain exact HTTP-48 capture-time source blobs through squash merges without weakening immutable closure validation.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Report failed, refused and busy legacy status-monitor transitions as installer failures while retaining completed runtime slots.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

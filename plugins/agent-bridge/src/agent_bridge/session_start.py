@@ -11,10 +11,13 @@ from dataclasses import replace
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
+from repository_policy import AgentHostingError
+
 from .caller_session import normalize_caller_session_id
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .events import EventLog
 from .models import SessionStatus
+from .owned_workspace import acquire_start, prepare_session
 from .session_manager import (
     _ACTIVE_STATES,
     _AcpLaunchTiming,
@@ -43,6 +46,7 @@ from .privileged_plugins import relay_agent, start_client
 
 if TYPE_CHECKING:
     from .acp_client import AcpClient
+    from .local_launch_owner import LocalLaunchOwner
 
 _CFG = ".agent-bridge/config.yaml"  # marketplace-isolation: allow deployed-runtime-diagnostics
 
@@ -87,6 +91,7 @@ class _SessionStartMixin:
         retain_container_lock_on_failure: bool = False,
         creation_session_id: str | None = None,
         creation_before_launch: Callable[[], Awaitable[None]] | None = None,
+        acquisition_launch: LocalLaunchOwner | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -122,6 +127,11 @@ class _SessionStartMixin:
             raise ValueError(f"unsupported parity fault: {parity_fault}")
         if target.native_resume_id:
             raise ValueError("native resume authority cannot create a fresh conversation")
+        from .acquisition_launch_owner import require_start_owner
+        require_start_owner(self, target, creation_session_id, acquisition_launch)
+        from .hosting_policy import require_target_hosting
+
+        await require_target_hosting(target)
         core = _core()
         # Per-session copilot args: append to the resolved target's args for
         # THIS spawn only (a fresh target copy so a shared/cached AgentConfig
@@ -187,23 +197,29 @@ class _SessionStartMixin:
         if caller_owner_ref is not None and target.caller_owner_ref is None:
             target = replace(target, caller_owner_ref=caller_owner_ref)
         session_id = creation_session_id or str(uuid.uuid4())[:12]
+        from .owned_workspace import arm
+
+        target = arm(target, session_id)
         if session_id in self._sessions:
             raise ValueError("creation session already exists; reconcile its original start")
         prepared_local_launch = None
-        if creation_before_launch is not None:
+        if target.type == "local":
             from .local_launch_preparation import prepare
             from .venue_plugins import with_controller_origin
 
-            if not creation_session_id or target.type != "local" or not target.explicit_cwd:
+            if creation_before_launch is not None and (not creation_session_id or not target.explicit_cwd):
                 raise ValueError("creation preflight requires a keyed exact local target")
-            target = with_controller_origin(
-                target, controller_origin,
-                caller_session_id=normalize_caller_session_id(caller_session_id),
-            )
+            if target.local_plugin_preparation or creation_before_launch is not None:
+                target = with_controller_origin(
+                    target, controller_origin,
+                    caller_session_id=normalize_caller_session_id(caller_session_id),
+                )
             prepared_local_launch = await prepare(target, session_id)
             if self._draining:
                 raise DaemonDrainingError("session")
-            await creation_before_launch()
+            if creation_before_launch is not None:
+                await creation_before_launch()
+            prepared_local_launch.resolve(target, session_id)
             if self._draining:
                 raise DaemonDrainingError("session")
         name = _generate_name()
@@ -244,6 +260,7 @@ class _SessionStartMixin:
                 )
 
         session = Session(session_id, name, target, agent_name, caller_id=caller_id)
+        session.background_recovery_enabled = acquisition_launch is None
         session.caller_session_id = normalize_caller_session_id(caller_session_id)
         # Per-session model / reasoning-effort override (agent-bridge create
         # --model/--effort). Retained on the Session so within-daemon resume /
@@ -300,6 +317,8 @@ class _SessionStartMixin:
             now=now,
             target_json=target.to_json(),
             config_json=config_json,
+            runtime_admission=acquisition_launch.admission if acquisition_launch is not None else None,
+            background_recovery_enabled=session.background_recovery_enabled,
         )
 
         session.status = SessionStatus.STARTING
@@ -343,6 +362,7 @@ class _SessionStartMixin:
                 agent_proc.alive,
             )
 
+        owned_start = await acquire_start(session)
         try:
             cs_target = None
             # Prefer the structured provider metadata (#177); fall back to
@@ -389,6 +409,7 @@ class _SessionStartMixin:
                     model=model,
                     effort=effort,
                     **({"prepared_local_launch": prepared_local_launch} if prepared_local_launch is not None else {}),
+                    **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
                 )
             elif container_target is not None:
                 from .venue_plugins import prepare_venue_plugins, resolve_controller_cwd
@@ -595,6 +616,7 @@ class _SessionStartMixin:
                     )
                     cs_spawner = build_codespace_spawner(
                         cs_target["name"], cs_target["repo"], relay_port=relay_port,
+                        ready_timeout=self._timeouts.session_host_ready,
                         provision_prelude=relay_prelude,
                         unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
                         active_reap_seconds=self._session_host_active_reap_seconds,
@@ -662,6 +684,7 @@ class _SessionStartMixin:
                 # ThomasMichon/copilot-extensions#566), so this is their only
                 # path. It is NOT reachable for a local target. Emits per-stage
                 # checkpoints (auth-env, ssh-connect, worktree) into the event log.
+                await prepare_session(session, self._db)
                 core = _core()
                 agent_proc = await core.spawn(
                     target,
@@ -780,13 +803,22 @@ class _SessionStartMixin:
             # session binding* names "a spawned successor, a headless launch").
             # LOCAL worktrees only -- a remote worktree's ground layer lives on
             # its own machine. Best-effort / fail-open: never breaks a launch.
-            if target.type == "local" and target.worktree_id and acp_sid:
+            if acquisition_launch is None and target.type == "local" and target.worktree_id and acp_sid:
                 from . import worktree_lineage
                 with contextlib.suppress(Exception):
                     worktree_lineage.register_session(
                         target.worktree_id, acp_sid, pid=session.pid,
                         worktree_dir=target.cwd,
                     )
+        except AgentHostingError as exc:
+            session.status = SessionStatus.STOPPED
+            self._db.update_session_status(session_id, SessionStatus.STOPPED.value, time.time())
+            session.event_log.append("launch_refused", {"code": exc.code, "reason": str(exc)})
+            session.event_log.append("session_state_changed", {
+                "status": SessionStatus.STOPPED.value, "reason": "repository_hosting_refused",
+            })
+            log.warning("Session %s not launched: %s", session_id, exc)
+            raise
         except ConnectError as exc:
             # Structured failure: we know exactly which stage failed and
             # whether a retry could help -- never an opaque "agent died".
@@ -858,6 +890,9 @@ class _SessionStartMixin:
             self._mark_session_failed(session, trigger="start_exception")
             session.event_log.append("error", {"message": str(exc)})
             log.error("Failed to start session %s: %s", session_id, exc, exc_info=True)
+        finally:
+            if owned_start is not None:
+                owned_start.release()
 
         session.touch()
         return session

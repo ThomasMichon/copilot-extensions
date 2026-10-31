@@ -21,7 +21,7 @@ from . import (
     tracking,
     worktree_identity,
 )
-from . import config as cfg, state_root as state_root_mod
+from . import config as cfg, execution_spaces, state_root as state_root_mod
 
 
 def _core():
@@ -154,6 +154,7 @@ def add_parsers(sub) -> None:
         "--remote", action="store_true",
         help="with history: also merge mirrored remote claim-history events (network)",
     )
+    p.add_argument("--sweep-observation", action="store_true", help=argparse.SUPPRESS)
     producer_views_cli.add_arguments(p)
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
@@ -216,6 +217,7 @@ def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict:
 def cmd_claims(args: argparse.Namespace) -> int:
     """Dispatch the claims verb."""
     target = list(getattr(args, "target", None) or [])
+    if getattr(args, "sweep_observation", False): return claims_find_cli.cmd_sweep_observation(args, target)
     if target and target[0] == "ownership":
         return producer_views_cli.cmd_ownership(args, target[1:])
     if target and target[0] == "owner": return claims_owner.cmd_claims_owner(args, target[1:])
@@ -344,7 +346,7 @@ def _coordination_readiness_for_owner_ref(
             f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})"
         )
     readiness_config = config
-    if parsed_owner.machine == config.machine:
+    if parsed_owner.machine == config.machine or execution_spaces.require_owner_identity(parsed_owner.machine, config):
         try:
             readiness_config = cfg.load_project_config(parsed_owner.project)
         except (OSError, RuntimeError, ValueError) as exc:

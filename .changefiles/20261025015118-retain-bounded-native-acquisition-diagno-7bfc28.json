@@ -1,0 +1,9 @@
+{
+  "comment": "Retain bounded native acquisition diagnostics after confirmed timeout cleanup",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

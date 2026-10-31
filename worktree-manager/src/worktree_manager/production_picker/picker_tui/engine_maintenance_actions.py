@@ -2,6 +2,8 @@
 """PickerScreen mixin extracted from ``engine.py``."""
 from __future__ import annotations
 
+from ... import picker_review
+
 import threading
 
 from .engine_dialogs import ScopeDlgScreen
@@ -12,27 +14,11 @@ from .engine_live_screens import ProgressScreen
 _SEED_PROMPT_ENABLED = True
 
 class PickerScreenMaintenanceActionsMixin:
-    def _confirm_new_worktree(self, dlg, seed_prompt: str = ""):
-        """Confirmed New-worktree options (+ an optional seed prompt, read
-        straight off the SAME dialog's prompt field -- see
-        ``_open_optmenu``) -> the launch decision (#88 F4)."""
-        on = {o["label"] for o in dlg["opts"] if o["on"]}
-        tm, te = dlg["target"]
-        self._decide({
-            "action": "new", "machine": tm, "env": te,
-            "is_local": (tm, te) == self.src.LOCAL,
-            "options": {
-                "anchor": "Anchor repo" in on,
-                "bare": "Bare" in on,
-                "no_mux": "No Mux" in on,
-                "ahp": "AHP" in on,
-                "local_model": "Local model" in on,
-                "seed_prompt": seed_prompt,
-            },
-        })
     def _confirm_cleanup(self, dlg):
         """Confirmed Clean/Sync scope -> build (and, when armed, start) the
         per-worktree maintenance progress run (#88 F4)."""
+        if picker_review.refuse(self):
+            return
         picked = [o["label"] for o in dlg["opts"] if o["on"]]
         verb = dlg.get("verb", "Clean up")
         op = "sync" if verb.lower().startswith("sync") else "cleanup"
@@ -113,8 +99,7 @@ class PickerScreenMaintenanceActionsMixin:
         a bare orphan the cwd-keyed lock-scan never registered (#662/#1416) still
         reaps, and a bound-but-unclassifiable-or-detached Copilot is no longer
         stranded. After it finishes the touched machines reload, so the row
-        re-renders without the stale bound process -- ready for a fresh Open /
-        Bare resume.
+        re-renders without the stale bound process -- ready for a fresh Open / Resume.
         """
         recs = [recs] if isinstance(recs, dict) else list(recs)
         live = [r for r in recs if type(self)._reclaimable(r)]
@@ -154,6 +139,8 @@ class PickerScreenMaintenanceActionsMixin:
         (not resolvable in the local tracking store) falls back to reloading its
         owning machine through the live loader. Best-effort; never raises on the
         UI thread."""
+        if picker_review.refuse(self):
+            return
         raw = rec.get("raw") or {}
         wt_id = raw.get("id")
         if not (getattr(self, "real_ops", False) and wt_id):
@@ -193,6 +180,7 @@ class PickerScreenMaintenanceActionsMixin:
         threading.Thread(target=work, name="wt-refresh", daemon=True).start()
     def _provider_runner(self):
         """Return the Picker-owned tracked runner for local provider commands."""
+        picker_review.require_writable()
         with self._provider_loader_lock:
             if self._provider_cancelled:
                 raise RuntimeError("picker provider runner is cancelled")
@@ -223,6 +211,8 @@ class PickerScreenMaintenanceActionsMixin:
         confirm gate (``armed=False``): the progress dialog asks before it
         executes. Only conversation-only / unused worktrees are targeted.
         """
+        if picker_review.refuse(self):
+            return
         recs = [recs] if isinstance(recs, dict) else list(recs)
         targets = [r for r in recs
                    if r.get("cleanup_bucket") in ("conversation", "unused")
@@ -235,6 +225,8 @@ class PickerScreenMaintenanceActionsMixin:
         """Build (and, when ``armed``, start) a maintenance progress run over
         ``recs`` for a single ``op`` (restart / finalize). An unarmed run shows
         the confirm gate first (see ``_key_progress`` / ``ProgressScreen``)."""
+        if picker_review.refuse(self):
+            return
         items = [{"key": self._row_key(r), "id4": r.get("id4"),
                   "title": r.get("title", ""),
                   "machine_env": r.get("machine_env", ""), "state": "pending"}
@@ -252,6 +244,8 @@ class PickerScreenMaintenanceActionsMixin:
         self._open_progress()
     def _start_progress(self):
         """Begin executing the armed progress run (real executor or mock walk)."""
+        if picker_review.refuse(self):
+            return
         p = self.progress
         if not self.real_ops:
             return  # mock walker advances via _advance_progress
@@ -260,6 +254,7 @@ class PickerScreenMaintenanceActionsMixin:
             p["op"], p["recs"], self.src,
             include_unused=p["include_unused"],
             include_conversations=p["include_conversations"],
+            local=self._src_local(),
         )
         self.executor = maintenance.MaintenanceExecutor(p["op"], tasks)
         self.executor.start()
@@ -290,62 +285,76 @@ class PickerScreenMaintenanceActionsMixin:
         else:
             return None
         return arr[i] if 0 <= i < len(arr) else None
-    def _decide(self, decision):
+    def _decide(self, decision, *, surface="picker-action"):
         """Record a launch decision and exit the TUI so __main__ can act on it.
 
         ``PickerApp.result`` stays ``None`` on cancel (q/Esc); a dict here is a
         concrete instruction the caller maps onto resume/create/remote paths.
         A deferred decision reports its reason and returns False without exit.
         """
+        if picker_review.refuse(self):
+            return False
         if decision.get("deferred"):
             self.debug = decision.get("reason") or "Locality is not ready; refresh and retry."
+            if getattr(self, "real_ops", False) and not decision.get("attempt_id"):
+                from ...launch_confirmation import confirm_before_effect
+                from .. import context
+
+                confirm_before_effect(
+                    self, decision.get("project") or context.project(), decision,
+                    surface=surface, saved=self._decide, refusal=self.debug,
+                    refusal_code="locality-unresolved",
+                )
             self.refresh()
             return False
+        if (
+            getattr(self, "real_ops", False) and not decision.get("attempt_id")
+            and decision.get("action") in {"new", "resume", "restore", "open-venue"}
+        ):
+            from ...launch_confirmation import confirm_before_effect
+            from .. import context
+
+            return confirm_before_effect(
+                self, decision.get("project") or context.project(), decision,
+                surface=surface, saved=self._decide,
+            )
         self.app.result = decision
         self.app.exit()
         return True
-    def _resume_decision(self, rec, no_mux=False, ahp=False, bare_resume=False,
+    def _resume_decision(self, rec, no_mux=False, ahp=False,
                           seed_prompt=""):
         """Build the resume decision for a worktree row/submenu selection.
 
         ``no_mux`` (the Open sub-menu toggle, #1343) launches directly without
-        the PSMux/TMux wrapper. ``bare_resume`` (two-step restore) creates the
-        worktree's mux but launches Copilot in HOME with no --resume, so a CLI
-        bug that fails to start in a repo/worktree cwd is dodged; the operator
-        finishes with a manual ``/resume <id>``. ``seed_prompt``
-        (resume-prompt-durable-seed-and-mux-fix Phase 2, "Resume prompt…")
+        the PSMux/TMux wrapper. ``seed_prompt``
         is an optional prompt queued as this resume's next interactive turn,
         forwarded end-to-end the same way "New worktree…"'s own seed is.
         """
         raw = rec.get("raw") or {}
         m, e = rec.get("machine"), rec.get("env")
-        try:
-            is_local = self.src.is_local(m, e)
-        except RuntimeError as exc:
-            return {
-                "action": "resume", "deferred": True, "reason": str(exc),
-                "worktree_id": raw.get("id"), "is_local": None,
-            }
         decision = {
             "action": "resume",
+            "journal_action": "open" if rec.get("mux_live") else "resume",
             "worktree_id": raw.get("id"),
             "id4": rec.get("id4"),
             "machine": m,
             "env": e,
             "title": rec.get("title"),
-            "is_local": is_local,
+            "is_local": None,
         }
         opts = {}
         if no_mux:
             opts["no_mux"] = True
         if ahp:
             opts["ahp"] = True
-        if bare_resume:
-            opts["bare_resume"] = True
         if seed_prompt:
             opts["seed_prompt"] = seed_prompt
         if opts:
             decision["options"] = opts
+        try:
+            decision["is_local"] = self.src.is_local(m, e)
+        except RuntimeError as exc:
+            decision.update(deferred=True, reason=str(exc))
         return decision
     def _activate(self):
         zone = self.sel[0]
@@ -389,6 +398,8 @@ class PickerScreenMaintenanceActionsMixin:
             self.sel = ("BTN", 0)
         elif zone == "BTN":
             btn = self.active_button()
+            if btn in {"N", "K", "SY", "PA"} and picker_review.refuse(self):
+                return
             if btn == "ConfigEdit":
                 self._activate_config_section()
             elif btn == "N":
@@ -409,6 +420,13 @@ class PickerScreenMaintenanceActionsMixin:
                               f"{n} bridge/system worktree(s)")
                 if self.sel not in self.stops():
                     self.sel = self.default_sel()
+            elif btn == "TM":
+                self.include_maintenance = not getattr(self, "include_maintenance", False)
+                self.top = self._data_top = 0
+                self.debug = (
+                    "Tasks: work + maintenance" if self.include_maintenance
+                    else "Tasks: work only (maintenance hidden)"
+                )
             elif btn == "K":
                 self._open_cleanup()
             elif btn == "SY":
@@ -458,7 +476,7 @@ class PickerScreenMaintenanceActionsMixin:
              "hint": "new worktree, no Copilot bootstrap"},
             {"label": "No Mux", "on": False, "hint": "skip PSMux/TMux wrapper"},
         ]
-        if (tm, te) == self.src.LOCAL:
+        if (tm, te) == self._src_local():
             opts.append({
                 "label": "AHP",
                 "on": False,
@@ -473,16 +491,14 @@ class PickerScreenMaintenanceActionsMixin:
                "verb": "New worktree", "confirm": "Create",
                "prompt": f"Creates on {tm} {te} · options (none required):",
                "opts": opts}
-        # Prompt recovery currently supports only this execution environment.
-        show_prompt = _SEED_PROMPT_ENABLED and (tm, te) == self.src.LOCAL
-        scr = ScopeDlgScreen(dlg, show_prompt=show_prompt)
+        show_prompt = _SEED_PROMPT_ENABLED
+        scr = ScopeDlgScreen(
+            dlg, show_prompt=show_prompt, launch_local=(tm, te) == self._src_local(),
+            journal_enabled=self.real_ops,
+        )
 
         def _after(confirmed):
             if not confirmed:
                 return
-            on = {o["label"] for o in dlg["opts"] if o["on"]}
-            seed_prompt = ""
-            if show_prompt and not ({"Anchor repo", "Bare"} & on):
-                seed_prompt = scr.seed_prompt
-            self._confirm_new_worktree(dlg, seed_prompt=seed_prompt)
+            self._decide(scr.launch_decision)
         self.app.push_screen(scr, _after)

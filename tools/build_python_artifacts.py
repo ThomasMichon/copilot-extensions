@@ -83,8 +83,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from pathlib import Path
+from artifact_source_build import PromotionArtifactError, parse_wheel_identity
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uv_editable_ref as uer  # noqa: E402
@@ -115,8 +117,6 @@ MANIFEST_SCHEMA = "copilot-extensions.python-artifact-manifest"
 MANIFEST_SCHEMA_VERSION = 3
 
 _GENERATOR_RE = re.compile(r"^Generator:\s*(.+?)\s*$", re.MULTILINE)
-_BUILD_TAG_RE = re.compile(r"^[0-9][^-]*$")
-_VERSION_LIKE_RE = re.compile(r"^[0-9]")
 
 # Tags considered "universal" (compatible everywhere) -- any other tag is
 # strictly more specific and wins when picking the artifact set's own
@@ -228,7 +228,7 @@ def _validate_in_tree_lib_dir(label: str, unresolved: Path) -> Path:
         )
     if not (canonical / "pyproject.toml").is_file():
         raise ArtifactBuildError(f"{label}: {canonical}/pyproject.toml is missing")
-    nested = uer._find_symlink(canonical)
+    nested = uer._find_symlink(canonical, skip_test_runs=False)
     if nested is not None:
         where = canonical if nested == "." else canonical / nested
         raise ArtifactBuildError(
@@ -285,7 +285,7 @@ def _validate_editable_canonical_ref(
             f"{consumer_dir}: {name} -> {raw_path} (resolved {canonical}): "
             "pyproject.toml is missing"
         )
-    nested = uer._find_symlink(canonical)
+    nested = uer._find_symlink(canonical, skip_test_runs=False)
     if nested is not None:
         where = canonical if nested == "." else canonical / nested
         raise ArtifactBuildError(
@@ -374,7 +374,7 @@ def resolve_vendored_libs(consumer_dir: Path) -> list[tuple[str, Path]]:
         seen_dirs.add(current_r)
         if is_top_level:
             consumer_label = current_r.name
-            problems = uer.uv_editable_problems(consumer_label, current)
+            problems = uer.uv_editable_problems(consumer_label, current, repo=REPO)
             if problems:
                 raise ArtifactBuildError(
                     f"{current}: rejected by uv_editable_problems: "
@@ -431,7 +431,7 @@ def resolve_vendored_libs(consumer_dir: Path) -> list[tuple[str, Path]]:
 
 _PAYLOAD_IGNORE_DIR_NAMES = {
     ".git", ".venv", "__pycache__", ".pytest_cache", "build", "dist",
-    ".mypy_cache", ".ruff_cache",
+    ".mypy_cache", ".ruff_cache", ".test-runs",
 }
 _PAYLOAD_IGNORE_SUFFIXES = (".pyc", ".pyo")
 
@@ -452,6 +452,8 @@ def directory_content_hash(d: Path) -> str:
     the very input that produced it."""
     entries: list[tuple[str, str]] = []
     for p in sorted(d.rglob("*")):
+        if ".test-runs" in p.relative_to(d).parts:
+            continue
         if not p.is_file():
             continue
         rel_parts = p.relative_to(d).parts
@@ -493,48 +495,8 @@ def compute_payload_hash(dirs: list[Path]) -> str:
 
 
 def parse_wheel_filename(path: Path) -> dict[str, str]:
-    """Parses a wheel filename's identity components by tokenizing from the
-    RIGHT (PEP 427's own grammar: `{name}-{version}(-{build tag})?-{python
-    tag}-{abi tag}-{platform tag}.whl`). A well-formed wheel's distribution
-    `name` is ALWAYS exactly one `-`-delimited token (PEP 427 normalizes
-    `-`/`_`/`.` runs in the distribution name to a single `_`, specifically
-    so this split is never ambiguous) -- it is never reconstructed by
-    rejoining multiple tokens, which would silently accept a malformed,
-    non-normalized name (e.g. `demo-pkg-1.2.3-py3-none-any.whl`, whose
-    unnormalized `demo-pkg` literally contains the separator) and misparse
-    it as `name="demo", version="pkg"`. The three compatibility tags never
-    contain hyphens, so they are unambiguously the last three tokens; the
-    single token between `name` and those three tags is `version`, or --
-    if there are two such tokens -- `version` then an optional numeric
-    build tag. `version` is additionally required to look like a real
-    version (start with a digit, per PEP 440), closing the case above
-    where the naive split would otherwise accept a non-version token."""
-    if not path.name.endswith(".whl"):
-        raise ArtifactBuildError(f"{path}: not a well-formed wheel filename")
-    tokens = path.name[: -len(".whl")].split("-")
-    if len(tokens) < 5:
-        raise ArtifactBuildError(f"{path}: not a well-formed wheel filename")
-    platform_tag, abi_tag, python_tag = tokens[-1], tokens[-2], tokens[-3]
-    name = tokens[0]
-    middle = tokens[1:-3]
-    if len(middle) == 1:
-        version = middle[0]
-    elif len(middle) == 2 and _BUILD_TAG_RE.match(middle[1]):
-        version = middle[0]
-    else:
-        raise ArtifactBuildError(
-            f"{path}: not a well-formed wheel filename (ambiguous "
-            "distribution/version/build-tag split)"
-        )
-    if not name or not _VERSION_LIKE_RE.match(version):
-        raise ArtifactBuildError(f"{path}: not a well-formed wheel filename")
-    return {
-        "name": name,
-        "version": version,
-        "python_tag": python_tag,
-        "abi_tag": abi_tag,
-        "platform_tag": platform_tag,
-    }
+    """Keep the builder's public parser and error type over the pure shared grammar."""
+    return parse_wheel_identity(path, error_type=ArtifactBuildError, numeric_version=True)
 
 
 def _more_specific(a: str, b: str, *, slot: str) -> str:
@@ -632,6 +594,33 @@ def sha256_file(path: Path) -> str:
     return f"sha256:{h.hexdigest()}"
 
 
+def _build_child(command: list[str], environment: dict[str, str], deadline: float | None):
+    if deadline is None:
+        return subprocess.run(
+            command, capture_output=True, text=True, env=environment,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired(command, 0)
+    previous = sys.path.copy()
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "agent-procutil" / "src"))
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
+        import agent_procutil
+        from installer_engine_process import run_owned
+    finally:
+        sys.path[:] = previous
+    with tempfile.TemporaryFile() as ownership:
+        try:
+            return run_owned(
+                command, cwd=Path.cwd(), env=environment, timeout=remaining, deadline=deadline,
+                procutil=agent_procutil, construction_fd=ownership.fileno(),
+            )
+        except subprocess.CalledProcessError as error:
+            return subprocess.CompletedProcess(command, error.returncode, error.stdout, error.stderr)
+
+
 def build_wheel(
     source_dir: Path,
     out_dir: Path,
@@ -639,6 +628,12 @@ def build_wheel(
     python: str | None = None,
     toolchain: ToolchainLock | None = None,
     reserved_names: set[str] | None = None,
+    offline: bool = False,
+    uv: str = "uv",
+    deadline: float | None = None,
+    procutil=None,
+    construction_fd: int | None = None,
+    retained_runtime: tuple[Path, str, Path] | None = None,
 ) -> Path:
     """Builds a wheel for ``source_dir`` via `uv build --wheel`.
 
@@ -651,7 +646,10 @@ def build_wheel(
     517 build, resolving its build-system `requires` the normal way --
     which, on a correctly governed-feed-configured machine, already
     resolves only from that feed; this script adds no index configuration
-    of its own either way.
+    of its own either way. The explicit ``offline`` consumer path requires
+    an already admitted toolchain and retained runtime custody. It disables
+    indexes, configuration discovery, caches and Python downloads; requirement
+    checks and the build share the caller's deadline and owned-child scope.
 
     Builds into a fresh, empty temporary staging directory (never directly
     into ``out_dir``) and moves the single resulting wheel into ``out_dir``
@@ -673,12 +671,44 @@ def build_wheel(
     function's staging-directory design already handles (a prior
     invocation's own leftover wheel, which carries no in-progress
     ``reserved_names`` entry to collide with)."""
+    run = None
+    if offline:
+        if (
+            toolchain is None or deadline is None or procutil is None
+            or construction_fd is None or retained_runtime is None
+        ):
+            raise ArtifactBuildError("Offline source builds require retained toolchain and child custody")
+        from installer_dependency_policy import _select_uv_executable
+        from installer_engine_process import run_owned
+        from installer_wheel_inputs import _check_deadline
+
+        _check_deadline(deadline)
+        uv = _select_uv_executable(uv)
+        build_env = sanitize_subprocess_env()
+        strip_package_source_env_vars(build_env, strip_credentials=True)
+
+        def run(argv):
+            # UV receives its source explicitly; Windows cannot launch with a
+            # deeply retained source directory as the process working directory.
+            return run_owned(
+                argv, cwd=out_dir, env=build_env, timeout=deadline - time.monotonic(),
+                deadline=deadline, procutil=procutil, construction_fd=construction_fd,
+                runtime_root=retained_runtime[0], runtime_version=retained_runtime[1],
+                runtime_path=retained_runtime[2],
+            )
+
     out_dir.mkdir(parents=True, exist_ok=True)
     if toolchain is not None:
-        _assert_toolchain_satisfies_build_requires(source_dir, toolchain)
+        options = {"deadline": deadline} if deadline is not None else {}
+        if run is not None:
+            options["run"] = run
+        _assert_toolchain_satisfies_build_requires(source_dir, toolchain, **options)
     with tempfile.TemporaryDirectory(prefix="build-python-artifacts-") as staging:
         staging_dir = Path(staging)
-        cmd = ["uv", "build", "--wheel", "-o", str(staging_dir)]
+        cmd = [uv, "build", "--wheel", "-o", str(staging_dir)]
+        if offline:
+            cmd += ["--offline", "--no-index", "--no-config", "--no-cache",
+                    "--no-sources", "--no-python-downloads"]
         if toolchain is not None:
             cmd += ["--no-build-isolation", "--python", str(toolchain.venv_python)]
         elif python:
@@ -696,9 +726,7 @@ def build_wheel(
             # credential variables so it can authenticate), this build
             # subprocess has no such need and strips them too.
             strip_package_source_env_vars(build_env, strip_credentials=True)
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, env=build_env
-        )
+        result = run(cmd) if run is not None else _build_child(cmd, build_env, deadline)
         if result.returncode != 0:
             raise ArtifactBuildError(
                 f"uv build failed for {source_dir}:\n{result.stdout}\n{result.stderr}"
@@ -751,14 +779,7 @@ def read_project_version(project_dir: Path) -> str:
 def _assert_version_corresponds(
     *, raw_version: str, wheel_version: str, label: str
 ) -> None:
-    """A light sanity check that the wheel's PEP 440-normalized version
-    still corresponds to the raw, declared one -- this repo's one actual
-    convention is a hyphen before a pre/dev/post segment (e.g.
-    `"0.4.1-dev3"` -> `"0.4.1.dev3"`); anything that doesn't match even
-    that simple substitution indicates the two have genuinely diverged
-    (not just a normalization spelling difference), which must fail closed
-    rather than silently ship a manifest whose `version` field doesn't
-    actually correspond to what was built."""
+    """Accept the repository's hyphen-to-dot PEP 440 spelling convention only."""
     if raw_version.replace("-", ".") != wheel_version:
         raise ArtifactBuildError(
             f"{label}: declared version {raw_version!r} does not correspond "
@@ -796,7 +817,7 @@ def build_plugin_artifacts(
     plugin_dir = PLUGINS_DIR / plugin
     if not (plugin_dir / "pyproject.toml").is_file():
         raise ArtifactBuildError(f"{plugin_dir}: no pyproject.toml -- not a plugin")
-    plugin_nested_symlink = uer._find_symlink(plugin_dir)
+    plugin_nested_symlink = uer._find_symlink(plugin_dir, skip_test_runs=False)
     if plugin_nested_symlink is not None:
         where = plugin_dir if plugin_nested_symlink == "." else plugin_dir / plugin_nested_symlink
         raise ArtifactBuildError(
@@ -806,6 +827,12 @@ def build_plugin_artifacts(
         )
 
     vendored_libs = resolve_vendored_libs(plugin_dir)
+    if plugin == "agent-containers":
+        from plugin_runtime_resources import build_inputs
+        try:
+            build_inputs(plugin_dir, root=REPO)
+        except PromotionArtifactError as exc:
+            raise ArtifactBuildError(f"invalid Containers runtime build inputs: {exc}") from exc
 
     return build_source_artifacts(
         identity={"plugin": plugin}, source_dir=plugin_dir, dependencies=vendored_libs,
@@ -820,13 +847,28 @@ def build_source_artifacts(
 ) -> dict:
     """Shared locked wheel construction; callers own source discovery and admission."""
     standalone = "component" in identity
-    label = f"standalone-{identity['component']}" if standalone else identity["plugin"]
-    # Computed BEFORE any build runs: a build backend can leave residue
-    # inside the source tree itself (e.g. setuptools' build_meta creating a
-    # *.egg-info directory alongside the sources even for an isolated
-    # wheel build), and hashing after the fact would fold build output into
-    # the identity of the very input that produced it.
-    all_dirs = [source_dir, *(d for _name, d in dependencies), *resources]
+    return build_project_artifacts(
+        identity=identity,
+        projects=[("standalone" if standalone else "plugin", source_dir), *(
+            ("vendored-lib", directory) for _name, directory in dependencies
+        )],
+        raw_version=read_project_version(source_dir),
+        schema_version=4 if standalone else MANIFEST_SCHEMA_VERSION,
+        resources=resources, out_dir=out_dir, python=python, toolchain=toolchain,
+    )
+
+
+def build_project_artifacts(
+    *, identity: dict, projects: list[tuple[str, Path]], raw_version: str,
+    schema_version: int, resources: tuple[Path, ...], out_dir: Path,
+    python: str | None, toolchain: ToolchainLock | None,
+    selection: dict | None = None, payload_hash: str | None = None,
+) -> dict:
+    """One locked construction path for plugin, standalone and core wheel sets."""
+    from standalone_python_artifacts import artifact_label
+    label = artifact_label(identity)
+    # Hash before the backend can leave build/egg-info residue in its inputs.
+    all_dirs = [*(directory for _role, directory in projects), *resources]
 
     out_dir_r = out_dir.resolve()
     for d in all_dirs:
@@ -839,7 +881,8 @@ def build_source_artifacts(
                 "Choose an output directory outside every hashed source tree."
             )
 
-    payload_hash = compute_payload_hash(all_dirs)
+    if payload_hash is None:
+        payload_hash = compute_payload_hash(all_dirs)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     entries: list[dict] = []
@@ -848,13 +891,8 @@ def build_source_artifacts(
 
     with contextlib.ExitStack() as stack:
         if toolchain is None:
-            # `TemporaryDirectory()` creates its own directory immediately,
-            # but `resolve_toolchain_lock` publishes via renaming a staging
-            # directory ONTO the path it's given -- POSIX may replace an
-            # empty directory, but Windows `Path.rename()` always fails
-            # when the destination already exists, even empty. Pass a
-            # non-existent child of the cleanup root instead, so the venv
-            # path itself never pre-exists.
+            # Windows rename cannot publish onto an existing directory.
+            # Resolve into a nonexistent child of the temporary cleanup root.
             toolchain_root = Path(
                 stack.enter_context(
                     tempfile.TemporaryDirectory(prefix="build-python-artifacts-toolchain-")
@@ -878,33 +916,17 @@ def build_source_artifacts(
                 )
             return wheel, info, generator
 
-        plugin_wheel, plugin_info, plugin_generator = _build_and_verify(source_dir)
-        raw_version = read_project_version(source_dir)
-        _assert_version_corresponds(
-            raw_version=raw_version, wheel_version=plugin_info["version"], label=source_dir
-        )
-        wheel_infos.append(plugin_info)
-        entries.append(
-            {
-                "role": "standalone" if standalone else "plugin",
-                "name": plugin_info["name"],
-                "source": source_dir.resolve().relative_to(REPO.resolve()).as_posix(),
-                "filename": plugin_wheel.name,
-                "sha256": sha256_file(plugin_wheel),
-                "generator": plugin_generator,
-                "python_tag": plugin_info["python_tag"],
-                "abi_tag": plugin_info["abi_tag"],
-                "platform_tag": plugin_info["platform_tag"],
-            }
-        )
-
-        for lib_name, lib_dir in dependencies:
+        for role, lib_dir in projects:
             lib_wheel, lib_info, lib_generator = _build_and_verify(lib_dir)
+            _assert_version_corresponds(
+                raw_version=read_project_version(lib_dir), wheel_version=lib_info["version"],
+                label=lib_dir,
+            )
             wheel_infos.append(lib_info)
             rel_source = lib_dir.resolve().relative_to(REPO).as_posix()
             entries.append(
                 {
-                    "role": "vendored-lib",
+                    "role": role,
                     "name": lib_info["name"],
                     "source": rel_source,
                     "filename": lib_wheel.name,
@@ -933,7 +955,7 @@ def build_source_artifacts(
 
         manifest = {
             "schema": MANIFEST_SCHEMA,
-            "schema_version": 4 if standalone else MANIFEST_SCHEMA_VERSION,
+            "schema_version": schema_version,
             **identity,
             "version": raw_version,
             "python_tag": identity_tags["python_tag"],
@@ -944,10 +966,12 @@ def build_source_artifacts(
             "artifact_id": artifact_id,
             "wheels": entries,
         }
-        if standalone:
+        if "component" in identity or "composition" in identity:
             manifest["build_resources"] = [
                 path.resolve().relative_to(REPO.resolve()).as_posix() for path in resources
             ]
+        if selection is not None:
+            manifest["selection"] = selection
         manifest_path = out_dir / f"{label}-{raw_version}-manifest.json"
         manifest_path.write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -958,7 +982,13 @@ def build_source_artifacts(
 def main() -> int:
     from artifact_builder_cli import main as run
     from standalone_python_artifacts import build_standalone_artifacts
-    return run(build_plugin_artifacts, __doc__ or "", standalone_builder=build_standalone_artifacts)
+    def build_core_artifacts(**kwargs):
+        from core_python_artifacts import build_core_artifacts as build
+        return build(**kwargs)
+    return run(
+        build_plugin_artifacts, __doc__ or "", standalone_builder=build_standalone_artifacts,
+        core_builder=build_core_artifacts,
+    )
 
 
 if __name__ == "__main__":

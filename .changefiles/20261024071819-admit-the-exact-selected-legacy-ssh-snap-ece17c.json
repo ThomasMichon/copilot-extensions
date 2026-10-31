@@ -1,0 +1,9 @@
+{
+  "comment": "Admit the exact selected legacy SSH snapshot through the fixed installation driver while preserving canonical-installed bootstrap publication.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

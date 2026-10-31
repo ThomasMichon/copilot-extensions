@@ -3,6 +3,7 @@
 Subcommands:
   doctor         Audit managed OpenSSH fragments without changing them.
   emit-profile   Render/write a managed SSH profile fragment.
+  gateway-profile Emit named peer routes through an existing Gateway SSH alias.
   explore        Introspect a reachable SSH target (repos, runtimes, agents).
   mesh-status    Render the calling repo's SSH machine mesh from machines.yaml.
   refresh-mesh   Re-discover live tunnel ids, re-emit the profile, and verify
@@ -248,6 +249,17 @@ def _cmd_copilot_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_session_snapshot(args: argparse.Namespace) -> int:
+    from . import session_snapshot
+
+    value = session_snapshot.capture(path=args.path, config_d=args.config_d)
+    print(json.dumps(
+        {"additionalContext": session_snapshot.guidance(value)} if args.guidance else value,
+        ensure_ascii=True,
+    ))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-ssh",
@@ -255,6 +267,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="store_true", help="Show version and exit")
     sub = parser.add_subparsers(dest="command")
+    snapshot = sub.add_parser(
+        "session-snapshot", help="Read declared topology and local profile coverage without probing.",
+    )
+    snapshot.add_argument("--path", type=Path)
+    snapshot.add_argument("--config-d", type=Path)
+    snapshot.add_argument("--json", action="store_true")
+    snapshot.add_argument("--guidance", action="store_true", help=argparse.SUPPRESS)
+    snapshot.set_defaults(func=_cmd_session_snapshot)
 
     emit = sub.add_parser(
         "emit-profile",
@@ -407,6 +427,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     copilot_config_list.add_argument("--json", action="store_true")
     copilot_config_list.set_defaults(func=_cmd_copilot_config)
+
+    from .gateway_profile import add_parser as add_gateway_parser
+
+    add_gateway_parser(sub)
+
+    from .gateway_provider import add_parser as add_gateway_provider_parser
+
+    add_gateway_provider_parser(sub)
+
+    from .gateway_authorization import add_parser as add_gateway_authorization_parser
+
+    add_gateway_authorization_parser(sub)
 
     from .copilot_plugins import target_repo
     target_repo_parser = sub.add_parser(

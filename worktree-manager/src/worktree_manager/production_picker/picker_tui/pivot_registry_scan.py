@@ -20,6 +20,7 @@ from dropin_registry import (
     scan_directory,
 )
 from plugin_activation import ActivationReport, ActivePlugin, resolve_active_plugins
+from ... import picker_review
 
 from .pivot_actions import ManifestError, parse_config_sections, parse_worktree_actions
 from .pivot_manifest import (
@@ -634,7 +635,7 @@ def scan_pivot_registry(
     """Scan, classify, reconcile, and de-duplicate Picker contributions."""
     directory = pivots_dir(base)
     activation = activation_report or resolve_active_plugins()
-    if materialize and not os.environ.get(
+    if materialize and not picker_review.active() and not os.environ.get(
         "WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE"
     ):
         _materialize_active_pivots(directory, activation)
@@ -863,4 +864,3 @@ def ensure_pivots(
         else resolve_active_plugins()
     )
     return _materialize_active_pivots(pivots_dir(base), activation)
-

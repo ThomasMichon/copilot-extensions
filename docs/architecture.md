@@ -46,6 +46,19 @@ without Copilot or marketplace hooks. Its offline non-root container recipe
 and existing `container.service` role references do not themselves construct,
 place or activate a fleet workload. Native PR operation remains independent.
 
+The standalone [SSH service](../services/ssh/README.md) registers an explicit
+enrollment/public-directory control plane through the existing Gateway service
+channel. Declared principal/generation bindings gate automatic public-key
+admission; an optional explicit peer policy instead retains a pending public
+candidate until exact authenticated approval, with separately selected recovery.
+Durable revisions and bounded notifications let the existing machine
+Fleet owner converge agent-ssh profiles and native login authorization.
+Its offline container recipe is independent of Copilot or a source checkout.
+An optional owned, non-root Linux OpenSSH child provides the native relay with
+distinct relay keys and verified listener custody before registration. Native
+OpenSSH remains the data plane: this registration does not introduce generic
+TCP routing into the HTTP Gateway or complete managed SSH installation.
+
 The standalone [agent-chat-service](../services/chat/README.md) currently
 provides dependency-free conversation state and a callable RPC core, plus an
 explicit optional `service` role for independently installed foreground hosting.
@@ -71,7 +84,7 @@ managed cutover; those remain separate slices of the
 | [agent-codespaces](../plugins/agent-codespaces/) | CLI + credential relay | `~/.agent-codespaces/` | `~/.local/bin/agent-codespaces` | On-demand CLI; self-registers a `codespace:` namespace **provider** (+ credential relay) with the agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest — the daemon drives its binstub over a process boundary |
 | [agent-containers](../plugins/agent-containers/) | CLI + `container:` provider | `~/.agent-containers/` | `~/.local/bin/agent-containers` | On-demand CLI; self-registers a `container:` namespace **provider** with the agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest (process-boundary binstub invocation) |
 | [agent-mcp](../plugins/agent-mcp/) | Standalone MCP bridge (stdio) | `~/.agent-mcp/` | `~/.local/bin/agent-mcp` | Spawned per-call by an agent's `mcp-servers` entry; no bridge integration |
-| [agent-ssh](../plugins/agent-ssh/) | SSH profile emitter + verifier | `~/.agent-ssh/` | `~/.local/bin/agent-ssh` | On-demand CLI; owns SSH profile modules and read-only explicit static fleet target description |
+| [agent-ssh](../plugins/agent-ssh/) | SSH profile emitter + verifier | `~/.agent-ssh/` | `~/.local/bin/agent-ssh` | On-demand CLI; owns SSH profile modules, explicit static fleet target description and a read-only exact-session topology/profile snapshot (no probes or launch-time provisioning) |
 | [agent-logger](../plugins/agent-logger/) | Session-logging CLI + writer agent + local/rescue sync sources | `~/.agent-logger/` | `~/.local/bin/agent-logger` | On-demand CLI + a scheduled `session-sync` (Windows task / Linux systemd timer) |
 | [agent-dispatch](../plugins/agent-dispatch/) | Task-queue engine + per-host coordinator + CLI/MCP | `~/.agent-dispatch/` | `~/.local/bin/agent-dispatch` | On-demand CLI + optional always-on coordinator and label-gated embody supervisor(s) (Windows tasks / Linux systemd units) |
 | [agent-index](../plugins/agent-index/) | Lightweight retrieval CLI + managed host companion | `~/.agent-index/` (client and durable data); dispatch-owned host generations | `~/.local/bin/agent-index` | Explicit configured host service supervised and provisioned only by running agent-dispatch; independent warm engine unchanged |
@@ -92,7 +105,7 @@ managed cutover; those remain separate slices of the
 | [harness-knowledge](../plugins/harness-knowledge/) | Stateless-harness → knowledge-repo binding skill (`binding-knowledge`) | Marketplace payload (skill + configurator script) | Loaded on demand when a harness-setup prompt matches; no runtime to install |
 | [ai-attribution](../plugins/ai-attribution/) | Ambient publication-policy hook + publication/setup skills | Marketplace payload (hooks + dependency-free scripts + skills/docs/examples) | The hook emits a concise payload-cwd-gated policy kernel at session start; setup reconciles the static fallback; detailed publication workflow loads on demand; no runtime to install |
 | [delegation-guidance](../plugins/delegation-guidance/) | **Deprecated** — no-op pointer at `agent-conduct-guidance` | Marketplace payload (README pointer only) | Ships no skills or instruction projections; kept installable so the name keeps resolving for existing adopters |
-| [agent-conduct-guidance](../plugins/agent-conduct-guidance/) | Consolidated ambient conduct-guidance modules (headless-process-spawn instruction projection + `spawning-headless-processes` skill; coordinator-first delegation instruction projection + `delegating-work` skill, migrated from `delegation-guidance`; scratch-space hygiene instruction projection + `using-scratch-space` skill) | Marketplace payload (static instruction projections + skills) | No `sessionStart` hook; each module's projection is a checked-in static fallback; detailed per-module skills load on demand; no runtime to install |
+| [agent-conduct-guidance](../plugins/agent-conduct-guidance/) | Independent ambient conduct modules and task-time procedures, including charter-bounded useful autonomy and persistent operator effect-scope pre-clearance; the plugin README owns the module list | Marketplace payload (static instruction projections + skills) | No grant broker, automatic tool approval or runtime; original evidence and current limits remain with existing effort/checkpoint/resource owners |
 | [agent-remote-driver](../plugins/agent-remote-driver/) | User-global SDK extension — baseline session drivability (attach/send/steer/abort) over a loopback HTTP surface, independent of agent-bridge | Marketplace payload (extension only) | Extension is auto-discovered from the enabled plugin's `extensions/` dir, same mechanism as `context-handoff`'s; no daemon, no runtime to install; not yet default-enabled (`cli-default-bridging` effort, pre-validation) |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
@@ -529,12 +542,23 @@ flowchart TB
 
 `agent-dispatch` supplies the portable queue/lease authority agents coordinate
 through: a per-host loopback coordinator (`agent-dispatch serve`), a CLI and MCP
-surface, SSE events, and optional always-on **embody supervisors** that turn
-queued, label-gated tasks into autonomous bodies. The primary supervisor reads
-`~/.agent-dispatch/supervisor.env`; additional named profiles under
-`~/.agent-dispatch/supervisors/<name>.env` install as independent
-`agent-dispatch-supervisor-<name>` units/tasks using the same env schema, while
-the primary `agent-dispatch-supervisor` remains unchanged.
+surface, SSE events, and optional always-on supervisors that turn queued,
+label-gated tasks into autonomous bodies. The coordinator owns queue state;
+the separate supervisor daemon merges stored registrations and discovered
+declarations with operator overrides, then manages producer and worker-lane
+subprocesses. Each worker lane performs its own eligibility/capacity sweep and
+records reservations before invoking a backend. Coordinator garbage collection
+is not that allocation sweep, and an alive supervisor process does not prove
+its lane is advancing. Legacy env-profile launchers remain a separate
+configuration path. The
+[spawn supervisor guide](../plugins/agent-dispatch/docs/spawn-supervisor.md#coordinator-supervisor-daemon-and-worker-lanes)
+owns the process, routing and observability details.
+
+Current spawn reservation is separate from the embodied worker's task claim.
+The [current-versus-target assignment model](../plugins/agent-dispatch/docs/spawn-supervisor.md#assignment-lifecycle-current-versus-target)
+distinguishes that implementation from the intended pool-owned `CLAIMED`
+startup transaction and links its reviewed-repair proposal; the target is not
+an installed behavior claim.
 
 Producer creation can be fenced by a coordinator-owned, durable generation over
 one permanent canonical repo-lane + source scope. An optional immutable required
@@ -564,7 +588,7 @@ coordinator-hosted MCP expose the same status/handoff primitive and structured
 rejections; bounded content-free events make transitions and rejected creates
 observable without exposing task content, capabilities, or control credentials.
 
-Its eight-state lifecycle includes explicit owner-preserving **suspended** work:
+Its nine-state lifecycle includes explicit owner-preserving **suspended** work:
 `started → suspended` parks a dormant, non-claimable task without losing its
 owner/session or durable context; `resume` wakes that same owner, while `release`
 clears ownership and requeues it for replacement embodiment. Suspended tasks are
@@ -580,12 +604,16 @@ lease, so cutover promotion recovers interrupted work without allowing a
 passive candidate to steal an in-flight delivery. The bridge atomically
 rechecks the captured owner-session identity when it enqueues the wake.
 
-Local agent bodies acquire sessions through `agent-bridge`, selecting ACP or
-CLI without a capability fallback that changes mode. Workspace allocation and
-terminal reclamation remain ground-layer responsibilities, not a second
-session-launch implementation in dispatch. The task's queue lane and worker's
-execution project are separate identities; allocation and acquisition must
-retain the same execution workspace. See the
+Local ordinary headless workers use Bridge keyed create without a prompt,
+store/read back the exact returned identities, then send the initial task under
+its native-conversation fence. Bridge internally allocates or resolves the
+workspace before native startup. The explicit acquisition/CLI path instead
+records a prepared workspace before asking Bridge to acquire its session.
+These remain distinct paths; Bridge's separate venue `create --cli --detach`
+interface is not a keyed-creation substitute. Workspace allocation and terminal
+reclamation remain ground-layer responsibilities. The task's queue lane and
+worker's execution project are separate identities; allocation and acquisition
+must retain the same execution workspace. See the
 [shared workspace contract](patterns/workspace-allocation-and-session-acquisition.md)
 and [local session acquisition guide](../plugins/agent-dispatch/docs/session-acquisition.md).
 Ground `create --creation-key` retains allocation intent and its original

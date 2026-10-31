@@ -5,7 +5,7 @@
   worktree-backed agents of a project.
 - **Scope:** leaf (concrete component; child of the agent-fabric vision)
 - **Status:** Active
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-24
 - **Home:** delivered by the **Installer & Configurator** (the optional worktree-
   and agent-control-plane) — see [installer](../installer/README.md). It is an
   **optional** surface: the plugins provide the in-session tools agents use and
@@ -156,6 +156,18 @@ mechanism. Confirmed text reaches that authority intact, without shell
 interpretation. An unavailable or incompatible target reports the limitation
 without losing intent or repeating an admitted creation or handoff.
 
+### durable-launch-attempts
+Each confirmed New, Resume or Open action leaves a durable machine-local
+attempt record before allocation or launch effects, including selected venue,
+options and privately retained submitted text where applicable. The operator
+can inspect the attempt through actual allocation and backend outcomes across
+local and SSH boundaries. Missing completion evidence remains unknown or
+interrupted, never a success claim or authorization to replay. Prompt contents
+remain protected private recovery data with explicit retention, omitted from
+ordinary metadata listings and shared telemetry. Read-only inspection across
+selected machines preserves unavailable sources and requires explicit prompt
+retrieval. Audit history does not replace target-owned seed or launch authority.
+
 ### worktree-search-and-filter
 A lightweight, keyboard-summoned search narrows the worktree list by substring
 match across every identifying facet an operator actually recognizes a
@@ -230,6 +242,15 @@ machine-readable verbs, and any of the Picker's state could be reproduced from t
 same data. The UX adds no state that a `--json` consumer could not also obtain —
 the Picker is a view over programmatically-accessible truth, never a privileged
 one.
+
+### stateless-authentication-actions
+The Manager presents the [Vault service's](../vault/README.md) accumulated
+authentication-required requests, non-secret context and progress through its
+existing contribution and interaction model. The user can explicitly launch a
+supported browser or platform-native flow, dismiss the view or request
+cancellation. Vault owns credentials, durable transactions, authentication
+polling, retries and consumer-readiness outcomes; Manager owns none of them.
+Closing or replacing the Manager neither cancels nor loses accepted requests.
 
 ### auditable-testable-rendering
 The Picker's rendered output is **capturable and inspectable outside an
@@ -419,6 +440,9 @@ regression is something a test can catch before an operator does.
   grammar. Binding detail of that kind lives in the reality docs.
 
 ## See Also
+
+- Credential and authentication authority: [Vault](../vault/README.md) -
+  Manager is its stateless presentation client, not its lifecycle owner.
 
 - Parent vision: [agent-fabric](../agent-fabric/README.md) — the layered agent
   coordination fabric; the Picker is its front-door presentation surface, and the

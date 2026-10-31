@@ -1,0 +1,65 @@
+{
+  "comment": "Retain automatic-maintenance custody and headless first-touch interpreter/installer handoff with explicitly bound, concurrently forwarded native output and visible failure status; preserve manual-update project context and original typed source/project across self-staged teardown; route native Worktrees uninstall through the authenticated execution owner, canonical broker removal and finite teardown with external Python 3.11+; qualify exact staged publisher ancestry without exempting unrelated consumers; remove stale consumer source shadows and the duplicate Codespaces snapshot key; qualify real cold construction and serialized maintenance in disposable Windows CI.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    }
+  ]
+}

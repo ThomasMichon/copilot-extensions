@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid repeating finished-session cleanup for retained tombstones that cannot advance paired retirement.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

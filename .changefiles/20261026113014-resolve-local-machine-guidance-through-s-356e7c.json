@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve local machine guidance through shared optional-map context while preserving explicit binding and refusal diagnostics",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

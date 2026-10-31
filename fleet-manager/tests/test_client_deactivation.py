@@ -153,7 +153,7 @@ def test_foreign_replacement_after_partial_removal_is_preserved(selected, monkey
     target = activation._targets(namespace)[0]
     target.write_bytes(b"new foreign owner\n")
     before = states([target])
-    with pytest.raises(PlanError, match="unattributed"):
+    with pytest.raises(PlanError, match="client selectors could not establish owned withdrawal"):
         deactivate(root)
     assert states(before) == before and (namespace / activation.REMOVING).is_file()
 

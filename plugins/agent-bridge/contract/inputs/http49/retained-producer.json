@@ -1,0 +1,70 @@
+{
+  "schema": "http49-retained-producer-cases-v1",
+  "generation": 49,
+  "requests": {
+    "body": "retained original body",
+    "unsupported_contract": "retained-inbox-v2",
+    "outcomes": ["unknown", "sdk_accepted", "consumed"]
+  },
+  "expected": {
+    "consumer_schema": {"version": 32, "history_index": true, "retained_history_index": true},
+    "advertised": {"protocol_version": 49, "min_protocol_version": 1},
+    "unsupported_contract": 422,
+    "negotiate": {
+      "status": 200,
+      "contract": "retained-inbox-v1",
+      "exact_installation": true,
+      "epoch": 1,
+      "expected_incarnation": null
+    },
+    "enroll": 200,
+    "unsupported_interrupt": 409,
+    "ordinary_producer": {
+      "status": 200,
+      "stage": "admitted",
+      "same_keyed_retry": true,
+      "legacy_inbox_empty": true
+    },
+    "post_close_keyed_retry": {"status": 200, "duplicate": true, "same_message": true},
+    "changed_keyed_input": 409,
+    "poll": {
+      "status": 200,
+      "body": "retained original body",
+      "handoff_stage": "offered",
+      "same_message": true,
+      "same_handoff": true,
+      "unchanged_retry": true
+    },
+    "wrong_epoch": 409,
+    "begin": [{"begin": true}, {"begin": false}],
+    "native_rename": {
+      "original_row_unchanged": true,
+      "original_begin_refused": 409,
+      "original_retry_receipt": true,
+      "original_receipt_status": 200,
+      "successor_retry": 409,
+      "successor_receipt": 404,
+      "original_pending_visible": true,
+      "successor_pending_empty": true,
+      "new_key_refused": 409,
+      "aliases_removed": true
+    },
+    "alias_control_refusals": {
+      "startup": 409,
+      "readiness": 409,
+      "mode-ready": 409,
+      "mode": 409,
+      "no_new_control": true
+    },
+    "outcomes_after_close": [
+      {"stage": "unknown"},
+      {"stage": "sdk_accepted"},
+      {"stage": "consumed"}
+    ],
+    "duplicate_outcome": {"stage": "consumed"},
+    "retained": {"body": "retained original body", "delivered": true, "consumed": true},
+    "post_close_begin": 503,
+    "proxy": 409,
+    "unauthenticated": 401
+  }
+}

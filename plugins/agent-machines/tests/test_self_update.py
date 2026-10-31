@@ -1100,6 +1100,39 @@ def test_live_session_deferral_reason_reports_busy_worktree():
     assert reason == "live session is active in worktree busy worktree"
 
 
+@pytest.mark.parametrize(("returncode", "detail", "expected"), [
+    (3, "automatic-update KillSwitch active; nothing ran", "noop"),
+    (3, "engine configuration is unavailable", "error"),
+    (1, "automatic-update KillSwitch active; nothing ran", "error"),
+])
+def test_held_self_update_skips_restore_without_recording_success(
+    tmp_path, returncode, detail, expected,
+):
+    previous = "2026-09-14T09:05:00+00:00"
+    self_update.write_status(tmp_path, "sweep", success=previous)
+    calls = []
+
+    def runner(argv, *, cwd=None, timeout=0):
+        calls.append(argv)
+        assert argv[:3] == ["agent-worktrees", "-p", "copilot-extensions"]
+        return self_update.CommandResult(argv, returncode, "", detail)
+
+    result = self_update.run_tier(
+        "sweep", opted_in=True, discovered_repos=[], runner=runner, home=tmp_path,
+    )
+    assert calls == [[
+        "agent-worktrees", "-p", "copilot-extensions", "update", "--auto", "--no-manager",
+    ]]
+    assert result.status == result.steps[0].status == expected
+    assert result.ok is (expected == "noop")
+    assert detail in result.detail
+    assert result.success_at is None
+    status = self_update_state.tier_status(tmp_path, "sweep")
+    assert status.last_attempt == result.attempted_at
+    assert status.last_success == previous
+    assert not any(step.name == "restore" for step in result.steps)
+
+
 def test_sweep_continues_despite_unrelated_live_session_and_uses_repo_update_and_binstub_restore(
     tmp_path, monkeypatch
 ):
@@ -1152,6 +1185,7 @@ def test_sweep_continues_despite_unrelated_live_session_and_uses_repo_update_and
         "-p",
         "copilot-extensions",
         "update",
+        "--auto",
         "--no-manager",
     ]
     restore_step = next(step for step in result.steps if step.name == "restore")

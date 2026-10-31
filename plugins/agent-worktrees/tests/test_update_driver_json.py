@@ -34,7 +34,8 @@ def test_indicator_read_retains_its_existing_stdout_contract(monkeypatch):
     assert seen[0].json
 
 
-def test_stage_records_json_in_worker_but_default_caller_stays_quiet(monkeypatch):
+@pytest.mark.parametrize("automatic", [False, True])
+def test_stage_records_json_in_worker_but_default_caller_stays_quiet(monkeypatch, automatic):
     seen = {}
 
     def dispatch(verb, flags, args, execute, **kwargs):
@@ -42,8 +43,8 @@ def test_stage_records_json_in_worker_but_default_caller_stays_quiet(monkeypatch
         return 0
 
     monkeypatch.setattr(boundary, "_run_request", dispatch)
-    assert boundary.cmd_stage_request(_args()) == 0
-    assert seen == {"verb": "stage-update", "flags": ["--json"], "emit": False}
+    assert boundary.cmd_stage_request(_args(auto=automatic)) == 0
+    assert seen == {"verb": "stage-update", "flags": ["--json", *(["--auto"] if automatic else [])], "emit": False}
 
 
 def test_apply_retains_machine_repo_status_and_payload_intent(tmp_path, monkeypatch):
@@ -57,10 +58,10 @@ def test_apply_retains_machine_repo_status_and_payload_intent(tmp_path, monkeypa
     monkeypatch.setattr(boundary, "_run_request", dispatch)
     assert boundary.cmd_reconcile_request(_args(
         apply=True, repo="repo", status="status.json", machine="fixture",
-        with_payload_refresh=True,
+        with_payload_refresh=True, auto=True,
     )) == 0
     assert seen["flags"] == [
-        "--apply", "--repo", str(tmp_path / "repo"), "--status", str(tmp_path / "status.json"),
+        "--apply", "--auto", "--repo", str(tmp_path / "repo"), "--status", str(tmp_path / "status.json"),
         "--machine", "fixture", "--with-payload-refresh",
     ]
 
@@ -84,7 +85,9 @@ def test_protocol_output_limit_fails_without_silent_truncation():
 
 
 @pytest.mark.parametrize("emit_json", [False, True])
-def test_early_stage_failure_respects_stdout_contract(tmp_path, monkeypatch, capsys, emit_json):
+def test_early_stage_failure_preserves_unleased_status_and_stdout_contract(
+    tmp_path, monkeypatch, capsys, emit_json,
+):
     import update_driver
 
     def refuse():
@@ -92,6 +95,7 @@ def test_early_stage_failure_respects_stdout_contract(tmp_path, monkeypatch, cap
 
     status = tmp_path / "stage.json"
     status.write_text('{"stage_done":true,"plugin_changed":true}')
+    original = status.read_bytes()
     monkeypatch.setattr(boundary.update_stage, "status_path", lambda: status)
     monkeypatch.setattr(update_driver, "borrowed_custody", refuse)
     assert boundary.cmd_stage_request(_args(json=emit_json)) == 1
@@ -101,9 +105,77 @@ def test_early_stage_failure_respects_stdout_contract(tmp_path, monkeypatch, cap
         assert json.loads(result.out)["reason"] == "update-driver"
     else:
         assert result.out == ""
-    failed = json.loads(status.read_text())
-    assert failed["stage_done"] is False and failed["plugin_changed"] is False
-    assert failed["runtime_apply_blocked"] == "update-driver"
+    assert status.read_bytes() == original
+
+
+@pytest.mark.parametrize("publication", ["in-progress", "completion"])
+@pytest.mark.parametrize("emit_json", [False, True])
+def test_stage_error_reporting_cannot_overwrite_successor_completion(
+    tmp_path, monkeypatch, capsys, publication, emit_json,
+):
+    from contextlib import nullcontext
+    import update_driver
+
+    stage = boundary.update_stage
+    status, lock = tmp_path / "stage.json", tmp_path / "stage.lock"
+    successor = {"stage_done": True, "plugin_changed": True, "fingerprint": "successor"}
+    publish, release = stage._write_status, stage.release_lock
+    events = []
+
+    class Custody:
+        root = tmp_path
+        request_id = "fixture"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def assert_owned(self):
+            pass
+
+        def execution_scope(self):
+            return nullcontext()
+
+    def fail_publication(path, record):
+        if path != status:
+            return publish(path, record)
+        phase = "completion" if record["stage_done"] else "in-progress"
+        if phase == publication:
+            events.append("publication-failed")
+            raise OSError("synthetic status publication failure")
+        publish(path, record)
+
+    def release_then_complete(*args, **kwargs):
+        release(*args, **kwargs)
+        events.append("released")
+        assert stage.acquire_lock(lock), "successor must acquire the released kernel lease"
+        try:
+            publish(status, successor)
+            events.append("successor-completed")
+        finally:
+            release(lock)
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
+    monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: SimpleNamespace(
+        state="running", spec=SimpleNamespace(backend="engine", context=()),
+    ))
+    monkeypatch.setattr(boundary.update_driver_cli, "_execution_context", lambda _context: nullcontext())
+    monkeypatch.setattr(stage, "lock_path", lambda: lock)
+    monkeypatch.setattr(stage, "discover_plugin_dir", lambda _home: (None, "unavailable"))
+    monkeypatch.setattr(stage, "_write_status", fail_publication)
+    monkeypatch.setattr(stage, "release_lock", release_then_complete)
+
+    assert boundary.cmd_stage_request(_args(status=str(status), json=emit_json)) == 1
+    output = capsys.readouterr()
+    assert "synthetic status publication failure" in output.err
+    if emit_json:
+        assert json.loads(output.out)["reason"] == "update-driver"
+    else:
+        assert output.out == ""
+    assert events == ["publication-failed", "released", "successor-completed"]
+    assert json.loads(status.read_text()) == successor
 
 
 @pytest.mark.parametrize("phase", ["custody", "enqueue", "launch"])
@@ -137,6 +209,31 @@ def test_driver_refusal_replaces_previous_success_status(tmp_path, monkeypatch, 
     assert json.loads(capsys.readouterr().out)["ok"] is False
 
 
+def test_killswitch_noop_reports_reason_without_requiring_executor_result(tmp_path, monkeypatch, capsys):
+    import update_driver
+
+    reason = "automatic-update KillSwitch active; nothing ran"
+    request = SimpleNamespace(
+        id="synthetic", log_path=tmp_path / "request.log", state="completed",
+        exit_code=3, started_at=None, error=reason,
+    )
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(boundary.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(update_driver, "runtime_command", lambda *args: (("synthetic",), {}))
+    monkeypatch.setattr(update_driver, "enqueue", lambda *args, **kwargs: request)
+    monkeypatch.setattr(update_driver, "ensure_worker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(update_driver, "wait", lambda *args, **kwargs: request)
+    status_path = tmp_path / "status.json"
+    assert boundary.cmd_reconcile_request(_args(
+        apply=True, repo=str(tmp_path), status=str(status_path),
+    )) == 1
+    failure = json.loads(capsys.readouterr().out)
+    assert failure["message"] == reason
+    assert json.loads(status_path.read_text())["message"] == reason
+    assert not boundary._result_path(request).exists()
+
+
 @pytest.mark.parametrize("verb", ["stage-update", "reconcile-plugins"])
 def test_status_publication_failure_retains_original_json_error(tmp_path, monkeypatch, capsys, verb):
     import update_driver
@@ -155,9 +252,13 @@ def test_status_publication_failure_retains_original_json_error(tmp_path, monkey
     failure = json.loads(result.out)
     assert failure["reason"] == "update-driver"
     assert failure["message"] == "synthetic custody refusal"
-    assert failure["status_error"]
     assert "synthetic custody refusal" in result.err
-    assert "Update failure status could not be written" in result.err
+    if verb == "reconcile-plugins":
+        assert failure["status_error"]
+        assert "Update failure status could not be written" in result.err
+    else:
+        assert "status_error" not in failure
+        assert "Update failure status could not be written" not in result.err
     assert blocked.read_text() == "unrelated"
 
 
@@ -166,7 +267,7 @@ def test_queued_json_round_trip_returns_original_payload_and_exit(tmp_path, monk
 
     request = SimpleNamespace(
         id="fixture", state="completed", exit_code=5, error="canonical failure",
-        log_path=tmp_path / "fixture.log",
+        log_path=tmp_path / "fixture.log", started_at=1.0,
     )
     boundary._publish_result(request, '{"executed":[{"ok":false}]}')
     seen = {}
@@ -246,6 +347,52 @@ def test_nested_update_participant_returns_json_without_recursive_enqueue(
     assert scoped == ["begin", "execute", "end"]
 
 
+@pytest.mark.parametrize("backend", ["manager", "engine"])
+def test_real_manual_custody_covers_inner_reconcile_under_active_auto_hold(
+    tmp_path, monkeypatch, capsys, backend,
+):
+    import update_driver
+    import sys
+    from pathlib import Path
+    from update_driver import core
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    queue = tmp_path / ".copilot-extensions" / "update-driver"
+    hold = tmp_path / "hold.json"
+    hold.write_text('{"active":true}', encoding="utf-8")
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(hold))
+    monkeypatch.setattr(core, "default_root", lambda: queue)
+    request = core.enqueue(
+        core.RequestSpec(backend, repair=True),
+        runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
+    )
+    executions = []
+
+    def reconcile(args):
+        assert args.apply
+        assert update_driver.participant_environment()
+        running = core.status(request.id)
+        assert running.state == "running" and running.spec.repair
+        executions.append(running.id)
+        print('{"executed":[]}')
+        return 0
+
+    monkeypatch.setattr(boundary.update_cli, "cmd_reconcile_plugins", reconcile)
+
+    def execute(transaction):
+        with monkeypatch.context() as environment:
+            for key, value in transaction.participant_env().items():
+                environment.setenv(key, value)
+            return boundary.cmd_reconcile_request(_args(apply=True))
+
+    assert core.drain(executor=execute) == 0
+    assert core.wait(request.id).exit_code == 0
+    assert executions == [request.id]
+    assert len(core.status()) == 1
+    assert json.loads(hold.read_text()) == {"active": True}
+    assert json.loads(capsys.readouterr().out) == {"executed": []}
+
+
 def test_actual_empty_inventory_apply_uses_worker_and_retains_json(tmp_path, monkeypatch):
     import sys
     from agent_procutil.owned_process import run_owned
@@ -272,3 +419,91 @@ def test_actual_empty_inventory_apply_uses_worker_and_retains_json(tmp_path, mon
     assert len(requests) == 1
     assert requests[0].spec.backend == "engine-reconcile-plugins"
     assert requests[0].state == "completed"
+
+
+@pytest.mark.parametrize("exit_code", [0, 2])
+def test_retained_dev_release_uses_finite_driver_and_actual_isolated_command(
+    tmp_path, monkeypatch, capsys, exit_code,
+):
+    import os
+    import sys
+    import sysconfig
+    import venv
+    import update_driver
+    from update_driver import core
+    from agent_procutil import direct_python
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.delenv("UPDATE_DRIVER_WITNESS", raising=False)
+    root, queue = tmp_path / "runtime", tmp_path / "driver"
+    slot = root / "versions" / "dev"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if os.name == "nt":
+        for launcher in python.parent.glob("*.exe"):
+            launcher.chmod(0o700)
+    site = slot / ("Lib/site-packages" if os.name == "nt" else
+                   f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
+    # The fixture command exercises the real adapter/driver process boundary,
+    # but never installs, restores or adopts a host runtime.
+    (site / "driver.pth").write_text(
+        f"import site; site.addsitedir({sysconfig.get_path('purelib')!r})\n", encoding="utf-8",
+    )
+    package = site / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    payload = {"runtime_version": "original"} if not exit_code else {"error": "owner mismatch"}
+    (package / "__main__.py").write_text(
+        "import json,pathlib,sys\n"
+        "import update_driver\n"
+        f"assert pathlib.Path(sys.prefix).resolve() == pathlib.Path({str(slot)!r}).resolve()\n"
+        "assert sys.flags.isolated and sys.flags.dont_write_bytecode\n"
+        "assert sys.argv[1:] == ['dev-release', '--json']\n"
+        f"with update_driver.borrowed_custody(root=pathlib.Path({str(queue)!r})) as custody:\n"
+        "    custody.assert_owned()\n"
+        "    request = update_driver.status(custody.request_id, root=custody.root)\n"
+        f"    assert request.spec.source == {str(root.resolve())!r}\n"
+        f"    request.log_path.with_suffix('.result.json').write_text({json.dumps(payload)!r})\n"
+        f"raise SystemExit({exit_code})\n",
+        encoding="utf-8",
+    )
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir()
+    (bootstrap / "runtime_launcher.py").write_text(
+        "raise RuntimeError('immutable dev launcher must not run')\n", encoding="utf-8",
+    )
+    executable, environment = direct_python(str(python))
+    monkeypatch.setattr(boundary.sys, "prefix", str(slot))
+    monkeypatch.setattr(boundary.sys, "executable", str(python))
+    monkeypatch.setattr(boundary.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(boundary.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(core, "default_root", lambda: queue)
+    monkeypatch.setattr(update_driver, "runtime_command", lambda *a, **k: pytest.fail("immutable bootstrap"))
+    monkeypatch.setattr(update_driver, "ensure_worker", lambda *a, **k: pytest.fail("background worker"))
+    assert boundary._run_request(
+        "dev-release", ["--json"], _args(), lambda _args: pytest.fail("not a participant"),
+        retained_dev=True,
+    ) == exit_code
+    assert json.loads(capsys.readouterr().out) == payload
+    request, = core.status(root=queue)
+    assert request.state == "completed" and request.exit_code == exit_code
+    assert request.runner.argv == (executable, "-I", "-B", "-m", "agent_worktrees", "dev-release", "--json")
+    assert dict(request.runner.env) == environment
+
+
+@pytest.mark.parametrize("fault", ["verb", "detached", "slot"])
+def test_retained_dev_execution_refuses_other_operations_before_enqueue(tmp_path, monkeypatch, capsys, fault):
+    import update_driver
+
+    monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(boundary.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(boundary.sys, "prefix", str(tmp_path / "versions" / (
+        "numbered" if fault == "slot" else "dev"
+    )))
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(update_driver, "enqueue", lambda *a, **k: pytest.fail("invalid operation enqueued"))
+    assert boundary._run_request(
+        "stage-update" if fault == "verb" else "dev-release", ["--json"],
+        _args(detach=fault == "detached"), lambda _args: 0, retained_dev=True,
+    ) == 1
+    assert json.loads(capsys.readouterr().out)["reason"] == "update-driver"

@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve literal Manager pane environment assignments while retaining opaque-renderer eligibility fences",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

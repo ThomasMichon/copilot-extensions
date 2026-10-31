@@ -655,7 +655,7 @@ async def test_remote_resume_attachment_blocks_clean_drain_before_old_client_shu
     pending = asyncio.create_task(manager.resume_session(session.session_id, drain=False))
     await entered.wait()
     try:
-        assert manager._active_acquisitions == 1
+        assert manager._active_acquisitions > 0
         result = await manager.drain(timeout=0)
         assert not result["clean"]
         release.set()

@@ -3,6 +3,20 @@
 GitHub Codespaces lifecycle management, SSH transport, and credential relay
 for Copilot CLI.
 
+Default native `uninstall` removes only explicitly named runtime code and
+selectors. Operator configuration, databases, adoption/account bindings, locks,
+SSH configuration, sockets, logs and unknown entries remain in the install
+root. Removal requires matching deployment ownership and an installer-engine
+with entry-list support. Foreign roots and linked ancestry refuse before
+removal; unowned binstubs remain untouched. Connection Owner registration and active/reconnect transport
+receipts also refuse; uninstall does not stop the owner or close SSH masters.
+The canonical uninstall engine holds runtime, snapshot and redirect-publication
+custody throughout finite native cleanup. Persistent lease files alone are not
+busy and retain their inodes; actual conflicting owners refuse admission.
+Every native mutating lifecycle action shares the install transaction inode;
+Bash uses an attached standard-library owner rather than depending on `flock`.
+Existing native dry runs perform read-only admission and remove nothing.
+
 ## Overview
 
 A copilot-extensions plugin that provides:
@@ -84,6 +98,13 @@ helper deployment from authenticated hooks: Session Hosts deploy helpers first,
 verify the real relay, then run hooks in the login-shell launch environment
 before plugin preparation.
 
+Pre-plugin relay readiness has a 30-second total budget: up to 20 seconds for
+SSH startup and transport retries, with 10 seconds reserved for owned SSH
+cancellation cleanup. Windows process-tree termination is bounded to 3 seconds
+before killing and reaping the SSH root; cancellation does not detach its reaper.
+Each remote ping remains bounded to 3 seconds; a relay that never answers still
+blocks launch.
+
 Attached CLI launches retain their foreground-owned relay fallback when the
 Connection Owner is unavailable. Its event loop supervises the forward until the
 interactive child exits, while SSH retains the main thread and terminal signals.
@@ -95,6 +116,15 @@ Attached checkout-creating hooks receive the same relay launch prelude inside
 their login shell, including on a cold foreground fallback without cached auth.
 Full SSH provisioning and fresh `create` provisioning carry that context too;
 fresh creation also supplies it to authenticated control-repository bootstrap.
+
+Connection Owner retirement waits for its already-admitted native work: late
+factory results remain in channel custody, mirror append/push work keeps its
+slot and OS lock until settled, and channel teardown waits for native process
+and registered proxy cleanup rather than relying on forward health. Repeated
+cancellation does not abandon teardown. The beacon's bounded `stop()` remains
+unchanged; daemon finalization additionally joins its thread before withdrawing
+liveness. Shutdown never starts an unstarted transport or replays an unknown
+transcript push, and dirty/prune markers retain any owed work for a later Owner.
 
 `ssh`, `copilot`, and `namespace-resolve` accept repeatable
 `--stage-plugin SOURCE` and `--stage-plugin-disabled SOURCE`. The latter preserves
@@ -136,10 +166,22 @@ provision status or orchestration locks; context validation alone is not
 deployment permission. Missing or older admission support produces an explicit
 readiness error rather than an alternate installer or completion parser.
 
+On Windows, initial installation `status` and selected-context `validate`
+reads may use the payload's canonical SDK in a fresh isolated, no-site Python
+process. The [independent bootstrap selector](../../docs/install-contract.md#independent-windows-evaluator-bootstrap)
+admits a registered signed CPython base before it executes; PATH and the
+addressed runtime do not establish admission. Missing optional support or an
+unavailable base selects native PowerShell before evaluation. Once selected,
+interpreter/SDK failures are terminal, not a reason to try another evaluator.
+The file guard is released before ordinary package-site/runtime resolution;
+publication admission and provisioning retain their existing ordering.
+
 Windows stamping captures the private snapshot candidate's canonical source
 before publishing the command and replacing the previous selection. Failed
 resolver or command publication leaves that previous snapshot and its selectors
 intact. Resolver destinations must be files, not directories.
+Checkout-stamped Windows snapshots retain the declared local dependency graph,
+including the bootstrap driver, for provisioning without the original checkout.
 The global command binds configuration and provisioning to its installed root.
 The generated PowerShell command uses UTF-8 with a BOM so Windows PowerShell
 5.1 preserves non-ASCII installation paths.
@@ -152,7 +194,47 @@ user-global commands; ordinary install/update/stamp retain their command
 publication responsibilities. An incomplete selected slot remains a cold
 candidate rather than a silent POSIX dispatcher exit.
 
+### Session bootstrap execution
+
+The legacy/default session bootstrap submits cold `stamp` and installed-payload
+version-drift `provision` actions to the same durable installation driver. Its
+self-contained foundation ships through canonical dependency materialization;
+it does not require Manager, another plugin or an existing Python runtime for
+the first stamp. POSIX drift detection retains its existing Python metadata
+reader. The hook uses its own canonical installed payload and default legacy
+root, not the deployment manifest's potentially different source.
+
+Direct POSIX installer mutation requires either native `flock` or an already
+available bootstrap Python for the same install-inode transaction. Native
+`flock` permits Python-free cold stamping; the Python fallback supports Bash
+3.2. If neither capability exists, the installer refuses without provisioning
+one. Read-only `status` requires neither capability.
+
+The existing 15-second hook returns `{}` after bounded native launch admission.
+Its diagnostic acknowledgement identifies a supervisor and log, **not** durable
+queue acceptance or installation success. Read the ordinary request receipt
+and final result in that log/queue. The driver owns construction and native
+installer execution independently of the caller; the hook never runs an
+installer in the foreground or reaps an age/PID marker.
+
+Healthy runtime detection remains a no-op. Managed publication, pinned reads,
+no-self-provisioning, nested custody, missing/skewed driver support and
+unsupported source/installation selection retain explicit refusal or defer
+outcomes without another installer fallback. First stamp preserves native
+Windows snapshot versus POSIX payload-pointer behavior. Drift preserves the
+canonical config-derived Connection Owner reconciliation, including disabled
+and unknown configuration; no client-only service flag is introduced.
+Provider registration and exact-session guidance remain independent hooks.
+This migration does not cover primary/payload command publishers, selected
+snapshots, explicit installers or namespaced/custom-root bootstrap publication.
+
 ## Configuration
+
+Runtime-home overrides are anchored to the selecting process's cwd and
+normalized lexically, including `..`, before daemon reservation or admission.
+The owner child receives that same canonical home even when launched from
+HOME. Filesystem links are not resolved away; instance custody checks still
+refuse redirected runtime roots.
 
 **Most repos need no config at all.** agent-codespaces works out of the box on
 standard GitHub CodeSpaces by **convention**:

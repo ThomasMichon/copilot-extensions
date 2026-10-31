@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from agent_procutil import spawn_daemon
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
+
 import argparse
 import os
 import subprocess
@@ -279,7 +282,8 @@ _BACKGROUND_AUTH_ENV_KEYS = {
 def _background_environment() -> dict[str, str]:
     """Environment for resident helpers, excluding session credentials."""
     return {
-        key: value for key, value in os.environ.items()
+        key: os.path.abspath(value.strip()) if key.upper() == "AGENT_HOME" and value.strip()
+        else value for key, value in os.environ.items()
         if key.upper() not in _BACKGROUND_AUTH_ENV_KEYS
     }
 
@@ -342,28 +346,20 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
         if path:
             argv += ["--path", path]
 
-        kwargs: dict = {
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
-            # Never inherit the spawner's cwd.  Both spawn seams -- the launcher
-            # and the sessionStart reseed hook -- run FROM the plugin payload
-            # dir, and a detached child that keeps that dir as its cwd holds an
-            # open directory handle that blocks ``copilot plugin update`` from
-            # replacing the payload on Windows (``os error 32``: the file/dir is
-            # in use).  The updater locates its worktree via ``--path``, so its
-            # cwd is irrelevant to its work -- root it at HOME.
-            "cwd": os.path.expanduser("~"),
-            "env": _background_environment(),
-        }
-        kwargs.update(_core().windowless_daemon_kwargs(breakaway=True))
-
-        subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
+        root = Path(os.path.abspath(cfg.install_dir()))
+        spawn_daemon(
+            argv, cwd=os.path.expanduser("~"), env=_background_environment(),
+            log_path=root / "logs" / "status-updater.log", console_children=True,
+            instance=DaemonInstanceSpec(
+                "agent-worktrees-status-updater", root, Path(__file__).resolve(),
+            ),
+        )
         return True
     except Exception:
         return False
 
 
+@daemon_entrypoint("agent-worktrees-status-updater", source=__file__, purpose="production")
 def cmd_status_updater(args: argparse.Namespace) -> int:
     """Keep a session's status-bar vars fresh without per-render spawns.
 

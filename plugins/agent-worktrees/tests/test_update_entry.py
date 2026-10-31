@@ -82,7 +82,10 @@ def update_entry_case(tmp_path: Path, monkeypatch, request):
     }
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    for key in ("WORKTREE_MANAGER_ROOT", "AGENT_WORKTREES_CONTROL_PLANE_PROVIDER"):
+    for key in (
+        "WORKTREE_MANAGER_ROOT", "AGENT_WORKTREES_CONTROL_PLANE_PROVIDER",
+        "WORKTREE_MANAGER_BOOTSTRAP_REPO", "WORKTREE_MANAGER_BOOTSTRAP_REF",
+    ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR", raising=False)
     if os.name == "nt":
@@ -128,9 +131,7 @@ def test_update_entry_fetches_before_python(update_entry_case, front, runtime, n
     result = subprocess.run([*command, "update", *flags], capture_output=True, timeout=15)
     assert result.returncode == 23, result.stderr.decode()
     assert _arguments(tmp / "bootstrap.args") == [
-        "--repair-update",
-        "https://github.com/ThomasMichon/copilot-extensions.git",
-        "main",
+        "--bootstrap-update",
         "update",
         "--project",
         "sample",
@@ -149,6 +150,9 @@ def test_update_entry_fetches_before_python(update_entry_case, front, runtime, n
         ["--project", "sample", "status"],
         ["update", "--no-manager"],
         ["update", "--auth-report"],
+        ["update", "--phase", "preflight", "--plugin", "agent-example"],
+        ["update", "--phase=runtimes", "--plugin=agent-example"],
+        ["update", "--plugin", "agent-example"],
         ["update", "--request-status", "synthetic-request"],
         ["update", "--request-status=synthetic-request"],
         ["update", "--recovery-status"],
@@ -168,6 +172,59 @@ def test_update_entry_leaves_other_calls_unchanged(update_entry_case, native_bas
     assert result.returncode == 19, result.stderr.decode()
     assert (tmp / "resolved").exists()
     assert not (tmp / "curl.args").exists()
+
+
+@pytest.mark.parametrize("front", ["global", "installed-project"])
+@pytest.mark.parametrize("ready", [False, True])
+@pytest.mark.parametrize("flags", [
+    ["--phase", "preflight", "--plugin", "agent-example"],
+    ["--phase=runtimes", "--plugin=agent-example"],
+    ["--plugin", "agent-example"],
+    ["--inventory", "--json"],
+    ["--target", "agent-example"],
+    ["--target=agent-example"],
+])
+def test_selected_update_operation_refuses_implicit_posix_bootstrap(
+    update_entry_case, monkeypatch, native_bash, front, ready, flags,
+):
+    tmp, home, resolver = update_entry_case
+    monkeypatch.delenv("AGENT_WORKTREES_NO_SELFPROVISION")
+    installer = home / ".copilot/installed-plugins/fixture/agent-worktrees/scripts/install.sh"
+    installer.parent.mkdir(parents=True)
+    installer.write_text(
+        '#!/bin/sh\nprintf unexpected > "$MANAGER_CALLED"\nexit 99\n',
+    )
+    if not ready:
+        resolver.unlink()
+    if front == "installed-project":
+        user_bin = home / ".local/bin"
+        user_bin.mkdir(parents=True)
+        for name in (
+            "agent-worktrees", "agent-worktrees-update-entry.sh",
+            "agent-worktrees-update-entry.ps1",
+        ):
+            shutil.copy2(PLUGIN / "bin" / name, user_bin / name)
+        rendered = project_command_templates.render(
+            "sample", PLUGIN, windows=False, user_bin=user_bin,
+        )
+        entry = tmp / "sample"
+        entry.write_text(rendered["sample"])
+        command = [native_bash, str(entry)]
+    else:
+        command = [native_bash, str(PLUGIN / "bin/agent-worktrees"), "--project", "sample"]
+    result = subprocess.run(
+        [*command, "update", *flags], capture_output=True, timeout=15,
+    )
+    assert result.returncode == (19 if ready else 127), result.stderr.decode()
+    if ready:
+        assert _arguments(tmp / "python.args") == [
+            "-m", "agent_worktrees", "--project", "sample", "update", *flags,
+        ]
+    else:
+        assert not (tmp / "python.args").exists()
+    assert not (tmp / "curl.args").exists()
+    assert not (tmp / "manager-called").exists()
+    assert not (home / ".agent-worktrees/.provision-status").exists()
 
 
 def test_update_entry_preserves_download_failure(update_entry_case, monkeypatch, native_bash):
@@ -197,7 +254,7 @@ def test_update_entry_transports_invocation_directory(update_entry_case, native_
     assert (tmp / "context").read_text() == str(invocation)
 
 
-def test_update_entry_preserves_source_ref(update_entry_case, native_bash):
+def test_update_entry_runtime_source_does_not_redirect_bootstrap(update_entry_case, native_bash):
     tmp, home, _resolver = update_entry_case
     root = home / ".worktree-manager"
     root.mkdir()
@@ -210,13 +267,9 @@ def test_update_entry_preserves_source_ref(update_entry_case, native_bash):
         timeout=15,
     )
     assert result.returncode == 23
-    assert _arguments(tmp / "bootstrap.args")[:3] == [
-        "--repair-update",
-        "https://github.com/example/fork.git",
-        "release/canary",
-    ]
+    assert _arguments(tmp / "bootstrap.args") == ["--bootstrap-update", "update"]
     assert _arguments(tmp / "curl.args")[1] == (
-        "https://raw.githubusercontent.com/example/fork/release/canary/worktree-manager/bootstrap.sh"
+        "https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/worktree-manager/bootstrap.sh"
     )
 
 
@@ -238,9 +291,7 @@ def test_update_entry_uses_registered_nondefault_root(update_entry_case, native_
         capture_output=True, timeout=15,
     )
     assert result.returncode == 23, result.stderr.decode()
-    assert _arguments(tmp / "bootstrap.args")[:3] == [
-        "--repair-update", "https://github.com/example/registered.git", "canary",
-    ]
+    assert _arguments(tmp / "bootstrap.args") == ["--bootstrap-update", "update"]
     assert not (home / ".worktree-manager").exists()
 
 
@@ -254,7 +305,7 @@ def test_update_entry_uses_registered_nondefault_root(update_entry_case, native_
         '"repo" = "https://github.com/example/fork.git"',
     ],
 )
-def test_update_entry_refuses_unrepresentable_source(update_entry_case, native_bash, source):
+def test_update_entry_leaves_source_validation_to_bootstrap(update_entry_case, native_bash, source):
     tmp, home, _resolver = update_entry_case
     root = home / ".worktree-manager"
     root.mkdir()
@@ -266,9 +317,9 @@ def test_update_entry_refuses_unrepresentable_source(update_entry_case, native_b
         capture_output=True,
         timeout=15,
     )
-    assert result.returncode == 126
+    assert result.returncode == 23
     assert config.read_text() == data
-    assert not (tmp / "curl.args").exists()
+    assert _arguments(tmp / "bootstrap.args") == ["--bootstrap-update", "update"]
     assert not (tmp / "resolved").exists()
 
 
@@ -374,7 +425,6 @@ def test_update_entry_powershell_before_runtime(
     update_entry_case, native_powershell, source_kind,
 ):
     tmp, home, _resolver = update_entry_case
-    repo, ref = "https://github.com/ThomasMichon/copilot-extensions.git", "main"
     if source_kind != "default":
         root = home / ".worktree-manager"
         root.mkdir()
@@ -384,8 +434,6 @@ def test_update_entry_powershell_before_runtime(
             f'[{table}]\nrepo = "{configured}"\nref = '
             + ('"unterminated' if source_kind == "malformed" else '"release/canary"\n'),
         )
-        if source_kind == "fork":
-            repo, ref = configured, "release/canary"
     downloaded = tmp / "download.ps1"
     downloaded.write_text(
         "$json = ConvertTo-Json -Compress -InputObject @($args)\n"
@@ -406,16 +454,9 @@ def test_update_entry_powershell_before_runtime(
         timeout=30,
         **no_window_kwargs(),
     )
-    if source_kind == "malformed":
-        assert result.returncode != 0
-        assert not (tmp / "bootstrap.args").exists()
-        assert not (tmp / "python.args").exists()
-        return
     assert result.returncode == 23, result.stderr.decode()
     assert json.loads((tmp / "bootstrap.args").read_text()) == [
-        "--repair-update",
-        repo,
-        ref,
+        "--bootstrap-update",
         "update",
         "--project",
         "sample",
@@ -427,7 +468,7 @@ def test_update_entry_powershell_before_runtime(
 
 
 def test_update_entry_helpers_are_in_publication_inventory():
-    tree = ast.parse((PLUGIN / "scripts/runtime_install_publication.py").read_text())
+    tree = ast.parse((PLUGIN / "scripts/runtime_install_publication.py").read_text(encoding="utf-8"))
     inventory = next(
         ast.literal_eval(node.value)
         for node in tree.body
@@ -437,5 +478,5 @@ def test_update_entry_helpers_are_in_publication_inventory():
     expected = {"agent-worktrees-update-entry.sh", "agent-worktrees-update-entry.ps1"}
     assert expected <= set(inventory)
     for shell in ("sh", "ps1"):
-        installer = (PLUGIN / "scripts" / f"install.{shell}").read_text()
+        installer = (PLUGIN / "scripts" / f"install.{shell}").read_text(encoding="utf-8")
         assert "agent-worktrees-update-entry.sh" in installer

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import argparse
 import dataclasses
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -25,6 +26,7 @@ def _cold_probe_boundary(monkeypatch):
 
 
 def _record(tmp_path):
+    (tmp_path / "checkout").mkdir(exist_ok=True)
     project_dir = cfg.project_dir("demo")
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / "config.yaml").write_text(json.dumps({
@@ -33,15 +35,254 @@ def _record(tmp_path):
     }), encoding="utf-8")
     return tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "checkout"), "demo", "test",
-        "windows", tmp_path,
+        "windows", project_dir / "worktrees",
     ).yaml_path
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_embody_native_startup_defers_claim_to_real_invocation(tmp_path, monkeypatch, explicit):
+    from agent_worktrees import embody_completion, embody_resume
+
+    path = _record(tmp_path)
+    text = "literal ' \"\n--resume=not-an-option \u03a9"
+    original = state.stage(path, kind="new", text="old" if explicit else text)
+    command, seed_id = embody_completion.prepare_startup_seed(
+        ["copilot"], path, text, explicit=explicit,
+    )
+    staged = state.peek(path)
+    assert staged.text == text and staged.handoff_id is None
+    assert seed_id == staged.seed_id
+    assert (seed_id != original.seed_id) is explicit
+    assert text not in command
+    assert command[-2:] == ["--", "copilot"]
+    assert command[command.index("--seed-id") + 1] == seed_id
+    native_command = embody_resume.with_resume(command, "history-id")
+    delimiter = native_command.index("--")
+    prepared = launch_seed_exec._prepare(
+        path, native_command[delimiter + 1:], invoke=True, seed_id=seed_id,
+    )
+    assert prepared.argv == ["copilot", "--resume=history-id", "--interactive", text]
+    assert prepared.receipt["seed"]["seed_id"] == seed_id
+    assert state.peek(path).handoff_id
+
+
+def test_embody_native_startup_refuses_uncertain_or_superseded_intent(tmp_path):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    seed = state.stage(path, kind="new", text="current")
+    with pytest.raises(ValueError, match="changed before launch"):
+        embody_completion.prepare_startup_seed(["copilot"], path, "stale", explicit=False)
+    receipt = state.take(path, seed_id=seed.seed_id)
+    before = state.peek(path)
+    with pytest.raises(ValueError, match="do not resend"):
+        embody_completion.prepare_startup_seed(["copilot"], path, "replacement", explicit=True)
+    assert state.peek(path) == before
+    assert state.restore(path, receipt)["restored"]
+
+
+def test_embody_native_startup_rejects_nul_before_staging_or_claim(tmp_path):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    original = state.stage(path, kind="new", text="retain")
+    with pytest.raises(ValueError, match="NUL"):
+        embody_completion.prepare_startup_seed(["copilot"], path, "bad\0input", explicit=True)
+    assert state.peek(path) == original
+
+
+def test_embody_native_startup_does_not_replace_typed_resume(tmp_path):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    original = state.stage(path, kind="resume", text="retained Resume")
+    with pytest.raises(ValueError, match="existing launch owner"):
+        embody_completion.prepare_startup_seed(["copilot"], path, "New task", explicit=True)
+    assert state.peek(path) == original
+
+
+@pytest.mark.parametrize("interleaving", ["claim", "resume", "new", "absent-to-new"])
+def test_embody_replacement_checks_snapshot_inside_writer(tmp_path, monkeypatch, interleaving):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    if interleaving != "absent-to-new":
+        state.stage(path, kind="new", text="sampled")
+    stage = state.stage
+    retained = []
+
+    def race(record_path, **kwargs):
+        if interleaving == "claim":
+            state.take(path, seed_id=state.peek(path).seed_id)
+        else:
+            stage(path, kind="resume" if interleaving == "resume" else "new", text="concurrent")
+        retained.append(state.peek(path))
+        return stage(record_path, **kwargs)
+
+    monkeypatch.setattr(state, "stage", race)
+    with pytest.raises(ValueError, match="custody changed"):
+        embody_completion.prepare_startup_seed(["copilot"], path, "replacement", explicit=True)
+    assert state.peek(path) == retained[0]
+
+
+def test_guarded_creation_replacement_never_dials_legacy_v7_writer(tmp_path, monkeypatch):
+    from agent_worktrees import locks, status_monitor_runtime
+
+    path = _record(tmp_path)
+    original = state.stage(path, kind="new", text="original")
+    old = {
+        "tracking_write_endpoint": "127.0.0.1:49152",
+        "tracking_write_token": "fixture-token",
+        "tracking_write_verbs": ["launch_seed_stage"],
+        "tracking_write_verb_versions": {"launch_seed_stage": 7},
+    }
+    monkeypatch.setattr(locks, "read_lock", lambda *a: old)
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+    monkeypatch.setattr(
+        tracking_write, "_send_tracking_write_request",
+        lambda *a, **k: pytest.fail("guarded replacement reached an unaware resident"),
+    )
+    updated = state.stage(
+        path, kind="new", text="replacement",
+        creation_snapshot={"seed": dataclasses.asdict(original)},
+    )
+    assert updated.text == "replacement" and updated.revision > original.revision
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_embody_marked_setup_keeps_prompt_unclaimed_until_backend(tmp_path, monkeypatch, shell):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    script = tmp_path / ("setup.sh" if shell == "bash" else "setup.ps1")
+    script.write_text(launch_seed_exec.BOUNDARY_MARKER + "\n", encoding="utf-8")
+    command = [shell, *([] if shell == "bash" else ["-File"]), str(script)]
+    seed = state.stage(path, kind="new", text="private staged prompt")
+    deferred, seed_id = embody_completion.prepare_startup_seed(
+        command, path, seed.text, explicit=False,
+    )
+    delimiter = deferred.index("--")
+    prepared = launch_seed_exec._prepare(
+        path, deferred[delimiter + 1:], invoke=False, seed_id=seed_id,
+    )
+    assert not isinstance(prepared, int)
+    assert prepared.receipt is None and state.peek(path) == seed
+    flag = "--launch-seed-id" if shell == "bash" else "-LaunchSeedId"
+    assert prepared.argv[prepared.argv.index(flag) + 1] == seed.seed_id
+    assert seed.text not in prepared.argv
+
+
+@pytest.mark.parametrize("command", [["custom-launcher"], ["gh", "copilot"]])
+def test_embody_unsupported_startup_preserves_legacy_fallback_without_staging(tmp_path, command):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    original = state.stage(path, kind="new", text="retain")
+    assert embody_completion.prepare_startup_seed(
+        command, path, "explicit", explicit=True,
+    ) == (command, None)
+    assert state.peek(path) == original
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_wrapped_intermediary_keeps_terminal_fallback(tmp_path, monkeypatch, shell):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    scripts = tmp_path / "installation" / "scripts"
+    scripts.mkdir(parents=True)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: scripts.parent)
+    script = scripts / ("launch-command.sh" if shell == "bash" else "launch-command.ps1")
+    script.write_text("", encoding="utf-8")
+    command = [shell, *([] if shell == "bash" else ["-File"]), str(script), "--", "gh", "copilot"]
+    # More than one recognized wrapper must retain the innermost qualification.
+    command = [*command[:-2], *command]
+    original = state.stage(path, kind="new", text="retain")
+    assert embody_completion.prepare_startup_seed(command, path, "explicit", explicit=True) == (
+        command, None,
+    )
+    assert state.peek(path) == original
+    assert launch_seed_exec._setup_command(path, original.seed_id, command) is not None
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+@pytest.mark.parametrize("selection", [
+    "gh-only", "session-path", "explicit-gh", "explicit-cli", "env-script", "explicit-cli-env-script",
+])
+@pytest.mark.parametrize("recovery", [False, True])
+def test_default_setup_requires_available_nonintermediary_backend(
+    tmp_path, monkeypatch, shell, selection, recovery,
+):
+    from agent_worktrees import embody_completion, process_launcher
+
+    path = _record(tmp_path)
+    scripts = tmp_path / "installation" / "scripts"
+    scripts.mkdir(parents=True)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: scripts.parent)
+    script = scripts / ("default-setup.sh" if shell == "bash" else "default-setup.ps1")
+    script.write_text(launch_seed_exec.BOUNDARY_MARKER + "\n", encoding="utf-8")
+    bin_dir, cli_dir = tmp_path / "bin", tmp_path / "selected"
+    bin_dir.mkdir()
+    cli_dir.mkdir()
+    suffix = ".exe" if os.name == "nt" else ""
+    gh = bin_dir / ("gh" + suffix)
+    cli = cli_dir / ("copilot" + suffix)
+    for executable in (gh, cli):
+        executable.write_text("", encoding="utf-8")
+        executable.chmod(0o700)
+    command = [shell, *([] if shell == "bash" else ["-File"]), str(script)]
+    if recovery:
+        command += ["--recovery" if shell == "bash" else "-Recovery"]
+    command += ["--model", "-CopilotPath", "--allow-all"]
+    if selection in {"session-path", "env-script"}:
+        command += ["--session-path" if shell == "bash" else "-SessionPath", str(cli_dir)]
+    elif selection.startswith("explicit"):
+        command += ["--copilot-path" if shell == "bash" else "-CopilotPath",
+                    str(gh if selection == "explicit-gh" else cli)]
+    if "env-script" in selection:
+        command += ["--env-script" if shell == "bash" else "-EnvScript", str(tmp_path / "env-script")]
+    command = process_launcher.bind_execution_directory(
+        command, str(tmp_path / "checkout"), ValueError, passthrough_start=len(command),
+    )
+    assert command[command.index(str(script)) + 1] == (
+        "--execution-directory" if shell == "bash" else "-ExecutionDirectory"
+    )
+    seed = state.stage(path, kind="new", text="retain")
+    prepared, seed_id = embody_completion.prepare_startup_seed(
+        command, path, seed.text, explicit=False, environment={"PATH": str(bin_dir)},
+    )
+    if selection in {"gh-only", "explicit-gh"} or "env-script" in selection:
+        assert (prepared, seed_id) == (command, None)
+    else:
+        assert seed_id == seed.seed_id and prepared != command
+    assert state.peek(path) == seed
+
+
+@pytest.mark.parametrize("marked", [False, True])
+def test_utf16_setup_preserves_terminal_fallback_without_staging(tmp_path, caplog, marked):
+    from agent_worktrees import embody_completion
+
+    path = _record(tmp_path)
+    script = tmp_path / "custom-setup.ps1"
+    script.write_text(
+        (launch_seed_exec.BOUNDARY_MARKER if marked else "# custom PowerShell setup") + "\n",
+        encoding="utf-16",
+    )
+    command = ["pwsh", "-File", str(script)]
+    seed = state.stage(path, kind="new", text="retain")
+    with caplog.at_level("INFO"):
+        assert embody_completion.prepare_startup_seed(
+            command, path, "replacement", explicit=True,
+        ) == (command, None)
+    assert state.peek(path) == seed
+    assert "retaining terminal fallback" in caplog.text
 
 
 def _settled_pair_receipt(path):
     from agent_worktrees import terminal_pair_progress
 
     sibling = tracking.load_record(path)
-    sibling.kind, sibling.status = "bridge", "complete"
+    sibling.kind, sibling.status = "bridge", "finalized"
     sibling.origin, sibling.owner = "delegate", "dispatcher"
     sibling.worktree_path = str(path.parent / sibling.worktree_id)
     sibling.pair_id, sibling.pair_role, sibling.pair_kind = "fixture-pair", "knowledge", "worktree"
@@ -49,13 +290,14 @@ def _settled_pair_receipt(path):
     primary = dataclasses.replace(
         sibling, worktree_id="wt-primary", branch="worktree/wt-primary",
         worktree_path=str(path.parent / "wt-primary"), pair_role="harness",
+        status="complete",
         pair_ref=tracking.format_claim_ref("test", "demo", sibling.worktree_id),
     )
     primary_path = path.parent / "wt-primary.yaml"
     tracking.save_record(primary, primary_path)
     tracking.save_record(sibling, path)
     terminal_pair_progress.publish(primary, sibling, path, primary_path=primary_path)
-    for record, record_path in ((primary, primary_path), (sibling, path)):
+    for record, record_path in ((sibling, path), (primary, primary_path)):
         for name in ("pair_id", "pair_role", "pair_ref", "pair_kind"):
             setattr(record, name, None)
         tracking.save_record(record, record_path)
@@ -272,7 +514,7 @@ def test_real_daemon_retains_failed_attempt_and_finishes_exactly_one_handoff(
     )
     try:
         seed = state.stage(path, kind=kind, text="quotes ' \"\nsecond line")
-        assert state.state_path(path) == tmp_path / "wt-a" / "launch-seed.json"
+        assert state.state_path(path) == path.parent / "wt-a" / "launch-seed.json"
         assert state.peek(path) == seed
         first = state.take(path, seed_id=seed.seed_id)
         assert state.peek(path).text == seed.text
@@ -316,6 +558,39 @@ def test_real_daemon_reports_native_transport_refusal_without_fallback(
         assert not state.state_path(path).exists()
     finally:
         server.close()
+
+
+@pytest.mark.parametrize("kind", ["new", "resume"])
+def test_finite_preparation_claims_but_never_spawns_or_settles_the_seed(tmp_path, monkeypatch, kind):
+    path = _record(tmp_path)
+    seed = state.stage(path, kind=kind, text="next turn")
+    command = ["copilot", "--", "", "literal argument"]
+    monkeypatch.setenv(launch_seed_exec.launch_execution.NATIVE_HINT_ENV, "stale")
+    real_popen = launch_seed_exec.subprocess.Popen
+
+    def spawn(argv, **kwargs):
+        if argv[0] == "copilot":
+            pytest.fail("preparation cannot start or wait for the backend")
+        return real_popen(argv, **kwargs)
+
+    monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
+    for name in ("finish", "restore"):
+        monkeypatch.setattr(
+            state, name, lambda *a, **k: pytest.fail("preparation cannot settle a child outcome"),
+        )
+    prepared = launch_seed_exec._prepare(
+        path, command, invoke=True, seed_id=seed.seed_id,
+    )
+    assert isinstance(prepared, launch_seed_exec.PreparedLaunch)
+    assert prepared.argv == ["copilot", "--interactive", "next turn", "--", "", "literal argument"]
+    assert command == ["copilot", "--", "", "literal argument"]
+    assert prepared.receipt["seed"]["handoff_id"]
+    assert state.peek(path).handoff_id == prepared.receipt["seed"]["handoff_id"]
+    assert state.peek(path).text == seed.text
+    assert launch_seed_exec.launch_execution.NATIVE_HINT_ENV not in prepared.environment
+    assert launch_seed_exec._prepare(
+        path, command, invoke=True, seed_id=seed.seed_id,
+    ) == 3
 
 
 @pytest.mark.parametrize("kind", ["new", "resume"])
@@ -383,7 +658,8 @@ def test_legacy_new_seed_migrates_without_two_owners(tmp_path):
     assert state.pending(path) == seed
 
 
-def test_uncertain_cleanup_retains_handoff_without_resubmission(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_uncertain_cleanup_retains_handoff_without_resubmission(tmp_path, monkeypatch, capsys, interrupted):
     path = _record(tmp_path)
     seed = state.stage(path, kind="resume", text="next turn")
     calls = []
@@ -398,7 +674,9 @@ def test_uncertain_cleanup_retains_handoff_without_resubmission(tmp_path, monkey
     monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
     monkeypatch.setattr(
         state, "finish",
-        lambda *a, **k: (_ for _ in ()).throw(tracking_write.AmbiguousWriteOutcome("late ack")),
+        lambda *a, **k: (_ for _ in ()).throw(
+            KeyboardInterrupt() if interrupted else tracking_write.AmbiguousWriteOutcome("late ack"),
+        ),
     )
     assert launch_seed_exec.launch(path, ["copilot"], invoke=True, seed_id=seed.seed_id) == 3
     assert state.peek(path).text == seed.text and state.peek(path).handoff_id
@@ -469,7 +747,7 @@ def test_successful_managed_reap_removes_only_owned_seed_state(tmp_path, monkeyp
     monkeypatch.setattr(reap_cli.disposition_history, "remove", lambda *a: None)
     monkeypatch.setattr(reap_cli.handoff_trace, "remove_trace", lambda *a: None)
     removed, warnings = reap_cli._remove_managed_worktree(
-        record, SimpleNamespace(anchor=str(tmp_path)), tmp_path,
+        record, SimpleNamespace(anchor=str(tmp_path)), path.parent,
     )
     assert removed and not warnings
     assert not path.exists() and not state.state_path(path).exists()
@@ -542,7 +820,7 @@ def test_pair_gc_primary_preserved_during_sibling_record_rollback(tmp_path, monk
             primary = tracking.load_record(primary_path)
             primary.branch = primary.worktree_path = ""
             removed, reasons = reap_cli._remove_managed_worktree(
-                primary, SimpleNamespace(anchor=str(tmp_path)), tmp_path,
+                primary, SimpleNamespace(anchor=str(tmp_path)), path.parent,
             )
             assert not removed and any("terminal-pair" in reason for reason in reasons)
             raise OSError("injected sibling YAML rollback")
@@ -656,6 +934,7 @@ def test_terminal_pair_sidecar_removal_crash_keeps_authority_until_last(
         "wt-newer", "worktree/wt-newer", str(tmp_path / "newer-checkout"),
         "demo", "test", "windows", tmp_path,
     ).yaml_path
+    (tmp_path / "newer-checkout").mkdir()
     state.stage(newer, kind="new", text="newer allocation stays owned")
     newer_receipt = newer.with_suffix(".terminal-pair.json")
     newer_receipt.write_text('{"version":1,"owner":"newer"}', encoding="utf-8")
@@ -776,7 +1055,7 @@ def test_native_reap_terminal_pair_sidecar_failure_preserves_evidence(tmp_path, 
     if failure == "receipt":
         monkeypatch.setattr(Path, "unlink", fail)
     removed, warnings = reap_cli._remove_managed_worktree(
-        record, SimpleNamespace(anchor=str(tmp_path)), tmp_path,
+        record, SimpleNamespace(anchor=str(tmp_path)), path.parent,
     )
     assert removed is False
     assert warnings and ("live mux" if failure == "live" else "injected native receipt") in warnings[0]
@@ -784,7 +1063,7 @@ def test_native_reap_terminal_pair_sidecar_failure_preserves_evidence(tmp_path, 
     if failure == "receipt":
         monkeypatch.setattr(Path, "unlink", unlink)
         assert reap_cli._remove_managed_worktree(
-            record, SimpleNamespace(anchor=str(tmp_path)), tmp_path,
+            record, SimpleNamespace(anchor=str(tmp_path)), path.parent,
         ) == (True, [])
         assert not any(file.exists() for file in before)
 

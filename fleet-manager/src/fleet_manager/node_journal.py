@@ -1,5 +1,8 @@
 """Explicit node persistence; no transport, authentication or remote executor."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
@@ -13,12 +16,18 @@ from .planning import PlanError, identifier, integer
 class NodeJournal:
     """Own local acceptance and receipts independently of a Gateway connection."""
 
-    def __init__(self, path, *, authority, installation, target):
+    def __init__(self, path, *, authority, installation, target, existing_only: bool = False):
+        if type(existing_only) is not bool:
+            raise PlanError("node existing-journal selection requires a boolean")
         for name, value in (("authority", authority), ("installation", installation),
                             ("target", target)):
             identifier(value, f"node {name}")
         self.path = Path(path).resolve()
         self.authority, self.installation, self.target = authority, installation, target
+        if existing_only:
+            with self._transaction(write=False):
+                pass
+            return
         with self._transaction(create=True) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             if version == 0:
@@ -65,9 +74,21 @@ class NodeJournal:
                     raise PlanError("unrecognized node release schema")
                 create_release_history(connection)
                 connection.execute("PRAGMA user_version=3")
+                version = 3
+            if version == 3:
+                if connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='external_owners' COLLATE NOCASE"
+                ).fetchone():
+                    raise PlanError("unrecognized node external ownership schema")
+                connection.execute(
+                    "CREATE TABLE external_owners("
+                    "resource TEXT PRIMARY KEY NOT NULL,"
+                    "operation_id INTEGER NOT NULL UNIQUE REFERENCES operations(id))"
+                )
+                connection.execute("PRAGMA user_version=4")
 
-    def _verify(self, connection, *, version=3):
-        if version not in (1, 2, 3) or connection.execute(
+    def _verify(self, connection, *, version=4):
+        if version not in (1, 2, 3, 4) or connection.execute(
             "PRAGMA user_version"
         ).fetchone()[0] != version:
             raise PlanError("unsupported node journal schema")
@@ -81,6 +102,8 @@ class NodeJournal:
         if version >= 3:
             columns["allocation_releases"] = ("operation_id", "resource", "generation", "proof")
             verify_release_index(connection)
+        if version >= 4:
+            columns["external_owners"] = ("resource", "operation_id")
         for name, expected in columns.items():
             kind = connection.execute(
                 "SELECT type FROM sqlite_master WHERE name=?", (name,),
@@ -168,6 +191,42 @@ class NodeJournal:
         with self._transaction() as connection:
             return self._accept(connection, value, intent)
 
+    def accept_named_external(self, intent, *, resource):
+        """Serialize cooperative external writers in this canonical journal.
+
+        This is not a distributed backend fence. The adopted effect owner must
+        independently exclude other installations from the physical resource.
+        UNKNOWN never transfers custody, even to a newer generation.
+        """
+        identifier(resource, "external resource")
+        value = self._scope(intent)
+        if value["command"] not in ("runner.converge", "manager.converge"):
+            raise PlanError("unsupported named external operation")
+        with self._transaction() as connection:
+            prior = self._find(connection, value)
+            held = connection.execute(
+                "SELECT operation_id FROM external_owners WHERE resource=?", (resource,),
+            ).fetchone()
+            if prior:
+                OperationIntent(bytes(prior[1])).check_repeat(intent)
+                if held != (prior[0],):
+                    raise PlanError("external operation no longer owns its resource")
+                return self._latest(connection, prior[0])
+            if held is not None:
+                previous = OperationIntent(bytes(connection.execute(
+                    "SELECT intent FROM operations WHERE id=?", held,
+                ).fetchone()[0])).to_dict()
+                if self._latest(connection, held[0]).to_dict()["status"] not in ("succeeded", "failed"):
+                    raise PlanError("external resource has an unsettled operation")
+                if value["generation"] <= previous["generation"]:
+                    raise PlanError("external resource requires a newer generation")
+            accepted = self._accept(connection, value, intent)
+            connection.execute(
+                "INSERT OR REPLACE INTO external_owners VALUES(?,?)",
+                (resource, self._find(connection, value)[0]),
+            )
+            return accepted
+
     def _accept(self, connection, value, intent):
         prior = self._find(connection, value)
         if prior:
@@ -246,7 +305,8 @@ class NodeJournal:
 
     @contextmanager
     def _cooperative(self, connection):
-        owned = {"identity", "operations", "receipts", "allocation_owners", "allocation_releases"}
+        owned = {"identity", "operations", "receipts", "allocation_owners", "allocation_releases",
+                 "external_owners"}
         def authorize(action, first, second, *_):
             if action in (
                 sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT,
@@ -357,16 +417,26 @@ class NodeJournal:
             self._append(connection, operation_id, receipt)
             return True
 
-    def reconcile(self, intent, receipt):
+    def reconcile(self, intent: OperationIntent, receipt: TargetReceipt, *,
+                  checkpoint: Callable[[], None] | None = None) -> TargetReceipt:
         """Caller supplies attributable terminal evidence; parsing is not proof."""
         self._scope(intent)
         receipt.check_intent(intent)
         value = receipt.to_dict()
         if value["status"] not in ("succeeded", "failed"):
             raise PlanError("reconciliation requires terminal evidence")
+        if checkpoint is not None and not callable(checkpoint):
+            raise PlanError("reconciliation requires a code-registered checkpoint")
+
+        def check() -> None:
+            if checkpoint is not None and checkpoint() is not None:
+                raise PlanError("reconciliation checkpoint returned unsupported evidence")
+
         with self._transaction() as connection:
+            check()
             operation_id, prior = self._accepted(connection, intent)
             if receipt.encoded == prior.encoded:
+                check()
                 return prior
             before = prior.to_dict()
             if before["status"] != "unknown":
@@ -374,6 +444,7 @@ class NodeJournal:
             if value["sequence"] != before["sequence"] + 1:
                 raise PlanError("reconciliation requires the next receipt sequence")
             self._append(connection, operation_id, receipt)
+            check()
             return receipt
 
     def inspect(self, intent):
@@ -383,6 +454,25 @@ class NodeJournal:
             if self._find(connection, value) is None:
                 return None
             return self._accepted(connection, intent)[1]
+
+    def inspect_named_external(self, *, resource):
+        """Read the exact physical-resource fence; caller owns admission and custody."""
+        identifier(resource, "external resource")
+        with self._transaction(write=False) as connection:
+            held = connection.execute(
+                "SELECT operation_id FROM external_owners WHERE resource=?", (resource,),
+            ).fetchone()
+            if held is None:
+                return None
+            row = connection.execute("SELECT intent FROM operations WHERE id=?", held).fetchone()
+            if row is None:
+                raise PlanError("external resource owner is missing")
+            request = OperationIntent(bytes(row[0]))
+            if self._scope(request)["command"] not in ("runner.converge", "manager.converge"):
+                raise PlanError("unsupported named external operation")
+            receipt = self._latest(connection, held[0])
+            receipt.check_intent(request)
+            return receipt
 
     def results(self, *, after=0, limit=100):
         """Read append-only receipt history; transport owns its durable replay cursor."""

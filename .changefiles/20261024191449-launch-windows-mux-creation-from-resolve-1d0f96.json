@@ -1,0 +1,13 @@
+{
+  "comment": "Launch Windows mux creation from resolved user home while preserving pane directories, arguments and exit behavior; refuse older descendants after parent-PID reuse during owned cleanup.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

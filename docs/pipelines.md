@@ -9,6 +9,46 @@ and reactive automation this repo runs. `CONTRIBUTING.md` owns contributor
 requirements); this doc owns the *infrastructure* those steps run on top
 of — link here rather than restating any of it.
 
+## Branch-only local publication
+
+The repository pre-push hook and installed Worktrees shim perform branch/ref
+policy only. The shim embeds the existing resolved PR/protected-branch policy
+at normal hook installation; rerun the existing hook installer after changing
+that policy. Installing a payload alone does not refresh a previously installed
+shim. Pre-commit is unchanged.
+
+| Validation outside automatic local publication | CI owner |
+| --- | --- |
+| `check-no-internal-identifiers.py`, including local live sweeps | Trusted `workflow-lockdown-guard` required job: pinned PR base/head, existing repository-secret denylists, `--ci` sanitized output and live sweeps disabled |
+| `check-large-files.py` (already removed from local hooks) | Same required job: resulting file blobs in the pinned PR base/head final diff; preserve the existing source-CI and explicit full-audit lanes, without complete object-history scans |
+| Generic `validate_hook`, `validate_paths`, legacy `tools/worktree/validate-core.ps1` | Adopting repository's required CI: move its command/contract there before adopting this policy; this source repository configures none of these hooks |
+| Contract/install, module-size, lint, version/changefiles, documentation, structure and vendor checks | Existing `ci.yml` `checks` job; these were already outside this repository's pre-push path |
+
+The trusted required workflow checks out only `github.workflow_sha`. Candidate
+commits are fetched/read as inert Git objects, never checked out or executed.
+The required job fails on either publication-validator failure. As with other
+`pull_request_target` changes, this new coverage becomes live only after the
+workflow is promoted to `main`; a green check from the older definition does
+not prove it ran. Do not activate the revised repository/managed hooks before
+that trusted `main` definition is available. Landing source on `dev` is not
+hook-activation or installation authority. Do not mistake `PR gate (required check)`'s name for live
+ruleset enrollment: inspect the provider rules.
+
+Worktrees no longer executes custom/core/legacy source validation during
+`push-changes` or finalize's publication path. Existing explicit validation
+commands remain available. Explicit review/scope policies, claims bookkeeping,
+clean-source/ref custody, required PR policy and remote merge gates are not
+disabled. No claims backend or network call is added to pre-push. Preserved
+foreign hooks still run; branch-only managed hooks cannot promise that an
+unknown chained hook is fast.
+
+Direct publication also omits the automatic anchor-hygiene inventory
+(untracked-inclusive status, stash listing and upstream-history count).
+These are machine-local maintenance diagnostics, not CI source validators;
+`anchor-check` remains their explicit owner. Source-workspace cleanliness,
+expected-branch/ref checks and Git's non-forced checkout/fast-forward refusal
+remain in the publication path to preserve local work.
+
 ## Standalone PR job admission
 
 The existing manual `installation-context-full.yml` workflow additionally accepts
@@ -75,9 +115,10 @@ not again on each PR update. Admitted Dev-push executions retain that diagnostic
 strict source guards and required validation remain in PR CI. A cancelled or
 superseded execution is not diagnostic or test evidence.
 
-Before the Agent Bridge contract guard, CI explicitly acquires the HTTP-47
-packet's exact captured source commit from the CI-selected, credential-free
-HTTPS repository URL when it is not already available. The separate bounded
+Before the Agent Bridge contract guard, CI explicitly acquires each HTTP-47,
+HTTP-48, HTTP-49 and HTTP-50 packet's exact captured source commit from the
+CI-selected, credential-free HTTPS repository URL when it is not already
+available. The separate bounded
 `tools/prepare_bridge_contract_evidence.py` step accepts only a full commit ID,
 does not change checkout, refs or `FETCH_HEAD`, and fails visibly if acquisition
 or verification fails. A normal full branch checkout can omit a squash-orphaned
@@ -125,20 +166,171 @@ state and qualification rather than inferring either pause or activation from
 the source-CI layout. Historical full-candidate descriptions below are not
 instructions to reactivate those integration gates.
 
-### Source-unit promotion receipt
+### Composed-candidate promotion receipt
 
 The source promotion declaration owns its independent source-unit transaction.
 Its governed Main control must pin reviewed helpers and qualification evidence;
 combining source-CI jobs changes neither that transaction nor its authority.
 
-After source admission, `source-units` runs the full admitted packet once with
-coverage while the credential-free artifact build proceeds independently.
-Attestation requires both successful units and the unsigned build. Candidate
-preparation retains the source/version, package/lock, signer, source-byte and
-freshness safeguards, but no longer downloads separate full-suite baselines.
-`qualify-candidate` requires the explicit `source-units-v2` profile and proves
-Dev/candidate input equivalence against the original successful unit job,
-upload step and immutable archive. It never dispatches candidate CI.
+The Source controller proposal freezes the stamped, vendored candidate before
+release execution. `compose-candidate` runs the existing composer once and
+retains its exact Git commit, content tree, admitted Dev/Main inputs and
+preparation time in a bounded `candidate.bundle` / `candidate.json` transport.
+Every consumer also requires the candidate SHA emitted by the composition job;
+internally consistent replacement transport data cannot select another object.
+Units and the unsigned artifact build independently import those objects.
+Artifact validation and publication consume the same frozen object; they do
+not recompute version allocation or vendoring after tests. A changed Main base
+requires a new admission, not a silent restamp.
+
+`source-units` retains its provider job identity but executes the fixed Dev
+inventory on candidate bytes using the explicit
+`copilot-extensions.promotion-candidate-units/v1` manifest. Declared materialized
+uv copies extend the admitted import closure, never the test-node inventory or
+five-minute budget. Attestation still requires successful units and the
+unsigned build. `qualify-candidate` uses `candidate-units-v3`, validates the
+candidate hashes and development correspondence against both authoritative
+source roots, and checks the original successful job/upload/immutable archive.
+It never dispatches candidate CI.
+
+Raw candidate line coverage remains in the three-file packet. Its separate
+development projection is bound to Dev bytes, candidate bytes, tree and copy
+origins. Exact copies map directly; recognized same-line version assignments
+leave the changed statement unattributed. Unsupported rewrites and shifted
+regions remain explicitly unmapped. Copy contributions are retained before
+unioning Dev coordinates. No projection asserts that raw Dev bytes, branches
+or functions executed.
+The manifest binds the entire admitted closure, but coordinate maps cover
+observed production files only, not every unexecuted vendor copy or test file.
+
+Coverage is generated evidence, not checked-in source. The collector and hosted
+archive verifier share a 192 MiB unit-evidence per-file bound, including PR
+reuse and release retention. Source files, manifests outside the unit packet
+and qualification receipts retain their 128 MiB limits. The three-file packet's
+384 MiB expanded total and its 384 MiB + 64 KiB transport bound remain unchanged,
+as does the retained release-evidence ZIP's 512 MiB + 64 KiB bound. Exact packet
+membership, source hashes, context completeness and the five-minute execution
+budget are unchanged.
+The complete expanded version-1 coverage projection is retained without a
+new report encoding merely to fit the former 16 MiB bound.
+
+After qualification, the existing publisher attaches the exact three packet
+files and canonical `qualification.json` in one deterministic ZIP to the same
+Dev-owned `python-artifacts-<Dev SHA>` GitHub Release. Its immutable filename
+binds Dev, candidate and archive SHA-256. Upload never clobbers an asset; an
+existing or newly uploaded asset must pass consumer-authority raw-byte readback
+before the publication receipt can enable Main merge. The receipt also binds
+the retained evidence identity. No generated report, packet or archive is
+added to the Source or generated Main tree.
+
+The current candidate-unit publisher additionally requires a self-contained ZIP
+of **every tracked blob in the final candidate tree**, including metadata,
+admitted Main controls and materialized first-party sources. Raw Git object
+batches avoid `git archive`'s `export-ignore` and `export-subst` transformations.
+The verifier reconstructs the exact Git tree from member bytes and modes,
+without extracting files or following source links. Link resolution uses the
+complete in-memory graph, including case-equivalent references; chained
+escapes, cycles, more than 40 traversals or literal targets over 4096 bytes
+fail closed. Unsupported submodules and unsafe/ambiguous paths are refused.
+The existing artifact
+bounds remain 512 MiB for the archive and expanded tree, 128 MiB per file and
+100,000 files.
+
+An external canonical source manifest binds that full tree, Dev, candidate,
+Main base, current controller, qualification digest and the **whole unchanged
+source-index digest**, including any optional profiles. It records the archive
+digest without being added to the tree it describes. Both subjects receive
+fresh trusted-Main attestations and immutable hash-named assets on the same
+Dev-owned release. The existing publisher verifies the exact subject signatures
+and independent raw-byte readback before including them in its publication
+receipt; missing subjects or failed readback cannot enable the final Main PR.
+This does not reinterpret the signed index's existing `content_tree` or
+authorize another candidate, controller, runtime profile or package build.
+The Dev tag's automatic archive and an incremental candidate Git bundle are
+not substitutes for this complete-source proof.
+
+Readiness and frozen-code reuse recognize only the bounded, hash-named
+supplementary evidence namespace for that same Dev release (at most 64
+retained packet/source/manifest assets in total). They retain earlier immutable
+generations without overwriting them. This data namespace grants no code-execution or
+qualification authority. The separately attested code/index inventory remains
+exact; foreign, malformed, duplicate or arbitrary extra assets are refused.
+Actions artifacts remain the original producing-job evidence, while the
+release copy retains the verified packet after Actions retention expires.
+
+Source support does not itself activate Main. Its independently reviewed
+controller selects the active qualification contract.
+Historical raw-source and legacy-CI packets retain their original verification;
+neither can be relabeled as candidate execution.
+
+### Source-coherent release implementations
+
+The source workflow proposal derives implementation revisions from existing
+admission, not a manually maintained helper-version constant. The read-only
+bootstrap uses the exact executing `github.workflow_sha`. After Main resolves
+and ancestry-checks live Dev once, downstream helper checkouts use that full
+immutable `needs.gate.outputs.sha`, matching the release's source input.
+Neither mutable branch names, dispatch payloads nor the generated candidate
+select implementation code. Helper checkouts do not persist credentials.
+The signer retains its existing successful source-unit prerequisite; Main
+still owns job privileges, pause, lifecycle, publication and exact-head landing.
+
+`promotion_release_helpers.py` discovers direct and indirect helper commands
+from both the development recipe and preserved Main controller, then resolves
+their repository-owned static import closure and registered dynamic build inputs
+as data. A new controller command cannot remain outside qualification merely
+because it was absent from an older entrypoint list. Qualification requires
+their byte admission, coverage enrollment for release-tool decision bodies,
+and actual test-call hits inside executable function bodies, not module
+initialization or definition lines reached by an import inside a test. Registered
+native compiler source is hash-bound data, not an executable unit or a coverage
+target. Real build/compiler behavior remains separate development validation.
+Synchronized executable copies borrow only their canonical origin's coverage;
+every run first verifies both admitted hashes and hard-refuses byte divergence.
+Self-file-relative `spec_from_file_location` implementations also join source
+and decision coverage regardless of directory or earlier static-import traversal;
+unresolved loaders, aliases and rebinding are refused. The native build `exec`
+exception is restricted to its exact source-bound site and declared input
+bindings, not all executable loads in that module.
+Dynamic module-import aliases use lexical provenance too; renaming a loader
+cannot hide an unadmitted dependency.
+The existing Windows retention guardian retains its separate runtime-actor
+contract: only its exact adapter and two owned resource-call shapes are
+recognized as external runtime loads, never as qualified repository helpers.
+Release implementations cannot invoke that private loader interface.
+
+Source PR guards compare helper-required CLI inputs and complete-source
+construction/attestation/publication against both the prepared proposal and
+the actual immutable Main controller, each against its own discovered helper
+inventory. A helper used only by Main cannot escape its interface check.
+Unsupported helper-bearing shell command substitutions fail explicitly, even
+beside a later valid invocation; they cannot hide a missing required input.
+An incompatible prepared proposal fails.
+A compatible prepared proposal with the explicit legacy pinned-helper Main
+generation reports
+`active_compatible: false` and the required separately reviewed Main bootstrap;
+it never claims activation. After source-coherent Main selection is active,
+an interface mismatch is a failing source gate, not another bootstrap warning.
+Required inputs are checked against each invocation's own arguments, including
+the promoter's literal base argument array and exact `runpy` trampoline;
+comments, adjacent commands and conditional additions cannot supply them.
+Unsupported shell or loader forms fail visibly rather than becoming an
+unverified compatibility result. This catches new required inputs before release
+without requiring a pin update. Controller-policy changes still need Main
+review. Mode-dependent publisher inputs are declared once and used by both
+the actual CLI validation and the compatibility checker; making an optional
+argparse field mandatory for a publication mode cannot bypass that check.
+Implementation discovery also includes the promoter's indirect `runpy` call.
+Main activation and live release proof are tracked in
+[Phase 9e](../efforts/active/dev-branch-release-pipeline/source-coherent-release-implementations.md).
+
+Chat's enrolled package initializer resolves its version from distribution
+metadata, with a source-project metadata fallback when uninstalled. Its
+registered version contract forbids a checked-in Python version literal:
+ordinary Main seeding and changefile allocation must not change imported unit
+source bytes. All enrolled Python files and the raw byte-equivalence verifier
+remain required; no version normalization or source omission bypasses that
+verification.
 
 Job-only retries retain the original producing attempt and archive rather than
 rerunning units or demanding that the still-executing controller already be
@@ -204,10 +396,12 @@ mode when exercising the builder locally.
 
 ### Registered standalone first-party artifacts
 
-The same locked builder accepts `--standalone pr-service` or
-`--standalone fleet-manager` (the positional value is a registered component,
-not an arbitrary path). Promotion discovers `services/pr` and `fleet-manager`
-explicitly alongside its existing plugins. Standalone manifests use schema 4,
+The same locked builder accepts `--standalone` with an explicit identity from
+`tools/standalone_python_artifacts.py`'s `COMPONENTS`: `pr-service`,
+`fleet-manager`, `chat-service`, `dispatch-service`, `ssh-service` or
+`worktree-manager`, never an arbitrary path. These are existing registered
+standalone consumers, discovered alongside the existing plugins; the optional
+Index service is not added by this core coverage. Standalone manifests use schema 4,
 `component` instead of `plugin`, a `standalone` primary wheel and an exact
 `build_resources` source closure; plugin schema-3 manifests are unchanged.
 Schema-2 promotion indexes carry either explicit identity, with standalone
@@ -215,17 +409,23 @@ filenames and version tags prefixed `standalone-`. Existing plugin release
 names, signature checks and optional artifact/source selection remain unchanged.
 
 Standalone builds share the existing toolchain, generator, source-content,
-wheel-hash and candidate composition checks. Fleet's resource-injecting setup
-and helper must match trusted producer code. The verifier maps its injected
+wheel-hash and candidate composition checks. Fleet's and Chat's resource-injecting
+setups and helper must match trusted producer code. The verifier maps their injected
 modules to canonical resource bytes without executing candidate code; changed,
 missing, linked or substituted inputs fail closed. This does not admit arbitrary
 `setup.py` files or weaken plugin static-build admission.
 
 The manual **Installation context native acceptance** workflow's
 `pr_artifacts` input builds real plugin and standalone wheels on Linux and
-Windows, verifies their bundles against the source tree, then installs only
-the standalone wheels into a fresh environment offline with no dependencies.
-Its outside-checkout import/resource checks prove first-party packaging, not
+Windows, verifies their bundles against the source tree, then installs each
+standalone component's first-party wheel set in its own fresh environment
+offline without resolving dependencies. The retained representative PR/Fleet
+nested export fixture derives its projects, dependencies and build resources
+from the same owner rather than assuming a fixed library list.
+Separate component environments do not silently select between conflicting
+shared-wheel identities; they are not the consolidated core environment.
+Outside-checkout distribution/resource checks and the retained PR/Fleet import
+controls prove first-party packaging, not
 service execution, governed-feed runtime closure, native Worktrees selection
 or image/fleet acceptance. Public toolchain provisioning remains the narrow
 hosted-runner exception above; no third-party runtime bytes enter release bundles.
@@ -394,6 +594,12 @@ file must byte-match its static setuptools source path, the Python member set
 must be complete, and declared package data must be present. Generated console
 and extension entry points must exactly match the project declarations;
 top-level and license metadata are source-checked as well. This verification
+also requires a source project's existing `LICENSE` notice to survive byte for
+byte in the wheel's modern or legacy dist-info license location. Independently
+packaged repository MIT projects carry the existing repository notice in their
+own project roots; other/upstream notices are not replaced. This is source-data
+preservation, not a license classification or redistribution-approval service.
+This verification
 supports the repository's `src` package layouts and explicitly declared flat
 `py-modules`. Generated code, custom discovery/mapping and compiled outputs
 without a verified source-to-wheel mapping fail closed; they are not silently
@@ -420,6 +626,11 @@ verification remain serial. Only the independent bundle attestations use up
 to four concurrent verifications, with the same pinned identities, read-only
 token and per-subject deadline. Every verification must pass and all workers
 are joined before the caller can publish or emit a success receipt.
+The CLI's exact Public Good verifier-initialization-unavailable error permits
+one explicitly logged retry with identical subject, identity constraints and
+read-only authority, sharing the original 120-second per-subject deadline.
+Signature, identity, policy and other failures are not retried; a second
+initialization failure or exhausted deadline still fails publication closed.
 `promote_release.py --python-artifacts-dir <dir>`
 recomputes composition and refuses missing/corrupt/mis-targeted artifacts
 before pushing a candidate, including repeating the archive-content checks.
@@ -1083,8 +1294,32 @@ files fail closed. Source, helper, test and documentation paths are not allowed.
 the pinned main commit, after ordinary versioning and materialization, and
 their blob IDs appear in the promotion summary and pipeline provenance.
 
-Removing a workflow from the trusted declaration returns it to normal dev
-composition; its actual retirement must be reviewed explicitly. This mechanism
+Removing a workflow from the trusted declaration while leaving it on Main returns
+it to normal Dev composition. Removing the actual Main file as well retires it
+only when Main's prior `last_promotion.control_preserved` receipt authenticates
+the exact prior declaration and regular blobs against an ancestor Main commit.
+Dev state never grants deletion authority. The composer retains at most 64
+`retired` path-to-origin tombstones in that receipt, revalidates their ancestor
+declarations and removes matching obsolete Dev copies before staging. This
+survives later promotions; explicit Main reintroduction clears the tombstone.
+Unsafe deletion destinations and malformed or unavailable provenance refuse the
+composition before controls are written.
+Once Main records control provenance, removing its ownership manifest also
+refuses composition rather than silently restoring legacy behavior.
+
+`tools/promotion_control_transition.py` classifies two pinned ancestor-related
+Main snapshots against their actual exact declarations. Only declared control
+changes and the operator's `paused`/`pause_reason` settings are control-only.
+Payload, coverage-baseline, unknown-governance, promoter-lineage and rollback
+changes require a new plan; removal of the ownership manifest also refuses.
+Non-operator state comparison preserves JSON types, including nested values;
+boolean/number substitutions and non-finite values cannot hide a policy change.
+Every changed control snapshot requires a fresh trusted execution. This
+classification does not qualify artifacts, prove equivalent construction inputs
+or authorize the old running controller to execute newer policy. The current
+frozen-candidate publication and merge paths still refuse a changed base.
+
+This mechanism
 does not establish admission authorization, atomic merge freshness, wrapper/helper
 compatibility or control-preserving rollback. Those contracts and their live
 rejection/recovery proof are prerequisites to activating a manifest; existing
@@ -1210,6 +1445,24 @@ PRs after an earlier run times out waiting for checks. This source behavior
 becomes live only when the workflow's existing Main control owner adopts it.
 
 ### Previewing without waiting for a real promotion
+
+Promotion's materializer checks the resulting local dependency closure for
+every plugin and declared standalone consumer, independently of its conversion
+log. Every reachable `[tool.uv.sources]` path must be non-editable, relative to
+that consumer's own payload, and lead to an existing package manifest or
+distribution archive. Nested sibling-library references are allowed inside the
+same payload. Missing packages,
+linked paths and references back to the monorepo or another payload refuse
+promotion before publication; installer-specific library lists are not the
+release dependency inventory.
+Existing standalone consumers must retain their root manifest. Retained
+workspace/file-URI mappings and path routes that leave and re-enter the owning payload
+are refused as well.
+Direct local requirements in project/build dependencies, dependency groups, or UV requirement
+settings (including overrides, constraints and extra build dependencies) are
+refused; declare them through `[tool.uv.sources]` so the vendoring flow owns their
+materialization. Linked payload content is refused even when the link
+points back into the original payload, since it may break after relocation.
 
 - **`python tools/preview_release.py <plugin>`** builds a scratch copy of
   that plugin's payload — with its vendored `libs/<lib>` materialized from
@@ -1514,12 +1767,16 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > exposes a Python `__version__` must bump it to match the
 > `pyproject.toml` version in the **same** commit — it is a *fourth* file
 > for that plugin, easy to miss because the marketplace doesn't read it.
+> Registered metadata-only standalone contracts are the explicit exception:
+> `services/chat` resolves the existing distribution/project version instead
+> of embedding a Python literal. Its version guard requires the declared
+> resolver assignment, keeping admitted unit code unchanged during allocation.
 >
-> **Enforced by `tools/check-version-consistency.py`** (pre-push): fails
+> **Enforced by `tools/check-version-consistency.py`** (CI): fails
 > if any plugin's `plugin.json` / `pyproject.toml` / `marketplace.json`
 > versions disagree.
 >
-> **Enforced by `tools/check-changefile-presence.py`** (pre-push + CI,
+> **Enforced by `tools/check-changefile-presence.py`** (CI,
 > PR-diff scoped, against `dev`): fails the push/PR if a plugin's content
 > changed **without** a pending changefile naming it. A change to **any
 > file under `plugins/<p>/`** requires a changefile for `<p>`; a change to
@@ -1548,6 +1805,15 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > same release-metadata rule: changes to their shipped content require a
 > pending changefile naming that consumer. Use its registered name with
 > `--plugin`; absence from the marketplace plugin roster is not an exemption.
+>
+> **Shared-library release versions also use changefiles.** Address the
+> canonical project explicitly, for example
+> `python tools/changefile.py add --plugin libs/agent-procutil --type dev --comment "Release shared process helpers"`.
+> Promotion seeds its version from the last shipped Main, applies the
+> requested bump to canonical and physical copies, and then materializes
+> editable pointers. This is separate from consumer changefiles: source
+> changes still require the consumer entries described above. Do not
+> hand-edit library manifests or weaken a consumer's minimum dependency.
 >
 > **Before editing a shared lib, find every consumer first — two commands,
 > not one.** `python tools/check-vendored-libs-sync.py --list` enumerates

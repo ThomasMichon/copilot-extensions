@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve exact bounded binary process output for local PR source inspection; existing text defaults and process custody remain unchanged",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

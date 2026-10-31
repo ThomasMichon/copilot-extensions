@@ -1,0 +1,64 @@
+{
+  "schema": "fleet-manager.loadout-catalog",
+  "version": 1,
+  "templates": [{
+    "schema": "fleet-manager.loadout-template",
+    "version": 1,
+    "id": "chat.service",
+    "revision": "1",
+    "source": "agent-chat-service",
+    "slots": {
+      "artifact_ref": {"type": "reference"},
+      "configuration_ref": {"type": "reference"},
+      "storage_ref": {"type": "reference"},
+      "credential_ref": {"type": "reference"},
+      "gateway_slot_ref": {"type": "reference"},
+      "manager_ref": {"type": "reference"},
+      "resource_ref": {"type": "reference"},
+      "container": {"type": "reference"},
+      "gateway": {"type": "reference"},
+      "storage": {"type": "reference"},
+      "credentials": {"type": "reference"},
+      "manager": {"type": "reference"},
+      "network": {"type": "reference"},
+      "cpu_millis": {"type": "integer", "minimum": 1},
+      "memory_bytes": {"type": "integer", "minimum": 1},
+      "disk_bytes": {"type": "integer", "minimum": 1},
+      "limit_cpu_millis": {"type": "integer", "minimum": 1},
+      "limit_memory_bytes": {"type": "integer", "minimum": 1},
+      "limit_disk_bytes": {"type": "integer", "minimum": 1}
+    },
+    "provides": ["conversation.chat"],
+    "requires": {
+      "container.runtime": {"slot": "container"},
+      "gateway.chat-route": {"slot": "gateway"},
+      "storage.single-writer": {"slot": "storage"},
+      "credential.chat-domain": {"slot": "credentials"},
+      "deployment.komodo": {"slot": "manager"},
+      "network.gateway-outbound": {"slot": "network"}
+    },
+    "resources": {
+      "units": 1,
+      "reservation": {
+        "cpu_millis": {"slot": "cpu_millis"},
+        "memory_bytes": {"slot": "memory_bytes"},
+        "disk_bytes": {"slot": "disk_bytes"}
+      },
+      "limit": {
+        "cpu_millis": {"slot": "limit_cpu_millis"},
+        "memory_bytes": {"slot": "limit_memory_bytes"},
+        "disk_bytes": {"slot": "limit_disk_bytes"}
+      }
+    },
+    "configuration": {
+      "adapter": "container.service",
+      "artifact_ref": {"slot": "artifact_ref"},
+      "configuration_ref": {"slot": "configuration_ref"},
+      "storage_ref": {"slot": "storage_ref"},
+      "key_refs": [{"slot": "credential_ref"}],
+      "gateway_slot_ref": {"slot": "gateway_slot_ref"},
+      "manager_ref": {"slot": "manager_ref"},
+      "resource_ref": {"slot": "resource_ref"}
+    }
+  }]
+}

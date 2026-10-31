@@ -217,6 +217,9 @@ def test_legacy_wsl_locality_uses_actual_platform_not_configured_override(
     )
     assert error is None
     assert path == legacy_records.paths["wsl"]
+    from agent_worktrees import execution_spaces
+
+    execution_spaces.require_record_mutation(tracking.load_record(path), overridden)
     assert claimant.local_claimant_alive(legacy_records.owner_ref) is True
 
 

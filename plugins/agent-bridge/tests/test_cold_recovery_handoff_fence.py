@@ -161,6 +161,58 @@ async def test_cold_handoff_allows_ordinary_and_confirmed_outage(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("completed_outage", [False, True])
+@pytest.mark.parametrize("new_stop", [False, True])
+async def test_stopped_handoff_accepts_only_its_authorized_token_consumption(
+    handoff_context: HandoffFixture, completed_outage: bool, new_stop: bool,
+) -> None:
+    manager, session, client = handoff_context
+    if completed_outage:
+        _outage(
+            manager, session, "reconnected",
+            evidence={
+                "kind": "provider-prompt-response", "native_session_id": session.acp_session_id,
+                "turn_index": 0, "stop_reason": "end_turn",
+            },
+        )
+    manager.db.request_cold_recovery_stop(session.session_id)
+    original_token = manager.db.get_session(session.session_id)["cold_recovery_stop_token"]
+    session.status = SessionStatus.STOPPED
+    client.is_running = False
+
+    async def authorized_resume(*_args: Any, **_kwargs: Any) -> Session:
+        assert manager.db.clear_cold_recovery_stop(session.session_id, original_token)
+        session.status = SessionStatus.IDLE
+        client.is_running = True
+        return session
+
+    manager.resume_session.side_effect = authorized_resume
+    successor = Session("successor", "successor", session.target)
+    successor.status = SessionStatus.IDLE
+    manager.db.create_session(
+        successor.session_id, successor.name, None, session.target.cwd, "local", "idle", 1,
+    )
+    manager.start_session.return_value = successor
+    if new_stop:
+        async def brief_with_new_stop(_prompt: str) -> dict[str, str]:
+            manager.db.request_cold_recovery_stop(session.session_id)
+            return {"response_text": "retained brief", "stop_reason": "end_turn"}
+
+        client.send_prompt.side_effect = brief_with_new_stop
+        with pytest.raises(RuntimeError, match="stop was requested"):
+            await manager.handoff_session(session.session_id, seed=False)
+        current = manager.db.get_session(session.session_id)["cold_recovery_stop_token"]
+        assert current is not None and current != original_token
+        manager.start_session.assert_not_awaited()
+    else:
+        assert await manager.handoff_session(session.session_id, seed=False) is successor
+        assert manager.db.get_session(session.session_id)["cold_recovery_stop_token"] is None
+        manager.start_session.assert_awaited_once()
+    manager.resume_session.assert_awaited_once_with(session.session_id, drain=False)
+    assert client.send_prompt.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_cold_handoff_rechecks_outage_after_awaited_brief(
     handoff_context: HandoffFixture,
 ) -> None:

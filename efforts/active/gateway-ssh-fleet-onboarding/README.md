@@ -6,7 +6,7 @@
 - **Created:** 2026-10-16
 - **Status:** Active
 - **Umbrella issue:** #6681
-- **Sub-issues:** #5861; prerequisite owners #6030, #6240, #6424, #5789, #6443, #6804
+- **Sub-issues:** #5861, #8888; allocation prerequisite #5839; prerequisite owners #6030, #6240, #6424, #5789, #6443, #6804
 
 ## Guiding Intent
 
@@ -33,6 +33,10 @@ resource acquisition and identity bindings remain external adapters.
 | Existing #5789 / #6443 / #6804 owners | Routing, authentication, enrollment and Gateway integration | Their existing issue threads |
 | Existing #6241 owner | Operation admission and receipt authority | Existing Fleet Control V2 coordination |
 | `wobbly-contraption` | Retained construction/admission/lifecycle and setup-consumer integration, not generic artifact publication | Existing #6030 / #6240 / #6424 source custody |
+| `crooked-circuit` | Bounded SSH-service peer-approval source, client contract and isolated qualification | #8888; [peer-approval plan](peer-approval.md) |
+| `squeaky-buckle` | Completed bounded foreground Fleet SSH directory/local-writer consumer after merged #8000; no installation or deployment | Merged #8910; bounded source reservation settled |
+| `restless-actuator` | Non-editable installed SSH runtime and source-denying native consumer qualification | #6681 source reservation6397956631 |
+| `patient-bearing` | Operator-allocated continuity/bootstrap source and the origin-owned remote allocation prerequisite | #6681 source allocation6408998175; [bootstrap boundary](continuity-bootstrap.md#selected-executable-slice); #5839 [allocation slice](origin-owned-allocation.md) |
 
 ## Coordination
 
@@ -49,6 +53,28 @@ resource acquisition and identity bindings remain external adapters.
   Gateway/SSH onboarding integration and validation matrix.
 - No edits to reserved installer, authentication, ledger, controller or shared
   CLI files before their retained owners agree the integration seam.
+- The operator subsequently allocated the bounded missing first-touch enrollment
+  operation and its normal setup consumer to `patient-bearing` within those
+  existing authorities. This is the narrow exception recorded in
+  #6681 comment6408998175, not a transfer of broader construction, publication,
+  lifecycle, provider or SSH custody. Review the selected executable slice
+  before changing runtime semantics.
+- The continuation selects `patient-bearing` for #5839's reviewed
+  origin-coordinated remote allocation prerequisite. The
+  [ordered execution and validation slice](origin-owned-allocation.md) must
+  clear review before runtime implementation. It owns Worktrees allocation and
+  the narrow Bridge/Dispatch consumers, not the retained Fleet installer,
+  machine-identity mapping, enrollment, provider or controller implementations.
+- The bounded normal SSH consumer continuation is now selected under #6681:
+  `squeaky-buckle` drives new `ssh_machine.py`/`ssh_machine_config.py`, focused
+  tests/docs and narrow `serve --role ssh-client`/optional-closure wiring.
+  This is an explicit source slice, not takeover of retained worktrees,
+  construction/admission or operational authority. Existing shared lifecycle,
+  provider, credential and deployment gates remain with their owners.
+- `restless-actuator` owns only the existing standalone SSH preparer's
+  non-editable dependency selection, focused preparation tests and a new
+  source-denying installed consumer witness. It does not select a release,
+  approve an artifact/feed, add an installer or wire normal role lifecycle.
 - The construction owner accepted two exclusive new source leaves:
   `fleet-manager/src/fleet_manager/gateway_ssh_policy.py` and its matching
   `test_gateway_ssh_policy.py` belong to `ticking-wrench`; the separate
@@ -113,6 +139,12 @@ The following contract decomposition and validation techniques are
 **agent-recommended** implementation proposals, not additional operator grants.
 
 ## Proposed Contract
+
+The [continuity-backed first-touch amendment](continuity-bootstrap.md) adds
+README/harness-context selection, already-authenticated user continuity,
+scoped Gateway enrollment before SSH and separate ordinary human sessions.
+It preserves the retained owners below and the separately selected
+[peer-approval policy](peer-approval.md); it is not delivered setup behavior.
 
 ### Portable setup modules and operation ownership
 
@@ -330,6 +362,29 @@ onboarded merely because its source is published.
   release/source/proof seam before privileged publication or setup wiring.
 - [x] Review the coherent integration-contract amendment against retained
   lifecycle, routing, authentication, credential and Chat scopes.
+- [ ] Review and implement the [continuity/bootstrap contract](continuity-bootstrap.md)
+  through the retained installer, credential/enrollment and human-session
+  adapters; preserve existing machine-proof and peer-approval requirements.
+- [x] Review the [selected executable slice](continuity-bootstrap.md#selected-executable-slice):
+  explicit public-key machine authentication, a real current-policy producer
+  and original-operation enrollment in the existing journal, followed by the
+  normal Manager/engine setup consumer. No new issuer or parallel registry.
+- [ ] Review and implement the [origin-owned remote allocation prerequisite](origin-owned-allocation.md)
+  under #5839 before relying on remote qualification workers. Retain the
+  originating claim and actual receiving identity across uncertainty; allocation
+  remains distinct from agent launch.
+- [x] Land the protected origin/receiving provider foundation for that prerequisite.
+  Ordinary selectors, consumers and installed
+  qualification remain in the open allocation item above.
+- [x] Land bounded asynchronous reconciliation under the existing elected
+  Worktrees resident. Ordinary startup alongside linkage and installed
+  acceptance remain in the open allocation item above.
+- [x] Land the ordinary origin-owned destination coordinator and original
+  receiving-result contract. Consumer integration and installed/native
+  qualification remain in the open allocation prerequisite.
+- [x] Land the first origin-local owned SSH Bridge consumer and its allocation,
+  native-identity and startup-serialization source controls. Foreign-origin
+  composition, Dispatch and installed/native qualification remain open.
 
 ### Phase 2 - Driver and directional policy
 
@@ -350,8 +405,18 @@ onboarded merely because its source is published.
 
 ### Phase 3 - Actual setup and durable convergence
 
+- [x] Implement the allocated public-key receiver/current-policy/journal and
+  normal Manager/engine local-projection consumer; qualify the actual synthetic
+  source/process/TLS path. Installed distribution and native/provider/live
+  acceptance remain open below.
+- [x] Implement the bounded explicit foreground Fleet SSH-directory consumer,
+  composing the existing authenticated client and local profile/login-key
+  writers with native lease and shutdown custody. This is source capability,
+  not managed setup, enrollment or an adopted installation.
 - [ ] Wire the accepted role setup entry point to admitted target-local
   lifecycle/enrollment/authorization/profile effects.
+- [ ] Consume the harness-selected continuity source and delegated first-touch
+  or confirmation path before assuming a Gateway connection or SSH transport.
 - [ ] Persist stage outcomes, desired/applied digests, owner generation and
   uncertain-operation reconciliation through the existing authorities.
 - [ ] Implement owner-managed startup/reconnect catch-up, no-op repeat,
@@ -364,6 +429,22 @@ onboarded merely because its source is published.
 - [ ] Record published, installed and live-qualified revisions separately.
 - [ ] Transfer any unavailable live lane to a named tracked objective; do not
   silently remove a declared machine/environment from acceptance.
+
+### Explicit peer enrollment approval
+
+The selected policy is **`explicit-peer-approval`**. The detailed decomposition
+in the [peer-approval plan](peer-approval.md) is agent-recommended realization,
+not installation, credential or live-adoption authority.
+
+- [x] Review the #8888 vision/contract amendment before implementation:
+  #8894 merged at `1fcf4f5f16926762e3a85ef799f55eaf02aeb81a`.
+- [x] Implement optional exact-fingerprint peer admission and separate explicit
+  bootstrap/recovery in the existing SSH service, preserving its automatic
+  configured-binding baseline when the policy is absent.
+- [x] Qualify the actual client/Gateway/store contract, restart, original-request
+  recovery, stale/unauthorized decisions and mixed-version refusal.
+- [x] Merge the bounded source and record its retained release/adoption boundary;
+  do not mark the broader setup or live mesh items complete.
 
 ## Validation Plan
 
@@ -398,15 +479,389 @@ onboarded merely because its source is published.
 - [ ] Clean-room and available live lanes; mark synthetic versus real evidence
   explicitly, including unexercised suspend/logout and channel-close cases.
 - [ ] Verify private policy is not embedded in public examples, tests or docs.
+- [ ] Qualify the [continuity bootstrap validation](continuity-bootstrap.md#validation-obligations),
+  including source/account/grant refusal, Gateway-first targets, pairing
+  recovery and the separate normal human-session boundary.
+- [ ] Qualify the selected public-key profile and actual source-to-setup-to-Gateway
+  path, including restart/lost replies, current-source revocation and rollback
+  floors, private local key custody, mixed-version refusal and unchanged token
+  profiles. Installed and live acceptance remain distinct.
+- [x] Qualify the bounded POSIX source path with synthetic delegation, real TLS,
+  original-operation recovery, private-file custody, unchanged active channels,
+  ordered publication, mixed-version refusal and two-harness state isolation.
+  This does not qualify source-denying installed distribution or native providers.
+- [x] Qualify the Linux noneditable Fleet SDK closure with checkout access
+  physically refused before imports, through the real synthetic TLS CLI and
+  Manager/engine consumer. Restart the receiver at the same origin/journal and
+  retain the original machine key and operation. Manager/engine installation,
+  native providers, released construction and live adoption remain open.
+  A separately bounded native Linux `aarch64` packet also passed all 11 cases;
+  that source-built SDK witness does not widen the product/provider claim.
+- [x] Peer-approval selection: pending public identities never enter active
+  directory or native relay authorization before exact authenticated approval;
+  explicit recovery cannot become a missing-approver fallback.
+- [x] Peer-approval compatibility: absent policy retains the old contract;
+  incapable or rolled-back providers refuse the required policy before effects.
+- [ ] Qualify the [remote allocation acceptance matrix](origin-owned-allocation.md#validation-plan)
+  through actual owner command boundaries, same-allocation recovery,
+  non-blocking claim linkage alongside ordinary child startup and target
+  completion, including an outbound-only
+  origin. Source, installed and native results remain separate.
 
 ## Proposal
 
 The proposal is reviewed and merged. Accepted policy/runtime source leaves are
 being implemented independently; shared setup integration remains with its
-retained owner. No managed setup/apply, enrollment, live rollout, lifecycle
-takeover or implementation completion is asserted.
+retained authority, with the bounded operator allocation above. No managed
+setup/apply, enrollment, live rollout, lifecycle takeover or implementation
+completion is asserted.
 
 ## Journal
+
+### 2026-10-27 - Native Linux aarch64 SDK boundary qualified
+
+- The reviewed origin-local allocation consumer was promoted through #9254:
+  source `d8c29a492ad29c0bcd4ff2f6a4291170952107fb`, exact candidate
+  `5a456e8063c9fea8b658bcea4ed1e88799158601`, landed Main
+  `5bee9e23a937da2ae460cb18e068314e2d52d358`. Normal unified installation
+  supplied Worktrees `1.24.312-dev1` and Bridge `0.9.189-dev1`; actual creator,
+  receiver/result capabilities and serving identity were checked.
+- That supported path created one actual receiving workspace and native
+  conversation, with the original protected obligation confirmed. Readiness
+  used the hosting Bridge's mapping, not an independently running receiver
+  Bridge's empty local roster. No duplicate registration or replacement was
+  introduced to bridge that distinction.
+- Exact reviewed #9066 source
+  `a15737268e591255b077bea514bb2e3e0ed0f551` passed **11 cases, zero skips**
+  on native Linux `aarch64`, Python `3.12.13`: eight source cases and three
+  fresh noneditable SDK cases. Real synthetic TLS, checkout-import refusal,
+  original-key/operation receiver restart and source Manager/engine consumption
+  remained intact. The SDK was built from reviewed source for this test,
+  not installed as the Manager product or a released construction closure.
+- Two-CPU/1536-MiB/zero-swap outer supervision and the existing inner test
+  sandbox contained preparation and tests. Both supervisor receipts verified
+  cleanup; preparation-through-test elapsed 61.37 seconds. The coordinator
+  independently parsed all JUnit cases, inspected the observation-only runner
+  hook and checked source/custody and resource receipts. This timing is not
+  cold/warm native agent-startup qualification.
+- Re-read the Plan and Validation Plan. Close only this selected native
+  synthetic SDK lane. Foreign-origin composition, Dispatch, outbound-only and
+  remaining platform/provider acceptance, actual child conclusion and installed
+  Manager/Core/Gateway delivery remain open under their existing owners.
+  Retained workspaces and claims were not cleared as a side effect of testing.
+
+### 2026-10-27 - First owned SSH Bridge consumer source merged
+
+- #9241 merged to `dev` as `d8c29a492ad29c0bcd4ff2f6a4291170952107fb`.
+  Exact head `e3f63cc5d9ec8afc0814e82ae14e6c660d2e6a02` received Copilot
+  approval `5663879456`, no active findings and required green checks.
+- Bridge retains the original allocation key before effects, negotiates the
+  actual local creator and bridge-shaped ordinary creation, and records the
+  actual receiving child before native startup. Pending claim linkage does not
+  delay that startup. Missing or foreign origin capability refuses rather than
+  dropping ownership metadata.
+- Review corrections cover failed pre-native recovery, changed local caller
+  facts, persistent unknown-native fencing and stop/resume while the original
+  allocation response is delayed. Initial startup uses the existing lifecycle
+  lock; it does not add another allocation store, lock or acknowledgement gate.
+  The final source packet passed 233 isolated lifecycle cases and 2,443 required
+  units. Native cold/warm performance remains explicitly unmeasured.
+- Re-read the Plan and Validation Plan. Close only this owner-local consumer
+  source item. The broader #5839 caller-origin/Dispatch, outbound-only, real
+  native, release and installed acceptance remain open. Continue those actual
+  qualification boundaries without treating this merge as an installed worker
+  or completed Gateway setup.
+
+### 2026-10-26 - Ordinary destination coordinator source merged
+
+- #9230 merged to `dev` as `f3d11b3bcd07805ebfaa3db22b4dfdf30535bb42`.
+  Exact head `325e311a70e22dc759f6add014311df362f72cd5` received Copilot
+  approval with no active findings and required green checks before managed
+  completion. The retained source vessel continues the open allocation slice.
+- The ordinary coordinator captures the original CWD owner before destination
+  selection, negotiates actual origin/resident/receiver capabilities and
+  returns the original sessionless receiving result with linkage reported
+  separately. Request-ID recovery survives lost stdout without reconstructing
+  a generated opaque key. Unresolved linked origins, including unregistered
+  repositories, and unsupported environment requests refuse before effects.
+- The final focused container packet passed 63 cases, including fresh
+  receiving CLI/result recovery and local/remote ownership refusals. The
+  exact-head required packet passed 2,440 no-effects units with coverage.
+  These are source/process results, not native startup or an installation.
+- Re-read the Plan and Validation Plan. Close only ordinary-coordinator source;
+  continue narrow Bridge/Dispatch consumption without a second allocator,
+  foreign origin-ledger writes or a linkage-acknowledgement startup gate.
+  Actual outbound-only, native, release and installed acceptance remain open.
+
+### 2026-10-26 - Original receiving creation-result source merged
+
+- #9222 merged to `dev` as `97836c1a5a6b2a710b65fd55d2ce4911f6d887fc`.
+  Exact head `fb03cf6d7a9ed5c7efa6d444120f8ba6a239e775` received current-head
+  Copilot approval with the unfinished-status finding resolved and required CI
+  green before managed completion. Canonical completion retained the source
+  vessel for the open allocation prerequisite.
+- The separately negotiated receiver result returns the original completed
+  journal's actual ordinary sessionless worktree, not a planned path or another
+  creation. Unfinished `pending`/`unknown` replies preserve status without a
+  usable ordinary result; strict original-request and incarnation checks do not
+  relax the completed lifecycle-proof validator.
+- The focused isolated result/receiver/CLI/resident-linker selection passed
+  101 cases, including a real receiving interpreter for capability, original
+  result and unknown-history transport. The exact committed no-effects packet
+  passed 2,435 cases with production coverage recorded once.
+- Re-read the Plan and Validation Plan. No broader ordinary-coordinator,
+  startup, consumer, native or installed acceptance item closes. Start ordinary
+  destination selection with CWD-origin capture and actual provider/resident
+  negotiation, then the existing Bridge/Dispatch consumers.
+
+### 2026-10-26 - Resident-owned asynchronous linkage source merged
+
+- #9214 merged to `dev` as `ce469bffe906be5aad7b72b0b4047c206fb61387`.
+  Exact head `ddea184dca4abd2d4f95c8106f8db996f50f22d1` received current-head
+  Copilot approval with no active findings and passed required CI before
+  managed completion. The source vessel remains responsible for the effort.
+- Re-read the Plan and Validation Plan. Resolve only bounded resident
+  reconciliation: current-ledger restart discovery, finite same-allocation
+  requests, non-blocking network waits, current governance and election fences,
+  visible damaged inventory and mandatory retirement settlement.
+- The final isolated discovery/runtime/wake selection passed 39 cases,
+  including opaque-ledger repair, five newly registered projects under a
+  four-project sweep budget and scan-scoped configuration reuse for both active
+  and retained-closed claims. The exact committed required no-effects packet
+  passed 2,435 cases with production coverage recorded once.
+- Next implement ordinary `create` destination selection with CWD origin
+  capture and negotiated runtime capabilities, then migrate Bridge/Dispatch.
+  Agent startup alongside delayed linkage, actual promotion, authorized
+  installation, native qualification and the parent delivery gates remain open.
+
+### 2026-10-26 - Allocation provider foundation merged
+
+- #9186 merged to `dev` as `0050dd33e6fce80e21a7e6808fb6eca624c66c4c`.
+  Exact head `f99f11790c2d2706b16f2d433d55daae3105d44e` received current-head
+  Copilot approval with no open findings and passed required CI before managed
+  completion. The source worktree remains responsible for the open effort.
+- Re-read the parent Plan and Validation Plan. Close only the provider-source
+  milestone: protected origin responsibility, sessionless receiving creation,
+  exact original-operation recovery and retained actual lifecycle conclusion.
+  The [allocation slice](origin-owned-allocation.md#provider-source-boundary)
+  records the provider-only scope and remaining acceptance.
+- The final correction qualifies complete lifecycle/wire capacity, including
+  cancellation, finalized/archived closeout, escaped identity size and the
+  transport newline. Its isolated packet passed 140 cases, followed by 34
+  receiver/CLI checks after the cohesive helper extraction. The exact committed
+  no-effects packet passed 2,432 cases with production coverage recorded once.
+- Next implement ordinary destination selection and the responsible owner's
+  restart-safe asynchronous linker, then migrate the existing Bridge/Dispatch
+  allocation callers. No installed capability, worker replay or rollout is
+  inferred from this merge.
+
+### 2026-10-26 - Non-blocking allocation claim linkage
+
+- The operator clarified: "I'd rather asynchronously try to link claims back
+  while getting the agent booted up". The
+  [allocation slice](origin-owned-allocation.md) captures the full narrow
+  clarification and replaces confirmation-before-embodiment with durable
+  receiving creation followed by asynchronous origin-claim linkage.
+- Pre-effect originating responsibility, exact allocation identity, recovery
+  after restart, parent-finalization gates and existing agent/session/task
+  admission remain required. Claim acknowledgement is not a second launch
+  dependency; this is not permission for unowned allocation or a reverse
+  connection requirement.
+- #9169 merged the initial execution plan as
+  `413f914f63d0ebde49585c482a09b2c042c7d270`, after current-head Copilot approval
+  and successful required checks.
+- #9179 merged the non-blocking revision as
+  `1febeb58bb8bfa301e7528c9b9d0e443f4ad4386`, after current-head Copilot approval
+  with no open findings and successful required checks. Implementation,
+  restart-safe reconciliation, consumer integration and qualification remain
+  open; no installed runtime capability or agent launch is claimed.
+
+### 2026-10-26 - Origin-owned remote allocation architecture and execution slice
+
+- #9155 merged the canonical Worktrees/Bridge vision and shared allocation
+  pattern as `cd9125ac742e8d052925835782e49ae725046916`, after current-head
+  Copilot approval with no open findings and successful required checks.
+- #5839 retains runtime ownership. The operator-directed continuation now
+  selects the [bounded implementation slice](origin-owned-allocation.md);
+  its plan review precedes new runtime code. This is not a second allocator,
+  a live retry or a transfer of the parent campaigns' retained responsibilities.
+- The existing pending-resource and keyed-creation primitives are prior art,
+  not interchangeable semantics: disposable absence and conversation retirement
+  cannot substitute for a worktree's actual lifecycle conclusion.
+
+### 2026-10-26 - Source-denying installed continuity SDK qualified
+
+- #9066 merged to `dev` as `a15737268e591255b077bea514bb2e3e0ed0f551`.
+  Exact head `6b777583bda552793cb3e6275777bc26d681b389` received Copilot
+  approval `5650118978` with no open findings; all required checks passed
+  before the normal managed Maintainer completion.
+- Re-read the full parent Plan and Validation Plan. Resolve only the bounded
+  Linux installed-SDK item: the final contained packet passed all 11 cases,
+  including an intentional source-import refusal, actual CLI and source
+  Manager/engine consumers, and same-origin receiver/journal restart with the
+  original key and operation. This does not install the Manager/engine product
+  or qualify real continuity providers, native Windows/macOS or live enrollment.
+- Continue through the retained release/construction owners for the selected
+  engine's supported service-Gateway SDK closure. The independently bootstrapped
+  Komodo substrate has its own reviewed #8860/#8872 source appointment under
+  #6030; do not replace it with a second installer or count its plan as execution.
+  Human sessions, actual role setup/lifecycle, published/installed revisions and
+  live adoption remain open. Neither #6681 nor #6236 is complete.
+
+### 2026-10-26 - Executable first-touch source merged; installation stays gated
+
+- #9047 merged to `dev` as `528c8b1c53d00ff8c561f78324f5b951339eaf71`.
+  Exact head `33f1782779388e0335605dad5bd23ed1e5651bfa` received a
+  current Copilot Comment with no open findings; required CI passed and all
+  review threads were resolved before the normal managed Maintainer merge.
+- Re-read this full Plan/Validation Plan. Resolve only the bounded source and
+  synthetic qualification items above: 643 affected Fleet cases passed, followed
+  by 57 engine/setup cases with 23 platform skips and eight continuity controls.
+  The normal Manager -> engine -> isolated SDK -> real TLS path is exercised,
+  not replaced by an injected enrollment result.
+- The retained construction/release owner must supply Fleet's service-Gateway
+  SDK closure in the selected engine environment. No unsupported cross-project
+  dependency, private installer, new token issuer or second journal was added.
+  Continue installed source-denying/native qualification and owner-approved
+  provider/human-session/setup/lifecycle integration under the existing trackers.
+  #6681 and #6236 remain open; no runtime update, live enrollment, deployment
+  or predecessor retirement occurred.
+
+### 2026-10-25 - Public-key enrollment implementation plan reviewed
+
+- #9039 merged the selected executable slice to `dev` as
+  `f1f5a3862c3a5ee30969a147349eda354357dab2`, after exact-head Copilot
+  approval with no open findings and required successful CI.
+- Re-read the full Plan and Validation Plan and resolve only the selected
+  executable-plan review item. Public-key authentication, actual enrollment
+  publication/journal recovery and normal Manager/engine setup consumption
+  remain to implement and qualify; no runtime or installed gate closes.
+- Continue the allocated receiver and current-policy/operation integration
+  before migrating its normal setup caller. No live credential, enrollment,
+  installation, service, network or deployment effect occurred.
+
+### 2026-10-25 - Continuity bootstrap and human-session contract source
+
+- #9038 merged the three governing vision refinements and proposed
+  continuity-bootstrap contract to `dev` as
+  `5bd6275d19f409ed4e6515eec5d86c1f7040414e`, after current-head Copilot
+  approval and required CI. The parent Plan/Validation Plan remains open.
+- The amendment adds no executable setup, verifier, issuer, enrollment or
+  provider behavior. Existing peer approval and retained implementation owners
+  remain unchanged. The next slice is the normal installer/adoption and
+  receiving identity/enrollment integration, not a new private installer or
+  live adoption inferred from a documentation merge.
+
+### 2026-10-25 - Peer-approval source merged; integration remains open
+
+- #8917 merged to `dev` as `e5ec299aceb81808a987e8752fa47566a630ae23`
+  at 13:34:11Z. Exact submitted head
+  `ccd78d077dea205091d515e89a38f4ef3b1930b7` received approval
+  `5643362836`; all three review threads were resolved and required CI passed.
+- Both full native service suites passed on that exact head in
+  [40197079356](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40197079356):
+  Windows control-plane and Linux service/native-relay qualification. These
+  are disposable authenticated Gateway/CLI fixtures, not installed adoption.
+- The rebuilt local focused packet passed all 55 enrollment cases. Seven
+  installed production modules matched source. The local whole-suite startup
+  timeouts under measured CPU saturation were not relabeled passing or waived:
+  the same unchanged deadlines passed in the pinned full native suites.
+- Re-read the Plan and Validation Plan and resolved only the four explicit
+  peer-approval source/qualification items. The parent remains Active.
+  Release, authentication/setup composition, provider interoperability, actual
+  fleet adoption and predecessor retirement remain with #6681 and its existing
+  owners; this source slice transfers its remaining responsibility there.
+- No installation, runtime update, credential action, fleet deployment or
+  serving-predecessor retirement occurred. Source merge is not release or
+  evidence that a running deployment enforces the selected policy.
+
+### 2026-10-24 - Foreground Fleet SSH consumer source
+
+- Added the explicitly selected `serve --role ssh-client` path and strict local
+  configuration, with packaged runtime contract metadata and an optional
+  dependency closure. Default installation/planning stays thin and inert.
+- The fixed adapter composes the existing authenticated directory client,
+  credential references, profile writer and target-login authorization owner.
+  Repeated cancellation retains the watch and native lease through settlement;
+  restart revalidates the current snapshot and existing writer floors.
+- Focused local qualification covers schema/refusal behavior, real local writes,
+  restart/no-op, lease/signal custody, missing dependencies and existing Gateway
+  runtime compatibility. Installed CLI fixtures exercise the real disposable
+  TLS/JWT/DPoP Gateway and registered service, including a connected later join
+  and offline catch-up with a second consumer. The Windows process fixture
+  qualifies abrupt kernel-lease recovery, not graceful Windows signal delivery.
+- This source does not install or update a managed role, enroll a machine,
+  acquire/rotate keys, renew a provider, change sshd, deploy or retire a
+  predecessor. General node hosting and the broader Plan/Validation items stay
+  open; release/artifact selection and actual adoption require their owners.
+
+### 2026-10-25 - Explicit peer-approval source
+
+- #8894 merged the scoped intent and plan after approval and required checks.
+  The selected policy extends the existing service; automatic configured-binding
+  admission remains the absent-policy baseline.
+- Implemented durable pending public candidates, exact authenticated peer
+  decisions, separately configured confirmed recovery, and the supported
+  runtime-selected client contract. The original store owns activation,
+  historical decisions, generation checks and original-request recovery.
+- The native Windows contained suite passed 116 tests with six explicit
+  Linux-only skips. Real TLS/JWT/DPoP and the installed CLI's retained-state
+  restart are exercised with synthetic identities. All five installed changed
+  source bodies match the candidate. Linux native/disposable
+  qualification and implementation review/publication remain outstanding.
+- No live installation, credential access, provider/setup takeover or
+  production migration is included. Broader integration and live adoption
+  remain with #6681 and its retained owners.
+- Review of #8917 found that an embedded near-limit directory could strand
+  committed outcomes and a maximum-size pending list could exceed its frame.
+  The new unreleased receipt now retains the decision's original directory
+  revision instead of embedding the global catalog, and checks its complete
+  encoded size before commit. Pending inspection uses byte-bounded `after` /
+  `next` pages without dropping candidates or reducing the binding limit.
+- The review-corrected Windows suite passed 120 tests with six explicit skips;
+  four focused wire-limit/transaction controls and the installed CLI's signed
+  paging/restart control also passed. All five changed installed source bodies
+  match the candidate. The earlier exact-head Linux/Windows run
+  [40176923839](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40176923839)
+  passed on `a8e7d19df91f7b8fed0e05541803996d0b83ac6a`; these corrections still
+  require fresh current-head review, required CI and native qualification.
+- The next review identified a retained outcome synthesized after a policy
+  round trip without persisting its decision. Observation now repairs that
+  receipt transactionally, reuses the original decision for equivalent request
+  aliases, and rolls back if the observing request is withdrawn.
+- The rebuilt Windows suite passes 127 tests with six Linux-only skips,
+  including four retained-history controls and real-process metadata controls.
+  The offline distribution check also passes with its unchanged ten-second
+  CLI deadline; metadata parsing no longer imports runtime-only dependencies.
+  All six installed changed production modules match the candidate and Ruff
+  passes. The preceding head passed both hosted native jobs in run
+  [40182383847](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40182383847);
+  this corrected head still requires fresh review, CI and native qualification.
+- Review of the next head found an intrinsically invalid inbound candidate
+  could be journaled without its required host pin. Validation now refuses
+  that candidate before recording its request, and likewise refuses a relay
+  key identical to its own client key. Corrected original-ID retries remain
+  usable in both modes; outbound-only clients may still omit host pins.
+  The host-pin controls first reproduced the defect against the preceding
+  installed wheel. The rebuilt final Windows suite passes 133 tests with six
+  Linux-only skips; Ruff passes. The preceding head passed both native jobs
+  in run [40187342145](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40187342145).
+  Fresh current-head review and qualification remain required before merge.
+- The rebased review found a one-byte terminal-page edge: `null` can exceed a
+  one-character continuation cursor. The regression reproduces an actual
+  32,769-byte terminal response against the 32,768-byte transport bound through
+  the client/service path. Page construction now budgets both representations.
+- Qualification of the newly merged Fleet consumer also exposed its frozen
+  Gateway clock versus a restarted realtime CLI. Both native restart fixtures
+  now share the existing realtime-clock helper. Invalid local writer scopes
+  refuse before credential-runtime imports; an import guard reproduces and
+  protects that ordering without changing the CLI's fifteen-second deadline.
+- All 55 focused enrollment regressions pass against the rebuilt provider,
+  including the exact transport boundary. The latest local whole-suite run
+  passed 139 cases with six Linux-only skips but hit four native startup
+  deadlines while aggregate host CPU remained at 100%, including an unchanged
+  foreground-custody fixture. No timeout or authentication allowance was raised.
+  Fresh pinned Linux/Windows whole-suite qualification remains a merge gate.
 
 ### 2026-10-16 - Intake and current boundary
 
@@ -636,3 +1091,107 @@ takeover or implementation completion is asserted.
   authentication/proof compatibility, managed setup, live transport, migration
   or fleet adoption. No keys, credentials, installation, runtime update, service
   restart or deployment were performed by this source slice.
+
+### 2026-10-25 - Foreground SSH consumer publication follow-through
+
+- #8910 adds the explicitly selected Fleet SSH directory subscriber after
+  #8000. Source review exposed unsupported cross-plugin UV references; the
+  optional SDK names now use normal dependency metadata and standalone test
+  preparation selects the first-party packages explicitly. The actual release
+  materializer regression passes without a plugin-vendoring exception.
+- The isolated native run found a coupled elevated Windows authorization-file
+  owner check. The correction accepts only OS-default privileged file owners
+  under the unchanged protected current-account directory and closed user/SYSTEM
+  grant policy; foreign owners/grants still refuse, with no ACL repair.
+  The corrected published head still owes both native platform lanes.
+- Local focused Fleet/Gateway/SSH/materializer checks passed 72 cases; the
+  installed real TLS/DPoP service packet passed 24 and affected preparation
+  families passed 10. These are disposable source/package fixtures, not a
+  production deployment or complete source-free shared-library closure.
+- Managed publication hit its unchanged 30-second transport deadline because
+  a timed-out live identifier sweep waited on descendant-held pipes. Reused the
+  canonical caller-owned capture helper with its unchanged 10-second sweep
+  deadline. All identifier sources, configuration-failure/partial-entry rules
+  and both independent publication guards remain enabled. Missing capture code,
+  output overflow and unconfirmed cleanup fail closed; cleanup errors retain
+  exact custody instead of masquerading as optional-source absence.
+- The 63-case identifier/publication packet passes, including native
+  parent-exits/descendant-holds-pipes retirement with a birth-pinned observer.
+  The same-input identifier guard body fell from 42.266 to 12.674 seconds.
+  This measures deadline recovery, not a successful complete live sweep:
+  the optional producer still times out and contributes no additional entries.
+  Review, required current-head CI and the corrected native lane remain open;
+  this shared effort and its release/setup/adoption obligations stay Active.
+- Reconciliation with the concurrently merged #8855 retains its equivalent
+  caller-owned sweep, no-self-provision environment, Windows batch quoting and
+  32 MiB/1 MiB stream limits. This branch adds canonical-source verification,
+  explicit missing-helper refusal and exact cleanup-error custody, plus the
+  birth-pinned inherited-pipe control; it does not replace those upstream fixes.
+- Review follow-through reproduced the stale Fleet-only preparation assertion
+  and corrected it to the explicit SSH/lease source contract. Reject all three
+  output destinations inside the normalized lease-state tree before effects;
+  unit controls cover equality, nesting, normalized aliases and sibling names,
+  and installed CLI controls prove refusal before credentials/state creation.
+  The complete preparation/scope/authorization packet passed 126 cases with
+  six native-platform skips; the installed connected/restart/refusal file
+  passed all six cases locally.
+- Exact-head native run40185328158 passed Linux's 78 service cases (seven
+  platform skips) and two real StrictModes/login cases, but both new Windows
+  connected/restart cases still refuse an authorization descriptor. The earlier
+  privileged-file-owner correction is not a qualified Windows fix. Added bounded
+  descriptor-shape diagnostics that redact every account SID; the owner/grant
+  policy is unchanged while this failure is diagnosed. No blind retry, ACL
+  relaxation or production repair is authorized by that observation.
+- Diagnostic run40186763879 identified the actual remaining mismatch:
+  Windows renders the exact current account SID as `LA` in both owner and
+  grants. Normalize the expected current SID through the same native
+  owner-only SDDL round trip before comparing. This is not a RID-based guess
+  or blanket acceptance of `LA`; foreign owners and extra group grants still
+  refuse, and the protected directory/current-account policy is unchanged.
+  The 55-case Fleet/authorization packet and six rebuilt installed-role cases
+  pass locally, including real native SID formatting and private ACLs.
+  Corrected hosted Windows qualification and fresh review are still required.
+- Exact-head run40187652857 qualified that correction: Windows passed 82 cases
+  with six platform skips; Linux passed 81 with seven platform skips plus two
+  real StrictModes/login cases. Every selected native job/step succeeded.
+  Subsequent reconciliation preserves #8953's independently merged
+  configured-only publication policy: live discovery is now an explicit manual
+  audit and size enforcement stays in CI. This branch does not restore retired
+  push scans or opt out of any current gate. The reconciled identifier packet
+  passed 65 cases with one POSIX-only skip on Windows.
+- Followed through the body-only review observations as well: preflight the
+  exact source/lock directories derived by the canonical local writers, not
+  just the three configured destinations. Fleet calls that adapter-owned check
+  before policy/credentials/lease effects; an older partial adapter refuses
+  before effects. Failure-path test teardown now settles all retained tasks,
+  process, diagnostic and rig even if one owner fails.
+  The 69-case Fleet/authorization/adapter packet and nine rebuilt installed
+  consumer cases pass locally. Final-head native/CI/review remain pending;
+  earlier native success is not substituted for the newer source.
+
+### 2026-10-25 - Non-editable installed runtime qualification
+
+- The preceding foreground source is delivered by merged #8910 at
+  `6254e0f9eb49231db76f23da54fe7dc5223f753e`. Final-head native
+  run40189515793 passed Windows85/6 platform skips, Linux84/7 platform skips
+  and both real Linux StrictModes/login cases before merge. Its review and
+  required checks passed; that settles only the preceding bounded source.
+- Follow-through found a narrower qualification gap: the standalone SSH
+  preparer still allowed editable shared-library dependencies, while its
+  installed-origin assertion covered only Fleet and agent-ssh. Selecting
+  `--no-editable` in that existing guarded preparer keeps the disposable
+  runtime's entire dependency graph installed, without a new resolver policy.
+- The new witness starts the actual foreground CLI without site startup or
+  `.pth` processing, admits only the selected environment's package locations,
+  checks every installed distribution's file inventory and non-editable
+  metadata, and refuses source-checkout reads outside that exact environment.
+  An intentional source import is refused by the same guard. The existing
+  connected/later-join and disconnected/restart scenarios exercise real
+  authenticated transport and native local writers; native OS identity/ACL
+  helpers remain allowed.
+- Local Windows qualification passed all 88 service cases with six native
+  platform skips, including the three new cases. The affected preparation
+  packet passed 73 cases with six platform skips. Hosted exact-head Windows
+  and Linux, current-head review and required CI remain publication gates.
+  This is installed-runtime evidence, not authenticated release-artifact
+  admission, managed setup, live fleet adoption or predecessor retirement.

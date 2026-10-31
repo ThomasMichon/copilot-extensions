@@ -1,0 +1,9 @@
+{
+  "comment": "Add non-executing topology/profile session snapshots with optional same-cell Worktrees lookup.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

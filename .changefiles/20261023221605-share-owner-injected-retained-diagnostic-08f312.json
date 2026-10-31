@@ -1,0 +1,17 @@
+{
+  "comment": "Share owner-injected retained diagnostic logging, adopt bounded Bridge application diagnostics and expose an explicit separate retained-spool API.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

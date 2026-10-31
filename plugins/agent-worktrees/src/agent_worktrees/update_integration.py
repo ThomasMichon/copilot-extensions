@@ -33,6 +33,21 @@ def _selected_payload(payload: Path, environment: Mapping[str, str]):
                 os.environ[key] = value
 
 
+def run_selected(payload: Path, platform_name: str) -> bool:
+    from . import reconcile
+
+    try:
+        environment, _root = reconcile.runtime_installer_environment("agent-worktrees", payload)
+    except ValueError as error:
+        output.err(f"Integration scope: {error}")
+        update_events.record(
+            "runtime_preflight", "agent-worktrees@copilot-extensions",
+            f"installation context invalid: {error}",
+        )
+        return False
+    return finish(payload, platform_name, environment)
+
+
 def finish(payload: Path, platform_name: str, environment: Mapping[str, str]) -> bool:
     """Required local outputs cannot be downgraded to advisory skipped work."""
     from .manager_recovery import recover

@@ -23,15 +23,17 @@ def remove_fixture_worktree(owner: Path) -> None:
     shutil.rmtree(owner, onerror=clear_git_readonly)
 
 
-def isolate_account_profile(plugin: Path, home: Path) -> None:
+def isolate_account_profile(
+    plugin: Path, home: Path, *, runtime_package: str | None = "agent_worktrees",
+) -> None:
     if os.name == "nt":
         return
     # HOME does not redirect passwd. Change only copied OS lookups before
     # construction freezes either the bootstrap or installed API graph.
-    for directory in (
-        plugin / "scripts" / "installation-context",
-        plugin / "src" / "agent_worktrees",
-    ):
+    directories = [plugin / "scripts" / "installation-context"]
+    if runtime_package is not None:
+        directories.append(plugin / "src" / runtime_package)
+    for directory in directories:
         resolution = directory / "_installation_context_resolution.py"
         source = resolution.read_text(encoding="utf-8")
         lookup = "profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)"

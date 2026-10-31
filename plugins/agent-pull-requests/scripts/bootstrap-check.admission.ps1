@@ -1,4 +1,4 @@
-# Native admission wrapper for the unchanged shared bootstrap-check reconciler.
+# Native admission wrapper for the legacy bootstrap-check driver submission.
 $ErrorActionPreference = 'Stop'
 function Write-SessionStartJson {
     [Console]::Out.Write('{}')
@@ -17,6 +17,11 @@ try {
         $start.FileName = (Get-Process -Id $PID).Path
         $start.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
             (Join-Path $PSScriptRoot 'bootstrap-check.ps1') + '"'
+        $location = Get-Location
+        if ($location.Provider.Name -cne 'FileSystem') {
+            throw 'Bootstrap requires a filesystem project location.'
+        }
+        $start.WorkingDirectory = $location.ProviderPath
         $start.UseShellExecute = $false
         $start.CreateNoWindow = $true
         $start.RedirectStandardOutput = $true

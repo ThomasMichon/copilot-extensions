@@ -168,6 +168,20 @@ done
 export AGENT_SSH_ACTION="$ACTION"
 export AGENT_SSH_DRY_RUN="$DRY_RUN"
 
+if [[ "$ACTION" == uninstall && "$DRY_RUN" != 1 && -z "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
+    INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-ssh}"
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    teardown_python="$(_uninstall_python)" || exit 1
+    teardown_project="${COPILOT_PROJECT_DIR:-$PWD}"
+    export COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT="$teardown_project"
+    teardown_arguments=(uninstall --install-dir "$INSTALL_DIR")
+    [[ "$FORCE" != 1 ]] || teardown_arguments+=(--force)
+    exec "$teardown_python" -I -S -B -X utf8 "$SCRIPT_DIR/command_binding.py" \
+        --payload-root "$PLUGIN_DIR" --plugin-id agent-ssh --legacy-root "$INSTALL_DIR" \
+        --source-payload-root "$PLUGIN_DIR" --project-root "$teardown_project" \
+        --teardown --run-lifecycle -- "$BASH" "$SCRIPT_DIR/install.sh" "${teardown_arguments[@]}"
+fi
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -525,7 +539,7 @@ _source_runtime_identity() {
 
 _initialize_source_runtime() {
     SOURCE_RUNTIME_IDENTITY=""
-    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
     SOURCE_RUNTIME_IDENTITY="$(_source_runtime_identity)" || return 1
     local py
     py="$(_source_python)" || return 1
@@ -599,7 +613,7 @@ _materialize_snapshot_vendored_libs() {
     local snapshot_dir="$1"
     mkdir -p "$snapshot_dir/libs"
     local lib source destination
-    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport plugin-resolve; do
+    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport plugin-resolve update-driver single-instance-lease; do
         source="$(_resolve_vendored_lib "$lib")" || {
             _fail "Cannot locate required snapshot library: $lib"
             return 1
@@ -620,7 +634,7 @@ _materialize_snapshot_vendored_libs() {
     local manifest
     for manifest in "$snapshot_dir/pyproject.toml" "$snapshot_dir"/libs/*/pyproject.toml; do
         if ! awk '
-        BEGIN { split("agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport plugin-resolve", libs, " ") }
+        BEGIN { split("agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport plugin-resolve update-driver single-instance-lease", libs, " ") }
         /^\[/ { sources = ($0 ~ /^\[tool\.uv\.sources\][[:space:]]*$/) }
         sources && $0 !~ /^[[:space:]]*#/ {
             for (i in libs) {
@@ -980,6 +994,10 @@ _enter_install_lock() {
 
 PACKAGE_VERSION="$SRC_VERSION"
 _initialize_source_runtime || exit 1
+if [[ "$ACTION" == uninstall ]]; then
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    uninstall_state_preserving_runtime 1 validate || exit 1
+fi
 case "$ACTION:${DRY_RUN:-0}" in
     uninstall:1) ;;
     install:*|update:*|stamp:*|provision:*|uninstall:*)
@@ -994,6 +1012,12 @@ case "$ACTION:${DRY_RUN:-0}" in
 esac
 _assert_source_runtime_identity || exit 1
 
+case "$ACTION:${DRY_RUN:-0}" in
+    install:0|update:0|provision:0)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 if [[ "$ACTION" == "stamp" ]]; then
@@ -1037,7 +1061,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     shopt -s dotglob nullglob
     for entry in "$PLUGIN_DIR"/*; do
         case "${entry##*/}" in
-            .git|__pycache__|.pytest_cache|.venv|tests)
+            .git|__pycache__|.pytest_cache|.venv|tests|snapshot-provenance.json)
                 [[ -n "$SOURCE_RUNTIME_IDENTITY" ]] || continue ;;
         esac
         if ! cp -a "$entry" "$SNAPSHOT_TMP/"; then
@@ -1098,16 +1122,13 @@ if [[ "$ACTION" == "status" ]]; then
 fi
 
 if [[ "$ACTION" == "uninstall" ]]; then
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    uninstall_state_preserving_runtime "$DRY_RUN" || exit 1
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        echo '(dry run -- nothing will be changed)'
-        [[ -e "$STUB" ]] && echo "[dry-run] would remove binstub: $STUB"
-        [[ -d "$INSTALL_DIR" ]] && echo "[dry-run] would remove runtime/config contents (coordination retained): $INSTALL_DIR"
         echo "agent-ssh uninstall dry run complete -- nothing was changed"
         exit 0
     fi
-    rm -f "$STUB"
-    remove_install_runtime_content "$INSTALL_DIR" || exit 1
-    _ok 'agent-ssh runtime removed (transaction/staging coordination retained)'
+    _ok 'agent-ssh runtime removed (durable, unknown and coordination state retained)'
     exit 0
 fi
 
@@ -1212,7 +1233,28 @@ if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
     SOURCE_FIELDS="${SOURCE_RUNTIME_IDENTITY#\{}"
     SOURCE_FIELDS="${SOURCE_FIELDS%\}}"
 fi
-if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN:-}" ]]; then
+    if ! manifest_json="$(
+        _payload_hash() { printf '%s\n' "$SOURCE_MANIFEST_HASH"; }
+        _git_info() { printf '%s\n' "$SOURCE_MANIFEST_GIT"; }
+        render_deploy_manifest "agent-ssh" "agent-ssh" "$INSTALL_DIR" "$PLUGIN_DIR" \
+            "$VENV_DIR" "$SOURCE_FIELDS" "$SOURCE_PATH" "$PACKAGE_VERSION"
+    )"; then
+        _fail "Source deploy manifest rendering failed: $manifest_json"
+        exit 1
+    fi
+    py="$(_source_python)" || exit 1
+    if ! printf '%s\n' "$manifest_json" |
+        "$py" -I -B -X utf8 "$SOURCE_PATH/scripts/command_binding.py" \
+            --payload-root "$SOURCE_PATH" --source-payload-root "$SOURCE_PATH" \
+            --plugin-id agent-ssh --legacy-root "$INSTALL_DIR" \
+            --project-root "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}" \
+            --publish-legacy --write-manifest >/dev/null; then
+        _fail 'Command ownership validation refused SSH source manifest publication.'
+        exit 1
+    fi
+    _ok "Deploy manifest written (source: $(_source_kind "$SOURCE_PATH"))"
+elif [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
     (
         _payload_hash() { printf '%s\n' "$SOURCE_MANIFEST_HASH"; }
         _git_info() { printf '%s\n' "$SOURCE_MANIFEST_GIT"; }

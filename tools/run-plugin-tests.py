@@ -51,7 +51,6 @@ import math
 import os
 import shutil
 import shlex
-import stat
 import subprocess
 import sys
 import tempfile
@@ -64,8 +63,10 @@ from pathlib import Path
 
 from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources
+from plugin_test_cache import clear_cache_contents, dependency_fingerprint, ordinary_cache_root
 # Preserve the runner's existing public map as an explicit re-export.
 from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
+from plugin_test_selection import SOURCE_ONLY_TEST_TARGETS
 from plugin_test_selection import (
     TestSelection, load_selection, resolve_plugin_root, validate_test_file,
 )
@@ -85,6 +86,7 @@ VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
 EXTERNAL_TEST_DEPENDENCIES = {
+    "repository-policy": ("pyyaml>=6.0.3",),
     "payload-invocation": ("pyyaml>=6.0.3",),
     "runtime-source": ("pyyaml>=6.0.3",),
 }
@@ -277,32 +279,11 @@ def _venv_python(name: str) -> Path:
 
 
 def _dep_fingerprint(name: str) -> str:
-    """Hash the plugin's ``pyproject.toml`` plus any vendored lib pyprojects, so
-    a dependency change forces a venv rebuild. Without this, ``_ensure_venv``
-    reuses a cached venv whose installed deps have drifted -- e.g. a path dep
-    added across a branch rebase is silently absent, masking/introducing
-    failures (a stale venv once produced 28 phantom ``ModuleNotFoundError``s)."""
-    import hashlib
-    pdir = _plugin_dir(name)
-    parts = [pdir / "pyproject.toml"]
-    if name in {"agent-index", "agent-pull-requests", "agent-dispatch"}:
-        parts.append(REPO / "fleet-manager" / "pyproject.toml")
-    if name == "agent-dispatch":
-        parts.append(REPO / "plugins" / "agent-pull-requests" / "pyproject.toml")
-    libs = pdir / "libs"
-    if libs.is_dir():
-        parts += sorted(libs.glob("*/pyproject.toml"))
-    h = hashlib.sha256()
-    if name == "agent-worktrees":
-        h.update(b"native-bootstrap-uv-cache-v1\n")
-    for dependency in (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())):
-        h.update(f"runner:{dependency}\n".encode())
-    for p in parts:
-        try:
-            h.update(p.read_bytes())
-        except OSError:
-            pass
-    return h.hexdigest()
+    """Bind cached installs to complete canonical/transitive local source bytes."""
+    return dependency_fingerprint(
+        name, _plugin_dir(name), REPO,
+        (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
+    )
 
 
 def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
@@ -311,7 +292,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
     The caller must establish the environment directory and hold its
     environment-scoped lease throughout preparation and subsequent test use.
     """
-    venv = VENV_ROOT / name
+    venv = ordinary_cache_root(VENV_ROOT / name)
     py = _venv_python(name)
     stamp = venv / ".dep-fingerprint"
     fingerprint = _dep_fingerprint(name)
@@ -330,20 +311,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
     if reinstall or drifted or fresh:
         # The held lease is keyed by this directory's filesystem identity.
         # Remove only contents, never the directory (including on partial rebuild).
-        for child in venv.iterdir():
-            if child.is_symlink():
-                child.unlink()
-            elif (
-                callable(getattr(child, "is_junction", None)) and child.is_junction()
-            ) or (
-                os.name == "nt"
-                and getattr(child.lstat(), "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
-            ):
-                child.rmdir()
-            elif child.is_dir():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
+        clear_cache_contents(venv)
         fresh = True
     if fresh:
         before = venv.stat()
@@ -355,7 +323,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
             raise RuntimeError("uv replaced the leased environment directory")
     if fresh or reinstall:
-        if _has_pyproject(name):
+        if _has_pyproject(name) and name not in SOURCE_ONLY_TEST_TARGETS:
             # Install the plugin editable with its dev extras. cwd = the plugin
             # dir so uv reads that pyproject's [tool.uv.sources] (vendored path
             # deps).
@@ -368,7 +336,9 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
             if name == "agent-pull-requests":
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
-            if reinstall:
+            if name == "agent-ssh":
+                cmd.extend(["-e", str(REPO / "fleet-manager")])
+            if reinstall or drifted:
                 # A new venv can still consume uv's stale local-path wheels.
                 cmd.append("--reinstall")
             if spec == ".":
@@ -382,14 +352,12 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                 uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
                 retained_resource_roots=(
                     standalone_build_resources("fleet-manager", source_root=REPO)
-                    if name in {"agent-index", "agent-pull-requests", "agent-dispatch"} else ()
+                    if name in {"agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh"} else ()
                 ),
             )
         else:
-            # A pyproject-less plugin (e.g. a skill-script plugin like
-            # harness-knowledge): there is nothing to install editable -- its
-            # tests import the scripts directly (importlib). Just ensure a
-            # pytest runner is present in the venv.
+            # Source-only targets and pyproject-less plugins import their
+            # owning scripts directly; they need test tooling, not an editable.
             run_uv_install(
                 uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES,
                      *EXTERNAL_TEST_DEPENDENCIES.get(name, ())],
@@ -546,6 +514,7 @@ def run_plugin(
     py = _ensure_venv(name, uv, reinstall=reinstall)
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
     sandbox_parent.mkdir(parents=True, exist_ok=True)
+    sandbox_parent = sandbox_parent.resolve(strict=True)
     with _TestSandbox(
         # Deliberately short: this sandbox root sits at the top of a path
         # whose depth (home/.agent-logger/snapshots/<ver>/libs/<lib>/
@@ -629,7 +598,7 @@ def run_plugin(
             # Only this group's pytest files are disposable after verified
             # reaping; shared seeds and environment roots outlive every group.
             cleanups.append(cleanup_pool.submit(
-                tempfile.TemporaryDirectory._rmtree, group_temp,
+                _TestSandbox._rmtree, group_temp,
             ))
             if returncode == 5 and (guards or kexpr) and not test_files:
                 continue
@@ -798,7 +767,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in targets:
         lease: SingleInstance | None = None
         try:
-            environment_root = (VENV_ROOT / name).resolve()
+            environment_root = ordinary_cache_root(VENV_ROOT / name)
             environment_root.mkdir(parents=True, exist_ok=True)
             if args.admission_wait:
                 print(f"Waiting up to {args.admission_wait:g}s for {environment_root} ...")

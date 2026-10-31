@@ -1,22 +1,336 @@
 # The engine ↔ Picker `--json` contract
 
 The interactive front-end (the **Worktree Manager**'s Picker) reaches the
-`agent-worktrees` engine **only** by shelling out to its machine-readable CLI
-verbs: `<project> <verb> --json`, never `import agent_worktrees`. That process
-boundary is what keeps the coupling one-way and dependency-free (the Picker owns
-no worktree logic or state), and it is why the TUI framework (Textual) stays
-entirely out of the plugin engine.
+`agent-worktrees` engine across a process boundary: its machine-readable CLI
+verbs (`<project> <verb> --json`) or the optional authenticated resident read
+contract below, never `import agent_worktrees`. That boundary keeps the coupling
+one-way and dependency-free (the Picker owns no worktree logic or state), and
+keeps the TUI framework (Textual) entirely out of the plugin engine.
+
+## Optional resident Picker bootstrap
+
+The elected monitor advertises `picker-bootstrap-v1` on its existing control
+endpoint. Action `picker-bootstrap` accepts `contract_version: 1`, an explicit
+`project`, absolute invocation `cwd`, Boolean `default_live`, and optional
+provider selection (`provider`, `providers_dir`). It resolves fresh layered
+project policy, including headless behavior, without changing the daemon's
+active project. Committed configuration candidates share one binary Git batch
+per resolved branch, preserving ordered precedence, empty-file semantics and
+fresh ref selection without a cross-request policy cache. A failed or malformed
+batch retains the bounded presence/ordered-read fallback and its original total
+resolution budget. The configured execution-space identity is validated before
+any handoff; invalid identity returns an explicit unavailable response.
+Workspace metadata reads one Git administration entry and one
+exact tracking record; it never reconstructs the roster in a request handler.
+The result carries `ok`, `contract_version`, resident `generation`,
+`runtime_root`, the existing version-1 `bootstrap` payload and
+`manager_command`. Bootstrap includes the optional project configuration
+scalars. A headless result offers no Manager command.
+
+A control-plane provider may explicitly advertise
+`resident_picker: {"version": 1, "command": ["<qualified-provider>", "..."]}`.
+The command is provider-owned, not a guessed runtime or PATH lookup. The
+Manager's installer publishes its own binstub with `--resident-picker`.
+An exact `--project NAME` bare TTY entry can request this bootstrap before
+importing the ordinary CLI dispatcher. The optional bootstrap RPC has one total
+one-second communication budget and uses the existing owner token without creating it.
+Missing capability, unavailable bootstrap, invalid installation context,
+headless/non-TTY invocation and an explicit engine override retain the
+ordinary front door. Once an advertised provider starts, its real exit result
+is preserved under the existing caller-owned process lifetime.
+
+The inherited bootstrap and exact engine argv are consumed by the provider,
+not propagated as ambient instructions. Only the accepted project and engine
+binding can select the local resident socket path. The Manager reads its
+existing token and capability before subscribing to `worktrees-feed`; remote,
+provider-exec and compatibility sources retain their CLI contracts. Socket
+frames enter the same atomic receiver as CLI frames. Authentication,
+capability and live-peer timeout failures are terminal; transport loss retains
+the existing cancellable reconnect behavior and explicitly stale last-good
+rows. Health and initial admission share one startup budget; begin/update
+transactions retain two-second deadlines and idle progress retains five-second
+deadlines. Cancellation closes the socket rather than leaving a relay child.
+
+This read transport does not make a cold UI process resident or certify its
+two-second native launch budget. Framework imports, visible/input-ready paint
+and current-row delivery remain separately measured boundaries.
+
+### Optional provider-owned terminal session
+
+A provider can add `session: {"version": 1, "root": "<absolute-provider-root>"}`
+inside `resident_picker`. The authenticated bootstrap forwards this as
+`manager_session`. This is an optional attachment contract, not a worktree
+reader or permission to provision a service.
+
+The existing engine front door reads only the provider's active loopback route
+and existing token, then requests `picker-session-v1` with the fresh bootstrap,
+exact engine argv, selected provider generation and invocation context.
+Manager admits a matching bounded single-use UI context or declines so the
+ordinary command can run. Missing tokens are never created by this read path;
+previous routes and arbitrary same-named executables are not substituted.
+Per-launch trace identity is carried separately from reusable environment
+scope, so a new launch ID does not make an otherwise matching spare foreign.
+
+An admitted response carries a scoped session directory and exact provider-owned
+attachment and completion argv. The existing engine process attaches its real
+terminal directly; it does not start another Python front door before the UI
+is visible. Manager's retained runtime consumes the completed decision afterward.
+It revalidates project, engine, original handoff and provider root, and claims
+the result once before executing an action. Interrupted or invalid admitted
+sessions fail visibly rather than opening a second cold UI or replaying an
+action. The provider owns mux identity, cancellation, bounded result retention,
+drain and runtime lifetime; the engine owns no Textual or mux implementation.
+
+Completion uses `agent_procutil.interactive.run_interactive` only after
+attachment returns. Windows retains its real console streams and a required
+Job. Linux/macOS completion uses a dedicated owned session and PTY relay,
+with input/resize/suspend handling and inherited redirected non-TTY streams.
+Its completion terminal-device identity changes; the UI attachment path does
+not. Every ordinary job group in that private session settles before return,
+including shell-created groups after interruption or caller death; explicitly
+detached
+managed workloads keep their existing lifecycle. This does not add another
+interpreter to the pre-paint attachment path.
+
+Each UI has independent process-local bindings. The Manager resident retains
+one initialized spare and at most four active UI processes, not a shared
+Textual application serving unrelated terminals. Optional housekeeping, pivots
+and background peer probes wait for local feed settlement, with a two-second
+escape and cancellation; explicit remote navigation remains demand-driven.
+No project-bound feed is retained before fresh launch admission. This facility
+does not itself qualify native first-frame, input or current-row budgets.
+The UI continues checking its resident owner's process birth after binding.
+Owner loss, identity replacement or explicit cancellation exits through normal
+Textual teardown (including loader cancellation) and cannot publish a launch
+decision from that retired lifetime.
+
+## Repository hosting admission
+
+The read-only [`agent-policy check`](repository-agent-policy.md) API is
+project-independent and reads the explicit `--path`, including denied or
+unadopted repositories. Policy version 1 is distinct from launch transport
+versions. It returns the policy provenance and `allowed: true`, or nonzero JSON
+`version`, `code`, `error`. A successful negative-policy check is not adoption
+or launch permission.
+
+Copilot launch planning and receiving launch paths enforce repository policy
+internally, without a hosting-policy flag. Manager and SSH forwarding must not
+inject such a flag into source or inspection commands. Required owner policy
+checks and versioned seed/admission contracts refuse unsupported receivers
+before launch effects. Source-only `create` omits
+optional launch planning and returns no `launch` member.
+
+Before effectful resolution, Manager probes the selected engine's existing
+read-only owner-policy contract. Local resolution requires actual admission;
+for a remote target, the local report establishes engine support only and does
+not substitute the policy of a local namesake for the receiving host's check.
+Compatibility retries recheck the selected owner before another resolution.
+Remote launch handoffs check that receiver before executing the ordinary
+command. Structured prompt preparation checks before its first admission call,
+and the returned launcher checks again before execution. Ordinary inspection,
+request-status and retirement commands receive no launch gate.
+
+## Launch-attempt resolution receipts
+
+Journaled Manager actions send `--launch-attempt-id <32-lowercase-hex>` and
+`--require-launch-attempt` for explicit local or SSH New, Resume, Open, Bare
+Resume and base plans. The latter is a parser-level capability fence: an old
+receiver refuses it before resolution effects, with no capability-stripping
+retry. Preview, implicit-picker and status-only uses refuse. Without this new
+fence, the older attempt-ID option retains its remote-native-prompt-only
+contract.
+
+Each ordinary resolver invocation durably records `resolution-requested`
+through the existing tracking-write owner before entering resolution. Its
+returned plan adds `launch_attempt_id` and a version-1
+`launch_attempt_receipt`: a fresh `operation_id`, `phase`, and the returned
+`worktree_id`, `seed_id` and `request_id` when present. The same attempt's local
+re-resolve and SSH target hop get distinct operation IDs; neither uses the
+attempt as a creation retry key. The Manager validates this receipt before
+executing or delegating the plan, and both second hops retain the ID and fence.
+
+Prompt-free receipts live under the resolving machine's external project
+tracking directory, `launch-attempts/<attempt-id>/<operation-id>.json`. They
+retain only timestamps, fixed phases, exit codes and correlation IDs, never
+commands, prompts, options, paths or arbitrary exception text. Each atomic,
+flushed file contains at most an initial and final event. Reads do not create
+or repair state. Initial-write failure prevents resolution; an unconfirmed
+terminal write withholds the plan without repeating resolution. A crash may
+leave only the initial event, which is unconfirmed, not successful.
+
+`plan-ready` is preparation evidence only. A seedless remote plan is
+`forwarded`, not target admission; the target writes its own receipt when its
+resolver actually runs. `remote-admission-returned` correlates the separate,
+verified target request receipt described below. Structured target admission
+uses that existing durable version-2 receipt and requires a non-null attempt
+when the new fence is present. No resolution receipt proves process start,
+native conversation identity, prompt acceptance or retry eligibility. Native
+acceptance integration, interactive history and sweeps remain separate work.
+
+The explicit source integration lane is
+`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_attempt_native.py`.
+It checks actual daemon transport and process loss after the initial receipt.
+The default unit portfolio excludes that lane; neither lane proves installed
+Copilot conversation or prompt acceptance.
+
+### Deferred execution observations
+
+Before publishing a journaled plan, the resolver places its attempt and exact
+resolution-operation IDs in the existing deferred command's private wrapper
+arguments. Resolution does not set ambient session environment or use a
+per-worktree "current attempt" pointer. Each executing wrapper gets a distinct
+execution-operation ID, with an explicit parent ID for a cooperative setup's
+backend wrapper. Concurrent launches cannot inherit another attempt merely
+because they share a worktree.
+
+The existing tracking-write owner retains prompt-free
+`worktree-launch-execution` version-2 files alongside resolution receipts as
+`launch-attempts/<attempt-id>/<execution-id>.execution.json`. Each is bounded
+to 16 KiB and four events: `execution-requested`, optional `seed-claimed`,
+optional `process-spawned`, and `execution-returned` or `unknown`.
+The subject binds the resolution ID, parent execution ID, observed worktree ID
+and its creation nonce when available. Initial persistence precedes seed claim,
+setup or process execution. Initial failure refuses the command. An unconfirmed
+post-effect observation is reported, but never repeats a spawn or skips the
+existing seed-settlement and process-wait ownership.
+An interrupted post-effect receipt write or process-identity probe is likewise
+unconfirmed, not permission to unwind past an already-started child. Interrupted
+seed settlement retains its existing uncertainty fence while child waiting
+continues.
+Version 2 also records the native execution epoch when the existing Linux/WSL
+source owner can qualify it. Unsupported platforms/environments retain a null
+epoch; version-1 receipts remain readable but cannot qualify native association.
+The execution-write verb advertises version 2 so an older resident cannot
+silently accept a subject it cannot retain.
+
+Each write rechecks the advertised verb/version. A published incompatible
+endpoint with a confirmed live PID/birth owner is not a starting monitor:
+the client skips boot and polling and uses the same locked direct fallback.
+Missing, dead, reused or unconfirmed publishers keep ordinary boot handling.
+An incompatible endpoint is never sent a request, and ambiguous sent writes
+are never replayed.
+
+`seed-claimed` records only the saved seed and handoff IDs: ownership was taken,
+not necessarily delivered. A later proven spawn failure can restore that seed.
+`process-spawned` records only the OS PID, process-birth token when readable,
+and `launcher-command` or `backend-command`. A missing birth token remains
+unknown identity, not permission to inspect or terminate a reused PID.
+The latter boundary means the configured backend command was passed to
+`Popen`, not that Copilot opened a conversation or accepted its first turn.
+`execution-returned` records the launch routine's result before the final
+audit acknowledgement, the separately observed child exit code when a wait
+completed, and whether an earlier receipt was unconfirmed. Final audit
+uncertainty can itself make the helper return 3 even when the routine returned
+0. None is an acceptance verdict. Crash loss leaves incomplete history; it
+never manufactures success or grants automatic replay.
+
+Record-backed seedless/custom launchers expose only the wrapper process unless
+their backend boundary supplies its own evidence. Base plans without a record
+retain resolution evidence only. Interactive Manager history, retention, sweeps and
+accepted-turn evidence remain separate work. In particular,
+the optional resident prompt-receipt adapter's missing qualified backend is
+unavailable, not evidence that a prompt was absent or accepted.
+
+### Read-only launch-attempt inspection
+
+`<project> launch-attempts <attempt-id> --json [--limit 1..100] [--after <cursor>]`
+returns `worktree-launch-attempt-inspection` version 1 for this machine's local
+project tracking directory. It does not resolve a launch, contact a target,
+read seed text, boot a monitor or mutate state. Manager consumes it over the
+existing CLI process boundary, not by importing the plugin.
+
+The envelope binds `attempt_id` and `scope: local-project`, with `receipts`,
+`admissions`, `errors`, `has_more`, `next_after` and
+`prompt_acceptance: unknown`. Receipt rows identify their `source`
+(`resolution`, `execution`, or `native`), exact `operation_id` and validated
+`evidence`. Native evidence uses the historical identity/epoch/ancestry join,
+not a new liveness probe or prompt-acceptance inference. Missing, corrupt,
+oversized or indirect sources report fixed error codes without echoing bytes.
+
+The reader visits one exact attempt directory, at most 1001 directory entries,
+and at most 100 receipt rows per page. Each file retains its owner's 16 KiB
+budget. An over-budget directory returns an explicit error with no arbitrary
+partial listing. Names are ordered lexically; when `has_more` is true, pass
+`next_after` unchanged as `--after`. Pagination is a live read, not a frozen
+snapshot: late writes may require a fresh first page. Files are never repaired.
+
+Up to 16 distinct admission references (explicit `--request-id` hints plus IDs
+from the current resolution-receipt page) can add projected target-admission
+evidence, only when the stored version-2 receipt binds the same attempt.
+Excess references produce an explicit error rather than unbounded reads.
+The projection excludes fingerprints, allocation paths and arbitrary fields.
+`admission_accepted` means request admission, not accepted Copilot input.
+Historical inspection does not require the checkout still to exist and does
+not read pending seed state. Missing references remain per-source errors.
+No envelope or individual event authorizes replay or claims whole-attempt
+success; absence of receipts and incomplete pages remain unknown.
+
+The explicit source lane
+`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_execution_native.py`
+exercises real daemon/process evidence and process loss after seed claim.
+Set `COPILOT_EXTENSIONS_NATIVE_WINDOWS=1` on an interactive Windows desktop to
+also observe two consoleless-parent backend cycles for visible windows and
+foreground changes. These are synthetic backend checks, not installed Copilot
+acceptance or local/SSH same-conversation qualification.
+
+### Original native-session observations
+
+Only an executing backend wrapper puts its exact attempt, resolution and
+execution IDs in the child-scoped `AGENT_WORKTREES_LAUNCH_EXECUTION` hint.
+Parent environment is unchanged; a launcher or unjournaled wrapper clears an
+inherited hint. This is correlation metadata, not a grant of native ownership,
+prompt consumption or retry permission.
+
+The original hook already transports its captured environment and bounded
+process ancestry to session registration. After successful registration, the
+observation path consumes that original hint and the existing source-aware
+native identity; a resident never substitutes its own environment or ancestry.
+The existing tracking-write owner checks the exact UUID's open hold, canonical
+registered activation, worktree incarnation and execution epoch before retaining
+one immutable, prompt-free `worktree-launch-native-observation` version-1 file
+at `launch-attempts/<attempt-id>/<execution-id>.native.json`, capped at 16 KiB.
+Identical repeats are idempotent; a changed observation is reported, not replaced.
+The hook does not boot a monitor or wait for one to start. Its optional warm
+write uses the registration path's 1.5-second request budget; ambiguous writes
+are never replayed. The observation's sidecar lock is nonblocking. Audit
+uncertainty is diagnostic and does not undo registration.
+
+The observation may precede the parent's `process-spawned` fsync. Retaining it
+independently allows the bounded read-only join to become qualified once that
+exact process receipt arrives, without polling, reacquiring a session or
+replaying a launch. The join requires the same attempt/resolution/execution,
+worktree nonce and physical epoch, plus the backend PID/birth at or above the
+qualified native holder in the original ancestry. A launcher-only boundary,
+PID reuse, missing receipt or unqualified/legacy epoch stays unknown. Corrupt
+or linked artifacts are errors, not an empty or successful history.
+
+`native-session-observed` proves only that original source's session was observed
+under the recorded backend process. It explicitly reports
+`prompt_acceptance: unknown`; it does not prove a delivered turn, current
+liveness, New/Resume parity or same-conversation installed acceptance.
+Windows, macOS and containers remain outside the native source owner's
+qualification. The separate native source lane
+`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_native_observation_native.py`
+uses a synthetic Linux/WSL open hold, an actual original-hook subprocess and the
+resident write transport. It is not a real Copilot acceptance test.
 
 ## SSH launch-prompt admission
 
 The Worktrees composer is host-rendered for local and machine-SSH sources.
 Prompted remote `resolve --json --machine <target>` invokes the target's own
 `resolve --json --launch-request-b64 <envelope>` first. The UTF-8 JSON envelope
-is bounded to 7168 bytes (7 KiB, including JSON metadata) and carries version 1, a 32-character hexadecimal
+is bounded to 7168 bytes (7 KiB, including JSON metadata) and carries a version, a 32-character hexadecimal
 `request_id`, `kind` (`new` or `resume`), `worktree_id` (null for New), `text`
-and Boolean `no_mux`. POSIX shell arguments are quoted; PowerShell commands
+and Boolean `no_mux`. Version 1 remains readable for legacy callers. Native-fenced
+callers use version 2, adding exactly `native_seed_required: true` and
+`attempt_id` (32 lowercase hexadecimal characters, or null for an unjournaled
+caller). The command must also carry `--require-native-seed`; a missing or
+contradictory flag/envelope refuses before configuration or admission.
+POSIX shell arguments are quoted; PowerShell commands
 are encoded. Prompt text never enters the interactive SSH launch string.
-Structured admission/status accepts only its protocol options and `--json`;
+Structured admission/status accepts only its protocol options, `--json`, and
+the hosting-admission capability fence, the matching native-seed fence and
+the optional launch-attempt fence;
 ordinary resolve selectors, modifiers and positional Copilot arguments are
 rejected before reading or mutating target launch state. Exactly one nonempty
 protocol option is required; an empty value never enters ordinary resolve.
@@ -25,10 +339,24 @@ launch-request error envelope and exit status 3 for both admission and status;
 they never enter ordinary or remote machine resolution.
 
 The target's existing tracking-write daemon owns admission and seed staging.
+Structured admission, creation and staging require verb version 8 so older
+writers cannot discard version-2 correlation. Seed stage/take retain their
+existing hosting/native protocol. Older writers cannot receive a weak fallback.
+The receiver checks fresh policy before
+writing an admission receipt or seed.
 Admission retains a text-free fingerprint and allocated worktree/intent IDs
 under external tracking state. The returned receipt carries those identities,
-not prompt text. The host's subsequent remote plan launches the same worktree
-with `--stage-launch-seed --seed-id <id>`. The existing target setup and native
+not prompt text. Version-2 receipt and status include the persisted attempt ID
+and native requirement. Replay binds those fields as well as the intent
+fingerprint; an attempt ID is correlation, never permission to retry or create.
+The host verifies the receipt's version, native capability and all identities.
+Its remote plan exposes `launch_request_version: 2`, `launch_attempt_id` and
+`native_seed_required: true`, alongside the existing request/worktree/seed IDs.
+The subsequent launch selects the same worktree with
+`--stage-launch-seed --seed-id <id> --require-native-seed`.
+Journaled callers also retain `--require-launch-attempt` and the same attempt ID
+on this hop; the structured admission hop carries the fence too.
+The existing target setup and native
 backend boundary perform cold checks, reservation, failed-start release and
 successful handoff discard.
 
@@ -75,8 +403,9 @@ The bounded current identity fields include string `creation_nonce` and Boolean
 `head_yielded`, preserving creation identity and resumable yielded-head semantics
 without carrying the creation or session-transition histories.
 
-The resident publishes complete project replacements into its SQLite WAL
-store, then swaps the in-memory publication. It claims the writer generation
+The resident publishes complete project transactions into its SQLite WAL
+store, changing only semantic rows whose values changed, then swaps the
+in-memory publication. It claims the writer generation
 only after monitor election. Drained/superseded endpoints refuse current reads;
 a late predecessor cannot reclaim the durable owner. Failure retains the
 last complete publication with explicit `availability.status: stale`.
@@ -114,6 +443,132 @@ and selected row count, `worktree` frames from that same publication, then
 rejects mixed revisions, duplicates and incomplete snapshots. This one-shot
 contract remains one-shot for existing consumers.
 
+### Explicit-project held-feed entry
+
+Canonical `--project NAME list ... --follow` invocations share an early entry
+between `python -m agent_worktrees` and the package's console declaration.
+The syntactic selector performs no configuration, filesystem or process work.
+Duplicates, abbreviations, implicit routing, help, unknown options and missing
+values decline to the existing dispatcher exactly once. Both paths use the
+same list argument declaration; accepted feeds retain canonical project/CWD,
+registry and installation-cell resolution, demand registration, authentication
+and shutdown behavior.
+
+The healthy current-roster client supplies its canonical runtime root to the
+existing control path helpers rather than loading monitor recovery machinery
+to discover that root. Recovery remains lazy and retains its existing
+unavailable/advisory behavior. Library import of `agent_worktrees.__main__`
+never runs the early selector. This is import/dispatch separation, not a new
+read authority, a new receipt operation, or a latency guarantee.
+
+### Negotiated observation contract (v2)
+
+The owner additionally advertises `worktrees-observations-v2`. A consumer
+that has discovered that capability may request `contract_version: 2` with
+the **same bounded selection fields** on `worktrees-read` or `worktrees-feed`.
+`worktrees_observation_contract.negotiate(request, capabilities)` selects v2
+only from already-observed capability evidence; it performs no discovery,
+ownership probe or read. Old strict request parsers must receive v1. Existing
+CLI flags and Manager loaders still select v1; the v2 parsers are available
+for separately staged consumer integration, not an implicit wire upgrade.
+
+V2 retains the existing projection fields and **schema_version: 1**. The wire
+contract version, durable schema version and opaque elected-writer generation
+are distinct. Every row adds `semantic_revision` (last semantic change in the
+current generation). Its `fact_provenance` retains quality, with observation
+times moved into a separate `observations` list:
+
+The 65,536-byte row limit counts the complete compact UTF-8 v2 row, including
+the actual decimal width of `semantic_revision`. Legacy field/type validation
+still applies separately to its semantic fields. The publisher checks every
+projected row before committing the atomic wave; one oversized row rejects the
+whole wave without advancing its head. Engine and Manager admission enforce
+the same complete-row limit. Manager's four locally derived metadata fields
+are excluded only when revalidating already-admitted rows, never at raw
+ingress. V1 row capacity and the schema-1 storage limit remain unchanged;
+a compatible older writer's row that cannot fit v2 is refused explicitly on
+that v2 read, not truncated or rewritten.
+
+V1 reconstruction starts from semantic fields and overlays only the current
+observation entry. Removing an optional closure observation therefore removes
+its `computed_at` from live and advisory v1 output, even when the unchanged
+semantic payload is retained without a row write.
+
+Publication snapshots each input row from its validated encoding before
+advancing the input iterable. Reusing or clearing an iterator-owned dictionary,
+including its nested fact values, cannot alter earlier row identities or
+observations in the atomic wave.
+
+```json
+{
+  "id": "tree",
+  "facts": {
+    "session": {
+      "quality": "current",
+      "observed_at": 1000.0,
+      "observation_revision": 11
+    }
+  },
+  "derivations": {
+    "closure": {
+      "computed_at": "2026-10-22T12:00:00",
+      "observation_revision": 11
+    }
+  }
+}
+```
+
+There is exactly one observation entry per selected row, including an empty
+`facts` object for rows without fact provenance. The fact groups are `record`,
+`git`, `mux` and `session`. An unavailable fact has a null `observed_at`;
+timestamps and revisions are validated, not truthiness-coerced. Optional
+`derivations.closure` carries the closure descriptor's computation time,
+which is also observation metadata; its domain facts remain in the semantic
+row. No arbitrary `*_at` fields are removed: activity/lifecycle timestamps
+remain semantic. Unchanged fact observations retain their observation revision.
+
+The v2 feed adds one bounded `observation` frame per changed observation entry,
+with the same `projection` and `observation` object above. Initial observations
+follow their semantic rows; updates retain the full order frames. Receivers
+stage both kinds until done/commit. Duplicate, unknown, mismatched-quality,
+future or regressing observations are rejected. A heartbeat changes neither
+facts nor observation time; publication revision may advance without a
+semantic row delta. Manager parsers expose admitted metadata as `_observations`
+and `_observation_derivations` alongside `_projection`; source-store/UI
+integration is separate. A publication cursor is not a point-row floor.
+
+Durability remains backward-compatible: additive observation tables are bound
+to a project generation/revision; the original schema-1 row/head/index tables
+and election mechanism remain usable by older supported writers. The semantic
+row keeps its last changed v1-shaped payload. Current v1 reads reconstruct
+latest actual observation timestamps from the matching side data; an older
+reader can still read the valid, conservatively older timestamps. If an older
+elected writer publishes, its generation/revision no longer matches the side
+data: its complete v1 payload wins and no stale metadata is overlaid.
+No new source-version election rule or per-read owner attestation is added.
+
+Rows, observations, deletion, head and order/index changes commit in one
+transaction before live visibility or notification. Failed writes preserve
+the prior complete publication. V1 retains truthful whole-row deltas, including
+observation changes; zero semantic-row deltas are the negotiated v2 guarantee.
+Neither protocol implements targeted observation requests or mutation receipts
+yet; those remain separate owner operations.
+
+### Test-only contended-host tier
+
+The native Worktrees and synthetic Manager deadline fixtures accept
+`WORKTREES_TEST_BUDGET_FACTOR=1|2|3`, default `1`. This is an explicit
+per-run test opt-in, not a runtime setting or a new production deadline.
+Selected fixture waits, deliberate delays and teardown budgets scale together;
+semantic, source/cursor, restart-count and cleanup assertions remain intact.
+The original nominal two-second goal is still measured separately.
+
+Reports distinguish `contended_test_pass`, factor, actual elapsed time and
+`nominal_qualified`. Factors above one never set nominal qualification true.
+A contended-tier pass does not erase a failed nominal run, authorize merge,
+or change production settings. The source effort's validation record carries
+the bounded selectors, actual results and remaining performance work.
+
 ### Held current-roster feed and cutover
 
 `list --current --stream --follow` is an additive held contract. `--follow`
@@ -124,6 +579,19 @@ uses the existing owner token. It never silently removes `--follow` or
 `--current` on capability skew. The Manager's local and machine-SSH loaders
 use this path by default; `AGENT_WORKTREES_PICKER_STREAM=0` explicitly selects
 the current one-shot compatibility path instead.
+
+One-shot reads and held-feed admission check a retained route's recorded
+process identity before dialing it. A confirmed exited owner or PID/birth
+mismatch enters the existing missing-owner recovery path; this avoids a short
+Windows connect timeout hiding a dead endpoint as a slow live peer. Legacy
+routes without a PID and owners whose birth cannot be read retain the existing
+transport behavior. Ensure, restart and candidate incumbent admission use the
+same exit-aware liveness predicate, so a retained exited Windows process object
+cannot veto that recovery. Unsupported native-exit platforms retain the existing
+PID/birth check. A live-peer timeout never authorizes replacement.
+The `machine-ssh:` source-ID namespace is stable for both local and remote
+machine sources; it is not transport evidence. Local Manager failure notices
+explicitly identify local execution (no SSH) and the resident current-roster read.
 
 An admitted feed registers its project notification before reading its initial
 publication. Its `begin` includes the complete projection, `selected_count`,
@@ -555,11 +1023,16 @@ The Manager requests `resolve --stage-launch-seed --require-native-seed` for
 prompted requests. The latter is a capability handshake: engines without the
 native execution-leg fence reject it before allocation or staging. The fence
 itself is unconditional in current engines, including direct stage callers.
-Direct engine requests requiring this fence refuse remote/cross-environment
-dispatch before SSH admission; the capability requirement is never silently dropped.
-Launch-seed stage/take mutation protocol version 5 and structured
-`launch_request_stage` version 4 exclude older resident handlers that lack that
-fence, using the existing same-code fallback. Both retain launch-admission guards.
+Remote/cross-environment requests requiring this fence use the version-2
+structured admission above, only for non-preview JSON New or cold Resume with
+explicit prompt text. `--launch-attempt-id <hex>` optionally correlates that
+request with the Manager's saved intent. The new `--require-launch-attempt`
+fence also supports local and seedless resolution receipts; the legacy
+ID-only option remains remote-native-only. Preview uses refuse. Both target hops
+keep the native requirement. There is no weaker capability-stripping retry.
+Launch-seed stage/take and structured admission exclude older resident handlers
+through their declared verb versions and the existing same-code fallback.
+Both retain launch-admission guards.
 
 Staging validates the actual execution leg while holding the same strict
 per-record lock that publishes the intent. Active, unknown, or opaque hosted
@@ -599,6 +1072,16 @@ or record mutation; migrate to normalized setup or explicitly adopt this
 boundary. Ordinary seedless commands are unaffected. A failure after backend
 invocation may follow delivery and must not
 automatically restore a potentially submitted prompt.
+
+Journaled seeded setup additionally declares the exact line
+`# agent-worktrees:launch-attempt-boundary-v1`, accepts `-LaunchAttemptId`,
+`-LaunchResolutionId`, `-LaunchParentId` (PowerShell), or
+`--launch-attempt-id`, `--launch-resolution-id`, `--launch-parent-id` (Bash),
+and forwards these as the corresponding long options to the invocation helper
+before its `--` delimiter. The standard scripts implement both contracts.
+A v1 seed-only custom script is never given unsupported correlation flags or
+silently allowed to drop a journaled attempt; it must adopt this additive
+boundary or use normalized setup. Unjournaled v1 launches remain compatible.
 
 - **`--json` → stdout is JSON only; stderr is logs only.** No TTY prompts, no
   color, no picker. `--json` implies `--no-mux`.
@@ -657,6 +1140,26 @@ The registry anchor used for bootstrap is not an effective `repo-dir` substitute
 a machine-local repo anchor override can legitimately differ. Compatible
 consumers retain their existing effective repo-dir and machine queries, while
 older consumers may ignore the additive field.
+
+The existing `picker-bootstrap --project-config --json` form loads and validates
+the effective configuration once, then also returns `repo_dir`, the legacy
+`machine` scalar, and optional `configured_machine`. The resident
+`picker-bootstrap-v1` response carries the same fields. `configured_machine`
+is either the explicit binding selected by the real project/global/drop-in
+loader or JSON `null` for detected naming. It is not a new setting.
+Its presence distinguishes known absence of a binding from an older response
+that supplies no provenance; a plain `machine` scalar cannot establish that
+distinction. Non-null values must be nonempty strings.
+
+These additive fields keep bootstrap contract version 1. Older consumers ignore
+them; newer Manager consumers retain the historical strict roster path when
+`configured_machine` is absent, including after provider rollback. When present,
+Manager combines that provenance with its own observed OS hostname/environment
+and the actual optional machine map to derive its local source. This is naming
+and routing context, not receiving-project or actual-record mutation authority.
+Malformed/conflicting maps refuse, but missing local customization does not
+require a new registry entry. No additional RPC, CLI flag or enrollment mode is
+introduced, and existing effect-side admission remains required.
 
 ## Pinned action verbs (the Picker's control plane)
 

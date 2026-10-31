@@ -17,6 +17,31 @@ from . import record_machine_identity
 _held = threading.local()
 
 
+class PublicationAuthorityBusy(TimeoutError):
+    """Retryable contention, distinct from provider or record-lock failures."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Timed out waiting for PR rewrite authority (installation-wide publication ownership lock). "
+            "Another operation may still hold it; this does not establish a stale lock or failed review. "
+            "Agent action: wait briefly, then retry the same canonical command without asking the operator. "
+            "For status/claim reconciliation, retry pr-status --json in the same worktree; "
+            "do not repeat a push or merge merely to reconcile its result. "
+            "If contention persists, retain the pending obligation and defer a retry; "
+            "never delete the lock, terminate its owner, or bypass publication checks."
+        )
+
+    def status_result(self) -> dict[str, object]:
+        return {
+            "error": str(self),
+            "error_code": "pr_authority_busy",
+            "retryable": True,
+            "retry_after_seconds": 2,
+            "reconciliation_pending": True,
+            "next_action": "Wait at least 2 seconds, then retry pr-status --json in the same worktree.",
+        }
+
+
 def publication(function):
     signature = inspect.signature(function)
     @wraps(function)
@@ -84,8 +109,8 @@ def guard(*, timeout: float | None = None):
             pr_publish._lock_publish_file(
                 fh, timeout=pr_publish.PUBLISH_LOCK_ACQUIRE_TIMEOUT_S if timeout is None else timeout,
             )
-        except TimeoutError as exc:
-            raise TimeoutError("Timed out waiting for PR rewrite authority; retry after the active publication.") from exc
+        except pr_publish.PublishLockTimeout as exc:
+            raise PublicationAuthorityBusy() from exc
         paths.add(key)
         try:
             yield

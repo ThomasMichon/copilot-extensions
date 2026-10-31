@@ -1,0 +1,13 @@
+{
+  "comment": "Retain canonical command ownership through Python runtime manifest publication",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

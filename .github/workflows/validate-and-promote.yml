@@ -22,8 +22,6 @@ permissions:
   contents: write
   pull-requests: write
   actions: read
-env:
-  RELEASE_HELPERS_SHA: dcdf3391ed0030d1355f268984ddf4b9609ea0b7
 jobs:
   gate:
     name: gate (confirm this is a dev commit)
@@ -37,6 +35,7 @@ jobs:
       is_dev: ${{ steps.pause.outputs.normal_paused == 'true' && 'false' || steps.check.outputs.is_dev }}
       sha: ${{ steps.check.outputs.sha }}
       qualification_only: ${{ steps.mode.outputs.qualification_only }}
+      main_before: ${{ steps.pause.outputs.main_base }}
     steps:
       - name: Admit paused qualification only from a manual trusted-Main dispatch
         id: mode
@@ -61,19 +60,14 @@ jobs:
             false|"") echo "qualification_only=false" >> "$GITHUB_OUTPUT" ;;
             *) echo "::error::Invalid qualification-only request."; exit 1 ;;
           esac
-      - name: Require an immutable reviewed release-helper pin
-        run: |
-          [[ "$RELEASE_HELPERS_SHA" =~ ^[0-9a-f]{40}$ ]] &&
-          [ "$RELEASE_HELPERS_SHA" != "0000000000000000000000000000000000000000" ] || {
-            echo "::error::A reviewed release-helper commit must be pinned before activation."
-            exit 1
-          }
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.workflow_sha }}
           fetch-depth: '0'
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ github.workflow_sha }}
           path: reviewed-helpers
           persist-credentials: false
       - name: Respect paused Main before expensive source validation
@@ -232,10 +226,83 @@ jobs:
           name: promotion-admission-${{ steps.check.outputs.sha }}-${{ steps.pause.outputs.main_base }}
           path: ${{ runner.temp }}/promotion-admission.json
           if-no-files-found: error
-  source-units:
-    name: Eligible source units with coverage
+  compose-candidate:
+    name: Freeze the vendored and version-stamped release candidate
     needs: gate
     if: needs.gate.outputs.is_dev == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      candidate_sha: ${{ steps.freeze.outputs.candidate_sha }}
+      tree: ${{ steps.freeze.outputs.tree }}
+      prepared_at: ${{ steps.freeze.outputs.prepared_at }}
+      composed: ${{ steps.freeze.outputs.composed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: '0'
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          path: reviewed-helpers
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: 0.12.6
+      - name: Install seasoned composition tooling
+        run: python reviewed-helpers/tools/seasoned_uv.py --uv uv -- --system packaging pyyaml
+      - name: Compose once before authoritative release execution
+        id: freeze
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
+          MAIN_BEFORE: ${{ needs.gate.outputs.main_before }}
+          QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
+        run: |
+          git fetch origin dev main
+          prepared_at=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+          args=(--repo "$GITHUB_WORKSPACE" --dev-ref "$DEV_SHA" --main-ref "$MAIN_BEFORE"
+            --promotion-time "$prepared_at" --prepare-candidate-dir "$RUNNER_TEMP/frozen-candidate")
+          if [ "$QUALIFICATION_ONLY" = "true" ]; then args+=(--qualification-only); fi
+          python reviewed-helpers/tools/promote_release.py "${args[@]}"
+          if [ ! -f "$RUNNER_TEMP/frozen-candidate/candidate.json" ]; then
+            echo "composed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "composed=true" >> "$GITHUB_OUTPUT"
+          python - "$RUNNER_TEMP/frozen-candidate/candidate.json" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          record = json.loads(Path(sys.argv[1]).read_text())
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for key in ("candidate_sha", "tree", "prepared_at"):
+                  output.write(f"{key}={record[key]}\n")
+          PY
+      - name: Retain the exact frozen candidate for every downstream consumer
+        if: steps.freeze.outputs.composed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: frozen-promotion-candidate
+          path: ${{ runner.temp }}/frozen-candidate/*
+          if-no-files-found: error
+          retention-days: 2
+  source-units:
+    name: Eligible source units with coverage
+    needs:
+      - gate
+      - compose-candidate
+    if: needs.gate.outputs.is_dev == 'true' && needs.compose-candidate.outputs.composed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -248,7 +315,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.gate.outputs.sha }}
-          fetch-depth: 1
+          fetch-depth: '0'
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -262,13 +334,32 @@ jobs:
         run: |
           python tools/check-version-consistency.py
           python tools/check-vendored-libs-sync.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: frozen-promotion-candidate
+          path: ${{ runner.temp }}/frozen-candidate
+      - name: Import the frozen candidate without recomposition
+        env:
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
+          MAIN_BEFORE: ${{ needs.gate.outputs.main_before }}
+          CANDIDATE_SHA: ${{ needs.compose-candidate.outputs.candidate_sha }}
+        run: |
+          python reviewed-helpers/tools/promotion_frozen_candidate.py \
+            --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/frozen-candidate" \
+            --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --checkout "$RUNNER_TEMP/candidate"
       - id: producer
         name: Record the actual unit-producing attempt
         run: printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-      - name: Execute only the admitted source units once
+      - name: Execute only the admitted candidate units once
         env:
           SOURCE_SHA: ${{ needs.gate.outputs.sha }}
-        run: python tools/run-promotion-unit-tests.py --source-sha "$SOURCE_SHA" --output-dir "$RUNNER_TEMP/promotion-unit-evidence"
+          CANDIDATE_TREE: ${{ needs.compose-candidate.outputs.tree }}
+        run: |
+          python "$RUNNER_TEMP/candidate/tools/run-promotion-unit-tests.py" \
+            --source-sha "$SOURCE_SHA" --development-root "$GITHUB_WORKSPACE" \
+            --candidate-tree "$CANDIDATE_TREE" --output-dir "$RUNNER_TEMP/promotion-unit-evidence"
       - id: upload
         name: Upload promotion unit evidence
         uses: actions/upload-artifact@v4
@@ -281,7 +372,8 @@ jobs:
     name: Build first-party Python artifacts without signing authority
     needs:
       - gate
-    if: needs.gate.outputs.is_dev == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      - compose-candidate
+    if: needs.gate.outputs.is_dev == 'true' && needs.compose-candidate.outputs.composed == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -298,7 +390,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -311,10 +403,16 @@ jobs:
           python reviewed-helpers/tools/seasoned_uv.py --registry-only --uv uv -- --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --only-binary :all: --require-hashes \
             --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r reviewed-helpers/tools/artifact_validation_requirements.txt
-      - name: Build the composed, versioned promotion candidate without release authority
+      - uses: actions/download-artifact@v4
+        with:
+          name: frozen-promotion-candidate
+          path: ${{ runner.temp }}/frozen-candidate
+      - name: Build the frozen tested composition without release authority
         id: build
         env:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
+          MAIN_BEFORE: ${{ needs.gate.outputs.main_before }}
+          CANDIDATE_SHA: ${{ needs.compose-candidate.outputs.candidate_sha }}
           ARTIFACT_DIR: ${{ runner.temp }}/python-artifacts
           QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
           GH_TOKEN: ${{ github.token }}
@@ -323,12 +421,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin dev main
-          args=(--repo "$GITHUB_WORKSPACE" --dev-ref "$DEV_SHA" --main-ref origin/main
-            --build-python-artifacts-dir "$ARTIFACT_DIR"
-            --reuse-artifacts-repository "$GITHUB_REPOSITORY"
-            --toolchain-source seasoned-public --toolchain-min-age-days 7)
-          if [ "$QUALIFICATION_ONLY" = "true" ]; then args+=(--qualification-only); fi
-          "$RUNNER_TEMP/artifact-validator/bin/python" reviewed-helpers/tools/promote_release.py "${args[@]}"
+          "$RUNNER_TEMP/artifact-validator/bin/python" reviewed-helpers/tools/promotion_frozen_candidate.py \
+            --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/frozen-candidate" \
+            --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --build-artifacts "$ARTIFACT_DIR" --reuse-artifacts-repository "$GITHUB_REPOSITORY"
           if [ -f "$ARTIFACT_DIR/python-artifacts.json" ]; then
             echo "exported=true" >> "$GITHUB_OUTPUT"
           else
@@ -347,7 +444,8 @@ jobs:
       - gate
       - build-python-artifacts
       - source-units
-    if: needs.gate.outputs.is_dev == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      - compose-candidate
+    if: needs.gate.outputs.is_dev == 'true' && needs.compose-candidate.outputs.composed == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -364,7 +462,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -382,51 +480,23 @@ jobs:
         with:
           name: unsigned-promotion-python-artifacts
           path: ${{ runner.temp }}/python-artifacts
-      - name: Validate untrusted bundles using only pinned reviewed helpers
+      - uses: actions/download-artifact@v4
+        with:
+          name: frozen-promotion-candidate
+          path: ${{ runner.temp }}/frozen-candidate
+      - name: Validate untrusted bundles using qualified admitted-source helpers
         if: needs.build-python-artifacts.outputs.exported == 'true'
         env:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
+          CANDIDATE_SHA: ${{ needs.compose-candidate.outputs.candidate_sha }}
           ARTIFACT_DIR: ${{ runner.temp }}/python-artifacts
           QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
         run: |
-          git fetch origin main
-          "$RUNNER_TEMP/artifact-validator/bin/python" - "$GITHUB_WORKSPACE" "$RELEASE_HELPERS_SHA" "$DEV_SHA" "$(git rev-parse origin/main)" "$ARTIFACT_DIR" "$QUALIFICATION_ONLY" <<'PY'
-          import re
-          import sys
-          from pathlib import Path
-
-          repo, helper_sha, dev, main, directory, qualification_only = sys.argv[1:]
-          repo = Path(repo).resolve(strict=True)
-          helpers = repo / "reviewed-helpers"
-          sys.path.insert(0, str(helpers / "tools"))
-          import promote_release as promotion
-          import promotion_python_artifacts as artifacts
-
-          if not all(re.fullmatch(r"[0-9a-f]{40}", value) for value in (helper_sha, dev, main)):
-              raise artifacts.PromotionArtifactError("invalid expected candidate commit identity")
-          if qualification_only not in ("true", "false"):
-              raise artifacts.PromotionArtifactError("invalid qualification-only admission")
-          if promotion._git(["rev-parse", "HEAD"], cwd=helpers) != helper_sha:
-              raise artifacts.PromotionArtifactError("release helpers do not match their reviewed pin")
-          scratch = promotion.add_scratch_worktree(dev, repo=repo)
-          try:
-              state = promotion._read_pipeline_state(main, repo=repo)
-              if state.get("paused") and qualification_only != "true":
-                  raise promotion.PromotionPaused("normal artifact validation cannot bypass the pause")
-              summary = promotion.consume_pending_changes(
-                  scratch, main_head=main, repo=repo,
-                  last_dev_head=(state.get("last_promotion") or {}).get("dev_head"),
-                  trusted_source=helpers,
-              )
-              tree = promotion.build_promotion_tree(scratch, control=summary.get("control_preserved"))
-              artifacts.validate_composed_artifacts(
-                  Path(directory), scratch=scratch, content_tree=tree,
-                  dev_head=dev, main_before=main,
-                  source_policy="seasoned-public", min_age_days=7,
-              )
-          finally:
-              promotion.remove_scratch_worktree(scratch, repo=repo)
-          PY
+          "$RUNNER_TEMP/artifact-validator/bin/python" reviewed-helpers/tools/promotion_frozen_candidate.py \
+            --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/frozen-candidate" \
+            --dev-sha "$DEV_SHA" --main-before "${{ needs.gate.outputs.main_before }}" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --validate-artifacts "$ARTIFACT_DIR"
       - name: Attest the validated index and every first-party bundle
         if: needs.build-python-artifacts.outputs.exported == 'true'
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
@@ -445,12 +515,13 @@ jobs:
       - gate
       - source-units
       - build-python-artifacts
+      - compose-candidate
       - python-artifacts
       - promote
       - qualify-candidate
       - publish-python-artifacts
       - merge-promotion
-    if: "always() && github.event_name == 'repository_dispatch' && needs.gate.outputs.is_dev == 'true' && (\n \n \n \n \n needs.source-units.result == 'failure' || needs.build-python-artifacts.result == 'failure' ||\n needs.python-artifacts.result == 'failure' ||\n needs.promote.result == 'failure' ||\n needs.qualify-candidate.result == 'failure' ||\n needs.publish-python-artifacts.result == 'failure' ||\n needs.merge-promotion.result == 'failure')"
+    if: "always() && github.event_name == 'repository_dispatch' && needs.gate.outputs.is_dev == 'true' && (\n needs.compose-candidate.result == 'failure' || needs.source-units.result == 'failure' || needs.build-python-artifacts.result == 'failure' ||\n needs.python-artifacts.result == 'failure' ||\n needs.promote.result == 'failure' ||\n needs.qualify-candidate.result == 'failure' ||\n needs.publish-python-artifacts.result == 'failure' ||\n needs.merge-promotion.result == 'failure')"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -547,6 +618,7 @@ jobs:
       - gate
       - source-units
       - python-artifacts
+      - compose-candidate
     if: always() && needs.gate.result == 'success' && needs.gate.outputs.is_dev == 'true'
     runs-on: ubuntu-latest
     environment: main-promotion
@@ -569,6 +641,11 @@ jobs:
       - name: Decide whether this run should actually promote
         id: decide
         run: |
+          if [ "${{ needs.compose-candidate.outputs.composed }}" = "false" ]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No changed candidate content remains to publish."
+            exit 0
+          fi
           if [ "${{ needs.gate.result }}" != "success" ]; then
             echo "proceed=false" >> "$GITHUB_OUTPUT"
             echo "::notice::gate job did not succeed (${{ needs.gate.result }}) -- skipping promotion."
@@ -596,7 +673,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -635,12 +712,11 @@ jobs:
             --repo "$GITHUB_WORKSPACE" --directory python-artifacts \
             --repository "$GITHUB_REPOSITORY" --signer-digest "${{ github.workflow_sha }}" \
             --source-digest "${{ github.sha }}" --source-ref "$GITHUB_REF"
-      - name: Pin the immutable workflow creation time for deterministic candidate retries
-        id: candidate-clock
+      - uses: actions/download-artifact@v4
         if: steps.decide.outputs.proceed == 'true'
-        run: |
-          created_at=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
-          printf 'prepared_at=%s\n' "$created_at" >> "$GITHUB_OUTPUT"
+        with:
+          name: frozen-promotion-candidate
+          path: ${{ runner.temp }}/frozen-candidate
       - name: Promote (push a candidate branch; report-only if push=false)
         id: promote
         if: steps.decide.outputs.proceed == 'true'
@@ -648,11 +724,14 @@ jobs:
           GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
           PUSH_INPUT: ${{ github.event.inputs.push }}
           DEV_SHA: ${{ needs.gate.outputs.sha }}
-          PROMOTION_TIME: ${{ steps.candidate-clock.outputs.prepared_at }}
+          EXPECTED_CANDIDATE_SHA: ${{ needs.compose-candidate.outputs.candidate_sha }}
+          PROMOTION_TIME: ${{ needs.compose-candidate.outputs.prepared_at }}
           QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
         run: |
           args=(--repo "$GITHUB_WORKSPACE" --dev-ref "$DEV_SHA" --main-ref origin/main
-            --python-artifacts-dir python-artifacts)
+            --python-artifacts-dir python-artifacts
+            --expected-candidate-sha "$EXPECTED_CANDIDATE_SHA"
+            --frozen-candidate-dir "$RUNNER_TEMP/frozen-candidate")
           if [ "$QUALIFICATION_ONLY" = "true" ]; then args+=(--qualification-only); fi
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
             land=false
@@ -684,8 +763,21 @@ jobs:
           QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
         run: |
           remote_ref=$(git ls-remote --heads origin "refs/heads/$CANDIDATE_BRANCH")
-          if [ "$(printf '%s\n' "$remote_ref" | cut -f1)" != "$CANDIDATE_SHA" ]; then
+          remote_sha=$(printf '%s\n' "$remote_ref" | cut -f1)
+          if [ "$remote_sha" != "$CANDIDATE_SHA" ]; then
+            case "$remote_ref" in
+              "") observed=missing-ref ;;
+              *$'\n'*) observed=multiple-refs ;;
+              *)
+                if [[ "$remote_sha" =~ ^[0-9a-f]{40}$ ]]; then
+                  observed="$remote_sha"
+                else
+                  observed=malformed-ref
+                fi
+                ;;
+            esac
             echo "::error::Remote branch does not match the trusted promoter's candidate."
+            printf '::error::Candidate ref verification: expected=%s observed=%s\n' "$CANDIDATE_SHA" "$observed"
             exit 1
           fi
           git fetch origin "refs/heads/$CANDIDATE_BRANCH"
@@ -747,7 +839,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/checkout@v4
@@ -788,7 +880,7 @@ jobs:
             --candidate-root candidate --dev-root validated-dev \
             --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" --control-sha "$CONTROL_SHA" \
             --promotion-run "$GITHUB_RUN_ID-$UNIT_PRODUCER_ATTEMPT" \
-            --profile source-units-v2 --unit-packet-dir "$RUNNER_TEMP/promotion-unit-evidence" \
+            --profile candidate-units-v3 --unit-packet-dir "$RUNNER_TEMP/promotion-unit-evidence" \
             --unit-manifest tools/promotion-unit-manifest.json \
             --unit-artifact-id "$UNIT_ARTIFACT_ID" --unit-artifact-digest "sha256:${UNIT_ARTIFACT_DIGEST#sha256:}" \
             --receipt "$RUNNER_TEMP/qualification.json" --github-output "$GITHUB_OUTPUT"
@@ -805,7 +897,7 @@ jobs:
       - promote
       - qualify-candidate
       - publish-python-artifacts
-    if: needs.publish-python-artifacts.outputs.pr_number != '' && needs.qualify-candidate.result == 'success' && needs.publish-python-artifacts.result == 'success' && needs.qualify-candidate.outputs.qualification_run != '' && needs.qualify-candidate.outputs.qualification_attempt != '' && needs.qualify-candidate.outputs.qualification_digest != '' && needs.qualify-candidate.outputs.qualification_promotion_run != '' && needs.publish-python-artifacts.outputs.publication_digest != '' && needs.publish-python-artifacts.outputs.source_release != '' && needs.qualify-candidate.outputs.qualification_profile == 'source-units-v2'
+    if: needs.publish-python-artifacts.outputs.pr_number != '' && needs.qualify-candidate.result == 'success' && needs.publish-python-artifacts.result == 'success' && needs.qualify-candidate.outputs.qualification_run != '' && needs.qualify-candidate.outputs.qualification_attempt != '' && needs.qualify-candidate.outputs.qualification_digest != '' && needs.qualify-candidate.outputs.qualification_promotion_run != '' && needs.publish-python-artifacts.outputs.publication_digest != '' && needs.publish-python-artifacts.outputs.source_release != '' && needs.qualify-candidate.outputs.qualification_profile == 'candidate-units-v3'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
@@ -1017,8 +1109,8 @@ jobs:
                       env=read_env,
                   )
                   qualified_run = json.loads(qualification.stdout)
-                  if os.environ["QUALIFICATION_PROFILE"] != "source-units-v2":
-                      raise RuntimeError("the controller requires an explicit source-unit v2 receipt")
+                  if os.environ["QUALIFICATION_PROFILE"] != "candidate-units-v3":
+                      raise RuntimeError("the controller requires an explicit candidate-unit v3 receipt")
                   for field in ("QUALIFICATION_UNIT_JOB", "QUALIFICATION_UNIT_ARTIFACT"):
                       if not re.fullmatch(r"[1-9][0-9]{0,19}", os.environ[field]):
                           raise RuntimeError(f"invalid source-unit provider identity: {field}")
@@ -1128,7 +1220,8 @@ jobs:
     permissions:
       contents: read
       actions: read
-      attestations: read
+      attestations: write
+      id-token: write
       pull-requests: read
     outputs:
       publication_digest: ${{ steps.publish.outputs.publication_digest }}
@@ -1148,7 +1241,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/checkout@v4
@@ -1202,6 +1295,17 @@ jobs:
           if hashlib.sha256(receipt.read_bytes()).hexdigest() != expected:
               raise RuntimeError("candidate qualification receipt digest mismatch")
           PY
+      - name: Prepare complete source subjects from pinned raw Git objects
+        run: |
+          git fetch origin "$CANDIDATE_SHA"
+          python reviewed-helpers/tools/promotion_source_archive.py \
+            --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/complete-source" \
+            --source-index python-artifacts/python-artifacts.json \
+            --qualification-receipt qualification/qualification.json
+      - name: Attest the complete source and its external generation manifest
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: ${{ runner.temp }}/complete-source/*
       - name: Publish immutable source assets and verify all raw bytes before merge
         id: publish
         env:
@@ -1216,7 +1320,8 @@ jobs:
             --source-digest "${{ github.sha }}" --source-ref "$GITHUB_REF" \
             --candidate-commit "$CANDIDATE_SHA" --dev-head "$DEV_SHA" --main-before "$MAIN_BEFORE" \
             --candidate-root candidate --promotion-run "$QUALIFICATION_PROMOTION_RUN" \
-            --qualification-profile source-units-v2 \
+            --qualification-profile candidate-units-v3 \
+            --complete-source-dir "$RUNNER_TEMP/complete-source" \
             --unit-packet-dir "$RUNNER_TEMP/promotion-unit-evidence" \
             --unit-manifest tools/promotion-unit-manifest.json --dev-root validated-dev \
             --qualification-receipt qualification/qualification.json --github-output "$GITHUB_OUTPUT"
@@ -1345,6 +1450,7 @@ jobs:
   record-promotion:
     name: Record the landed commit for an already qualified and published Dev release
     needs:
+      - gate
       - merge-promotion
       - publish-python-artifacts
     if: needs.merge-promotion.outputs.merge_sha != '' && needs.publish-python-artifacts.outputs.source_release != ''
@@ -1362,7 +1468,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5

@@ -6,6 +6,7 @@ import json
 import sqlite3
 import tarfile
 import zipfile
+import weakref
 from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +17,9 @@ from agent_logger.config import Config, load_config
 from agent_logger.sync import engine
 from agent_logger.sync.lock import sync_lock
 from agent_logger.usage_capture import capture_usage
+from agent_logger.usage_sqlite import (
+    UsageReadError, UsageRowLimitError, UsageTimeLimitError, read_sqlite_usage,
+)
 from agent_logger.usage_ledger import (
     ARTIFACT, UsageEvidenceError, evidence_lock_path, merge_session_evidence,
 )
@@ -71,6 +75,248 @@ def _cfg(tmp_path: Path) -> Config:
     data["sync"]["compact"] = {"enabled": False}
     data["machine"] = {"name": "synthetic"}
     return Config(data, tmp_path / "home")
+
+
+def _large_store(source: Path, counts: dict[str, int]) -> dict[str, Path]:
+    sessions = {sid: _session(source, sid) for sid in counts}
+    _db(source)
+    with closing(sqlite3.connect(source / "session-store.db")) as db, db:
+        db.execute("DELETE FROM assistant_usage_events")
+        for sid, count in counts.items():
+            db.executemany(
+                "INSERT INTO assistant_usage_events VALUES(?,?,?,?,?,?)",
+                [(sid, "2026-01-01T00:00:00Z", "model-a", 10, 2, None)] * count,
+            )
+    return sessions
+
+
+def test_usage_capture_splits_large_corpus_without_raising_reader_budget(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    counts = {f"s{index}": 6000 for index in range(4)}
+    sessions = _large_store(cfg.sync_source, counts)
+    with pytest.raises(UsageRowLimitError, match="row budget"):
+        read_sqlite_usage(cfg.sync_source / "session-store.db", set(sessions))
+
+    result = capture_usage(cfg.sync_source, None)
+
+    assert result.complete
+    assert result.updated == 4
+    for sid, session in sessions.items():
+        evidence = json.loads((session / ARTIFACT).read_text())
+        stored = [row for row in evidence["records"] if row["source"] == "session-store"]
+        assert sum(row["multiplicity"] for row in stored) == counts[sid]
+    assert capture_usage(cfg.sync_source, None).updated == 0
+    assert engine.run_sync(cfg) == 0
+    for sid, session in sessions.items():
+        published = tmp_path / "dest" / "synthetic" / "session-state" / sid / ARTIFACT
+        assert published.read_bytes() == (session / ARTIFACT).read_bytes()
+
+
+def test_usage_capture_retains_oversized_session_failure_and_captures_siblings(tmp_path: Path) -> None:
+    sessions = _large_store(tmp_path, {"healthy": 2, "oversized": 20001})
+    result = capture_usage(tmp_path, None)
+    assert result.updated == 1
+    assert result.failures == (
+        "oversized: session-store capture: accounting store read exceeded row budget",
+    )
+    assert not (sessions["oversized"] / ARTIFACT).exists()
+    assert (sessions["healthy"] / ARTIFACT).is_file()
+
+
+@pytest.mark.parametrize("error", [UsageRowLimitError, UsageTimeLimitError])
+def test_usage_split_releases_failed_reader_buffers_before_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error,
+) -> None:
+    from agent_logger import usage_capture
+
+    class DiscardedRows:
+        pass
+
+    live = weakref.WeakSet()
+    calls = []
+
+    def read_store(path: Path, session_ids: set[str]) -> dict:
+        assert not live, "a failed reader's traceback still retains its row buffer"
+        calls.append(len(session_ids))
+        discarded = DiscardedRows()
+        live.add(discarded)
+        if len(session_ids) > 1:
+            raise error("reader budget")
+        return {}
+
+    for index in range(4):
+        _session(tmp_path, f"s{index}")
+    monkeypatch.setattr(usage_capture, "read_sqlite_usage", read_store)
+    assert capture_usage(tmp_path, None).complete
+    assert calls == [4, 2, 1, 1, 2, 1, 1]
+    assert not live
+
+
+def test_usage_capture_partitions_expired_scope_without_widening_reader_limits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger import usage_capture
+
+    sessions = _large_store(tmp_path, {f"s{index}": 2 for index in range(4)})
+    calls = []
+
+    def expired_scope(path: Path, session_ids: set[str], **kwargs) -> dict:
+        assert not kwargs
+        calls.append(len(session_ids))
+        if len(session_ids) > 1:
+            return read_sqlite_usage(path, session_ids, timeout=1e-12)
+        return read_sqlite_usage(path, session_ids)
+
+    monkeypatch.setattr(usage_capture, "read_sqlite_usage", expired_scope)
+
+    result = capture_usage(tmp_path, None)
+
+    assert result.complete
+    assert result.updated == 4
+    assert calls == [4, 2, 1, 1, 2, 1, 1]
+    for session in sessions.values():
+        evidence = json.loads((session / ARTIFACT).read_bytes())
+        stored = [row for row in evidence["records"] if row["source"] == "session-store"]
+        assert sum(row["multiplicity"] for row in stored) == 2
+
+
+def test_usage_time_partition_retains_last_good_and_stops_at_individual_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger import usage_capture
+
+    sessions = _large_store(tmp_path, {f"s{index}": 2 for index in range(4)})
+    assert capture_usage(tmp_path, None).complete
+    retained = (sessions["s2"] / ARTIFACT).read_bytes()
+    calls = []
+
+    def expired_scope(path: Path, session_ids: set[str]) -> dict:
+        calls.append(frozenset(session_ids))
+        if len(session_ids) > 1 or "s2" in session_ids:
+            return read_sqlite_usage(path, session_ids, timeout=1e-12)
+        return read_sqlite_usage(path, session_ids)
+
+    monkeypatch.setattr(usage_capture, "read_sqlite_usage", expired_scope)
+    result = capture_usage(tmp_path, None)
+    assert result.failures == (
+        "s2: session-store capture: accounting store read exceeded time budget",
+    )
+    assert not result.complete
+    assert len(calls) == 7
+    assert calls.count(frozenset({"s2"})) == 1
+    assert (sessions["s2"] / ARTIFACT).read_bytes() == retained
+
+
+def test_usage_time_partition_has_finite_worst_case_and_does_not_retry_other_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger import usage_capture
+
+    _large_store(tmp_path, {f"s{index}": 1 for index in range(32)})
+    calls = []
+
+    def expired(path: Path, session_ids: set[str]) -> dict:
+        calls.append(len(session_ids))
+        raise UsageTimeLimitError("time budget")
+
+    monkeypatch.setattr(usage_capture, "read_sqlite_usage", expired)
+    result = capture_usage(tmp_path, None)
+    assert len(calls) == 63
+    assert calls.count(1) == 32
+    assert len(result.failures) == 32
+
+    calls.clear()
+
+    def unsafe(path: Path, session_ids: set[str]) -> dict:
+        calls.append(len(session_ids))
+        raise UsageReadError("unsafe source")
+
+    monkeypatch.setattr(usage_capture, "read_sqlite_usage", unsafe)
+    result = capture_usage(tmp_path, None)
+    assert calls == [32]
+    assert result.failures == ("session-store capture: unsafe source",)
+
+
+@pytest.mark.parametrize("include", [None, {"s1"}])
+def test_usage_ignores_internal_metadata_directories(tmp_path: Path, include) -> None:
+    session = _session(tmp_path)
+    _db(tmp_path)
+    metadata = [
+        tmp_path / "session-state" / name
+        for name in (".agent-worktrees-locks", ".agent-worktrees-tmp", ".session-operation-locks")
+    ]
+    for directory in metadata:
+        directory.mkdir()
+        (directory / "sentinel").write_bytes(b"retained")
+
+    result = capture_usage(tmp_path, include)
+
+    assert result.complete
+    assert result.updated == 1
+    assert (session / ARTIFACT).is_file()
+    for directory in metadata:
+        assert list(directory.iterdir()) == [directory / "sentinel"]
+        assert (directory / "sentinel").read_bytes() == b"retained"
+
+
+def test_usage_invalid_session_identity_still_fails(tmp_path: Path) -> None:
+    session = _session(tmp_path)
+    (session.parent / "invalid session").mkdir()
+    result = capture_usage(tmp_path, None)
+    assert result.failures == ("session enumeration: invalid session directory identity",)
+    assert not (session / ARTIFACT).exists()
+
+
+def test_sync_with_internal_metadata_preserves_accounting_and_succeeds(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    session = _session(cfg.sync_source)
+    _db(cfg.sync_source)
+    (session.parent / ".session-operation-locks").mkdir()
+
+    assert engine.run_sync(cfg) == 0
+    published = tmp_path / "dest" / "synthetic" / "session-state" / "s1"
+    assert (published / ARTIFACT).read_bytes() == (session / ARTIFACT).read_bytes()
+
+
+def test_scheduled_capture_converges_above_total_transcript_limit(tmp_path: Path) -> None:
+    from agent_logger.usage_capture import capture_for_sync
+    from agent_logger.usage_transcript import MAX_TRANSCRIPT_BYTES
+
+    cfg = _cfg(tmp_path)
+    session = _session(cfg.sync_source)
+    _db(cfg.sync_source)
+    usage = (session / "events.jsonl").read_bytes()
+    padding = json.dumps({"type": "assistant.message", "data": {"content": "x" * 1024}}).encode() + b"\n"
+    with (session / "events.jsonl").open("wb") as stream:
+        for _ in range(MAX_TRANSCRIPT_BYTES // len(padding) + 1):
+            stream.write(padding)
+        stream.write(usage)
+    assert (session / "events.jsonl").stat().st_size > MAX_TRANSCRIPT_BYTES
+
+    assert capture_for_sync(cfg, None) == (False, False)
+    assert not (session / ARTIFACT).exists()
+    assert capture_for_sync(cfg, None) == (True, False)
+    evidence = json.loads((session / ARTIFACT).read_text())
+    transcript = [row for row in evidence["records"] if row["source"] == "transcript"]
+    assert len(transcript) == 1 and transcript[0]["values"]["input_tokens"] == 10
+    before = (session / ARTIFACT).read_bytes()
+    assert capture_for_sync(cfg, None) == (True, False)
+    assert (session / ARTIFACT).read_bytes() == before
+
+
+def test_scheduled_capture_converges_above_total_event_limit(tmp_path: Path) -> None:
+    from agent_logger.usage_capture import capture_for_sync
+    from agent_logger.usage_transcript import MAX_EVENTS
+
+    cfg = _cfg(tmp_path)
+    session = _session(cfg.sync_source)
+    _db(cfg.sync_source)
+    usage = (session / "events.jsonl").read_bytes()
+    (session / "events.jsonl").write_bytes(b"{}\n" * MAX_EVENTS + usage)
+    assert capture_for_sync(cfg, None) == (False, False)
+    assert capture_for_sync(cfg, None) == (True, False)
+    evidence = json.loads((session / ARTIFACT).read_text())
+    assert len([row for row in evidence["records"] if row["source"] == "transcript"]) == 1
 
 
 @pytest.mark.guard
@@ -349,7 +595,7 @@ def test_usage_huge_numeric_record_retains_prior_and_allows_raw_transfer(
     assert copied.read_bytes() == transcript.read_bytes()
 
 
-@pytest.mark.parametrize("store", ["missing", "corrupt"])
+@pytest.mark.parametrize("store", ["missing", "corrupt", "deferred"])
 def test_usage_incomplete_capture_still_delivers_existing_archives(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: str,
 ) -> None:
@@ -358,13 +604,21 @@ def test_usage_incomplete_capture_still_delivers_existing_archives(
 
     cfg = _cfg(tmp_path)
     cfg._data["sync"]["compact"] = {"enabled": True}
-    _session(cfg.sync_source)
+    session = _session(cfg.sync_source)
     archived_session = _session(tmp_path / "old-source", "old")
     cfg.compact_archive_root.mkdir(parents=True)
     archive = cfg.compact_archive_root / "old.tar.gz"
     get_codec("targz").archive_dir(archived_session, archive)
     if store == "corrupt":
         (cfg.sync_source / "session-store.db").write_bytes(b"corrupt")
+    elif store == "deferred":
+        from agent_logger import usage_transcript
+
+        _db(cfg.sync_source)
+        assert capture_usage(cfg.sync_source, None).complete
+        with (session / "events.jsonl").open("ab") as stream:
+            stream.write(b"{}\n")
+        monkeypatch.setattr(usage_transcript, "MAX_EVENTS", 1)
     target = engine.build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
 
     def forbidden(*args: object, **kwargs: object) -> None:

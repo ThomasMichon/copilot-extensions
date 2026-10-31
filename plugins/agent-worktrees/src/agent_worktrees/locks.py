@@ -28,13 +28,12 @@ live (fail-open -- never hide a session that might be real).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
 import tempfile
 import time
 from pathlib import Path
-
-import single_instance_lease
 
 # Bumped only on a breaking change to the on-disk shape; readers tolerate an
 # absent/unknown version (treat as legacy best-effort) so a rollout is safe.
@@ -63,6 +62,8 @@ def _pid_alive(pid: int) -> bool:
     """
     if pid <= 0:
         return False
+    import single_instance_lease
+
     return single_instance_lease.pid_alive(pid)
 
 
@@ -278,6 +279,26 @@ def lock_is_live(data: dict | None) -> bool:
 def lock_live(path: Path | str) -> bool:
     """Convenience: read ``path`` and report whether its owner is live."""
     return lock_is_live(read_lock(path))
+
+
+def lock_is_running(data: dict | None) -> bool:
+    """Keep unknown owners live, but reject a retained, already-exited process."""
+    if not isinstance(data, dict) or not lock_is_live(data):
+        return False
+    birth = data.get("start_time")
+    if not birth or platform.system() not in {"Windows", "Linux"}:
+        return True
+    from zdd.process_exit import observe_original_exit
+
+    try:
+        return not observe_original_exit(data["pid"], birth)
+    except NotImplementedError:
+        return True
+    except (OSError, ValueError) as exc:
+        logging.getLogger(__name__).warning(
+            "Owner exit evidence unavailable; retaining liveness protection: %s", exc,
+        )
+        return True
 
 
 def remove_lock(path: Path | str) -> None:

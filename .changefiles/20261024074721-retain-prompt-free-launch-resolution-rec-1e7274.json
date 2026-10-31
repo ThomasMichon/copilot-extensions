@@ -1,0 +1,9 @@
+{
+  "comment": "Retain prompt-free launch-resolution receipts and confirmed attempt identities across local and SSH hops",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

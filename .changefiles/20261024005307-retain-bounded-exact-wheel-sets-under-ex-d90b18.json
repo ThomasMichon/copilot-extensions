@@ -1,0 +1,17 @@
+{
+  "comment": "Retain bounded exact wheel sets under existing private input custody, without enabling profile consumers.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

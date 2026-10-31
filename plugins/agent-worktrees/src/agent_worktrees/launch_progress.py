@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from . import activity
+from . import activity, creation_diagnostics
 from . import output
 
 HEARTBEAT_SECONDS = 10
@@ -28,7 +28,10 @@ def preview_mode(enabled: bool) -> Iterator[None]:
 
 
 @contextmanager
-def step(label: str, *, enabled: bool = True, worktree_id: str | None = None):
+def step(
+    label: str, *, enabled: bool = True, worktree_id: str | None = None,
+    creation_advisory: bool = False,
+):
     started = time.monotonic()
     recording = not _preview.get()
     step_id = uuid.uuid4().hex
@@ -51,7 +54,12 @@ def step(label: str, *, enabled: bool = True, worktree_id: str | None = None):
             if human is not None:
                 human.progress(message)
             else:
-                print(f"[launch] {label}: {message}", file=sys.stderr, flush=True)
+                def write():
+                    print(f"[launch] {label}: {message}", file=sys.stderr, flush=True)
+                if creation_advisory:
+                    creation_diagnostics.emit("creation_progress", write, worktree_id=worktree_id)
+                else:
+                    write()
 
     def heartbeat():
         while not stopped.wait(HEARTBEAT_SECONDS):
@@ -60,7 +68,12 @@ def step(label: str, *, enabled: bool = True, worktree_id: str | None = None):
                    else f"still working ({time.monotonic() - started:.0f}s elapsed)")
 
     record("started")
-    with output.human_operation(f"launch/{label}", enabled=enabled) as human:
+    human_scope = (
+        creation_diagnostics.human_operation(
+            f"launch/{label}", enabled=enabled, worktree_id=worktree_id,
+        ) if creation_advisory else output.human_operation(f"launch/{label}", enabled=enabled)
+    )
+    with human_scope as human:
         if human is None:
             report("starting")
         thread = None

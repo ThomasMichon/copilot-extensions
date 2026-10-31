@@ -28,6 +28,10 @@ def main(argv=None):
     planning.add_argument("--inventory", type=Path, required=True)
     planning.add_argument("--fleet-id", required=True)
     planning.add_argument("--machine-limit", type=int, required=True)
+    designer = commands.add_parser("design", help="Actualize loadout slots and named-host resource grid; never deploy")
+    designer.add_argument("--config", type=Path, required=True)
+    designer.add_argument("--inventory", type=Path, required=True)
+    designer.add_argument("--catalog", type=Path, help="Explicit additional non-secret contributed templates")
     inspection = commands.add_parser("inspect", help="Inspect explicit release snapshots; never probe or install")
     inspection.add_argument("--release", type=Path, required=True)
     inspection.add_argument("--observation", type=Path, help="Explicit installation observation; absent means unknown")
@@ -36,12 +40,22 @@ def main(argv=None):
     inspection.add_argument("--installation", required=True)
     diagnostic = commands.add_parser("doctor", help="Check this installed thin client; never install or probe a controller")
     diagnostic.add_argument("--role", choices=("client",), default="client")
-    hosting = commands.add_parser("serve", help="Host the explicitly configured NEW Gateway over TLS")
-    hosting.add_argument("--role", choices=("gateway",), required=True)
+    hosting = commands.add_parser("serve", help="Run an explicitly configured foreground Fleet role")
+    hosting.add_argument("--role", choices=("gateway", "ssh-client"), required=True)
     profile = hosting.add_mutually_exclusive_group(required=True)
     profile.add_argument("--config", type=Path)
     profile.add_argument("--service-policy", type=Path)
     hosting.add_argument("--tls-config", type=Path)
+    hosting.add_argument("--operation-journal", type=Path)
+    hosting.add_argument("--operation-authority")
+    hosting.add_argument("--operation-installation")
+    commands.add_parser("capabilities", help="Report this executable's available bootstrap contracts")
+    bootstrap_parser = commands.add_parser(
+        "bootstrap", help="Use a selected private local continuity projection; never install or SSH")
+    bootstrap_parser.add_argument("--source", type=Path, required=True)
+    bootstrap_parser.add_argument("--harness", required=True)
+    bootstrap_parser.add_argument("--state-root", type=Path, required=True)
+    bootstrap_parser.add_argument("--apply", action="store_true")
     credential = commands.add_parser(
         "credential", help="Acquire one typed forge credential; secret JSON is for a captured pipe only",
     )
@@ -83,6 +97,29 @@ def main(argv=None):
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 1
+    if args.command in ("capabilities", "bootstrap"):
+        try:
+            import asyncio
+            from .continuity_bootstrap import CAPABILITY, PROVIDER, bootstrap
+            from .gateway_service_channel import TransportError
+        except ImportError:
+            print("fleet-manager: continuity bootstrap requires the service-gateway extra",
+                  file=sys.stderr)
+            return 1
+        try:
+            if args.command == "capabilities":
+                result = {"schema": "fleet-manager.capabilities", "version": 1,
+                          "capabilities": [CAPABILITY, PROVIDER]}
+            else:
+                result = asyncio.run(bootstrap(
+                    args.source.expanduser().absolute(), harness=args.harness,
+                    state_root=args.state_root.expanduser().absolute(), apply=args.apply))
+            print(canonical(result).decode("utf-8"))
+            return 0
+        except (TransportError, PlanError, OSError, ValueError, KeyError, TypeError) as exc:
+            code = exc.code if isinstance(exc, TransportError) else "continuity-bootstrap-refused"
+            print("fleet-manager: " + code, file=sys.stderr)
+            return 1
     if args.command == "credential":
         from .gateway_contract import ForgeScope, GatewayError, encode, parse, require
 
@@ -113,6 +150,20 @@ def main(argv=None):
             return 1
         return 0
     if args.command == "serve":
+        journal = (args.operation_journal, args.operation_authority, args.operation_installation)
+        if any(item is not None for item in journal) and (
+            not all(item is not None for item in journal) or args.service_policy is None
+        ):
+            print("fleet-manager: operation journal requires service policy and exact owner/installation",
+                  file=sys.stderr)
+            return 1
+        if args.role == "ssh-client":
+            if args.config is None or args.tls_config is not None:
+                print("fleet-manager: ssh-client requires only --config", file=sys.stderr)
+                return 1
+            from .ssh_machine import serve as serve_ssh
+
+            return serve_ssh(args.config)
         if args.service_policy is not None:
             if args.tls_config is None:
                 print("fleet-manager: --service-policy requires --tls-config", file=sys.stderr)
@@ -122,7 +173,12 @@ def main(argv=None):
             except ImportError:
                 print("fleet-manager: service serving requires the service-gateway extra", file=sys.stderr)
                 return 1
-            return serve_service(args.service_policy, args.tls_config)
+            if args.operation_journal is None:
+                return serve_service(args.service_policy, args.tls_config)
+            return serve_service(
+                args.service_policy, args.tls_config, operation_journal=args.operation_journal,
+                operation_authority=args.operation_authority,
+                operation_installation=args.operation_installation)
         if args.tls_config is not None:
             print("fleet-manager: --tls-config requires --service-policy", file=sys.stderr)
             return 1
@@ -205,6 +261,13 @@ def main(argv=None):
                         )
                     else:
                         result = admit_client_release(args.root, identity, selection, staged, policy)
+        elif args.command == "design":
+            from .loadouts import design_loadout
+
+            result = design_loadout(
+                read(args.config, "config"), read(args.inventory, "inventory"),
+                read(args.catalog, "catalog") if args.catalog else None, now=time.time(),
+            )
         elif args.command == "doctor":
             from .client_diagnostics import diagnose_client
 

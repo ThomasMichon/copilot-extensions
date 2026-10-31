@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 import socket
 import ssl
@@ -11,6 +12,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from agent_procutil.daemon_instances import daemon_entrypoint
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -23,10 +25,10 @@ from .gateway_contract import (
     GatewayConfig,
     GatewayError,
     encode,
+    endpoint,
     fields,
     parse,
     require,
-    endpoint,
 )
 from .gateway_index import IndexRouter
 from .planning import digest
@@ -218,8 +220,50 @@ def build_server(config: GatewayConfig, signer: Signer) -> _Server:
     return _Server((config.tls["host"], config.tls["port"]), config, signer, tls)
 
 
+def _close_server(server) -> None:
+    completed = threading.Event()
+    failures = []
+    threads = getattr(server, "_threads", ())
+    requests = tuple(threads) if isinstance(threads, list) else ()
+
+    def close():
+        try:
+            server.server_close()
+        except BaseException as error:  # noqa: BLE001 - re-raised on the serving thread.
+            failures.append(error)
+        finally:
+            # ThreadingMixIn removes its thread list before joining it.
+            for request in requests:
+                request.join()
+            completed.set()
+
+    closer = threading.Thread(target=close, name="gateway-close")
+    try:
+        closer.start()
+    except KeyboardInterrupt:
+        # Creation may already have happened; retain this exact close attempt.
+        pass
+    finally:
+        while True:
+            try:
+                if completed.wait(0.1):
+                    break
+            except KeyboardInterrupt:
+                pass
+    if failures:
+        raise failures[0]
+
+
+@daemon_entrypoint(
+    "fleet-manager-gateway", source=__file__, purpose="production",
+    runtime_root=lambda config_path: Path(os.path.abspath(config_path)).parent,
+)
 def serve(config_path: Path) -> int:
-    """Foreground hosting only. No deployment, background spawn or discovered-state writes."""
+    """Host from the same lexical config selection checked by admission.
+
+    No deployment, background spawn or discovered-state writes.
+    """
+    config_path = Path(os.path.abspath(config_path))
     try:
         with config_path.open("rb") as stream:
             config = GatewayConfig.load(parse(stream.read(MAX_WIRE + 1)))
@@ -246,5 +290,5 @@ def serve(config_path: Path) -> int:
     except KeyboardInterrupt:
         return 0
     finally:
-        server.server_close()
+        _close_server(server)
     return 0

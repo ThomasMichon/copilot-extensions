@@ -17,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'provision')]
+    [ValidateSet('install', 'init', 'stamp', 'provision', 'uninstall', 'broker-remove')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [switch]$Force
@@ -31,6 +31,17 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
         throw 'Required installer human-output initializer is unavailable.'
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
+if ($Action -eq 'uninstall' -and (($InstallDir -split '[\\/]') -contains '..')) {
+    throw 'Uninstall refuses parent-traversal path components'
+}
+if ($Action -eq 'uninstall' -and $InstallDir) {
+    if (-not [IO.Path]::IsPathRooted($InstallDir)) {
+        $InstallDir = Join-Path $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath $InstallDir
+    }
+    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -57,6 +68,29 @@ function Copy-InstallerStageDirectory {
 # === end install-contract:v4 payload-copy ===
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
+if ($env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'init', 'provision', 'broker-remove')) {
+    $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
+        else { Join-Path $env:USERPROFILE '.agent-mcp' }
+    $driverOptions = @()
+    if ($Force) { $driverOptions += 'Force' }
+    $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
+        -Plugin 'agent-mcp' -Action $Action -Options $driverOptions
+    if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
+    $driverPython = $driverEntry.Python
+    $driverArguments = $driverEntry.Arguments
+}
+if ($Action -eq 'broker-remove') {
+    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') {
+        throw 'Owned broker removal requires an uncontained Windows installer'
+    }
+    & $driverPython @driverArguments --remove-broker
+    if ($LASTEXITCODE -ne 0) { throw 'Owned runtime broker removal failed; runtimes preserved' }
+    return
+}
+
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
     param(
@@ -80,6 +114,7 @@ function Set-CopilotPersistentEnvironmentVariable {
 }
 # === end install-contract:test-persistent-environment ===
 
+if ($Action -ne 'uninstall') {
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -211,7 +246,9 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
     }
 }
 # === end install-contract:v4 self-stage ===
+}
 
+if ($Action -ne 'uninstall') {
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
 # the self-stage/lock behavior WITHOUT a heavy venv build: this (post-stage)
@@ -249,6 +286,7 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
     exit 0
 }
 # === end install-contract:v4 smoke seam ===
+}
 
 # #935: bound uv's per-request network wait so a hung index/download degrades to
 # "failed + retryable" rather than wedging the install; the self-stage watchdog
@@ -343,12 +381,14 @@ function Remove-ConsoleTrampolines {
 # anything else (a git checkout) => local.
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
+    param([switch]$ExternalOnly)
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
        Prefers the freshly-built slot venv python ($VenvDir, present at
        mark-complete before the link is swapped), then the active link's
        python, then a real base python via the `py` launcher -- avoiding the
        Windows Store 'python' alias stub. Returns $null if none. #>
     foreach ($d in @($VenvDir, $LinkDir)) {
+        if ($ExternalOnly) { break }
         # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
         if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
@@ -386,7 +426,7 @@ function Invoke-VersionedSlotClean {
     Assert-SourceRuntime
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
+    $py = Get-BootstrapPython -ExternalOnly
     if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
         $constructionError = ''
@@ -399,7 +439,12 @@ function Invoke-VersionedSlotClean {
     }
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) `
+        -Footprint (Join-Path $PSScriptRoot 'uninstall-profile.json') -Plugin 'agent-mcp'
+    $script:SrcVersion = $script:RuntimeConstructionSession.Version
+    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+    $script:VenvPython = Join-Path $VenvDir $(if ($env:OS -eq 'Windows_NT') { 'Scripts\python.exe' } else { 'bin/python' })
+    $script:LinkDir = $VenvDir
     Assert-SourceRuntime
 }
 
@@ -410,8 +455,34 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
+}
+
+function Invoke-RuntimeOwnerSettlement {
+    if (-not $VersionedRuntime -or $script:RuntimeConstructionSession.Construction -ne 'fresh') { return }
+    $arguments = @('-I', (Join-Path $PSScriptRoot 'reap_versions.py'), '--root', $InstallDir,
+        '--link-name', '.venv', '--fresh', '--reset-control')
+    if ($env:AGENT_MCP_NO_VERSION_REAP) { $arguments += '--check-only' }
+    Invoke-Hidden -FilePath $VenvPython -ArgList $arguments | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Fresh MCP replacement could not settle its old runtime owners and control state' }
+    Write-Ok 'Old MCP runtime owners and control state settled'
+}
+
+function Invoke-RuntimeBrokerAdoption {
+    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
+        $script:RuntimeConstructionSession.Process.HasExited) {
+        throw 'Broker adoption requires attached complete-slot retention'
+    }
+    $diagnostic = ''
+    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
+        '--runtime-root', $InstallDir, '--slot', $VenvDir,
+        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
+        -ErrorOutput ([ref]$diagnostic)
+    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
+    $receipt = $result | ConvertFrom-Json
+    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
 }
 # === end install-contract:v4 marker/toss helpers ===
 
@@ -645,9 +716,70 @@ function Exit-InstallLock {
 }
 # === end install-transaction lock ===
 
+function Get-FiniteUninstallPython {
+    param([Parameter(Mandatory)][string]$InstallRoot)
+    $probe = @'
+import sys
+assert sys.version_info >= (3, 10)
+from pathlib import Path
+root = Path(sys.argv[1]).absolute()
+assert ".." not in root.parts
+roots = (root, root.resolve())
+paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+         getattr(sys, "_base_executable", sys.executable))
+for value in paths:
+    path = Path(value).absolute()
+    for actual in (path, path.resolve(strict=True)):
+        assert all(not actual.is_relative_to(boundary) for boundary in roots)
+print(Path(sys.executable).resolve(strict=True))
+'@
+    $candidates = @()
+    foreach ($name in @('python3', 'python')) {
+        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' } | ForEach-Object { $_.Source })
+    }
+    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' })) {
+        try {
+            $nativeError = ''
+            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0) {
+                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
+                    $candidates += $match.Groups[1].Value
+                }
+            }
+        } catch { }
+    }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        try {
+            $nativeError = ''
+            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
+                '-I', '-B', '-c', $probe, $InstallRoot, $candidate
+            ) -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
+                return $selected.Trim()
+            }
+        } catch { }
+    }
+    return $null
+}
+
 $ScriptDir = $PSScriptRoot
 . (Join-Path $ScriptDir 'source-runtime.ps1')
-Initialize-SourceRuntime
+$UninstallPython = $null
+if ($Action -eq 'uninstall') {
+    $UninstallPython = Get-FiniteUninstallPython -InstallRoot $InstallDir
+    if (-not $UninstallPython) { throw 'Uninstall requires an existing Python 3.10+ outside the runtime' }
+    $nativeError = ''
+    $status = Invoke-Hidden -FilePath $UninstallPython -ArgList @(
+        '-I', '-B', (Join-Path $ScriptDir 'uninstall_runtime.py'), 'check',
+        '--root', $InstallDir, '--shell', (Get-Process -Id $PID).Path
+    ) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw $nativeError }
+    if ($status.Trim() -eq 'absent') { Write-Ok 'Legacy MCP runtime is already absent'; exit 0 }
+} else {
+    Initialize-SourceRuntime
+}
 if (-not (Enter-InstallLock)) {
     Write-Fail "Could not acquire the install transaction lock ($(Join-Path $InstallDir '.install.lock')) within $(Get-InstallLockTimeoutSec)s -- another install is still running; refusing to proceed unlocked"
     exit 1
@@ -655,7 +787,21 @@ if (-not (Enter-InstallLock)) {
 
 $script:McpInstallFailure = $null
 try {
+if ($Action -eq 'uninstall') {
+    $nativeError = ''
+    $result = Invoke-Hidden -FilePath $UninstallPython -ArgList @(
+        '-I', '-B', (Join-Path $ScriptDir 'uninstall_runtime.py'), 'remove',
+        '--root', $InstallDir, '--shell', (Get-Process -Id $PID).Path
+    ) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw $nativeError }
+    Write-Ok $result.Trim()
+    exit 0
+}
 Assert-SourceRuntime
+if ($Action -in @('install', 'init', 'provision')) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 # -- Preflight checks --------------------------------------------------
@@ -781,14 +927,15 @@ Remove-ConsoleTrampolines -VenvDir $VenvDir
 # `agent-credential-relay`/`agent-procutil`/`agent-single-instance-lease`
 # are `uv`-editable canonical references (vendor-pointer-generalization
 # effort, Phase 1: no local copy in a dev checkout at all); `agent-zdd` is
-# a real local copy. All 4 are `[tool.uv.sources]` workspace path deps, so
+# a real local copy. These and the execution driver are workspace path deps, so
 # when `uv` is unavailable the fallback below (bare `python -m pip
 # install`) cannot resolve any of them without this explicit preinstall.
 foreach ($lib in @(
     @{ Dir = 'credential-relay'; Pkg = 'agent-credential-relay' },
     @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil' },
     @{ Dir = 'single-instance-lease'; Pkg = 'agent-single-instance-lease' },
-    @{ Dir = 'zdd'; Pkg = 'agent-zdd' }
+    @{ Dir = 'zdd'; Pkg = 'agent-zdd' },
+    @{ Dir = 'update-driver'; Pkg = 'agent-update-driver' }
 )) {
     $libDir = Join-Path $PluginDir "libs\$($lib.Dir)"
     if (-not (Test-Path (Join-Path $libDir 'pyproject.toml'))) {
@@ -825,6 +972,10 @@ Write-Ok 'Package installed: agent-mcp'
 
 }
 
+$sourceManifestPath = if ($env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN -and $env:COPILOT_PLUGIN_STAGED_FROM) {
+    $env:COPILOT_PLUGIN_STAGED_FROM
+} else { $PluginDir }
+
 # === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
 if ($VersionedRuntime) {
     # Point the stable `.venv` link at this version's freshly-built slot, moving a
@@ -841,9 +992,10 @@ if ($VersionedRuntime) {
         throw "Fresh runtime slot failed its health gate (versions/$SrcVersion)"
     }
     if (-not (Invoke-VersionedMarkComplete)) { throw 'Runtime construction completion failed' }
+    Invoke-RuntimeBrokerAdoption
     # Source manifest inputs are captured before activation.
     if ($script:SourceRuntimeIdentity) {
-        $sourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $PluginDir))
+        $sourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $sourceManifestPath))
     }
     Assert-SourceRuntime
     Invoke-Hidden -FilePath $VenvPython -ArgList @($VrScript, '--root', $InstallDir, '--link-name', '.venv', 'activate', $SrcVersion, '--no-link') | Out-Null
@@ -873,7 +1025,7 @@ if ($VersionedRuntime) {
 # used bridge, so this uses much shorter install-appropriate defaults
 # (still overridable, e.g. for a host with slow-starting upstream MCP
 # servers) via AGENT_MCP_CUTOVER_HEALTH_TIMEOUT / AGENT_MCP_CUTOVER_DRAIN_TIMEOUT.
-if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
+if ($VersionedRuntime -and $script:RuntimeConstructionSession.Construction -ne 'fresh' -and -not $env:AGENT_MCP_NO_CUTOVER) {
     $cutoverHealthTimeout = if ($env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT) { $env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT } else { '15' }
     $cutoverDrainTimeout = if ($env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT) { $env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT } else { '30' }
     try {
@@ -890,7 +1042,7 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
             } elseif ($cutoverResult.ok) {
                 Write-Ok "Cut over the live serve daemon to the new version (routing flipped; old drained + retired)"
             } else {
-                Write-Warn "Cutover attempted -- $($cutoverResult.error)"
+                Write-Warning "Cutover attempted -- $($cutoverResult.error)" -WarningAction Continue
             }
         }
     } catch { Write-Skip "Cutover skipped ($($_.Exception.Message))" }
@@ -902,19 +1054,21 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
 # leaves "two runtime versions resident". Best-effort; opt out with
 # AGENT_MCP_NO_VERSION_REAP. Runs via the new slot's own python, so it is
 # attributed to the current version and never reaps itself.
-if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
+Invoke-RuntimeOwnerSettlement
+if ($VersionedRuntime -and $script:RuntimeConstructionSession.Construction -ne 'fresh' -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
     $ReapScript = Join-Path $PSScriptRoot 'reap_versions.py'
     try {
         # Use the plain (one 'version:pid' per line) output, not --json: under this
         # script's Set-StrictMode 2.0, an empty ConvertFrom-Json array collapses so
         # a later .Count throws. @(...) of the lines is always a countable array.
-        $reapLines = (Invoke-Hidden -FilePath $VenvPython -ArgList @($ReapScript, '--root', $InstallDir, '--link-name', '.venv')) -split "`r?`n"
+        $reapLines = (Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', $ReapScript, '--root', $InstallDir, '--link-name', '.venv')) -split "`r?`n"
+        if ($LASTEXITCODE -ne 0) { throw 'Old MCP runtime retirement was not confirmed' }
         $reaped = @($reapLines | Where-Object { $_ -and $_.ToString().Trim() })
         if ($reaped.Count -gt 0) {
             $stale = ($reaped | ForEach-Object { ($_ -split ':', 2)[0] } | Sort-Object -Unique) -join ', '
             Write-Ok "Reaped $($reaped.Count) stale-version process(es) from: $stale"
         }
-    } catch { Write-Skip "Version-reap skipped ($($_.Exception.Message))" }
+    } catch { Write-Warning "Version-reap incomplete ($($_.Exception.Message))" -WarningAction Continue }
     # Collect the now-idle stale version *directories* the reap above freed. The
     # process-reap alone leaves the dirs on disk (the primitive's gc deliberately
     # protects any slot a live process runs from), so without this step stale
@@ -945,7 +1099,7 @@ if (-not $script:SourceRuntimeIdentity) { Assert-SourceRuntime }
 # Unified schema_version 3 manifest (install-contract): records the source
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-$kind = Get-SourceKind -PluginPath $PluginDir
+$kind = Get-SourceKind -PluginPath $sourceManifestPath
 $ver = if ($script:SourceRuntimeIdentity) { $PackageVersion } else { '0.0.0' }
 $pyproj = Join-Path $PluginDir 'pyproject.toml'
 if (-not $script:SourceRuntimeIdentity -and (Test-Path $pyproj)) {
@@ -965,7 +1119,7 @@ $manifest = [ordered]@{
     deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
     source         = [ordered]@{
         kind    = $kind
-        path    = ($PluginDir -replace '\\', '/')
+        path    = ($sourceManifestPath -replace '\\', '/')
         repo    = 'copilot-extensions'
         plugin  = 'agent-mcp'
         version = $ver
@@ -975,15 +1129,30 @@ $manifest = [ordered]@{
     }
     venv           = ($LinkDir -replace '\\', '/')
     runtime        = 'python'
+    runtime_version = $SrcVersion
 }
 if ($script:SourceRuntimeIdentity) {
     $fields = $script:SourceRuntimeIdentity | ConvertFrom-Json
-    $manifest.runtime_version = $fields.runtime_version
     $manifest.runtime_source = $fields.runtime_source
 }
 $tmp = "$manifestPath.tmp"
-$manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
-Move-Item -Force -Path $tmp -Destination $manifestPath
+if ($env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN) {
+    $publicationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+        $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+    } else { (Get-Location).Path }
+    $result = Invoke-Hidden -FilePath (Get-BootstrapPython) -ArgList @(
+        '-I', '-B', '-X', 'utf8', (Join-Path $sourceManifestPath 'scripts/command_binding.py'),
+        '--payload-root', $sourceManifestPath, '--source-payload-root', $sourceManifestPath,
+        '--plugin-id', 'agent-mcp', '--legacy-root', $InstallDir,
+        '--project-root', $publicationProject, '--publish-legacy', '--write-manifest'
+    ) -InputText ($manifest | ConvertTo-Json -Depth 8 -ErrorAction Stop)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command ownership validation refused MCP source manifest publication: $result"
+    }
+} else {
+    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
+    Move-Item -Force -Path $tmp -Destination $manifestPath
+}
 Write-Ok "Deploy manifest written (source: $kind)"
 
 # -- 6. Verify ----------------------------------------------------------

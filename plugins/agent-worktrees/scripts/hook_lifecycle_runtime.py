@@ -113,3 +113,22 @@ def run_end(python: Path, payload: dict, *, timeout: float) -> dict:
     if result.stderr:
         return {"_stderr": str(result.stderr)[-4096:]}
     return {}
+
+
+def bootstrap_result(completed: subprocess.CompletedProcess) -> dict:
+    """Preserve legacy bootstrap JSON/text output without lifecycle side effects."""
+    result: dict = {}
+    stdout = (completed.stdout or "").strip()
+    if stdout:
+        try:
+            value = json.loads(stdout)
+        except (TypeError, ValueError):
+            result["additionalContext"] = stdout
+        else:
+            if isinstance(value, dict):
+                result.update(value)
+            else:
+                result["additionalContext"] = stdout
+    if completed.stderr:
+        result["_stderr"] = completed.stderr
+    return result

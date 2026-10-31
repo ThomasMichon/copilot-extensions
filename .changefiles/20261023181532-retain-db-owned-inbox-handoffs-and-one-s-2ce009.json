@@ -1,0 +1,9 @@
+{
+  "comment": "Retain DB-owned inbox handoffs and one-shot final admission under the runtime custody epoch",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

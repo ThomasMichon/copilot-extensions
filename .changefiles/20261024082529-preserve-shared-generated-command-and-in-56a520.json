@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve shared generated-command and installation-driver compatibility while adopting SSH cold commands.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

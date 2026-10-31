@@ -75,6 +75,14 @@ def test_exact_prepared_context_and_no_secret_copy(case):
     assert dockerfile.count(BASE) == 2
     assert dockerfile.split(" AS build\n", 1)[1].startswith("USER 0\n")
     assert "USER 10001:10001" in dockerfile
+    runtime = dockerfile.split(" AS runtime\n", 1)[1]
+    assert runtime.startswith("USER 0\n")
+    assert "getent passwd 10001" in runtime
+    assert "groupadd --gid 10001 agent-index-10001" in runtime
+    assert "usermod --gid 10001 --home /var/lib/agent-index" in runtime
+    assert "useradd --uid 10001 --gid 10001 --home-dir /var/lib/agent-index" in runtime
+    assert "install -d -m 700 -o 10001 -g 10001 /var/lib/agent-index" in runtime
+    assert runtime.index("getent passwd") < runtime.index("USER 10001:10001")
     assert "EXPOSE" not in dockerfile and "COPY . " not in dockerfile
     assert '"/opt/agent-index/bin/python", "-I", "-m", "agent_index_service", "serve"' in dockerfile
     assert "RUN --network=none" in dockerfile
@@ -98,6 +106,19 @@ def test_replay_unchanged_and_unrelated_output_preserved(case):
     with pytest.raises(ContainerError, match="conflicts"):
         prepare(case)
     assert extra.read_text() == "keep"
+
+
+@pytest.mark.parametrize("uid,gid", [(10001, 10001), (1001, 1001), (12001, 12002)])
+def test_selected_account_profile_matches_numeric_runtime_identity(case, uid, gid):
+    prepare(case, uid=uid, gid=gid)
+    runtime = (case["output"] / "Dockerfile").read_text().split(" AS runtime\n", 1)[1]
+    assert f"getent group {gid}" in runtime
+    assert f"getent passwd {uid}" in runtime
+    assert f"usermod --gid {gid} --home /var/lib/agent-index" in runtime
+    assert f"agent-index-{uid}" in runtime
+    assert f"install -d -m 700 -o {uid} -g {gid} /var/lib/agent-index" in runtime
+    assert f"USER {uid}:{gid}" in runtime
+    assert "test ! -L /var/lib/agent-index" in runtime
 
 
 @pytest.mark.parametrize("name", ["unrelated-empty", "wheels/unrelated-empty"])

@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-23
+- **Last revised:** 2026-10-30
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -164,14 +164,129 @@ versioned topology and knowledge-repository settings are shown read-only.
 A single published command takes a bare machine into the installer without any
 pre-installed harness tooling.
 
+The caller may optionally select a Git repository for adoption in that same
+attended transaction. The installer establishes its core toolkit first, then
+acquires the selected repository through Git's configured credential owner and
+hands off to explicitly trusted, repository-owned setup. Repository selection
+does not change the Manager's own installation or update source. Omitting it
+preserves the standalone Manager journey.
+
+The neutral installer does not absorb the selected repository's organization,
+private knowledge, machine inventory or connectivity policy. Authentication
+remains with its provider, including a genuine interactive opportunity when
+needed; access failure is not permission to substitute another account or source.
+An unfinished repository stage remains explicit without discarding a completed
+Manager installation or claiming full adoption.
+
+The upstream entry establishes Manager first from a trusted staged source and
+complete installation inputs, independently of Copilot, installed plugin
+payloads, an old runtime command or interactive shell initialization. Default
+selection follows live upstream Main; explicit locally promoted installation
+snapshots and admitted source checkouts/commits remain supported. Last-known-good
+Main ancestors retain their own release identity.
+
+### harness-selected-continuity-bootstrap
+
+A harness README can compose the standard upstream setup with a portable
+selection of its harness/worktree configuration context. That context declares
+the expected user-owned continuity source; an adopter does not need a copied
+installer or machine-specific setup command to express the arrangement.
+Standalone installation remains available without a harness, continuity store
+or Gateway.
+
+For a selected integrated fleet, setup consumes the user's already-established
+authenticated access to that source to obtain Gateway discovery and the
+delegated authority needed to provision this machine. Source/provider selection,
+current credentials and enrollment remain with their existing owners.
+Access to public configuration or a similarly named local folder is not
+bootstrap authority. An already-authorized source does not trigger a redundant
+human ceremony; an actual provider or enrollment challenge stays explicit.
+
+Cloud synchronization, private repositories and other protected user-state
+providers compose through the same contract without a mandatory storage or
+identity vendor. A managed machine can authenticate outbound to its Gateway
+before SSH is available; an existing authorized SSH provisioning path remains
+usable. Initial reach, source access, enrollment and complete connectivity have
+separate, truthful outcomes. Setup does not create a session or expand fleet
+administration merely because it selected a harness.
+
 ### prerequisite-provisioning
 Detects and installs the foundational prerequisites, and **prompts to restart**
 when a change requires it before continuing.
 
 ### core-install-via-real-flow
-Installs the user-global ground runtime and baseline services by driving the
-harness's **own** install flow, so the deployed core matches what the harness
-expects rather than a parallel reimplementation that can drift.
+Establishes Manager through the real upstream installation owner, then derives
+wanted local tools and services from a selected repository or an explicitly
+addressed registered-repository set. Complete per-application uv inputs and
+associated wheel closures are prepared with bounded parallelism, without
+inventing a second installer or using plugin payloads as runtime source.
+
+Setup owns completion and readiness; preparation can remain separate from
+activation. An operator-selected atomic local set admits every incoming member
+before coordinated selection, preserves the last good set and supports
+state-compatible rollback. Independent components remain usable without a
+mandatory Manager or group transaction.
+
+### owner-scoped-independent-recovery
+
+The same trusted self-install entry remains reachable when an old launcher,
+environment or redirect is broken. Read-only doctor, inventory and native
+transaction evidence precede a disruptive recovery. Positively owned incomplete
+candidates can be isolated and reconstructed fresh without wiping durable
+configuration/data or unrelated installations.
+
+Stable global command redirects and declared consumer registrations survive
+source staging and plugin removal. A running legacy launcher is not rewritten
+inside its own execution stream. Unknown, inaccessible, foreign or unsettled
+ownership is an explicit blocker, not a reason to unlink locks, kill processes,
+escalate privilege or adopt a different source.
+
+Raw self-install and rollback remain usable without the old Manager, tool
+commands, updater queue or services being replaced. Core source/toolchain
+construction comes before repository adoption and its authentication.
+Old installed wrappers/connectors either remain compatible or receive a
+supported, authorized refresh before activation; installed payload files are
+not patched ad hoc.
+
+Manual rescue authority is distinct from automatic-update admission. It does
+not clear another maintenance owner or a global automatic hold, and never grants
+unaddressed fleet rollout. Incoming native readiness, routing selection,
+preserved state and predecessor retirement are observed separately.
+
+### prepared-independent-maintenance
+
+One admitted owner prepares updates after foreground Manager load or on an
+optional long cadence. A later worktree/session launch can select a fully
+prepared toolset without first-use environment rebuilding. The caller waits
+for admitted construction/start outcomes, not complete background draining.
+
+Plugins remain bounded discovery and guidance connectors, not runtime
+installation triggers. Prepared reconciliation/instruction/hoist selections
+keep fresh worktrees correct: current managed bodies reach model discovery
+before execution, with reviewed fallbacks only when current bodies are absent.
+An optional once-per-session prepared-update notice does not create another
+maintenance loop or claim activation.
+
+Repository-derived service selection respects role, locus, provider and
+installation ownership. Missing or incomplete declarations never imply
+automatic uninstall. Automatic inhibition leaves ordinary healthy launch/use
+available, and manual rescue does not settle an unknown queue owner.
+
+Only an explicitly automatic update request is inhibited by the update switch.
+Manual update without the automatic flag, raw self-install, setup/install-source,
+doctor/list and ordinary launch still reach their normal owner. A launch's
+skipped automatic preparation is not a launch failure. This distinction never
+removes independent source, privilege, active-owner or unsettled-effect guards.
+
+### setup-invocation-authorizes-dependencies
+A user or authorized agent directly invoking the trusted harness setup flow
+authorizes installation of the dependencies required by its selected
+configuration, including the installer and selected plugins. The flow carries
+that authority through the real component installers rather than asking for
+another approval of each package or resolved lock. Existing source restrictions,
+integrity, seasoning, revocation and installation-ownership checks still apply;
+dependency authorization does not select additional optional capabilities or
+grant unrelated activation and background execution.
 
 ### first-harness-repo-adoption
 Offers three paths for the initial harness repo — adopt an existing local
@@ -222,12 +337,13 @@ lightweight plugin carries or assumes any of these dependencies.
 
 ### plugin-updating-and-alignment
 Keeps the installed plugin set **current and mutually consistent** — updates
-plugins and their user-global runtimes, and checks that versions, shared
+connector content and independently installed runtimes, and checks that capabilities, shared
 contracts, and configuration across plugins **align**, offering to reconcile
-drift or a half-upgraded set. It **complements** each plugin's own
-self-provisioning/self-reconciliation rather than replacing it: a plugin still
-keeps *itself* healthy alone; the configurator is the place a human can see and
-true-up the *whole set* at once. On a host that adopts the integrated
+drift or a half-upgraded set. Runtime installation is independently invoked;
+plugin discovery does not construct or reconcile it. Each independently
+installed component keeps its declared daemon healthy without requiring Manager.
+The configurator presents the whole set and requests work from its owner.
+On a host that adopts the integrated
 coordination product, the app is a client of that product's release authority
 and installer. It shows what is selected, ready, and serving, and it can
 request an update. It does not keep its own record of which release the host
@@ -272,6 +388,63 @@ an alternative to Manager-owned maintenance, not a concurrent updater.
 Ownership changes preserve the existing installation and update authorities;
 general machine/dependency convergence remains independent.
 
+The [shared local maintenance banner](../plugin-services/disposable-runtimes/README.md#shared-maintenance-banner)
+vetoes automatic updates, including Manager self-update and already queued
+background work at effect admission. Manager and an external controller consume
+that same hold; neither keeps a competing banner or bypasses it by calling an
+installer directly. Clearing it does not enroll maintenance or override an
+independent disable. Manager itself remains disposable while the retained banner,
+configuration and durable work survive, except for any actual critical
+machine-management transport closure that must remain independently available.
+Complete, forced and purge removal/reinstall exclude that closure rather than
+sever the SSH or Gateway path used to manage the host. Agent credential relays
+may be removed; they are not automatically protected transport.
+
+### fresh-default-upstream-installation
+An ordinary project update reaches the installed global front door and the
+Manager's canonical upstream bootstrap without depending on the old runtime
+being healthy. The published Main bootstrap is the default; explicit local
+source, development, installation-scope and test overrides remain effective
+through one attributable selection.
+The bootstrap's transport override is distinct from its runtime selections;
+choosing a Dev runtime does not implicitly replace the Main orchestrator.
+
+The bootstrap orchestrates installation into the assigned immutable slot.
+Its baseline is a fresh installation, not permission to reuse whatever happens
+to be present. Positive recognition of a compatible existing footprint enables
+incremental construction and zero-downtime replacement. Missing or incompatible
+recognition selects a mostly fresh installation within the same requested
+scope; it does not veto updating or demand an extra repair flag.
+
+Ordinary updates and repair/force-install publish and start the incoming
+generation independently of the old version's existence, health or cooperation.
+They do not require uninstalling, deleting, unregistering or stopping the old
+runtime first. Current binstubs and applicable task registrations select the new
+generation; brief overlap is expected. The outgoing owner recognizes that it
+is no longer current and retires itself after the incoming owner starts.
+Installer-driven teardown is not the replacement mechanism.
+
+Replacement preserves configuration, durable application data, unrelated
+installations and protected session/connectivity dependencies. Readiness,
+current routing and confirmed self-retirement are distinct observed facts;
+uncertain convergence stays explicit without turning incumbent inspection into
+an admission gate. Explicit uninstall or independently scoped reclamation is a
+separate operation, not a prerequisite for updating.
+
+### recognizer-manifests
+Each installed footprint has a maintained declarative manifest with two
+independent responsibilities: identify the disposable artifacts the installer
+may reset, and describe the markers and supported version/contract ranges that
+permit incremental or zero-downtime updating. An incremental-compatibility
+receipt is evidence of ability to reuse, never permission to install.
+
+Changes to installed artifacts carry the corresponding manifest and historical
+footprint transitions, just as a product schema change carries its migrations.
+Validation detects omitted artifacts, unsupported incremental reuse and unsafe
+reset boundaries. The inventory includes generated commands, runtime state and
+process or registration effects rather than only package files. Durable data
+and protected execution/connectivity remain outside disposable reset scope.
+
 ### single-installation-execution-owner
 An installation has one background execution owner for its complete update
 transaction: acquisition, runtime construction, activation and integration.
@@ -296,7 +469,8 @@ administered always-on coordinator. Foundation construction has one bounded,
 recoverable owner; it is not a general-purpose exception for running plugin
 installers. Once ready, first-use publication follows the same durable request
 contract as later updates. Missing, incompatible or interrupted foundation state
-is explicit, never permission to fall back to an independent installer.
+is handled by that same installation authority, including fresh establishment
+or supported recovery, never by an independent competing installer.
 
 Equivalent same-target requests debounce and share the active operation's
 observable result; different-target requests wait or queue rather than race.
@@ -327,23 +501,29 @@ does not make Manager a mandatory plugin dependency.
 ### normal-and-repair-installation
 Normal background installation limits trigger fan-out and converges on the
 authoritative desired version. Same-version requests debounce; a different
-version waits or queues behind the active installation. Blocking acquisition,
-I/O, permission or execution failures leave clean failed-candidate state
-without activating the failed version. Compatible zero-downtime handoff is
-preferred, not a veto on the selected replacement: an incompatible or stalled
-old service is retired by bounded cold takeover rather than defeating the new
-installation solely because handoff failed. Success still requires the new
-installation to be ready.
+version waits or queues behind the active installation. Fresh installation is
+the default convergence path; recognizers enable incremental/ZDD optimization.
+Absent reuse evidence, stale control records or an incompatible old runtime do
+not require a separate force/repair request merely to complete the selected
+update. The same execution owner preserves exclusive installation custody; competing
+callers never become concurrent writers. That serialization does not require
+outgoing service-runtime teardown before incoming startup.
+Blocking acquisition, I/O, permission or execution failures leave explicit
+failed-candidate state without activating a failed version. Compatible handoff
+is preferred, not a veto on bounded cold replacement.
 
 Explicit force/repair installation gives any intact authorized installer a
-bounded way to take charge of its addressed installation, including when the
-previous installation, queue or owner records are corrupt. Agents request
-operator approval before invoking this disruptive mode. It may briefly attempt
-cooperation, then terminates previous installers and older managed service
-daemons within that installation's process scope, invalidates stale ownership
-and installation-control state, and converges on its explicitly selected code.
-An old installer cannot veto its replacement. Competing repair callers still
-converge on one active writer rather than repeatedly killing one another.
+bounded way to request disruptive recovery or an explicit replacement target.
+It is not the switch that enables the normal fresh fallback. Agents request
+operator approval before a concrete disruptive host operation. Ordinary and
+repair replacement use the same start-first/self-retirement lifecycle:
+establish and start the selected generation, update its invocation and
+activation routes, and let the outgoing runtime observe supersession and exit.
+An old runtime cannot veto construction or startup of its replacement.
+An active installation writer remains subject to the existing execution owner;
+competing repair callers do not become concurrent writers or repeatedly kill
+one another. Separately authorized stuck-writer recovery is not the routine
+service-replacement path.
 
 An explicit operator order to repair, clean-install or force-reinstall is
 sufficient authorization for that recovery mode. Historical cleanup proof,
@@ -353,7 +533,7 @@ a separate path, not a mandatory ceremony before repair. Status distinguishes
 operator-authorized recovery from native-confirmed settlement and preserves
 the prior failure without turning it back into installation authority.
 
-A successful repair leaves old generations inert: no older managed installer
+A successful replacement leaves old generations inert: no older managed installer
 or daemon remains serving or able to reactivate itself through stale launch,
 routing or maintenance state. Inert rollback artifacts need not be physically
 erased. The repair preserves application data and unrelated installations;
@@ -395,6 +575,33 @@ health-gated activation, followed by inexpensive local integration. Verified
 progress survives retry. Transient failures receive safe retry and mitigation;
 authority, policy and integrity blockers remain explicit and durable. Existing
 lifecycle authorities, package governance and rollback remain intact.
+
+### reliable-working-footprint
+Install, update and repair retain responsibility for reaching a verified usable
+footprint. Slow delivery is an experience problem, not a reason to fail work
+that continues making progress. A partially prepared environment, selected but
+inoperable generation or reported success without usable commands and services
+does not satisfy installation.
+
+Genuine failure, detected hangs, interruption and cancellation preserve or
+restore an operable footprint rather than stranding the device. Preparation
+does not destroy the healthy incumbent before a replacement is ready; recovery
+continues through the existing installation authority. Keeping a healthy prior
+generation preserves operability but does not misreport the requested update
+as complete. Source, integrity and ownership requirements remain intact.
+
+### progress-renewed-hang-protection
+Installation supervision uses renewable inactivity protection, not a fixed
+total-runtime ceiling that terminates progressing work. Lower-level stdout or
+stderr activity is an accepted indication of progress. Each layer reports or
+relays progress so useful work remains visible through nested installation
+flows, without corrupting machine-readable results.
+
+A layer's quiet allowance outlasts the expected duration of its non-reporting
+atomic work. Genuine no-progress hangs remain detectable and recoverable;
+supervisors do not manufacture keepalives that conceal a stalled worker.
+Stopping hung work preserves native cleanup, cancellation and working-footprint
+recovery rather than abandoning installation state.
 
 ### historical-generated-command-migration
 Known generated commands from earlier versions migrate or retire automatically
@@ -489,9 +696,10 @@ the plugins' prerequisites and interop, never to be a thing they are wired to.
 ### control-plane-is-optional-plugins-are-self-sufficient
 The worktree/agent **control-plane** (picker and provider-backed session launch)
 is a convenience layer, not a foundation. With it absent, every plugin still
-**provisions and manages itself — its runtime *and* its daemons — and exposes the
-in-session tools an agent needs**, driven by the plugins' own self-provisioning
-model (see [plugin-services](../plugin-services/README.md)). The control-plane
+resolves independently installed tools, while each runtime's own installation
+and supervision owner remains sufficient without Manager. Missing backends
+remain explicit rather than being installed by plugin loading
+(see [plugin-services](../plugin-services/README.md)). The control-plane
 makes the fleet *legible and launchable by a human*; it never becomes a
 precondition for a plugin — or an agent using that plugin's tools — to function.
 This is the same one-way, dependency-free rule as *knows-the-plugins*, applied to
@@ -503,6 +711,11 @@ one-line bootstrap and its own auto-update — **out-of-band from any Copilot
 session and from the plugin pipe**. It never relies on a session, an agent, or a
 plugin to install or refresh the launcher; a plugin, conversely, never relies on
 the app to keep *itself* current.
+
+Out-of-band automatic self-maintenance carries the explicit automatic-update
+classification and honors its hold. Manual setup/update is not vetoed solely
+by that hold, but still respects actual installation authority, live native
+ownership and unsettled effects.
 
 ## Non-Goals / Boundaries
 
@@ -517,16 +730,17 @@ the app to keep *itself* current.
   the same as being one.
 - **Its control-plane role is optional and additive, never a foundation.** The
   picker / provider-backed session-launch surface is a convenience for a human
-  running the fleet. The plugins provide the in-session tools agents use and
-  **self-provision and self-manage — daemons included — with this app absent**;
+  running the fleet. Plugins provide bounded in-session connection/knowledge
+  surfaces, and independently installed runtimes supervise their own daemons
+  with this app absent;
   the app must never become a prerequisite for a plugin (or an agent using its
   tools) to work. (The launcher-half of the worktree runtime relocating *into*
   this app must not smuggle in such a dependency.)
-- **It does not replace per-plugin installers or own their runtimes.** It
-  *orchestrates and guarantees* the harness's real install flows and each
-  plugin's prerequisites, and can **update the set and true-up cross-plugin
-  alignment**; it does not reimplement plugin runtime logic, and each plugin still
-  keeps *itself* provisioned and reconciled alone. The relationship carries **no
+- **It does not duplicate per-component installation or supervision owners.** It
+  coordinates the real application install flows and their prerequisites, and
+  can update the selected set and true-up compatibility. It does not reimplement
+  runtime logic or turn plugin loading into installation; independent component
+  setup remains available. The relationship carries **no
   dependency in either direction**: a plugin never requires the installer to be
   present, and the installer never becomes a link in a plugin's dependency chain —
   it is a knowing outsider, not a layer in the graph.

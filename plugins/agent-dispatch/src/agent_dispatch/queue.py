@@ -109,6 +109,7 @@ from .queue_records import (  # noqa: F401 -- re-exported for existing call site
 from .queue_agent_backed_repo import AgentBackedRepoMixin
 from .queue_routing_assignments import RoutingAssignmentMixin
 from .queue_schema_migrations import run_queue_schema_migrations
+from .queue_pool_catalog import QueuePoolCatalogMixin
 from .queue_schedule_registry import ScheduleRegistrationMixin
 from .queue_spawn_rearm import SpawnRearmMixin
 from .queue_spawn_conclusion import SpawnConclusionMixin
@@ -117,6 +118,7 @@ from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existin
     spawn_key,
 )
 from .queue_storage import QueueStorageMixin
+from .queue_task_recovery import TaskRecoveryMixin
 from .queue_steering import QueueSteeringMixin
 from .queue_suspend import QueueSuspendMixin
 from .queue_submission_rejection import QueueSubmissionRejectionMixin
@@ -158,6 +160,8 @@ class _ClosingConnection(sqlite3.Connection):
 
 
 class TaskQueue(
+    TaskRecoveryMixin,
+    QueuePoolCatalogMixin,
     QueueExecutionWakesMixin,
     QueueExecutionRuntimesMixin,
     QueueExecutionScopesMixin,
@@ -221,6 +225,7 @@ class TaskQueue(
         payload_dir: str | Path | None = None,
         blob_threshold: int = DEFAULT_BLOB_THRESHOLD,
         result_max_bytes: int = DEFAULT_RESULT_MAX_BYTES,
+        worker_admission: Callable[[], None] | None = None,
     ):
         self.db_path = str(db_path)
         self.lease_seconds = lease_seconds
@@ -228,6 +233,7 @@ class TaskQueue(
         self.eval_lease_seconds = eval_lease_seconds
         self.blob_threshold = blob_threshold
         self.result_max_bytes = result_max_bytes
+        self._worker_admission = worker_admission
         self._wake_notifier: Callable[[], None] | None = None
         self._owned_transition_notifier: Callable[[], None] | None = None
         self._run_waiter_prepare_notifier: Callable[[], None] | None = None
@@ -237,6 +243,11 @@ class TaskQueue(
             payload_dir = Path(self.db_path).parent / "payloads"
         self.payloads = PayloadStore(payload_dir)
         self._migrate()
+
+    def require_worker_admission(self) -> None:
+        """Check one admission attempt without imposing ambient host policy."""
+        if self._worker_admission is not None:
+            self._worker_admission()
 
     # -- connection / schema -------------------------------------------------
 
@@ -273,6 +284,8 @@ class TaskQueue(
             self._migrate_execution_scopes(conn)
             self._migrate_execution_runtimes(conn)
             self._migrate_execution_wakes(conn)
+            self._migrate_task_recovery(conn)
+            self._migrate_pool_catalog(conn)
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS coordinator_fencing ("
                 " singleton INTEGER PRIMARY KEY CHECK (singleton = 1),"

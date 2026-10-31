@@ -14,10 +14,11 @@ per `visions/plugin-services`'s `hooks-and-callbacks-are-transient` and
     block past a wall-clock budget.
 
 This harness is deliberately plugin-agnostic: it exercises the *contract*,
-not any real plugin's code, so it is fast, dependency-free (stdlib only), and
-runs the same on every OS. Real per-plugin conformance is issue #2301's own
-audit, cited against this harness's PASS/FAIL evidence rather than
-re-validated here.
+not a product runtime. Its mock uses Python's standard library, while daemon
+instance ownership uses the shared agent-procutil package. Transient clients
+do not import or initialize that lifecycle package. Real per-plugin conformance
+is issue #2301's own audit, cited against this harness's PASS/FAIL evidence
+rather than re-validated here.
 
 Roles (this file plays all three, selected by `--role`):
 
@@ -45,6 +46,7 @@ import argparse
 import http.client
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -67,6 +69,8 @@ ALL_SCENARIOS = [
 # the OS process table -- the same technique the agent-dispatch-supervisor-
 # self-update clean-room probe uses, generalized here.
 _THIS_FILE = os.path.abspath(__file__)
+_DAEMON_TEST_ENV: dict[str, str] = {}
+_DAEMON_TEST_REGISTRY: Path | None = None
 
 # Client wall-clock budget. Generous enough for CI jitter, tight enough that
 # a hang is unambiguous.
@@ -217,24 +221,31 @@ def _make_handler(behavior: str):
 
 
 def run_daemon(home: str, behavior: str) -> int:
-    lease = _Lease(_lock_path(home))
-    if not lease.acquire():
-        print("STANDDOWN", flush=True)
-        return 3
-    try:
-        server = HTTPServer(("127.0.0.1", 0), _make_handler(behavior))
-    except OSError:
-        lease.release()
-        print("BIND-FAILED", flush=True)
-        return 4
-    host, port = server.server_address
-    write_rendezvous(home, host, port)
-    print(f"DAEMON-READY pid={os.getpid()} port={port}", flush=True)
-    try:
-        server.serve_forever(poll_interval=0.05)
-    finally:
-        remove_rendezvous(home)
-        lease.release()
+    from agent_procutil.daemon_instances import admit_daemon_instance
+
+    with admit_daemon_instance(
+        "process-hygiene-mock", runtime_root=Path(home), source=Path(__file__)
+    ) as instance:
+        lease = _Lease(_lock_path(home))
+        if not lease.acquire():
+            print("STANDDOWN", flush=True)
+            return 3
+        try:
+            server = HTTPServer(("127.0.0.1", 0), _make_handler(behavior))
+        except OSError:
+            lease.release()
+            print("BIND-FAILED", flush=True)
+            return 4
+        host, port = server.server_address
+        write_rendezvous(home, host, port)
+        instance.add_artifact(Path(_rendezvous_path(home)))
+        print(f"DAEMON-READY pid={os.getpid()} port={port}", flush=True)
+        try:
+            server.serve_forever(poll_interval=0.05)
+        finally:
+            server.server_close()
+            remove_rendezvous(home)
+            lease.release()
     return 0
 
 
@@ -304,10 +315,45 @@ def _spawn(role: str, home: str, tag: str, *, behavior: str | None = None,
     kw: dict = {}
     if sys.platform == "win32":
         kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    if role == "daemon":
+        from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_instance
+
+        if not _DAEMON_TEST_ENV or _DAEMON_TEST_REGISTRY is None:
+            raise RuntimeError("mock daemon launch requires its test-driver context")
+        return spawn_instance(
+            argv,
+            instance=DaemonInstanceSpec(
+                service="process-hygiene-mock", runtime_root=Path(home),
+                source=Path(__file__), purpose="unattended-test",
+                owner="process-hygiene-convergence", registry_root=_DAEMON_TEST_REGISTRY,
+            ),
+            env={**os.environ, **_DAEMON_TEST_ENV},
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, **kw,
+        )
     return subprocess.Popen(
         argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, text=True, **kw,
     )
+
+
+def _stop_owned_daemon(process) -> None:
+    from agent_procutil.daemon_instances import cleanup_instance
+
+    if process is None:
+        return
+    if process.poll() is None:
+        process.terminate()
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=3)
+    if process.stdout is not None:
+        process.stdout.close()
+    result = cleanup_instance(process.instance_receipt)
+    if result.status not in ("settled", "missing"):
+        raise RuntimeError(f"mock daemon cleanup is {result.status}: {result.reason}")
 
 
 def _count_tagged_processes(tag: str) -> int:
@@ -336,6 +382,7 @@ def _count_tagged_processes(tag: str) -> int:
         r = subprocess.run(
             [ps, "-NoProfile", "-NonInteractive", "-Command", cmd],
             capture_output=True, text=True, timeout=20, env=env,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         out = (r.stdout or "").strip()
         return int(out) if out.isdigit() else 0
@@ -435,12 +482,7 @@ def scenario_flood_against_live_daemon(flood_n: int) -> Result:
         r.check(_count_tagged_processes(tag) == before + 1, "exactly 1 daemon process live, no client residue")
         return r
     finally:
-        if daemon and daemon.poll() is None:
-            daemon.terminate()
-            try:
-                daemon.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                daemon.kill()
+        _stop_owned_daemon(daemon)
         shutil.rmtree(home, ignore_errors=True)
 
 
@@ -488,12 +530,7 @@ def scenario_daemon_appears_mid_flood(flood_n: int) -> Result:
         r.check(late_served == len(late_results), f"every late client (after publication) was served ({late_served}/{len(late_results)})")
         return r
     finally:
-        if daemon and daemon.poll() is None:
-            daemon.terminate()
-            try:
-                daemon.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                daemon.kill()
+        _stop_owned_daemon(daemon)
         shutil.rmtree(home, ignore_errors=True)
 
 
@@ -517,8 +554,7 @@ def scenario_daemon_dies_mid_packet(flood_n: int) -> Result:
         )
         return r
     finally:
-        if daemon and daemon.poll() is None:
-            daemon.terminate()
+        _stop_owned_daemon(daemon)
         shutil.rmtree(home, ignore_errors=True)
 
 
@@ -548,8 +584,7 @@ def scenario_concurrent_daemon_race(daemon_m: int) -> Result:
         return r
     finally:
         for p in daemons:
-            if p.poll() is None:
-                p.terminate()
+            _stop_owned_daemon(p)
         shutil.rmtree(home, ignore_errors=True)
 
 
@@ -568,12 +603,7 @@ def scenario_process_count_invariant(flood_n: int, rounds: int) -> Result:
             procs, result_paths = _flood_clients(home, tag, flood_n)
             _collect_results(procs, result_paths, timeout=_CLIENT_BUDGET_S * 4 + 2)
         finally:
-            if daemon and daemon.poll() is None:
-                daemon.terminate()
-                try:
-                    daemon.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    daemon.kill()
+            _stop_owned_daemon(daemon)
             settled = _wait_settled(tag, _SETTLE_TIMEOUT_S)
             r.check(settled, f"round {i}: every process tagged '{tag}' exited (no leftovers)")
             shutil.rmtree(home, ignore_errors=True)
@@ -591,6 +621,8 @@ SCENARIOS = {
 
 
 def main() -> None:
+    global _DAEMON_TEST_ENV, _DAEMON_TEST_REGISTRY
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--role", choices=["daemon", "client"], default=None,
                     help="internal: run as a spawned daemon/client instead of the driver")
@@ -611,22 +643,33 @@ def main() -> None:
     if args.role == "client":
         sys.exit(run_client(args.home, args.budget, args.result_path))
 
-    # Driver mode.
-    selected = [x.strip() for x in args.scenarios.split(",") if x.strip()]
-    failed = 0
-    for name in selected:
-        fn = SCENARIOS.get(name)
-        if not fn:
-            print(f"PROBE: {name} FAIL unknown scenario")
-            failed += 1
-            continue
-        try:
-            res = fn(args.flood_n, rounds=args.rounds, daemon_m=args.daemon_m)
-            if not res.emit():
+    from agent_procutil.daemon_instances import (
+        daemon_test_lifecycle,
+        default_registry_root,
+    )
+
+    _DAEMON_TEST_REGISTRY = default_registry_root()
+    with daemon_test_lifecycle(
+        owner="process-hygiene-convergence", registry_root=_DAEMON_TEST_REGISTRY
+    ) as environment:
+        _DAEMON_TEST_ENV = environment
+        selected = [x.strip() for x in args.scenarios.split(",") if x.strip()]
+        failed = 0
+        for name in selected:
+            fn = SCENARIOS.get(name)
+            if not fn:
+                print(f"PROBE: {name} FAIL unknown scenario")
                 failed += 1
-        except Exception as e:
-            print(f"PROBE: {name} FAIL probe-exception {type(e).__name__}: {e}")
-            failed += 1
+                continue
+            try:
+                res = fn(args.flood_n, rounds=args.rounds, daemon_m=args.daemon_m)
+                if not res.emit():
+                    failed += 1
+            except Exception as e:
+                print(f"PROBE: {name} FAIL probe-exception {type(e).__name__}: {e}")
+                failed += 1
+        _DAEMON_TEST_ENV = {}
+        _DAEMON_TEST_REGISTRY = None
     print(f"PROBE-SUMMARY: {len(selected) - failed}/{len(selected)} passed")
     sys.exit(1 if failed else 0)
 

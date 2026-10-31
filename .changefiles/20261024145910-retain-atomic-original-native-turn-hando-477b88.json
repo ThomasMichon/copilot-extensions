@@ -1,0 +1,9 @@
+{
+  "comment": "Retain atomic original native-turn handoffs and one-shot DB admission with separate outcomes; reject retrospective enrollment and preserve legacy uncertainty",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

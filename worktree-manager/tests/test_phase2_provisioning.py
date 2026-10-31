@@ -1,13 +1,15 @@
 """Phase 2 tests: prerequisite detection, provisioning plan, and core install.
 
-Everything here stays read-only / dry-run — no test installs anything or mutates
-the machine. Provisioning apply and the core install are exercised only in
-dry-run, and detection is driven against fakes where needed.
+No test installs production software or changes the machine. Apply controls
+use isolated fake providers; the consumer control provisions only a synthetic
+executable beneath the test's temporary directory.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+
+import pytest
 
 from worktree_manager.catalog import Prereq
 from worktree_manager.core_install import (
@@ -180,3 +182,169 @@ def test_setup_command_dry_run_changes_nothing(capsys):
     assert "plan" in out.lower()
     assert "nothing was changed" in out.lower()
     assert rc in (0, 1)
+
+
+def _setup_providers(monkeypatch, *, before, after, results, core_result=None):
+    from worktree_manager import setup_cli as cli
+    from worktree_manager.core_install import CoreInstallResult, CoreStatus
+
+    probes = iter((before, after))
+    monkeypatch.setattr(cli, "detect_baseline", lambda: next(probes))
+    monkeypatch.setattr(cli, "provision_apply", lambda *a, **kw: results)
+    status = CoreStatus("installed", True, True, "stub", "runtime")
+    monkeypatch.setattr(cli, "core_status", lambda: status)
+    monkeypatch.setattr(cli, "install_command", lambda: ["owned-installer"])
+    calls = []
+
+    def install(**kwargs):
+        calls.append(kwargs)
+        return core_result or CoreInstallResult(None, False, reason="already-installed")
+
+    monkeypatch.setattr(cli, "install_core", install)
+    return calls
+
+
+def test_setup_apply_uses_post_provision_readiness(monkeypatch, capsys):
+    from worktree_manager.provision import ProvisionResult
+
+    gap = PrereqStatus("uv", False)
+    action = plan([gap])[0]
+    calls = _setup_providers(
+        monkeypatch, before=[gap], after=[PrereqStatus("uv", True)],
+        results=[ProvisionResult(action, True, returncode=0)],
+    )
+    assert main(["setup", "--apply"]) == 0
+    assert len(calls) == 1
+    assert "RESTART" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("returncode", [1, 3010, None])
+def test_setup_failed_prerequisite_never_runs_core(monkeypatch, capsys, returncode):
+    from worktree_manager.provision import ProvisionResult
+
+    gap = PrereqStatus("uv", False)
+    calls = _setup_providers(
+        monkeypatch, before=[gap], after=[PrereqStatus("uv", True)],
+        results=[ProvisionResult(plan([gap])[0], True, returncode=returncode)],
+    )
+    assert main(["setup", "--apply"]) == 1
+    assert not calls
+    assert "prerequisite uv failed" in capsys.readouterr().out
+
+
+def test_setup_unstarted_prerequisite_reports_reason(monkeypatch, capsys):
+    from worktree_manager.provision import ProvisionResult
+
+    gap = PrereqStatus("uv", False)
+    calls = _setup_providers(
+        monkeypatch, before=[gap], after=[gap],
+        results=[ProvisionResult(plan([gap])[0], False, skipped_reason="access denied")],
+    )
+    assert main(["setup", "--apply"]) == 1
+    assert not calls
+    assert "access denied" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["uv", "git"])
+def test_setup_unresolved_prerequisite_blocks_core(monkeypatch, capsys, name):
+    from worktree_manager.provision import ProvisionResult
+
+    gap = PrereqStatus(name, False)
+    action = plan([gap])[0]
+    result = (
+        ProvisionResult(action, False, skipped_reason="manual") if action.manual
+        else ProvisionResult(action, True, returncode=0)
+    )
+    calls = _setup_providers(
+        monkeypatch, before=[gap], after=[gap], results=[result],
+    )
+    assert main(["setup", "--apply"]) == 1
+    assert not calls
+    out = capsys.readouterr().out
+    assert f"prerequisites still needed: {name}" in out
+    assert ("RESTART" in out) == result.ran
+
+
+@pytest.mark.parametrize(
+    "ran,returncode,reason",
+    [(True, 7, None), (False, None, "no-installer"), (False, None, None)],
+)
+def test_setup_core_failure_is_not_hidden_by_installed_state(
+    monkeypatch, capsys, ran, returncode, reason,
+):
+    from worktree_manager.core_install import CoreInstallResult
+
+    calls = _setup_providers(
+        monkeypatch, before=[], after=[], results=[],
+        core_result=CoreInstallResult(["owned-installer"], ran, returncode, reason),
+    )
+    assert main(["setup", "--apply"]) == 1
+    assert len(calls) == 1
+    assert "core install failed" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("installed", [True, False])
+def test_setup_first_core_install_checks_postcondition(monkeypatch, installed):
+    from worktree_manager import setup_cli as cli
+    from worktree_manager.core_install import CoreInstallResult, CoreStatus
+
+    calls = _setup_providers(
+        monkeypatch, before=[], after=[], results=[],
+        core_result=CoreInstallResult(["owned-installer"], True, 0),
+    )
+    absent = CoreStatus("absent", False, False, None, "runtime")
+    ready = CoreStatus("installed", True, True, "stub", "runtime")
+    states = iter((absent, ready if installed else absent))
+    monkeypatch.setattr(cli, "core_status", lambda: next(states))
+    assert main(["setup", "--apply"]) == (0 if installed else 1)
+    assert len(calls) == 1
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+def test_setup_refreshes_actual_tool_after_synthetic_installer(
+    monkeypatch, tmp_path, capsys,
+):
+    import os
+    import shlex
+    import subprocess
+    import sys
+
+    from worktree_manager import prereqs, setup_cli as cli
+    from worktree_manager.core_install import CoreInstallResult, CoreStatus
+    from worktree_manager.provision import ProvisionAction
+
+    windows = os.name == "nt"
+    tool = tmp_path / ("fixture-tool.cmd" if windows else "fixture-tool")
+    content = "@echo 1.0.0\n" if windows else "#!/bin/sh\necho 1.0.0\n"
+    script = (
+        "from pathlib import Path;"
+        f"p=Path({str(tool)!r});p.write_text({content!r});p.chmod(0o700)"
+    )
+    args = [sys.executable, "-c", script]
+    command = subprocess.list2cmdline(args) if windows else shlex.join(args)
+    action = ProvisionAction(
+        "fixture-tool", "script", command, False, None, False, None,
+    )
+    monkeypatch.setitem(prereqs._EXE_ALIASES, "fixture-tool", (str(tool),))
+    monkeypatch.setattr(
+        cli, "detect_baseline",
+        lambda: [detect_prereq(Prereq("fixture-tool", min="1.0"))],
+    )
+    monkeypatch.setattr(cli, "provision_plan", lambda gaps: [action] if gaps else [])
+    monkeypatch.setattr(
+        cli, "core_status",
+        lambda: CoreStatus("installed", True, True, "stub", "runtime"),
+    )
+    monkeypatch.setattr(cli, "install_command", lambda: None)
+    monkeypatch.setattr(
+        cli, "install_core",
+        lambda **kw: CoreInstallResult(None, False, reason="already-installed"),
+    )
+    assert not tool.exists()
+    assert main(["setup", "--apply"]) == 0
+    assert tool.is_file()
+    assert prereqs.detect_prereq(Prereq("fixture-tool")).version == "1.0.0"
+    assert "RESTART" not in capsys.readouterr().out
+    assert main(["setup", "--apply"]) == 0

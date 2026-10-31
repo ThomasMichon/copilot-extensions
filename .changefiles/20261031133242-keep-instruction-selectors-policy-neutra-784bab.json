@@ -1,0 +1,9 @@
+{
+  "comment": "Keep instruction selectors policy-neutral across template generations",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

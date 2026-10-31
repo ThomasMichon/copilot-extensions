@@ -107,6 +107,53 @@ owner, use normal authorized local rollout, and continue bounded source
 diagnosis and isolated container qualification. This does not authorize a
 timeout waiver, installed-code patch, control takeover or fleet-wide change.
 
+Subsequent operator direction, captured verbatim:
+
+> Identify what takes up 8 seconds; break down the architecture and figure out what we can spare
+
+**Direction summary:** Attribute the complete call chain and distinguish
+necessary authority checks from removable startup or unrelated configuration
+work before selecting another implementation. This is not approval to remove
+the validation process boundary.
+
+Subsequent operator direction, captured verbatim:
+
+> Great. Build out an effort plan and tackle it
+
+**Authorization summary:** Develop and execute the measured startup-headroom
+follow-up below through reviewed source changes. Reuse this canonical effort;
+retain the unchanged eight-second requirement, process isolation and existing
+release, installation and lifetime ownership.
+
+Subsequent operator selection, captured verbatim:
+
+> design-reviewed-selector
+
+**Selection summary:** Develop a reviewed trusted-bootstrap contract,
+coordinating with its existing owner. This selects design work rather than
+silently trusting PATH or an unadmitted runtime; it does not grant shared
+implementation ownership or installed rollout.
+
+Subsequent operator selection, captured verbatim:
+
+> assign-new-selector-scope
+
+**Bounded assignment:** Implement a new payload-local native selector under
+`libs/installer-engine`, its focused tests/sync declaration, and
+Containers/Codespaces delivery. This explicit assignment resolves the earlier
+acknowledgement gate; it is not inferred from the existing owner's silence.
+Existing installer-selection behavior, SDK validation algorithms,
+Manager/lifetime work and installed rollout remain excluded. Coordinate any
+newly overlapping consumer PR rather than modifying its still-open change.
+
+Subsequent operator direction, captured verbatim:
+
+> Help drive to adoption
+
+**Direction summary:** Drive the existing dependency, source merge, qualified
+release and already-authorized normal adoption flow. This does not waive review,
+CI, installation ownership or live-control gates.
+
 ## Plan
 
 ### Phase 1 - Review the bounded repair plan
@@ -153,6 +200,16 @@ timeout waiver, installed-code patch, control takeover or fleet-wide change.
 - [x] Confirm qualified promotion to `main` separately from the `dev` merge.
   Natural #8287 contains the source repair; #8302 separately contains the
   registered-Manager launcher repair.
+- [x] Land the bounded state-root follow-up through review and required CI.
+  #8414 merged as `5a2b202b5ae94b9695f04f4a05c4c424731d3ab7`.
+- [x] Land the reviewed [startup-headroom follow-up](startup-headroom.md)
+  before its implementation; preserve existing source and control owners.
+- [x] Execute that follow-up in independently reviewable source slices:
+  omit unused state-root preferences first, then qualify the canonical
+  fresh-process evaluator selection without weakening bootstrap admission.
+- [x] Review the [independent Windows bootstrap contract](trusted-bootstrap.md)
+  and agree its shared implementation scope with #6812 before changing the
+  evaluator or shared selector.
 - [ ] Requalify the remaining installed reader latency after a reviewed
   state-root follow-up, preserving complete discovery within eight seconds.
 - [ ] Retain release/rollout responsibility explicitly. Apply a local rollout
@@ -190,6 +247,9 @@ All items are agent-recommended means of proving the requested repair.
   runtime changes.
 - [ ] Promotion and authorized running-state proof are distinct receipts; an
   installed selector version alone is not evidence of a running repaired daemon.
+- [ ] The startup follow-up's [qualification matrix](startup-headroom.md#validation-plan)
+  proves equivalent source/installation refusals, first-touch behavior and
+  complete native discovery; a faster status microbenchmark alone is not a pass.
 
 ## Proposal
 
@@ -199,6 +259,707 @@ closes a bounded reliability delta within the existing Bridge vision and
 namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
+
+### 2026-10-24 - Integrated regression gates pass; native tail still fails
+
+- The integrated lifecycle, namespace, resolver and external-ownership packet
+  passes 130 tests with one platform skip. The five earlier fixture failures
+  are resolved by the original owner's merged changes, not waived or duplicated.
+- The canonical packet first hit its unchanged 300-second supervisor limit
+  while normal fixture construction ran concurrently. That incomplete run is
+  retained as failed evidence. With those builds finished, the same exact
+  source passed all 1,702 nodes, with coverage and zero effects, in 227.610
+  seconds under the same bound. No timeout, hash, coverage or effect rule changed.
+- Fresh normal Worktrees/Containers construction completed with no stderr.
+  Executing config/lifecycle/resolver and Worktrees module hashes/origins match
+  the integrated source; complete bound state-root JSON and actual global
+  legacy peer identity remain verified.
+- The new complete-provider cohort returned actual complete empty inventories,
+  exit 0 and no stderr in 7.799/5.632/5.502/6.752/**8.821** seconds. The fifth
+  invocation fails the unchanged eight-second requirement. The cohort stopped;
+  no integrated Bridge cohort, average-based pass, installed rollout or
+  comfortable-headroom claim follows.
+- The independent one-query work reduction remains the source change, not a
+  complete latency repair. Source review/CI may assess that component while
+  the parent native and adoption gates remain open. The next performance work
+  must diagnose the combined source's residual/variability; do not retry this
+  unchanged cohort or substitute the earlier source's passing measurements.
+
+### 2026-10-24 - Original-owner dependency merged and integration resumed
+
+- The original owner reported #8805 merged; provider state independently
+  confirms `c7b1cfca8624103272ba0ee4f846c922c42549c0` at
+  `2026-10-25T05:32:38Z`. Its owner retained the corrections, current-head
+  review, required CI, merge and child finalization; no competing patch or
+  takeover was used.
+- Backed up the clean owned source and used the managed sync to integrate
+  that actual merge. The resulting branch contains its hosting-policy fixture
+  repairs and namespace/lifecycle ownership guards while retaining only this
+  effort's independent inventory optimization.
+- Updated the canonical inventory source hash to the actual integrated
+  lifecycle bytes. The broader regression packet and exact-source unit gate
+  must pass before advancing the source PR. Earlier native results remain
+  attributed to their measured bytes; they do not automatically qualify the
+  new combined source, a containing release or installed consumption.
+
+### 2026-10-24 - Changed Docker candidate passes native reader cohorts
+
+- Normal isolated construction used the current source. Only the baseline
+  materialization restored the earlier lifecycle file before installation;
+  no installed runtime was patched. Executing module hashes/origins and the
+  actual global legacy Worktrees command were checked. Complete bound state-root
+  JSON matches the host control; installed host selectors remain unchanged.
+- Three alternating fresh installed-function pairs retained complete inventory
+  parity and removed exactly one Docker query, saving 0.204/0.202/0.234 seconds.
+  This supports the component change, not attribution of every subsequent
+  whole-command difference to that removal.
+- The changed actual provider command passed five fresh reads in
+  6.840/5.079/5.244/5.371/5.664 seconds. Five fresh real Bridge readers then
+  discovered an owned stopped member in 7.844/6.234/5.812/5.500/6.328 seconds
+  at the unchanged eight-second reader boundary. Each reader retained five
+  warm cached reads, settled native/CPU futures and CPU observations.
+  The first reader's thin 0.156-second slack remains a headroom concern.
+  The first outer test-process time was 9.480 seconds, including Bridge
+  interpreter/import startup outside that existing reader boundary.
+- Real missing-CLI and unavailable-daemon controls both exited 1 with no
+  stdout and explicit diagnostics. Six checks of the exact production bytes
+  passed on Linux 3.12.3 in a read-only networkless disposable container.
+  No Python package or image was pulled for that Linux smoke. This is
+  compatibility smoke, not the full Linux plugin suite.
+- The canonical source unit packet passed all 1,702 cases in 222.531 seconds
+  with coverage and zero effects, below its unchanged 300-second limit.
+  Touched Python lint and all 13 install contracts passed.
+- The broader five hosting-policy fixture failures still belong to #8805,
+  whose owner has their exact cases. They are neither fixed here nor waived.
+  No competing fixture repair, source-merge acceptance, containing release,
+  control adoption or installed readiness is claimed. All owned disposable
+  Docker fixtures were removed; the source effort and parent remain open.
+
+### 2026-10-24 - Single-query plan merged; implementation qualification started
+
+- #8837 actually merged as `4c67a5596f081595b2a0b0fed3167f3aab890f83`
+  after exact-head Copilot approval `5641369105`, complete clean feedback/thread
+  reads and passing required CI. The parent was re-read after merge; the source
+  worktree was backed up and advanced onto that merged plan before code.
+- The bounded implementation removes only the inventory version preflight and
+  retains query diagnostics with a daemon-access hint. Six effect-free tests
+  exercise the actual production inventory function, including full fields,
+  command count, empty success and missing-CLI/query/timeout failures.
+- The broader contained lifecycle/namespace/resolver packet found five
+  hosting-policy fixture failures. Their fixes already belong to open #8805;
+  the exact cases were reported there rather than duplicated. Its actual
+  lifecycle mutation implementation remains untouched. The broader result is
+  not green or waived; that original-owner fix is a qualification dependency.
+- Matched native component benefit, complete discovery, first-touch behavior,
+  source review/CI, containing release and authorized running consumption
+  remain open. No installed/runtime/service state changed.
+
+### 2026-10-24 - Actual peer attribution and bounded Docker proposal
+
+- Bound the retained normal Containers profile to its producer recipe: PATH
+  selected the normal global legacy Worktrees launcher, not the discarded
+  payload-frontdoor peer. Its 3.521-second peer wait includes that command's
+  startup and execution; do not add independently measured component times.
+- The separately retained Worktrees profile attributes 0.401 seconds to config
+  and 1.371 seconds to imports, including necessary config work. The rejected
+  import experiment remains rejected; these figures do not license another
+  unchanged whole-discovery attempt.
+- Selected the independently reviewable, agent-recommended
+  [single-query Docker proposal](startup-headroom.md#next-proposed-slice-one-docker-inventory-query).
+  Its approximately 0.2-second removable preflight is a component opportunity,
+  not a promise to close the 1.378-second whole-command gap.
+- Refreshed current open PRs and read #8805's actual lifecycle/test patches.
+  Its mutation admission and exact-ID work are outside this proposal.
+  Coordination is recorded on #5761 and #8805. No implementation, installed
+  change, daemon restart, deadline waiver or release-control action follows
+  from this plan-stage update.
+
+### 2026-10-24 - Fixture corrections merged; next mechanism remains unassigned
+
+- #8831 actually merged as `4e3a43318cfb31281cb6a101a9556074fe676f73`.
+  Copilot approved exact head `dfa3368ca14c7cb6330469e6637164e4b1837192`
+  in review `5641298407`, with no summary, inline or thread findings.
+  Required PR gate `40157147512`, eligible unit coverage, source attribution
+  and workflow lockdown passed before managed completion.
+- Re-read the parent after merge. Only fixture corrections and the negative
+  experiment record landed; no import optimization or latency qualification
+  was published. The native, release/control and running-consumption items
+  remain open, so do not finalize this effort or its worktree.
+- The existing Docker discovery path performs `version` and then `ps`.
+  Retained real profiles attribute 0.197 and 0.199 seconds to the version
+  preflight, compared with 0.376 and 0.397 seconds for the whole Docker-list
+  step. Removing it alone cannot explain or close the retained 1.378-second
+  whole-discovery overrun. Do not implement a speculative replacement or
+  relax daemon/CLI error reporting; assess the remaining startup owners
+  before proposing a separately reviewed mechanism.
+- A bounded diagnostic wrapped the unchanged selector's existing candidate and
+  native-type initialization functions, then ran the unchanged canonical SDK.
+  PS5/pwsh candidate discovery took 0.221/0.110 seconds, native type
+  initialization 0.440/0.417, total selection 0.780/0.640 and the SDK process
+  0.840/0.366. Outer diagnostic wall times were 3.032/1.750 seconds, with
+  identical complete status JSON. These are one-process component attributions,
+  not cold/tail qualification or additive whole-command savings. The existing
+  generated CMD entry already prefers pwsh; do not invent a host-switch fix.
+  Reconcile the residual against retained full-provider profiles before
+  selecting another source change.
+
+### 2026-10-24 - Reject the first import experiment after real-command comparison
+
+- The bounded candidate deferred installation/session-registration imports and
+  retained complete ordinary metadata output, dispatch and legacy exports.
+  Its native packet passed 404 cases with four native POSIX FIFO cases skipped;
+  the complete effect-free packet passed 1694 cases with production-call
+  coverage and the unchanged 300-second budget.
+- Fresh normal baseline and candidate installations used the same materialized
+  source, differing only in the two composition-root inputs. Installed origins,
+  exact source hashes and complete bound state-root JSON were verified through
+  the normal global legacy command, not a direct-Python peer.
+- All three alternating fresh-process comparisons were slower for the candidate:
+  baseline/candidate seconds were 2.578/2.938, 2.296/2.735 and 2.204/2.281.
+  This fails the reviewed meaningful-benefit gate. The import implementation
+  and its experimental admission changes were withdrawn before publication;
+  the private evidence and source backup remain available.
+- The same packet exposed real fixture prerequisites: launch paths must exist
+  before repository admission, and byte-exact copy fixtures must not inherit
+  newline conversion. Retain those test-only corrections with the actual
+  repository-policy and Git-safety gates intact. After withdrawing the runtime
+  experiment, the two corrected fixture files passed 210 cases in 130.06
+  seconds, with the four native POSIX FIFO cases unavailable on Windows.
+- The eight-second complete-discovery gate remains open; the last whole
+  observation is still the retained 9.378-second failure. No unchanged whole
+  cohort, Bridge namespace read, installed update or held venue action followed
+  the rejected comparison. Trace the existing Docker preflight next and seek
+  separate review before implementing another mechanism.
+
+### 2026-10-24 - Existing CLI import-closure plan reviewed; implementation next
+
+- #8818 actually merged as `a1a15d4c9e7d934d02fac5818e3f194865f4cae6`.
+  Copilot approved exact head `1649857c8353bdb39743eb67b9a518c2d7878f85`
+  in review `5641153270`; complete inline/comment/thread reads found no
+  feedback. Required PR gate `40154084601`, source attribution and workflow
+  lockdown passed. Managed Maintainer completion was verified separately.
+- Re-read the parent and sub-plan after merge. The next action is tracing the
+  existing state-root/lazy-dispatch import closure before a minimal source
+  change, preserving its full behavior and concrete peer ownership.
+  No import optimization, new launcher or native-frontdoor change is implemented.
+- Retain the actual 9.378-second whole-command failure and the parent's native,
+  release/control and installed-consumption obligations. The effort stays
+  Active; source-component and plan merges do not close it.
+- Preserved the merged plan source on another backup and verified its actual
+  merge is in fetched Dev before advancing the clean worktree with no unmerged
+  commits to replay. No routine retry against the known deleted PR ref, stash,
+  hard reset, finalize or installed update was used.
+
+### 2026-10-24 - Selector and two-adopter source slice merged; parent continues
+
+- #8789 actually merged as `6913ea9c57cb46d02646bd2bfb05869ad5ec44b8`.
+  Current-head review `5641068072` is a clean owner-authored Comment with no
+  remaining concrete Medium/High finding. Both original threads are resolved;
+  the additional home-fallback summary finding is corrected. Required PR
+  gate `40152776429`, source attribution and workflow lockdown all pass.
+- Used the repository-authorized managed Maintainer completion flow. Its
+  provider-confirmed extra-CODEOWNER exception does not waive checks or
+  feedback. Source merge is not a qualified containing Main release or an
+  installed rollout.
+- Re-read the parent and its sub-plans after merge. The reviewed selector
+  assignment and source consumer slice are complete; whole-provider/Bridge
+  eight-second qualification, containing release/control adoption and actual
+  authorized installed consumption remain open. The effort stays Active.
+- The next candidate is separately reviewed startup work, not more scope in
+  the merged selector PR. Refreshed #8601's complete file inventory and the
+  active Worktrees root owners: #8458, #7611 and #6009 touch `__main__.py`;
+  #8786 touches configuration. Preserve their changes and coordinate concrete
+  overlap before choosing a root/import or configuration slice.
+- The routine sync refused the merged PR's already-deleted remote ref before
+  rebasing. Preserved the completed source on a backup, verified the provider's
+  actual merge is in fetched Dev, then advanced the clean worktree with no
+  unmerged commits to replay. No stash, hard reset or finalize was used.
+
+### 2026-10-24 - Corrected native cost and retained PowerShell home fallback
+
+- Rebuilt both normal installations from corrected source `b5905b6d62` in a
+  separate fresh profile: Worktrees completed in 214.453 seconds and Containers
+  in 63.266 seconds, both with zero exit and no stderr. Generated deployed
+  global Worktrees commands match the ordinary legacy frontdoor, not a payload
+  wrapper. Host selectors and source bytes remain unchanged.
+- Repeated only the combined evaluator comparison after the native alias
+  correction: PowerShell 5.1 native/admitted pairs measured 4.117/2.591,
+  3.614/2.185 and 3.858/2.515 seconds; pwsh measured 3.278/2.444,
+  3.168/2.134 and 3.152/2.197. All twelve complete SDK JSON values, zero
+  exits and empty stderr agree. Every pair retains 0.834-1.526 seconds
+  of benefit with native drive-root admission and compilation included.
+  No unchanged whole-provider cohort was retried or credited.
+- The second review confirmed both original findings resolved but identified
+  another Medium issue in its summary: initial durable-home construction
+  required `USERPROFILE` even for POSIX pwsh with an explicit runtime root.
+  Both gates now derive Copilot and durable homes from the native evaluator's
+  shared `USERPROFILE`-or-`$HOME` fallback. No SDK algorithm changes.
+- Eight new absent-`USERPROFILE` legacy/namespaced ABI controls and eight
+  selected-route controls pass on both Windows hosts/adopters. The other
+  previously passing consumer logic and native helper are unchanged.
+  An exact-owned, network-disabled, read-only probe of the existing Linux
+  clean-room base confirmed no `pwsh`; its temporary container was removed.
+  Windows ABI controls are not a native POSIX-pwsh pass. POSIX shell dispatch
+  remains untouched; no new tool installation or held venue substitutes.
+- Current-head review/CI and merge remain required. The parent retains its
+  actual 9.378-second whole-discovery failure, further owner-coordinated
+  startup work, release/control adoption and authorized installed acceptance.
+
+### 2026-10-24 - Native alias and provenance-home review corrections
+
+- #8789's first review found two concrete boundaries. Native controls
+  reproduced eight addressed-runtime exclusion failures through ordinary
+  SUBST and raw DOS-device aliases, including missing aliased suffixes.
+  Four actual-SDK legacy controls reproduced differing complete status when
+  `HOME` and `USERPROFILE` disagree. The positive signed-base controls passed;
+  those failures were not treated as unavailable native fixtures.
+- Admission now verifies drive-root handle identity against its addressed
+  drive before candidate execution, reusing the existing final-path primitive.
+  Candidate and exclusion aliases refuse; ordinary missing local suffixes
+  remain supported. Temporary native test aliases are removed by exact target
+  in caller-owned cleanup. Both adopter copies are synchronized.
+- Both portable status/validation calls explicitly pass the native evaluator's
+  Copilot home. This retains native provenance semantics without changing SDK
+  source/policy algorithms. ABI expectations include that exact argument.
+- All 62 native helper cases plus four real signed-base consumer cases pass
+  without skips. The remaining 116 two-adopter ABI/actual-SDK cases also pass
+  without skips, accounting for all 120 consumer cases. Lint passes with the
+  existing tooling; no dependency installation, timeout or coverage waiver
+  was needed. Review of the corrected head and final combined-cost evidence
+  remain required before merge.
+
+### 2026-10-24 - Component publication retains shared-library release fan-out
+
+- Opened #8789 for the bounded selector/two-adopter implementation, with
+  actual-profile paired benefit and the unresolved whole-discovery failure
+  stated separately. The managed flow rebased cleanly onto current Dev.
+- Its first required source guard correctly rejected missing changefile entries
+  for seven existing installer-engine consumers. The guard deliberately charges
+  a canonical shared-library source addition to its full declared consumer set,
+  even though only Containers and Codespaces adopt this new helper.
+- Added those required release entries rather than narrowing the guard or
+  changing unrelated installers. Required units executed successfully on that
+  head; the overall source check remains failed until a corrected head passes.
+  Current-head review/CI, merge and parent acceptance are still open.
+
+### 2026-10-24 - Normal-install evaluator comparison retains a bounded benefit
+
+- Compared the actual normal-profile SDK through twelve fresh outer processes:
+  three alternating-order native/admitted pairs for each Windows host.
+  The admitted route includes registry discovery, offline trust verification,
+  native helper compilation, fresh isolated/no-site SDK execution and guard
+  disposal. The native route starts the same host's canonical PowerShell SDK.
+  Both routes receive identical payload/plugin/legacy inputs.
+- PowerShell 5.1 native/admitted seconds were 5.576/3.019, 4.034/3.214 and
+  3.463/1.772. pwsh measured 2.886/2.441, 3.157/2.067 and 3.886/2.791.
+  Every pair retained a benefit, ranging from 0.445 to 2.557 seconds.
+  All twelve full SDK JSON values and zero exits agree, with no stderr.
+  Host selectors and candidate source hashes remain unchanged.
+- These are paired evaluator measurements, not a new complete-provider
+  cohort, first-touch claim or tail-latency guarantee. The actual legacy
+  frontdoor's retained 9.378-second whole-command failure remains open.
+  Do not substitute isolated SDK time or an average for the unchanged
+  eight-second discovery requirement.
+- Proceed with bounded selector/two-adopter source review, explicitly retaining
+  that residual parent gate. Further Worktrees eager-import or native-frontdoor
+  work needs its own owner-coordinated source slice; it is not added to this
+  selector assignment. No installed update, shared service or control changed.
+
+### 2026-10-24 - Source-independent native construction exposes the residual budget gap
+
+- Built normal, non-developer Worktrees and Containers installations from
+  canonical materialized payloads into a fresh private profile. Construction
+  completed in 211.047 and 53.253 seconds; canonical provider registration
+  completed in 1.105 seconds. All three returned zero with no stderr.
+  Host selectors and the executing source hashes remained unchanged.
+- Full bound state-root JSON matches the current host. Both installed module
+  origins lie inside the private profile, match the candidate source bytes,
+  and have no original source-checkout prefix in their import paths.
+  The fixture now distinguishes original-checkout independence from the
+  earlier developer-runtime construction.
+- The first whole command used the attributable payload Worktrees frontdoor
+  for its peer and returned a complete empty roster in 15.348 seconds.
+  Source inspection then confirmed this caller's actual legacy contract is
+  PATH lookup of the deployed global compatibility command. Those generated
+  private command files are byte-identical to the host's. Using that exact
+  legacy contract preserves the full state-root response but still takes
+  9.378 seconds, with exit zero and no stderr. Retain both measurements with
+  their distinct frontdoors; neither qualifies the unchanged eight-second
+  requirement. No repeated cold cohort or Bridge pass is claimed.
+- A separate actual-profile admission probe selects signed base CPython in
+  1.137 seconds. Profiling its guarded, fresh canonical SDK reports 0.398
+  seconds of SDK work and complete ready/legacy output; these are distinct
+  diagnostic samples, not an additive whole-command timeline.
+- Direct selected Worktrees Python returns the complete state-root response
+  in 2.254 seconds. Its diagnostic profile attributes 1.371 seconds to eager
+  imports; the 0.930-second handler includes subprocess waits. The matching
+  Containers runtime profile remains dominated by its real peer wait.
+  Existing low-overhead boot tracing is retained separately and is not
+  credited as a passing performance sample.
+- The independently admitted route is implemented and functionally qualified,
+  but whole-source headroom is still open. Establish the final actual-profile
+  evaluator comparison before publishing a performance claim, then review
+  any further eager-import or native startup slice with its retained owner.
+  No SDK validation, timeout, service, control pin or installed runtime was
+  changed to make these measurements pass.
+
+### 2026-10-24 - Both consumers integrated after the retained owner's merge
+
+- Confirmed #8666 merged as `98c990a4c28e02014618335f56d3d96535cbaef0`
+  before integrating Containers. Its legacy predicate, selected runtime-root
+  and generation checks, publication/legacy-management probes and under-lock
+  refresh remain unchanged. Only initial status/validation uses the new route.
+- The shared two-adopter consumer packet passed 112 cases on Windows
+  PowerShell 5.1 and pwsh, with no skips and an explicit signed fixture.
+  It covers complete SDK status/refusal parity, isolation, cleanup, runtime
+  package-site initialization and exact argument/environment contracts.
+- That packet exposed a quoted-argument split in the unchanged Dev Containers
+  gate on PowerShell 5.1. A separate baseline control reproduced it before
+  correction. Legacy forwarding now reuses Codespaces' existing encoded-argv
+  module entry; modern argument passing is unchanged. All 24 selected-route
+  and empty/numeric/quoted/Unicode/trailing-slash controls passed.
+- Boundary review then reproduced a linked addressed-root exclusion escaping
+  independence checks, with a real signed positive control on both hosts.
+  A small shared root-to-leaf path walk now rejects candidate or addressed-root
+  redirection before descending through it. Remote exclusions refuse before
+  verification; absent local suffixes remain first-use compatible. The
+  inverse short-path hypothesis did not reproduce: existing full-path
+  normalization already handles it. Retained both-direction controls instead
+  of adding unnecessary native directory APIs.
+- The final helper passed all 50 native admission cases and all four real
+  admitted-base consumer cases, with no skips. Its two payload copies remain
+  byte-identical. The other 108 dispatcher cases exercise unchanged consumer
+  code. Existing Containers publication coverage passed in complementary
+  partitions: 30 payload cases plus 25 global/fallback cases, with eight
+  explicit POSIX-only skips. The final helper was exercised again in the
+  payload partition; the earlier other-entry partition covers unchanged
+  normal-root publication behavior.
+- A combined 175-node invocation exhausted its existing 900-second controller
+  envelope without a test verdict. That was not credited as a pass; exact
+  complementary partitions account for every existing node without raising
+  per-test, production or controller deadlines.
+- Next qualification builds both runtimes from materialized source into a
+  fresh private profile, with canonical generated commands and provider
+  registration. Unlike the earlier developer-Worktrees fixture, this must
+  prove no original checkout is needed at runtime before crediting first touch.
+  Whole-provider/Bridge headroom, release and authorized installed consumption
+  remain open.
+
+### 2026-10-24 - Codespaces evaluator integration and combined native cost
+
+- Integrated only initial status/selected-context validation in the Codespaces
+  Windows gate. Selection precedes evaluation; no post-selection failure
+  retries through another interpreter or native helper. Complete SDK output,
+  generation checks, ordinary package-site loading, both streams and exact
+  forwarded arguments remain intact. The guard is disposed before runtime
+  resolution, including refusal and malformed-output paths.
+- Native PowerShell 5.1 and pwsh passed 45 focused consumer cases with no
+  skips, including real signed-base admission and actual canonical SDK
+  legacy/namespaced/deactivation JSON equality. Refusals cover foreign
+  namespace source, stale context and malformed policy. Twelve existing
+  selected-publication-policy cases also pass. Unicode/apostrophe payloads,
+  ambient Python poisoning, selector/protocol/launch failures and guard
+  cleanup are included. These native cases are not pure-unit admission.
+- The first ABI run exposed local shadowing of PowerShell's automatic native
+  exit variable; initialization now uses its actual global scope. Subsequent
+  stricter assertions corrected two fixture assumptions: launch exceptions
+  terminate with code 1, and source refusal must alter the actual namespace
+  receipt, not settings overridden by an explicit context or an unknown field.
+- Measured twelve fresh real dispatcher processes, including actual registry
+  discovery, offline native trust compilation, canonical SDK evaluation,
+  readiness and a minimal selected runtime. Three alternating-order pairs
+  for PowerShell 5.1 measured native/selected seconds:
+  3.850225/3.155037, 3.259938/2.547828 and 3.333858/2.465372.
+  pwsh measured 4.787203/2.878162, 3.479542/2.369438 and
+  3.496756/2.343991. All twelve returned identical complete legacy status,
+  exact runtime output and no stderr. This includes selector cost, not just
+  a Python SDK microbenchmark; three pairs do not qualify tails or the
+  parent's whole-provider/Bridge eight-second requirement.
+- Documentation now distinguishes Codespaces' opted-in reads from Containers'
+  delivered-but-inactive helper. #8666 still owns the open Containers gate.
+  No installed payload/runtime, service, maintenance or control was changed.
+  Consumer review/CI, containing release, whole-provider qualification and
+  authorized rollout remain open.
+
+### 2026-10-24 - Native bootstrap selector and scoped delivery implemented
+
+- Implemented the independent helper at the assigned installer-engine owner,
+  without changing existing installer selection or SDK validation algorithms.
+  The sync owner delivers identical source only to Containers and Codespaces.
+- Native PowerShell 5.1 and pwsh contracts passed all 42 cases with an explicit
+  signed fixture and no skips. They include real PSF signature admission,
+  actual trusted other-publisher and missing-signature refusals, a held write-exclusion guard,
+  modified/foreign architecture inputs, registry and verifier errors,
+  opaque-tag precedence, ordinal tie-breaking, venv/embedded/linked paths,
+  and an actual short-path alias of an excluded runtime.
+- Default fixture discovery initially selected an unsigned development
+  interpreter and skipped positive cases; those results were not credited as
+  native admission. The explicit fixture run exposed a test producer's OEM
+  encoding at a non-ASCII path. Matching the real gate's existing UTF-8
+  initialization fixed that producer, without lossy decoding or output masking.
+- The complete installer-engine delivery/materialization cohort passed
+  74 tests with its one explicit POSIX-on-Windows exclusion. Scoped drift,
+  missing-source and linked-delivery controls pass. Lint and sync parity pass.
+- This is component source, not complete consumer integration or eight-second
+  acceptance. The next slice wires only the assigned initial status/validation
+  reads while preserving publication/provisioning gates. #8666 still owns the
+  overlapping Containers gate; do not pre-patch its open change.
+
+### 2026-10-24 - Operator assigns the independent selector implementation
+
+- The operator explicitly selected `assign-new-selector-scope` after the
+  retained coordinator could not be reached through the available live-session
+  registry. Its active upstream source work is not presumed orphaned.
+- Pulled the sole local journal onto current Dev with a backup and explicit
+  commit-range checks after ordinary managed sync refused the deleted plan
+  publication ref. The implementation starts from the current source rather
+  than the earlier qualification fixture.
+- New open #8666 owns Containers' first-use runtime gate. Keep that file with
+  its current owner while implementing the independent native selector,
+  focused tests and scoped payload delivery; coordinate consumer integration
+  instead of pre-patching the open PR.
+- The periodic existing PR observation remains read-only and unchanged.
+  No installed runtime, service, held venue, source-policy algorithm or
+  release control changed as part of this assignment.
+
+### 2026-10-24 - Bootstrap design reviewed; shared assignment remains open
+
+- #8486 merged to Dev as
+  `e75ca8ed86212e8dcc50b4256ec47c7a5164275d` after actual
+  Copilot approval `5637026840` of head
+  `9398aea865a71aa587ade9319941e8595a1e769f`, complete empty
+  inline/comment/thread reads, and successful required CI
+  `40066709523` plus lockdown/attribution `40066709604`.
+- Provider readback confirmed the merge. The managed Maintainer completion
+  omitted only the confirmed extra CODEOWNER vote; no required check or
+  feedback gate was bypassed. The clean accepted design was pulled forward
+  after merged-ancestor and file-equality checks.
+- Re-read the parent plan and bootstrap contract after merge. Only the design
+  review item is complete. The #6812 shared-selector implementation assignment
+  has not been received; silence is not a grant to edit its shared helper.
+- The proposed bounded assignment is a standalone native selector at the
+  existing installer-engine owner, its focused tests and the two explicitly
+  qualified consumer deliveries. Preserve existing installer selection and
+  SDK algorithms. Implementation and native evidence remain open.
+- No new evaluation, host update, held venue, release pin or shared service
+  changed. The latest complete native provider cohort still fails at
+  8.844 seconds; the parent effort remains Active.
+
+### 2026-10-24 - Independent bootstrap contract proposed
+
+- After the preference-only native cohort failed, the operator explicitly
+  selected developing a reviewed selector contract rather than waiting with
+  the evaluator implicitly blocked.
+- The proposal uses existing Windows CPython registration for data-only
+  discovery and requires independent local executable/publisher admission
+  before any candidate runs. It proposes no new interpreter registry, path
+  cache, runtime-self-validation, on-read download or larger deadline.
+- Existing native PowerShell evaluation remains the preselected fallback when
+  no suitable independent bootstrap exists. Once evaluation starts, refusal
+  stays terminal. The canonical SDK retains every source/cell/policy and
+  generation check in a fresh process.
+- The #6812 owner was contacted for an existing selector or concrete overlap.
+  Shared implementation requires an explicit bounded owner assignment; this
+  design does not pre-patch the installer's existing selection helper.
+- The linked design has its own review and native qualification gates,
+  including the selector's real cold cost. It is not implementation or
+  evidence that the unchanged eight-second objective now passes.
+
+### 2026-10-24 - Preference-only native qualification remains over budget
+
+- Rebuilt the merged source through the canonical native developer installer
+  in a new isolated profile. Construction completed in 324.594 seconds with
+  no stderr, no predecessor and a no-op monitor transition. The source head
+  remained `db4e11c90438a51eaaa6a52c47a20eac53f418f3`.
+- Both executing config and context-handler files are frozen under the private
+  runtime and match the recorded source hashes. The complete state-root JSON
+  equals the installed reader's result. Shared installed selector and
+  deployment-manifest hashes remain unchanged.
+- Complete provider runs took 6.531, 6.765 and 8.844 seconds, each returning
+  the actual empty container inventory without stderr. The third run fails
+  the unchanged eight-second contract. The cohort stopped there; no fourth
+  or fifth cold run, Bridge cohort, average-based pass or installed rollout
+  is credited.
+- The preference slice is a reviewed, landed optimization, not a completed
+  native repair. The separate evaluator remains unimplemented pending an
+  independently trusted pre-admission bootstrap selector. The bounded
+  dependency question is retained with the existing #6812 owner in
+  comment `6380217728`; no shared helper or SDK is pre-patched.
+- Removing imports only from `context_cli` would not remove the same eagerly
+  imported config/session/publication dependencies from `__main__`. Its
+  composition roots are already covered by other contributors' open work;
+  do not fork or silently supersede that work. A broader command-root change
+  needs concrete owner coordination and its own reviewed scope.
+- The next stretch is the owned bootstrap-contract dependency, followed by
+  a reviewed consumer implementation and newly rebuilt native qualification.
+  Source publication, required CI, release/control adoption, native discovery
+  and authorized running-state acceptance remain separate gates. This effort
+  stays Active.
+
+### 2026-10-24 - Preference-read slice reviewed and merged
+
+- #8476 merged to Dev as
+  `08b0820621c49f1e8e386f5fd86c9df4ae39c266`. Copilot approved
+  the actual head `a233f771c07c907a44fc83fa4cc98d1ecef2e26b`
+  in review `5636927916`; the full review, inline comments and complete
+  thread inventory contain no unresolved findings.
+- Required CI `40064478395` and lockdown/attribution
+  `40064478513` passed. The managed merge omitted only the
+  provider-confirmed extra CODEOWNER vote, not required CI or feedback.
+  Provider readback confirmed the merge; the accepted source was pulled
+  forward after clean-head, merged-ancestor and file-equality checks.
+- The published-head effect-free eight-node handler proof passed in
+  2.891 seconds with no effects and contextual coverage. The real four-child
+  CLI smoke passed bound/unbound JSON/text results through the canonical
+  synthetic registry writer. Configuration/profile coverage and complete
+  Linux CI are distinct from full installed provider/Bridge timing.
+- The preference slice is merged, not deployed. Rebuild the isolated native
+  fixture before measuring it. Bootstrap evaluation remains source-only:
+  the reached dispatchers validate with native PowerShell before resolving
+  their runtime; installer PATH/launcher probes execute a candidate before
+  establishing independent evaluator authority. Do not repurpose those
+  probes or an unadmitted selected runtime as its own validator.
+- The effort remains Active. Native headroom, first-touch/failure controls,
+  qualified release/control adoption and authorized installed consumption
+  remain open under their existing owners.
+
+### 2026-10-24 - Narrow state-root preference read implemented
+
+- Refreshed the active source ownership and newly opened Worktrees PR files;
+  the preference-read slice has no direct file conflict.
+- Added a default-on knowledge-preference option at the existing config owner.
+  Plain/JSON `state-root` disables only that unused contribution. Conduct and
+  pair modes retain their preference paths; ordinary configuration callers
+  remain full by default. Per-scope cache keys distinguish the two loads.
+- The contained configuration, state-root, context-resolution and profile
+  cohort passed 396 tests. New cases observe actual overlay reads in both
+  cache orders and compare complete real resolver/handler results for bound,
+  unbound, unregistered, explicit, self-hosted and absent-config inputs.
+- Updated the CLI owner reference and Worktrees changefile. The existing eight
+  effect-free handler nodes retain their identities; only their two changed
+  source hashes are refreshed in the unit manifest. Lint and the 13-plugin
+  install-contract gate passed.
+- Current-head review, required CI and merge remain pending. This is not native
+  eight-second acceptance, release adoption or installed rollout. The separate
+  evaluator slice still requires an independently admitted bootstrap selector.
+
+### 2026-10-24 - Startup-headroom plan reviewed and merged
+
+- #8461 merged to Dev as
+  `6b793523de1d38b70173c65bbd5eb64cf0537a24` after actual Copilot
+  approval `5636807744` of head
+  `c492262b19b1c7c18985e429f322a1f8fab999bc`, complete empty inline
+  and thread reads, and passing required CI.
+- The managed Maintainer merge omitted only the provider-confirmed separate
+  CODEOWNER vote; no CI, hold or blocking feedback was bypassed. The clean
+  accepted source was pulled forward after merge/provenance checks, preserving
+  its backup when routine sync refused the deleted publication ref.
+- The reviewed implementation order starts with the independent unused
+  state-root preference read. Fresh-process evaluator selection still needs
+  its explicit trusted-bootstrap admission and refusal qualification.
+  Implementation, complete native discovery, release/control adoption and
+  authorized running acceptance remain open; the effort is Active.
+
+### 2026-10-24 - Architecture attribution before selecting the next repair
+
+- The actual path is Bridge's registered command, a CMD/PowerShell launcher,
+  a separate canonical installation-context PowerShell evaluator, Containers
+  Python, a second CMD/PowerShell/Worktrees Python stack to locate the state
+  root, then Docker version/list queries. Most wall time precedes Docker.
+- A correlated, low-overhead diagnostic took 7.438 seconds: launcher and
+  runtime selection 0.841; installation-mode validation 2.336; Containers
+  runtime initialization before the peer read 0.802; the complete Worktrees
+  peer read 2.890; backend/serialization/exit remainder 0.569. These are
+  non-overlapping intervals of one invocation, not a sum of unrelated
+  profiles. The observer used 0.031 seconds of thread CPU. A preceding
+  low-overhead 8.437-second result remains an over-budget result.
+- Frequent process-tree polling was rejected for latency attribution: it
+  used 6.703 seconds of observer CPU and stretched its diagnostic to 14.360
+  seconds. It established nesting and verified the private candidate
+  interpreter was actually reached, but its wall times are not credited.
+- Three alternating fresh-process controls of the existing canonical status
+  implementations returned identical complete JSON: PowerShell took
+  2.141/1.797/1.797 seconds; isolated no-site Python took
+  0.687/0.406/0.453. The roughly 1.34-1.45-second difference is a more
+  promising candidate than removing process isolation. This is only a
+  positive legacy-mode comparison: trusted bootstrap selection, native
+  refusal/parity cases and the real consumer still need qualification.
+- The state-root result uses launch policy, the machine-local knowledge
+  binding and canonical registry checks. Its current full config loader also
+  resolves portable launch preferences (`copilot_profiles`,
+  `profile_assignment`, `headless`, `auto_fast_forward`) that this result
+  does not consume. That unrelated preference read and unrelated eager CLI
+  imports are narrower candidates; the existing approximately one-second
+  configuration and 1.14-second import profiles include required work too,
+  so their whole totals are not claimed as removable savings.
+- The separate Docker version preflight is another small candidate because
+  the subsequent list operation already observes daemon availability.
+  Preserve actionable missing-provider/daemon errors, source and installation
+  ownership, binding refusal, native holder accounting and incomplete-roster
+  semantics. No candidate from this attribution is implemented or deployed.
+
+### 2026-10-24 - Full native boundary still misses the unchanged deadline
+
+- The merged #8414 state-root source was built through the canonical native
+  developer installer into an isolated profile. Its monitor transition was a
+  no-op with no predecessor. The executing `context_cli.py` hash matches the
+  reviewed source; the complete state-root JSON matches the installed reader,
+  including the knowledge binding. Shared runtime selectors and deployment
+  manifests remained unchanged.
+- With that candidate reader behind the selected Containers command, five
+  fresh full PowerShell invocations took 7.421, 6.968, 6.672, 6.922 and
+  8.031 seconds. All returned the actual empty container inventory without
+  stderr. The fifth result fails the eight-second requirement; neither its
+  small overrun nor the four faster results is a waiver.
+- The exact registered CMD command was then exercised through Bridge's real
+  namespace resolver and native CPU/lifetime observer. One fresh process
+  completed in 7.875 seconds with native success, both holders settled and
+  five consistent warm reads. The first process of the required fresh
+  five-process cohort instead reached the unchanged eight-second foreground
+  timeout and reported incomplete enumeration. The cohort stopped there and
+  is not credited as passing. An earlier fixture that supplied a PowerShell
+  script as a native executable was invalid and is not acceptance evidence.
+- Read-only profiling still attributes 3.891 seconds of the provider core to
+  its nested state-root command. The candidate Worktrees core takes 3.187
+  seconds wall time in that diagnostic sample, including roughly 1.14 seconds
+  of import work and 1.00 second of layered configuration reads. Existing
+  per-load committed-config snapshot reuse is already present; no second
+  cache, skipped committed policy read or native-command shortcut was added.
+- A separate read-only control of the canonical installation-context status
+  script returned identical JSON and exit codes through separate-host and
+  scoped invocation, taking 2.152 and 1.567 seconds respectively. This is only
+  a potential startup-cost observation, not approval to remove a process
+  isolation boundary or a qualified invocation change. All canonical
+  validation, publication and installed code remains untouched.
+- Release remains independently blocked by #8411's active `ticking-forge`
+  source-only repair. The #3336/#6237 control owner retains reviewed helper
+  adoption; #7743's `rusty-kiln` owner retains its explicitly assigned stdio
+  and confirmed-no-launch settlement repair. #6859 and held #7833 retain
+  lifetime ownership. Coordination supplied the real initializer import and
+  exact-byte refusal boundary without opening a competing repair.
+- Complete native discovery, qualified containing release, authorized normal
+  rollout and the parent consumer task remain open. This effort is Active.
+
+### 2026-10-23 - State-root follow-up merged; native consumption still open
+
+- #8414 merged to Dev as
+  `5a2b202b5ae94b9695f04f4a05c4c424731d3ab7` after actual Copilot
+  approval of final head `f36181de7165b2400b5ec87801b05c3da1909390`,
+  empty complete feedback/thread reads and all required green checks.
+  Normal repository-authorized Maintainer handling omitted only the separate
+  CODEOWNER vote; no CI or blocking-feedback gate was bypassed.
+- Publication preserved the concurrent contributor's additional unit:
+  final-head admission has 1,156 nodes, 51 targets and the unchanged
+  300-second bound. Required CI qualified that actual source head.
+- The owned review waiter was stopped after its fresh cursor revealed that
+  the passing review had already arrived. No review or build was cancelled.
+  The merged worktree was pulled forward only after exact-head, clean-tree
+  and merged-ancestor checks, retaining its accepted-head backup.
+- This is source merged, not a containing qualified Main release or actual
+  complete eight-second running discovery. Follow the normal release and
+  authorized consumer path next. Existing control adoption and installer
+  integration scopes, broader #5761 outcomes and the parent guidance task
+  remain open.
 
 ### 2026-10-23 - State-root continuation and fresh-container qualification
 

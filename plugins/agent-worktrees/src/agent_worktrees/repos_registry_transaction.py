@@ -7,6 +7,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dropin_registry import ScanAuthority
+
+from . import config_acquisition as acquisition
+from .acquisition_report import failed, observe
 from .repos_registry_reader import RepositoryResolutionError
 
 if TYPE_CHECKING:
@@ -22,10 +26,17 @@ def revision(content: bytes | None) -> str:
 
 
 def read_bytes(path: Path) -> bytes | None:
+    observations = acquisition.current_observations()
     try:
-        return path.read_bytes()
+        content = path.read_bytes()
     except FileNotFoundError:
+        observe(observations, str(path), "config-source-bytes", ScanAuthority.ABSENT)
         return None
+    except Exception as exc:
+        failed(observations, str(path), "config-source-bytes", "unreadable-source", type(exc).__name__)
+        raise
+    observe(observations, str(path), "config-source-bytes", ScanAuthority.COMPLETE)
+    return content
 
 
 @contextmanager

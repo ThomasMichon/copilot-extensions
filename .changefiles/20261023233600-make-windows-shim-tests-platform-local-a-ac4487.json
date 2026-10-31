@@ -1,0 +1,13 @@
+{
+  "comment": "Make Windows shim tests platform-local and reconcile the explicit inline guidance guard.",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    },
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

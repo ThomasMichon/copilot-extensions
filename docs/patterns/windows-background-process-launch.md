@@ -25,8 +25,8 @@ change the symptom, but it is never part of the launch contract.
 | Short-lived child with captured or redirected stdio | A console-subsystem root plus `agent_procutil.no_window_kwargs()` / `no_window_flags()`, or the owning shared library's equivalent | `CREATE_NO_WINDOW`; pipes and exit status preserved; timeout owns the complete tree |
 | Non-interactive OpenSSH transport with redirected stdio | `ssh_manager.proxy.create_ssh_subprocess()` | `DETACHED_PROCESS` for the SSH root; a configured native proxy runs through an owned loopback broker; pipes, exit status, and cleanup remain owned |
 | Console descendant controlled by a third-party OpenSSH `ProxyCommand` | A windowless binary stdio client connects to an owned loopback broker; the broker launches the console child with `no_window_kwargs()` | Preserve SSH's original host/port and token expansion; authenticate the local channel; protocol bytes and child cleanup remain owned |
-| Long-lived Python daemon with no recurring console descendants | `agent_procutil.spawn_daemon(argv, cwd=..., log_path=...)` with `windowless_python()` (or `windowless_python()` plus `detached_kwargs(breakaway=True)` at sites not yet migrated) | No root console; lifetime escape is explicit; explicit durable cwd; output logged; occasional captured console children use the short-lived primitive |
-| Long-lived Python daemon with recurring console descendants | `spawn_daemon(..., console_children=True)` with a console-subsystem Python (or `windowless_daemon_kwargs(breakaway=True)` at sites not yet migrated) | One inherited hidden console contains descendants; durable lifetime is separate from headlessness |
+| Long-lived Python daemon with no recurring console descendants | `agent_procutil.spawn_daemon(argv, instance=..., cwd=..., log_path=...)` with `windowless_python()` | Attributable launch/startup custody; no root console; explicit durable cwd; output logged; occasional captured console children use the short-lived primitive |
+| Long-lived Python daemon with recurring console descendants | `spawn_daemon(..., instance=..., console_children=True)` with a console-subsystem Python | Attributable custody; one inherited hidden console contains descendants; durable lifetime is separate from headlessness |
 | PowerShell startup or scheduled launcher whose output is not captured | `conhost.exe --headless <interpreter> ...` | Headless console inherited by descendants; stable installed target; explicit stop/cutover ownership |
 | Intentional interactive terminal | An explicit interactive launcher | Reviewable exception with `# headless-guard: allow <reason>` when low-level flags are necessary |
 
@@ -45,6 +45,9 @@ control the console flags of a native proxy descendant. Do not put a console or
 pseudoconsole wrapper around an opaque protocol stream. Move that descendant
 behind an owned loopback broker instead, pump bytes without decoding them, and
 apply the normal captured-child launch primitive at the point that creates it.
+`ProxyJump` is another such boundary. Resolve the complete declared hop chain
+before launch and give every native SSH stage to the same owner; do not let
+OpenSSH spawn an opaque jump chain beneath an otherwise hidden root.
 The shared SSH launcher owns this broker in-process for the lifetime of one SSH
 root; normal exit, timeout, and cancellation close its listener and proxy child,
 and both the proxy child and the SSH root are bound to a kill-on-close Job
@@ -76,41 +79,83 @@ closed. Successful installer exit is therefore not a durable-service witness.
 Keep bounded helpers and their descendants inside caller-owned containment.
 For a durable daemon whose contract requires it to outlive the installer or
 request, opt out explicitly with the owning primitive:
-`agent_procutil.spawn_daemon()` (breakaway by default; `console_children=True`
-for recurring console descendants), or, at sites not yet migrated to it,
-`windowless_daemon_kwargs(breakaway=True)` / `detached_kwargs(breakaway=True)`.
+`agent_procutil.spawn_daemon()` with its instance descriptor (breakaway by
+default; `console_children=True` for recurring console descendants), or the
+corresponding native attributed launch/startup boundary. Flags-only
+`windowless_daemon_kwargs` / `detached_kwargs` are not daemon admission.
 `spawn_daemon` also requires an explicit durable `cwd` (the runtime root or
 home, never the caller's cwd or a plugin payload) and appends the daemon's
 output to a `log_path` (stderr optionally to its own `stderr_log_path`) instead
 of discarding it.
-Do not remove the caller's Job or make every child break away to repair one
-daemon. A caller already in a Job uses the shared, bounded WMI lifetime broker
-before launching: Windows can accept breakaway while retaining an ancestor Job
-under a venv redirector. A caller Job query failure refuses the launch. A
-direct launch's breakaway denial uses the same broker. Its windowless, stdlib-only
-bootstrap uses the actual base interpreter with WMI's supported detached-process
-flag, so a venv redirector cannot change the identity being adopted. It receives
-launch data through an authenticated one-use channel,
-stages the actual child suspended, and transfers a pinned native process
-handle before resume. Shell interpolation, credential-bearing command lines,
-temporary launch files and wrapper PIDs are not part of this contract.
-The caller receives the actual daemon's PID and exit/control methods.
-An uncommitted failed launch is reaped before retry; both direct and broker
-failure produce `DaemonSpawnError`, never an apparently successful contained
-daemon. Independent cleanup branches preserve that failure type. If process
-exit cannot be confirmed, the error carries `cleanup_confirmed=False` and no
-contained retry is permitted.
+
+### Preferred path: normal creation and explicit Job ownership
+
+Ordinary native process creation is the default, not an OS-registered broker.
+Choose `CREATE_NO_WINDOW` or detached/GUI-subsystem execution for visibility,
+then select Job ownership independently. A deliberate durable launch may request
+`CREATE_BREAKAWAY_FROM_JOB` where the owning Jobs permit it. Jobs created by
+the launcher must distinguish durable children from bounded request/tool/test
+children, whose cleanup remains strict. Do not remove a caller Job or make every
+descendant escape merely to repair one daemon.
+
+Validate the actual cleanup owners using retained native Job/process handles
+and identities. `IsProcessInJob(child, NULL)` reports membership in some Job,
+not whether the launcher owns that Job or will terminate the child. Conversely,
+escaping the immediate Job does not prove independence from a shared outer
+kill-on-close Job. A NULL-job limit query does not describe the complete
+hierarchy. The supported runtime contract verifies every tracked
+launcher-owned cleanup scope; it makes no escape claim for arbitrary unknown
+external supervisors.
+
+Prove the supported launch topology by closing every fixture-owned caller
+cleanup Job after admission. The daemon must survive, bounded controls must die
+and a child retained by a shared outer cleanup Job must not be reported
+independent. Parent exit and an early health response are insufficient.
+
+Do not automatically substitute COM/shell activation, Scheduled Tasks/S4U, an
+installed service or UAC for a failed normal spawn. Repair and qualify the
+owning direct-creation/Job boundary first. If a restrictive external owner
+prevents the required lifetime, report that limitation explicitly. A different
+activation, availability or privilege model requires its own reviewed decision;
+it is not a silent fallback or an excuse to relax cleanup checks.
+
+### Existing finite-broker compatibility path
+
+`spawn_daemon` now uses ordinary suspended native creation. Canonical Job
+producers propagate their complete named-scope chain; admission verifies the
+child against every exact retained Job object, closes temporary query handles
+before resume, and clears escaped metadata. No Job handles are inherited.
+Native creation denial, missing scope identities and a retained restrictive
+outer Job refuse explicitly without broker activation.
+
+The explicit finite Task broker remains for owned legacy recovery/removal.
+Its older outside-every-Job contract is not the ordinary launch path, and normal
+constructors no longer require Task adoption. This neither removes an existing
+registration automatically nor changes deployment authority.
+
+The caller receives the actual daemon's process control. An uncommitted failed
+launch is reaped before retry. Unconfirmed exit retains native custody and
+`cleanup_confirmed=False`; no contained retry is permitted.
 A caller for which the degraded lifetime is still better than no daemon may
-opt in to `contained_fallback=True`: only after broker failure does the daemon
+opt in to `contained_fallback=True`: only after a settled native refusal does the daemon
 start inside the caller's Job, with a warning and log entry. That daemon does
 not outlive the Job. Explicit `breakaway=False` and contained test mode never
-invoke the broker.
+escape containment.
 Contained tests deliberately suppress escape and retain process-tree cleanup.
+They still carry instance ownership. A `daemon_test_lifecycle` scope supplies
+runner-owned renewal and exact cleanup: 10-minute renewable leases and a
+4-hour unattended maximum, with an explicit pause-tolerant policy for
+interactive tests. Source-only test daemons do not become unbounded production
+instances by omission; native supervisors and service entrypoints participate
+in the same admission contract. See `libs/agent-procutil/README.md`.
 The native survival regression separately exercises Jobs with and without
 breakaway permission, with two complete launch/stop cycles, exact argv and
 environment delivery, split logs and foreground/window observation. The
 broker-only handle-control case proves timeout, termination and actual exit
 status rather than polling an unrelated wrapper.
+
+Native direct-lifetime, actual Manager recovery, Main promotion and installed
+rollout remain distinct evidence gates. A source change authorizes no deployment.
 
 PowerShell `Start-Process` and .NET `CreateNoWindow` provide no Job-escape
 promise. A one-shot installer should call the service's common user-mode ensure
@@ -154,7 +199,7 @@ check into recurring self-SSH process churn.
   `plugins/*/transports/*/scripts/install*.ps1`) may not start a process with
   `Start-Process` of `conhost`: that child stays in the installer's Job. Start
   a daemon now through its user-mode ensure path (built on `spawn_daemon`), or
-  WMI `Win32_Process.Create` for a PowerShell-only daemon; a child the caller
+  `Start-NativeDaemon` for a PowerShell-only daemon; a child the caller
   deliberately owns (a foreground supervisor that waits on it, a warned last
   resort) carries `# daemon-spawn: allow <reason>` on the statement or the
   comment line directly above it.
@@ -162,6 +207,8 @@ check into recurring self-SSH process churn.
 `agent_procutil.spawn_daemon` is an approved headless primitive: a launch
 through it is windowless by construction. It approves only its own call; a raw
 `subprocess` spawn beside it in the same function is still checked.
+`tools/check-daemon-coverage.py` separately audits shipped entrypoint custody
+and callable classifications; headless flags do not establish that coverage.
 
 Canonical shared libraries and every shipped vendored copy are scanned directly.
 The vendored-library synchronization guard is also required in CI and pre-push,

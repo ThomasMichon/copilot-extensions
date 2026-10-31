@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import time
+import uuid
 from dataclasses import asdict
 
 from .signals import (
@@ -16,7 +17,7 @@ _SCOPE = "copilot-extensions.process-telemetry"
 _SCHEMA = "agent.source-observation.log.v1"
 
 
-def _log_payload(records, identity, observed):
+def _log_payload(records, identity, observed, resource):
     from opentelemetry._logs import LogRecord, SeverityNumber
     from opentelemetry.sdk._logs import ReadableLogRecord
     from opentelemetry.sdk.resources import Resource
@@ -54,7 +55,7 @@ def _log_payload(records, identity, observed):
                 body="agent.source.observation", event_name="agent.source.observation",
                 attributes=attrs,
             ),
-            resource=Resource(_RESOURCE),
+            resource=Resource(resource),
             instrumentation_scope=InstrumentationScope(_SCOPE, "1"),
         ))
     encoded = []
@@ -68,12 +69,12 @@ def _log_payload(records, identity, observed):
             body=AnyValue(string_value=record.body), attributes=attributes(record.attributes),
         ))
     return logs, ExportLogsServiceRequest(resource_logs=[ResourceLogs(
-        resource=ProtoResource(attributes=attributes(_RESOURCE)),
+        resource=ProtoResource(attributes=attributes(resource)),
         scope_logs=[ScopeLogs(scope=ProtoScope(name=_SCOPE, version="1"), log_records=encoded)],
     )]).SerializeToString()
 
 
-def _metric_payload(points, start, end):
+def _metric_payload(points, start, end, resource):
     from opentelemetry.sdk.metrics.export import (
         AggregationTemporality, Histogram, HistogramDataPoint, Metric, MetricsData,
         NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
@@ -103,7 +104,7 @@ def _metric_payload(points, start, end):
         for (name, unit), data in sorted(groups.items())
     ]
     data = MetricsData([ResourceMetrics(
-        Resource(_RESOURCE), [ScopeMetrics(InstrumentationScope(_SCOPE, "1"), metrics, "")], "",
+        Resource(resource), [ScopeMetrics(InstrumentationScope(_SCOPE, "1"), metrics, "")], "",
     )])
     return data, encode_metrics(data).SerializeToString()
 
@@ -147,6 +148,9 @@ class LocalOtlpSignalsSink:
         if type(timeout) not in (float, int) or not math.isfinite(timeout) or not 0 < timeout <= 5:
             raise ValueError("signal timeout must be positive and at most five seconds")
         self._endpoints, self._identity, self._timeout = endpoints, identity, timeout
+        self._resource = {
+            **_RESOURCE, "service.instance.id": str(uuid.uuid4()),
+        } if endpoints.requested else None
         self._closed = False
         self._inactive = set()
         self._trace = None
@@ -201,6 +205,7 @@ class LocalOtlpSignalsSink:
 
                     if self._trace is None:
                         self._trace = LocalOtlpSink(endpoint, timeout=self._timeout)
+                        self._trace._service_instance_id = self._resource["service.instance.id"]
                     self._trace._deadline = deadline
                     self._trace._last_reply = None
                     try:
@@ -212,7 +217,7 @@ class LocalOtlpSignalsSink:
                 elif signal == "logs":
                     from opentelemetry.sdk._logs.export import LogRecordExporter, LogRecordExportResult
 
-                    sdk_records, payload = _log_payload(records, self._identity, observed)
+                    sdk_records, payload = _log_payload(records, self._identity, observed, self._resource)
                     result = None
 
                     class Exporter(LogRecordExporter):
@@ -232,7 +237,7 @@ class LocalOtlpSignalsSink:
                 else:
                     from opentelemetry.sdk.metrics.export import MetricExporter, MetricExportResult
 
-                    sdk_metrics, payload = _metric_payload(points, start, end)
+                    sdk_metrics, payload = _metric_payload(points, start, end, self._resource)
                     result = None
 
                     class Exporter(MetricExporter):

@@ -22,6 +22,7 @@ from promotion_unit_contract import (
 )
 from promotion_unit_effects import UnitRun
 from promotion_unit_packet import verify_packet
+from promotion_release_helpers import verify_helper_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKET = ROOT / "tools/promotion_unit_tests"
@@ -70,10 +71,23 @@ def main() -> int:
     parser.add_argument("--source-sha", required=True, type=source_sha)
     parser.add_argument("--manifest", type=Path, default=ROOT / "tools/promotion-unit-manifest.json")
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--development-root", type=Path)
+    parser.add_argument("--candidate-tree", type=source_sha)
     args = parser.parse_args()
     started = time.monotonic()
     manifest = admit_manifest(decode_json(args.manifest.read_text(encoding="utf-8")))
+    mapping = None
+    if (args.development_root is None) != (args.candidate_tree is None):
+        raise UnitEvidenceError("candidate execution requires both Dev bytes and the composed tree")
+    if args.development_root is not None:
+        from promotion_candidate_units import derive_manifest
+
+        manifest, development, candidate = derive_manifest(
+            manifest, development_root=args.development_root.resolve(), candidate_root=ROOT,
+            dev_sha=args.source_sha, candidate_tree=args.candidate_tree,
+        )
     verify_sources(ROOT, manifest["sources"])
+    verify_helper_contract(ROOT, manifest, development_root=args.development_root)
     args.output_dir.mkdir(parents=True, exist_ok=False)
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     os.environ.pop("PYTEST_ADDOPTS", None)
@@ -85,7 +99,7 @@ def main() -> int:
     # Pytest's Windows capture adapter loads native console support before collection.
     prepare_framework_io()
     with tempfile.TemporaryDirectory(prefix="promotion-units-") as temporary:
-        run = UnitRun(None, ROOT, manifest["sources"], Path(temporary))
+        run = UnitRun(None, ROOT, manifest["sources"], Path(temporary), nodes=manifest["nodes"])
         cov = coverage.Coverage(
             data_file=None, config_file=False,
             include=[str(ROOT / name) for name in manifest["coverage_targets"]],
@@ -110,7 +124,9 @@ def main() -> int:
                     "--log-file", str(Path(temporary) / "pytest.log"),
                     "--rootdir", str(ROOT), "--confcutdir", str(ROOT),
                     "--basetemp", str(Path(temporary) / "pytest"),
-                    *[str(ROOT) + "/" + node for node in manifest["nodes"]],
+                    *[str(ROOT / name) for name in dict.fromkeys(
+                        node.partition("::")[0] for node in manifest["nodes"]
+                    )],
                 ], plugins=[run])
             finally:
                 run.active = False
@@ -136,10 +152,35 @@ def main() -> int:
     cov.save()
     coverage_path = args.output_dir / "coverage.json"
     write_line_coverage(cov, coverage_path, coverage.__version__)
+    if args.development_root is not None:
+        from promotion_development_map import build_mapping, project_coverage
+
+        raw = decode_json(coverage_path.read_bytes())
+        raw["meta"]["profile"] = manifest["profile"]
+        origins = {name: manifest["composition"]["origins"][name] for name in raw["files"]}
+        mapping = build_mapping(
+            dev_sha=args.source_sha, candidate_tree=args.candidate_tree,
+            sources={name: development[name] for name in set(origins.values())},
+            candidate_sources={name: candidate[name] for name in origins}, origins=origins,
+        )
+        raw["development_projection"] = project_coverage(raw, mapping)
+        raw["development_mapping"] = mapping
+        coverage_path.write_text(
+            json.dumps(raw, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8",
+        )
     measured = {
         Path(name).resolve().relative_to(ROOT).as_posix() for name in cov.get_data().measured_files()
     }
-    if measured != set(manifest["coverage_targets"]):
+    if mapping is None:
+        complete = measured == set(manifest["coverage_targets"])
+    else:
+        origins = manifest["composition"]["origins"]
+        complete = (
+            measured <= set(manifest["coverage_targets"])
+            and {origins[name] for name in measured}
+            == set(manifest["composition"]["required_coverage_origins"])
+        )
+    if not complete:
         raise UnitEvidenceError("coverage did not observe every admitted production target")
     elapsed = time.monotonic() - started
     verify_observations(
@@ -147,7 +188,7 @@ def main() -> int:
         elapsed, manifest["max_seconds"],
     )
     proof = {
-        "profile": PROFILE, "source_sha": args.source_sha,
+        "profile": manifest["profile"], "source_sha": args.source_sha,
         "manifest_sha256": manifest_digest(manifest), "elapsed_seconds": elapsed,
         "collected": run.collected, "reports": run.reports, "effects": run.effects,
         "imported_sources": sorted(imported), "coverage_file": coverage_path.name,
@@ -161,7 +202,7 @@ def main() -> int:
     )
     verify_packet(
         args.output_dir, expected_source_sha=args.source_sha,
-        expected_manifest=manifest, source_root=ROOT,
+        expected_manifest=manifest, source_root=ROOT, development_root=args.development_root,
     )
     if time.monotonic() - started >= manifest["max_seconds"]:
         raise UnitEvidenceError("unit packet verification exceeded the whole-execution budget")

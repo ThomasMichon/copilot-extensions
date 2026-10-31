@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve operator snapshot model preferences, use a 300-second timeout, and interpret request contents locally by default.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

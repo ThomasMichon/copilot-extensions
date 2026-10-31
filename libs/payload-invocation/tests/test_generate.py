@@ -160,8 +160,13 @@ def test_binding_human_assets_do_not_require_worktrees_source(tmp_path, monkeypa
         ).read_text(encoding="utf-8")
 
 
-def test_installer_lifecycle_does_not_change_command_catalog(tmp_path: Path) -> None:
-    manifest = _required_context_multi_manifest(tmp_path)
+@pytest.mark.parametrize("required_context", (False, True))
+def test_installer_lifecycle_does_not_change_command_catalog(
+    tmp_path: Path, required_context: bool,
+) -> None:
+    manifest = (
+        _required_context_multi_manifest(tmp_path) if required_context else _manifest(tmp_path)
+    )
     data = json.loads(manifest.read_text(encoding="utf-8"))
     before = generator.expected_files(manifest)
     primitive = manifest.parent / "scripts/installation-context/installation_context.py"
@@ -184,6 +189,20 @@ def test_installer_lifecycle_requires_boolean(tmp_path: Path, value: object) -> 
     data["installerLifecycle"] = value
     manifest.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(ValueError, match="installerLifecycle must be a boolean"):
+        generator.load_manifest(manifest)
+
+
+@pytest.mark.parametrize("required_context", [False, True])
+def test_installer_lifecycle_requires_vendored_primitive(
+    tmp_path: Path, required_context: bool,
+) -> None:
+    manifest = (
+        _required_context_manifest(tmp_path) if required_context else _manifest(tmp_path)
+    )
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["installerLifecycle"] = True
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="installerLifecycle requires a vendored installation primitive"):
         generator.load_manifest(manifest)
 
 
@@ -471,6 +490,24 @@ def test_required_installation_context_uses_fixed_dispatchers(tmp_path: Path) ->
     assert "$env:AGENT_MACHINES_PAYLOAD_ROOT = $_payloadRoot" in powershell
     assert "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN" in powershell
     assert "Resolve-PayloadRuntime" not in powershell
+
+
+def test_dispatch_required_context_keeps_native_catalog_contract() -> None:
+    payload = REPO / "plugins" / "agent-dispatch"
+    data = generator.load_manifest(payload / "payload-invocation.json")
+    assert data["version"] == 2
+    assert data["installationContext"] == "required"
+    assert data["payloadRootEnv"] == "AGENT_DISPATCH_PAYLOAD_ROOT"
+    assert data["payloadDispatcher"] == {
+        "posix": "scripts/runtime-gate.sh", "windows": "scripts/runtime-gate.ps1",
+    }
+    assert data["windowsCatalogShim"] == "cmd"
+    assert data["provisionMode"] == "direct"
+    assert data["powershellPipelineInput"] is False
+    generated = generator.expected_files(payload / "payload-invocation.json")
+    assert "runtime-gate.sh" in generated[payload / "bin" / "agent-dispatch"]
+    assert "runtime-gate.ps1" in generated[payload / "bin" / "agent-dispatch.ps1"]
+    assert "agent-dispatch.cmd" in generated[payload / "scripts" / "emit-command-catalog.ps1"]
 
 
 def test_required_multi_command_dispatchers_export_command_metadata(
@@ -892,13 +929,14 @@ def test_worktrees_composed_status_revalidates_changed_receipt(tmp_path: Path, h
         "TEST_NAMESPACE_REPLACEMENT": str(replacement),
     })
     native = payload / "scripts" / "installation-context" / "installation-context.ps1"
-    source = native.read_text(encoding="utf-8")
-    status_call = "$result = Resolve-InstallationStatus $resolvedCopilotHome $resolvedProjectRoot $resolvedDurableHome"
+    owner = native.with_name("_installation_context_mode_cli.py")
+    source = owner.read_text(encoding="utf-8")
+    status_call = "    result = resolve_installation_mode(**mode_arguments)"
     assert source.count(status_call) == 1
-    native.write_text(source.replace(
+    owner.write_text(source.replace(
         status_call, status_call + "\n"
-        "[IO.File]::WriteAllText($env:TEST_NAMESPACE_RECEIPT, "
-        "[IO.File]::ReadAllText($env:TEST_NAMESPACE_REPLACEMENT))",
+        "    Path(os.environ['TEST_NAMESPACE_RECEIPT']).write_bytes("
+        "Path(os.environ['TEST_NAMESPACE_REPLACEMENT']).read_bytes())",
     ), encoding="utf-8")
     result = subprocess.run(
         [host, "-NoProfile", "-File", str(native), "status",
@@ -2363,9 +2401,14 @@ def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:
         ):
             writer_path = plugin_root / "scripts" / writer_name
             if writer_path.is_file():
-                assert "emit-command-catalog" in writer_path.read_text(
-                    encoding="utf-8"
-                ), (
+                writer_text = writer_path.read_text(encoding="utf-8")
+                if data["inProcessCatalog"]:
+                    module_path = plugin_root / "scripts" / "emit_command_catalog.py"
+                    assert module_path in generated
+                    assert "emit_command_catalog.py" in writer_text
+                    assert "subprocess" not in writer_text
+                    break
+                assert "emit-command-catalog" in writer_text, (
                     f"{plugin}: {writer_name} no longer composes "
                     "emit-command-catalog"
                 )
@@ -3384,3 +3427,241 @@ def test_powershell_shim_boot_trace_lines_survive_concurrent_invocations(
                 cursor += 1
             assert cursor < len(expected), phases
             cursor += 1
+
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "", []])
+def test_in_process_catalog_rejects_non_boolean_opt_in(tmp_path, value):
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["inProcessCatalog"] = value
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="inProcessCatalog"):
+        generator.load_manifest(manifest)
+
+
+@pytest.mark.parametrize("other", ["catalogGate", "catalogBinding"])
+def test_in_process_catalog_rejects_unimplemented_policy_composition(tmp_path, other):
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["inProcessCatalog"] = True
+    if other == "catalogGate":
+        (manifest.parent / "scripts/gate.py").write_text("")
+        data[other] = "scripts/gate.py"
+    else:
+        data[other] = True
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="inProcessCatalog"):
+        generator.load_manifest(manifest)
+
+
+@pytest.mark.parametrize("multi", [False, True])
+def test_in_process_catalog_is_explicit_generated_source(tmp_path, multi):
+    manifest = (_multi_manifest if multi else _manifest)(tmp_path)
+    module = manifest.parent / "scripts/emit_command_catalog.py"
+    before = generator.expected_files(manifest)
+    assert module not in before
+    data = json.loads(manifest.read_text())
+    data["inProcessCatalog"] = True
+    manifest.write_text(json.dumps(data))
+    after = generator.expected_files(manifest)
+    assert set(after) == {*before, module}
+    assert all(after[path] == content for path, content in before.items())
+    namespace = {"__file__": str(module), "__name__": "_catalog_test"}
+    exec(compile(after[module], str(module), "exec"), namespace)
+    context = namespace["render_context"](windows=True)
+    catalog = json.loads(context.split("```json\n", 1)[1].split("\n```", 1)[0])
+    assert catalog["plugin"] == data.get("plugin", data.get("command"))
+    assert catalog["payload"] == {"provenance": "payload-local"}
+    assert [row["id"] for row in catalog["commands"]] == (
+        ["agent-example", "example-helper"] if multi else ["agent-example"]
+    )
+    assert all(row["availability"] == "unavailable" for row in catalog["commands"])
+    assert all(row["argv"][0].endswith(".ps1") for row in catalog["commands"])
+
+
+
+_IN_PROCESS_ADOPTERS = (
+    "agent-bridge", "agent-containers", "agent-logger", "agent-machines",
+    "agent-mcp", "agent-pull-requests", "agent-vault",
+)
+
+
+def _catalog_parts(context):
+    prose, encoded = context.split("```json\n", 1)
+    return prose, json.loads(encoded.split("\n```", 1)[0])
+
+
+@pytest.mark.parametrize("plugin", _IN_PROCESS_ADOPTERS)
+def test_in_process_catalog_registered_writer_native_entry(tmp_path, plugin):
+    if os.name == "nt":
+        shell = shutil.which("pwsh") or shutil.which("powershell.exe")
+    else:
+        shell = shutil.which("bash")
+    if not shell:
+        pytest.skip("native hook shell unavailable")
+    payload = tmp_path / "space 'quote $value[1]"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    source = REPO / "plugins" / plugin
+    data = generator.load_manifest(source / "payload-invocation.json")
+    assert data["inProcessCatalog"]
+    for name in (
+        "write-session-guidance.ps1", "write-session-guidance.sh",
+        "write_session_guidance.py", "emit_command_catalog.py",
+        "emit-command-catalog.ps1", "emit-command-catalog.sh",
+    ):
+        shutil.copyfile(source / "scripts" / name, scripts / name)
+    writer_path = scripts / "write_session_guidance.py"
+    audit = tmp_path / "writer-audit.jsonl"
+    # Observe the real writer process and its spawn boundary, not a mocked producer.
+    instrumentation = (
+        "\nimport sys as _audit_sys, json as _audit_json\n"
+        f"_audit_path = {str(audit)!r}\n"
+        "def _audit_record(event, args):\n"
+        "    if event in ('subprocess.Popen', 'os.system', 'os.posix_spawn', 'os.spawn'):\n"
+        "        with open(_audit_path, 'a', encoding='utf-8') as stream:\n"
+        "            stream.write(_audit_json.dumps({'spawn': event}) + '\\n')\n"
+        "with open(_audit_path, 'a', encoding='utf-8') as _stream:\n"
+        "    _stream.write('{\"writer\":1}\\n')\n"
+        "_audit_sys.addaudithook(_audit_record)\n"
+    )
+    writer_path.write_text(writer_path.read_text().replace(
+        "from __future__ import annotations",
+        "from __future__ import annotations\n" + instrumentation,
+    ), encoding="utf-8")
+    sentinel = tmp_path / "forbidden"
+    for name in (data["installer"], "runtime-gate", "invoke-payload-runtime", "service", "network"):
+        for suffix in (".ps1", ".sh"):
+            (scripts / (name + suffix)).write_text(
+                f"Set-Content -LiteralPath '{sentinel}' -Value invoked; exit 91"
+                if suffix == ".ps1" else f"printf invoked > '{sentinel}'; exit 91\n",
+                encoding="utf-8",
+            )
+    output = payload / str(data["outputDir"])
+    output.mkdir(parents=True)
+    for command in data["commands"]:
+        for suffix in ("", ".ps1", ".cmd"):
+            target = output / (command["command"] + suffix)
+            trap = (
+                f"Set-Content -LiteralPath '{sentinel}' -Value invoked; exit 91"
+                if suffix == ".ps1" else
+                f'@echo invoked>"{sentinel}"' + chr(10) + '@exit /b 91' + chr(10)
+                if suffix == ".cmd" else
+                "#!/bin/sh" + chr(10) + f"printf invoked > '{sentinel}'; exit 91" + chr(10)
+            )
+            target.write_text(trap, encoding="utf-8")
+            target.chmod(0o755)
+    hooks = json.loads((source / "hooks.json").read_text())["hooks"]["sessionStart"]
+    entry = next(h for h in hooks if "write-session-guidance." in h["powershell"])
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+           "HOMEDRIVE": home.drive, "HOMEPATH": str(home)[len(home.drive):],
+           "COPILOT_PLUGIN_ROOT": str(payload), "PYTHONDONTWRITEBYTECODE": "1",
+           "POWERSHELL_UPDATECHECK": "Off"}
+    for key in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV", "COPILOT_EXTENSIONS_CONTEXT"):
+        env.pop(key, None)
+    command = (
+        [shell, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]]
+        if os.name == "nt" else [shell, "-c", entry["bash"]]
+    )
+    target = home / ".copilot/session-state/session-1/instructions" / plugin / "session-guidance.instructions.md"
+    calls = 0
+
+    def invoke(payload_input='{"sessionId":"session-1"}'):
+        nonlocal calls
+        calls += 1
+        result = subprocess.run(command, input=payload_input, env=env, text=True,
+                                capture_output=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "{}"
+        assert not sentinel.exists()
+        return target.read_text(encoding="utf-8") if target.exists() else ""
+
+    def reference():
+        argv = (
+            [shell, "-NoProfile", "-File", str(scripts / "emit-command-catalog.ps1")]
+            if os.name == "nt" else [shell, str(scripts / "emit-command-catalog.sh")]
+        )
+        result = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        return _catalog_parts(json.loads(result.stdout)["additionalContext"])
+
+    first = invoke()
+    assert _catalog_parts(first[first.index("## "):]) == reference()
+    assert invoke() == first
+    assert not (home / str(data["runtimeRoot"])).exists()
+    primary = output / (str(data["commands"][0]["command"]) + (
+        (".cmd" if data["windowsCatalogShim"] == "cmd" else ".ps1") if os.name == "nt" else ""
+    ))
+    saved = primary.read_bytes()
+    primary.unlink()
+    unavailable = invoke()
+    assert _catalog_parts(unavailable[unavailable.index("## "):]) == reference()
+    assert _catalog_parts(unavailable[unavailable.index("## "):])[1]["commands"][0]["availability"] == "unavailable"
+    primary.write_bytes(saved)
+    primary.chmod(0o755)
+    assert invoke() == first
+    installer = scripts / (str(data["installer"]) + (".ps1" if os.name == "nt" else ".sh"))
+    installer.unlink()
+    content = invoke()
+    assert _catalog_parts(content[content.index("## "):]) == reference()
+    assert all(row["availability"] == "unavailable" for row in _catalog_parts(content[content.index("## "):])[1]["commands"])
+    before_invalid = target.read_bytes()
+    assert invoke('{"sessionId":"../escape"}')
+    assert target.read_bytes() == before_invalid
+    assert invoke("malformed json")
+    assert target.read_bytes() == before_invalid
+    module = scripts / "emit_command_catalog.py"
+    for noisy_source in (
+        "print('accidental module noise')" + chr(10) + "raise RuntimeError('broken module')",
+        "def render_context():" + chr(10) + "    print('accidental render noise')"
+        + chr(10) + "    raise RuntimeError('broken render')",
+    ):
+        module.write_text(noisy_source, encoding="utf-8")
+        assert "unavailable" in invoke()
+    module.write_text(
+        "def render_context(): return 'oversized source must not run'" + chr(10) + "#" * (64 * 1024),
+        encoding="utf-8",
+    )
+    assert "unavailable" in invoke()
+    module.write_text("this is not valid Python !!!", encoding="utf-8")
+    assert "unavailable" in invoke()
+    module.unlink()
+    assert "unavailable" in invoke()
+    records = [json.loads(line) for line in audit.read_text().splitlines()]
+    assert sum(row.get("writer", 0) for row in records) == calls
+    assert not any("spawn" in row for row in records)
+    assert not list(payload.rglob("__pycache__"))
+    print(f"entry-workcount {plugin}: wrapper={calls} writer={calls} nested-spawn=0")
+
+
+
+@pytest.mark.parametrize("multi", [False, True])
+def test_in_process_catalog_retains_platform_availability_predicates(tmp_path, monkeypatch, multi):
+    manifest = (_multi_manifest if multi else _manifest)(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["inProcessCatalog"] = True
+    data["windowsCatalogShim"] = "cmd"
+    manifest.write_text(json.dumps(data))
+    module = manifest.parent / "scripts/emit_command_catalog.py"
+    namespace = {"__file__": str(module), "__name__": "_catalog_predicates"}
+    exec(compile(generator.expected_files(manifest)[module], str(module), "exec"), namespace)
+    commands = ["agent-example", "example-helper"] if multi else ["agent-example"]
+    output = manifest.parent / "bin"
+    output.mkdir()
+    for command in commands:
+        (output / command).mkdir()
+        (output / (command + ".cmd")).mkdir()
+    monkeypatch.setattr(namespace["os"], "access", lambda *_: True)
+    windows = namespace["render_context"](windows=True)
+    assert "a newline" in windows
+    assert all(row["shell"] == "cmd" for row in _catalog_parts(windows)[1]["commands"])
+    assert all(row["availability"] == "ready" for row in _catalog_parts(windows)[1]["commands"])
+    posix = _catalog_parts(namespace["render_context"](windows=False))[1]
+    assert all(row["availability"] == ("unavailable" if multi else "ready") for row in posix["commands"])
+    installer = manifest.parent / "scripts/install.sh"
+    installer.unlink()
+    installer.mkdir()
+    assert all(row["availability"] == "unavailable" for row in _catalog_parts(namespace["render_context"](windows=False))[1]["commands"])

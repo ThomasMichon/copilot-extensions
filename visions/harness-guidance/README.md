@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-14
+- **Last revised:** 2026-10-31
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -22,6 +22,11 @@ portable, attributable, and intentionally budgeted.
   enabled.
 - **Skills** provide detailed procedures at task time rather than occupying
   always-on context.
+- **Circumstance-based skills** use instruction-injection hooks to detect a
+  problem-specific occurrence and deliver just-in-time guidance, as a last line
+  of defense when general upfront instructions and reactive skill selection
+  are insufficient. Fact acquisition, event-time evaluation and contextual
+  intervention remain distinct responsibilities.
 - **Coordinators and delegates** divide work by context cost and separability:
   the coordinating agent owns decomposition, integration, synthesis, and
   completion, while bounded delegates isolate independent evidence gathering,
@@ -83,21 +88,118 @@ Plugin-owned ambient policy should reach every applicable session as a concise
 kernel containing only what must remain active, with detailed mechanics
 available on demand. **`sessionStart` `additionalContext` composition across
 multiple hooks is empirically unreliable** — observed sessions deliver no
-contributor's output at all, not merely a last-writer-wins loss. Guidance a
-harness genuinely depends on should therefore reach the agent through a
-checked-in static pointer instruction plus a hook-written session-scoped file
+contributor's output at all, not merely a last-writer-wins loss. Ambient session
+guidance a harness depends on should therefore reach the agent through a
+creation/startup-projected pointer instruction plus a hook-written session-scoped file
 the agent is directed to read (see
 `docs/patterns/session-scoped-dynamic-guidance.md`), not through
 `additionalContext` aggregation alone. When the host natively composes every
 independent hook output and that behavior is proven at the supported version
 floor, direct plugin-owned `additionalContext` should become the preferred
-perfectly dynamic path. Until then, the checked-in pointer plus exact-session
-guidance file remains authoritative.
+perfectly dynamic path. Until then, projected pointers plus exact-session
+guidance files should provide the normal delivery path. Offline recovery
+should use periodically synchronized, non-automatically-loaded fallback bodies,
+not a second automatic copy of the same policy.
+
+### circumstance-based-intervention
+
+Problem-specific guidance should arrive when its circumstance is present.
+General startup guidance should not substitute for occurrence detection, and a
+blanket once-per-session acknowledgement should not silence later circumstances.
+A known rule should still be evaluated against a new target or changed condition.
+Advisory intervention should not require a blocking bounce merely to be visible.
+Acknowledgement should not grant permission or prove the underlying condition
+resolved; its scope and invalidation should follow the actual circumstance.
+
+### reusable-facts-current-decisions
+
+Computed discovery should be reusable through its existing authority, with
+complete input binding, freshness and completeness, or precomputed at startup
+when stable. Event facts and current controls should retain their source
+provenance and freshness. A complete empty result should remain meaningful, while
+unavailable or incomplete evidence should not become an invented allow decision.
+An unavailable-evaluation default should remain distinct from asserting that
+evidence authorized the action. Facts may be reused; final authorization and dynamic occurrences should not be
+memoized away. Optional discovery should not dominate the essential event path.
 
 ### portable-operator-policy
 
 An operator should be able to carry personal policy across target repositories
 without copying it into each repository or erasing repository-owned overrides.
+
+### charter-bounded-useful-autonomy
+
+An agent should continue ordinary investigation, source fixes, bounded
+validation and issue/PR publication within its established charter and
+designated destinations without asking permission to remain useful. Genuine
+decisions, explicit holds and independent review, security and ownership gates
+remain binding; a blocked effect should not stop independent authorized work.
+
+### persistent-effect-scope-preclearance
+
+Explicit operator approvals should retain their original evidence, allowed
+operations, targets, resource owners, effects, accepted blast radius, limits
+and later narrowing or revocation across efforts, checkpoints and handoffs.
+An ordinary revision or retry inside the approved scope should not require
+another permission ceremony.
+
+Deployment, personal or non-source-controlled content, disclosure and resources
+outside the operator's control need applicable explicit effect authority.
+Current scope and circumstances remain revalidated before action; confidence,
+convenience, a copied record or expected recoverability should never create a
+grant or bypass a product gate.
+
+### decision-ready-unattended-continuation
+
+An agent approaching a genuine effect boundary should use permitted
+investigation, planning and documentation to prepare the operator's decision
+before requesting blocking input. The proposal should explain the problem and
+its cause, current evidence and uncertainty, options and conditional future
+projections, a general-class framework and the precise scope and ramifications
+of acceptance.
+
+The affected action stays gated while another authorized avenue can progress.
+An adopted agenda can preserve the branch and a revisit point without turning
+time, Autopilot or inferred operator presence into authority. Explicit all-work
+holds, privacy/resource limits and unknown-effect reconciliation still govern;
+unattended operation should not mean presence polling or unrelated busywork.
+
+### configurable-attribution-signatures
+
+AI disclosure should have one authoritative policy owner. An adopting harness
+should express its attribution goals through configuration of that owner,
+rather than another decision matrix or competing signature convention.
+
+Sparse circumstance-based configuration should select header and footer
+signatures with useful defaults and trusted personal overrides. Templates and
+interpolation should remain data. Lightly formatted session guidance should
+help an agent choose and adapt the appropriate marker; an optional programmatic
+consumer should use the same effective configuration and avoid duplicate
+markers. Neither presentation path should invent human review, waive a required
+disclosure, authorize publication or change an already approved or published
+item.
+
+### maintenance-aware-tool-unavailability
+
+Normally projected `agent-conduct-guidance` should tell an agent to inspect the
+retained local maintenance banner when a command advertised by an `agent-*`
+catalog appears missing. An explained active hold means preserve work and
+obligations, report its responsible session, and refrain from self-repair,
+repeated missing-tool retries or replacement workers.
+
+The banner should be readable through native filesystem facilities even when
+noncritical supporting services, binstubs and plugin payloads are gone. Applicable
+guidance should remain available through that outage rather than requiring the
+missing tool to explain itself. A held agent should use one low-frequency native
+scheduled prompt to observe updates until applicable clearance and capability
+readiness; unavailable native scheduling is an explicit limitation, never a
+reason to invent another daemon. The maintenance owner continues only its
+separately authorized work. See
+[Disposable Supporting Runtimes](../plugin-services/disposable-runtimes/README.md).
+
+Critical machine-management connectivity remains outside that removal scope.
+Credential relays are disposable; their absence is not permission for an agent
+to rebuild the supporting suite or take over the retained transport.
 
 ### attributable-context-budget
 
@@ -160,6 +262,25 @@ Delivering already-static files should not require a separately packaged
 projection engine, authoring/review framework, sibling runtime, service or
 network operation. The implementation should stay simple rather than inherit
 unrelated machinery merely to reuse code from a similar subject.
+
+Every worktree creation and session start should copy the selected plugins'
+current declared files. Content hashes, fingerprints, provenance envelopes,
+version comparisons and prepared-generation receipts should not gate copying
+or the use of these managed instruction copies. Existing plugin selection and
+harness trust boundaries should own instruction trust rather than a second
+runtime authentication layer.
+
+Generated instructions may be overwritten while a session is running. An
+operator should be able to restart that session to load corrected upstream
+guidance; protecting a previously copied generation must not prevent refresh.
+Filesystem delivery should remain distinct from proving model admission.
+
+Automatically discovered full plugin instruction bodies should come from this
+creation/startup projection, not independently maintained checked-in copies.
+Periodically synchronized offline fallbacks should remain available on demand;
+their content-bearing filenames must not contain `.instructions.md` or otherwise
+match native instruction discovery. Thin recovery locators should not duplicate
+policy or cause an available projected body and its fallback to load together.
 
 ### coordinator-first-task-routing
 
@@ -253,26 +374,28 @@ should remain discoverable from the concise ambient kernel.
 
 ### resilient-safety-boundary
 
-Critical safety and publication constraints should retain a minimal static
-fallback when a launch path cannot load the richer plugin-owned guidance.
-Plugin setup should own any compatibility/fallback prose through a stable,
-idempotently reconciled marker or dedicated rule file. For worktree-scoped
-projected instruction content specifically, the lifecycle-hook-rendered,
-gitignored local cache is the **primary** delivery path -- it reflects the
-currently installed payload, not a sync-lagged approximation of it. The
-checked-in, scheduled-sync-worker-maintained copy is strictly the
-**fallback**: the floor a session falls back to only when no pre-session
-hook could render anything fresher (a fully hookless/headless/sandboxed
-launch) or hasn't yet had the chance to (a pre-sync gap on an otherwise
-hook-capable path). A fallback a stale leftover local artifact can
-silently outrank is not actually safe, so precedence between the two must
-be decided by stable content provenance (e.g. a declared version), never
-by the local artifact's mere existence or render recency.
+Critical safety and publication constraints should remain recoverable when a
+launch path cannot load richer plugin-owned guidance. Repository-owned
+invariants should stay with the repository; plugin-owned offline fallback
+content should be periodically synchronized and read only when needed, never
+automatically loaded beside its current projection. Thin recovery locators may
+remain discoverable without embedding another policy body.
+
+For worktree-scoped projected content, creation/startup-generated local guidance
+should be the normal automatic delivery path. A checked-in offline fallback
+should remain usable when no usable current projection exists, including
+hookless/headless or failed preparation. Content-bearing fallback filenames
+must not contain `.instructions.md` or otherwise trigger automatic discovery.
+The selected plugin and its declaration should determine the primary file;
+no separate version, content-provenance or fingerprint comparison should choose
+between it and the fallback. A failed copy should be reported explicitly, not
+hidden by a fallback read or mistaken for successful refresh.
 
 Applicable worktree and session-creation boundaries should establish that
 local guidance is available before the agent begins loading instructions. Session-start
-should repair missing or stale local guidance as a backup, not be the sole
-delivery opportunity on a path that can prepare it earlier.
+should copy the current plugin files again, including while another session is
+running, not be the sole delivery opportunity on a path that can prepare them
+earlier. A restart is sufficient to let that running session load the update.
 
 ### ambient-delivery-fails-open
 
@@ -285,6 +408,31 @@ otherwise-usable session start. A session-scoped dynamic guidance file that has
 not yet been written (or whose owning hook could not run, e.g. an untrusted
 repository-level hook path) is an explicit no-op for the reader, never a
 blocker.
+
+### bounded-actionable-hook-failures
+
+Circumstantial guidance, explicit policy enforcement and lifecycle work should
+have explicit, different failure outcomes. When an uninstalled, missing or
+broken backing suite prevents ordinary evaluation, hooks should default to fail
+open and preserve inspection, recovery and repair, rather than making every tool
+depend on suite infrastructure. Unavailable advisory guidance should likewise
+remain nonblocking and legible. A narrow exception should require a documented
+protected condition or installation prerequisite, positively applicable trusted
+inputs, a bounded actionable error and a reachable recovery path, without relying
+on the missing helper to select that default. Absence or validator failure should
+not prove applicability. Confirmed policy outcomes should retain their explicit
+scoped meaning without fabricated successful evaluation. Existing runtime
+fallback and recovery selection should remain usable. Errors should identify
+their owner, failed boundary, operation effect, supported next action and retry
+safety through a
+verified agent-readable channel. Unknown mutation effects should be reconciled
+by their owner rather than blindly replayed.
+
+Whole-path cost should include first attempt, retries, response delivery,
+cancellation and owned-descendant cleanup within the caller's deadline. A
+transition should preserve policy, error, lifecycle and cleanup behavior and
+keep one active implementation per event. Diagnostic deduplication should avoid
+loops without permanently concealing an unresolved or newly occurring failure.
 
 ### bounded-source-modules
 

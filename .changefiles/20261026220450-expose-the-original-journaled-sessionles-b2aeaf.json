@@ -1,0 +1,9 @@
+{
+  "comment": "Expose the original journaled sessionless creation result through a separately negotiated receiving operation without changing lifecycle proofs or starting an agent.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -31,14 +31,20 @@ parse_arguments() {
             --force) FORCE=1; shift ;;
             --install-dir) INSTALL_DIR="${2:?--install-dir requires a path}"; shift 2 ;;
             --profile) PROFILE="${2:?--profile requires base or provider-exec}"; shift 2 ;;
-            stamp|provision|init) ACTION="$1"; shift ;;
+            install|uninstall|stamp|provision|init) ACTION="$1"; shift ;;
             *) _fail "Unknown installer argument: $1"; exit 2 ;;
         esac
     done
 }
 # Resolve caller-relative roots before self-staging changes the working directory.
 parse_arguments "$@"
+if [[ "$ACTION" != stamp && "$ACTION" != uninstall && -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" &&
+    -z "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET+x}" ]]; then
+    _fail "Prepared-source transaction requires a frozen source target; upgrade the update engine before profile construction."
+    exit 1
+fi
 case "$PROFILE" in ""|base|provider-exec) ;; *) _fail "Unknown runtime profile: $PROFILE"; exit 2 ;; esac
+case "/$INSTALL_DIR/" in */../*) _fail 'Legacy runtime paths must not contain raw .. components'; exit 1 ;; esac
 case "$INSTALL_DIR" in ""|/*) ;; *) INSTALL_DIR="$PWD/$INSTALL_DIR" ;; esac
 set -- "$ACTION"
 if [[ "$FORCE" == 1 ]]; then set -- "$@" --force; fi
@@ -48,6 +54,11 @@ export AGENT_CONTAINERS_ACTION="$ACTION"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [[ "$ACTION" == uninstall ]]; then
+    [[ "$FORCE" == 0 && -z "$PROFILE" ]] || { _fail 'Legacy uninstall does not accept force or profile'; exit 2; }
+    exec bash "$SCRIPT_DIR/legacy-uninstall.sh" "${INSTALL_DIR:-$HOME/.agent-containers}"
+fi
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
@@ -276,7 +287,7 @@ _source_runtime_version() {
     "$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
         --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-containers "$@"
 }
-if [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
     SOURCE_RUNTIME_IDENTITY="$(_source_runtime_version --format json)" || exit 1
     source_python="$(_source_python)" || exit 1
     SRC_VERSION="$("$source_python" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_version"])' \
@@ -352,229 +363,97 @@ deploy_binstub() {
     STUB="$LOCAL_BIN/agent-containers"
     mkdir -p "$LOCAL_BIN"
     deploy_resolver
-    cat > "$STUB" << 'STUBEOF'
-#!/usr/bin/env bash
-# agent-containers binstub -- self-provisioning (install-on-first-use).
-# Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
-# (the deployed resolve-runtime.sh; uniform-runtime-resolution, #765): current-
-# version -> last-known-good -> newest complete slot. NEVER a `.venv` link, NEVER
-# a PATH python -- when no slot is installed AGENT_RT_PY is empty and we self-
-# provision on first use rather than silently binding the system interpreter.
-export PYTHONUTF8=1
-_name="agent-containers"
-_root="$HOME/.$_name"
-_resolver="$_root/bin/resolve-runtime.sh"
-_resolve() {
-    AGENT_RT_PY=""
-    if [ -f "$_resolver" ]; then
-        AGENT_RT_ROOT="$_root"
-        . "$_resolver"
+    local source_root="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    local bound_context="${COPILOT_EXTENSIONS_CONTEXT:-}" bound_mode=unknown bound_root="" decision="" durable=""
+    local -a binding_args=(status --payload-root "$source_root" --plugin-id agent-containers --legacy-root "$INSTALL_DIR")
+    if [[ -n "$bound_context" ]]; then
+        durable="$bound_context"
+        for _part in 1 2 3 4 5; do durable="$(dirname -- "$durable")"; done
+        binding_args+=(--context "$bound_context" --durable-home "$durable")
     fi
-}
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_containers "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
-_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/init.sh"
-[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/init.sh 2>/dev/null | head -n1)"
-if [ ! -f "$_install" ]; then
-    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
-    exit 127
+    decision="$(bash "$SCRIPT_DIR/installation-context/installation-context.sh" "${binding_args[@]}")" || {
+        _fail 'Cannot bind the global command to its installation context'
+        return 126
+    }
+    binding_value() {
+        LC_ALL=C awk -f "$SCRIPT_DIR/installation-context/json-query.awk" \
+            -v mode="${2:-get}" -v "query_path=$1" <<<"$decision"
+    }
+    bound_root="$(binding_value $'legacy\034root')"
+    if [[ "$bound_root" != /* ]]; then
+        _fail 'Cannot bind the global command to a canonical installation root'
+        return 126
+    fi
+    if [[ "$(binding_value actualMode)" == namespaced &&
+          "$(binding_value runtimeRoot)" == "$bound_root" &&
+          -n "$(binding_value context)" ]]; then
+        bound_mode=namespaced
+        bound_context="$(binding_value context)"
+    elif [[ -z "$bound_context" && ! -e "$bound_root/install.json" ]] &&
+         { [[ "$(binding_value status)" == ready && "$(binding_value actualMode)" == legacy &&
+              "$(binding_value desiredMode)" == legacy ]] ||
+           [[ "$(binding_value status)" == provenance-blocked &&
+              "$(binding_value $'policy\034enabled' type)" == boolean &&
+              "$(binding_value $'policy\034enabled')" == false &&
+              "$(binding_value $'legacy\034disposition')" == active &&
+              -z "$(binding_value $'legacy\034tombstone')" ]]; }; then
+        bound_mode=legacy
+    fi
+    printf '#!/usr/bin/env bash\n_root=%q\n_source=%q\n_bound_context=%q\n_bound_mode=%q\n' \
+        "$bound_root" "$source_root" "$bound_context" "$bound_mode" > "$STUB"
+    cat >> "$STUB" << 'STUBEOF'
+set -euo pipefail
+export PYTHONUTF8=1
+if [[ -n "$_bound_context" ]]; then
+    if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
+          "$COPILOT_EXTENSIONS_CONTEXT" != "$_bound_context" ]]; then
+        printf '[agent-containers] requested context does not match the bound global command.\n' >&2
+        exit 126
+    fi
+    export COPILOT_EXTENSIONS_CONTEXT="$_bound_context"
 fi
-_lock="$_root/.provision.lock"
-exec 9>"$_lock"
-command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_containers "$@"
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-bash "$_install" provision >&2
-_rc=$?
-_resolve
-if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$AGENT_RT_PY" -m agent_containers "$@"
+_snap="$(cat "$_root/payload-dir" 2>/dev/null || true)"
+_payload="$_snap"
+# Old ordinary snapshots have no canonical source receipt. Bind their exact
+# publisher while it exists; never discover another marketplace through a glob.
+if [[ -z "$_snap" || ! -f "$_snap/snapshot-provenance.json" ]]; then
+    _payload=""
+    if [[ -n "$_snap" && -f "$_source/scripts/runtime-gate.sh" ]]; then _payload="$_source"; fi
 fi
-printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
-    _rc=1
-else
-    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
+if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]]; then
+    if [[ "$_bound_mode" == legacy && -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+        _resolver="$_root/bin/resolve-runtime.sh"
+        if [[ -f "$_resolver" ]] &&
+           grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
+            AGENT_RT_ROOT="$_root"
+            AGENT_RT_RESOLVE_TRACE_MODE=ready
+            AGENT_RT_PY=""
+            if ! . "$_resolver"; then
+                printf '[agent-containers] runtime resolver failed; update the owning installation.\n' >&2
+                exit 126
+            fi
+            if [[ -n "$AGENT_RT_PY" ]]; then
+                export AGENT_CONTAINERS_HOME="$_root"
+                export AGENT_CONTAINERS_STATE_DIR="$_root"
+                exec "$AGENT_RT_PY" -m agent_containers "$@"
+            fi
+        fi
+    fi
+    printf '[agent-containers] retained runtime gate is unavailable. Re-enable/update the owning plugin, then retry.\n' >&2
+    exit 126
 fi
-exit "$_rc"
+export AGENT_CONTAINERS_HOME="$_root"
+export AGENT_CONTAINERS_STATE_DIR="$_root"
+export AGENT_CONTAINERS_PAYLOAD_ROOT="$_payload"
+exec bash "$_payload/scripts/runtime-gate.sh" "$@"
 STUBEOF
     chmod +x "$STUB"
     _ok "Binstub: $STUB (self-provisioning)"
 }
 # === install-transaction lock (fail-closed) ===
-# Serializes every mutating action of this runtime (stamp/install/update/
-# provision): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 8, or
-# an exact-path PID receipt fallback where flock is unavailable) held for the whole build +
-# publish transaction. A concurrent run waits up to the timeout
-# (COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC, default 300s) and then FAILS -- it
-# never proceeds unlocked. The OS drops the flock if this process dies; a dead
-# owner's receipt is reclaimed; legacy dangling PID symlinks remain readable.
-__install_lock_link=""
-__install_lock_fd=""
-
-_install_lock_timeout() {
-    local __t="${COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC:-}"
-    case "$__t" in
-        ''|*[!0-9]*) __t=300 ;;
-    esac
-    [[ "$__t" -gt 0 ]] 2>/dev/null || __t=300
-    printf '%s' "$__t"
-}
-
-_create_install_lock_owner() {
-    local __path="$1" __private __result=1
-    __private="$(mktemp -d "$INSTALL_DIR/.install-lock-create.XXXXXX")" || return 1
-    # link(1), unlike ln(1), creates exactly the named entry, never a child
-    # beneath an existing directory or directory symlink (also on BSD/macOS).
-    if printf 'copilot-extensions.install-lock-pid:v1:%s\n' "$$" > "$__private/owner" &&
-       link "$__private/owner" "$__path" 2>/dev/null; then
-        __result=0
-    fi
-    # The published link is a second, independent directory entry on the same
-    # inode: once link(1) above succeeds, admission already happened and must
-    # be reported regardless of what happens to this private staging
-    # directory next. A concurrent purge is free to reclaim unreferenced
-    # staging scratch at any time (it never follows the published link), so a
-    # best-effort cleanup failure here must never flip a successful
-    # publication back into a reported failure -- that would abandon the
-    # mutex this call just admitted, with nothing left to ever release it.
-    rm -f "$__private/owner" 2>/dev/null
-    rmdir "$__private" 2>/dev/null
-    return "$__result"
-}
-
-_read_install_lock_owner() {
-    local __path="$1" __private __record="" __owner="" __result=1
-    if [[ -L "$__path" ]]; then
-        # Legacy PID symlinks represent IDs, not references to existing filesystem nodes.
-        [[ ! -e "$__path" ]] || return 1
-        __private="$(mktemp -d "$INSTALL_DIR/.install-lock-read.XXXXXX")" || return 1
-        # Preserve target bytes before command substitution can trim newlines.
-        if readlink "$__path" > "$__private/owner" &&
-           [[ -L "$__path" && ! -e "$__path" ]] &&
-           ! IFS= LC_ALL=C read -r -d '' -n 65 __record < "$__private/owner" &&
-           [[ "$__record" == *$'\n' ]]; then
-            __owner="${__record%$'\n'}"
-            case "$__owner" in
-                *[!0-9]*|"") ;;
-                *) __result=0 ;;
-            esac
-        fi
-        rm -f "$__private/owner" || __result=1
-        rmdir "$__private" || __result=1
-        [[ "$__result" != 0 ]] || printf '%s\n' "$__owner"
-        return "$__result"
-    fi
-    [[ -f "$__path" ]] || return 1
-    __private="$(mktemp -d "$INSTALL_DIR/.install-lock-read.XXXXXX")" || return 1
-    # Capture the inode before opening it. A raced FIFO/device/link remains
-    # non-regular in this private snapshot and cannot cause a blocking open.
-    if link "$__path" "$__private/owner" 2>/dev/null &&
-       [[ -f "$__private/owner" && ! -L "$__private/owner" && ! -L "$__path" &&
-          "$__private/owner" -ef "$__path" ]]; then
-        # A NUL delimiter reports NUL instead of silently dropping it.
-        # Only EOF within the byte bound can yield a complete receipt.
-        if ! IFS= LC_ALL=C read -r -d '' -n 65 __record < "$__private/owner" &&
-           [[ "$__record" == *$'\n' ]]; then
-            __record="${__record%$'\n'}"
-            case "$__record" in
-                copilot-extensions.install-lock-pid:v1:*)
-                    __owner="${__record#copilot-extensions.install-lock-pid:v1:}"
-                    case "$__owner" in
-                        *[!0-9]*|"") ;;
-                        *) __result=0 ;;
-                    esac
-                    ;;
-            esac
-        fi
-    fi
-    rm -f "$__private/owner" || __result=1
-    rmdir "$__private" || __result=1
-    [[ "$__result" != 0 ]] || printf '%s\n' "$__owner"
-    return "$__result"
-}
-
-_exit_install_lock() {
-    if [[ -n "$__install_lock_link" ]]; then
-        local __owner
-        __owner="$(_read_install_lock_owner "$__install_lock_link" 2>/dev/null || true)"
-        [[ "$__owner" == "$$" ]] && rm -f "$__install_lock_link"
-        __install_lock_link=""
-    elif [[ -n "$__install_lock_fd" ]]; then
-        flock -u "$__install_lock_fd" 2>/dev/null || true
-        eval "exec $__install_lock_fd>&-"
-        __install_lock_fd=""
-    fi
-}
-
-_enter_install_lock() {
-    local __timeout="${1:-$(_install_lock_timeout)}"
-    mkdir -p "$INSTALL_DIR" 2>/dev/null || return 1
-    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
-        { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 1
-        if ! flock -w "$__timeout" 8; then
-            exec 8>&-
-            return 1
-        fi
-        __install_lock_fd=8
-        return 0
-    fi
-    if ! command -v link >/dev/null 2>&1 || ! command -v mktemp >/dev/null 2>&1; then
-        _fail "PID-fallback install admission requires link(1) and mktemp; refusing to proceed unlocked"
-        return 1
-    fi
-    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __acquired
-    __deadline=$(( $(date +%s) + __timeout ))
-    # Always attempt admission once before enforcing the deadline: computing
-    # the deadline and this loop's own `date +%s` are two separate calls, so a
-    # short timeout (e.g. 1s) can straddle a second boundary between them and
-    # make a pre-check-only loop condition skip even an uncontended
-    # acquisition. Checking the deadline only after the first attempt (below)
-    # removes that race.
-    while :; do
-        __live=0
-        if _create_install_lock_owner "$__link.reap"; then
-            # Admission and stale cleanup share this mutex; no acquirer may
-            # replace the owner between a reaper's read and unlink.
-            __acquired=0
-            if _create_install_lock_owner "$__link"; then
-                __acquired=1
-            else
-                __owner="$(_read_install_lock_owner "$__link" 2>/dev/null || true)"
-                case "$__owner" in
-                    *[!0-9]*|"") ;; # Missing or malformed evidence never authorizes deletion.
-                    *)
-                        if kill -0 "$__owner" 2>/dev/null; then
-                            __live=1
-                        elif [[ "$(_read_install_lock_owner "$__link" 2>/dev/null || true)" == "$__owner" ]] &&
-                             rm -f "$__link" && _create_install_lock_owner "$__link"; then
-                            __acquired=1
-                        fi
-                        ;;
-                esac
-            fi
-            if [[ "$__acquired" == 1 ]]; then
-                __install_lock_link="$__link"
-            fi
-            if ! rm -f "$__link.reap"; then
-                _exit_install_lock
-                return 1
-            fi
-            [[ "$__acquired" != 1 ]] || return 0
-        fi
-        # A dead admission-mutex owner requires explicit repair, never another reaper.
-        [[ "$(date +%s)" -lt "$__deadline" ]] || break
-        if [[ "$__live" == 1 ]]; then sleep 1; else sleep 0.1; fi
-    done
-    return 1
-}
+# Publishers and legacy removal use the same persistent fd-8 gate, whether
+# acquisition uses native flock or the existing Python fcntl implementation.
+. "$SCRIPT_DIR/legacy-transaction.sh"
 # === end install-transaction lock ===
 
 if ! _enter_install_lock; then
@@ -587,6 +466,12 @@ trap '_exit_install_lock; exit 143' TERM
 
 _assert_source_runtime_identity || exit 1
 
+case "$ACTION" in
+    install|init|provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 if [[ "$ACTION" == "stamp" ]]; then
@@ -687,6 +572,15 @@ fi
 if [[ "$SOURCE_SELECTED" != 1 ]]; then _assert_source_runtime_identity || exit 1; fi
 IFS=$'\t' read -r RUNTIME_PROFILE RUNTIME_VERSION VENV_DIR VENV_PYTHON <<< "$profile_result"
 _ok "Runtime profile: $RUNTIME_PROFILE ($RUNTIME_VERSION)"
+
+if [[ "$SOURCE_SELECTED" != 1 ]]; then
+    "$PYTHON_CMD" -I "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+        publish-redirects --payload-dir "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" \
+        --version "$RUNTIME_VERSION" || {
+        _fail 'Failed to publish the runtime payload binding'
+        exit 1
+    }
+fi
 
 # -- 4. Binstub --------------------------------------------------------
 deploy_binstub

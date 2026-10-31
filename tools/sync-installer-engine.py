@@ -46,6 +46,8 @@ FILES = ier.FILES
 # so the canonical engine can migrate one plugin at a time.
 ADOPTERS = ier.ADOPTERS
 PYTHON_ADOPTERS = ier.PYTHON_ADOPTERS
+BOOTSTRAP_ADOPTERS = ("agent-containers", "agent-codespaces")
+BOOTSTRAP_FILE = "bootstrap-python.ps1"
 
 
 def vendor_pairs() -> list[tuple[Path, Path]]:
@@ -56,6 +58,14 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
         )
         for plugin in ADOPTERS
         for name in (*FILES, *ier.support_files(CANONICAL_DIR))
+    ]
+
+
+def bootstrap_vendor_pairs() -> list[tuple[Path, Path]]:
+    return [
+        (CANONICAL_DIR / BOOTSTRAP_FILE, REPO / "plugins" / plugin / "scripts" / BOOTSTRAP_FILE)
+        for plugin in BOOTSTRAP_ADOPTERS
+        if os.path.lexists(REPO / "plugins" / plugin)
     ]
 
 
@@ -249,6 +259,7 @@ def unregistered_adopters() -> list[str]:
         candidate.name
         for candidate in plugins_root.iterdir()
         if candidate.name not in ADOPTERS
+        and candidate not in ier.native_adopter_dirs(REPO)
         and (
             any((candidate / "scripts" / name).is_file() for name in FILES)
             or _has_any_ref(candidate.name)
@@ -315,10 +326,24 @@ def verify() -> list[str]:
                     problems.append(f"{destination.relative_to(REPO)} differs from canonical native engine")
                 elif os.name != "nt" and stat.S_IMODE(destination.stat().st_mode) != stat.S_IMODE(source.stat().st_mode):
                     problems.append(f"{destination.relative_to(REPO)} has a different canonical native mode")
+    for source, destination in bootstrap_vendor_pairs():
+        indirect = next(
+            (found for path in (source, destination)
+             if (found := uer._find_symlinked_ancestor(path, REPO.resolve())) is not None),
+            None,
+        )
+        if indirect is not None:
+            problems.append(f"{indirect} is a symlink -- refusing")
+        elif not source.is_file() or not destination.is_file() or source.read_bytes() != destination.read_bytes():
+            problems.append(f"{destination.relative_to(REPO)} differs from canonical evaluator bootstrap")
     plugins = REPO / "plugins"
     for candidate in plugins.iterdir() if plugins.is_dir() else ():
+        native_files = (
+            ier.STANDALONE_NATIVE_FILES if candidate in ier.native_adopter_dirs(REPO) else ()
+        )
         if candidate.name not in PYTHON_ADOPTERS and any(
-            (candidate / "scripts" / name).exists() for name in ier.PYTHON_FILES
+            (candidate / "scripts" / name).exists()
+            for name in ier.PYTHON_FILES if name not in native_files
         ):
             problems.append(f"{candidate.name} has an unregistered Python installer engine")
     return problems
@@ -418,6 +443,18 @@ def sync() -> list[str]:
             if os.name != "nt":
                 shutil.copymode(source, destination)
             written.append(destination.relative_to(REPO).as_posix())
+    for source, destination in bootstrap_vendor_pairs():
+        for path in (source, destination):
+            indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
+            if indirect is not None:
+                raise RuntimeError(f"{indirect}: linked evaluator bootstrap refused")
+        if not source.is_file():
+            raise FileNotFoundError(f"canonical evaluator bootstrap is missing: {source}")
+        if destination.is_file() and destination.read_bytes() == source.read_bytes():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+        written.append(destination.relative_to(REPO).as_posix())
     return written
 
 
@@ -428,7 +465,36 @@ def main() -> int:
         action="store_true",
         help="verify vendored copies without changing files",
     )
+    parser.add_argument(
+        "--only-python-engine", action="store_true",
+        help="synchronize only the canonical Python engine files, preserving concurrent native/support edits",
+    )
     arguments = parser.parse_args()
+    if arguments.only_python_engine:
+        pairs = [
+            (CANONICAL_DIR / name, consumer / "scripts" / name)
+            for consumer in ier.python_adopter_dirs(REPO, plugins=PYTHON_ADOPTERS)
+            for name in ier.PYTHON_FILES
+        ]
+        for source, destination in pairs:
+            for path in (source, destination):
+                if uer._find_symlinked_ancestor(path, REPO.resolve()) is not None:
+                    raise RuntimeError("linked Python installer-engine source or destination")
+            if not source.is_file():
+                raise FileNotFoundError(f"canonical Python engine missing: {source.name}")
+        drift = []
+        for source, destination in pairs:
+            if destination.is_file() and destination.read_bytes() == source.read_bytes():
+                continue
+            drift.append(destination.relative_to(REPO).as_posix())
+            if not arguments.check:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+        if arguments.check and drift:
+            print("\n".join(drift), file=sys.stderr)
+            return 1
+        print(f"Python installer-engine scope: {len(pairs)} files, {len(drift)} differences.")
+        return 0
     if arguments.check:
         problems = verify()
         if problems:

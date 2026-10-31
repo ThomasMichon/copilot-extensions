@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # agent-worktrees:launch-seed-boundary-v1
+# agent-worktrees:launch-attempt-boundary-v1
+# agent-worktrees:native-setup-owner-v1
 # Default / normalized session setup script for repos.
 #
 # Used by agent-worktrees as the normalized launcher. Prepends any
@@ -29,6 +31,13 @@ RUNTIME_PYTHON=""
 LAUNCH_SEED_RECORD=""
 LAUNCH_SEED_ID=""
 LAUNCH_SEED_RUNTIME_PYTHON=""
+LAUNCH_SEED_PREPARATION=""
+LAUNCH_SEED_NATIVE_ROOT=""
+LAUNCH_SEED_PRESERVE_ID=""
+LAUNCH_NATIVE_RESUME_SESSION=""
+LAUNCH_ATTEMPT_ID=""
+LAUNCH_RESOLUTION_ID=""
+LAUNCH_PARENT_ID=""
 COPILOT_ARGS=()
 native_value_option() {
     case "$1" in
@@ -67,6 +76,13 @@ while [[ $# -gt 0 ]]; do
         --launch-seed-record) LAUNCH_SEED_RECORD="$2"; shift 2 ;;
         --launch-seed-id) LAUNCH_SEED_ID="$2"; shift 2 ;;
         --launch-seed-runtime-python) LAUNCH_SEED_RUNTIME_PYTHON="$2"; shift 2 ;;
+        --launch-seed-preparation) LAUNCH_SEED_PREPARATION="$2"; shift 2 ;;
+        --launch-seed-native-root) LAUNCH_SEED_NATIVE_ROOT="$2"; shift 2 ;;
+        --launch-seed-preserve-id) LAUNCH_SEED_PRESERVE_ID="$2"; shift 2 ;;
+        --launch-native-resume-session) LAUNCH_NATIVE_RESUME_SESSION="$2"; shift 2 ;;
+        --launch-attempt-id) LAUNCH_ATTEMPT_ID="$2"; shift 2 ;;
+        --launch-resolution-id) LAUNCH_RESOLUTION_ID="$2"; shift 2 ;;
+        --launch-parent-id) LAUNCH_PARENT_ID="$2"; shift 2 ;;
         *)              COPILOT_ARGS+=("$1"); shift ;;
     esac
 done
@@ -81,6 +97,19 @@ for _a in "${COPILOT_ARGS[@]:-}"; do
     [[ "$_a" == "--stdio" ]] && STDIO=true
 done
 say() { if $STDIO; then echo "$@" >&2; else echo "$@"; fi; }
+
+if [[ -n "$LAUNCH_SEED_PREPARATION" ]]; then
+    if [[ -n "$ENV_SCRIPT" ]]; then
+        printf 'Native POSIX setup cannot own env_script; no backend started.\n' >&2
+        exit 3
+    fi
+    if [[ -n "${BASH_ENV:-}" ]]; then
+        printf 'Native POSIX setup cannot own BASH_ENV; no backend started.\n' >&2
+        exit 3
+    fi
+    . "${BASH_SOURCE[0]%/*}/native-seed-setup.sh"
+    aw_native_setup_begin "$BASH" "${BASH_SOURCE[0]}" || exit 3
+fi
 
 # -- Runtime --------------------------------------------------------------
 # Contextual/cell launches validate and export their runtime root as
@@ -156,7 +185,7 @@ export WORKTREE_MACHINE="$MACHINE"
 
 # Direct agent-bridge launches may enter through this setup script without the
 # outer launch-session wrapper. Source the same optional reconciliation helper.
-_MACHINE_SETTINGS_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reconcile-machine-settings.sh"
+_MACHINE_SETTINGS_HELPER="$(cd "$(builtin command -p dirname "${BASH_SOURCE[0]}")" && pwd)/reconcile-machine-settings.sh"
 if [[ -f "$_MACHINE_SETTINGS_HELPER" ]]; then
     _MACHINE_SETTINGS_ARGS=()
     [[ "$RECOVERY" == true ]] && _MACHINE_SETTINGS_ARGS+=(--recovery)
@@ -221,13 +250,32 @@ _log_copilot_invoked() {
 
 # -- Launch Copilot -------------------------------------------------------
 _exec_copilot_backend() {
+    if [[ -n "$LAUNCH_SEED_PREPARATION" ]]; then
+        case $- in *x*) set +x ;; esac
+        set +a
+        local code=0
+        aw_native_setup_backend "$@" "${COPILOT_ARGS[@]}" || code=$?
+        exit "$code"
+    fi
     if [[ -n "$LAUNCH_SEED_RECORD" ]]; then
         if [[ -z "$LAUNCH_SEED_RUNTIME_PYTHON" || ! -x "$LAUNCH_SEED_RUNTIME_PYTHON" ]]; then
             echo 'ERROR: Launch-seed runtime is unavailable; the prompt remains staged.' >&2
             exit 3
         fi
+        local attempt_args=()
+        if [[ -n "$LAUNCH_ATTEMPT_ID$LAUNCH_RESOLUTION_ID$LAUNCH_PARENT_ID" ]]; then
+            if [[ -z "$LAUNCH_ATTEMPT_ID" || -z "$LAUNCH_RESOLUTION_ID" ]]; then
+                printf 'Launch-attempt correlation is incomplete; no backend started.\n' >&2
+                return 3
+            fi
+            attempt_args=(--launch-attempt-id "$LAUNCH_ATTEMPT_ID" --launch-resolution-id "$LAUNCH_RESOLUTION_ID")
+            if [[ -n "$LAUNCH_PARENT_ID" ]]; then
+                attempt_args+=(--launch-parent-id "$LAUNCH_PARENT_ID")
+            fi
+        fi
         exec "$LAUNCH_SEED_RUNTIME_PYTHON" -I -m agent_worktrees.launch_seed_exec \
-            --invoke --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID" -- "$@" "${COPILOT_ARGS[@]}"
+            --invoke --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID" \
+            "${attempt_args[@]}" -- "$@" "${COPILOT_ARGS[@]}"
     fi
     exec "$@" "${COPILOT_ARGS[@]}"
 }

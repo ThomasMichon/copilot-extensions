@@ -6,9 +6,23 @@ engine application remains
 [#6737](https://github.com/ThomasMichon/copilot-extensions/issues/6737).
 
 **Status: Design approved in #6795; inert record implemented in #7044.**
-This closes the design portion of the artifact effort's exact-profile
-prerequisite, not approval-adapter integration, publication, consumer admission,
-deployed engine selection or any production rollout.
+Release approval adapter implemented in #8568; installation-owned policy intent
+in #8494; repository-only policy/release planning composition in #8586.
+Explicit retained source-graph candidate export merged in #8600.
+Independent selected-source/native-target/candidate-lock binding merged in #8705.
+Governed acquisition/admission, real profile
+publication, deployed engine selection and production rollout remain open.
+
+`tools/runtime_source_wheels.py` completes a retained source-lock candidate with
+source-built first-party wheels and caller-acquired third-party bytes matching
+its exact pins. It inspects the complete closure and extras before passing it to
+the existing offline immutable constructor. The construction receipt binds the
+source-lock record, actual profile and locked build tools; construction derives
+its root, interpreter and source generation from that selection and never
+activates a runtime. This repository-only source consumer does not supply network
+acquisition, private-feed approval, persistent reuse admission, released engine
+application or rollout. Its caller is the already-invoked installation owner,
+not an approval inferred from reading configuration.
 
 ## Reconciliation and existing boundaries
 
@@ -53,6 +67,25 @@ authority. Optional overlays may narrow permissions or deliberately select
 capability; they cannot weaken existing acquisition restrictions. The bounded
 [zero-configuration plan](../lean-runtime-dependencies/zero-configuration-defaults.md)
 owns the adapter/consumer amendment before enabling it.
+
+Direct execution of that trusted setup flow by a user or an authorized agent
+is the installation authority's approval of the package dependencies required
+by the selected harness configuration, including the installer and selected
+plugins. The component installers inherit that scoped operation; they do not
+seek a separate approver for each dependency or exact lock. The authority
+adapter may bind the resulting complete source-mode lock to that invocation
+after independently checking the selected source, declared constraints and
+existing acquisition policy. No prior list of exact dependency hashes is
+required from the operator for source resolution.
+
+This operation authorization is distinct from authentication of a
+producer-supplied release profile and from admission of its actual wheel bytes.
+The invocation does not authorize arbitrary packages, configuration outside its
+selection, a public-feed escape or bypass of integrity, provenance, seasoning
+or revocation checks. Reading configuration, discovering a candidate or
+presenting a digest is not evidence that this setup operation was invoked.
+The adapter must compose with the existing installation/custody owner rather
+than accepting a caller's self-declared approval flag.
 
 Public profiles contain only dependency identities/hashes and portable target
 constraints, never private feed identities, credentials or third-party bytes.
@@ -164,6 +197,9 @@ and cutover ownership. It does not regenerate or edit its historical lock.
   inspected wheel metadata and hashes, closed exact resolution, unchanged
   offline reuse, bounded acquisition and invocation-owned cleanup. Determine
   measured limits before enabling the consumer; this proposal guesses none.
+  The repository-only actual-byte comparator merged in #8399; authenticated
+  acquisition, policy evidence, receipts/reuse and constructor integration
+  still need their actual consumer proof.
 - [ ] Apply the reviewed seam to Windows/POSIX engine constructors under #6737.
   Remove default-install/torch-only-swap; prove first install, retained explicit
   capability, wrong target refusal, source fallback, failed-build retention,
@@ -217,3 +253,48 @@ fallback, resolver, download, signature verifier, profile directory, installer
 adapter, activation or runtime payload fan-out. The record API does not itself
 prove device detection, feed compatibility, approval origin or source
 provenance. Those remain prerequisite owner integrations, not success claims.
+
+### Release approval adapter prerequisite
+
+`tools/runtime_profile_release.py` extends the existing promotion index and its
+pinned hosted Main attestation verifier, not installation-mode or deployment
+publication permission. Its optional versioned `runtime_profiles` extension is
+validated against the exact first-party manifest before signing. The adapter
+authenticates retained subject bytes before deriving whole-record approvals and
+matches independently selected release, manifest, capability and target facts.
+It exposes no raw approval map as user configuration.
+
+This is only the release-channel adapter. Real profile generation/publication,
+governed acquisition and independent
+source-mode selection/locking remain open. No installer or engine is enabled,
+and the authority-integration Plan item above is not complete.
+
+`tools/runtime_profile_policy.py` (#8586) composes that existing policy resolver with
+release authentication. It freezes the resolved owner/policy intent, uses its
+backend selection, and prefers a matching authenticated release profile.
+`ProfileUnavailable` distinguishes an absent matching/preferred approved record
+from malformed, ambiguous or unapproved input. Lock preference validation
+precedes every availability-dependent path. Only explicit discovery absence
+or that typed absence can request a policy-permitted source fallback. A supplied
+index still authenticates if no artifact was discovered; I/O, integrity,
+provenance and cancellation failures propagate rather than requesting fallback.
+This repository-only plan does not authenticate source bytes, freeze the separate
+source lock, admit acquisition or grant publication permission. Source-mode
+construction and production enablement remain open.
+
+### Actual-byte verification prerequisite
+
+`tools/runtime_profile_wheels.py` compares that exact record with a complete
+retained wheel set using the existing promotion wheel inspector. Archive
+digests, actual dependency/Python/extra metadata, wheel identity/tags and
+RECORD content must agree. Explicit total archive/unpacked byte budgets and
+per-metadata-file limits refuse before an oversized member is read.
+No wheel is extracted or executed. First-party promotion retains its separate
+locked-generator check; an arbitrary runtime wheel's generator is not trust.
+
+The verifier leaves binary streams and their immutable custody with the caller.
+It produces no approval or reusable admission receipt. This is one acquisition/
+admission prerequisite, not completion of that multi-part Plan item: trusted
+policy/source adapters, actual governed acquisition/seasoning/revocation,
+measured production budgets, independent target/device proof, real CPU and
+accelerator closures, offline construction and native consumers remain open.

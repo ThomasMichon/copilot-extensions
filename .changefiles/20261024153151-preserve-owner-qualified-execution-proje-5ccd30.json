@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve owner-qualified execution projects through Dispatch worktree namespace hosting admission",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

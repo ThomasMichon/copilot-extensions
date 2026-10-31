@@ -101,12 +101,21 @@ def _observe_unreaped(process: UnreapedChild):
     return status
 
 
+def _zombie_only_group(process: subprocess.Popen) -> bool:
+    """Confirm the group holds no live member besides its exited, unreaped leader."""
+    if sys.platform != "darwin":
+        return False
+    from agent_procutil._darwin_caller_owned import GroupCensus
+
+    return not GroupCensus().active(process.pid)
+
+
 def _retire_posix_group(
     process: UnreapedChild, *, inherit_process_group: bool = False,
 ) -> None:
     # Exclusive Popen ownership plus WNOWAIT pins the original PID through termination.
     # Never poll, communicate or wait this child before this boundary.
-    _observe_unreaped(process)
+    exited = _observe_unreaped(process) is not None
     try:
         if inherit_process_group:
             os.kill(process.pid, signal.SIGKILL)
@@ -114,11 +123,17 @@ def _retire_posix_group(
             os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    except PermissionError:
+        # Darwin refuses killpg() for a group left with only its exited leader;
+        # leader exit alone never proves settlement, so a census must confirm it.
+        if inherit_process_group or not exited or not _zombie_only_group(process):
+            raise
 
 
 def _communicate_unreaped(
     process: subprocess.Popen, *, input_text: str | None, deadline: float,
     argv: list[str], timeout: float, capture_limits: tuple[int, int] | None = None,
+    binary: bool = False,
 ) -> tuple[str | None, str | None]:
     streams = (process.stdout, process.stderr)
     output = (bytearray(), bytearray())
@@ -166,7 +181,7 @@ def _communicate_unreaped(
     while _observe_unreaped(process) is None:
         time.sleep(min(.01, _remaining(deadline, argv, timeout)))
     return tuple(
-        data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        (bytes(data) if binary else data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"))
         if stream is not None else None
         for data, stream in zip(output, streams)
     )
@@ -237,6 +252,7 @@ def _communicate_windows(
 def _communicate_windows_bounded(
     process: subprocess.Popen, job, *, input_text: str | None, deadline: float,
     argv: list[str], timeout: float, capture_limits: tuple[int, int],
+    binary: bool = False,
 ) -> tuple[str | None, str | None]:
     if job is None:
         raise RuntimeError("native child Windows Job custody is unavailable")
@@ -260,7 +276,7 @@ def _communicate_windows_bounded(
                 return
             retiring.set()
             try:
-                job.terminate_and_wait(2.0)
+                process.retire_job(job, 2.0)
             except BaseException as error:
                 retirement_error.append(error)
                 raise
@@ -375,9 +391,14 @@ def _communicate_windows_bounded(
     if cleanup_error is not None:
         raise OwnedCleanupError(process, job) from cleanup_error
     if primary:
+        if isinstance(primary[0], subprocess.TimeoutExpired):
+            # Readers have joined and retirement succeeded; preserve raw,
+            # budgeted evidence without decoding or adding it to the message.
+            primary[0].output = bytes(output[0]) if process.stdout is not None else None
+            primary[0].stderr = bytes(output[1]) if process.stderr is not None else None
         raise primary[0]
     return tuple(
-        data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        (bytes(data) if binary else data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"))
         if stream is not None else None
         for data, stream in zip(output, (process.stdout, process.stderr))
     )
@@ -389,12 +410,20 @@ def _run_owned(
     capture_limits: tuple[int, int] | None = None, pass_fds: tuple[int, ...] = (),
     confirm_posix_group: bool = False,
     on_settled: Callable[[], None] | None = None,
+    cwd: str | os.PathLike | None = None,
+    env: dict[str, str] | None = None,
+    allow_daemon_breakaway: bool = False,
+    binary: bool = False,
 ) -> subprocess.CompletedProcess:
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("native child timeout must be finite and positive")
     windows = os.name == "nt"
     if type(inherit_process_group) is not bool:
         raise ValueError("inherit_process_group must be a boolean")
+    if type(binary) is not bool or binary and capture_limits is None:
+        raise ValueError("binary capture requires explicit stream limits")
+    if type(allow_daemon_breakaway) is not bool:
+        raise ValueError("allow_daemon_breakaway must be a boolean")
     if inherit_process_group:
         require_contained_worker()
     if not windows:
@@ -408,7 +437,7 @@ def _run_owned(
         from agent_procutil._windows_caller_owned import spawn
 
     process, job = spawn(
-        argv, require_job=True, allow_breakaway=False,
+        argv, require_job=True, allow_breakaway=allow_daemon_breakaway,
         stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
         stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
@@ -418,6 +447,8 @@ def _run_owned(
         **no_window_kwargs(),
         **({"start_new_session": True} if not windows and not inherit_process_group else {}),
         **({"pass_fds": pass_fds} if pass_fds else {}),
+        **({"cwd": cwd} if cwd is not None else {}),
+        **({"env": env} if env is not None else {}),
     )
     retained = False
     try:
@@ -425,6 +456,7 @@ def _run_owned(
             stdout, stderr = _communicate_windows_bounded(
                 process, job, input_text=input_text, deadline=deadline,
                 argv=argv, timeout=timeout, capture_limits=capture_limits,
+                binary=binary,
             )
         elif windows:
             stdout, stderr = _communicate_windows(
@@ -434,6 +466,7 @@ def _run_owned(
             stdout, stderr = _communicate_unreaped(
                 process, input_text=input_text, deadline=deadline, argv=argv, timeout=timeout,
                 capture_limits=capture_limits,
+                binary=binary,
             )
     except OwnedCleanupError:
         retained = True
@@ -442,7 +475,7 @@ def _run_owned(
         try:
             if bounded_windows and not retained and job.handle:
                 try:
-                    job.terminate_and_wait(2.0)
+                    process.retire_job(job, 2.0)
                     process.wait(timeout=2.0)
                 except BaseException as error:
                     retained = True
@@ -515,12 +548,37 @@ def run_caller_owned(
     argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None = None, capture: bool = True,
     on_settled: Callable[[], None] | None = None,
+    cwd: str | os.PathLike | None = None,
+    env: dict[str, str] | None = None,
+    binary: bool = False,
 ) -> subprocess.CompletedProcess:
-    """Execute with caller-lifetime ownership and explicit, separate raw-byte budgets."""
+    """Execute with caller lifetime/stream budgets; binary capture preserves exact bytes."""
     from agent_procutil._caller_owned import run
 
     return run(
         argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
         max_stderr_bytes=max_stderr_bytes, input_text=input_text, capture=capture,
         on_settled=on_settled,
+        **({"cwd": cwd} if cwd is not None else {}),
+        **({"env": env} if env is not None else {}),
+        **({"binary": binary} if binary is not False else {}),
+    )
+
+
+def run_installation_owned(
+    argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
+    on_settled: Callable[[], None] | None = None,
+) -> subprocess.CompletedProcess:
+    """Own a trusted installer, allowing explicitly detached product daemons.
+
+    Ordinary descendants remain in the cleanup Job. Only a daemon's explicit
+    breakaway can leave it; an external restrictive Job is never bypassed.
+    """
+    from agent_procutil import contained_test_mode
+    from agent_procutil._caller_owned import run
+
+    return run(
+        argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
+        max_stderr_bytes=max_stderr_bytes, input_text=None, capture=True,
+        on_settled=on_settled, allow_daemon_breakaway=not contained_test_mode(),
     )

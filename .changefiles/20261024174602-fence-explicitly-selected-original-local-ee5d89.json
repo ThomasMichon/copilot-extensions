@@ -1,0 +1,9 @@
+{
+  "comment": "Fence explicitly selected original local acquisitions through Host, child, native lifecycle and prompt effect owners without replay.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

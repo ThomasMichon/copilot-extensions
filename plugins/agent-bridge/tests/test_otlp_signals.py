@@ -6,6 +6,8 @@ import atexit
 import json
 import threading
 import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -63,6 +65,7 @@ def test_unconfigured_sink_returns_before_clock_import_or_record_validation(monk
     monkeypatch.setattr(otlp_signals, "time", SimpleNamespace(
         time_ns=forbidden, monotonic=forbidden, perf_counter_ns=forbidden,
     ))
+    monkeypatch.setattr(otlp_signals.uuid, "uuid4", forbidden)
     monkeypatch.setattr(builtins, "__import__", imports)
     client = LocalOtlpSignalsSink(SignalEndpoints(), identity=SignalIdentity())
     result = client.export_batch(object())
@@ -219,7 +222,9 @@ def test_genuine_sdk_records_export_and_persist_closed_protobuf(wire, monkeypatc
     assert sum(getattr(first, s).requests for s in ("traces", "logs", "metrics")) == 3
     log_request = decode_logs(captured[1][2])
     resource = log_request.resource_logs[0]
-    assert {a.key for a in resource.resource.attributes} == {"service.name", "service.namespace"}
+    assert {a.key for a in resource.resource.attributes} == {
+        "service.name", "service.namespace", "service.instance.id",
+    }
     scope = resource.scope_logs[0]
     assert scope.scope.name == "copilot-extensions.process-telemetry" and scope.scope.version == "1"
     assert not scope.scope.attributes
@@ -248,6 +253,77 @@ def test_genuine_sdk_records_export_and_persist_closed_protobuf(wire, monkeypatc
     before = len(captured)
     assert client.export_batch([source(sequence=5)]).logs.status == "inactive"
     assert len(captured) == before
+
+
+def test_resource_instance_is_stable_per_sink_and_distinct_across_sink_lifetimes(wire):
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+    base, captured, _ = wire
+    clients = [sink(base), sink(base)]
+
+    def export(client, events):
+        first = len(captured)
+        result = client.export_batch(events)
+        assert all(getattr(result, s).status == "accepted" for s in ("traces", "logs", "metrics"))
+        return captured[first:]
+
+    def instance_ids(requests):
+        instances = set()
+        for path, _, file in requests:
+            if path == "/v1/traces":
+                resource = ExportTraceServiceRequest.FromString(file.read_bytes()).resource_spans[0]
+                records = resource.scope_spans[0].spans
+            elif path == "/v1/logs":
+                resource = decode_logs(file).resource_logs[0]
+                records = resource.scope_logs[0].log_records
+            else:
+                resource = decode_metrics(file).resource_metrics[0]
+                records = [
+                    point
+                    for metric in resource.scope_metrics[0].metrics
+                    for point in (metric.sum if metric.HasField("sum") else metric.histogram).data_points
+                ]
+                assert all({a.key for a in point.attributes} == {"ce.stage", "ce.outcome"}
+                           for point in records)
+            attrs = {a.key: a.value.string_value for a in resource.resource.attributes}
+            assert attrs.keys() == {"service.name", "service.namespace", "service.instance.id"}
+            assert attrs["service.name"] == "worktree-manager-source"
+            assert attrs["service.namespace"] == "copilot-extensions"
+            instance = attrs["service.instance.id"]
+            parsed = uuid.UUID(instance)
+            assert str(parsed) == instance and parsed.version == 4
+            assert parsed.variant == uuid.RFC_4122
+            assert instance.replace("-", "") != "a" * 32
+            assert all("service.instance.id" not in {a.key for a in record.attributes}
+                       for record in records)
+            instances.add(instance)
+        return instances
+
+    try:
+        initial = [instance_ids(export(client, [source()])) for client in clients]
+        assert all(len(ids) == 1 for ids in initial)
+        assert initial[0].isdisjoint(initial[1])
+        before = len(captured)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(
+                lambda client: client.export_batch([source("input_ack", sequence=2)]), clients,
+            ))
+        assert all(getattr(result, s).status == "accepted"
+                   for result in results for s in ("traces", "logs", "metrics"))
+        assert instance_ids(captured[before:]) == initial[0] | initial[1]
+        assert len(captured[before:]) == 6
+        assert instance_ids(export(clients[0], [source("ui_stop", sequence=3)])) == initial[0]
+    finally:
+        for client in clients:
+            client.close()
+
+    replacement = sink(base)
+    try:
+        replacement_ids = instance_ids(export(replacement, [source()]))
+        assert len(replacement_ids) == 1
+        assert replacement_ids.isdisjoint(initial[0] | initial[1])
+    finally:
+        replacement.close()
 
 
 @pytest.mark.parametrize("kind", ["partial", "warning", "negative", "excess", "malformed", "mime", "oversize", "truncated", "unsupported", "redirect"])
@@ -291,7 +367,25 @@ def test_acknowledgement_partition_and_no_retry(wire, kind):
     client.close()
 
 
-def test_shared_deadline_slow_drip_and_independent_sibling(wire):
+def test_shared_deadline_slow_drip_and_independent_sibling(wire, monkeypatch):
+    from process_telemetry import _otlp_transport
+
+    # Measure transport exhaustion, not first-use optional SDK import latency.
+    pytest.importorskip("opentelemetry.exporter.otlp.proto.common.trace_encoder")
+    pytest.importorskip("opentelemetry.exporter.otlp.proto.common.metrics_encoder")
+    real_post = _otlp_transport.post
+
+    def consume_trace_budget(endpoint, payload, deadline, **kwargs):
+        reply = real_post(endpoint, payload, deadline, **kwargs)
+        if endpoint.endswith("/v1/traces"):
+            assert reply.attempted
+            # A socket timeout can precede a coarse monotonic-clock deadline.
+            # This scenario requires the trace result to arrive after that boundary.
+            while (remaining := deadline - time.monotonic()) > 0:
+                time.sleep(remaining)
+        return reply
+
+    monkeypatch.setattr(_otlp_transport, "post", consume_trace_budget)
     base, captured, config = wire
     config["/v1/traces"] = {"body": b"x" * 20, "drip": .025}
     client = sink(base, timeout=.1)
@@ -307,6 +401,23 @@ def test_shared_deadline_slow_drip_and_independent_sibling(wire):
     assert second.logs.status == second.metrics.status == "accepted"
     assert sum(path == "/v1/traces" for path, _, _ in captured) == 1
     client.close()
+
+
+def test_trace_failure_before_deadline_preserves_sibling_budget(wire):
+    base, captured, config = wire
+    config["/v1/traces"] = {"status": 503}
+    client = sink(base)
+    try:
+        first = client.export_batch([source()])
+        assert first.traces.status == "transport_unknown"
+        assert first.traces.requests == first.traces.unknown_records == 1
+        assert first.logs.status == first.metrics.status == "accepted"
+        second = client.export_batch([source("input_ack", sequence=2)])
+        assert second.traces.status == "inactive"
+        assert second.logs.status == second.metrics.status == "accepted"
+        assert sum(path == "/v1/traces" for path, _, _ in captured) == 1
+    finally:
+        client.close()
 
 
 def test_missing_origin_and_unsupported_metrics_are_not_zero_success(wire):

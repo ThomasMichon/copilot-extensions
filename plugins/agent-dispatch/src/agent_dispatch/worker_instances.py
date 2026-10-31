@@ -6,12 +6,17 @@ import contextlib
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shutil
 import time
 
 from . import registrar_discovery as rd
+from .command_operands import (
+    execution_operand_indices,
+    is_python_interpreter as _is_python_interpreter,
+    script_operand as _command_script_operand,
+)
 from .registrar import RegistrarError
 from .registrar_recipes import GLOBAL_RECIPES, deep_merge
 from .single_instance import SingleInstance
@@ -127,7 +132,9 @@ def _atomic(path: Path, value: dict) -> None:
                 staging.unlink()
 
 
-def validate_configuration(name: str, document: object, repo_root: str = "") -> tuple[dict, tuple]:
+def validate_configuration(
+    name: str, document: object, repo_root: str = "", *, snapshot=None,
+) -> tuple[dict, tuple]:
     if not isinstance(document, dict):
         raise RegistrarError("declaration: expected a JSON object")
     if document.get("name") not in (None, name):
@@ -145,32 +152,119 @@ def validate_configuration(name: str, document: object, repo_root: str = "") -> 
         raise RegistrarError("this template requires repo_root for worker identity and dependency resolution")
     data = {**document, "name": name, "owner": OWNER}
     declarations = rd.expand_declaration_document(
-        data, directory=root or active_dir(), repo_root=root,
+        data, directory=root or active_dir(), repo_root=root, snapshot=snapshot,
     )
     if not declarations:
         raise RegistrarError("configuration expands to no declarations")
     return data, declarations
 
 
+def _validate_command_dependency(command: list[str], directory: Path, *, explicit_cwd: bool) -> None:
+    if explicit_cwd and not directory.is_dir():
+        raise RegistrarError(f"missing working directory dependency: {directory}")
+    executable = command[0]
+    path_command = Path(executable).is_absolute() or any(
+        separator in executable for separator in (os.sep, os.altsep) if separator
+    )
+    available = (directory / executable).is_file() if path_command else bool(shutil.which(executable))
+    if not available:
+        raise RegistrarError(f"missing command dependency: {executable}")
+    script = _command_script_operand(command)
+    if script is not None:
+        target = directory / script
+        if not target.is_file() and not (
+            _is_python_interpreter(executable) and target.is_dir()
+            and any((target / name).is_file() for name in ("__main__.py", "__main__.pyc"))
+        ):
+            raise RegistrarError(f"missing script dependency: {script}")
+    if not explicit_cwd and (
+        (path_command and not Path(executable).is_absolute())
+        or (script is not None and not Path(script).is_absolute())
+    ):
+        raise RegistrarError("relative command/script dependencies require an explicit working directory")
+
+
+def _validate_evaluator_dependency(declaration, resources) -> None:
+    from .producers.evaluator import ScriptEvaluator, load_registration_evaluator
+
+    if declaration.kind == "evaluator":
+        spec = dict(declaration.spec)
+    elif declaration.kind == "supervised-lane" and declaration.evaluator:
+        spec = {"evaluator": declaration.evaluator}
+    else:
+        return
+    try:
+        policy = spec.get("evaluator") if spec.get("evaluator_spec") is None else None
+        if isinstance(policy, str) and policy.startswith("repo:"):
+            raise RegistrarError("file-backed evaluator does not support named repository resources")
+        if isinstance(policy, str) and not Path(policy).expanduser().is_file():
+            raise RegistrarError("missing or nonregular evaluator policy dependency")
+        evaluator = load_registration_evaluator(spec)
+        if isinstance(evaluator, ScriptEvaluator):
+            if not evaluator.cwd or not (
+                evaluator.cwd.startswith("repo:")
+                or any(cls(evaluator.cwd).is_absolute() for cls in (Path, PurePosixPath, PureWindowsPath))
+            ):
+                raise RegistrarError(
+                    "evaluator script dependencies require an explicit absolute or named working directory"
+                )
+            command = [resources.resolve(part) for part in evaluator.argv]
+            directory = Path(resources.resolve(
+                evaluator.cwd, directory=True,
+            )) if evaluator.cwd else Path.cwd()
+            _validate_command_dependency(command, directory, explicit_cwd=bool(evaluator.cwd))
+    except (OSError, ValueError) as exc:
+        raise RegistrarError(f"missing or invalid evaluator dependency: {exc}") from exc
+
+
 def _validate_dependencies(
     declarations: tuple, repo_root: str, *, available_declarations: tuple | None = None,
+    snapshot=None,
 ) -> None:
     from .registrations import RegistrationKind
+    from .repository_resources import RepositoryResourceSnapshot
+
+    resources = snapshot or RepositoryResourceSnapshot(execution=False)
     for declaration in declarations:
         if declaration.fleet.enabled and not shutil.which("ssh"):
             raise RegistrarError("missing fleet dependency: ssh transport")
+        _validate_evaluator_dependency(declaration, resources)
         command = declaration.spec.get("command")
         if isinstance(command, list) and command:
-            executable = command[0]
-            directory = Path(declaration.spec.get("cwd") or repo_root or active_dir())
-            if not shutil.which(executable) and not (
-                (Path(executable).is_absolute() or Path(executable).parent != Path("."))
-                and (directory / executable).is_file()
+            if declaration.kind == RegistrationKind.EMITTER:
+                from .producers.emitter import _render_command
+
+                command = _render_command(command)
+            command = [resources.resolve(part) for part in command]
+            directory = Path(resources.resolve(
+                str(declaration.spec.get("cwd") or repo_root or active_dir()), directory=True,
+            ))
+            _validate_command_dependency(
+                command, directory, explicit_cwd=bool(declaration.spec.get("cwd")),
+            )
+        if declaration.kind == RegistrationKind.EMITTER and isinstance(
+            declaration.spec.get("side_load"), dict,
+        ):
+            from .producers.emitter import _render_command
+
+            side_command = _render_command(
+                declaration.spec["side_load"]["command"], change_ref="{change_ref}",
+            )
+            if any(
+                "{change_ref}" in side_command[index]
+                for index in execution_operand_indices(side_command)
             ):
-                raise RegistrarError(f"missing command dependency: {executable}")
-            if len(command) > 1 and Path(command[1]).suffix in {".py", ".sh", ".ps1"}:
-                if not (directory / command[1]).is_file():
-                    raise RegistrarError(f"missing script dependency: {command[1]}")
+                raise RegistrarError("dynamic side-load execution dependencies cannot be validated safely")
+            side_command = [
+                part if "{change_ref}" in part else resources.resolve(part)
+                for part in side_command
+            ]
+            directory = Path(resources.resolve(
+                str(declaration.spec.get("cwd") or repo_root or active_dir()), directory=True,
+            ))
+            _validate_command_dependency(
+                side_command, directory, explicit_cwd=bool(declaration.spec.get("cwd")),
+            )
         if declaration.kind == RegistrationKind.SUPERVISED_LANE:
             # The registrar validates named identities on composed issue loops.
             # A basic lane may name a custom body agent; do not fabricate a
@@ -253,14 +347,19 @@ def _check_pointer() -> None:
 
 def save_instance(
     source_id: str, revision: str, fields: dict, *,
-    activate: bool = False, consent: str | None = None,
+    activate: bool = False, consent: str | None = None, operator_inputs: bool = False,
 ) -> dict:
     """Persist a draft, optionally publish it; never start a service or task."""
     if activate and consent != ACTIVATION_CONSENT:
         raise RegistrarError(f"activation requires explicit --consent {ACTIVATION_CONSENT}")
-    allowed = {"name", "declaration", "repo_root"}
-    if set(fields) - allowed:
-        raise RegistrarError(f"unknown configuration fields: {sorted(set(fields) - allowed)}")
+    allowed = {"name", "repo_root"} if operator_inputs else {"name", "declaration", "repo_root"}
+    parameters = {
+        key: value for key, value in fields.items()
+        if operator_inputs and isinstance(key, str) and key.startswith("param_")
+    }
+    unknown = set(fields) - allowed - set(parameters)
+    if unknown:
+        raise RegistrarError(f"unknown configuration fields: {sorted(unknown)}")
     name = _name(fields.get("name"))
     document = fields.get("declaration")
     if isinstance(document, str):
@@ -272,7 +371,36 @@ def save_instance(
     if not isinstance(repo_root, str):
         raise RegistrarError("repo_root must be text")
     source = source_id.removeprefix("template:")
-    if source_id.startswith("template:"):
+    provider = None
+    safe_values = None
+    operator_baseline = None
+    if operator_inputs:
+        from .worker_operator_inputs import materialize, selected_source, source_fields, values_for, verify_record
+
+        if source_id.startswith("instance:"):
+            if source_id != f"instance:{name}":
+                raise RegistrarError("instance identity changed")
+            _regular(instance_dir(), directory=True)
+            record = _read(instance_dir() / f"{name}.json")
+            selected, current_values = verify_record(record)
+            operator_baseline = digest(record["operator_inputs"])
+            parameters = {**{f"param_{key}": value for key, value in current_values.items()}, **parameters}
+            if "repo_root" not in fields:
+                repo_root = record["configuration"]["repo_root"]
+        else:
+            selected = selected_source(source_id, revision)
+        safe_values = values_for(source_fields(selected), parameters)
+        document = materialize(selected, safe_values, name, repo_root)
+        if "builtin" not in selected:
+            provider = selected
+    elif source_id.startswith("template:provider:"):
+        from .worker_template_materialization import materialize_template, selected_template
+
+        provider = selected_template(source_id, revision)
+        if not isinstance(document, dict):
+            raise RegistrarError("declaration: expected a JSON object")
+        document = materialize_template(provider, document, name, repo_root)
+    elif source_id.startswith("template:"):
         if source not in templates() or revision != digest(templates()[source]):
             raise RegistrarError("template is absent or changed; refresh the catalog")
         if not isinstance(document, dict):
@@ -284,6 +412,9 @@ def save_instance(
     _validate_dependencies(declarations, repo_root)
     configuration = {"declaration": data, "repo_root": repo_root}
     wanted_revision = digest(configuration)
+    request = {"id": source_id, "revision": revision}
+    if operator_inputs:
+        request["operator_inputs"] = digest(fields)
     for root in (rd.registrar_dir(), instance_dir(), active_dir()):
         _regular(root, directory=True)
     _check_pointer()
@@ -296,7 +427,7 @@ def save_instance(
         existing = _read(path) if path.exists() else None
         retry = bool(
             existing and existing["revision"] == wanted_revision
-            and existing.get("last_request") == {"id": source_id, "revision": revision}
+            and existing.get("last_request") == request
         )
         if not retry:
             if source_id.startswith("template:") and existing:
@@ -305,17 +436,37 @@ def save_instance(
                 existing is None or existing["revision"] != revision
             ):
                 raise RegistrarError("stale or missing instance; refresh before editing")
+        if operator_inputs and source_id.startswith("instance:"):
+            # Binding invalidation can leave execution bytes unchanged.
+            verify_record(existing)
+            if not retry and digest(existing["operator_inputs"]) != operator_baseline:
+                raise RegistrarError("operator inputs changed; refresh before editing")
         _check_collisions(name, declarations, existing)
+        if provider is not None:
+            # Recheck source closure/activation after validation and collision reads.
+            from .worker_template_materialization import selected_template
+            selected_template(provider["row"]["id"], provider["row"]["revision"])
         record = {
             "id": f"instance:{name}", "name": name, "configuration": configuration,
             "revision": wanted_revision,
             "source": existing["source"] if existing else {
-                "id": source_id, "revision": revision, "provider": "agent-dispatch",
+                "id": source_id, "revision": revision,
+                **({
+                    "provider": provider["row"]["provenance"],
+                    "context": provider["row"]["source"],
+                    "declaration": str(provider["path"]),
+                } if provider is not None else {"provider": "agent-dispatch"}),
             },
-            "last_request": {"id": source_id, "revision": revision},
+            "last_request": request,
             "saved_at": existing["saved_at"] if retry else time.time(),
         }
-        if not retry:
+        if operator_inputs:
+            from .worker_operator_inputs import CONTRACT, VERSION
+            record["operator_inputs"] = {
+                "contract": CONTRACT, "version": VERSION, "values": safe_values,
+                "configuration_revision": wanted_revision,
+            }
+        if not retry or (not operator_inputs and existing and "operator_inputs" in existing):
             _atomic(path, record)
         receipt = {
             "id": record["id"], "revision": wanted_revision, "persisted": True,

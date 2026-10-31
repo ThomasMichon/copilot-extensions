@@ -48,6 +48,18 @@ The ``agent-worktrees`` prefix is stripped for SSH compatibility
 
 from __future__ import annotations
 
+if __name__ == "__main__":
+    from .current_roster_entry import run_module_if_selected
+    run_module_if_selected()
+    import sys as _entry_sys
+
+    if len(_entry_sys.argv) == 3 and _entry_sys.argv[1] == "--project":
+        from .picker_fast_entry import dispatch as _dispatch_resident_picker
+
+        _resident_picker_result = _dispatch_resident_picker(_entry_sys.argv[1:])
+        if _resident_picker_result is not None:
+            raise SystemExit(_resident_picker_result)
+
 import argparse
 import contextlib
 import dataclasses
@@ -97,7 +109,7 @@ from . import (
     permissions as permissions,
     pr_config,
     pr_ops,
-    procs as procs,
+    procs as _procs_module,
     profile_assignment,
     prune,
     reciprocal_presentation,
@@ -106,6 +118,8 @@ from . import (
     sessions_pane_retire,  # noqa: F401 -- compatibility re-export (handoff_cutover.py tests patch m.sessions_pane_retire)
     terminal_identity, tracking, tracking_lifecycle,
 )
+procs = _procs_module
+
 from . import claimant as claimant_mod
 from . import config as cfg
 from . import finalize as fin
@@ -113,7 +127,7 @@ from . import installer as inst
 from . import loop_governance as loop_governance_mod  # noqa: F401 -- compatibility re-export
 from . import services as _svc
 from . import session_context as session_context_mod  # noqa: F401 -- compatibility re-export
-from . import state_root as state_root_mod
+from . import state_root as state_root_mod  # noqa: F401 -- compatibility re-export
 from .copilot_launch_prefs import resolve_launch_pref_flags
 from .process_launcher import apply_process_launcher, bind_execution_directory, native_option_tokens, quote_powershell_command
 from .update_stage import cmd_stage_update as cmd_stage_update, discover_plugin_dir as _discover_plugin_dir
@@ -208,30 +222,8 @@ def _env_set(new_name: str, value: str) -> None:
 
 
 def _fire_launch_resolution_watchdog() -> None:
-    """Self-terminate a hung bare-launch invocation (copilot-extensions #<TBD>).
-
-    The pre-handoff resolution in ``cmd_launch`` (project/config resolution,
-    filesystem probes, an optional git call for the recovery anchor) has been
-    observed to survive its hosting console being closed mid-call and hang
-    indefinitely at near-zero CPU rather than exit -- a known CPython-on-
-    Windows interaction where the installed console-control handler reports
-    the close "handled" and returns immediately even though the blocked
-    native call (e.g. a git subprocess wait) is never actually interrupted, so
-    the process never gets a chance to notice and exit on its own. Whatever
-    the trigger, nothing downstream can be trusted to notice a stall here, so
-    this watchdog guarantees a hard ceiling: ``os._exit`` bypasses the stuck
-    call entirely rather than trying to unwind through it.
-    """
-    try:
-        sys.stderr.write(
-            "[agent-worktrees] bare-launch resolution exceeded "
-            f"{_LAUNCH_RESOLUTION_TIMEOUT_SECS}s -- self-terminating a likely "
-            "hang instead of blocking forever.\n"
-        )
-        sys.stderr.flush()
-    except Exception:
-        pass
-    os._exit(1)
+    """Retain the legacy patch seam while the front-door owner enforces it."""
+    front_door_cli.fire_launch_resolution_watchdog(_LAUNCH_RESOLUTION_TIMEOUT_SECS)
 
 
 # How long cmd_launch's pre-handoff resolution (before it hands the console off
@@ -996,8 +988,9 @@ def _make_pr_lookup(config):
     def lookup(repo, number):
         try:
             token = providers.account_token_for_slug(repo, prcfg)
-        except Exception:
-            token = None
+        except providers.ProviderError as exc:
+            output.warn(str(exc))
+            return None
         try:
             provider = providers.get_provider(prcfg.provider)
             return provider.get_pull(repo, number, api_base=api_base, token=token)
@@ -1947,38 +1940,20 @@ def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:
     return out
 
 
-@dataclasses.dataclass(frozen=True)
-class LaunchPreflight:
-    """Read-only validation required before constructing a launch plan."""
-
-    config_root: state_root_mod.ConfigRoot | None = None
-
-    @property
-    def error(self) -> str | None:
-        if self.config_root is not None and not self.config_root.path:
-            return (
-                self.config_root.error or "could not resolve the machine-local configuration root"
-            )
-        return None
-
-    @property
-    def config_root_path(self) -> str:
-        return (self.config_root.path or "") if self.config_root else ""
-
-
-class LaunchPreflightError(RuntimeError):
-    """A launch plan cannot be built without mutating unsafe state."""
+from .launch_preflight import LaunchPreflight, LaunchPreflightError
 
 
 def _preflight_launch(
     config: cfg.Config,
     args: argparse.Namespace,
     work_dir: str,
+    *,
+    allocation_source: str | None = None,
 ) -> LaunchPreflight:
     """Validate normalized setup state before any launch-side mutation."""
     from .resolve_launch_cli import preflight_launch
 
-    return preflight_launch(config, args, work_dir)
+    return preflight_launch(config, args, work_dir, allocation_source=allocation_source)
 
 
 def _launch_preflight_error(
@@ -5022,13 +4997,14 @@ def _resolve_copilot() -> str | None:
 
 
 def _write_global_config(
-    machine: str,
+    machine: str | None,
     plat: str,
     srcroot: Path | str,
 ) -> None:
     """Scaffold the global machine-wide config (~/.agent-worktrees/config.yaml).
 
-    Carries machine-wide base settings (srcroot/machine/platform) plus
+    Carries machine-wide base settings (srcroot/platform and an explicit
+    machine binding, when supplied) plus
     user-authored copilot_profiles -- the lowest config tier. This file is
     **user-owned**: the installer scaffolds it once when missing, then **never**
     overwrites it -- not even with ``--force`` (which targets installer-owned
@@ -5041,6 +5017,7 @@ def _write_global_config(
         output.skipped(f"Global config exists at {path} (user-owned, left as-is)")
         return
     _p = "~/.agent-worktrees/config.yaml"  # marketplace-isolation: allow legacy-compatibility
+    machine_line = f"machine: {machine}\n" if machine is not None else ""
     content = f"""# {_p}
 # GLOBAL machine-wide agent-worktrees config (lowest precedence tier).
 #
@@ -5049,8 +5026,7 @@ def _write_global_config(
 # config) then ~/.<project>/config.yaml (machine-local override).
 
 srcroot: {srcroot}
-machine: {machine}
-platform: {plat}
+{machine_line}platform: {plat}
 
 # Copilot backend profiles -- machine-wide (Tab to cycle in the picker).
 # User-authored; uncomment and edit. Example:
@@ -5160,6 +5136,8 @@ def build_parser() -> argparse.ArgumentParser:
     from . import record_cli
 
     resolve_cli.add_parsers(sub)
+    from . import launch_attempt_inspection
+    launch_attempt_inspection.add_parsers(sub)
 
     p = sub.add_parser(
         "execution-leg",
@@ -5230,7 +5208,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     pr_cli.add_parsers(sub)
     # stage-update (background marketplace download; #1430 stage-then-join)
-    sp = sub.add_parser("stage-update", help="Background-stage the plugin marketplace update (JSON status)")
+    sp = sub.add_parser("stage-update", help="Background-stage the plugin marketplace update (JSON status)", allow_abbrev=False)
+    sp.add_argument("--auto", action="store_true", help="Automatic acquisition; honor the automatic-update hold")
     _sh_path = "~/.agent-worktrees/updater-status.json"  # marketplace-isolation: allow legacy
     sp.add_argument("--status", default=None, help=f"Status file path (defaults to {_sh_path})")
     sp.add_argument("--indicator-state", action="store_true",
@@ -5256,6 +5235,8 @@ def build_parser() -> argparse.ArgumentParser:
     handoff_cancel_cli.add_parsers(sub)
 
     session_tracking_cli.add_parsers(sub)
+    from . import session_observations_cli
+    session_observations_cli.add_parsers(sub)
     record_cli.add_parsers(sub)
     worktree_status_audit.add_parsers(sub)
 
@@ -5355,6 +5336,7 @@ def _current_session_ids() -> set[str]:
 # fleet, reconcile, delegates, hook -- each of those is fixed to do its own
 # lazy `from . import <module>` at its own call site instead).
 _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
+    'launch-attempts': ('launch_attempt_inspection', 'cmd_launch_attempts'),
     'dev-status': ('installation_cli', 'cmd_dev_status'),
     'dev-release': ('installation_cli', 'cmd_dev_release'),
     'anchor-check': ('maintenance_cli', 'cmd_anchor_check'),
@@ -5368,6 +5350,8 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'claims': ('claims_cli', 'cmd_claims'),
     'resource-producer': ('resource_producer_cli', 'cmd_resource_producer'),
     'resource-relationship': ('resource_producer_cli', 'cmd_resource_relationship'),
+    'worktree-allocation': ('resource_producer_cli', 'cmd_worktree_allocation'),
+    'worktree-allocation-receive': ('resource_producer_cli', 'cmd_worktree_allocation_receive'),
     'cleanup': ('cleanup_gc_cli', 'cmd_cleanup'),
     'codename-lookup': ('session_metadata_cli', 'cmd_codename_lookup'),
     'conclude-disposable': ('session_tracking_cli', 'cmd_conclude_disposable'),
@@ -5375,6 +5359,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'config-migrate': ('maintenance_cli', 'cmd_config_migrate'),
     'create': ('worktree_ops_cli', 'cmd_create'),
     'create-pr': ('finalize_cli', 'cmd_create_pr'),
+    'pr-publication-labels': ('finalize_cli', 'cmd_publication_labels'),
     'deploy-instructions': ('context_cli', 'cmd_deploy_instructions'),
     'deregister-session': ('session_binding_cli', 'cmd_deregister_session'),
     'dev': ('maintenance_cli', 'cmd_dev'),
@@ -5449,6 +5434,8 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'session-recovery': ('session_inspection_cli', 'cmd_session_recovery'),
     'session-role': ('session_metadata_cli', 'cmd_session_role'),
     'session-tail': ('session_tracking_cli', 'cmd_session_tail'),
+    'session-observations': ('session_observations_cli', 'cmd_session_observations'),
+    'session-attention': ('session_observations_cli', 'cmd_session_attention'),
     'session-transcript': ('session_tracking_cli', 'cmd_session_transcript'),
     'set-pr': ('pr_state_cli', 'cmd_set_pr'),
     'status': ('status_cli', 'cmd_status'),
@@ -5487,7 +5474,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
 _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | frozenset({
     "services", "repos", "accounts", "forks", "copilot-identity", "related", "state-root",
     "coordination-readiness", "config-root", "knowledge", "git",
-    "pr-watch", "pr-merge", "pr-research", "pr",
+    "pr-watch", "pr-merge", "pr-research", "pr", "pr-sweep",
     "activity", "activity-log", "activity-prune-worker", "register-launch", "stage-update",
     "reconcile-marketplaces",
     "execution-leg", "copilot", "resolve", "handoff-trace", "identifiers",
@@ -6042,10 +6029,13 @@ def _load_full_command_surface() -> None:
             args, json_output=output._json_output, json_error=output._json_error
         )
     from .record_cli import cmd_record
+    from .launch_attempt_inspection import cmd_launch_attempts
 
     from . import update_launch_cli
 
+    from .session_observations_cli import cmd_session_attention, cmd_session_observations
     COMMAND_MAP = {
+        "launch-attempts": cmd_launch_attempts,
         "resolve": cmd_resolve,
         "execution-leg": cmd_execution_leg,
         "post-exit": cmd_post_exit,
@@ -6089,6 +6079,8 @@ def _load_full_command_surface() -> None:
         "claims": cmd_claims,
         "resource-producer": resource_producer_cli.cmd_resource_producer,
         "resource-relationship": resource_producer_cli.cmd_resource_relationship,
+        "worktree-allocation": resource_producer_cli.cmd_worktree_allocation,
+        "worktree-allocation-receive": resource_producer_cli.cmd_worktree_allocation_receive,
         "follow-ups": cmd_follow_ups,
         "claimant-liveness": cmd_claimant_liveness,
         "codename-lookup": cmd_codename_lookup,
@@ -6159,6 +6151,8 @@ def _load_full_command_surface() -> None:
         "link-succession": cmd_link_succession,
         "session-transcript": cmd_session_transcript,
         "session-tail": cmd_session_tail,
+        "session-observations": cmd_session_observations,
+        "session-attention": cmd_session_attention,
         "recent-messages": cmd_recent_messages,
         "anchor-check": cmd_anchor_check,
         "activity": activity.cmd_activity,
@@ -6320,6 +6314,13 @@ def main(argv: list[str] | None = None) -> int:
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
 
+    # Policy inspection must not resolve/adopt a project or prepare runtime state.
+    policy_args = front_door_cli.policy_invocation(args_list)
+    if policy_args is not None:
+        from . import agent_policy
+
+        return agent_policy.main(policy_args[0], project=policy_args[1])
+
     # ── Raw pre-dispatch ──────────────────────────────────────────────
     # Handle compatibility aliases and the default "launch" action
     # BEFORE argparse, which can't represent both CLI and launch modes.
@@ -6412,6 +6413,9 @@ def main(argv: list[str] | None = None) -> int:
             return _dispatch_lazy("record", args_list)
         return cmd_help_unrouted(requested=args_list[0])
 
+    if args_list[0] == "pr-sweep":
+        from .pr_sweep_cli import run_pr_sweep
+        return run_pr_sweep(args_list[1:])
     # --version / -V → print version + build info + boot provenance
     if args_list[0] in ("--version", "-V"):
         try:
@@ -6445,6 +6449,7 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] in ("--help", "-h"):
         parser = build_parser()
         parser.print_help()
+        print("One-shot: pr-sweep <repo> --fleet --json")
         return 0
 
     # Fast path (checked before manual-dispatch verbs + the blanket
@@ -6653,10 +6658,6 @@ def main(argv: list[str] | None = None) -> int:
             print("\nCancelled.")
             return 130
 
-    # lease/fleet/reconcile/delegates -- self-contained argparse verbs manually
-    # dispatched here (each owns its own module) rather than growing this
-    # already-at-ceiling tree. fleet/reconcile/delegates are Phase 1/2/3 of
-    # #2740 (aggregate list, out-of-band PR reconcile, delegate graph/sweep).
     _manual_verb_modules = {
         "lease": ("lease_cli", "run_lease"),
         "fleet": ("list_views_cli", "run_fleet"),
@@ -6718,16 +6719,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def console_entry() -> None:
-    """Entry point for both the ``python -m agent_worktrees`` guard below and
-    the installed ``agent-worktrees`` console script (`pyproject.toml`'s
-    ``[project.scripts]``) -- the generated script wrapper calls this
-    directly, bypassing the ``__main__`` guard, so routing both through here
-    is required for the shutdown-crash workaround to cover the installed
-    command too.
-    """
-    from ._shutdown_exit import run_and_exit
-
-    run_and_exit(main)
+    """Compatibility entry retaining the root's late-bound main callable."""
+    from .current_roster_entry import run_legacy_console
+    run_legacy_console(main)
 
 
 def __getattr__(name: str):

@@ -1,0 +1,21 @@
+{
+  "comment": "Preserve fixed owned-delivery refusal reasons through parser recovery and detached launch failures without replay authority.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/venue-copilot",
+      "type": "patch"
+    }
+  ]
+}

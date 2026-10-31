@@ -1,0 +1,29 @@
+{
+  "comment": "Allow provisionless legacy guest preflight through the canonical repository policy reader while preserving denial and selected-context authority.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/repository-policy",
+      "type": "patch"
+    }
+  ]
+}

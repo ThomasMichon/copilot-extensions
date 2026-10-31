@@ -609,7 +609,7 @@ _bootstrap_python() {
 }
 
 _initialize_source_runtime() {
-    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
     local py
     py="$(_bootstrap_python)" || {
         _fail "Source runtime selection requires a bootstrap Python interpreter"
@@ -1448,7 +1448,7 @@ _ensure_uv_index() {
 # Deploy the self-provisioning binstub (install-on-first-use). Fast path execs the
 # venv console script; otherwise it provisions on first use -- announcing (a human
 # line + a machine-readable ::agent-provisioning:: signal so a caller can extend
-# its timeout), lock-serialized, fail-fast. Replaces the old thin exec stub.
+# its timeout), observing the canonical queued installer rather than owning it.
 deploy_binstub() {
     mkdir -p "$INSTALL_DIR/bin" || return 1
     if $PUBLISH_GLOBAL_BINSTUBS; then
@@ -1471,19 +1471,21 @@ deploy_binstub() {
         return 0
     fi
 
-    printf '#!/usr/bin/env bash\n_root=%q\n_source=%q\n' \
-        "$INSTALL_DIR" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$BINSTUB"
+    printf '#!/usr/bin/env bash\n_root=%q\n_source=%q\n_qualified_source=%q\n' \
+        "$INSTALL_DIR" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "${SOURCE_RUNTIME_IDENTITY:+1}" > "$BINSTUB"
     cat >> "$BINSTUB" << 'STUB'
 set -euo pipefail
 export PYTHONUTF8=1
+unset PYTHONPATH PYTHONHOME
 _snap="$(cat "$_root/payload-dir" 2>/dev/null || true)"
 _payload="$_snap"
 # Prefer the exact publisher for old snapshots lacking canonical source proof.
-if [[ -z "$_snap" || ! -f "$_snap/snapshot-provenance.json" ]]; then
+if [[ -z "$_qualified_source" && ( -z "$_snap" || ! -f "$_snap/snapshot-provenance.json" ) ]]; then
     _payload=""
     if [[ -f "$_source/scripts/runtime-gate.sh" ]]; then _payload="$_source"; fi
 fi
-if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]]; then
+if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]] ||
+   ! grep -Fq '# Installation driver contract: bridge-first-use-v1' "$_payload/scripts/runtime-gate.sh"; then
     if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         _resolver="$_root/bin/resolve-runtime.sh"
         if [[ -f "$_resolver" ]] &&
@@ -1504,7 +1506,7 @@ if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]]; then
             fi
         fi
     fi
-    printf '[agent-bridge] retained runtime gate is unavailable. Re-enable/update the owning plugin, then retry.\n' >&2
+    printf '[agent-bridge] retained runtime gate lacks the queued command contract. Re-enable/update the owning plugin, then retry.\n' >&2
     exit 126
 fi
 export AGENT_BRIDGE_INSTALL_DIR="$_root"
@@ -1538,6 +1540,10 @@ do_stamp() {
             _fail "Source snapshot publisher returned no path"; return 1;
         }
         _payload_unchanged_since_admission source-only || return 1
+        publish_legacy_snapshot_source "$snapshot" "$SCRIPT_DIR" \
+            "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" agent-bridge "$INSTALL_DIR" \
+            "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-${COPILOT_PROJECT_DIR:-$PWD}}" \
+            "$(basename -- "$snapshot")" "$SRC_VERSION" || return 1
         "$py" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
             publish-redirects --payload-dir "$snapshot" --version "$SRC_VERSION" \
             --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || return 1
@@ -1849,6 +1855,7 @@ _install_slot_build() {
             --reinstall-package agent-machine-transport --refresh-package agent-machine-transport \
             --reinstall-package agent-worktree-identity --refresh-package agent-worktree-identity \
             --reinstall-package agent-process-telemetry --refresh-package agent-process-telemetry \
+            --reinstall-package agent-update-driver --refresh-package agent-update-driver \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package install failed"
         exit 1
@@ -1967,6 +1974,9 @@ do_uninstall() {
     $DRY_RUN && echo "(dry run -- nothing will be changed)"
     echo ""
 
+    . "$SCRIPT_DIR/uninstall-runtime.sh"
+    _finite_runtime_uninstall --check || return 1
+    _bridge_uninstall_preflight || return 1
     if $DRY_RUN; then
         if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
             echo "[dry-run] would stop agent-bridge (pid=$(cat "$PID_FILE"))"
@@ -1974,63 +1984,35 @@ do_uninstall() {
             _skip "agent-bridge not running"
         fi
     else
-        do_stop
+        _bridge_uninstall_stop_owned || return 1
     fi
 
     # systemd unit
-    if command -v systemctl &>/dev/null; then
+    if command -v systemctl &>/dev/null && [[ -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT" ]]; then
         if $DRY_RUN; then
             echo "[dry-run] would disable + remove systemd unit: $SYSTEMD_UNIT"
         else
-            systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
+            if [[ "${_bridge_uninstall_unit_state:-}" == loaded ]]; then
+                systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
+            fi
             rm -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT"
             systemctl --user daemon-reload 2>/dev/null || true
             _ok "systemd unit removed"
         fi
     fi
 
-    if $PUBLISH_GLOBAL_BINSTUBS; then
-        if $DRY_RUN; then
-            echo "[dry-run] would remove binstub: $BINSTUB"
-        else
-            rm -f "$BINSTUB"
-            _ok "Binstub removed"
-        fi
-    else
-        _ok "Scoped install left the legacy global binstub unchanged"
-    fi
-
     $DRY_RUN || _remove_sibling_binstubs
-
-    # Remove the runtime venv. In the versioned layout this means the `venv`
-    # symlink AND the whole versions/ tree; otherwise the single real venv dir.
-    if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-        if $DRY_RUN; then
-            [[ -L "$LINK_DIR" || -d "$LINK_DIR" ]] && echo "[dry-run] would remove: $LINK_DIR"
-            [[ -d "$INSTALL_DIR/versions" ]] && echo "[dry-run] would remove: $INSTALL_DIR/versions"
-        else
-            [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
-            [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
-            [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
-            _ok "Venv removed"
-        fi
-    elif [[ -d "$VENV_DIR" ]]; then
-        if $DRY_RUN; then
-            echo "[dry-run] would remove venv: $VENV_DIR"
-        else
-            rm -rf "$VENV_DIR"
-            _ok "Venv removed"
-        fi
-    fi
 
     if $PURGE; then
         if $DRY_RUN; then
             echo "[dry-run] would PURGE config/DB/auth at: $INSTALL_DIR"
         else
             _warn "Purging config, DB, and auth"
-            rm -rf "$INSTALL_DIR"
+            _finite_runtime_uninstall --remove-runtime || return 1
+            remove_install_runtime_content "$INSTALL_DIR" || return 1
         fi
     else
+        _remove_bridge_runtime_code || return 1
         _skip "Preserved config/DB at $INSTALL_DIR (use --purge to remove)"
     fi
 
@@ -2039,6 +2021,103 @@ do_uninstall() {
     else
         _ok "agent-bridge uninstalled"
     fi
+}
+
+_uninstall_external_python() {
+    local root="${1:?runtime root required}" candidate selected probe
+    probe='import sys
+from pathlib import Path
+assert sys.version_info >= (3, 10)
+root = Path(sys.argv[1]).absolute()
+assert ".." not in root.parts
+roots = (root, root.resolve())
+paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+         getattr(sys, "_base_executable", sys.executable))
+for value in paths:
+    path = Path(value).absolute()
+    for actual in (path, path.resolve(strict=True)):
+        assert all(not actual.is_relative_to(boundary) for boundary in roots)
+sys.stdout.write(str(Path(sys.executable).resolve(strict=True)))'
+    while IFS= read -r candidate; do
+        case "$candidate" in "$root"/*|*WindowsApps*) continue ;; esac
+        case "${OSTYPE:-}" in
+            msys*|cygwin*) [[ "$candidate" == *.exe || ! -f "$candidate.exe" ]] || candidate="$candidate.exe" ;;
+        esac
+        selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" || continue
+        [[ -n "$selected" && -x "$selected" ]] || continue
+        printf '%s' "$selected"
+        return 0
+    done < <(type -aP python3 python 2>/dev/null)
+    _fail "Uninstall requires an existing external Python outside runtime and prefix closure" >&2
+    return 1
+}
+
+_bridge_uninstall_tool() {
+    local python helper="$SCRIPT_DIR/installer_engine_stop.py"
+    [[ -f "$helper" && ! -L "$helper" ]] || helper="$SCRIPT_DIR/../../../libs/installer-engine/installer_engine_stop.py"
+    python="$(_uninstall_external_python "$INSTALL_DIR")" || return 1
+    "$python" -I -B "$helper" "$@" --root "$INSTALL_DIR" --plugin agent-bridge
+}
+
+_bridge_uninstall_preflight() {
+    local unit="$HOME/.config/systemd/user/$SYSTEMD_UNIT" properties
+    _bridge_uninstall_unit_state=unloaded
+    if [[ -e "$unit" || -L "$unit" ]]; then
+        _bridge_uninstall_tool check-unit --unit "$unit" || return 1
+        if command -v systemctl >/dev/null 2>&1; then
+            properties="$(systemctl --user show --all --no-pager --property=LoadState,ActiveState,FragmentPath,DropInPaths,ExecStart,WorkingDirectory -- "$SYSTEMD_UNIT")" || return 1
+            _bridge_uninstall_unit_state="$(printf '%s\n' "$properties" |
+                _bridge_uninstall_tool check-effective-unit --unit "$unit")" || return 1
+            case "$_bridge_uninstall_unit_state" in
+                loaded|unloaded) ;;
+                *) _fail "Effective Bridge service ownership was not admitted"; return 1 ;;
+            esac
+        else
+            _fail "Cannot verify effective Bridge service ownership without systemctl"
+            return 1
+        fi
+    fi
+    _bridge_uninstall_processes >/dev/null
+}
+
+_bridge_uninstall_processes() {
+    _bridge_uninstall_admission="$(_bridge_uninstall_tool capture --pid-file "$PID_FILE")" || return 1
+    _bridge_uninstall_tool pids --admission "$_bridge_uninstall_admission"
+}
+
+_bridge_uninstall_stop_owned() {
+    if [[ -z "${_bridge_uninstall_admission:-}" ]]; then
+        _bridge_uninstall_processes >/dev/null || return 1
+    fi
+    if command -v systemctl >/dev/null 2>&1 && [[ -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT" ]]; then
+        case "${_bridge_uninstall_unit_state:-}" in
+            loaded) systemctl --user stop "$SYSTEMD_UNIT" || return 1 ;;
+            unloaded) ;;
+            *) _fail "Bridge service ownership was not admitted"; return 1 ;;
+        esac
+    fi
+    _bridge_uninstall_tool stop --admission "$_bridge_uninstall_admission"
+}
+
+_remove_bridge_runtime_code() {
+    if $DRY_RUN; then
+        echo "[dry-run] would remove owned runtime code at: $INSTALL_DIR"
+        return 0
+    fi
+    _finite_runtime_uninstall --remove-runtime
+}
+
+_remove_bridge_helper_files() {
+    local directory="$1" name
+    shift
+    [[ -d "$directory" && ! -L "$directory" ]] || { _fail "Refusing linked runtime helpers"; return 1; }
+    for name in "$@"; do
+        [[ -e "$directory/$name" || -L "$directory/$name" ]] || continue
+        [[ -f "$directory/$name" && ! -L "$directory/$name" ]] || {
+            _fail "Refusing linked/non-file runtime helper"; return 1;
+        }
+    done
+    for name in "$@"; do rm -f -- "$directory/$name" || return 1; done
 }
 
 do_start() {
@@ -2302,16 +2381,30 @@ _source_version() {
 }
 
 # True (0) if version $1 is strictly older than version $2. Normalizes the PEP
-# 440 dev separator first -- plugin.json carries `0.4.0-dev93` (hyphen) but
-# importlib.metadata reports the normalized `0.4.0.dev93` (dot), so without this
-# an equal version would not compare equal. `sort -V` then orders our
-# `0.4.0.devN` build stream correctly (dev71 < dev93 < dev100).
+# 440 dev separator and compares package components numerically, independently
+# of the host sort implementation. Source fingerprints do not order packages.
 _version_lt() {
     local a="${1//-/.}" b="${2//-/.}"
+    a="${a%%[+.]source.*}"; b="${b%%[+.]source.*}"
     [[ "$a" == "$b" ]] && return 1
-    local lower
-    lower="$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n1)"
-    [[ "$lower" == "$a" ]]
+    local -a pa pb
+    IFS='.' read -r -a pa <<< "$a"
+    IFS='.' read -r -a pb <<< "$b"
+    local len=${#pa[@]}
+    (( ${#pb[@]} > len )) && len=${#pb[@]}
+    local i ca cb na nb
+    for (( i = 0; i < len; i++ )); do
+        ca="${pa[i]:-}"; cb="${pb[i]:-}"
+        [[ -z "$ca" && -z "$cb" ]] && continue
+        [[ -z "$ca" ]] && return 1
+        [[ -z "$cb" ]] && return 0
+        na="${ca//[!0-9]/}"; nb="${cb//[!0-9]/}"
+        na="${na:-0}"; nb="${nb:-0}"
+        na=$((10#$na)); nb=$((10#$nb))
+        (( na < nb )) && return 0
+        (( na > nb )) && return 1
+    done
+    return 1
 }
 
 # Downgrade guard (#1790). A stress test caught an agent running the raw
@@ -2500,6 +2593,7 @@ _update_core() {
             --reinstall-package agent-machine-transport --refresh-package agent-machine-transport \
             --reinstall-package agent-worktree-identity --refresh-package agent-worktree-identity \
             --reinstall-package agent-process-telemetry --refresh-package agent-process-telemetry \
+            --reinstall-package agent-update-driver --refresh-package agent-update-driver \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package update failed"
         return 1
@@ -2822,6 +2916,12 @@ if [[ -n "$_LIFECYCLE_ACTION" ]]; then
 fi
 _initialize_source_runtime || exit 1
 
+case "$ACTION" in
+    install|update|provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
 case "$ACTION" in
     install)   do_install ;;
     stamp)     do_stamp ;;

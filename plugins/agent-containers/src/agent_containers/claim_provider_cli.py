@@ -165,7 +165,7 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
                 lifecycle.remove_container(args.name, force=True)
             except RuntimeError as exc:
                 detail = str(exc)
-                if _container_looks_gone(detail):
+                if isinstance(exc, lifecycle.ContainerNotFoundError) or _container_looks_gone(detail):
                     _release_lease_silently(args.name)
                     print(json.dumps({
                         "reclaimed": True, "detail": f"container {args.name} already gone",

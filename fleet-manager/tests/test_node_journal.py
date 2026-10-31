@@ -60,6 +60,25 @@ def test_acceptance_restart_and_conflicting_reuse(tmp_path):
     assert store.accept(intent(account="other")) != accepted
 
 
+def test_named_external_inspection_retains_exact_resource_fence_without_attempt_metadata(tmp_path):
+    store = journal(tmp_path / "node.db")
+    request = intent(command="manager.converge", parameters={"deployment": "a" * 64})
+    assert store.inspect_named_external(resource="resource-a") is None
+    accepted = store.accept_named_external(request, resource="resource-a")
+    assert store.inspect_named_external(resource="resource-a") == accepted
+    assert store.inspect_named_external(resource="resource-b") is None
+    assert store.begin_external(request)
+    assert journal(store.path).inspect_named_external(resource="resource-a").to_dict()["status"] == "unknown"
+    failed = store.reconcile(request, outcome(request, status="failed"))
+    assert store.inspect_named_external(resource="resource-a") == failed
+    assert len(store.results()) == 3
+    with closing(sqlite3.connect(store.path)) as connection:
+        connection.execute("UPDATE external_owners SET operation_id=999")
+        connection.commit()
+    with pytest.raises(PlanError, match="external resource owner is missing"):
+        store.inspect_named_external(resource="resource-a")
+
+
 def test_atomic_acceptance_rolls_back_on_spool_failure(tmp_path, monkeypatch):
     store, request = journal(tmp_path / "node.db"), intent()
     def fail(*args):

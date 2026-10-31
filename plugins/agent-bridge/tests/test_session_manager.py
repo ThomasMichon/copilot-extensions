@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -122,6 +122,7 @@ def _mock_agent_proc():
     return proc
 
 
+@pytest.mark.usefixtures("provider_admission")
 @pytest.mark.asyncio
 async def test_failed_process_launch_reaps_wrapper_tree(session_manager, monkeypatch):
     """A stage-7 failure must not leave a provider/SSH holder alive."""
@@ -235,6 +236,25 @@ def _patch_spawn():
 
 
 @pytest.fixture
+def provider_admission(tmp_path, monkeypatch):
+    """An isolated enforcing guest for tests that already replace its agent transport."""
+    from repository_policy import require_agent_hosting
+
+    guest = tmp_path / "provider-policy-checkout"
+    guest.mkdir()
+    (guest / ".git").mkdir()
+    checks = []
+
+    async def query(target, *, operation):
+        checks.append((target, operation))
+        return {**require_agent_hosting(guest, operation=operation).to_dict(), "allowed": True}
+
+    monkeypatch.setattr("agent_bridge.provider_hosting.query_provider_policy", query)
+    monkeypatch.setattr("agent_bridge.hosting_policy.query_ssh_policy", query)
+    return guest, checks
+
+
+@pytest.fixture
 def _patch_acp(mock_acp_client):
     """Patch AcpClient construction to return a mock.
 
@@ -278,6 +298,21 @@ class TestStartSession:
         assert row is not None
         assert row["status"] == "idle"
         assert row["acp_session_id"] == "acp-test-123"
+
+    @pytest.mark.asyncio
+    async def test_start_unselected_local_still_registers_ordinary_lineage(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp, monkeypatch,
+    ) -> None:
+        register = Mock(return_value=True)
+        monkeypatch.setattr("agent_bridge.worktree_lineage.register_session", register)
+        spawn_target.worktree_id = "ordinary-worktree"
+        spawn_target.explicit_cwd = True
+        session = await session_manager.start_session(spawn_target)
+        assert session.status == SessionStatus.IDLE
+        register.assert_called_once_with(
+            "ordinary-worktree", session.acp_session_id, pid=session.pid,
+            worktree_dir=spawn_target.cwd,
+        )
 
     @pytest.mark.asyncio
     async def test_start_failure_marks_failed(
@@ -412,6 +447,10 @@ class TestLocalCacheRefreshWiring:
         ``target.cwd`` was unset at ``start_session``'s own entry."""
         resolved_dir = tmp_path / "resolved-worktree"
         resolved_dir.mkdir()
+        monkeypatch.setattr(
+            "agent_bridge.hosting_policy.resolve_project_cwd",
+            AsyncMock(return_value=str(resolved_dir)),
+        )
         fake_argv = self._fake_agent_argv(tmp_path)
 
         async def _fake_resolve(target, *, tracker=None, session_id=""):
@@ -479,6 +518,7 @@ class TestLocalCacheRefreshWiring:
                 await self._kill(mgr, session)
             db.close()
 
+    @pytest.mark.usefixtures("provider_admission")
     @pytest.mark.asyncio
     async def test_a_remote_boundary_call_never_invokes_resolve_local_launch_or_refresh(
         self, tmp_path: Path, monkeypatch
@@ -536,6 +576,7 @@ class TestLocalCacheRefreshWiring:
         mock_refresh.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("provider_admission")
 class TestConcurrencyGuard:
     """Single-session-per-CodeSpace concurrency guard."""
 
@@ -672,15 +713,17 @@ async def _start_codespace_session(tmp_db, monkeypatch):
         lambda *args, **kwargs: ("", None),
     )
     transport = object()
+    factory = Mock(return_value=SimpleNamespace(transport=transport))
     monkeypatch.setattr(
         "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
-        lambda *args, **kwargs: SimpleNamespace(transport=transport),
+        factory,
     )
     monkeypatch.setattr(
         "agent_bridge.venue_plugins.prepare_venue_plugins",
         AsyncMock(return_value=[]),
     )
     manager = SessionManager(tmp_db)
+    manager._timeouts.session_host_ready = 150.0
     captured: dict[str, list[str] | None] = {}
 
     async def fake_connect(self, target, **kwargs):
@@ -704,9 +747,11 @@ async def _start_codespace_session(tmp_db, monkeypatch):
     )
 
     await manager.start_session(target, agent_name="codespace:example")
+    assert factory.call_args.kwargs["ready_timeout"] == 150.0
     return acp_command, captured["remote_child_argv"]
 
 
+@pytest.mark.usefixtures("provider_admission")
 class TestCodespaceSessionHostAcpCommand:
     """The Session-Host CodeSpace dispatch passes copilot's acp_command through
     unchanged (no ``--model`` launch flags).
@@ -725,6 +770,37 @@ class TestCodespaceSessionHostAcpCommand:
 
 
 @pytest.mark.asyncio
+async def test_codespace_replacement_factory_receives_configured_readiness(
+    tmp_db, monkeypatch,
+):
+    manager = SessionManager(tmp_db)
+    manager._timeouts.session_host_ready = 150.0
+    session = Session(
+        "synthetic", "synthetic",
+        SpawnTarget(type="command", codespace={"name": "example", "repo": "example/repo"}),
+        "codespace:example",
+    )
+    factory = Mock(side_effect=RuntimeError("factory boundary reached"))
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner", factory,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.venue_plugins.resolve_controller_cwd", AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_relay_launch_env", lambda *args: ("", None),
+    )
+    monkeypatch.setattr(manager, "_acquire_codespace_lock", Mock())
+    monkeypatch.setattr(manager, "_release_codespace_lock", Mock())
+    with pytest.raises(RuntimeError, match="factory boundary reached"):
+        await manager._resume_via_new_remote_host(
+            session, on_acp_event=None, permission_callback=None,
+        )
+    assert factory.call_args.kwargs["ready_timeout"] == 150.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_admission")
 async def test_trusted_container_selects_remote_session_host(
     tmp_db,
     monkeypatch,
@@ -858,6 +934,7 @@ async def test_trusted_container_selects_remote_session_host(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_admission")
 async def test_container_cleanup_exception_does_not_fail_successful_start(
     tmp_db,
     monkeypatch,
@@ -936,6 +1013,7 @@ async def test_container_cleanup_exception_does_not_fail_successful_start(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_admission")
 async def test_codespace_handshake_failure_releases_claim(
     tmp_db,
     monkeypatch,
@@ -2283,11 +2361,18 @@ class TestRemoteForwardRelaySupervision:
         async def ready_probe():
             return True
 
+        probe_budgets = []
+
+        def probe_factory(_endpoint, *, fail_open=True, timeout=60.0):
+            probe_budgets.append((fail_open, timeout))
+            return lambda _port: ready_probe
+
+        manager._timeouts.session_host_ready = 150.0
         monkeypatch.setattr(relay_state, "get_live_relay_port", lambda: 62000)
         monkeypatch.setattr(
             endpoints_mod,
             "endpoint_serving_probe_factory",
-            lambda _endpoint, fail_open=True: lambda _port: ready_probe,
+            probe_factory,
         )
 
         await manager._ensure_forward(
@@ -2302,6 +2387,7 @@ class TestRemoteForwardRelaySupervision:
         assert current.kw["host_port_resolver"]() == 62000
         assert current.started == 1
         assert manager._relays["s1"] == [current]
+        assert probe_budgets == [(True, 150.0), (False, 150.0)]
 
     @pytest.mark.asyncio
     async def test_stopped_container_relay_failure_is_explicit(
@@ -2330,7 +2416,7 @@ class TestRemoteForwardRelaySupervision:
         monkeypatch.setattr(
             endpoints_mod,
             "endpoint_serving_probe_factory",
-            lambda _endpoint, fail_open=True: lambda _port: AsyncMock(
+            lambda _endpoint, fail_open=True, timeout=60.0: lambda _port: AsyncMock(
                 return_value=True
             ),
         )
@@ -2807,6 +2893,10 @@ async def test_idle_unwatched_session_goes_dormant_after_repeated_recovery_failu
     session.status = SessionStatus.IDLE
     session.acp_session_id = "acp-1"
     session.client = None
+    tmp_db.create_session(
+        session.session_id, session.name, None, str(tmp_path), "local", "idle", 1.0,
+        acp_session_id=session.acp_session_id,
+    )
     manager._sessions[session.session_id] = session
     rec = SimpleNamespace(
         session_id=session.session_id,
@@ -2864,6 +2954,10 @@ async def test_recoverable_stopped_session_also_reaches_idle_dormancy(
     session.status = SessionStatus.STOPPED  # as rehydrate() would leave it
     session.acp_session_id = "acp-1"
     session.client = None
+    tmp_db.create_session(
+        session.session_id, session.name, None, str(tmp_path), "local", "stopped", 1.0,
+        acp_session_id=session.acp_session_id,
+    )
     session.background_recovery_enabled = True  # not an explicit stop
     manager._sessions[session.session_id] = session
     rec = SimpleNamespace(
@@ -3026,6 +3120,10 @@ async def test_recover_disconnected_hosts_feeds_codespace_unavailable_into_backo
     session.status = SessionStatus.IDLE
     session.acp_session_id = "acp-1"
     session.client = None
+    tmp_db.create_session(
+        session.session_id, session.name, None, str(tmp_path), "local", "idle", 1.0,
+        acp_session_id=session.acp_session_id,
+    )
     manager._sessions[session.session_id] = session
     rec = SimpleNamespace(
         session_id=session.session_id,
@@ -3235,6 +3333,7 @@ def test_ensure_columns_backfills_background_recovery_for_stopped_rows(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_admission")
 async def test_stopped_container_resume_reattaches_without_refresh(
     tmp_db, tmp_path, monkeypatch,
 ) -> None:
@@ -3268,6 +3367,12 @@ async def test_stopped_container_resume_reattaches_without_refresh(
     session.status = SessionStatus.STOPPED
     session.acp_session_id = "acp-1"
     manager._sessions[session.session_id] = session
+    tmp_db.create_session(
+        session_id=session.session_id, name=session.name,
+        agent_name=session.agent_name, caller_id=session.caller_id,
+        target_dir=None, target_type="command", status=SessionStatus.STOPPED.value,
+        now=1, target_json=session.target.to_json(),
+    )
 
     class Resolver:
         async def resolve_async(self, _name):
@@ -3294,6 +3399,7 @@ async def test_stopped_container_resume_reattaches_without_refresh(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_admission")
 async def test_stopped_legacy_container_resume_reattaches_despite_missing_overrides(
     tmp_db, tmp_path, monkeypatch,
 ) -> None:
@@ -3322,6 +3428,12 @@ async def test_stopped_legacy_container_resume_reattaches_despite_missing_overri
     session.status = SessionStatus.STOPPED
     session.acp_session_id = "acp-1"
     manager._sessions[session.session_id] = session
+    tmp_db.create_session(
+        session_id=session.session_id, name=session.name,
+        agent_name=session.agent_name, caller_id=session.caller_id,
+        target_dir=None, target_type="command", status=SessionStatus.STOPPED.value,
+        now=1, target_json=session.target.to_json(),
+    )
 
     class Resolver:
         async def resolve_async(self, _name):
@@ -3398,6 +3510,7 @@ async def test_stopped_container_live_host_applies_current_relay_policy(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_admission")
 async def test_stopped_container_relay_failure_prevents_prompt_admission(
     tmp_db, tmp_path, monkeypatch,
 ) -> None:
@@ -3414,6 +3527,12 @@ async def test_stopped_container_relay_failure_prevents_prompt_admission(
     session.status = SessionStatus.STOPPED
     session.acp_session_id = "acp-1"
     manager._sessions[session.session_id] = session
+    tmp_db.create_session(
+        session_id=session.session_id, name=session.name,
+        agent_name=session.agent_name, caller_id=session.caller_id,
+        target_dir=None, target_type="command", status=SessionStatus.STOPPED.value,
+        now=1, target_json=session.target.to_json(),
+    )
     monkeypatch.setattr(
         manager,
         "_refresh_provider_target",
@@ -3816,6 +3935,7 @@ class TestBackgroundTaskGate:
         assert session_manager.get_session(sid) is None
 
 
+@pytest.mark.usefixtures("provider_admission")
 class TestResumeSession:
     """Session resume from STOPPED state."""
 
@@ -3860,11 +3980,11 @@ class TestResumeSession:
 
     @pytest.mark.asyncio
     async def test_start_session_preserves_existing_provider_override_provenance(
-        self, session_manager, _patch_spawn, _patch_acp
+        self, session_manager, _patch_spawn, _patch_acp, tmp_path
     ) -> None:
         target = SpawnTarget(
             type="local",
-            cwd="/workspaces/example",
+            cwd=str(tmp_path),
             env={"REQUEST_OVERRIDE": "kept"},
             copilot_args=["--request-flag"],
             venue={
@@ -5085,6 +5205,7 @@ class TestDurablePromptQueue:
         assert session_manager._db.count_pending_prompts(sid) == 1
 
 
+@pytest.mark.usefixtures("provider_admission")
 class TestCodespaceExclusiveClaim:
     """#897 Increment B step 2: the Session-Host CodeSpace dispatch path
     acquires an exclusive, worktree-keyed claim before establishing the

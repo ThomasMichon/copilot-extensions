@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import pytest
 
 
 from agent_bridge import related_plugins as rp
@@ -32,6 +33,21 @@ related:
     locus:
       codespace: { repo: org/other-codespaces }
 """
+
+
+def test_explicit_missing_override_survives_related_selection(tmp_path):
+    _write_related(tmp_path, """related:
+  sample:
+    plugins:
+      - {source: retired@local, enable: false, allow_missing: true}
+""")
+    refs = rp.related_plugins_for_repo("sample", anchors=[tmp_path])
+    assert refs == [PluginRef("retired@local", enable=False, allow_missing=True)]
+    assert refs[0].selection() == {
+        "source": "retired@local", "enable": False, "allow_missing": True,
+    }
+    with pytest.raises(ValueError, match="allow_missing"):
+        rp._parse_plugin_items([{"source": "retired@local", "allow_missing": "true"}])
 
 
 def test_match_by_codespace_repo(tmp_path: Path):

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec
+
 import json
 import os
 import secrets
@@ -65,10 +67,11 @@ _DEFAULT_DRAIN_TIMEOUT_S = _env_timeout("AGENT_WORKTREES_STATUS_MONITOR_DRAIN_TI
 
 
 def routing_dir(runtime_home: Path | None = None) -> Path:
-    from . import status_monitor_runtime as smr
+    if runtime_home is None:
+        from . import status_monitor_runtime as smr
 
-    root = runtime_home if runtime_home is not None else smr._aw_runtime_home()
-    return Path(root) / "status-monitor-routing"
+        runtime_home = smr._aw_runtime_home()
+    return Path(runtime_home) / "status-monitor-routing"
 
 
 def pick_free_port(bind: str = _BIND) -> int:
@@ -153,9 +156,9 @@ class _ControlHandler(socketserver.StreamRequestHandler):
             if not isinstance(payload, dict):
                 payload = {}
             owner = self.server.owner
-            if action in {"worktrees-read", "repos-map-read"}:
-                owner._on_current_read_started(action)
-                current_read = action
+            if action in {"worktrees-read", "repos-map-read", "picker-bootstrap"}:
+                current_read = "worktrees-read" if action == "picker-bootstrap" else action
+                owner._on_current_read_started(current_read)
             if owner.stream_handle is not None and action == "worktrees-feed":
                 def disconnected():
                     readable, _, _ = select.select([self.request], [], [], 0)
@@ -418,6 +421,9 @@ def spawn_monitor(argv: list[str], env: dict[str, str], *, console_children: boo
     cwd = smr._daemon_cwd()
     return spawn_daemon(
         argv, cwd=cwd, log_path=monitor_log_path(cwd), env=env,
+        instance=DaemonInstanceSpec(
+            "agent-worktrees-status-monitor", Path(cwd), Path(__file__).resolve(),
+        ),
         console_children=console_children,
         display="agent_worktrees " + " ".join(argv[3:5]),
     )
@@ -759,33 +765,34 @@ def activate_after_update(
 
 
 def installer_after_update() -> int:
-    """Non-fatal installer wrapper that prints a short cutover summary."""
+    """Report the existing transition outcome without masking an incomplete update."""
     summary = activate_after_update(
         monitor_was_live=os.environ.get("AGENT_WORKTREES_MONITOR_WAS_LIVE") == "1",
     )
     action = str(summary.get("action") or "noop")
-    if not summary.get("enabled"):
+    if summary.get("enabled") is False:
         print("status-monitor disabled; skipped")
         return 0
     if action == "noop":
         print(f"status-monitor {summary.get('reason', 'noop')}; left as-is")
-        return 0
+        return 0 if summary.get("reason") == "no-live-monitor" else 1
     if action == "restart":
         restart = summary.get("restart")
         if isinstance(restart, dict):
-            if restart.get("already_current"):
+            if restart.get("already_current") is True:
                 print("no routed live monitor; current monitor already owns the host")
-            elif restart.get("spawned"):
+                return 0
+            if restart.get("spawned") is True:
                 print("no routed live monitor; restarted the current monitor")
-            else:
-                print("no routed live monitor; restart attempt did not spawn a monitor")
-        return 0
+                return 0
+        print("no routed live monitor; restart attempt did not spawn a monitor")
+        return 1
     result = summary.get("result") if isinstance(summary.get("result"), dict) else {}
-    if result.get("ok"):
+    if action == "cutover" and result.get("ok") is True:
         print(f"cut over live monitor to port {result.get('new_port')}")
-    else:
-        print(f"cutover failed; rollback kept serving state ({result.get('error')})")
-    return 0
+        return 0
+    print(f"status-monitor transition incomplete ({result.get('error') or summary.get('reason')})")
+    return 1
 
 
 def _acquire_cutover_lock(

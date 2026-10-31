@@ -11,6 +11,7 @@ or an explicit ``--project``; it is threaded in-process, not read from
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import socket
@@ -29,11 +30,19 @@ from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml
 from machine_transport import normalize_machine_entries as _mt_normalize_machine_entries
 from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
 
+from . import config_acquisition
+from .config_acquisition import (
+    _load_config_d_report as _load_config_d_report,
+    _load_yaml_safe_report as _load_yaml_safe_report,
+    load_config_report as load_config_report,
+)
+
 from . import config_migrations, inrepo_config_source, project_state, publication_deadline, registry_paths
 from . import machine_instructions
 from .codename_config import CodenameConfig, parse_codename
 from .pr_observation_config import ObservationConfig, parse_observation
 from .pr_publication_config import PublicationChecksConfig, parse_publication_checks, parse_string_tuple
+from .pr_publication_labels import PublicationOrigin, parse_origin
 from .pr_related_binding import parse_repository
 from .config_cache import (  # noqa: F401 (re-exported)
     ConfigCacheSession,
@@ -232,12 +241,9 @@ class PRConfig:
     head_scheme: str = "refspec"   # refspec (default) | snapshot
     head_pattern: str = ""         # empty -> provider-aware default (see above)
     push_timeout_seconds: float = publication_deadline.DEFAULT_PUSH_TIMEOUT
-    # Provider-plugin settings (PR creation via a provider CLI). ``api_base``
-    # is the hosting endpoint -- required for self-hosted Gitea
-    # (e.g. https://host/gitea) and Azure DevOps org URLs; GitHub defaults to
-    # the public API. ``token_command`` (a shell command that prints a token,
-    # e.g. a vault fetch) takes precedence over ``token_env`` (an env var
-    # name); GitHub falls back to ``gh`` auth when neither is set. ``labels``
+    # Provider endpoint: required for self-hosted Gitea and Azure DevOps;
+    # GitHub defaults to its public API. A token_command (printing a token)
+    # takes precedence over token_env; GitHub otherwise uses gh auth. ``labels``
     # are applied to every opened PR (``{machine}`` is templated). ``auto_open``
     # is **opt-in** (default False): only when a repo sets it true does
     # ``create-pr`` open the PR via the provider; otherwise the branch is just
@@ -246,6 +252,8 @@ class PRConfig:
     token_env: str = ""
     token_command: str = ""
     labels: tuple[str, ...] = ()
+    publication_origin: PublicationOrigin | None = None
+    publication_origin_active: bool = False
     auto_open: bool = False        # opt-in: open the PR via the provider after push
     # Embed source-worktree provenance in a hidden PR-body marker:
     # - "codename" (default, effort codename-attribution-by-default) -- a
@@ -685,7 +693,7 @@ def _parse_machines_yaml_file(
 
 
 def load_machines_yaml(
-    repo_dir: str | Path, *, config: Config | None = None,
+    repo_dir: str | Path, *, config: Config | None = None, require_alias: bool = True,
 ) -> dict[str, MachineEntry]:
     """Additively merge the canonical in-repo + legacy root ``machines.yaml``
     (returning only whichever was found first -- the prior bug, #7914 --
@@ -707,8 +715,10 @@ def load_machines_yaml(
             _parse_machines_yaml_file(canonical, require_alias=False) if have_canonical else None,
         )
     return {
-        key: replace(entry, ssh_environments=[env for env in entry.ssh_environments if env.alias])
-        for key, entry in _mt_normalize_machine_entries(entries).items()
+        key: replace(entry, ssh_environments=[env for env in entry.ssh_environments if env.alias or not require_alias])
+        for key, entry in _mt_normalize_machine_entries(
+            entries, observed_hostname=socket.gethostname(),
+        ).items()
     }
 
 
@@ -741,7 +751,7 @@ def detect_machine(
     from .machine_identity import load_execution_registry, resolve_execution_machine
 
     return resolve_execution_machine(
-        value if value is not None else socket.gethostname().lower(),
+        value if value is not None else socket.gethostname(),
         guest=detect_platform() == "wsl", configured=value is not None,
         load_entries=(lambda: load_execution_registry(repo_dir, config=config))
         if repo_dir is not None else None,
@@ -772,7 +782,7 @@ def _home() -> Path:
     """
     override = os.environ.get("AGENT_HOME", "").strip()
     if override:
-        return Path(override)
+        return Path(os.path.abspath(override))
     if sys.platform == "win32":
         return Path(os.environ.get("USERPROFILE", str(Path.home())))
     return Path.home()
@@ -835,8 +845,8 @@ def legacy_install_dir() -> Path:
 
 
 def install_dir() -> Path:
-    """Selected legacy or installation-cell runtime/state root."""
-    return registry_paths.registry_root(legacy_install_dir())
+    """Selected lexical absolute legacy/cell root, preserving filesystem aliases."""
+    return Path(os.path.abspath(registry_paths.registry_root(legacy_install_dir())))
 
 
 def project_dir(name: str | None = None) -> Path:
@@ -872,6 +882,7 @@ def _load_config_uncached(
     path: Path | None = None,
     *,
     include_control_plane_related_pr: bool = True,
+    include_knowledge_preferences: bool = True,
     project: str | None = None,
     _machine_binding: dict[str, str] | None = None,
 ) -> Config:
@@ -912,6 +923,8 @@ def _load_config_uncached(
         include_control_plane_related_pr: Include foreign-repo PR overlays from
             active harness plugins. Related-index bootstrap disables this to
             avoid resolving the same active-plugin corpus twice.
+        include_knowledge_preferences: Load portable knowledge-repo preferences.
+            Disable only for readers that do not consume launch preferences.
         project: Explicit project identity. When supplied, it overrides legacy
             machine/global ``repo_name`` values for this load.
         _machine_binding: Internal per-load provenance capture; never a YAML
@@ -924,6 +937,7 @@ def _load_config_uncached(
         ValueError: If no repo can be resolved (no machine-local repos and no
             registry anchor for the active project).
     """
+    config_acquisition.full_load_started()
     if path is None:
         path = default_config_path()
 
@@ -981,9 +995,10 @@ def _load_config_uncached(
     # for portable operator-preference keys (never machine-specifics or the
     # binding). Gated + fail-open -> ``{}`` for a normal (non-stateless) repo, so
     # the hot config path is unchanged off the stateless track.
-    knowledge_raw = _load_knowledge_overlay_config(
+    knowledge_raw = config_acquisition.knowledge_call(
+        _load_knowledge_overlay_config, _KNOWLEDGE_OVERLAY_OWNER,
         machine_raw, global_raw, repo_name, platform
-    )
+    ) if include_knowledge_preferences else {}
 
     machine_repos = machine_raw.get("repos") or {}
     if not isinstance(machine_repos, dict):
@@ -992,11 +1007,10 @@ def _load_config_uncached(
     # Control-plane related.yaml (+ ``<repo>-harness`` plugin) ``pr:`` overlays,
     # computed once: a checked-in control-plane view of how to land PRs in a
     # FOREIGN repo, layered per-repo below. Fail-safe -> ``{}``.
-    cp_related_pr = (
-        _control_plane_related_pr_map()
-        if include_control_plane_related_pr
-        else {}
-    )
+    cp_related_pr = config_acquisition.owner_call(
+        _control_plane_related_pr_map, _CONTROL_PLANE_PR_OWNER,
+        source="control-plane-related-pr",
+    ) if include_control_plane_related_pr else {}
 
     # Build the set of repos to resolve: those named in the machine-local file,
     # plus the active project (so a convention-adopted repo with no
@@ -1141,29 +1155,19 @@ def _load_config_uncached(
         ),
         copilot_identity_switch_enabled=bool(machine_raw.get("copilot_identity_switch_enabled", global_raw.get("copilot_identity_switch_enabled", False))),
     )
-    from .execution_spaces import canonicalize_legacy_config
-
-    config = canonicalize_legacy_config(config, configured=bool(configured_machine))
-    # Explicit execution-space keys are not a migration surface.
-    if detect_platform() != "wsl":
-        return config
-    try:
-        entries = load_machines_yaml(config.default_repo.anchor, config=config)
-    except FileNotFoundError:
-        entries = {}
-    if any(entry.execution_platform and not entry.legacy_key for entry in entries.values()):
-        if not configured_machine:
-            detect_machine(config.default_repo.anchor)
-        return config
     # Resolve after the config-source binding is available, without calling
     # load_machines_yaml's overlay fallback (which loads this config recursively).
-    identity_anchors = [config.default_repo.anchor]
-    if config.default_repo.stateless or config.default_repo.requires_external_state_root:
+    try:
+        repo = config.default_repo
+    except KeyError:
+        repo = None
+    identity_anchors = [repo.anchor] if repo is not None and repo.anchor else []
+    if repo is not None and repo.anchor:
         from . import state_root
 
         identity_anchors = [
             source.anchor for source in state_root.config_source_anchors(
-                config, base_anchor=config.default_repo.anchor,
+                config, base_anchor=repo.anchor,
             )
         ]
     for anchor in identity_anchors:
@@ -1171,8 +1175,13 @@ def _load_config_uncached(
         if any((root / rel).is_file() for rel in (
             Path(INREPO_CONFIG_DIRNAME) / "machines.yaml", Path("machines.yaml"),
         )):
-            return replace(config, machine=detect_machine(
-                anchor, value=config.machine if configured_machine else None,
+            from .machine_identity import load_execution_registry, resolve_execution_machine
+
+            return replace(config, machine=resolve_execution_machine(
+                configured_machine if configured_machine else socket.gethostname(),
+                guest=detect_platform() == "wsl", configured=bool(configured_machine),
+                load_entries=lambda: load_execution_registry(anchor, config=config),
+                preserve_native_hostname=True,
             ))
     else:
         if machine_raw.get("machine") or global_raw.get("machine"):
@@ -1184,6 +1193,7 @@ def load_config(
     path: Path | None = None,
     *,
     include_control_plane_related_pr: bool = True,
+    include_knowledge_preferences: bool = True,
     project: str | None = None,
 ) -> Config:
     """Load config; memoized inside ``cached_load_config_scope()`` (see
@@ -1192,6 +1202,7 @@ def load_config(
         return memoize_in_scope(
             _load_config_uncached, path,
             include_control_plane_related_pr=include_control_plane_related_pr,
+            include_knowledge_preferences=include_knowledge_preferences,
             project=project,
         )
 
@@ -1230,14 +1241,7 @@ def _load_yaml_safe(path: Path) -> dict[str, Any]:
     missing, empty, or malformed file degrades to an empty mapping rather than
     breaking the whole CLI.
     """
-    try:
-        if not path.exists():
-            return {}
-        with open(path, encoding="utf-8") as f:
-            raw = yaml.load(f, Loader=_YamlSafeLoader)
-        return raw if isinstance(raw, dict) else {}
-    except Exception:
-        return {}
+    return config_acquisition.yaml_value(path)
 
 
 def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
@@ -1259,7 +1263,7 @@ def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
 
     merged = inrepo_config_source.load_config_base(root, rel_candidates, strict=strict)
 
-    context = registry_paths.installation_context()
+    context = registry_paths.installation_context_call(registry_paths.installation_context)
     marketplace_id = (
         str(context.get("marketplaceId", "")).strip()
         if isinstance(context, dict)
@@ -1272,7 +1276,7 @@ def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
             / marketplace_id
             / GLOBAL_CONFIG_FILENAME
         )
-        if overlay_path.exists():
+        if config_acquisition.source_exists(overlay_path, "marketplace-config"):
             merged = _deep_merge(merged, inrepo_config_source.load_config_file(overlay_path, strict=strict))
     return merged
 
@@ -1295,21 +1299,7 @@ def _load_config_d(
     independent fault boundary and uncertainty retains only its last-known
     contribution.
     """
-    from .config_dropins import (
-        scan_config_dropin_registry,
-        warn_config_dropin_findings,
-    )
-
-    report = scan_config_dropin_registry(
-        config_d,
-        project_name=project_name,
-    )
-    if warn:
-        warn_config_dropin_findings(report)
-    merged: dict[str, Any] = {}
-    for contribution in report.active_configs:
-        merged = _deep_merge(merged, contribution.raw_config)
-    return merged
+    return config_acquisition.dropin_value(config_d, project_name=project_name, warn=warn)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -1347,6 +1337,7 @@ def _resolve_anchor_from_registry(name: str, platform: str) -> str | None:
     machine-specific path comes from the registry, the settings from the
     repo's own in-repo config. Never raises.
     """
+    start = config_acquisition.registry_call_started()
     try:
         from . import repos as repos_mod
 
@@ -1355,8 +1346,11 @@ def _resolve_anchor_from_registry(name: str, platform: str) -> str | None:
         if entry is None:
             return None
         return entry.local_path(platform) or None
-    except Exception:
+    except Exception as exc:
+        config_acquisition.registry_call_failed("repository-anchor-registry", exc)
         return None
+    finally:
+        config_acquisition.registry_call_finished(start, "repository-anchor-registry")
 
 
 # E1e config.yaml knowledge overlay (#947): the portable operator-preference keys
@@ -1370,25 +1364,37 @@ _KNOWLEDGE_OVERLAY_TOP_KEYS: tuple[str, ...] = (
 )
 
 
+_KNOWLEDGE_READ_OWNER = _load_inrepo_config
+_KNOWLEDGE_ANCHOR_OWNER = _resolve_anchor_from_registry
+
+
+@contextlib.contextmanager
+def _config_owner_outcome(source, *, complete=True):
+    start = config_acquisition.registry_call_started()
+    try:
+        yield
+    except Exception as exc:
+        config_acquisition.failed(
+            config_acquisition.current_observations(), source, source,
+            f"{source}-failed", type(exc).__name__,
+        )
+    else:
+        if complete:
+            config_acquisition.owner_outcome(start, source)
+
+
 def _load_knowledge_overlay_config(
     machine_raw: dict[str, Any], global_raw: dict[str, Any],
     repo_name: str, platform: str,
 ) -> dict[str, Any]:
     """The E1e config.yaml **knowledge overlay** tier (portable operator prefs).
 
-    Returns the bound knowledge repo's ``config.yaml`` filtered to
-    :data:`_KNOWLEDGE_OVERLAY_TOP_KEYS` when the launch repo is a **stateless
-    harness** bound to a knowledge repo; ``{}`` otherwise. This lets portable
-    operator preferences live (versioned) in the knowledge repo as a tier between
-    the harness in-repo base and the machine-local config, so machine-local stays
-    minimal (just the binding + true machine-specifics).
-
-    This is the config-READ knowledge overlay for ``config.yaml`` itself. Gated +
-    fail-open: a non-stateless launch repo, an unbound harness, an unregistered
-    knowledge repo, or any error yields ``{}`` -- so the hot config path is
-    byte-identical off the stateless track.
+    A bound stateless harness receives only ``_KNOWLEDGE_OVERLAY_TOP_KEYS``
+    between its in-repo and machine-local tiers. Other gates and errors yield
+    ``{}``. A completed owner decision does not certify child acquisition:
+    child failures remain uncertain, and reports are never reusable input data.
     """
-    try:
+    with _config_owner_outcome("knowledge-preferences"):
         knowledge_repo = (
             machine_raw.get("knowledge_repo")
             or global_raw.get("knowledge_repo")
@@ -1404,22 +1410,30 @@ def _load_knowledge_overlay_config(
             block = machine_repos.get(repo_name)
             if isinstance(block, dict):
                 launch_anchor = block.get("anchor")
-        launch_anchor = launch_anchor or _resolve_anchor_from_registry(
-            repo_name, platform
+        launch_anchor = launch_anchor or config_acquisition.knowledge_call(
+            _resolve_anchor_from_registry, _KNOWLEDGE_ANCHOR_OWNER, repo_name, platform,
         )
         if not launch_anchor:
             return {}
-        inrepo = _load_inrepo_config(launch_anchor)
+        inrepo = config_acquisition.knowledge_call(
+            _load_inrepo_config, _KNOWLEDGE_READ_OWNER, launch_anchor,
+        )
         if not (inrepo.get("stateless")
                 or inrepo.get("requires_external_state_root")):
             return {}
-        kpath = _resolve_anchor_from_registry(knowledge_repo, platform)
+        kpath = config_acquisition.knowledge_call(
+            _resolve_anchor_from_registry, _KNOWLEDGE_ANCHOR_OWNER, knowledge_repo, platform,
+        )
         if not kpath:
             return {}
-        kcfg = _load_inrepo_config(kpath)
+        kcfg = config_acquisition.knowledge_call(
+            _load_inrepo_config, _KNOWLEDGE_READ_OWNER, kpath,
+        )
         return {k: kcfg[k] for k in _KNOWLEDGE_OVERLAY_TOP_KEYS if k in kcfg}
-    except Exception:
-        return {}
+    return {}
+
+
+_KNOWLEDGE_OVERLAY_OWNER = _load_knowledge_overlay_config
 
 
 def _resolve_adoption_defaults_from_registry(
@@ -1435,27 +1449,9 @@ def _resolve_adoption_defaults_from_registry(
     Only keys with a usable registry value are returned; the caller fills them
     with ``setdefault`` so overlay/in-repo settings still win. Never raises.
     """
-    out: dict[str, Any] = {}
-    try:
-        from . import repos as repos_mod
+    from .config_adoption_defaults import resolve_adoption_defaults
 
-        entry = repos_mod.read_registry().repos.get(name)
-        if entry is not None and entry.default_branch:
-            out["default_branch"] = entry.default_branch
-    except Exception:
-        pass
-    try:
-        from . import installer
-
-        proj = (installer.read_projects_registry().get("projects") or {}).get(name)
-        if isinstance(proj, dict):
-            if "default_branch" not in out and proj.get("default_branch"):
-                out["default_branch"] = str(proj["default_branch"])
-            if proj.get("base_repo") is not None:
-                out["base_repo"] = bool(proj["base_repo"])
-    except Exception:
-        pass
-    return out
+    return resolve_adoption_defaults(name, platform)
 
 
 def peek_base_repo(project: str | None = None) -> bool | None:
@@ -1632,7 +1628,8 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
     ABOVE the foreign repo's own in-repo ``pr`` and BELOW a machine-local
     ``repos.<name>.pr`` override.
     """
-    try:
+    config_acquisition.opaque_source("control-plane-related-pr")
+    with _config_owner_outcome("control-plane-related-pr"):
         from . import related
         from . import repos
         from . import state_root
@@ -1640,7 +1637,8 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
         cp = related.find_control_plane_anchor()
         anchors: list[str] = list(related.installed_plugin_related_anchors())
         if cp:
-            try:
+            cp_sources = []
+            with _config_owner_outcome("control-plane-related-pr", complete=False):
                 cp_key = related._anchor_key(cp)
                 cp_project = next(
                     (
@@ -1661,8 +1659,6 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
                     if cp_project
                     else []
                 )
-            except Exception:
-                cp_sources = []
             if cp_sources:
                 anchors.extend(
                     related.config_contribution_anchor(source.anchor, source.origin)
@@ -1681,8 +1677,10 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
             for name, entry in rc.related.items()
             if getattr(entry, "pr", None)
         }
-    except Exception:
-        return {}
+    return {}
+
+
+_CONTROL_PLANE_PR_OWNER = _control_plane_related_pr_map
 
 
 def _parse_pr(raw: Any) -> PRConfig:
@@ -1698,6 +1696,7 @@ def _parse_pr(raw: Any) -> PRConfig:
     enabled = bool(raw.get("enabled", False)) or required
 
     labels = parse_string_tuple(raw.get("labels", ()))
+    publication_origin = parse_origin(raw.get("publication_origin"))
 
     def _choice(value: Any, allowed: tuple[str, ...], default: str) -> str:
         """Normalize a config enum to one of ``allowed`` (case-insensitive),
@@ -1739,6 +1738,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         token_env=str(raw.get("token_env", "")),
         token_command=str(raw.get("token_command", "")),
         labels=labels,
+        publication_origin=publication_origin,
         auto_open=bool(raw.get("auto_open", False)),
         source_attribution=_source_attribution(raw.get("source_attribution", "codename")),
         source_attribution_configured=("source_attribution" in raw),

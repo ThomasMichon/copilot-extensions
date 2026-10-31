@@ -1,0 +1,9 @@
+{
+  "comment": "Add pinned resumable Git full-snapshot pages through the existing acquisition journal",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

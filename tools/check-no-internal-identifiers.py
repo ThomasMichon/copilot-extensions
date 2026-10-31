@@ -28,7 +28,9 @@ A denylist that *named* those strings would itself leak them, so the list is
      for the mechanism and ``docs/identifier-blocklist.md`` for the
      convention. This source is silently absent wherever ``agent-worktrees``
      isn't installed or this repo isn't registered (a fresh clone, CI) --
-     never required, only additive on a machine that has it. Opt out with
+     never required, only additive on a machine that has it. Local pre-push
+     passes ``--no-live-sweep`` and uses only configured inputs 1/2/3; discovery
+     remains available for explicit manual audits. Opt out of it globally with
      ``COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1``.
 
 CI entries (sources 3 and 4 share this grammar) are case-insensitive literal
@@ -53,10 +55,9 @@ Source 4 never has this gotcha: it only ever reads its own generated
 With none of these configured (a fresh clone with no local ``agent-worktrees``
 registration, or CI with no secret) there is nothing to enforce and the check
 is a no-op (exit 0) -- so it is safe to ship in the public repo. On your own
-machine, populate one of sources 1/2/3 by hand, or simply register this repo
-with ``agent-worktrees`` (source 4) and let the live sweep do the work; wire
-this up as a git ``pre-push`` hook either way, and it blocks a push that would
-leak any of your identifiers.
+machine, populate one of sources 1/2/3 for pre-push. A manual audit can also
+register this repo with ``agent-worktrees`` and request source 4's live sweep.
+The local pre-push hook always uses configured-only inputs.
 
 Scope: by default the guard only scans the files your push actually **changes**
 (``git diff --name-only <base>...HEAD``, base ``origin/main`` -- override via
@@ -83,6 +84,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import re
@@ -100,6 +102,9 @@ CI_LIST_ENV = "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI"
 # this script's own tests deterministic/machine-independent (set by default
 # in their subprocess harness; see tools/test_check_no_internal_identifiers.py).
 LIVE_SWEEP_DISABLE_ENV = "COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP"
+_LIVE_SWEEP_TIMEOUT = 10
+_LIVE_SWEEP_STDOUT_LIMIT = 32 * 1024 * 1024
+_LIVE_SWEEP_STDERR_LIMIT = 1024 * 1024
 
 # Files this guard must not flag for merely *implementing* the mechanism.
 SELF = {
@@ -213,16 +218,54 @@ def _is_benign_absence(stdout: str, stderr: str) -> bool:
     return False
 
 
+def _run_live_sweep(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    source = REPO / "libs" / "agent-procutil" / "src"
+    expected = source / "agent_procutil" / "owned_process.py"
+    if not expected.is_file():
+        raise LiveSweepFailure("live identifier sweep requires repository agent-procutil", [])
+    previous_path = sys.path.copy()
+    sys.path.insert(0, str(source))
+    batch_source = REPO / "libs" / "plugin-resolve" / "src"
+    sys.path.insert(0, str(batch_source))
+    environment = {**os.environ, "AGENT_WORKTREES_NO_SELFPROVISION": "1"}
+    try:
+        from agent_procutil import owned_process
+        if os.name == "nt" and Path(argv[0]).suffix.lower() in (".cmd", ".bat"):
+            from plugin_resolve import execution
+            if Path(execution.__file__).resolve() != (
+                batch_source / "plugin_resolve" / "execution.py"
+            ).resolve():
+                raise LiveSweepFailure("live identifier sweep loaded a non-repository resolver", [])
+            argv = execution.windows_batch_command(argv, environment)
+    except ImportError as error:
+        raise LiveSweepFailure("live identifier sweep could not load agent-procutil", []) from error
+    finally:
+        sys.path[:] = previous_path
+    if Path(owned_process.__file__).resolve() != expected.resolve():
+        raise LiveSweepFailure("live identifier sweep loaded a non-repository agent-procutil", [])
+    try:
+        return owned_process.run_caller_owned(
+            argv, cwd=REPO, timeout=_LIVE_SWEEP_TIMEOUT,
+            max_stdout_bytes=_LIVE_SWEEP_STDOUT_LIMIT,
+            max_stderr_bytes=_LIVE_SWEEP_STDERR_LIMIT,
+            env=environment,
+        )
+    except owned_process.OutputLimitExceeded as error:
+        raise LiveSweepFailure(f"live identifier sweep failed: {error}", []) from error
+
+
 def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
     """Best-effort source 4: a locally registered ``agent-worktrees``' live
     cross-repo identifier-blocklist sweep, scoped to this repo as the sweep
     target (auto-resolved from cwd by ``identifiers sweep``).
 
     Absent anywhere this isn't installed/registered (a fresh clone, CI) --
-    a missing binary, a timeout, or any other environment-level failure to
-    even run the command is silently swallowed so this is purely additive,
-    never a new requirement. Set ``COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1``
-    to opt out entirely.
+    a missing binary, a settled timeout, or an OS-level launch failure is
+    silently swallowed so this is purely additive,
+    never a new requirement. The timeout retires the owned process tree,
+    including descendants holding captured pipes after their parent exits.
+    Unconfirmed cleanup and output-budget failures are never absence.
+    Set ``COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1`` to opt out entirely.
 
     A sweep that DID run but failed (nonzero exit -- e.g. another locally
     registered repo's ``.identifier-blocklist/`` file is malformed YAML) is
@@ -254,12 +297,11 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
     if not exe:
         return []
     try:
-        proc = subprocess.run(
-            [exe, "identifiers", "sweep", "--format", "json"],
-            cwd=REPO, capture_output=True, text=True, timeout=10, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
+        proc = _run_live_sweep([exe, "identifiers", "sweep", "--format", "json"])
+    except (OSError, subprocess.TimeoutExpired):
         return []
+    except (RuntimeError, ImportError, UnicodeError) as error:
+        raise LiveSweepFailure("Live identifier sweep could not be observed safely", []) from error
     if proc.returncode != 0 and _is_benign_absence(proc.stdout, proc.stderr):
         # An installed agent-worktrees that either predates the
         # `identifiers` command entirely, or whose cwd isn't a registered
@@ -330,7 +372,9 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
     return pairs
 
 
-def _load_identifier_data() -> tuple[list[str], dict[str, str | None], str | None]:
+def _load_identifier_data(
+    *, include_live_sweep: bool = True,
+) -> tuple[list[str], dict[str, str | None], str | None]:
     """Returns ``(identifiers, reasons, live_sweep_error)``.
 
     ``live_sweep_error`` is ``None`` on success or benign absence of source
@@ -354,11 +398,13 @@ def _load_identifier_data() -> tuple[list[str], dict[str, str | None], str | Non
         ids.append(ident)
         ci_reasons.setdefault(ident, reason)
     live_sweep_error: str | None = None
-    try:
-        sweep_pairs = _load_live_sweep_identifiers()
-    except LiveSweepFailure as exc:
-        sweep_pairs = exc.pairs
-        live_sweep_error = str(exc)
+    sweep_pairs = []
+    if include_live_sweep:
+        try:
+            sweep_pairs = _load_live_sweep_identifiers()
+        except LiveSweepFailure as exc:
+            sweep_pairs = exc.pairs
+            live_sweep_error = str(exc)
     for ident, reason in sweep_pairs:
         ids.append(ident)
         ci_reasons.setdefault(ident, reason)
@@ -473,23 +519,62 @@ def _read_worktree_text(rel: str) -> str | None:
         return None
 
 
-def _make_git_ref_loader(ref: str) -> Callable[[str], str | None]:
-    def _read_git_ref_text(rel: str) -> str | None:
-        try:
-            result = subprocess.run(
-                ["git", "show", f"{ref}:{rel}"],
-                cwd=REPO,
-                capture_output=True,
-                check=True,
-            )
-        except subprocess.CalledProcessError:
-            return None
-        try:
-            return result.stdout.decode("utf-8")
-        except UnicodeDecodeError:
-            return None
+def _make_git_ref_loader(ref: str, files: list[str]) -> Callable[[str], str | None]:
+    """Resolve literal paths once, then read bounded, content-addressed batches."""
+    selected = set(files) - SELF
+    if not selected:
+        return lambda rel: None
+    options = {
+        "cwd": REPO, "capture_output": True, "check": True,
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    }
+    result = subprocess.run(["git", "ls-tree", "-r", "-l", "-z", ref, "--"], **options)
+    objects: dict[str, tuple[str, int]] = {}
+    for record in result.stdout.split(b"\0"):
+        if not record:
+            continue
+        metadata, separator, raw_path = record.partition(b"\t")
+        fields = metadata.split()
+        if not separator or len(fields) != 4:
+            raise ValueError("malformed identifier scan tree metadata")
+        path = raw_path.decode("utf-8", "surrogateescape")
+        if fields[1] != b"blob" or path not in selected:
+            continue
+        if (
+            re.fullmatch(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})", fields[2]) is None
+            or not fields[3].isdigit()
+        ):
+            raise ValueError("malformed identifier scan blob metadata")
+        objects[path] = (fields[2].decode("ascii"), int(fields[3]))
 
-    return _read_git_ref_text
+    pending = list(dict.fromkeys(objects.values()))
+    texts: dict[str, str | None] = {}
+    while pending:
+        batch = []
+        size = 0
+        while pending and len(batch) < 32 and (not batch or size + pending[0][1] <= 8 * 1024 * 1024):
+            blob, length = pending.pop(0)
+            batch.append((blob, length))
+            size += length
+        result = subprocess.run(
+            ["git", "cat-file", "--batch"],
+            input="".join(f"{blob}\n" for blob, _length in batch).encode("ascii"),
+            **options,
+        )
+        stream = io.BytesIO(result.stdout)
+        for blob, length in batch:
+            if stream.readline() != f"{blob} blob {length}\n".encode("ascii"):
+                raise ValueError("malformed identifier scan blob response")
+            body = stream.read(length)
+            if len(body) != length or stream.read(1) != b"\n":
+                raise ValueError("truncated identifier scan blob response")
+            try:
+                texts[blob] = body.decode("utf-8")
+            except UnicodeDecodeError:
+                texts[blob] = None
+        if stream.read(1):
+            raise ValueError("unexpected trailing identifier scan blob response")
+    return lambda rel: texts[objects[rel][0]] if rel in objects else None
 
 
 def _compile_patterns(identifiers: list[str]) -> dict[str, re.Pattern[str]]:
@@ -648,11 +733,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Suppress per-finding stdout and print only a count summary.",
     )
+    parser.add_argument(
+        "--no-live-sweep", action="store_true",
+        help="Use configured environment/local denylist inputs without cross-repo discovery.",
+    )
     args = parser.parse_args(argv)
     if sum(bool(value) for value in (args.all, args.paths_file, args.paths_jsonl)) > 1:
         parser.error("--all, --paths-file and --paths-jsonl are mutually exclusive")
 
-    identifiers, reasons, live_sweep_error = _load_identifier_data()
+    identifiers, reasons, live_sweep_error = (
+        _load_identifier_data(include_live_sweep=False)
+        if args.no_live_sweep else _load_identifier_data()
+    )
     if live_sweep_error:
         # A configured live sweep (source 4) ran but failed -- a genuinely
         # broken local configuration (e.g. another registered repo's
@@ -681,7 +773,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.paths_file
         else _files_to_scan(args.all, args.base, emit_status=not args.ci, head=args.git_ref)
     )
-    text_loader = _make_git_ref_loader(args.git_ref) if args.git_ref else None
+    text_loader = _make_git_ref_loader(args.git_ref, files_to_scan) if args.git_ref else None
     violations = _scan(
         files_to_scan,
         identifiers,

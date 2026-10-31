@@ -5,7 +5,7 @@
   rather than merely borrowing whatever SSH profiles happen to already exist.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-10-26
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's [`README`](../../../plugins/agent-ssh/README.md),
   `docs/transport-provider-contract.md`, and its skills (`agent-ssh`,
@@ -188,6 +188,20 @@ location registry.
 
 ## Features
 
+### explicit-peer-enrollment-approval
+An explicitly selected transport admission policy can require an already
+enrolled peer to approve the exact requesting machine's public identity before
+it becomes an active mesh member. Authentication, a declared target and a
+pending request do not substitute for that approval. Approval remains bound to
+the authenticated approver and the unchanged target identity; self-approval,
+stale requests and implicit key replacement are refused.
+
+First-peer bootstrap and recovery remain distinct, explicitly selected
+operations through their configured authority. An unavailable approver never
+silently activates recovery. Credential custody stays with its existing owner,
+and no machine receives another machine's private identity. Transports without
+this selected policy retain their existing admission behavior.
+
 ### conventional-repository-connectivity
 An operator's declared repository topology is discoverable through the existing
 machine and SSH configuration conventions, without a second inventory. Each
@@ -200,6 +214,22 @@ convergence never implicitly authorizes server, key or firewall changes.
 The SSH mesh is something agent-ssh **provisions and maintains**, not something
 it assumes a human wired. Installing OpenSSH, minting/pinning keys, standing up a
 transport, and repairing a decayed one are first-class capabilities of the layer.
+
+### provisioning-independent-management-access
+
+Provisioning tools and their generated products have distinct lifetimes.
+Positioning keys, emitting a profile or configuring OpenSSH does not make the
+provisioner the process that serves SSH requests. The working host/client,
+authentication material, profile and selected proxy/tunnel mechanics remain
+usable when noncritical supporting tools are removed, including for a fresh
+connection rather than only an already-open stream.
+
+A selected route that invokes an agent runtime or payload helper on its request
+path declares that real dependency. Its critical closure is retained or moved
+to an independently durable transport boundary before supporting-suite removal;
+neither the plugin's name nor the presence of an established connection proves
+independence. Credential relays for agents are disposable and are not required
+to remain for direct machine management.
 
 ### live-machine-introspection
 Invoked locally against a reachable target, agent-ssh **explores** it over SSH
@@ -300,6 +330,17 @@ is simply handed the fabric's one coordination contract, the same way a
 venue provider hands it to a machine it provisioned.
 
 ## Behaviors
+
+### supporting-removal-preserves-management-transport
+
+The operator's actual machine-to-machine SSH and gateway access is critical
+session substrate, not an incidental installation artifact. Supporting-suite
+uninstall, purge, force and reinstall leave its native services, required
+helpers, supervision, routes, keys and configuration intact. Unknown impact
+blocks that removal rather than risking the only route back to the machine.
+Dedicated transport changes have their own scoped authority; a generic force
+request does not grant it. See
+[Disposable Supporting Runtimes](../../plugin-services/disposable-runtimes/README.md#connectivity-survives-supporting-suite-removal).
 
 ### adopt-then-reach
 A machine is **adopted** (registered, provisioned for its role, transport

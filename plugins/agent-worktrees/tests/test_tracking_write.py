@@ -26,6 +26,51 @@ def _endpoint_dict(server) -> dict:
     return tracking_write.rendezvous_fields(server)
 
 
+@pytest.mark.parametrize("owner", [
+    "live", "starting", "dead", "reused", "unconfirmed", "unknown-pid", "arrives-incompatible",
+])
+def test_boot_distinguishes_live_incompatible_publisher_from_startup(monkeypatch, owner):
+    from types import SimpleNamespace
+    from agent_worktrees import locks
+
+    clock, boots, sends, fallbacks = [0.0], [], [], []
+    old = {
+        "pid": 123, "start_time": "100",
+        "tracking_write_endpoint": "127.0.0.1:49152", "tracking_write_token": "fixture",
+        "tracking_write_verbs": ["other"],
+    }
+    if owner == "unknown-pid":
+        old["pid"] = None
+    ready = {**old, "tracking_write_verbs": ["wanted"]}
+    monkeypatch.setattr(locks, "pid_alive", lambda pid: owner != "dead")
+    monkeypatch.setattr(locks, "process_start_time", lambda pid:
+                        None if owner == "unconfirmed" else "200" if owner == "reused" else "100")
+    monkeypatch.setattr(tracking_write, "time", SimpleNamespace(
+        time=lambda: clock[0], sleep=lambda delay: clock.__setitem__(0, clock[0] + delay),
+    ))
+    monkeypatch.setattr(tracking_write, "_send_tracking_write_request",
+                        lambda *a, **k: sends.append(True) or {"via": "resident"})
+    monkeypatch.setattr(tracking_write.wcs_client, "release", lambda *a, **k: None)
+    def read():
+        if clock[0]:
+            return old if owner == "arrives-incompatible" else ready
+        return None if owner in {"starting", "arrives-incompatible"} else old
+    result = tracking_write.write_with_boot(
+        read_lock_data=read, ensure_monitor=lambda: boots.append(True) or True,
+        payload={"verb": "wanted", "args": {}},
+        fallback=lambda: fallbacks.append(True) or {"via": "direct"},
+    )
+    if owner == "live":
+        assert result == {"via": "direct"} and fallbacks == [True]
+        assert boots == sends == [] and clock == [0.0]
+    elif owner == "arrives-incompatible":
+        assert result == {"via": "direct"} and fallbacks == boots == [True]
+        assert sends == [] and clock == [0.1]
+    else:
+        assert result == {"via": "resident"} and boots == sends == [True]
+        assert fallbacks == [] and clock == [0.1]
+
+
 @pytest.fixture(autouse=True)
 def _clean_verb_registry():
     # Tests register throwaway verbs into the module-level registry, and a
@@ -257,6 +302,40 @@ class TestVerbRegistryAndCompute:
 
 
 class TestRunDirectFallback:
+    @pytest.mark.parametrize("verb", (
+        "launch_attempt_execution", "launch_seed_stage", "launch_seed_take",
+        "launch_seed_restore", "launch_seed_finish", "launch_seed_remove",
+    ))
+    def test_finite_direct_owners_match_the_canonical_registry(self, verb):
+        tracking_write._ensure_verb_modules_loaded()
+        owner = tracking_write._DIRECT_VERB_MODULES[verb]
+        assert owner in tracking_write._VERB_MODULES
+        assert tracking_write._VERBS[verb].__module__ == owner
+
+    def test_finite_receipt_imports_its_owner_without_the_full_roster(self, monkeypatch):
+        original = tracking_write.importlib.import_module
+        imports = []
+
+        def load(name):
+            imports.append(name)
+            return original(name)
+
+        def refuse_full_roster():
+            pytest.fail("A finite receipt must not import unrelated mutation owners")
+
+        monkeypatch.setattr(tracking_write.importlib, "import_module", load)
+        monkeypatch.setattr(tracking_write, "_ensure_verb_modules_loaded", refuse_full_roster)
+        result = tracking_write.run_direct("launch_attempt_execution", {}, reason="test")
+        assert imports == ["agent_worktrees.launch_execution"]
+        assert result == {"error": "Could not retain launch execution receipt"}
+
+    def test_unknown_finite_name_retains_full_roster_discovery(self, monkeypatch):
+        loads = []
+        monkeypatch.setattr(tracking_write, "_ensure_verb_modules_loaded", lambda: loads.append(True))
+        with pytest.raises(ValueError, match="unregistered verb"):
+            tracking_write.run_direct("launch_seed_unknown", {}, reason="test")
+        assert loads == [True]
+
     def test_run_direct_calls_the_same_registered_function(self):
         calls = []
 

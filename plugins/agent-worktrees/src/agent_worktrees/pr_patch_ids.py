@@ -9,7 +9,9 @@ from agent_procutil import no_window_kwargs
 from . import git_ops
 
 
-def _patch_id(base: str, head: str, *, cwd: str) -> str:
+def _patch_id(
+    base: str, head: str, *, cwd: str, ignore_context: bool = False,
+) -> str:
     """Squash-invariant patch-id of ``base..head`` (#898), or "" on failure.
 
     ``git diff base..head | git patch-id --stable`` identifies the *change
@@ -17,11 +19,13 @@ def _patch_id(base: str, head: str, *, cwd: str) -> str:
     recorder (an issue-close comment, a session ref) can bind to something that
     survives the server-side squash-merge rewriting the commit SHA, instead of a
     pre-squash SHA that dangles once the work lands. Best-effort: an empty diff or
-    any git error yields "".
+    any git error yields "". ``ignore_context`` excludes surrounding unchanged
+    lines for candidate discovery; neither form is replay authorization.
     """
     if not base:
         return ""
-    diff = git_ops.git("diff", f"{base}..{head}", cwd=cwd, check=False)
+    context = ("--unified=0", "--inter-hunk-context=0") if ignore_context else ()
+    diff = git_ops.git("diff", *context, f"{base}..{head}", cwd=cwd, check=False)
     if diff.returncode != 0 or not diff.stdout:
         return ""
     try:
@@ -39,16 +43,22 @@ def _patch_id(base: str, head: str, *, cwd: str) -> str:
     return out.split()[0] if out else ""
 
 
-def _commit_patch_ids(base: str, head: str, *, cwd: str) -> dict[str, set[str]]:
+def _commit_patch_ids(
+    base: str, head: str, *, cwd: str, ignore_context: bool = False,
+) -> dict[str, set[str]]:
     """Map patch IDs to non-merge commits through one streaming Git pipeline."""
     if not base:
         return {}
     log_process: subprocess.Popen[bytes] | None = None
     patch_process: subprocess.Popen[str] | None = None
     env = git_ops.repository_identity_env()
+    context = ["--unified=0", "--inter-hunk-context=0"] if ignore_context else []
     try:
         log_process = subprocess.Popen(
-            ["git", "log", "--no-merges", "--format=commit %H", "-p", f"{base}..{head}"],
+            [
+                "git", "log", "--no-merges", "--format=commit %H",
+                "-p", *context, f"{base}..{head}",
+            ],
             cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             **no_window_kwargs(),
         )

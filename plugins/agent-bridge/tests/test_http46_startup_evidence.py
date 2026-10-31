@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import agent_bridge_contract_registry as registry_codec
 
 from agent_bridge import __main__ as cli, protocol, startup_observation as observer
 from agent_bridge import startup_progress as producer
@@ -309,7 +310,7 @@ def _body(value):
 
 
 def test_http46_generation46_attestations_link_unchanged_families_without_rewriting_history():
-    registry = json.loads((CONTRACT / "registry.json").read_text())
+    registry = registry_codec.load(ROOT).materialized
     http = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
     assert http["declared_range"]["current"] >= 46
     registered = {row["path"]: row for row in http["fixtures"]}
@@ -342,7 +343,7 @@ def test_http46_generation46_attestations_link_unchanged_families_without_rewrit
 
 
 def test_current_generation_attestations_cover_semantic_sources_and_moved_prompt_owner():
-    registry = json.loads((CONTRACT / "registry.json").read_text())["contracts"][0]
+    registry = registry_codec.load(ROOT).materialized["contracts"][0]
     generation = registry["declared_range"]["current"]
     proofs = {}
     for row in registry["fixtures"]:

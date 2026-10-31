@@ -11,6 +11,12 @@ from .orphanage import OrphanageScreen
 from .styles import canonical_key
 
 class PickerScreenInputMixin:
+    def action_launch_history(self):
+        from .. import context
+        from ...launch_history_screen import LaunchHistoryScreen
+
+        self.app.push_screen(LaunchHistoryScreen(context.project()))
+
     def _dispatch_key(self, key, character=None):
         # NOTE: this MUST NOT be named ``handle_key`` -- Textual's
         # ``Widget.handle_key`` is an ``async`` coroutine its ``_on_key``
@@ -148,6 +154,11 @@ class PickerScreenInputMixin:
             elif zone == "BTN":
                 self._activate()
         elif key == "r":
+            if self._kind() == "registered":
+                from .registered_scopes import refresh
+                refresh(self, self._reg_pivot())
+                self.debug = f"{self._reg_pivot().label}: refreshing selected declared scope(s)"
+                return
             if self._in_configuration():
                 if self._kind() == "config_section":
                     self._load_current_config_section(force=True)
@@ -156,10 +167,10 @@ class PickerScreenInputMixin:
                 return
             # Real reload: rebuild the data source (live mode re-fetches every
             # machine on its loader threads; fixture mode re-reads src.load()).
+            self.debug = "worktree reload requested"
             self._start_setup_reload_worker()
             self._poll_orphan_state(force=True)
             self.sel = self.default_sel()
-            self.debug = "refreshed · reloaded worktrees"
         elif key in ("q", "escape"):
             if key == "escape" and self._in_configuration():
                 self._leave_configuration()
@@ -255,8 +266,7 @@ class PickerScreenInputMixin:
     def _nav_view_row(self, d):
         """Move focus across the top tab-row -- the left-rail pivots plus the
         ⚙ Configuration entry -- with bare ◀▶. Landing on a pivot switches the
-        view (as a tab implies); landing on Configuration just focuses it (Enter
-        opens its menu). Configuration is thus part of the same row as the
+        view (as a tab implies), including Configuration. It is part of the same row as the
         pivots, not a separate stop (#1426)."""
         left = self._left_pivots()
         if not left:
@@ -272,6 +282,7 @@ class PickerScreenInputMixin:
             cur = 0
         target = row[(cur + d) % len(row)]
         if target == "cfg":
+            self._open_cfgmenu()
             self.sel = ("CFG", 0)
         else:
             self.htab = target

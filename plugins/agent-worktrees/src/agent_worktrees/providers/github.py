@@ -1,9 +1,7 @@
-"""GitHub PR provider -- the ``gh`` CLI.
+"""GitHub PR provider through gh and repository-bound credential support.
 
-Uses ``gh pr create`` (and ``gh pr view``) so it inherits ``gh``'s ambient
-auth.  An explicit token (``pr.token_command`` / ``pr.token_env``) is passed
-via ``GH_TOKEN`` when configured; otherwise ``gh``'s logged-in account is
-used (the resolve_token None case).
+Explicit configuration supplies tokens; inventory reads verify the selected
+account before enumerating a repository.
 """
 
 from __future__ import annotations
@@ -85,6 +83,10 @@ class GitHubProvider:
 
     name = "github"
 
+    def confirm_no_pull_by_head_v1(self, repo, head, *, api_base="", token=None) -> bool:
+        from .github_head_absence import confirm
+        return confirm(self, repo, head, api_base=api_base, token=token)
+
     def authority_endpoint(self, api_base: str = "") -> str:
         configured = (api_base or "").strip()
         if configured:
@@ -140,6 +142,28 @@ class GitHubProvider:
     def _number_from_url(url: str) -> int | None:
         tail = url.rstrip("/").rsplit("/", 1)[-1] if url else ""
         return int(tail) if tail.isdigit() else None
+
+    def get_publication_labels(self, repo, number, *, api_base="", token=None):
+        args = ["gh", "api", f"repos/{repo}/issues/{number}/labels", "--paginate", "--slurp"]
+        proc = run_cli(args, env=self._env(token, host=self.authority_endpoint(api_base)))
+        if proc.returncode:
+            raise ProviderError(f"Publication-label read failed: {proc.stderr.strip()}")
+        data = json.loads(proc.stdout)
+        if not isinstance(data, list) or any(not isinstance(page, list) for page in data):
+            raise ProviderError("Malformed publication-label pages")
+        data = [item for page in data for item in page]
+        if not isinstance(data, list) or any(
+                not isinstance(item, dict) or not isinstance(item.get("name"), str) for item in data):
+            raise ProviderError("Malformed publication-label response")
+        return tuple(item["name"] for item in data)
+
+    def add_publication_labels(self, repo, number, labels, *, api_base="", token=None):
+        args = ["gh", "api", "--method", "POST", f"repos/{repo}/issues/{number}/labels"]
+        for label in labels:
+            args.extend(["-f", f"labels[]={label}"])
+        proc = run_cli(args, env=self._env(token, host=self.authority_endpoint(api_base)))
+        if proc.returncode:
+            raise ProviderError(f"Publication-label addition failed: {proc.stderr.strip()}")
 
     def get_pull(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
@@ -461,12 +485,14 @@ class GitHubProvider:
     def list_open_pulls(
         self, repo: str, *, api_base: str = "", token: str | None = None
     ) -> tuple[int, ...]:
-        """Not implemented: pr-watch/pr-merge snapshot flow is gitea-only today."""
-        _ = (repo, api_base, token)
-        raise ProviderError(
-            f"Provider '{self.name}' does not support listing open PRs "
-            "(pr-merge --all is gitea-only today)."
-        )
+        raise ProviderError("Provider 'github' does not support listing open PRs (pr-merge --all is gitea-only today).")
+
+    def list_open_pull_records(
+        self, repo: str, *, api_base: str = "", token: str | None = None,
+        expected_login: str | None = None,
+    ) -> tuple[dict, ...]:
+        from .repository_inventory import github_open_pulls
+        return github_open_pulls(self, repo, api_base=api_base, token=token, expected_login=expected_login)
 
     def find_pull_by_head(
         self, repo: str, head: str, *, api_base: str = "", token: str | None = None

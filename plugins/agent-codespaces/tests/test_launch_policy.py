@@ -6,6 +6,7 @@ import argparse
 import os
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,7 @@ def _align_isolated_profile(monkeypatch, tmp_path):
     """Keep this module's registration fixture inside its effective profile."""
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
 
 
 def _policy(code: str, *, timeout: float = 20.0) -> None:
@@ -28,6 +30,20 @@ def _policy(code: str, *, timeout: float = 20.0) -> None:
 
 def test_nothing_registered_allows():
     assert lp.refusal("cs") is None
+
+
+@pytest.mark.parametrize("inherited_home_override", [False, True])
+def test_the_isolated_profile_accepts_a_private_registration(
+    monkeypatch, tmp_path, inherited_home_override,
+):
+    if inherited_home_override:
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "outer-profile"))
+        _align_isolated_profile.__wrapped__(monkeypatch, tmp_path)
+    assert Path.home() == tmp_path
+    assert lp.POLICY_FILE.parent == tmp_path
+    lp.register([sys.executable], timeout=5.0)
+    assert lp.registered() == {"argv": [sys.executable], "timeout": 5.0}
+    assert lp.POLICY_FILE.is_file()
 
 
 def test_the_registration_is_machine_wide_not_per_cell(tmp_path):

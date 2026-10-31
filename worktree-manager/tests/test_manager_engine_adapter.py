@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 from contextlib import contextmanager
 from pathlib import Path
@@ -57,6 +58,17 @@ def test_adapter_delegates_construction_health_and_retention_without_selecting(t
         assert options["construction_callable"] == "worktree_manager.runtime_candidate:prepare_runtime_candidate"
         assert options["base_python"].is_file()
         assert options["expected_source_identity"] == {}
+
+
+def test_explicit_interpreter_is_forwarded_instead_of_reselected(tmp_path, monkeypatch):
+    adapter = si._runtime_installer()
+    payload, root, uv = _source(tmp_path)
+    selected = tmp_path / "selected-python"
+    selected.touch()
+    calls = _capture(adapter, monkeypatch)
+    monkeypatch.setattr(adapter, "base_python", lambda: pytest.fail("explicit interpreter was reselected"))
+    with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv, python=selected):
+        assert calls[0][2]["base_python"] == selected
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows command discovery")
@@ -326,6 +338,147 @@ def test_source_identity_survives_payload_assembly(tmp_path, monkeypatch):
             prepared, "1.2.3-dev1", plugin="worktree-manager",
         ).runtime_version == generation
         assert not (prepared / ".install-complete").exists()
+
+
+def _attribute_source(adapter, payload, version="1.2.3-dev1"):
+    (payload / "plugin.json").write_text(json.dumps({
+        "name": "worktree-manager", "version": version,
+    }), encoding="utf-8")
+    digest = adapter.runtime_source.assembly_hash(payload)
+    generation = adapter.runtime_source.runtime_version(version, "a" * 40, digest)
+    (payload / "runtime-source.json").write_text(json.dumps({
+        "schema": adapter.runtime_source.SOURCE_SCHEMA, "version": 1,
+        "plugin": "worktree-manager", "package_version": version,
+        "source_commit": "a" * 40, "source_tree": "b" * 40,
+        "assembly_hash": digest, "runtime_version": generation,
+    }), encoding="utf-8")
+    return generation
+
+
+@contextmanager
+def _closed_inputs(tmp_path, content=b"constructor fixture", extra_wheels=()):
+    from installer_wheel_snapshot import WheelInstallInputs, retain_wheel_inputs
+
+    filename = "copilot_extensions_worktree_manager-1.2.3.dev1-py3-none-any.whl"
+    archives, expected, distributions = {}, {}, []
+    for name, version, filename, content in (
+        ("copilot-extensions-worktree-manager", "1.2.3.dev1", filename, content), *extra_wheels,
+    ):
+        wheel = tmp_path / filename
+        wheel.write_bytes(content)
+        digest = "sha256:" + hashlib.sha256(content).hexdigest()
+        archives[filename], expected[filename] = wheel, digest
+        distributions.append((name, version, filename, digest))
+    with retain_wheel_inputs(
+        archives, expected, max_wheels=len(archives),
+        max_archive_bytes=1 << 20, max_total_bytes=1 << 20,
+        max_snapshot_bytes=1 << 20, deadline=time.monotonic() + 120,
+    ) as snapshot:
+        yield WheelInstallInputs(
+            snapshot, '{"fixture":"complete-manager-closure"}',
+            tuple(distributions),
+        )
+
+
+def test_source_wheels_bind_generation_and_retain_existing_candidate_contract(tmp_path, monkeypatch):
+    adapter = si._runtime_installer()
+    payload, root, uv = _source(tmp_path)
+    generation = _attribute_source(adapter, payload)
+    calls = _capture(adapter, monkeypatch)
+    local = ("copilot-extensions-worktree-manager",)
+    validate = lambda slot: None
+    with _closed_inputs(tmp_path) as wheels, adapter.candidate(
+        payload, root, assemble=si._copy_payload, uv=uv,
+        wheel_inputs=wheels, local_packages=local, validate_candidate=validate,
+    ) as ready:
+        assert ready.slot.name == generation + ".profile." + wheels.receipt()["lock_id"][7:23]
+        options = calls[0][2]
+        assert options["wheel_inputs"] is wheels and options["local_packages"] == local
+        assert options["validate_candidate"] is validate
+        assert options["process_retention"] is True and options["reuse_generations"] is False
+        assert options["expected_source_identity"]["runtime_version"] == generation
+        assert options["plugin"] != payload
+        assert not (root / "current-version").exists()
+
+
+def test_unattributed_manager_wheels_refuse_before_construction(tmp_path, monkeypatch):
+    adapter = si._runtime_installer()
+    payload, root, uv = _source(tmp_path)
+    calls = _capture(adapter, monkeypatch)
+    with _closed_inputs(tmp_path) as wheels, pytest.raises(ValueError, match="source identity"):
+        with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv, wheel_inputs=wheels):
+            pytest.fail("unattributed source reached the constructor")
+    assert not calls and not (root / "current-version").exists()
+
+
+def test_source_wheel_health_repair_preserves_profile_generation_family(tmp_path, monkeypatch):
+    adapter = si._runtime_installer()
+    payload, root, uv = _source(tmp_path)
+    generation = _attribute_source(adapter, payload)
+    calls = []
+
+    @contextmanager
+    def unhealthy(root, version, **options):
+        calls.append((version, options))
+        if len(calls) == 1:
+            raise adapter.engine.HealthRepairRequired("fixture")
+        yield SimpleNamespace(slot=root / "versions" / version)
+
+    monkeypatch.setattr(adapter.engine, "numbered_candidate", unhealthy)
+    with _closed_inputs(tmp_path) as wheels, adapter.candidate(
+        payload, root, assemble=si._copy_payload, uv=uv, wheel_inputs=wheels,
+        local_packages=("copilot-extensions-worktree-manager",),
+    ) as ready:
+        expected = generation + ".profile." + wheels.receipt()["lock_id"][7:23]
+        assert calls[0][0] == expected
+        assert ready.slot.name.startswith(expected + ".repair.")
+        assert calls[1][1]["wheel_inputs"] is wheels
+    assert not (root / "current-version").exists()
+
+
+@pytest.mark.parametrize("selected", [None, "fixture", "foreign"])
+def test_self_install_forwards_source_inputs_without_replacing_completion_owner(tmp_path, monkeypatch, selected):
+    adapter = si._runtime_installer()
+    payload, root, _ = _source(tmp_path)
+    root.mkdir()
+    if selected is not None:
+        (root / "current-version").write_text(selected + "\n", encoding="utf-8")
+    calls = []
+    result = si.SelfInstallResult("1.2.3-dev1", "installed", str(root))
+    validate = lambda slot: None
+    before = lambda: None
+    python = tmp_path / "selected-python"
+    uv = tmp_path / "selected-uv"
+
+    @contextmanager
+    def candidate(payload, root, **options):
+        calls.append(options)
+        yield SimpleNamespace(slot=root / "versions" / "fixture")
+
+    def complete(ready, actual_payload, actual_root, **options):
+        assert actual_payload == payload and actual_root == root
+        assert options["before_publish"] is before
+        assert options["previous"] == selected
+        assert options["was_current"] is (selected == "fixture")
+        return result
+
+    monkeypatch.setattr(adapter, "candidate", candidate)
+    monkeypatch.setattr(si, "_complete_candidate", complete)
+    with _closed_inputs(tmp_path) as wheels:
+        actual = si.self_install(
+            payload, root=root, dry_run=False, _wheel_inputs=wheels,
+            _local_packages=("copilot-extensions-worktree-manager",),
+            _validate_candidate=validate, _before_publish=before,
+            _base_python=python, _uv=uv,
+        )
+        assert actual is result
+        assert calls == [{
+            "assemble": si._copy_payload, "wheel_inputs": wheels,
+            "local_packages": ("copilot-extensions-worktree-manager",),
+            "validate_candidate": validate,
+            "python": python,
+            "uv": uv,
+        }]
 
 
 def test_damaged_repair_uses_a_new_generation_of_the_original_package(tmp_path, monkeypatch):

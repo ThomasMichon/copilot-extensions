@@ -1,0 +1,9 @@
+{
+  "comment": "Track witnessed bucket mutation generations in the existing logical commit receipt",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

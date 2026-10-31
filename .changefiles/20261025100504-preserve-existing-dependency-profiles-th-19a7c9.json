@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve existing dependency profiles through pinned prepared-source target planning and native updater construction.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

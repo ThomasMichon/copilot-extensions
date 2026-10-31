@@ -65,17 +65,36 @@ def test_preference_authority_capture_replays_terminal_and_host(capture_tool) ->
 
 
 @pytest.mark.parametrize("indent", [1, 2, None])
-def test_preference_authority_capture_retains_registry_indentation(
-    capture_tool, monkeypatch: pytest.MonkeyPatch, indent: int | None,
+@pytest.mark.parametrize("representation", ["inline", "chunked"])
+def test_preference_authority_capture_accepts_legacy_json_layouts(
+    capture_tool, monkeypatch: pytest.MonkeyPatch, indent: int | None, representation: str,
 ) -> None:
     root = capture_tool.REPO
-    original = json.loads((root / capture_tool.REGISTRY).read_text(encoding="utf-8"))
-    registry_text = json.dumps(original, indent=indent) + "\n"
+    original = copy.deepcopy(capture_tool.registry_codec.load(root).materialized)
+    for contract in original["contracts"]:
+        contract["provenance"] = contract["provenance"][:3]
+    index = copy.deepcopy(original)
+    metadata = {}
+    if representation == "chunked":
+        index["schema_version"] = 2
+        for contract in index["contracts"]:
+            chunk = capture_tool.registry_codec.encode({
+                "schema": capture_tool.registry_codec.CHUNK_SCHEMA, "schema_version": 1,
+                "contract": contract["id"], "record_offset": 0,
+                "provenance": contract["provenance"],
+            })
+            sha256 = hashlib.sha256(chunk).hexdigest()
+            path = f"{capture_tool.registry_codec.PROVENANCE}{contract['id']}/{sha256}.json"
+            metadata[path] = chunk.decode()
+            contract["provenance_chunks"] = [{
+                "contract": contract["id"], "path": path, "sha256": sha256,
+                "record_count": len(contract["provenance"]),
+            }]
+            contract["provenance"] = []
+    metadata[capture_tool.REGISTRY] = json.dumps(index, indent=indent) + "\n"
 
     def committed(_commit: str, path: str) -> str:
-        return registry_text if path == capture_tool.REGISTRY else (
-            root / path
-        ).read_text(encoding="utf-8")
+        return metadata[path] if path in metadata else (root / path).read_text(encoding="utf-8")
 
     monkeypatch.setattr(capture_tool, "committed", committed)
     monkeypatch.setattr(capture_tool, "unchanged", lambda *_args: None)
@@ -89,8 +108,11 @@ def test_preference_authority_capture_retains_registry_indentation(
 
     output = capture_tool.capture("a" * 40)
 
-    registry = json.loads(output[capture_tool.REGISTRY])
-    assert output[capture_tool.REGISTRY] == json.dumps(registry, indent=indent) + "\n"
+    raw = json.loads(output[capture_tool.REGISTRY])
+    assert output[capture_tool.REGISTRY].encode() == capture_tool.registry_codec.encode(raw)
+    registry = capture_tool.registry_codec.load(
+        root, read=lambda path: (output[path] if path in output else metadata[path]).encode(),
+    ).materialized
     assert registry["contracts"][0] == original["contracts"][0]
     assert set(output) == {capture_tool.REGISTRY, *(
         capture_tool.CURRENT + name for name in capture_tool.FILES

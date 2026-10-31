@@ -1,0 +1,9 @@
+{
+  "comment": "Compose relay readiness and SSH probe budgets for slow transport establishment.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

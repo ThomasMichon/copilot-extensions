@@ -895,7 +895,8 @@ def contaminated_main_project_resolution(tmp_path, monkeypatch):
     monkeypatch.setattr(
         main.cfg,
         "load_config",
-        lambda include_control_plane_related_pr=True: configs[main.cfg.active_project()],
+        lambda include_control_plane_related_pr=True, include_knowledge_preferences=True:
+            configs[main.cfg.active_project()],
     )
     monkeypatch.setattr(sr, "_checkout_path", lambda name: (
         str(knowledge) if name == "knowledge" else None

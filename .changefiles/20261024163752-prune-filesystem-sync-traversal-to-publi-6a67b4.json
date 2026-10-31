@@ -1,0 +1,9 @@
+{
+  "comment": "Prune filesystem sync traversal to publication scope and flush phase timings",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

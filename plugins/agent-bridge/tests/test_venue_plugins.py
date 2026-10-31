@@ -9,6 +9,41 @@ from agent_bridge.venue_plugins import prepare_venue_plugins
 
 
 @pytest.mark.asyncio
+async def test_missing_permission_reaches_provider_before_strict_planning(monkeypatch, tmp_path):
+    from agent_bridge.venue_plugins import venue_plugin_plan
+    from plugin_resolve.reflection import build_plan, selection_json
+    from plugin_resolve.registration import atomic_json
+
+    catalog = tmp_path / ".ai" / "marketplace.json"
+    catalog.parent.mkdir()
+    atomic_json(catalog, {"name": "local", "owner": {"name": "Synthetic"}, "plugins": []})
+    settings = tmp_path / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    atomic_json(settings, {
+        "extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": "./.ai"}}},
+    })
+    monkeypatch.setattr("agent_bridge.related_plugins.control_plane_anchors", lambda: [])
+    monkeypatch.setattr("agent_bridge.related_plugins.related_plugins_for_repo", lambda *a, **k: [])
+
+    async def provider(command, **kwargs):
+        selected = {"source": "retired@local", "enable": False}
+        if "--stage-plugin-spec" in command:
+            spec = selection_json(command[command.index("--stage-plugin-spec") + 1])
+            selected["allow_missing"] = spec["allow_missing"]
+        return 0, json.dumps(build_plan([selected], [tmp_path])), ""
+
+    monkeypatch.setattr("agent_bridge.session_host.container_transport._run_provider", provider)
+    plan = await venue_plugin_plan({
+        "name": "synthetic", "repo": "example/app", "provider_command": ["provider"],
+        "plugin_plan": True,
+        "related_plugins": [{"source": "retired@local", "allow_missing": True}],
+    }, controller_cwd=str(tmp_path))
+    assert plan["plugins"] == [{
+        "source": "retired@local", "enable": False, "allow_missing": True, "resolve_on_target": True,
+    }]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("repository", ["app-alias", "example/app"])
 async def test_target_binding_uses_only_registered_identity(monkeypatch, tmp_path, repository):
     from agent_bridge.venue_plugins import _registered_target_binding
@@ -165,6 +200,14 @@ def controller(monkeypatch, tmp_path):
     }]})
     monkeypatch.setattr("agent_bridge.acquisition_authority.worktree_command", owner)
     return caller, owner
+
+
+@pytest.fixture
+def hosting_allowed(monkeypatch):
+    """Keep hosting admission a positive prerequisite in controller-focused cases."""
+    admission = AsyncMock()
+    monkeypatch.setattr("agent_bridge.hosting_policy.require_target_hosting", admission)
+    return admission
 
 
 def _native_provider_workspace_cd():
@@ -604,7 +647,7 @@ async def test_controller_failure_never_spawns_plugin_provider(monkeypatch, cont
 @pytest.mark.asyncio
 @pytest.mark.parametrize("owned", [True, False])
 async def test_session_manager_callback_preserves_controller_context(
-    monkeypatch, session_manager, controller, owned,
+    monkeypatch, session_manager, controller, owned, permitted_provider_hosting,
 ):
     from types import SimpleNamespace
     from unittest.mock import MagicMock
@@ -648,7 +691,9 @@ async def test_session_manager_callback_preserves_controller_context(
 
 
 @pytest.mark.asyncio
-async def test_local_session_does_not_require_or_resolve_controller(monkeypatch, session_manager):
+async def test_local_session_does_not_require_or_resolve_controller(
+    monkeypatch, session_manager, tmp_path,
+):
     from unittest.mock import MagicMock
     from agent_bridge.transport import SpawnTarget
 
@@ -657,12 +702,14 @@ async def test_local_session_does_not_require_or_resolve_controller(monkeypatch,
     monkeypatch.setattr(session_manager, "_connect_via_session_host", AsyncMock(return_value=(
         MagicMock(is_running=True, pid=12345), "acp-synthetic",
     )))
-    await session_manager.start_session(SpawnTarget(type="local", cwd="."))
+    await session_manager.start_session(SpawnTarget(type="local", cwd=str(tmp_path)))
     controller.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_container_context_refusal_precedes_provider_setup(monkeypatch, session_manager, controller):
+async def test_container_context_refusal_precedes_provider_setup(
+    monkeypatch, session_manager, controller, hosting_allowed,
+):
     from unittest.mock import MagicMock
     from agent_bridge.models import SessionStatus
     from agent_bridge.transport import SpawnTarget
@@ -825,7 +872,7 @@ async def test_provider_refresh_preserves_controller_provenance(
     "explicit-equals-affinity",
 ])
 async def test_native_venue_controller_context_start_and_recovery(
-    monkeypatch, session_manager, controller, kind, recovery, context,
+    monkeypatch, session_manager, controller, hosting_allowed, kind, recovery, context,
 ):
     import os
     from types import SimpleNamespace
@@ -1074,6 +1121,7 @@ async def test_cold_remote_spawn_authenticates_before_preparation_and_child(monk
 @pytest.mark.asyncio
 async def test_legacy_dynamic_workspace_recovery_resolves_persists_then_prepares(monkeypatch, controller):
     from types import SimpleNamespace
+    from agent_bridge.models import PhasedTimeouts
     from agent_bridge.transport import SpawnTarget
     from agent_bridge.session_host_recovery import _SessionHostRecoveryMixin
 
@@ -1103,6 +1151,7 @@ async def test_legacy_dynamic_workspace_recovery_resolves_persists_then_prepares
         return "client", "acp-session"
 
     manager = SimpleNamespace(
+        _timeouts=PhasedTimeouts(),
         _codespace_lock_sessions=set(), _acquire_codespace_lock=lambda *a: None,
         _release_codespace_lock=lambda *a: None,
         _session_host_unexpected_reap_seconds=60, _session_host_active_reap_seconds=0,

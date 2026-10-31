@@ -464,8 +464,9 @@ class ProjectAnchorSelection:
 def project_anchor_selection(
     name: str, home_dir: Path | None = None, *,
     input_roots: ProfileInputRoots | None = None, reader=None,
+    require_project: bool = True,
 ) -> ProjectAnchorSelection:
-    """Resolve only one registered project's anchor, without materializing it."""
+    """Resolve one anchor; knowledge readers may explicitly allow repo-only registration."""
     paths = tuple(
         _registry_path(home_dir, kind, input_roots=input_roots)
         for kind in ("repos", "projects")
@@ -481,9 +482,9 @@ def project_anchor_selection(
             raise ValueError(f"{kind} entries must be a mapping")
         registries.append(entries)
     repos, projects = registries
-    if name not in projects:
+    if name not in projects and (require_project or name not in repos):
         return ProjectAnchorSelection(None, paths)
-    project_entry, repo_entry = projects[name], repos.get(name)
+    project_entry, repo_entry = projects.get(name), repos.get(name)
     project_entry = {} if project_entry is None else project_entry
     repo_entry = {} if repo_entry is None else repo_entry
     if not isinstance(project_entry, dict) or not isinstance(repo_entry, dict):
@@ -511,11 +512,13 @@ def build_repos(
     out: list[RepoInfo] = []
     for name, entry in (reg.get("repos") or {}).items():
         entry = entry or {}
+        if strict and type(entry.get("agent", False)) is not bool:
+            raise ValueError(f"Registered repository {name!r} agent must be a Boolean")
         path = _registered_repo_path(entry, pkey)
         out.append(RepoInfo(
             name=name,
             klass=entry.get("class", "?"),
-            agent=bool(entry.get("agent", True)),
+            agent=entry.get("agent") is True,
             remote=entry.get("remote"),
             path=path,
             account=_account_for(name, entry, account_map),

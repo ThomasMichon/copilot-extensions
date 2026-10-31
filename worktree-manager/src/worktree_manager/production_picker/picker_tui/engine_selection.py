@@ -433,10 +433,7 @@ class PickerScreenSelectionMixin:
         appended ellipsis of our own -- the manifest already carries one when
         it wants one, e.g. ``"New task…"``) since any pivot can declare one."""
         t = Text("  ")
-        labels = (
-            ([f"+ {reg.create_action.label}"] if reg.create_action else [])
-            + [action.label for action in self._pivot_view_actions()]
-        )
+        labels = self._registered_button_labels(reg)
         for index, label in enumerate(labels):
             if index:
                 t.append("   ")

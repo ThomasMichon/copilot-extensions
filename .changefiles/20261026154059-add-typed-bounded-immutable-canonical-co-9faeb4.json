@@ -1,0 +1,9 @@
+{
+  "comment": "Add typed bounded immutable canonical content snapshot reads with explicit identity and retention refusals",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

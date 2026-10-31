@@ -1,0 +1,13 @@
+{
+  "comment": "Qualify fixed Pull Requests stamp and provision recipes through the canonical installation execution foundation without adopting ordinary publishers.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "dev"
+    }
+  ]
+}

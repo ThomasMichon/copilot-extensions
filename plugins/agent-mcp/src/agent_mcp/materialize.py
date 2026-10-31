@@ -44,13 +44,13 @@ from pathlib import Path
 from .cli_tools import load_cli_tools
 from .config import BridgeConfig
 from .decorators._catalog import render_tools_interface
+from .home import default_home_dir
 
 # One dispatcher script per server; every POSIX stub symlinks to it and it
 # dispatches on ``argv[0]`` (busybox / git-multicall style).
 DISPATCHER_NAME = "_amcp-dispatch"
 MANIFEST_NAME = "manifest.json"
 SOURCE_DIGEST_KEY_NAME = "source-digest.key"
-_LEGACY_ROOT = ".agent-mcp"  # marketplace-isolation: allow legacy compatibility root
 
 # Characters allowed in an on-disk stub name; anything else becomes ``-``.
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -220,7 +220,7 @@ def _wait_for_source_digest_key(
 
 def _source_digest_key() -> bytes:
     """Load or create the machine-local key used for source fingerprints."""
-    home = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / _LEGACY_ROOT))
+    home = default_home_dir()
     path = home / SOURCE_DIGEST_KEY_NAME
     try:
         key = path.read_bytes()
@@ -358,8 +358,7 @@ def cmd_shim() -> str:
 
 def default_dest() -> Path:
     """The default materialization root: ``$AGENT_MCP_HOME/materialized``."""
-    home = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / _LEGACY_ROOT))
-    return home / "materialized"
+    return default_home_dir() / "materialized"
 
 
 def _make_executable(path: Path) -> None:

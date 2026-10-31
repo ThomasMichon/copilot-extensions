@@ -140,6 +140,15 @@ availability outcomes, not permission to consume invalid bytes or bypass
 dependency governance. Preserve source-integrity and artifact-integrity
 refusals and the installation authority's explicit path selection.
 
+**2026-10-24 feed-validation direction (public-safe summary):** extend the
+canonical release/admission intent with bounded CI validation through redundant
+eligible signed-in feed-access workers. Reuse authenticated transport and
+production resolver policy, keep credentials local, and require exact, fresh
+closure evidence with durable leases, fencing and original-ID recovery.
+This is a finite documentation-only design slice; implementation, empirical
+probe qualification, CI authorization and lifecycle validation remain with
+#7529/#4876, not implicitly assigned to the design author.
+
 ## Plan
 
 ### Phase 1 - Spike: governed-feed-only install and timing baseline
@@ -225,8 +234,10 @@ refusals and the installation authority's explicit path selection.
       The bounded [exact-profile contract](exact-profile-contract.md)
       contributes the authority/selection and engine-consumer seam from #6234;
       its design is approved in #6795 and the inert record/selection slice
-      merged in #7044. Authenticated approval adapters, real exact closures,
-      publication and consumer admission remain open.
+      merged in #7044. The release-channel approval adapter merged in #8568
+      and installation-owned policy intent in #8494; their repository-only
+      planning composition merged in #8586. Independent exact source closures,
+      governed admission, real publication and consumer enablement remain open.
       The [zero-configuration amendment](../lean-runtime-dependencies/zero-configuration-defaults.md)
       requires a complete adopting-policy baseline: release profiles preferred,
       automatically selected governed source mode when permitted, and no
@@ -236,9 +247,79 @@ refusals and the installation authority's explicit path selection.
 
 ### Phase 3 - Verified consumption with correct fallback
 
-- [ ] Implement the reviewed [wheel-input admission slice](wheel-input-admission.md):
-      compare actual wheel bytes with the exact selected record before retained
-      construction, then integrate owned reuse evidence without creating approval.
+- [x] Specify the documentation-only [feed-availability validation design](feed-availability-validation.md),
+      reconciling release/runtime intent and the earlier promotion/consumer
+      boundary. This records the design deliverable only; implementation and
+      real qualification remain open in Validation Plan under #7529/#4876.
+- [x] Provide the bounded shared wheel-inspection component and complete-set
+      actual-byte verification (#8419). Inspection facts do not authenticate
+      approval, enable a consumer or replace retained-construction evidence.
+- [x] Retain exact wheel-byte snapshots under the existing private input owner
+      with explicit count, archive/closure/storage and deadline bounds (#8523).
+      Custody evidence alone does not authenticate acquisition or approve reuse.
+- [x] Compose complete-profile inspection and retained byte custody with the
+      existing immutable constructor and installed receipt/health owner (#8534).
+      The explicit closed mode preserves ordinary source seasoning, independent
+      venvs, unchanged cached-byte reuse, exact binding invalidation and prior
+      selection on failure. No production approval or acquisition is enabled.
+- [x] Implement the bounded release-channel whole-profile approval adapter
+      through the existing pinned hosted Main attestation verifier (#8568).
+      This is not real profile publication, governed feed admission or runtime
+      enablement; installation-policy/source-fallback composition remains open.
+- [x] Compose existing owner-bound policy intent with release authentication
+      in the repository-only planner (#8586). Only explicit or typed approved
+      record absence can request permitted source fallback; source verification,
+      exact locking and feed admission remain prerequisites to construction.
+- [x] Provide explicit retained source-graph candidate export (#8600).
+      Only unconditional locally mapped dependencies may be omitted from
+      third-party output; ordinary compile retains its directory refusal.
+      Exact installation receipt, actual
+      governed acquisition and consumer realization remain open.
+- [x] Bind independently selected source, native target, declared extras,
+      fallback trigger and exact candidate lock through retained resolution
+      (#8705). This freezes inputs, not origin approval or governed admission.
+- [x] Provide bounded exact-wheel acquisition and actual owner/native-feed
+      configuration composition (#8820). Exact trust, file-policy facts and
+      retained bytes flow into the existing offline constructor; per-attempt
+      counters do not invalidate healthy same-input reuse. This explicit
+      preparation API does not enable consumers, approve a live feed or
+      complete source/revocation/provider/retention contracts.
+- [x] Compose independently authenticated configured source, native exact
+      runtime/build locking, governed wheel acquisition and separate immutable
+      build tools through the existing source-profile completion owner (#8880).
+      Actual built/runtime metadata, installed target and health, build-only
+      exclusion and unchanged transaction-level reuse are qualified. This is
+      explicit preparation, not default-marketplace authentication, persistent
+      offline admission, enabled installation or activation-time revocation.
+- [x] Compose the explicit authenticated-source transaction with actual Manager
+      installation and persisted unchanged-generation admission (#8991).
+      Current source/policy/feed authentication, target, local selection and
+      constructor evidence gate reuse; integrity refuses rather than repairing.
+      A real fresh process reuses without package-feed access or reconstruction.
+      Default marketplace/bootstrap authentication, production dependency
+      qualification, dependency-unchanged updates, measured defaults and
+      installation savings remain open.
+- [x] Provide explicit registered-marketplace source authentication (#9005).
+      Actual installed ownership, registration and ledger select a consistent
+      native cache; independent acquisition authenticates its exact commit/tree,
+      and canonical preparation must match the installed assembly/version.
+      Custody and current source/configuration checks remain live through
+      consumption. This is a repository-only provider, not normal bootstrap
+      integration or measured production installation savings.
+- [ ] Complete the reviewed [wheel-input admission slice](wheel-input-admission.md):
+      authenticated approval/acquisition, supplied revocation and enabled real
+      consumer contracts remain open after the bounded construction component.
+- [ ] **Accepted from #6234 (reviewed #6767 helper slice):** realize immutable
+      promotion-built helper wheels in independent owned runtimes through this
+      effort's admission/consumer/retention boundary. Prove complete closure and
+      extras, standalone first install, second-consumer survival after uninstall/
+      cache retirement, matched hardlink-aware savings, independent cell/trust
+      ownership, two installers/two marketplaces, recovery and rollback. The
+      measured experiment is not production admission or completion. Do not add
+      a routing broker, shared mutable venv or parallel constructor. Publication
+      readiness stays with its existing release objective; merged #6697 is
+      evidence, not a delivery owner. No rollout/new-feed/model/corpus authority
+      is conferred. #6234 retains its parent and native engine/application work.
 - [ ] Teach installers (via the shared installer engine, not a parallel
       mechanism) to locate, verify, and consume a matching artifact set,
       falling back explicitly to the existing client-side source-build/venv
@@ -248,6 +329,77 @@ refusals and the installation authority's explicit path selection.
       immutable-slot assembly, health gates, activation, and rollback.
 - [ ] Validate across supported platform/architecture/Python-ABI
       combinations, including a clean-room first install.
+
+#### Bootstrap-safe normal consumer _(agent-recommended; plan approved in #9009)_
+
+The next implementation stretch closes the gap between the explicit providers
+above and an actual installer. `libs/installer-engine/installer-engine.ps1`
+and its POSIX sibling supply bootstrap helpers; they do not invoke the new
+profile owner. Worktrees' `scripts/runtime_install.py` invokes
+`installer_engine.numbered_candidate` from its existing Python lifecycle.
+Bridge still uses the existing shell construction adapter. Do not assume that
+shipping the shared Python engine makes every installer a migrated consumer.
+#9006 packages the existing command lifecycle SDK for prepared sources; retain
+that implementation and #7028's source/deployment ownership.
+
+The admission tools currently import `packaging` and repository-relative
+modules. A fresh bootstrap must neither import them from an incidental host
+environment nor install them using the admission code they are needed to run.
+Use the following ordered implementation and acceptance gates:
+
+- [x] Extract the existing native feed-projection/capture mechanism into the
+      shared installer's standard-library layer. Keep profile selection and
+      approval in their current owner; capture consumes its retained native UV
+      transaction, not a second configuration reader. Preserve authentication,
+      OS trust, redirect policy, seasoning, unsupported-policy refusals and
+      secret-safe keyed identities. Preserve existing repository APIs through
+      thin compatibility adapters, not copied alternate implementations.
+      Implemented and qualified in #9010; this does not admit tooling or enable
+      an ordinary consumer.
+- [x] Admit the declared admission-tool dependency through a bounded
+      standard-library bootstrap, using the existing native compiler, retained
+      feed capture, actual wheel inspector/acquisition and immutable constructor.
+      Start with the dependency-free `packaging` wheel required by the current
+      admission code. Native UV selects its exact governed-feed version/file;
+      freeze that lock before construction and require actual metadata to have
+      no dependencies, extras or unsupported wheel layout. This restricted seed
+      must not grow a requirement/version resolver or execute a source backend.
+      Reuse the existing installation-owned immutable build-tool namespace and
+      third-party-only constructor mode, not a global mutable tooling venv.
+      Bind source/tooling bytes, interpreter, exact lock and effective policy;
+      retain custody through health and invalidate reuse on changed inputs.
+      Implemented and qualified in #9015. The restricted seed is inert until
+      a real consumer supplies its source/policy owner; complete toolkit
+      packaging, ordinary enabling and production savings remain open.
+- [ ] Package the existing admission code and its complete first-party imports
+      as a canonical, self-contained installer toolkit. Retain one source of
+      truth and the existing payload-generation/materialization conventions.
+      Reuse the actual source acquisition/preparation owners; remove repository
+      path assumptions rather than reaching into another installed plugin or
+      executing a fetched repository's tooling. Run semantic profile validation
+      under the admitted tooling interpreter, never via ambient `packaging`.
+      Keep public first-party artifacts free of third-party dependency bytes.
+- [ ] Connect Worktrees' real installation lifecycle first, preserving its
+      `agent-worktrees` owner and runtime root separately from Manager's
+      `worktree-manager` component. Carry the actual installed owner through
+      self-staging. Compose real release discovery and source-provider selection;
+      do not manufacture an unavailable index or relabel a marketplace plugin
+      as Manager. Keep source, current policy, acquisition and revocation checks
+      alive through the existing health/publication/rollback owner.
+- [ ] Qualify and enable that ordinary install/update path only after its full
+      bootstrap and consumer tests pass. Missing/nonmatching artifacts may
+      select the authority's permitted governed-source fallback; invalid
+      artifacts/source never do. A tooling admission failure is not artifact
+      absence and cannot silently select an ungoverned installer. Preserve the
+      current supported path while the new lane is inert; do not gate ordinary
+      installation on artifact publication proof. Migrate other installers
+      only through their actual construction/lifecycle adapters.
+
+No new service, approval database, installation authority, constructor, source
+resolver or deployment permission is introduced. This plan does not credit
+production feed qualification, dependency-unchanged updates or installation
+savings. The parent remains Active until its complete Plan and Validation Plan
+are resolved.
 
 #### First consumer lane _(authority-lock direction; review before implementation)_
 
@@ -353,10 +505,13 @@ this planning document. Promotion decisions belong to Phase 2; consumer
 feed/admission decisions belong to Phase 3. Each requires a concrete,
 verified answer against its actual repository or machine configuration:
 
-- **Feed model:** promotion runs on public CI and cannot certify
-  installability from any one consumer's private governed feed - the
-  governed-feed check is necessarily a consumer-side, install-time concern,
-  not a promotion-time one.
+- **Feed model:** a public runner's own resolution cannot certify another
+  consumer's governed feed. Trusted promotion may request bounded validation
+  from redundant eligible feed-access workers over the existing authenticated
+  transport. The [feed-availability validation design](feed-availability-validation.md)
+  specifies this proposed extension; it does not establish that a CI identity,
+  durable work API or production worker route is already available.
+  Install-time admission remains independently binding.
 - **Lag-tolerant version selection:** a public version or age floor does not
   establish availability on a particular governed feed.
   **Phase 1 evidence (2026-10-02): lag
@@ -486,6 +641,116 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [x] Qualify the restricted dependency-free Packaging seed (#9015).
+      All 29 selected native jobs pass,
+      including Linux/Windows seed compilation, controlled TLS acquisition,
+      actual offline tooling health/reuse and POSIX interpreter-link custody.
+      The 1,824-case admitted unit packet passes with coverage under the
+      unchanged 300-second bound. Actual owner CLI selection and exact frozen
+      cutoffs are retained; intentionally dropped settings refuse before
+      resolution or HTTP. Fresh copied-payload `-I -S` import/inspection does
+      not load ambient Packaging or repository tools.
+      This does not qualify the complete toolkit or ordinary
+      fresh/existing installation, production feeds, enabled defaults,
+      dependency-unchanged offline discovery, measured savings or rollout.
+- [x] Qualify the standard-library native feed-capture extraction (#9010).
+      The exact admitted unit packet passes 1,800 cases with coverage inside
+      its unchanged 300-second bound. All 27 selected Linux/Windows/macOS
+      native jobs pass on the reviewed head, including actual retained feed/
+      source compilation, acquisition, profile/Manager compatibility and
+      copied-payload `-I -S` first touch without Packaging or repository tools.
+      Current-head approval, no review threads and required green CI qualify
+      this mechanism only, not tooling installation, ordinary consumer
+      enablement, production feed eligibility, measured savings or rollout.
+- [ ] Qualify bootstrap-safe admission and the actual ordinary consumer:
+      isolated `-I -S` first-touch imports without repository paths or site
+      packages; actual governed native compilation/acquisition and installed
+      tooling health; a dependency-bearing or malformed seed, unsupported
+      configuration, changed bytes/policy and forged source all refuse before
+      publication. Prove no backend execution or unapproved endpoint request,
+      bounded child settlement and invocation-owned cleanup. Then exercise real
+      Windows/POSIX installer entry points on fresh and existing installations,
+      with artifact outage versus integrity refusal, retained unchanged reuse,
+      exact component ownership and prior-selection/rollback preservation.
+      Keep existing lifecycle-SDK packaging and mixed-version callers working.
+      Record measured cold/warm time, network and physical storage before
+      selecting default budgets or claiming a faster normal installation.
+- [x] Qualify the explicit registered-marketplace source provider. #9005's final
+      head passes required CI, all 22 selected Linux/Windows native jobs and
+      Copilot approval, with both review threads resolved. Actual Git/ledger/
+      preparation controls reject forged cached commits, changed closures,
+      ambiguous caches and version/configuration changes; preserve selected
+      older source; separate marketplace owners; honor explicit native homes
+      and empty environments; and qualify Windows source paths over 260
+      characters. This does not qualify default bootstrap, production feed/
+      closure eligibility, measured savings or rollout.
+- [ ] Implement and qualify the [feed-availability validation contract](feed-availability-validation.md#implementation-validation-plan)
+      under #7529 and #4876: exact production-resolver coverage, admitted probe
+      semantics, durable claim/fence recovery, real worker failover and CI
+      routing, and owned installation/update/rollback/stop. This is future
+      implementation, not completed by accepting the documentation-only design.
+
+- [x] Qualify explicit Manager source installation and cross-invocation reuse.
+      #8991's final head passes required CI and all 17 selected hosted native
+      Linux/Windows/macOS jobs. A clean current-head owner-authored Comment
+      has no concrete findings or unresolved threads. Real Manager cases
+      cover absolute/no-PATH and command-selected UV, account/resolver changes,
+      source-profile version checks, provenance-corruption refusal and genuine
+      health repair. Controlled authentication changes invalidate the keyed
+      policy identity without persisting credentials. This does not qualify
+      default bootstrap, live production dependencies or measured speedup.
+- [x] Qualify explicit authenticated-source preparation and the composed
+      source-profile owner. #8880's final head passes required CI and all 11
+      selected native Linux/Windows/macOS jobs, with fresh/reused tools-target
+      refusal, precompile feed-policy refusal, real build-only requirements,
+      backend descendant settlement and actual offline runtime health/reuse.
+      The 1,792-case admitted unit packet passes under the unchanged 300-second
+      whole-execution budget. Current-head review has no open issues and every
+      thread is resolved. This does not credit a live feed, default provider,
+      installation speedup, persistent offline admission or production caller.
+- [x] Qualify bounded exact-wheel preparation with real TLS/authentication,
+      pre-request redirect refusal, independent count/byte/storage/deadline
+      bounds, worker settlement, offline installed health and unchanged-input
+      reacquisition/reuse. #8820's final head passes required CI and all six
+      selected Linux/Windows wheel-input, runtime-policy and compiler jobs.
+      Review has no retained concrete findings; all threads are resolved.
+      Live governed-feed/profile publication, broader providers, supplied
+      revocation and enabled real consumers remain distinct open gates.
+- [x] Qualify selected source-lock binding with canonical retained inventory,
+      copy-time mutation/restoration refusal, native target override refusal,
+      whole-preflight deadlines and context-owned cleanup. #8705's repaired
+      head passes 562 development controls (one POSIX-only Windows skip), the
+      unchanged 1509-unit packet, required CI, both selected Linux/Windows
+      compiler jobs and approval with no unresolved findings. No production
+      consumer, origin authentication or governed acquisition is credited.
+- [x] Qualify the bounded source compiler with native dated-feed retention,
+      transitive seasoning/hashes, recursive local mappings, root-metadata
+      registry identity preservation, inactive marker/extra and context-only
+      ambiguity refusal. #8600 passes 421 development controls (one POSIX-only
+      Windows skip), the current 1509-unit packet, final-head required CI,
+      native Linux/Windows compiler jobs and clean approving review.
+      This is candidate export, not source-origin or governed-feed admission.
+- [x] Qualify the bounded policy/release planning composition with the real
+      installation owner, fresh no-file defaults and isolated Python first
+      touch. Malformed preferences, foreign/invalid/pending owners and supplied
+      subject authentication failures refuse on every availability branch.
+      #8586's final head passes required CI, all four selected Linux/Windows
+      native jobs and Copilot approval with no unresolved findings. This is not
+      governed source-lock, acquisition or production-consumer proof.
+- [x] Qualify the bounded release-approval component with complete manifest/
+      first-party binding, independent selection facts, forged origin refusal,
+      exact private subject custody, inclusive byte limits and failure/timeout/
+      cancellation cleanup. Final-head Linux/Windows wheel and policy lanes,
+      macOS guardian follow-through, required CI and review pass for #8568.
+      Attestation backend responses are synthetic; a live profile-bearing
+      release and whole fresh-adopter/runtime admission remain open.
+- [x] Prove the bounded closed-wheel constructor component with real independent
+      fresh venvs, a transitive closure and a 97-wheel closure, actual installed
+      origins/health, unchanged cached-byte reuse, altered binding/receipt/
+      distribution refusal, cancellation and selected-prior preservation.
+      Final-head Windows/Linux source-profile, inspected-wheel and real
+      first-party artifact lanes pass for #8534. This is component evidence,
+      not authenticated feed/default-policy or production consumer acceptance.
 - [ ] Prove the trusted default-branch promotion workflow builds, signs and
       publishes real artifact sets for the exact merged candidate. Record
       native signer identity, bundle/manifest digest agreement and immutable
@@ -645,6 +910,480 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-25 - Explicit source preparation merged; real installation next
+
+[Merged evidence and next slice](journal/2026/10.25%20source-preparation.md).
+The parent remains **Active**; the next work is the real shared-installer
+entry and persisted admission/reuse, not another standalone preparation owner.
+
+### 2026-10-24 - Explicit source-fallback transaction design approved
+
+- #8829 merged as `d78a69266823b4fd6efdc1ccc9a3814cac778d1e`.
+  Review `5641295377` approved final head `3fe48e065a39ad7c32632afccc45a7889d6d3e7a`
+  without findings or threads; required CI `40157069100` passes.
+  The existing wheel-input sub-plan now specifies actual source authentication,
+  native exact-wheel selection, admitted source-build inputs, complete offline
+  construction/health and independent source-mode receipts/reuse.
+- Re-read this Plan and Validation Plan after merge. No source-admission or
+  consumer checkbox closes from this documentation-only approval. Start the
+  actual source-owner/native-selection integration; preserve existing candidate
+  and publisher ownership, artifact-independent fallback and the foreground
+  payload/runtime boundary. The parent remains **Active**.
+
+### 2026-10-24 - Bounded exact-wheel preparation merged; source admission next
+
+- #8820 merged as `68223a35d34a77773d65a263e2bb8b140fe0c63b`.
+  Final head `8a83d9fabce6ab5e05232ceced670117c0f0077e` passes required CI
+  `40155921723` and all six selected Linux/Windows jobs in native acceptance
+  `40155955097`. Review `5641244436` is a clean owner-authored Comment with
+  no retained concrete findings; both inline policy-reader threads are
+  resolved. The documented Maintainer CODEOWNER exception was used; required
+  CI was not bypassed and no human approval or rollout is claimed.
+- The current 1594-unit packet passes without observed effects in 231.906
+  seconds. Native qualification covers the POSIX invalid-origin/IPv6 repairs;
+  real reacquisition/reuse verifies that diagnostic counters do not become
+  stable identity. This closes only the bounded preparation component and
+  its qualification item, not the larger admission/consumer slice.
+- Re-read the parent Plan and Validation Plan after merge. The effort remains
+  **Active**. Continue with independently authenticated source-mode admission
+  and exact fallback-lock acquisition/receipt composition, then real
+  consumer/revocation/provider and measured-default gates. Existing publisher
+  and candidate-input owners retain their scopes. No production consumer is
+  enabled and no rollout authority is inferred from this merge.
+
+### 2026-10-24 - Bounded exact-wheel acquisition implementation
+
+- Implemented the #8728 design under the canonical installer input/process
+  owners. Exact selected files are acquired through bounded TLS simple-index
+  metadata and pre-request download/redirect trust checks. One owned worker
+  bounds DNS, headers and body time; helper/control bytes count against storage.
+  The existing snapshot and constructor remain the only byte-custody and
+  assembly paths. No dependency resolver, service or proxy was introduced.
+- The repository adapter rechecks the actual installation owner, selected
+  interpreter and retained native UV settings without compiling or installing.
+  Native URL/named/netrc/stored credential inputs remain private. Effective
+  policy identity excludes transient retained paths and advancing current-date
+  cutoffs, while binding actual feed/trust and semantic seasoning policy.
+  Optional exact download origins are validated consistently by Python,
+  PowerShell and POSIX readers in the existing owner-bound policy.
+- Acquired file/policy facts bind into the existing owned construction receipt
+  without altering the approved profile lock. Changed or removed facts cannot
+  reuse a numbered generation. Legacy receipt shape is unchanged when the
+  optional evidence is absent. Closed-wheel children and retries share the
+  acquisition deadline; ordinary source execution defaults remain unchanged.
+- Controlled tests exercise real TLS, named authentication, exact byte/storage
+  thresholds, blocked DNS and trickling responses, worker settlement and
+  complete-profile inspection into a real offline runtime/installed health.
+  The real constructor timeout control preserves the selected healthy prior,
+  releases its lease and removes partial inputs. Native Windows PowerShell
+  passes all 19 download-origin parity cases; final regression/publication and
+  Linux hosted evidence remain open.
+- The combined development run passed 458 controls and one expected POSIX-only
+  skip, but a deadline fault test incorrectly required its target to start even
+  when cold preparation exhausted the budget. The repair separates that
+  preparation/refusal outcome from a prepared real-child timeout and a delayed
+  real Windows guardian startup. The absolute deadline now crosses the existing
+  process owner/guardian without renewal and bounds bootstrap-source copying.
+  All 102 affected acquisition/configuration/construction/guardian controls pass
+  in 401.69 seconds, with one expected POSIX guardian skip on Windows. Existing
+  relative-timeout outcomes remain covered. The unchanged required packet
+  passes all 1509 units without observed effects in 222.406 seconds at
+  `81c7d8c232`; only the two changed admitted-source hashes were refreshed,
+  with no node or budget growth. Canonical synchronization, module-size,
+  changefile and effort-structure guards pass. Published-head review and
+  native qualification gates remain open.
+- Publication reconciliation preserved the newer upstream 1594-unit roster.
+  Its Windows/Python 3.11 run exposed a missing-platform-attribute mock in the
+  newly admitted host-policy packet. All six parser models now explicitly
+  create their mocked `os.set_blocking` attribute, as their other POSIX-only
+  mocks already do. All 42 host-policy wrapper cases pass on Windows without
+  skipping assertions or changing production behavior. The admitted test hash
+  is refreshed; the complete current packet passes all 1594 units without
+  observed effects in 231.906 seconds at `24b491492a`.
+- This is still preparation, not consumer enabling or live feed approval.
+  The initial adapter supports system trust on Windows/Linux plus captured CA
+  certificates. Unsupported proxy/bypass, keyring, bundled-root/Darwin providers,
+  resolver-altering constraints and per-package index routing defer explicitly
+  before HTTP rather than being ignored. Integrity/trust refusals remain fatal.
+  The parent retains broader provider/source-mode admission, supplied
+  revocation/offline reuse, real release/client/helper integration, measured
+  defaults, publication and rollout gates; it remains **Active**.
+
+### 2026-10-24 - Acquisition published-head native and review repairs
+
+- #8820's initial head passes required CI and both Linux/Windows wheel-input
+  and retained dependency-compile jobs. Windows runtime-policy acceptance
+  passes, but Linux rejects 15 invalid-origin cases with malformed JSON:
+  the helper's command-substitution failure did not propagate through the
+  enclosing captured snapshot. The caller now explicitly fails that snapshot
+  so the existing owner returns a structured invalid-policy result.
+- Review also identified malformed IPv6 boundary groups accepted by POSIX but
+  rejected by Python. The shared native validator now rejects stray leading
+  and trailing colons while retaining valid `::`, `::1` and `1::` forms.
+  Native parity tests include both malformed examples and valid compressed
+  boundaries. Both fixes are synchronized through every native adopter.
+  Final-head review and Linux/Windows qualification remain open.
+- The repaired policy head passes all six selected Linux/Windows jobs and
+  required CI. A fresh review found a separate stable-identity defect:
+  per-attempt acquisition counters entered the construction and health hash.
+  The generation receipt now projects only validated schema, policy and exact
+  file facts; complete counters remain available through acquisition evidence.
+  A real TLS reacquisition after unrelated index growth reuses the same healthy
+  numbered generation, while changed/removed policy still refuses reuse.
+  This regression plus existing snapshot controls passes all 34 cases locally.
+  All eight snapshot adopters are synchronized; final-head review/native
+  qualification remain open.
+
+### 2026-10-24 - Concrete exact-wheel acquisition design approved
+
+- #8728 merged as `a8f3464ae4121d97360d2c5a9b8c68160a223c7f`.
+  Review `5640430980` approved head
+  `37339d37955e6eb9752daf00564a03b178caaf8f` with no findings or threads;
+  required CI `40140352693` and source-attribution/workflow guards pass.
+  The existing Maintainer CODEOWNER exception applies; no CI bypass was used.
+- Re-read the parent Plan and Validation Plan after merge. The reviewed
+  execution design does not close acquisition, source-mode admission,
+  real-profile publication, helper-consumer or rollout gates; the parent remains
+  **Active**. Next implement the exact selected-wheel acquisition boundary
+  described in `wheel-input-admission.md`, including actual installation-owned
+  policy/configuration rather than a self-declared trusted input map.
+
+### 2026-10-24 - Source candidate binding merged; acquisition next
+
+- #8705 merged as `06ae28c96f9f8cf7961b4328cbe07ee2e44ab962`.
+  Copilot review `5640331781` approved the repaired head
+  `203ef28e19f9a71f08acad0a179f9220b0eaba24` with no open issues;
+  all four original review threads are resolved. Required CI `40139089677`
+  and native qualification `40139139807` pass, including both selected
+  Linux/Windows retained compiler jobs. The managed merge used the existing
+  Maintainer CODEOWNER exception, not a CI override.
+- Re-read this Plan and Validation Plan after merge and marked only selected
+  source/lock input binding complete. The parent remains **Active**; #4876 and
+  the accepted helper-consumer gates remain open. No runtime or service
+  activation, installed-source receipt or rollout is enabled.
+- Next realize bounded governed acquisition from the existing policy/feed
+  configuration into the existing inspected/retained wheel boundary, preserving
+  named-index credentials, OS trust, explicit download/redirect trust, file
+  admission/seasoning/yank evidence, finite budgets and a shared deadline.
+  The build-tool trust helper's default-index allowlist is not by itself a
+  runtime download-chain authority; no second resolver or personal policy file
+  is introduced.
+
+### 2026-10-24 - Source candidate review repairs
+
+- Addressed #8705's four findings: updated the exact optional-lane workflow
+  assertion; refused effective universal/platform overrides in native candidate
+  mode; required complete canonical retained-source coverage and matching
+  original digests before compilation; and propagated the caller's deadline
+  through retention entry, both settings probes and per-chunk source copying.
+  A transient copy-time edit cannot be hidden by restoring the original before
+  candidate consumption.
+- Reused the existing configuration companion to keep canonical modules below
+  their cap, preserving ordinary preparation defaults. Synchronized the two
+  canonical helpers across every existing adopter and added the affected
+  plugin/standalone changefile. Refreshed only their two source hashes in the
+  required unit manifest; its node selection and budget are unchanged.
+- The development regression packet passes **562 tests**, with one expected
+  POSIX-only helper skip on Windows. Contract, synchronization, documentation,
+  feed-neutrality and Python lint checks pass. The unchanged required packet
+  passes all **1509 units** without observed effects in **198.360 seconds**
+  against the repaired source bytes before publication. Committed-diff module,
+  changefile and effort-structure guards pass. Repaired published-head CI/native
+  review gates remain open. This is still an
+  input-binding component, not governed acquisition or an enabled constructor;
+  the parent remains **Active**.
+
+### 2026-10-24 - Explicit helper-consumer custody acceptance
+
+- Accepted the remaining immutable-helper consumer slice described in
+  #4876 comment `6390022767` from the continuing #6234 owner. The complete
+  closure/extras, standalone, second-consumer reference survival, matched
+  hardlink-aware allocation, cell/trust, two-installer/two-marketplace and
+  recovery/rollback gates are retained above as unchecked work in this existing
+  admission/consumer/retention objective.
+- Acceptance transfers only that bounded helper slice; it does not make it
+  implemented, close either parent or transfer publication ownership. The peer
+  retains the lean-runtime parent and native engine/application follow-through.
+  No source-lock/acquisition duplication, broker/shared venv, production
+  activation, new feed or model/corpus change is authorized.
+
+### 2026-10-24 - Selected source/lock candidate binding
+
+- Added repository-only `retain_source_lock` composition of the actual
+  installation-owned planner, existing `SourceIdentity` receipt/assembly
+  validator and #8600's retained compiler. The existing authority supplies
+  the independent source selection; a self-consistent receipt alone is not
+  origin approval. The adapter never discovers another release or needs an
+  artifact manifest.
+- The selected source is compared before and after retained resolution. A
+  native isolated probe reuses the existing toolchain marker-query script to
+  verify the exact selected interpreter's environment. The candidate freezes
+  source identity, policy, target/capability, declared extras, source trigger,
+  exact applicable pins/hashes and requirements digest while retaining payload
+  custody through consumption. Unknown extras cannot silently become base.
+- Positive controls exercise real source receipt validation and UV with fresh
+  offline inputs and a nonempty dated loopback feed. The focused packet passes
+  194 controls across source binding, real policy composition, compiler and
+  optional-lane contracts. Inclusive byte limits, independent-selection/source/
+  target refusal, child failure, timeout and cancellation cleanup are covered.
+  The feed fixture required HEAD as well as GET; its correction changed no
+  production resolution policy.
+- This realizes the reviewed source-fallback input-binding seam, not a complete
+  inspected-wheel profile, governed acquisition, reusable admission receipt or
+  deployed constructor. Private installation policy stays in the local
+  candidate, not public release records. No runtime entrypoint is enabled.
+  The existing optional Linux/Windows compiler lane includes the new controls;
+  no effectful matrix or new node joins required unit-only CI. Publication,
+  native qualification and review remain open; the parent stays **Active**.
+
+### 2026-10-24 - Retained source compiler merged; identity/lock binding next
+
+- #8600 merged as `83e229b971603bacf09e82bf3abfd859993624cc` after
+  review `5640072155` approved final head
+  `df26db14fa9f8da90639c846d787ba0a7e121bdd` with no open issues.
+  Both fixed review threads are resolved. Required CI `40133369446` and
+  native compiler acceptance `40133469410` pass; both selected Linux and
+  Windows jobs are green. The managed merge used the existing Maintainer
+  CODEOWNER exception, not a CI override.
+- Re-read this Plan and Validation Plan after merge. Marked only the bounded
+  export component complete; the parent remains **Active** and #4876 is open.
+  Pulled the owned worktree onto the actual squash merge without retaining
+  duplicated upstreamed changes. No production consumer or rollout is enabled.
+- Next bind independently selected source identity, fallback trigger, target/
+  capability and exact candidate output through the retained transaction.
+  The existing source receipt validator establishes byte consistency, not
+  origin approval. Retained metadata remaps paths, so compare the selected
+  original source through existing snapshot custody rather than treating a
+  transformed assembly hash as a second source authority. Exact wheel-profile
+  closure and governed acquisition remain separate gates. Preserve #6941's
+  contributor-owned candidate-input generation.
+
+### 2026-10-24 - Independent retained source-graph export
+
+- Added an explicit `retain_uv_source_compile` API to the existing retained
+  transaction. Native UV resolves the retained local graph's transitive
+  requirements while omitting only unconditional local mappings required by
+  each owning project's unmarked base dependencies. Root metadata does not
+  suppress its own registry identity. Ordinary compile still refuses directory
+  dependencies. Effective omission drift, disabled local sources, ambiguous
+  identities, direct local requirements, conditional/alternative or optional-only
+  local mappings, remote inputs and local artifacts refuse; ordinary third-party
+  named-index mappings remain supported.
+- This realizes the reviewed source-fallback contract's candidate-export seam,
+  not its origin approval, exact installation receipt, governed acquisition or
+  consumer enablement. The caller must bind independently selected source
+  identity, lock and trigger before the existing constructor can use them.
+  No artifact manifest is required and no second constructor is introduced.
+- Canonical helpers are synchronized across their existing adopters with a
+  changefile for every affected plugin. The tests extend the existing optional
+  native compiler lane; no effectful test joins required unit-only CI.
+  Candidate-constraint generation remains owned by the external #6941.
+- Before review repair, targeted validation passed 331 controls, including real dated-feed
+  source retention, transitive seasoning/hash export, missing-age refusal,
+  ordinary directory refusal, named-index preservation and cleanup.
+  Install-contract, helper synchronization, Python lint and diff checks pass.
+  The unchanged required packet passes all 1497 units with no observed effects
+  in 234.219 seconds at `aee33e0ffb04d74f2d671acdef586e5d781cd65e`.
+  Published-head Linux/Windows qualification passes on the initial code.
+  Review found inactive marker/extra references could hide registry pins.
+  The repair adds explicit ambiguity refusal, root-metadata registry identity
+  and recursive-local controls (71 compiler checks pass). Recursive requirements
+  parsing and compile composition move to the existing configuration companion
+  without changing callbacks, keeping every policy copy under the 1000-line cap.
+  The repaired development regression packet passes 411 controls with one
+  POSIX-only installer-helper skip on Windows. Install/sync/changefile/module,
+  documentation, feed-neutrality, lint and diff guards pass. The unchanged
+  required packet passes all 1497 units without observed effects in 216.672
+  seconds at `cfffe6ca4eb359e5f3921fd199f9f1e08a5ef6d8`. Repaired published-head
+  CI and both Linux/Windows compile lanes passed. The next review found
+  configuration-only project mappings could still omit an actual registry pin.
+  The follow-up rejects explicit project contexts and ambient projects outside
+  compiled inputs, with nine argument/environment/ambient regressions across
+  direct, recursive and metadata inputs (80 compiler controls pass).
+  Rebased onto current development while preserving its newly admitted unit
+  entries. The current development packet passes 421 controls with the one
+  expected POSIX-only helper skip on Windows. The current required packet
+  passes all 1509 units without observed effects in 208.547 seconds at
+  `5ec1b831ee7bcc1f449e30017974aec2bb191f4f`. Final published-head CI,
+  native qualification and review remain open.
+  The parent Plan and Validation Plan remain open.
+
+### 2026-10-24 - Policy/release planner merged; exact source lock next
+
+- #8586 merged as `9e29b923da2ebc0b2c6c28b2b9ac419d24a0ef81` after
+  Copilot review `5638219232` approved exact head
+  `cedc19c9ecac5a81579e8dc5a82b81afd6885f45` with no open findings.
+  The one fixed review thread is resolved. Required CI `40093452938` and
+  native acceptance `40093501724` pass; all four selected Linux/Windows
+  wheel and runtime-policy jobs are green. Merge used the configured
+  Maintainer CODEOWNER exception, not a CI override.
+- Re-read this Plan and Validation Plan after merge. Marked only the bounded
+  planning component complete; the parent remains **Active**. No installer,
+  source acquisition, real profile producer or production runtime is enabled.
+- Continue the independent source-lock seam using the retained compiler and
+  existing selected-source identity. The compiler freezes effective resolver
+  configuration and exports hashes; neither result alone authenticates source
+  approval or feed admission. Reuse the existing source/retention owners.
+  Candidate-constraint generation is already owned by the still-open external
+  contributor PR #6941; do not duplicate or supersede that contribution.
+
+### 2026-10-24 - Installation-policy and release-selection composition
+
+- Added the repository-only `plan_installation_profile` adapter using #8494's
+  real owner-bound resolver and #8568's retained release authentication, not
+  another configuration reader or caller approval map. The result freezes the
+  resolved policy and either retains authenticated release selection or requests
+  permitted source fallback with an explicit availability trigger.
+- Typed `ProfileUnavailable` separates absent approved records from malformed,
+  ambiguous or unapproved records. Invalid lock preferences remain validation
+  failures. A supplied release subject authenticates even if its artifact was
+  not discovered; integrity, I/O, provenance and cancellation do not fall back.
+  Existing managed/profile-aware publication holds remain unchanged.
+- Local validation: 147 policy/release/exact-selection/installation-policy
+  controls pass, including an isolated fresh Python caller with no artifact
+  infrastructure; touched Python lint, diff checks and the install-contract
+  guard pass. The optional Linux/Windows wheel lane includes the new tests.
+  Required no-actor inventory changes only the already-admitted selector hash;
+  effectful planner tests do not join that packet. Full packet, native remote
+  qualification and review are pending publication.
+- Review on #8586 found preference validation was skipped when the index was
+  absent. Moved the shared validation ahead of every availability branch and
+  covered malformed/duplicate preferences with present, missing-index and
+  missing-artifact inputs. Required CI and all four optional native jobs passed
+  the original head; the repaired head must qualify separately.
+- This is not source verification, an exact source lock, acquisition admission
+  or production enablement. The parent stays **Active**; complete the independent
+  source-lock/feed-admission seam and real profile publication next.
+
+### 2026-10-24 - Release approval adapter merged; policy/source composition next
+
+- #8568 merged as `f0722fcab7127f2709f239a3931db7cf8df0f40d` after
+  final-head approval with no findings or review threads, required CI success
+  and all five selected native jobs: Linux/Windows wheel inspection and policy
+  readers plus macOS guardian follow-through. The canonical effort was re-read
+  after merge; no parent acquisition or runtime gate is inferred complete.
+- The eligible no-actor inventory admits the updated promotion-validator hash
+  without adding a node or effect: its complete packet passed **1,497** tests.
+  Required CI also exposed three stale first-use guardian copies after #7753
+  reached the merge base. The normal generator synchronized those copies,
+  all four affected consumers received changefiles, and the existing guardian
+  settlement controls passed. No failing check was bypassed.
+- #8494 supplies the actual owner-bound `resolve_runtime_profile_policy` API:
+  no-file CPU-first/artifact-preferred/source-permitted intent, explicit
+  capability retention/migration and stricter optional policy. Its `policyId`
+  is an invalidation input, not profile approval or publication permission.
+  The next owned stretch composes that existing resolver with authenticated
+  release selection and independently locked governed source mode. It must
+  not introduce another policy reader or relax a blocked artifact lock.
+- Real profile production/publication, approved acquisition/redirect/withdrawal
+  evidence, production budget measurements, unchanged admitted offline reuse,
+  source fallback and native engine application remain open. No production
+  consumer or local rollout is enabled; #4876 stays **Active**.
+
+### 2026-10-24 - Existing release-channel approval adapter implementation
+
+- Traced the owning first-use/update/native construction path. Installation
+  provenance, installation-mode selection and deployment publication permission
+  do not approve a dependency profile and were not repurposed as approval.
+- Extended the existing signed promotion index and pinned hosted Main
+  attestation verifier with a versioned exact-profile extension. Pre-signing
+  validation binds it to the actual first-party manifest, primary wheel and
+  selected vendored wheels. The release selector retains bounded private
+  subject bytes, verifies them before deriving whole-record approvals and
+  requires independently selected release/manifest/target/capability facts.
+  It introduces neither a personal approval map nor a new trust directory.
+- Native regression controls cover replacement during authentication, private
+  input custody, forged origins, mismatched selection, byte limits and cleanup
+  after signature failure, timeout or cancellation. The compatibility sweep
+  exposed a workflow fixture discarding its real composed candidate report;
+  all four affected checkout-attribute cases now pass with that report supplied
+  to the existing frozen-candidate exporter.
+- Reconciled with #8494's merged `resolve_runtime_profile_policy` adapter:
+  it supplies the existing owner-bound CPU-first policy intent, not approval.
+  The release adapter is complementary; no second configuration reader is added.
+- This is only the release-channel adapter. Real profile production and
+  publication, composition with that adopting-policy baseline, admitted governed acquisition,
+  source-mode selection with its independent exact lock, measured production
+  budgets and runtime consumer integration remain open. No installer is enabled,
+  no deployed capability is claimed and this effort remains **Active**.
+
+### 2026-10-24 - Closed offline constructor component merged; authority integration next
+
+- #8534 merged as `bd4c5539a3336b02c828e26e3d1a3e8ccf1cef5d`.
+  It composes inspected profiles and exact snapshots with the existing
+  `_candidate`/`_construct`, private policy transaction and installed origin/
+  health/retention owners. Source receipts remain schema 1; explicit closed
+  receipts bind the whole profile/lock and actual versions, closure and
+  hash-qualified archive origins. No new allocator or approval source exists.
+- Native Windows read custody now denies writers and deletion while permitting
+  independent readers and extended-length paths. It fixes the reproduced
+  CPython 3.14/NTFS last-access change-time false refusal without relaxing
+  path/byte integrity; POSIX change-time checks remain unchanged.
+- Review found and tests reproduced oversized health argv (70,534 characters
+  for a valid 97-wheel closure) and caller-relative UV paths in a private cwd.
+  Health now verifies parent digest bindings against the existing owned
+  receipt, keeping complete records out of argv; canonical UV selection binds
+  an absolute executable before retention. All derived consumers are synced.
+  The oversized policy module and stale exact-source admission were corrected,
+  not bypassed. The no-actor inventory, module cap and CI bounds are unchanged.
+- Final head `2aa7c0a230962e72f2316c20568fd46200d4203a` has approval
+  `5637805887`, no overview findings or unresolved threads, green required CI
+  `40082957848` and all six Windows/Linux native jobs in `40083043781`.
+  Local validation includes the 133-case native cohort, subsequent 100-case
+  large-closure/profile cohort, focused source/path controls and the 68-case
+  canonical candidate suite; concrete scope and tooling correction are in
+  [the component journal](wheel-input-admission.md).
+- The effort remains Active. The next owned stretch establishes the actual
+  existing release/configuration approval adapters and approved baseline,
+  followed by bounded approved-source acquisition and authority-selected exact
+  source fallback. The generic adapter remains this effort's prerequisite;
+  #6737 retains native CPU/accelerator engine application, not a transfer of
+  this parent gate. No production consumer, fallback or rollout is claimed.
+
+### 2026-10-24 - Exact-set snapshot component merged; constructor remains open
+
+- #8523 merged as `1c386200bd4297e0bb5321d43185e485f75777bd`.
+  The shared helper retains ordinary unlinked inputs as read-only exact copies
+  and streams under the existing private temporary-input owner. It shares one
+  deadline and explicit count, per-archive, closure-byte and temporary-storage
+  limits; snapshot verification composes with the complete-profile verifier.
+- Thirty native snapshot controls cover inclusive limits, replacement, mutation
+  across the set, growth/read/write failures, final-EOF deadline, cancellation,
+  caller-input preservation and actual isolated `-I -S` bootstrap. The combined
+  local snapshot/archive/profile/bootstrap/source-binding cohort passed 289
+  cases, with one POSIX-only installer case skipped on Windows.
+- Final-head review approved with no findings or threads, required CI passed,
+  and all four Linux/Windows inspection and real-built/offline artifact jobs
+  passed. The first CI refusal for incomplete shared-consumer release metadata
+  was corrected with changefiles and a fresh green run, not bypassed.
+- The next stretch integrates an explicit closed wheel mode through the existing
+  canonical transaction, constructor, installed-origin receipt and health/
+  completion owner. Ordinary source-policy checks remain intact; no arbitrary
+  record/hash or callback becomes profile/feed approval. Authenticated adapters,
+  acquisition, actual offline construction/reuse, source fallback, retention and
+  rollout remain open. This effort stays Active and the worktree is retained.
+
+### 2026-10-24 - Bounded inspection component merged; retained assembly next
+
+- #8419 merged as `90663eab5b44d2d63032fa8a0ac95cf016ce8d6d`.
+  Its shared stdlib archive verifier is synchronized across all five Python
+  consumers. The existing complete-profile API retains exact complete sets,
+  actual metadata, closure budgets, strong runtime RECORD hashes and strict
+  first-party promotion policy; no production profile consumer was enabled.
+- On the reviewed final head, required CI passed all 1,414 selected cases and
+  all four Linux/Windows inspection and real-built/offline artifact jobs passed.
+  The admitted coverage report is 16,547,830 bytes under the unchanged
+  16,777,216-byte cap. Redundant test labels were reduced with all prior cases,
+  bodies and assertions retained; the final-EOF regression adds one case.
+- The next owned stretch retains the exact selected inputs under explicit
+  count/total-byte/storage/deadline budgets, then composes closed offline UV
+  assembly and mode/profile/policy/source/artifact receipts through the existing
+  constructor and retention owner. Ordinary source-policy refusal of
+  `--no-deps` must not be bypassed to obtain an offline transaction.
+  Authenticated approval/acquisition, reuse/revocation, source fallback,
+  native/fresh construction, retention and authorized rollout remain open.
+  The effort stays Active; neither this component nor its merge is completion.
 
 ### 2026-10-24 - Shared-installer wheel-input continuation
 

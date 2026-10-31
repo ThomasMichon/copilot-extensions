@@ -76,6 +76,8 @@ def test_transplanted_picker_sources_match_production_copy():
                 # on the agent-worktrees side; Worktree Manager keeps its own
                 # local frame_health.append_launch_event untouched).
                 "__init__.py",
+                # Manager-owned maintenance admission and outcome presentation.
+                "engine_loading.py",
                 # frame_health.py's own _timestamp/_launch_trace_path helpers
                 # now import from agent_worktrees.launch_trace instead of
                 # defining them locally (same Step 1.5 relocation); Worktree
@@ -587,7 +589,7 @@ def test_manager_acts_on_production_picker_resume_decision(monkeypatch):
             "worktree_id": "demo-1234",
             "title": "Resume me",
             "is_local": True,
-            "options": {"bare_resume": True, "no_mux": True, "ahp": True},
+            "options": {"no_mux": True, "ahp": True},
         },
     )
     requests = []
@@ -599,9 +601,21 @@ def test_manager_acts_on_production_picker_resume_decision(monkeypatch):
 
     assert entrypoint._run_production_picker("demo") == 0
     assert requests[0].worktree_id == "demo-1234"
-    assert requests[0].mode == "bare-resume"
+    assert requests[0].mode == "resume"
     assert requests[0].no_mux is True
     assert requests[0].seed_prompt is None
+
+
+def test_manager_rejects_retired_bare_resume_decision(monkeypatch):
+    monkeypatch.setattr(runner, "run", lambda project: {
+        "action": "resume", "worktree_id": "example", "is_local": True,
+        "options": {"bare_resume": True},
+    })
+    monkeypatch.setattr(
+        entrypoint, "_run_launch",
+        lambda request: pytest.fail("retired mode must not launch"),
+    )
+    assert entrypoint._run_production_picker("demo") == 1
 
 
 def test_manager_acts_on_production_picker_resume_decision_with_seed_prompt(
@@ -1061,6 +1075,8 @@ def test_run_launch_rejects_crafted_remote_ahp_before_launch(
 def test_run_launch_selects_ahp_after_plan_resolution(monkeypatch, tmp_path):
     from worktree_manager import ahp_provider, engine_client, launcher
 
+    admitted = []
+    monkeypatch.setattr(engine_client, "require_agent_hosting", admitted.append)
     plan = type(
         "Plan",
         (),
@@ -1110,6 +1126,7 @@ def test_run_launch_selects_ahp_after_plan_resolution(monkeypatch, tmp_path):
 
     assert entrypoint._run_launch(request) == 0
     assert calls == [(hosted, True)]
+    assert admitted == [str(tmp_path)]
 
 
 def test_run_launch_selects_ahp_without_mux_when_both_requested(
@@ -1120,6 +1137,8 @@ def test_run_launch_selects_ahp_without_mux_when_both_requested(
     ``want_mux=False`` to the launcher."""
     from worktree_manager import ahp_provider, engine_client, launcher
 
+    admitted = []
+    monkeypatch.setattr(engine_client, "require_agent_hosting", admitted.append)
     plan = type(
         "Plan",
         (),
@@ -1169,6 +1188,7 @@ def test_run_launch_selects_ahp_without_mux_when_both_requested(
 
     assert entrypoint._run_launch(request) == 0
     assert calls == [(hosted, False)]
+    assert admitted == [str(tmp_path)]
 
 
 def test_run_launch_delegates_to_relocated_script_on_windows(monkeypatch, tmp_path):
@@ -1393,12 +1413,10 @@ def test_run_launch_relocated_script_forwards_staged_identity_not_prompt_text(
     assert "--seed" not in argv and "do the thing" not in argv
 
 
-def test_run_launch_relocated_script_bare_resume_never_forwards_seed(
+def test_run_launch_rejects_retired_bare_resume_without_launching(
     monkeypatch, tmp_path,
 ):
-    """Bare resume never carries a seed through to the relocated script,
-    even if ``plan.cmd`` somehow carried one -- matching the engine's own
-    rejection of --seed alongside --bare-resume."""
+    """A stale request cannot reintroduce the retired Manager action."""
     from worktree_manager import ahp_provider, engine_client, launcher
 
     plan = type(
@@ -1458,11 +1476,8 @@ def test_run_launch_relocated_script_bare_resume_never_forwards_seed(
         },
     )()
 
-    assert entrypoint._run_launch(request) == 0
-    assert len(calls) == 1
-    argv = calls[0]
-    assert "--seed" not in argv
-    assert "--bare-resume" in argv
+    assert entrypoint._run_launch(request) == 1
+    assert calls == []
 
 
 def test_run_launch_relocated_script_sets_no_mux_env(monkeypatch, tmp_path):
@@ -1555,7 +1570,7 @@ def test_run_launch_relocated_script_posix_execs_bash(monkeypatch, tmp_path):
         {
             "project": "demo",
             "worktree_id": "demo-1234",
-            "mode": "bare-resume",
+            "mode": "resume",
             "machine": None,
             "no_mux": False,
             "ahp": False,
@@ -1567,7 +1582,8 @@ def test_run_launch_relocated_script_posix_execs_bash(monkeypatch, tmp_path):
     assert calls[0][0] == "bash"
     assert calls[0][1][0] == "bash"
     assert str(script) in calls[0][1]
-    assert "--bare-resume" in calls[0][1]
+    assert "--worktree-id" in calls[0][1]
+    assert "--bare-resume" not in calls[0][1]
 
 
 class TestRunLaunchNewWindow:
@@ -1728,10 +1744,17 @@ class TestRunLaunchNewWindow:
         rc = entrypoint._run_launch(self._request(machine="dev6", environment="prod"))
         assert rc == 1
 
-    def test_new_window_rejects_ahp(self, monkeypatch):
-        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (self._plan(), 0))
+    def test_new_window_rejects_ahp(self, monkeypatch, tmp_path):
+        from worktree_manager import engine_client
+
+        plan = self._plan()
+        plan.work_dir = str(tmp_path)
+        admitted = []
+        monkeypatch.setattr(engine_client, "require_agent_hosting", admitted.append)
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
         rc = entrypoint._run_launch(self._request(ahp=True))
         assert rc == 1
+        assert admitted == [str(tmp_path)]
 
     def test_new_window_rejects_missing_relocated_script(self, monkeypatch):
         from worktree_manager import ahp_provider
@@ -1778,6 +1801,8 @@ def test_run_launch_forces_persisted_active_or_unknown_ahp_binding(
 ):
     from worktree_manager import ahp_provider, engine_client, launcher
 
+    admitted = []
+    monkeypatch.setattr(engine_client, "require_agent_hosting", admitted.append)
     plan = type(
         "Plan",
         (),
@@ -1836,6 +1861,7 @@ def test_run_launch_forces_persisted_active_or_unknown_ahp_binding(
 
     assert entrypoint._run_launch(request) == 0
     assert calls == [(hosted, True)]
+    assert admitted == [str(tmp_path)]
 
 
 def test_run_launch_allows_direct_after_disposed_binding(monkeypatch):
@@ -1936,8 +1962,8 @@ def test_run_launch_preserves_direct_resume_when_execution_leg_is_unsupported(
         },
     )()
 
-    assert entrypoint._run_launch(request) == 0
-    assert calls == [(plan, True)]
+    assert entrypoint._run_launch(request) == (1 if mode == "bare-resume" else 0)
+    assert calls == ([] if mode == "bare-resume" else [(plan, True)])
 
 
 def test_run_launch_fails_closed_for_unknown_unavailable_provider(
@@ -1998,27 +2024,13 @@ def test_run_launch_rejects_bare_resume_for_active_ahp_binding(
 ):
     from worktree_manager import engine_client, launcher
 
-    plan = type(
-        "Plan",
-        (),
-        {
-            "action": "exec",
-            "exit_code": 0,
-            "worktree_id": "demo-1234",
-        },
-    )()
-    monkeypatch.setattr(entrypoint, "_resolve_for", lambda _request: (plan, 0))
+    monkeypatch.setattr(
+        entrypoint, "_resolve_for", lambda _request: pytest.fail("retired mode must not resolve"),
+    )
     monkeypatch.setattr(
         engine_client,
         "execution_leg_get",
-        lambda *_args, **_kwargs: {
-            "execution_leg": {
-                "provider": "ahp",
-                "state": "active",
-                "binding_revision": 3,
-                "blob": {},
-            }
-        },
+        lambda *_args, **_kwargs: pytest.fail("retired mode must not inspect a binding"),
     )
     monkeypatch.setattr(
         launcher,
@@ -2041,7 +2053,7 @@ def test_run_launch_rejects_bare_resume_for_active_ahp_binding(
     )()
 
     assert entrypoint._run_launch(request) == 1
-    assert "bare resume is incompatible" in capsys.readouterr().out
+    assert "Bare resume is retired from Manager" in capsys.readouterr().out
 
 
 def test_production_picker_disposal_decision_calls_manager_owned_provider(

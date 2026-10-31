@@ -4,7 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Dedicated integration branch; reviewed proposal before source changes
 - **Created:** 2026-10-23
-- **Status:** Draft
+- **Status:** Active
+- **Original scope completed:** 2026-10-25
+- **Source:** #8720 (original implementation merged); compiler-free amendment
+  reviewed in #9120; Linux replacement merged in #9129, Windows replacement open
 - **Vision:** `visions/plugin-services/README.md` - `attributed-daemon-instances`
 - **Umbrella issue:** #8403
 
@@ -72,100 +75,161 @@ identity; limit deletion to declared disposable artifacts; preserve production
 cutover; use installer reconciliation as a backstop rather than the primary
 cleanup mechanism.
 
+The original Python-free Linux choice was a prebuilt helper with explicit
+source builds. The operator's 2026-10-26 requirement supersedes that choice:
+no native code in the repository and no compilation at the build/release or
+device end. The complete verbatim requirement and cross-owner acceptance live
+in the [compiler-free execution amendment](../lean-runtime-dependencies/compiler-free-execution.md).
+This effort retains shared daemon-instance custody while replacing its
+compiled implementation with thin shell entrypoints and standard-library
+Python. Original completed phases remain historical evidence, not proof of the
+replacement.
+
+The operator's 2026-10-27 clarification uses setup-provided Python from normal
+PATH resolution, without interpreter signature, registry or physical-path
+attestation. The linked amendment owns that prerequisite and setup-hygiene
+boundary; process identity, leases, Job containment and safe cleanup retain
+their existing owners and guarantees.
+
 ## Plan
 
 ### Phase 1 - Reviewed contract
 
 - [x] Claim #8403 and inventory shared, direct, native-supervised, standalone
   and test-fixture daemon launch paths without runtime effects.
-- [ ] Review and merge this proposal and its governing intent before source
+- [x] Review and merge this proposal and its governing intent before source
   implementation.
-- [ ] Record the complete callable-scoped launch census as a checked contract,
+- [x] Record the complete callable-scoped launch census as a checked contract,
   distinguishing residents, supervised service children, finite workers,
   caller-contained tools and venue-owned agent bodies.
 
 ### Phase 2 - Shared instance custody and finite test lifetime
 
-- [ ] Add one service-independent shared instance inventory outside disposable
+- [x] Add one service-independent shared instance inventory outside disposable
   state roots. Reserve before detached creation; bind actual process-birth
   identity and startup admission before application work/readiness.
-- [ ] Cover direct/native-supervisor startup as well as launcher wrappers.
+- [x] Cover direct/native-supervisor startup as well as launcher wrappers.
   Source provenance is supported without pretending a source launch is an
   installed production generation.
-- [ ] Track production instances without introducing a production expiry or
+- [x] Track production instances without introducing a production expiry or
   replacing singleton, cutover, supervisor or recoverable-work authority.
-- [ ] Require explicit ephemeral-test ownership and purpose. Unattended tests
+- [x] Require explicit ephemeral-test ownership and purpose. Unattended tests
   default to a renewable 10-minute lease and 4-hour hard maximum.
-- [ ] Require an explicit pause-tolerant lifetime for interactive tests; do not
+- [x] Require an explicit pause-tolerant lifetime for interactive tests; do not
   silently apply the unattended maximum to a test waiting for human input.
   Renewal belongs to the test lifecycle owner, not agent-turn activity.
-- [ ] Enforce expiry independently of the launching command, including its
+- [x] Enforce expiry independently of the launching command, including its
   abrupt disappearance. Preserve contained-test suppression and existing
   Windows outside-Job adoption/uncertain-outcome rules.
-- [ ] Reuse native birth identity and per-instance mutation custody. Avoid a
+- [x] Reuse native birth identity and per-instance mutation custody. Avoid a
   second coordinator, cryptographic admission chain or capacity scheduler.
 
 ### Phase 3 - Complete caller and installer integration
 
-- [ ] Integrate all shipped resident/service startup paths and shared
+- [x] Integrate all shipped resident/service startup paths and shared
   Python/PowerShell/Bash launchers, including managers, standalone services and
   explicit test fixtures. Preserve Python-free native launch capability.
-- [ ] Add a mechanical coverage guard that refuses new unclassified bypasses;
+- [x] Include the Linux kernel helper in supported release artifacts; compile
+  explicitly for source builds, never implicitly on normal daemon startup.
+- [x] Add a mechanical coverage guard that refuses new unclassified bypasses;
   comments or containment flags alone do not establish instance admission.
-- [ ] Add finite, explicit reconciliation to admitted normal install/update
+- [x] Add finite, explicit reconciliation to admitted normal install/update
   paths, including healthy/reuse returns. No destructive import, status,
   session-start or resolver sweep.
-- [ ] Reclaim only expired, explicitly disposable instances through the same
+- [x] Reclaim only expired, explicitly disposable instances through the same
   cleanup owner: verify process identity, confirm stop, then settle exact owned
   runtime artifacts. Unknown custody, reused PIDs, live protected work, changed
   paths and unsafe filesystem indirection hold with diagnostics.
-- [ ] Preserve source checkouts, installed code slots, retained proof files,
+- [x] Preserve source checkouts, installed code slots, retained proof files,
   unrelated entries and unsettled cleanup evidence. Partial cleanup remains
   resumable under the original instance identity.
-- [ ] Update owner documentation, distribution/vendoring declarations and
+- [x] Update owner documentation, distribution/vendoring declarations and
   changefiles for actual affected consumers.
 
 ### Phase 4 - Qualification and completion
 
-- [ ] Run the validation plan, publish the source PR and resolve substantive
+- [x] Run the validation plan, publish the source PR and resolve substantive
   review/CI findings through merge.
-- [ ] Update this effort from actual merged results; resolve every plan and
+- [x] Update this effort from actual merged results; resolve every plan and
   validation item before setting Done and finalizing.
-- [ ] Report source/release/installed state separately. No runtime rollout is
+- [x] Report source/release/installed state separately. No runtime rollout is
   authorized by this implementation request.
+
+### Phase 5 - Compiler-free shared lifecycle amendment
+
+- [x] Review the governing compiler-free vision and
+  [complete amendment](../lean-runtime-dependencies/compiler-free-execution.md)
+  through the existing #8403 owner (#9120).
+- [x] Reuse shared Python reservation, schema, locks and identity operations;
+  replace Linux C supervise/cleanup and preserve owner-loss, lease/hard maximum,
+  subreaper descendant settlement and exact-artifact behavior.
+- [x] Establish the shared compiler-free original-shell custody prerequisite
+  through the installation-context SDK (#9354), including its complete bounded
+  44-case native Windows packet. Instance admission/expiry migration below
+  remains a separate implementation and qualification boundary.
+- [x] Qualify the compiler-free PowerShell instance adapter and its changed
+  source archive: 60 native instance, three installer and 44 SDK cases pass
+  with exact source, desktop and retirement reconciliation. Current-head
+  review/CI/merge remain separate gates; see the linked implementation journal.
+- [ ] Migrate the remaining thin shell and PowerShell daemon/owned-process
+  entrypoints through
+  setup-provided PATH Python without interpreter attestation; preserve Windows
+  process/Job and uncertainty contracts.
+- [x] Remove canonical C, all distributed copies and native build/export hooks,
+  regenerating consumers through their normal owner.
+- [ ] Complete actual compiler-free construction and lifecycle qualification,
+  update current docs and journal reviewed merged results.
 
 ## Validation Plan
 
-- [ ] Pure tests cover reservation/admission/renewal/expiry, production
+- [ ] Review and complete the compiler-free amendment below, preserving every
+  original process/lifetime/artifact guarantee without native compilation.
+- [ ] Requalify the actual compiler-free implementation and consumers; retain
+  original results as historical, not current replacement acceptance.
+
+- [x] Pure tests cover reservation/admission/renewal/expiry, production
   non-expiry, interactive-policy refusal, concurrent mutation, PID reuse,
   malformed/foreign records, safe paths and unknown-outcome holds.
-- [ ] Actual contained native-process tests prove discoverability across
+- [x] Actual contained native-process tests prove discoverability across
   isolated roots, expiry after caller loss, exact-process stop, descendant
   settlement and protected/unrelated-instance preservation.
-- [ ] Real consumer checks cover fresh install, repeat install, healthy/reused
+- [x] Real consumer checks cover fresh install, repeat install, healthy/reused
   runtime, update, missing registry, permission failure and interrupted cleanup
   without changing the selected production generation.
-- [ ] Shared fixtures exercise Python and Python-free native protocol parity.
-- [ ] Extend an appropriate clean-room scenario with synthetic inputs; record
+- [x] Shared fixtures exercise Python and Python-free native protocol parity.
+- [x] Actual built-artifact tests find and execute the packaged native helper
+  without a runtime compiler; source-build tests make compilation explicit.
+- [x] Extend an appropriate clean-room scenario with synthetic inputs; record
   exact supported lanes and explicit reasons for unavailable ones.
-- [ ] Windows launch qualification retains zero visible windows/focus changes
+- [x] Windows launch qualification retains zero visible windows/focus changes
   from a windowless parent and verifies caller-Job cleanup behavior.
-- [ ] Measure incremental launch/reconciliation work; no whole-machine process
+- [x] Measure incremental launch/reconciliation work; no whole-machine process
   scan, synchronous export or new per-request helper service is introduced.
-- [ ] Run affected consumer tests, headless/coverage guards, installer contract,
+- [x] Run affected consumer tests, headless/coverage guards, installer contract,
   documentation checks and the repository's required change-scoped gates.
 
 ## Proposal
 
-Pending review. Implementation must follow the admitted shared ownership and
-complete caller coverage, rather than closing this effort after one launcher
-or one platform passes.
+Proposal #8433 and implementation #8720 completed the original shared ownership
+and caller/installer integration. The compiler-free amendment cleared review
+and merged in #9120; the Linux replacement merged in #9129. Windows replacement
+and full compiler-free requalification remain open.
+The journal distinguishes actual supported-lane proof from unavailable
+hardware, dependency and production-venue lanes; those are not claimed as
+exercised. Release promotion and installed rollout are separate, and no
+runtime rollout was authorized or performed.
+The compiler-free SDK custody prerequisite subsequently merged in #9354.
+Its native packet does not replace the retained compiled PowerShell
+daemon-instance entrypoint or qualify its admission, expiry and reconciliation.
 
 ## Journal
 
-### 2026-10-23 - Scope and source census
+All original entries and qualification details are retained in dated sidecars,
+newest first:
 
-- Claimed #8403 and confirmed `leased-daemon-instances` with the operator.
-- Completed independent read-only shared-launch, caller and installer evidence.
-- Captured the unattended defaults and the interactive human-wait exception.
-- No implementation, service activation or deployment has occurred.
+- [2026-10-30 - compiler-free PowerShell instance custody](../lean-runtime-dependencies/journal/2026/10.30%20powershell-instance-custody.md)
+- [2026-10-28 - SDK caller bounds and native qualification](../lean-runtime-dependencies/journal/2026/10.28%20sdk-caller-qualification.md)
+- [2026-10-26 - compiler-free amendment](journal/2026/10.26%20compiler-free-amendment.md)
+- [2026-10-25 - retirement and completion](journal/2026/10.25%20retirement-and-completion.md)
+- [2026-10-24 - native and installer qualification](journal/2026/10.24%20native-and-installer-qualification.md)
+- [2026-10-23 - design and initial integration](journal/2026/10.23%20design-and-initial-integration.md)

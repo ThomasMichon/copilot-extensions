@@ -81,6 +81,10 @@ class PickerScreenWorkerActionsMixin:
         put). Carries the row's ``effort`` claim owner when present, so an
         effort-claimed venue isn't refused as busy. With no supported window
         mechanism, falls back to ``open-venue`` (exit the Picker and attach)."""
+        from ... import picker_review
+
+        if picker_review.active():
+            return False, picker_review.MESSAGE
         provider, venue = ctx.get("provider"), ctx.get("id")
         if not provider or not venue:
             return False, "missing provider/venue identity for this row"
@@ -104,6 +108,10 @@ class PickerScreenWorkerActionsMixin:
     def _open_bridge_ui(self, _ctx):
         """Internal verb ``open-bridge-ui``: open agent-bridge's live-session
         web view (it signs the browser in with a one-time code)."""
+        from ... import picker_review
+
+        if picker_review.active():
+            return False, picker_review.MESSAGE
         bridge = shutil.which("agent-bridge")
         if not bridge:
             return False, "'agent-bridge' is not on PATH"
@@ -119,6 +127,10 @@ class PickerScreenWorkerActionsMixin:
         to the row's live session with ``agent-bridge send <sid> -`` (the text
         rides stdin, so no quoting reaches a shell shim), steering the running
         turn or interrupting it. The send runs off the render flow."""
+        from ... import picker_review
+
+        if picker_review.active():
+            return False, picker_review.MESSAGE
         sid = str(ctx.get("session_id") or "").strip()
         if not sid:
             return False, "no live session on this venue to message"

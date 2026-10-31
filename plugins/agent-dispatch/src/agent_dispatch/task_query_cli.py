@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
 
 from .client import DispatchError
 from .handoff_claim_release import is_handoff_task
@@ -115,9 +116,40 @@ def _browse_peer(args: argparse.Namespace, subcommand: str, *, repo: str | None 
         print(f"agent-dispatch: {diagnosis}", file=sys.stderr)
     return result.returncode
 
+def register_list_command(
+    sub: argparse._SubParsersAction[argparse.ArgumentParser],
+    *,
+    handler: Callable[[argparse.Namespace], int],
+) -> None:
+    p = sub.add_parser("list", help="list tasks (scoped to the calling repo by default)")
+    p.add_argument("--category", choices=("work", "maintenance", "all"), default="work")
+    scope = p.add_mutually_exclusive_group()
+    scope.add_argument("--repo", help="lane to list (local name or remote URL); default: calling repo")
+    scope.add_argument(
+        "--all-repos", action="store_true",
+        help="explicitly list every repository lane without resolving the calling repo",
+    )
+    p.add_argument(
+        "--status",
+        help="filter by status; comma-separate for several (e.g. queued,started)",
+    )
+    p.add_argument("--target-machine")
+    p.add_argument("--target-repo")
+    p.add_argument("--label")
+    p.add_argument("--evaluator-ref")
+    p.add_argument("--limit", type=int, default=200)
+    p.add_argument(
+        "--machine",
+        help="read another machine's queue over the SSH mesh (peer browse); "
+        "default: this machine's local coordinator",
+    )
+    p.set_defaults(func=handler)
+
+
 def _cmd_list(args: argparse.Namespace) -> int:
-    repo = _core()._scope_repo(args)
-    if not repo:
+    all_repos = bool(getattr(args, "all_repos", False))
+    repo = None if all_repos else _core()._scope_repo(args)
+    if not all_repos and not repo:
         print(_core()._REPO_UNRESOLVED, file=sys.stderr)
         return 2
     from . import remote_dispatch
@@ -255,6 +287,11 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
     from . import remote_dispatch
     from .client_authority import client_authority
 
+    if getattr(args, "limit_per_category", False) and (
+        not getattr(args, "board", False) or getattr(args, "category", None) != "all"
+    ):
+        print("agent-dispatch: --limit-per-category requires --board --category all", file=sys.stderr)
+        return 2
     if client_authority(args) == "legacy" and remote_dispatch.is_peer_machine(args.machine):
         return _core()._browse_peer(args, "inbox")
     machine = args.machine
@@ -283,8 +320,12 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
             "submitted,completed,abandoned,dead_letter"
         )
         with _core()._client(args) as c:
-            tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit,
-                           category=getattr(args, "category", None))
+            tasks_by_id = {}
+            for category in _board_cli.board_categories(args):
+                for task in c.list(repo=None, status=status, label=args.label, limit=args.limit,
+                                   category=category):
+                    tasks_by_id[task["id"]] = task
+            tasks = list(tasks_by_id.values())
             def _relay_fetch_many(
                 refs: list[tuple[str, str]]
             ) -> dict[tuple[str, str], dict | None]:

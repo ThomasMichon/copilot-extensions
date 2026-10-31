@@ -44,6 +44,11 @@ original-owner supervision, use [driving-backlog-burndown](../driving-backlog-bu
 after establishing this canonical effort. It adds a charter and operating
 loop without replacing this skill's placement or completion lifecycle.
 
+For an explicitly adopted agenda, use
+[driving-effort-agendas](../driving-effort-agendas/SKILL.md) to answer "what next?",
+follow exit criteria and preserve a bounded parent/child work stack. This is
+optional; the effort README remains the canonical plan and completion gate.
+
 ## First: resolve the effort home, then read its addendum
 
 Efforts are standalone. If no external state-root binding is in play, the
@@ -149,7 +154,8 @@ files in this repo.**
 1. **Find the seed.** An effort starts pointing at something that already
    exists — an issue, a plan/roadmap doc, or a stated idea. Identify and cite
    it.
-2. **Derive a kebab-case slug** and confirm it with the operator.
+2. **Derive a kebab-case slug** from established intent. Ask only when the
+   naming choice changes scope or the operator requested a naming decision.
 3. **Create the folder** at the grouped path (per the addendum): copy the
    effort home's `efforts/TEMPLATE.md` to the new effort's `README.md`. If the
    repo template is missing, run `efforts-setup`; that template is scaffolded
@@ -167,50 +173,27 @@ files in this repo.**
 
 ## Validate the capture, then demarcate enhancements
 
-Every write to an effort's `README.md` that captures or updates operator
-intent — at creation, and at any later point where new operator guidance
-lands (a follow-up round, a resumed session, a direction change) — carries an
-explicit obligation: **before treating the write as done, re-read it back
-against the operator's actual words and confirm nothing was paraphrased away,
-softened, or silently added.** A captured effort that quietly drifts from
-what the operator actually said is worse than no capture at all, because it
-reads as authoritative.
+Every creation or later rewrite capturing operator intent must be re-read
+against the actual words: do not omit constraints, soften decisions or silently
+add scope. Mark agent recommendations separately. Before treating the capture
+as complete, follow [the capture procedure](references/request-capture.md),
+including verbatim/sidecar preservation and the public-safety exception.
 
-- **Validate against the source, within reason.** Compare the README's
-  Request/Guiding Intent/Plan against the operator's literal input for the
-  round just captured. Flag it back to the operator, in the same turn, when
-  you: omitted a stated constraint, softened a firm decision into an open
-  question, or added scope the operator didn't ask for.
-- **Demarcate agent-recommended enhancements.** Anything in the Plan,
-  Validation Plan, or Context that originated from the agent's own analysis
-  rather than the operator's stated request must be visibly marked as such —
-  an inline `_(agent-recommended)_` tag, or a dedicated subsection — so a
-  later reader (the operator, a reviewer, a resuming agent) can tell "the
-  operator asked for this" from "the agent proposed this and it was
-  accepted." Don't let recommended and requested content blend into one
-  undifferentiated list.
-- **Accumulate, then summarize.** A short back-and-forth (a clarifying
-  question, one follow-up round) can be captured verbatim inline in
-  **Request**, appended in sequence. Once operator input spans several rounds
-  or the verbatim text would dominate the README, stop accumulating inline:
-  write a **gist** in Request/Context (the settled premise, in your own
-  words, clearly labeled as a summary) and move the full back-and-forth to a
-  sidecar file.
-- **The sidecar: `<effort-folder>/inception-transcript.md`.** When the
-  verbatim record no longer belongs inline, create this file holding the full
-  operator-agent exchange that produced the effort (or a later major
-  direction change), and link it from the README's Request/Context section
-  (e.g. "Full inception exchange: `inception-transcript.md`"). This keeps the
-  README a navigable map — its own stated purpose — without losing the
-  authoritative record of what was actually said.
-- **Redaction is the one safety exception to verbatim capture** when the
-  repo is public/externally-shareable and the operator's own words name a
-  real private/internal identifier — never drop or soften the surrounding
-  *intent* to work around it, only the private specifics it doesn't depend
-  on. See *Keep internal specifics out of a public-facing effort*
-  (`references/efforts.md`) for the full technique, including why a name
-  swap alone is sometimes not enough and why the public README never links
-  to a private sidecar.
+## Capture and reuse scope approvals
+
+Capture upfront approvals and one-time answers immediately in optional **Scope
+Approvals** or one linked canonical record, then stamp the current owner's
+checkpoint. Preserve original evidence, effect/owner/target bounds and later
+changes, separately from interpretation. Read
+[the record and reuse procedure](references/efforts.md#scope-approvals) before
+qualifying or recovering authority; no mandatory schema or sibling is required.
+
+Reuse within current scope across ordinary revisions and bounded retries.
+Explicit pins, single attempts, budgets, expiry, revocation and holds remain
+binding; unknown effects need owner-led reconciliation, not replay. A plan or
+receipt is not permission. Carry references, limits and current changes through
+every checkpoint/handoff, and continue independent authorized work rather than
+asking another generic continue-or-pause question.
 
 ## Plan an effort
 
@@ -425,6 +408,8 @@ change that realizes it.
    effort/slice if it is not already the worktree's active focus.
 3. Pick up from the last incomplete checklist item / Journal entry. The README
    is self-contained by design — a fresh agent session resumes from the file.
+   Read applicable Scope Approvals and later holds/changes before effects;
+   preserve their original evidence and bounds in the current-owner checkpoint.
 4. For multi-participant work, dispatch via the bound executor (the addendum
    says how) and **journal the dispatch** so the coordination record stays in
    the file.

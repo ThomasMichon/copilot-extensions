@@ -1,4 +1,9 @@
 # Installation driver lifecycle contract: vault-stamp-v1
+# Installation driver lifecycle contract: logger-install-v1
+# Installation driver lifecycle contract: bridge-install-v1
+# Installation driver lifecycle contract: ssh-command-v1
+# Installation driver lifecycle contract: logger-command-v1
+# Installation driver lifecycle contract: bridge-command-v1
 param(
     [Parameter(Mandatory)][string]$Root,
     [Parameter(Mandatory)][string]$Payload,
@@ -8,7 +13,7 @@ param(
     [string]$ExpectedSource,
     [string]$ReceiptLog,
     [ValidateSet('default', 'client-only')][string]$ServiceMode = 'default',
-    [ValidateSet('provision', 'stamp')][string]$InstallerAction = 'provision',
+    [ValidateSet('provision', 'stamp', 'stamp-provision', 'install')][string]$InstallerAction = 'provision',
     [switch]$Wait
 )
 $ErrorActionPreference = 'Stop'
@@ -16,7 +21,7 @@ $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($fals
 $Mode = $Mode.ToLowerInvariant()
 $ServiceMode = $ServiceMode.ToLowerInvariant()
 $InstallerAction = $InstallerAction.ToLowerInvariant()
-if ($InstallerAction -ceq 'stamp' -and $ServiceMode -cne 'default') {
+if ($InstallerAction -cne 'provision' -and $ServiceMode -cne 'default') {
     throw 'Client-only selection requires the provision action.'
 }
 if (Test-Path Env:UPDATE_DRIVER_WITNESS) {
@@ -38,20 +43,168 @@ foreach ($path in @($Payload, $RuntimeRoot)) {
         throw 'Execution root must be separate from owning payload and installation.'
     }
 }
-if ($env:AGENT_VAULT_NO_SELFPROVISION -or (Test-Path Env:AGENT_VAULT_PINNED_CONTEXT)) {
-    throw 'Owning plugin first-use provisioning is disabled for this invocation.'
-}
 $invocation = [IO.File]::ReadAllText((Join-Path $Payload 'payload-invocation.json')) | ConvertFrom-Json
 $identity = [IO.File]::ReadAllText((Join-Path $Payload 'plugin.json')) | ConvertFrom-Json
+$plugin = $identity.name
+switch -CaseSensitive ($plugin) {
+    'agent-vault' { $prefix = 'AGENT_VAULT' }
+    'agent-pull-requests' { $prefix = 'AGENT_PULL_REQUESTS' }
+    'agent-ssh' { $prefix = 'AGENT_SSH' }
+    'agent-codespaces' { $prefix = 'AGENT_CODESPACES' }
+    'agent-logger' { $prefix = 'AGENT_LOGGER' }
+    'agent-bridge' { $prefix = 'AGENT_BRIDGE' }
+    default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
+}
+if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
+    throw 'Stamp-to-selected-snapshot provisioning requires SSH.'
+}
+if ($InstallerAction -ceq 'install' -and $plugin -cnotin @('agent-logger', 'agent-bridge')) {
+    throw 'Fixed install action requires Logger or Bridge.'
+}
+if ($plugin -ceq 'agent-logger') {
+    foreach ($helper in @(
+        'command_binding.py', 'command_lifecycle.py', 'installer_engine.py',
+        'installation-context\installation_context.py'
+    )) {
+        if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {
+            throw 'Logger first use requires its complete materialized installation and lifecycle helpers.'
+        }
+    }
+}
+if ($plugin -ceq 'agent-bridge') {
+    foreach ($helper in @(
+        'installer-engine.ps1', 'installer-engine.sh',
+        'installer_engine.py', 'installer_engine_process.py', 'runtime_launcher.py',
+        'installer_wheel_inputs.py', 'installer_wheel_snapshot.py', 'installer_wheel_acquisition.py',
+        'installer_dependency_policy.py', 'installer_dependency_config.py',
+        'installation-context\installation_context.py',
+        'installation-context\installation-context.ps1', 'installation-context\installation-context.sh',
+        'install.ps1', 'install.sh', 'repair-scheduled-task.ps1',
+        'versioned_runtime_native.ps1', 'versioned_runtime.py',
+        'versioned_runtime_construction.py', 'versioned_runtime_source.py',
+        'versioned_runtime_publication.py', 'versioned_runtime_leases.py'
+    )) {
+        if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {
+            throw 'Bridge first use requires its complete materialized installation helpers.'
+        }
+    }
+}
+if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger', 'agent-bridge')) {
+    $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger'; 'agent-bridge' = 'Bridge' }[$plugin]
+    $sshDeclaration = @{
+        legacyRuntimeRoot = '.' + $plugin
+        payloadRootEnv = $prefix + '_PAYLOAD_ROOT'
+    }
+    if ($plugin -cne 'agent-logger') { $sshDeclaration.module = $plugin.Replace('-', '_') }
+    foreach ($field in $sshDeclaration.GetEnumerator()) {
+        $value = $invocation.PSObject.Properties[$field.Key]
+        if ($null -eq $value -or $value.Value -isnot [string] -or $value.Value -cne $field.Value) {
+            throw "$label first use requires its declared native runtime gate."
+        }
+    }
+    if ($invocation.payloadDispatcher -isnot [PSCustomObject] -or
+        $invocation.payloadDispatcher.posix -isnot [string] -or
+        $invocation.payloadDispatcher.windows -isnot [string] -or
+        $invocation.payloadDispatcher.posix -cne 'scripts/runtime-gate.sh' -or
+        $invocation.payloadDispatcher.windows -cne 'scripts/runtime-gate.ps1' -or
+        @($invocation.payloadDispatcher.PSObject.Properties).Count -ne 2) {
+        throw "$label first use requires its declared native runtime gate."
+    }
+}
+if ($plugin -cin @('agent-codespaces', 'agent-logger', 'agent-bridge') -and (
+    (Test-Path ("Env:" + $prefix + '_INSTALLATION_ID')) -or
+    $RuntimeRoot -ine (Join-Path $env:USERPROFILE ('.' + $plugin)) -or
+    -not (
+        ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ieq
+            (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -and
+            [IO.Path]::GetFileName($Payload) -ceq $plugin) -or
+        ($plugin -cin @('agent-logger', 'agent-bridge') -and $InstallerAction -ceq 'provision' -and
+            [IO.Path]::GetDirectoryName($Payload) -ieq (Join-Path $RuntimeRoot 'snapshots'))
+    ))) {
+    throw "$label first use requires its canonical installed payload and default legacy root."
+}
+if ($plugin -cin @('agent-pull-requests', 'agent-ssh', 'agent-logger', 'agent-bridge')) {
+    $label = @{ 'agent-ssh' = 'SSH'; 'agent-logger' = 'Logger'; 'agent-bridge' = 'Bridge'; 'agent-pull-requests' = 'Pull Requests' }[$plugin]
+    $installed = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ieq
+        (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -and
+        ($plugin -ceq 'agent-pull-requests' -or [IO.Path]::GetFileName($Payload) -ceq $plugin)
+    $snapshot = [IO.Path]::GetDirectoryName($Payload) -ieq (Join-Path $RuntimeRoot 'snapshots')
+    if ($RuntimeRoot -ine (Join-Path $env:USERPROFILE ('.' + $plugin)) -or
+        -not ($installed -or $snapshot)) {
+        throw "$label first use requires its canonical installed payload or selected legacy snapshot."
+    }
+    if ($snapshot) {
+        $receiptPath = Join-Path $Payload 'snapshot-provenance.json'
+        $null = [CopilotExtensions.NativeFoundationState]::CheckPath($receiptPath, $false, $false)
+        $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
+        if ($receipt.schema -cne 'copilot-extensions.legacy-snapshot-source') {
+            throw "$label first use requires canonical selected snapshot provenance."
+        }
+        if ($plugin -ceq 'agent-bridge') {
+            $sourcePath = Join-Path $Payload 'runtime-source.json'
+            $null = [CopilotExtensions.NativeFoundationState]::CheckPath($sourcePath, $false, $false)
+            $selectedSource = [IO.File]::ReadAllText($sourcePath) | ConvertFrom-Json
+            if ($selectedSource.schema -cne 'copilot-extensions.runtime-source' -or
+                $selectedSource.plugin -cne $plugin -or
+                $selectedSource.package_version -cne $identity.version -or
+                $selectedSource.runtime_version -cne [IO.Path]::GetFileName($Payload)) {
+                throw 'Bridge first use requires its source-qualified selected snapshot.'
+            }
+        }
+    }
+}
+if ($ServiceMode -ceq 'client-only' -and $plugin -cne 'agent-vault') {
+    throw 'Client-only selection is unsupported by the owning installer.'
+}
+$noSelf = $prefix + '_NO_SELFPROVISION'
+if ([Environment]::GetEnvironmentVariable($noSelf) -or
+    ($plugin -ceq 'agent-pull-requests' -and (Test-Path ("Env:" + $noSelf))) -or
+    (Test-Path ("Env:" + $prefix + '_PINNED_CONTEXT'))) {
+    throw 'Owning plugin first-use provisioning is disabled for this invocation.'
+}
 $installer = if ($null -eq $invocation.PSObject.Properties['installer']) {
     'install'
 } else { $invocation.installer }
 $recipe = @{
     schema = 'copilot-extensions.payload-invocation'
-    command = 'agent-vault'
-    noSelfProvisionEnv = 'AGENT_VAULT_NO_SELFPROVISION'
-    provisionMode = 'direct'
+    noSelfProvisionEnv = $noSelf
     installationContext = 'required'
+}
+if ($plugin -ceq 'agent-logger') {
+    $loggerCommands = @(
+        @('agent-logger', 'agent_logger'),
+        @('collate-session', 'agent_logger.segmenter.collate'),
+        @('read-session-digest', 'agent_logger.segmenter.read_digest'),
+        @('prepare-session-log', 'agent_logger.segmenter.prepare_log'),
+        @('ramp-up-session', 'agent_logger.segmenter.ramp_up'),
+        @('session-sync', 'agent_logger.sync.engine')
+    )
+    if ($invocation.plugin -isnot [string] -or $invocation.plugin -cne $plugin -or
+        $invocation.installerLifecycle -isnot [bool] -or -not $invocation.installerLifecycle -or
+        $null -ne $invocation.PSObject.Properties['command'] -or
+        $null -ne $invocation.PSObject.Properties['module'] -or
+        $null -ne $invocation.PSObject.Properties['provisionMode'] -or
+        $invocation.commands -isnot [array] -or $invocation.commands.Count -ne $loggerCommands.Count) {
+        throw 'Logger first use requires its fixed six-command lifecycle declaration.'
+    }
+    for ($index = 0; $index -lt $loggerCommands.Count; $index++) {
+        $item = $invocation.commands[$index]
+        if ($item -isnot [PSCustomObject] -or
+            $item.command -isnot [string] -or $item.command -cne $loggerCommands[$index][0] -or
+            $item.module -isnot [string] -or $item.module -cne $loggerCommands[$index][1]) {
+            throw 'Logger first use requires its fixed six-command lifecycle declaration.'
+        }
+    }
+} else { $recipe.command = $plugin }
+$provisionMode = $invocation.PSObject.Properties['provisionMode']
+if ($plugin -cin @('agent-ssh', 'agent-codespaces')) {
+    if ($null -ne $provisionMode -and
+        ($provisionMode.Value -isnot [string] -or $provisionMode.Value -cne 'snapshot')) {
+        throw 'Owning payload does not declare the fixed first-use provision recipe.'
+    }
+} elseif ($plugin -cne 'agent-logger' -and ($null -eq $provisionMode -or
+    $provisionMode.Value -isnot [string] -or $provisionMode.Value -cne 'direct')) {
+    throw 'Owning payload does not declare the fixed first-use provision recipe.'
 }
 foreach ($field in $recipe.GetEnumerator()) {
     $value = $invocation.PSObject.Properties[$field.Key]
@@ -59,7 +212,7 @@ foreach ($field in $recipe.GetEnumerator()) {
         throw 'Owning payload does not declare the fixed first-use provision recipe.'
     }
 }
-if ($identity.name -isnot [string] -or $identity.name -cne 'agent-vault' -or
+if ($identity.name -isnot [string] -or
     ($invocation.version -isnot [int] -and $invocation.version -isnot [long]) -or
     $invocation.version -ne 2 -or $installer -isnot [string] -or $installer -cne 'install') {
     throw 'Owning payload does not declare the fixed first-use provision recipe.'
@@ -70,11 +223,11 @@ $previousPayload = $env:COPILOT_PLUGIN_ROOT
 try {
     $env:COPILOT_PLUGIN_ROOT = $Payload
     $document = @(& $modeRunner -Action probe-plugin-publication `
-        -PayloadRoot $Payload -PluginId agent-vault -LegacyRoot $RuntimeRoot -ProjectRoot $Project)
+        -PayloadRoot $Payload -PluginId $plugin -LegacyRoot $RuntimeRoot -ProjectRoot $Project)
     $code = $LASTEXITCODE
     if ($code -ne 0) { throw 'Owning installation refused first-use publication.' }
     $sourceDocument = @(& $modeRunner -Action resolve `
-        -PayloadRoot $Payload -PluginId agent-vault -ProjectRoot $Project)
+        -PayloadRoot $Payload -PluginId $plugin -ProjectRoot $Project)
     if ($LASTEXITCODE -ne 0) { throw 'Owning payload provenance could not be resolved.' }
 } finally {
     if ($null -eq $previousPayload) {
@@ -105,21 +258,26 @@ if ($Mode -ceq 'launch') {
     New-NativeExecutionDirectory -Root $Root
     $log = Join-Path $Root ('first-use-' + [Guid]::NewGuid().ToString('N') + '.log')
     [IO.File]::Open($log, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read).Dispose()
+    $diagnosticLog = Join-Path $Root ('process-' + [IO.Path]::GetFileName($log))
+    [IO.File]::Open($diagnosticLog, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read).Dispose()
     $worker = Start-NativeDaemon -Script $PSCommandPath -Arguments @(
         $Root, $Payload, $RuntimeRoot, $Project, 'owner', $source, $log, $ServiceMode, $InstallerAction
-    ) -WorkingDirectory $Project -LogPath $log
+    ) -WorkingDirectory $Project -LogPath $diagnosticLog
     try {
+        $acknowledgement = @{
+            launched = $true; log = $log; diagnostic_log = $diagnosticLog; pid = $worker.Id
+            created = $worker.StartTime.ToUniversalTime().ToFileTimeUtc()
+        } | ConvertTo-Json -Compress
         if ($Wait) {
+            [Console]::Error.WriteLine("[installation-driver] launch acknowledgement: $acknowledgement")
             $worker.WaitForExit()
             $code = $worker.ExitCode
-            Get-Content -LiteralPath $log -Encoding UTF8 | ForEach-Object { [Console]::Error.WriteLine($_) }
+            Get-Content -LiteralPath @($log, $diagnosticLog) -Encoding UTF8 |
+                ForEach-Object { [Console]::Error.WriteLine($_) }
             exit $code
         }
         # This is launch acknowledgement, never a durable ordinary-request receipt.
-        [Console]::Out.WriteLine((@{
-            launched = $true; log = $log; pid = $worker.Id
-            created = $worker.StartTime.ToUniversalTime().ToFileTimeUtc()
-        } | ConvertTo-Json -Compress))
+        [Console]::Out.WriteLine($acknowledgement)
     } finally { $worker.Dispose() }
     exit 0
 }

@@ -1,0 +1,9 @@
+{
+  "comment": "Commit retained session and turn admissions with full SQLite durability while preserving atomic queue consumption and legacy write policy",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

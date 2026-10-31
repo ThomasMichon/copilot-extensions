@@ -25,15 +25,29 @@ Schema `fleet-manager.operation-intent`, version 1:
 | `authority` | Canonical coordination domain |
 | `principal`, `account` | Explicit actor/account references, not authentication proof |
 | `target` | Canonical target reference within that authority |
-| `generation` | Positive expected allocation generation |
+| `generation` | Positive expected operation/allocation generation |
 | `command`, `parameters` | Fixed named operation and its reference-only shape |
 
 All references use the shared bounded identifier syntax. Generation is an
 integer 1 through `2**63-1`, not boolean.
 
 Supported shapes are `task.submit: {objective}`,
-`workspace.allocate: {repository, objective}` and
-`prompt.deliver: {session, message_ref}`. Supporting their shape does not deliver
+`workspace.allocate: {repository, objective}`,
+`prompt.deliver: {session, message_ref}` and
+`runner.converge: {preparation, allocation, deployment}` and
+`machine.enroll: {enrollment}`. The enrollment parameter is the exact canonical
+public-binding digest, not a key or grant. Its [same-owner enrollment
+producer](continuity-bootstrap.md) authenticates delegation and proof before
+using the exclusive transaction in the existing journal; generic `admit` cannot
+write that command. An old consumer with no such command refuses it; default
+schema-four journals do not silently accept it.
+
+The runner parameters
+are the exact prepared-proposal digest, allocation reference and separately
+selected deployment digest; no chart, values, command or credential is accepted
+in this operation. Its [bounded Helm owner](arc-owner.md) additionally requires
+a current, exact-content admission grant and independently admitted prerequisites.
+Supporting a record's shape does not deliver
 their execution; the `fleet-manager` CLI exposes no execute/admit command.
 Referenced messages, objective content, repository configuration and authorization
 must be resolved through a future trusted owner, not from record text.

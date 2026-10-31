@@ -1,0 +1,9 @@
+{
+  "comment": "Add offline ADO review generations with scoped completeness and incremental comparison",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

@@ -18,8 +18,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
-from machine_transport import resolve_machine_selection, is_observed_local_name
-from machine_transport.registry import PhysicalMachineError
+from machine_transport import (
+    MachineEntry, MachineEnvironment, MachineSelection,
+    resolve_machine_selection, is_observed_local_name, resolve_local_execution_context,
+)
+from machine_transport.registry import MissingExecutionSpaceError, PhysicalMachineError
 
 from . import config as cfg
 from .execution_spaces import ExecutionSpaceError
@@ -53,6 +56,33 @@ def record_namespace_matches(record: "WorktreeRecord", config: cfg.Config) -> bo
     )
 
 
+def _local_record_selection(
+    config: cfg.Config, entries: dict[str, MachineEntry],
+) -> tuple[MachineSelection[MachineEntry], bool]:
+    """Keep actual observed/derived bindings local only within the record proof."""
+    actual = cfg.detect_platform()
+    if getattr(config, "platform", actual) != actual:
+        return resolve_machine_selection(entries, config.machine, actual), False
+    from .execution_spaces import _current_execution_context
+
+    context = _current_execution_context(config, entries)
+    observed = (
+        context.customization_key is None
+        and config.machine.casefold() in {
+            context.hostname.casefold(), context.execution_machine.casefold(),
+        }
+        and context == resolve_local_execution_context(
+            entries, hostname=context.hostname, environment=actual,
+            configured_machine=getattr(config, "configured_machine", None),
+        )
+    )
+    if observed:
+        return MachineSelection(
+            None, MachineEnvironment(context.machine, context.environment), False,
+        ), True
+    return resolve_machine_selection(entries, config.machine, context.environment), False
+
+
 def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | None:
     """Resolve a historical alias ref with actual-platform and namespace proof.
 
@@ -72,14 +102,21 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
 
     try:
         caller_entries = registry_for_config(config)
-        current = resolve_machine_selection(caller_entries, config.machine, actual)
-        observed_ref = is_observed_local_name(
-            ref.machine, config_machine=config.machine, entries=caller_entries, environment=actual,
+        current, caller_observed = _local_record_selection(config, caller_entries)
+        observed_ref = (
+            (caller_observed and ref.machine.casefold() == config.machine.casefold())
+            or is_observed_local_name(
+                ref.machine, config_machine=config.machine, entries=caller_entries, environment=actual,
+            )
         )
         # Exact foreign logical entries are rejected before any ledger lookup.
         try:
             direct = resolve_machine_selection(caller_entries, ref.machine)
         except PhysicalMachineError:
+            direct = None
+        except MissingExecutionSpaceError:
+            if not observed_ref:
+                raise
             direct = None
         if direct is not None and direct.entry is not None and direct.exact:
             declared = direct.entry.execution_platform
@@ -125,7 +162,7 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
             if not require_owner_identity(ref.machine, receiving_config):
                 return None
         receiver_entries = registry_for_config(receiving_config)
-        receiving = resolve_machine_selection(receiver_entries, receiving_config.machine, actual)
+        receiving, receiver_observed = _local_record_selection(receiving_config, receiver_entries)
         caller_key = current.entry.key if current.entry is not None else current.target.logical_machine
         receiving_key = receiving.entry.key if receiving.entry is not None else receiving.target.logical_machine
         if caller_key.casefold() != receiving_key.casefold():
@@ -138,18 +175,29 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
             return None
         if record.platform != actual:
             return None
-        requested = resolve_machine_selection(receiver_entries, ref.machine, record.platform)
-        stored = resolve_machine_selection(receiver_entries, record.execution_machine or "", record.platform)
-        if observed_ref and is_observed_local_name(
-            ref.machine, config_machine=receiving_config.machine,
-            entries=receiver_entries, environment=record.platform,
+        if observed_ref and (
+            (receiver_observed and ref.machine.casefold() == receiving_config.machine.casefold())
+            or is_observed_local_name(
+                ref.machine, config_machine=receiving_config.machine,
+                entries=receiver_entries, environment=record.platform,
+            )
         ):
             requested = receiving
-        if is_observed_local_name(
-            record.execution_machine or "", config_machine=receiving_config.machine,
-            entries=receiver_entries, environment=record.platform,
+        else:
+            requested = resolve_machine_selection(receiver_entries, ref.machine, record.platform)
+        if (
+            (
+                receiver_observed
+                and (record.execution_machine or "").casefold() == receiving_config.machine.casefold()
+            )
+            or is_observed_local_name(
+                record.execution_machine or "", config_machine=receiving_config.machine,
+                entries=receiver_entries, environment=record.platform,
+            )
         ):
             stored = receiving
+        else:
+            stored = resolve_machine_selection(receiver_entries, record.execution_machine or "", record.platform)
         if any(
             (
                 selected.entry.key.casefold() != receiving.entry.key.casefold()

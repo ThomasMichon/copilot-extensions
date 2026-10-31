@@ -1216,6 +1216,8 @@ valid_ipv6() {
     local address="$1" left right group count=0 compressed=false
     local -a groups=()
     [[ "$address" =~ ^[0-9A-Fa-f:]+$ && "$address" != *:::* ]] || return 1
+    [[ "$address" != :* || "$address" == ::* ]] || return 1
+    [[ "$address" != *: || "$address" == *:: ]] || return 1
     if [[ "$address" == *::* ]]; then
         compressed=true
         left="${address%%::*}"
@@ -1639,7 +1641,7 @@ resolve_legacy_snapshot_evidence() {
 
 resolve_directory_evidence() {
     local payload="$1" requested_plugin_id="$2" cursor manifest relative plugin_root source_base
-    local count name source_path candidate matches matched_name manifest_name
+    local name source_path candidate matches matched_name manifest_name records kind encoded_name encoded_source
     local -a manifests=(
         ".github/plugin/marketplace.json"
         "marketplace.json"
@@ -1654,37 +1656,47 @@ resolve_directory_evidence() {
         for relative in ${manifests[@]+"${manifests[@]}"}; do
             manifest="$cursor/$relative"
             [[ -f "$manifest" ]] || continue
-            json_optional_string_into plugin_root "$manifest" "$(path_join metadata pluginRoot)"
+            records="$(
+                INSTALLATION_CONTEXT_QUERY_PLUGIN="$requested_plugin_id" LC_ALL=C \
+                    awk -f "$JSON_QUERY" -v mode=directory "$manifest"
+            )" || fail "Cannot read directory marketplace evidence in '$manifest'."
             source_base="$cursor"
-            if [[ -n "$plugin_root" ]]; then
-                ! is_absolute "$plugin_root" || fail "Marketplace metadata.pluginRoot must be relative in '$manifest'."
-                [[ "/$plugin_root/" != */../* ]] || fail "Marketplace metadata.pluginRoot may not escape '$cursor'."
-                source_base="$(canonical_path "$cursor/$plugin_root")"
-                path_is_within "$source_base" "$cursor" ||
-                    fail "Marketplace metadata.pluginRoot escapes '$cursor'."
-            fi
-            count="$(json_length_path "$manifest" plugins)" ||
-                fail "Marketplace manifest '$manifest' has no plugins array."
             matches=0
             matched_name=""
-            for ((index_value = 0; index_value < count; index_value++)); do
-                json_optional_string_into name "$manifest" "$(path_join "$(path_join plugins "$index_value")" name)"
-                [[ -z "$requested_plugin_id" || "$name" == "$requested_plugin_id" ]] || continue
-                json_optional_string_into source_path "$manifest" "$(path_join "$(path_join plugins "$index_value")" source)"
-                [[ -n "$source_path" ]] || continue
-                ! is_absolute "$source_path" || fail "Marketplace plugin source must be relative and remain beneath '$cursor'."
-                [[ "/$source_path/" != */../* ]] || fail "Marketplace plugin source must be relative and remain beneath '$cursor'."
-                candidate="$(canonical_path "$source_base/$source_path")"
-                path_is_within "$candidate" "$cursor" ||
-                    fail "Marketplace plugin source escapes '$cursor'."
-                if [[ -e "$candidate" ]] && paths_equal "$candidate" "$payload"; then
-                    matches=$((matches + 1))
-                    matched_name="$name"
-                fi
-            done
+            while IFS=: read -r kind encoded_name encoded_source; do
+                case "$kind" in
+                    root)
+                        decode_hex_into plugin_root "$encoded_name"
+                        if [[ -n "$plugin_root" ]]; then
+                            ! is_absolute "$plugin_root" || fail "Marketplace metadata.pluginRoot must be relative in '$manifest'."
+                            [[ "/$plugin_root/" != */../* ]] || fail "Marketplace metadata.pluginRoot may not escape '$cursor'."
+                            source_base="$(canonical_path "$cursor/$plugin_root")"
+                            path_is_within "$source_base" "$cursor" ||
+                                fail "Marketplace metadata.pluginRoot escapes '$cursor'."
+                        fi
+                        ;;
+                    plugin)
+                        decode_hex_into name "$encoded_name"
+                        decode_hex_into source_path "$encoded_source"
+                        [[ -n "$source_path" ]] || continue
+                        ! is_absolute "$source_path" || fail "Marketplace plugin source must be relative and remain beneath '$cursor'."
+                        [[ "/$source_path/" != */../* ]] || fail "Marketplace plugin source must be relative and remain beneath '$cursor'."
+                        candidate="$(canonical_path "$source_base/$source_path")"
+                        path_is_within "$candidate" "$cursor" ||
+                            fail "Marketplace plugin source escapes '$cursor'."
+                        if [[ -e "$candidate" ]] && paths_equal "$candidate" "$payload"; then
+                            matches=$((matches + 1))
+                            matched_name="$name"
+                        fi
+                        ;;
+                    marketplace)
+                        decode_hex_into manifest_name "$encoded_name"
+                        ;;
+                    *) fail "Invalid directory marketplace evidence in '$manifest'." ;;
+                esac
+            done <<<"$records"
             ((matches == 1)) ||
                 fail "Marketplace manifest '$manifest' does not contain exactly one plugin entry resolving to '$payload'."
-            json_optional_string_into manifest_name "$manifest" name marketplace
             SOURCE_KIND=directory
             SOURCE_CANONICAL="directory:$(canonical_path "$cursor" true)"
             SOURCE_REF=""
@@ -4797,6 +4809,56 @@ emit_legacy_json() {
 
 DEPLOYMENT_JSON=""
 
+runtime_download_origins() {
+    local document="$1" prefix="$2" count index origin normalized authority host label previous separator=""
+    local LC_ALL=C
+    local -a origins=() labels=()
+    [[ "$(json_type_path "$document" "$prefix")" == array ]] ||
+        fail "runtimeProfiles.downloadOrigins must be a bounded JSON array."
+    count="$(json_length_path "$document" "$prefix")"
+    ((count <= 256)) || fail "runtimeProfiles.downloadOrigins must be a bounded JSON array."
+    for ((index=0; index<count; index++)); do
+        [[ "$(json_type_path "$document" "$(path_join "$prefix" "$index")")" == string ]] ||
+            fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+        json_optional_into origin "$document" "$(path_join "$prefix" "$index")"
+        ((${#origin} <= 2048)) && [[ "$origin" =~ ^[!-~]+$ ]] &&
+            matches "$origin" '^[Hh][Tt][Tt][Pp][Ss]://([^/?#@%\\]+)(/)?$' ||
+            fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+        normalized="$(normalize_git_url "$origin" 2>/dev/null)" ||
+            fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+        normalized="${normalized%/}"
+        [[ "$normalized" != *:0 ]] ||
+            fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+        authority="${normalized#https://}"
+        if [[ "$authority" == \[* ]]; then
+            matches "$authority" '^(\[[0-9a-f:]+\])(:[0-9]+)?$' ||
+                fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+        else
+            host="${authority%%:*}"
+            [[ "$host" != .* && "$host" != *. && "$host" != *..* ]] ||
+                fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+            IFS=. read -r -a labels <<<"$host"
+            for label in ${labels[@]+"${labels[@]}"}; do
+                [[ "$label" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] ||
+                    fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+            done
+        fi
+        for previous in ${origins[@]+"${origins[@]}"}; do
+            [[ "$previous" != "$normalized" ]] ||
+                fail "runtimeProfiles.downloadOrigins contains duplicate origins."
+        done
+        origins+=("$normalized")
+    done
+    printf '['
+    if ((${#origins[@]} > 0)); then
+        while IFS= read -r origin; do
+            printf '%s%s' "$separator" "$(json_quote "$origin")"
+            separator=","
+        done < <(printf '%s\n' "${origins[@]}" | LC_ALL=C sort)
+    fi
+    printf ']'
+}
+
 deployment_policy_snapshot() {
     local path="$1" actual_mode="$2" status="$3" runtime_root="$4"
     local encoded document="" schema version managed owner field value source_snapshot
@@ -4849,7 +4911,46 @@ deployment_policy_snapshot() {
             "Repair the installation-owned runtime deployment policy explicitly."
         return
     fi
-    assert_json_object_length "$document" "" 4 "Runtime deployment policy"
+    local profiles="" profile_type field profile_value separator="" property_count profile_count recognized=0
+    property_count="$(json_length_path "$document" "")"
+    if [[ "$property_count" == 5 ]]; then
+        profile_type="$(json_type_path "$document" runtimeProfiles)"
+        [[ "$profile_type" == object ]] || fail "runtimeProfiles must be a JSON object."
+        profile_count="$(json_length_path "$document" runtimeProfiles)"
+        profiles="{"
+        for field in allowSourceFallback backend downloadOrigins; do
+            profile_type="$(json_type_path "$document" "$(path_join runtimeProfiles "$field")")"
+            [[ -n "$profile_type" ]] || continue
+            case "$field" in
+                allowSourceFallback)
+                    [[ "$profile_type" == boolean ]] ||
+                        fail "runtimeProfiles.allowSourceFallback must be a JSON boolean."
+                    profile_value="$(json_optional_path "$document" "$(path_join runtimeProfiles "$field")")"
+                    ;;
+                backend)
+                    [[ "$profile_type" == string ]] ||
+                        fail "runtimeProfiles.backend must be an explicit opaque capability reference."
+                    json_optional_into profile_value "$document" "$(path_join runtimeProfiles "$field")"
+                    [[ "$profile_value" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$ ]] ||
+                        fail "runtimeProfiles.backend must be an explicit opaque capability reference."
+                    profile_value="$(json_quote "$profile_value")"
+                    ;;
+                downloadOrigins)
+                    profile_value="$(runtime_download_origins "$document" "$(path_join runtimeProfiles "$field")")" ||
+                        fail "runtimeProfiles.downloadOrigins is invalid."
+                    ;;
+                *) fail "runtimeProfiles supports only allowSourceFallback, backend and downloadOrigins." ;;
+            esac
+            profiles="$profiles$separator$(json_quote "$field"):$profile_value"
+            separator=","
+            recognized=$((recognized + 1))
+        done
+        [[ "$recognized" == "$profile_count" ]] ||
+            fail "runtimeProfiles supports only allowSourceFallback, backend and downloadOrigins."
+        profiles="$profiles}"
+    elif [[ "$property_count" != 4 ]]; then
+        fail "Runtime deployment policy has missing or unsupported fields."
+    fi
     [[ "$(json_type_path "$document" managed)" == boolean ]] ||
         fail "Runtime deployment policy managed must be a JSON boolean."
     managed="$(json_optional_path "$document" managed)"
@@ -4906,19 +5007,24 @@ deployment_policy_snapshot() {
     owner="{\"sourceFingerprint\":$(json_quote "$source_fingerprint"),\"pluginId\":$(json_quote "$RESOLVED_PLUGIN_ID"),\"mode\":$(json_quote "$actual_mode"),\"runtimeRoot\":$(json_quote "$runtime_root"),\"environment\":$(emit_environment_json)}"
     if [[ "$managed" == true ]]; then
         emit_deployment_json "$path" valid true false deployment-managed "$owner" "" \
-            "Use explicit installation management to install or update this runtime; plugin bootstrap and first use may not publish it."
+            "Use explicit installation management to install or update this runtime; plugin bootstrap and first use may not publish it." "$profiles"
+    elif [[ -n "$profiles" ]]; then
+        emit_deployment_json "$path" valid false false runtime-profile-consumer-required "$owner" "" \
+            "Runtime profile intent requires a profile-aware construction lifecycle; ordinary plugin publication cannot ignore it." "$profiles"
     else
-        emit_deployment_json "$path" valid false true deployment-explicit-standalone "$owner"
+        emit_deployment_json "$path" valid false true deployment-explicit-standalone "$owner" "" "" "$profiles"
     fi
 }
 
 emit_deployment_json() {
     local path="$1" state="$2" managed="$3" allow="$4" reason="$5"
     local owner="${6:-null}" diagnostic="${7:-}" recovery="${8:-}"
-    printf '{"path":%s,"state":%s,"managed":%s,"allowPluginPublication":%s,"reason":%s,"owner":%s,"diagnostic":%s,"recovery":%s}' \
+    printf '{"path":%s,"state":%s,"managed":%s,"allowPluginPublication":%s,"reason":%s,"owner":%s,"diagnostic":%s,"recovery":%s' \
         "$(json_quote "$path")" "$(json_quote "$state")" "$managed" "$allow" \
         "$(json_quote "$reason")" "$owner" "$(json_string_or_null "$diagnostic")" \
         "$(json_string_or_null "$recovery")"
+    [[ -z "${9:-}" ]] || printf ',"runtimeProfiles":%s' "$9"
+    printf '}'
 }
 
 resolve_deployment_result() {

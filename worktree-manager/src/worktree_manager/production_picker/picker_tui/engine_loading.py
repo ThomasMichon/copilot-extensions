@@ -16,6 +16,7 @@ from textual.widgets import Static
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
 from .inbox import Inbox, ensure_inbox
 from .selection import ListSelection
+from .source_identity import local_key, machine_ssh_id
 from .. import project_config as cfg
 
 #: Supplies a unique suffix for ``_apply_from_worker``'s inbox slot name,
@@ -139,15 +140,16 @@ class PickerScreenLoadingMixin:
                 self._frame_health.start()
         callback = self._after_first_refresh_callback
         if callable(callback):
-            threading.Thread(
-                target=callback,
-                name="picker-after-first-refresh",
-                daemon=True,
-            ).start()
+            def report(result):
+                if result:
+                    self.notify(str(result), title="Automatic maintenance")
+
+            self._run_bg("Automatic maintenance", callback, report)
         if not self.live:
             return
         threading.Thread(
             target=self._setup_live_async,
+            args=(self._setup_epoch,),
             name="picker-setup",
             daemon=True,
         ).start()
@@ -272,8 +274,15 @@ class PickerScreenLoadingMixin:
         self._config_cache_session = session
         return session.scope()
 
-    def _setup_live_async(self):
+    def _setup_live_async(self, epoch=None):
         """Enroll the current feed without a redundant advisory one-shot read."""
+        from .frame_health import append_launch_event
+
+        if epoch is None:
+            epoch = self._setup_epoch
+        if epoch != self._setup_epoch:
+            return
+        append_launch_event("picker_live_setup_start")
         threading.Thread(
             target=self._setup_live_pivots,
             name="picker-pivots",
@@ -293,6 +302,7 @@ class PickerScreenLoadingMixin:
                 snapshot_fn = getattr(self.src, "source_snapshot", None)
                 snapshot = snapshot_fn() if callable(snapshot_fn) else None
                 prepared = self._prepare_live_source(snapshot)
+            append_launch_event("picker_live_sources_prepared")
             loader = (
                 self.src.make_loader(snapshot)
                 if snapshot is not None
@@ -309,22 +319,37 @@ class PickerScreenLoadingMixin:
             # loading everything (focus_keys=None below).
             local = prepared.get("local") if prepared else None
             start_loader(loader, focus_keys={local} if local else None)
+            append_launch_event("picker_live_loader_started")
         except Exception as exc:
             err = exc
 
         def apply():
+            if epoch != self._setup_epoch:
+                if loader is not None:
+                    loader.cancel()
+                return
             if err is not None:
                 self.debug = f"setup-failed: {err}"
-                self._busy_label = "Load failed"
+                if self._busy_label == "Loading…":
+                    self._busy_label = None
+                self._setup_error = str(err)
+                self._setup_failed_epoch = epoch
                 self.refresh()
                 return
             self._apply_live_source(prepared, loader)
-            self._busy_label = None
+            self._setup_error = ""
+            if self._busy_label == "Loading…":
+                self._busy_label = None
             self.refresh()
 
         self._apply_from_worker(apply)
     def _setup_live_pivots(self):
         """Scan contributed pivots without delaying local or fleet rows."""
+        from ... import resident_picker
+
+        cancelled = getattr(self, "_bg_cancel", None)
+        if not resident_picker.wait_for_local(None, cancelled.is_set if cancelled else lambda: False):
+            return
         # Prewarm FIRST, before the (potentially slow) registry scan below --
         # same reasoning as the non-live setup-reload ordering fix: this thread is
         # already off the render thread, but the prewarm's own purpose is to
@@ -437,32 +462,15 @@ class PickerScreenLoadingMixin:
             ),
             None,
         )
-        # Warm ``self.src.LOCAL`` here even when ``local`` was already found
-        # above from ``tabs``: on a live source (``data_ssh``), ``LOCAL`` is a
-        # module-level attribute resolved lazily on FIRST access (PEP 562
-        # ``__getattr__``, see ``data_ssh._resolve_local()``) and memoized
-        # forever after -- but that first resolution itself reads
-        # ``worktree_manager.production_picker.project_config``'s
-        # ``lru_cache``-backed project/machine lookups (a real file read plus
-        # an ``engine_client`` cross-process call the first time; free on
-        # every call after, module-wide, regardless of any scope). This
-        # method runs on a background thread (``_setup_live_async``'s
-        # worker), so its unconditional touch here pays that one-time cost
-        # off the render thread. Without it, whichever render-thread call
-        # site compares against ``self.src.LOCAL`` FIRST -- e.g.
-        # ``_wt_submenu_verbs()``'s ``(machine, env) == self.src.LOCAL``,
-        # reached synchronously the first time the operator opens ANY
-        # worktree's Actions menu -- pays that first real cost instead,
-        # reproducing as a UI freeze with no spinner (it blocks before
-        # anything mounts) on the very first Enter press of a session
-        # (#picker-menu-open-latency).
+        # Warm selected identity on this worker, even when tabs already supplied
+        # it. Legacy sources can still resolve LOCAL lazily through config/IPC.
         try:
-            self.src.LOCAL
+            local_key(self.src)
         except Exception:
             pass
         if local is None:
             try:
-                local = self.src.LOCAL
+                local = local_key(self.src)
             except Exception:
                 local = None
         try:
@@ -536,10 +544,48 @@ class PickerScreenLoadingMixin:
         prewarm = getattr(self, "_prewarm_machine_key_map", None)
         if callable(prewarm) and getattr(self, "is_mounted", False):
             prewarm()
-    def _apply_loader_records(self):
+        self._settle_initial_local_after_refresh()
+    def _settle_initial_local_after_refresh(self):
+        if getattr(self, "_local_settlement_scheduled", False) or self.loader is None:
+            return
+        local = next((tab for tab in getattr(self, "source_tabs", []) if tab.get("local")), None)
+        if local is None or not local.get("source_id"):
+            return
+        source_id = local["source_id"]
+        state_fn = getattr(self.loader, "state_for_source", None)
+        authoritative_fn = getattr(self.loader, "authoritative_source_ids", None)
+        if not callable(state_fn) or not callable(authoritative_fn):
+            return
+        state = state_fn(source_id)
+        authoritative = authoritative_fn()
+        if state != "failed" and not (state == "ready" and source_id in authoritative):
+            return
+        self._local_settlement_scheduled = True
+
+        def release():
+            cancel = getattr(self, "_bg_cancel", None)
+            if cancel is None or not cancel.is_set():
+                from ... import resident_picker
+
+                resident_picker.settle_local()
+
+        self.call_after_refresh(release)
+    def _apply_loader_records(self, *, source_tabs=None):
         """Merge incomplete stream prefixes over cached rows."""
         if self.loader is None:
             return
+        if source_tabs is not None:
+            source_ids = {
+                tab.get("source_id") or machine_ssh_id(tab["machine"], tab["env"])
+                for tab in source_tabs
+                if tab.get("source_id") or (
+                    tab.get("source_kind", "machine-ssh") == "machine-ssh"
+                    and tab.get("machine") and tab.get("env")
+                )
+            }
+            self.data = [
+                rec for rec in self.data if rec.get("source_id") in source_ids
+            ]
         records = self.loader.records()
         authoritative_fn = getattr(self.loader, "authoritative_source_ids", None)
         if not callable(authoritative_fn):

@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original installation-context decision provenance without certifying delegated acquisition or changing callback behavior.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

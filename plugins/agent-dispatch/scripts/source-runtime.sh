@@ -1,7 +1,55 @@
+_require_actions() {
+    # Stamping remains Python-free when ordinary explicit state is absent.
+    # Prove searchable, unlinked ancestry rather than treating EACCES as absence.
+    local probe="$INSTALL_DIR"
+    while [[ "$probe" != / && "$probe" == */ ]]; do probe="${probe%/}"; done
+    if [[ ! -e "$INSTALL_DIR/action-controls.json" && ! -L "$INSTALL_DIR/action-controls.json" ]]; then
+        while [[ ! -L "$probe" ]]; do
+            if [[ -e "$probe" && ( ! -d "$probe" || ! -x "$probe" ) ]]; then break; fi
+            [[ "$probe" != / ]] || return 0
+            local parent
+            parent="$(dirname -- "$probe")"
+            [[ "$parent" != "$probe" ]] || break
+            probe="$parent"
+        done
+    fi
+    local py
+    py="$(_bootstrap_python)" || {
+        _fail 'Action policy prerequisite unavailable: no bootstrap Python'
+        return 3
+    }
+    [[ -f "$SCRIPT_DIR/action_controls.py" ]] || {
+        _fail 'Action policy prerequisite unavailable: payload reader is missing'
+        return 3
+    }
+    local -a arguments=(--root "$INSTALL_DIR")
+    local action
+    for action in "$@"; do arguments+=(--action "$action"); done
+    local result=0
+    "$py" -I -B "$SCRIPT_DIR/action_controls.py" "${arguments[@]}" >/dev/null || result=$?
+    if [[ "$result" != 0 ]]; then
+        _fail "Action policy did not admit requested maintenance (reader exit $result)"
+        return 3
+    fi
+}
+
+_maintenance_preflight() {
+    case "${1:-${ACTION:-install}}" in
+        install|update|provision)
+            if [[ "${PRESERVE_SUPERVISORS:-0}" == 1 && "${1:-${ACTION:-install}}" == update ]]; then
+                _require_actions runtime-activation coordinator-replacement
+            else
+                _require_actions runtime-activation coordinator-replacement supervisor-reconcile
+            fi ;;
+        stamp) _require_actions runtime-activation ;;
+        *) return 0 ;;
+    esac
+}
+
 _initialize_source_runtime() {
     PACKAGE_VERSION="$SRC_VERSION"
     SOURCE_RUNTIME_IDENTITY=""
-    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
     local py
     py="$(_bootstrap_python)" || return 1
     SOURCE_RUNTIME_IDENTITY="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
@@ -61,8 +109,15 @@ _publish_source_redirects() {
 }
 
 _runtime_publication_begin_install() {
+    local support
+    local -a launch_paths=("$INSTALL_DIR/bin/runtime-gate.sh" "$INSTALL_DIR/bin/runtime-gate.ps1")
+    for support in installation-context.sh installation-context.ps1 \
+        guest-environment.sh guest-environment.ps1 json-query.awk; do
+        launch_paths+=("$INSTALL_DIR/bin/installation-context/$support")
+    done
     _runtime_publication_begin \
         "$INSTALL_DIR/bin/resolve-runtime.sh" "$INSTALL_DIR/bin/resolve-runtime.ps1" \
+        "${launch_paths[@]}" \
         "${STUB:-$LOCAL_BIN/agent-dispatch}" "${BOARD_STUB:-$LOCAL_BIN/agent-dispatch-board}" \
         "$INSTALL_DIR/machine" "$INSTALL_DIR/payload-dir" "$INSTALL_DIR/stamped-version" \
         "$INSTALL_DIR/deploy-manifest.json" "$INSTALL_DIR/last-known-good" "$INSTALL_DIR/current-version"

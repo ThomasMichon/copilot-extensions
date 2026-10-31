@@ -1,0 +1,9 @@
+{
+  "comment": "Retain confirmed locality refusals with explicit unknown metadata and atomic journal upgrades",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

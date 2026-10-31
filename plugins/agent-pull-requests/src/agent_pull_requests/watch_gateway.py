@@ -19,12 +19,13 @@ from single_instance_lease import OperationLockedError, OperationOwnershipError
 
 from .watch_replay import MAX_BATCH, ConsumerScope
 from .watch_notification import positive_seconds
+from .watch_replay_binding import SCOPED_PROTOCOL, ReplayBinding, ReplayBindingMismatch
 from .watch_replay_store import (
     ReplayCallerExpired, ReplayServiceIdentity, ReplayStore, ReplayStoreInvalid, json_object,
 )
 
 _TARGET = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
-_PATH = re.compile(r"/v1/watch/([a-z0-9][a-z0-9-]{0,63})/([a-z]+)")
+_PATH = re.compile(r"/(v[12])/watch/([a-z0-9][a-z0-9-]{0,63})/([a-z]+)")
 _LOG = logging.getLogger(__name__)
 _FIELDS = {
     "register": (
@@ -62,8 +63,7 @@ def _response(status: int, value: dict) -> ServiceResponse:
     )
 
 
-def _payload(operation: str, body: bytes) -> dict:
-    value = json_object(body) if body else {}
+def _payload(operation: str, value: dict) -> dict:
     required, optional = _FIELDS[operation]
     if not required <= value.keys() or value.keys() - required - optional:
         raise ValueError("invalid watch request fields")
@@ -137,7 +137,7 @@ class WatchGateway:
         matched = _PATH.fullmatch(request.target)
         if matched is None:
             return _response(404, {"error": "watch_route_not_found"})
-        target, operation = matched.groups()
+        version, target, operation = matched.groups()
         scope = self.bindings.get((caller.principal, target))
         if scope is None:
             return _response(403, {"error": "watch_scope_refused"})
@@ -154,14 +154,31 @@ class WatchGateway:
         ):
             return _response(415, {"error": "watch_json_required"})
         try:
-            payload = _payload(operation, request.body)
+            payload = json_object(request.body) if request.body else {}
+            expected = None
+            if version == "v2" and operation != "capabilities":
+                if set(payload) != {"binding", "request"} or not isinstance(payload["request"], dict):
+                    raise ValueError("invalid scoped replay request")
+                expected = ReplayBinding.from_document(payload["binding"])
+                payload = payload["request"]
+            payload = _payload(operation, payload)
         except (ValueError, UnicodeError, RecursionError):
             return _response(400, {"error": "invalid_watch_request"})
+        try:
+            if version == "v2":
+                selected = self._binding(request, target)
+                if expected is not None and expected != selected:
+                    raise ReplayBindingMismatch
+                expected = selected
+        except ReplayBindingMismatch:
+            return _response(409, {"error": "watch_binding_mismatch"})
         if self._closing:
             return _response(503, {"error": "watch_service_draining"})
         if len(self._tasks) >= 8:
             return _response(503, {"error": "watch_service_busy"})
-        task = asyncio.create_task(self._execute(scope, operation, payload, request))
+        task = asyncio.create_task(self._execute(
+            scope, operation, payload, request, target=target, expected=expected,
+        ))
         self._tasks.add(task)
         task.add_done_callback(self._completed)
         # Transport cancellation cannot release an in-progress disk transaction.
@@ -176,6 +193,20 @@ class WatchGateway:
         if self._checkpoint is not None:
             self._checkpoint()
 
+    def _binding(self, request: ServiceRequest, target: str) -> ReplayBinding:
+        caller = request.context
+        scope = self.bindings.get((caller.principal, target))
+        identity = ReplayServiceIdentity(caller.fleet, caller.gateway, caller.slot)
+        if (scope is None or self.store.service_identity != identity
+                or (caller.fleet, caller.gateway, caller.slot) != (
+                    self.fleet, self.gateway, self.slot,
+                )):
+            raise ReplayBindingMismatch
+        return ReplayBinding(
+            caller.fleet, caller.gateway, caller.slot, self.store.namespace,
+            caller.principal, target, scope.consumer, scope.account, scope.repo,
+        )
+
     def stop_admission(self) -> None:
         """Withdraw readiness before joining already-owned operations."""
         self._closing = True
@@ -187,12 +218,23 @@ class WatchGateway:
 
     async def _execute(
         self, scope: ConsumerScope, operation: str, payload: dict, request: ServiceRequest,
+        *, target: str, expected: ReplayBinding | None,
     ) -> ServiceResponse:
+        def checkpoint() -> None:
+            self._check(request)
+            if expected is not None and self._binding(request, target) != expected:
+                raise ReplayBindingMismatch
+
         try:
             value = await asyncio.to_thread(
                 self.store.execute, scope, operation, payload,
-                expires_at=request.context.expires_at, checkpoint=lambda: self._check(request),
+                expires_at=request.context.expires_at, checkpoint=checkpoint,
             )
+            checkpoint()
+            if expected is not None and operation == "capabilities":
+                value = dict(value, protocol=SCOPED_PROTOCOL, binding=expected.document())
+        except ReplayBindingMismatch:
+            return _response(409, {"error": "watch_binding_mismatch"})
         except RequestDisconnected:
             return _response(503, {"status": "uncertain", "reason": "watch_request_disconnected"})
         except ReplayCallerExpired:

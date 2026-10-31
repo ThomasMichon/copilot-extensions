@@ -18,6 +18,7 @@ from .db_live_session_aliases import (
     register_live_session_atomic,
 )
 from .db_live_controls import LiveControlsMixin
+from .runtime_custody import RuntimeAdmission, RuntimeCustodyError, admission_document
 
 LIVE_MESSAGE_DELIVERIES = {"queue", "steer", "interrupt"}
 
@@ -27,6 +28,12 @@ def _validate_live_message_delivery(delivery: str | None) -> str:
     if value not in LIVE_MESSAGE_DELIVERIES:
         raise ValueError(f"unsupported live-message delivery: {value!r}")
     return value
+
+
+def _live_message_association(kind: str, admission: RuntimeAdmission | None) -> str | None:
+    if admission is not None and kind.casefold().startswith("control:"):
+        raise RuntimeCustodyError("Associated controls require qualified control handoff admission")
+    return admission_document(admission)
 
 
 class _LiveSessionsMixin(LiveControlsMixin):
@@ -237,7 +244,10 @@ class _LiveSessionsMixin(LiveControlsMixin):
                 ).rowcount != 1:
                     conn.rollback()
                     return False
-                conn.execute("DELETE FROM live_messages WHERE session_id=?", (session_id,))
+                conn.execute(
+                    "DELETE FROM live_messages WHERE session_id=? "
+                    "AND runtime_custody_json IS NULL AND handoff_json IS NULL", (session_id,),
+                )
                 conn.execute("DELETE FROM live_session_aliases WHERE alias_session_id=? "
                              "OR target_session_id=?", (session_id, session_id))
                 conn.commit()
@@ -288,6 +298,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         if n:
             self.execute_write(
                 "DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL "
+                "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
                 "AND session_id IN ("
                 "SELECT session_id FROM live_sessions "
                 "WHERE worktree_id=? AND status='taken-over')",
@@ -383,6 +394,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             demoted += cur.rowcount
             self.execute_write(
                 f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL "
+                "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
                 f"AND session_id IN ({_in(expire_from_live)})",
                 tuple(expire_from_live),
             )
@@ -406,6 +418,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             )
             self.execute_write(
                 f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL "
+                "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
                 f"AND session_id IN ({_in(expire_from_wedged)})",
                 tuple(expire_from_wedged),
             )
@@ -421,7 +434,8 @@ class _LiveSessionsMixin(LiveControlsMixin):
         if dead:
             dead_ids = [r["session_id"] for r in dead]
             self.execute_write(
-                f"DELETE FROM live_messages WHERE session_id IN ({_in(dead_ids)})",
+                f"DELETE FROM live_messages WHERE session_id IN ({_in(dead_ids)}) "
+                "AND runtime_custody_json IS NULL AND handoff_json IS NULL",
                 tuple(dead_ids),
             )
             self.execute_write(  # its aliases go with it (live_sessions_drop_orphaned_aliases),
@@ -725,6 +739,8 @@ class _LiveSessionsMixin(LiveControlsMixin):
         reply_to: str | None = None, kind: str = "prompt",
         delivery: str = "queue",
         idempotency_key: str | None = None,
+        *,
+        runtime_admission: RuntimeAdmission | None = None,
     ) -> int:
         """Enqueue a message for delivery into a live session; return its id.
 
@@ -734,11 +750,14 @@ class _LiveSessionsMixin(LiveControlsMixin):
         appropriately.
         """
         delivery = _validate_live_message_delivery(delivery)
-        cur = self.execute_write(
+        association = _live_message_association(kind, runtime_admission)
+        cur = self._execute_runtime_admitted_write(
             "INSERT INTO live_messages (session_id, sender, body, reply_to, "
-            "kind, delivery, idempotency_key, created_at, consumption_tracked) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
-            (session_id, sender, body, reply_to, kind, delivery, idempotency_key, now),
+            "kind, delivery, idempotency_key, created_at, consumption_tracked, runtime_custody_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+            (session_id, sender, body, reply_to, kind, delivery, idempotency_key, now,
+             association),
+            runtime_admission,
         )
         return int(cur.lastrowid or 0)
 
@@ -757,6 +776,9 @@ class _LiveSessionsMixin(LiveControlsMixin):
         stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
         report_duplicate: bool = False,
         require_idle: bool = False,
+        runtime_admission: RuntimeAdmission | None = None,
+        enrolled_inbox: bool = False,
+        inbox_refusal: str | None = None,
     ) -> tuple[int | None, str | None]:
         """Atomically lease-check the target registration and enqueue, or reject.
 
@@ -782,100 +804,20 @@ class _LiveSessionsMixin(LiveControlsMixin):
         error message; the accept/reject decision itself is the atomic insert.
         An identical idempotent retry returns the original id with ``None``, or
         with ``"duplicate"`` when ``report_duplicate`` is set.
+
+        ``enrolled_inbox`` selects retained custody from durable enrollment in
+        that same transaction. A frontend refusal blocks retained targets, not
+        unrelated legacy queues or recovery of an already committed keyed send.
         """
+        from .live_message_enqueue import LiveMessageEnqueue, enqueue_fresh
+
         delivery = _validate_live_message_delivery(delivery)
-        cutoff = now - stale_seconds
-        cur = self.execute_write(
-            "INSERT OR IGNORE INTO live_messages "
-            "(session_id, sender, body, reply_to, kind, delivery, "
-            "idempotency_key, created_at, consumption_tracked) "
-            f"SELECT {_CANON}, ?, ?, ?, ?, ?, ?, ?, 1 "
-            "WHERE EXISTS ("
-            "  SELECT 1 FROM live_sessions ls "
-            f"  WHERE ls.session_id = {_CANON} AND ls.status = 'live' "
-            "    AND ls.updated_at >= ? "
-            "    AND ("
-            "      ls.worktree_id IS NULL OR ls.session_id = ("
-            "        SELECT session_id FROM live_sessions "
-            "        WHERE worktree_id = ls.worktree_id AND status = 'live' "
-            "          AND (ls.machine IS NULL OR ls.repo IS NULL OR "
-            "            (machine = ls.machine COLLATE NOCASE AND repo = ls.repo COLLATE NOCASE)) "
-            "          AND updated_at >= ? "
-            "        ORDER BY registered_at DESC, updated_at DESC LIMIT 1"
-            "      )"
-            "    )"
-            f"    AND (? IS NULL OR {_CANON} = ls.session_id)"
-            "    AND (? = 0 OR (ls.turn_state IN ('idle','completed') "
-            "      AND NOT EXISTS (SELECT 1 FROM live_messages pending "
-            "        WHERE pending.session_id=ls.session_id AND pending.consumed_at IS NULL "
-            "        AND (pending.delivered_at IS NULL OR pending.consumption_tracked=1) "
-            "        AND pending.kind NOT LIKE 'control:%')))"
-            ")",
-            (
-                session_id, session_id, sender, body, reply_to, kind, delivery,
-                idempotency_key, now,
-                session_id, session_id, cutoff, cutoff,
-                expected_session_id, expected_session_id, expected_session_id,
-                require_idle,
-            ),
-        )
-        if cur.rowcount == 1:
-            return int(cur.lastrowid or 0), None
-        if idempotency_key:
-            # The message and every canonical-id comparison in ONE statement
-            # (one snapshot): a rollover committing between separate reads
-            # would resolve the two handles differently and turn an identical
-            # retry into a false conflict.
-            msg_canon = (
-                "COALESCE((SELECT target_session_id FROM live_session_aliases "
-                "WHERE alias_session_id = live_messages.session_id), live_messages.session_id)"
-            )
-            existing = self.execute_read(
-                "SELECT id, sender, body, reply_to, kind, delivery, "
-                f"{msg_canon} = {_CANON} AS same_target, "
-                f"(? IS NULL OR {_CANON} = {_CANON}) AS same_expected "
-                "FROM live_messages WHERE idempotency_key = ?",
-                (session_id, session_id, expected_session_id, expected_session_id,
-                 expected_session_id, session_id, session_id, idempotency_key),
-            )
-            if existing:
-                original = existing[0]
-                same_request = (
-                    bool(original["same_target"])
-                    and original["sender"] == sender
-                    and original["body"] == body
-                    and original["reply_to"] == reply_to
-                    and original["kind"] == kind
-                    and original["delivery"] == delivery
-                    and bool(original["same_expected"])
-                )
-                if same_request:
-                    return int(original["id"]), ("duplicate" if report_duplicate else None)
-                return None, "idempotency_conflict"
-        # Rejected -- derive a reason for the error message (best-effort; the
-        # authoritative decision was the 0-row insert above).
-        row = self.get_live_session(session_id)
-        if row is None:
-            return None, "not_found"
-        if not live_session_is_fresh(row, now, stale_seconds):
-            return None, "stale"
-        worktree_id = row.get("worktree_id")
-        current_sid = session_id
-        if worktree_id:
-            scoped = row.get("machine") is not None and row.get("repo") is not None
-            current_sid = (
-                self.current_live_session_for_worktree(
-                    worktree_id, now=now, stale_seconds=stale_seconds,
-                    machine=row.get("machine") if scoped else None,
-                    project=row.get("repo") if scoped else None,
-                )
-                or session_id
-            )
-        if current_sid != session_id:
-            return None, f"superseded:{current_sid}"
-        if expected_session_id is not None and expected_session_id != current_sid:
-            return None, f"expected_mismatch:{current_sid}"
-        return None, "session_busy" if require_idle else "stale"
+        if not enrolled_inbox:
+            _live_message_association(kind, runtime_admission)
+        return enqueue_fresh(self, LiveMessageEnqueue(
+            session_id, sender, body, now, reply_to, kind, delivery,
+            expected_session_id, idempotency_key, stale_seconds, report_duplicate, require_idle,
+        ), runtime_admission, enrolled_inbox=enrolled_inbox, inbox_refusal=inbox_refusal)
 
     def list_pending_live_messages(self, session_id: str) -> list[dict[str, Any]]:
         """Unacknowledged, unconsumed messages, oldest-first (delivery order).
@@ -888,7 +830,8 @@ class _LiveSessionsMixin(LiveControlsMixin):
         rows = self.execute_read(
             "SELECT * FROM live_messages "
             f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
-            "AND consumed_at IS NULL ORDER BY id ASC",
+            "AND consumed_at IS NULL AND handoff_json IS NULL "
+            "AND runtime_custody_json IS NULL ORDER BY id ASC",
             (session_id, session_id),
         )
         return [dict(r) for r in rows]
@@ -919,6 +862,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             cur = self.execute_write(
                 f"UPDATE live_messages SET delivered_at=?, outcome=? "
                 f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind LIKE 'control:%' "
+                "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
                 f"AND claimed_at IS NOT NULL AND id IN ({placeholders})",
                 (now, outcome or "applied", session_id, session_id, *ids),
             )
@@ -926,6 +870,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             cur = self.execute_write(
                 f"UPDATE live_messages SET delivered_at=? "
                 f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
+                "AND handoff_json IS NULL AND runtime_custody_json IS NULL "
                 f"AND id IN ({placeholders})",
                 (now, session_id, session_id, *ids),
             )

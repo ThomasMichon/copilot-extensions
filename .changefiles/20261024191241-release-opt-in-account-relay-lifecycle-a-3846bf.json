@@ -1,0 +1,9 @@
+{
+  "comment": "Release opt-in account relay lifecycle and account-bound provider isolation with unchanged default wire behavior.",
+  "changes": [
+    {
+      "plugin": "libs/credential-relay",
+      "type": "patch"
+    }
+  ]
+}

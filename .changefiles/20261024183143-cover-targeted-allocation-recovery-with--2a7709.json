@@ -1,0 +1,9 @@
+{
+  "comment": "Cover targeted allocation recovery with the existing native-holder and post-preparation revocation checks",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

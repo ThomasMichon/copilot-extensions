@@ -211,7 +211,7 @@ def test_golden_unsealed_settings_are_not_accepted_as_authority():
     asyncio.run(scenario())
 
 
-def test_connection_propagates_host_authority():
+def test_connection_propagates_host_authority(tmp_path):
     from agent_bridge.session_host_connection import _SessionHostConnectionMixin
     from agent_bridge.transport import SpawnTarget
 
@@ -242,7 +242,7 @@ def test_connection_propagates_host_authority():
             patch("agent_bridge.session_manager.AcpClient", return_value=fake_client) as factory,
         ):
             await manager._connect_via_session_host(
-                SpawnTarget(type="local", env={SOURCE_ENV: "target-settings"}),
+                SpawnTarget(type="local", cwd=str(tmp_path), env={SOURCE_ENV: "target-settings"}),
                 tracker=MagicMock(), session_id="session", on_acp_event=lambda *_: None,
                 permission_callback=None, spawner=spawner, remote_child_argv=["copilot"],
                 remote_cwd="workspace",
@@ -434,7 +434,7 @@ def test_intentional_native_provider_precedes_cloud_environment(monkeypatch):
     ("native", SessionStatus.FAILED), ("requested", SessionStatus.IDLE),
 ])
 async def test_manager_never_readies_an_unverified_model(
-    session_manager, monkeypatch, current, expected,
+    session_manager, monkeypatch, current, expected, permitted_provider_hosting,
 ):
     from agent_bridge.transport import SpawnTarget
 

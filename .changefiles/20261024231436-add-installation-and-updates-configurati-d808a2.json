@@ -1,0 +1,13 @@
+{
+  "comment": "Add Installation and Updates configuration inventory with durable component-scoped updates",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

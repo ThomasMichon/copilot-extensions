@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** branch (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-23
+- **Last revised:** 2026-10-25
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -21,6 +21,9 @@ Gateway. A roaming operator client is not required to keep remote work alive.
 The same fabric can grow into a scalable fleet of Linux hosts running explicit,
 containerized roles from the existing service ecosystem, without making one
 container manager or a private infrastructure provider its required substrate.
+Trusted agent-cluster containers scope that cluster’s agent-* services and
+state so they are not host-global. Clusters still federate through the Gateway.
+The physical machine remains the fleet’s security boundary for that posture.
 
 A fleet belongs to exactly one operator. Its machines, services, state and
 credentials form that operator's control boundary, not a multi-tenant hosting
@@ -213,12 +216,22 @@ placement or movement; a healthy replacement process is not proof that its
 data and authority are safe to activate. Adopter-specific provisioning remains
 outside the portable fleet core.
 
+A trusted agent-cluster container exists to give that cluster its own scoped
+agent-* services and state, not to invent a host-security product. Those
+scoped globals remain local to the cluster; Gateway federation is how clusters
+meet. The hosting physical machine is the security boundary.
+
 ### Scoped credential relay
 
-The fleet composes the existing auth-relay provider model. Machine enrollment,
+The fleet composes the existing auth-relay provider model and the
+[Vault service's](../vault/README.md) credential and transaction authority.
+Machine enrollment,
 operator control, access to a registered service, and borrowing resource
-credentials are distinct authorities. Providers own issuance, account/audience
-selection, expiry, renewal, and any interaction required to acquire credentials.
+credentials are distinct authorities. Vault owns credential lifecycle and
+authentication transactions; providers implement issuance, account/audience
+selection, custody and platform interaction under that logical authority while
+retaining their own identity-policy restrictions. Unmigrated providers retain
+their existing ownership until an explicit transfer.
 The Gateway is not a blanket credential pool or an implicit source of authority.
 
 Explicitly enrolled, logged-in provider machines maintain the authenticated
@@ -242,6 +255,10 @@ execution capacity are separate, inspectable dimensions.
 
 Each adopted fleet supplies central management services and connections: Gateway,
 coordination, task state, indexing and declared communication capabilities.
+The Gateway-backed standard integrated profile installs a central Vault service
+container through the selected external deployment manager, not through
+Worktree Manager. Vault remains independently usable as a machine-local service
+without Fleet or central access; federation is optional and explicitly trusted.
 An unavailable future capability is an explicit requirement awaiting a supported
 implementation, not a fabricated ready service. Minimal capacity prioritizes
 these services; more capacity adds agent/build containers and product venues.
@@ -274,6 +291,14 @@ Generalized capabilities can move from an adopter implementation into the shared
 product, while private policy, inventories and presentation remain extensions.
 Convergence replaces duplicated responsibilities deliberately, preserving
 accepted work and existing consumers rather than installing a second authority.
+
+### cluster-scoped-agent-globals
+
+Trusted agent-cluster containers give each cluster its own agent-* service and
+state scope. They are for tidiness, control and scale-out. They federate
+through the Gateway. The physical machine remains the security boundary for
+this posture; restricted sandboxes, where they exist, remain a separate
+containment mode.
 
 ### single-operator-fleet
 
@@ -436,6 +461,34 @@ intent. Credential custody, vault unlock authority and access stay with their
 existing owners; syncing encrypted material does not grant fleet membership
 or publish plaintext secrets.
 
+### continuity-backed-machine-bootstrap
+
+A new machine can discover its selected fleet and obtain scoped Gateway
+authentication through a user-owned continuity source declared by its harness
+context. The user has already established that source's authenticated pathway;
+where it carries delegated bootstrap authority, setup consumes that approval
+without inventing another mandatory presence or confirmation step.
+
+Gateway discovery, authority to enroll and authority to use particular fleet
+capabilities remain distinct. Public configuration, cloud arrival or a copied
+stale record cannot create enrollment or restore a revoked grant. The existing
+credential and enrollment owners provision the admitted machine's credentials;
+portable user state does not make machine-bound caches or live owner journals
+interchangeable between devices.
+
+An already authenticated device can approve a pending new-device request through
+a short-code experience when the selected policy requires confirmation.
+The code correlates the exact device and requested scope; it is not a credential
+or a substitute for current approval authority. The declared bootstrap path
+provides the initial authenticated configuration/authorization exchange without
+assuming anonymous registration or an existing Gateway session.
+
+Managed machines can establish outbound Gateway access before SSH exists.
+Already authorized direct-SSH provisioning remains an alternative, not the
+universal first-touch prerequisite. Storage, identity and transport providers
+stay replaceable, and selecting bootstrap does not bypass separately required
+peer, credential, capability or deployment decisions.
+
 ### operator-owned-whole-machine-lifecycle
 
 Only fleet-manager's explicit operator-side management path can create or
@@ -449,7 +502,8 @@ to the Gateway or its container manager.
 ### declarative-setup-modules
 
 Gateway and Vault setup are declared Fleet Manager modules, composed through the
-normal service, plugin and Worktree Manager lifecycle. Modules express selected
+normal service and plugin lifecycle. Worktree Manager is a presentation client,
+not the installer or credential/transaction owner. Modules express selected
 roles and configuration while the existing installer, supervisor, credential
 provider and service owners perform their own work. A declarative loadout does
 not require Kubernetes, a new controller or a parallel installation engine.
@@ -707,6 +761,7 @@ replacement.
 
 - Parent: [agent-fabric](../agent-fabric/README.md)
 - Related: [host-resource-providers](../host-resource-providers/README.md),
+  [Vault](../vault/README.md),
   [venue-parity](../venue-parity/README.md), [session-hosting](../session-hosting/README.md),
   [PR service](../plugins/agent-pull-requests/README.md)
 - Lifecycle: [plugin-services](../plugin-services/README.md), [installer](../installer/README.md),

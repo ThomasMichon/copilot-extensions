@@ -37,11 +37,12 @@ def existing_startup_kind(db, key: str, expectation: PluginReadinessRequest) -> 
     return kind
 
 
-async def startup_message(db, body, target, target_session_id, *, existing_kind, wait_readiness):
+async def startup_message(db, body, target, session_id, *, existing_kind, wait_readiness):
     if body.kind != "prompt" or body.delivery != "queue" or not body.idempotency_key:
         raise HTTPException(400, detail="owned startup requires a queued prompt and operation key")
     if target is None:
         raise HTTPException(404, detail="live session not found")
+    target_session_id = target["session_id"]
     expectation = body.plugin_readiness.model_copy(update={"expected_session_id": target_session_id})
     if body.plugin_readiness.expected_session_id not in (None, target_session_id):
         raise HTTPException(409, detail="startup native session changed")
@@ -57,7 +58,7 @@ async def startup_message(db, body, target, target_session_id, *, existing_kind,
                 "reply_to": body.reply_to, "delivery": body.delivery,
             }, sort_keys=True).encode()).hexdigest()
             observed = await wait_readiness(
-                db, target_session_id, expectation,
+                db, session_id, expectation,
                 operation_key=body.idempotency_key, operation_digest=input_digest,
             )
         except PluginReadinessError as exc:
@@ -94,7 +95,7 @@ async def set_live_mode(
     target = db.get_live_session(session_id)
     target_session_id = target["session_id"] if target is not None else session_id
     control_id, reason = db.enqueue_live_message_if_fresh(
-        target_session_id,
+        session_id,
         sender=body.sender,
         body=control_body,
         now=time.time(),

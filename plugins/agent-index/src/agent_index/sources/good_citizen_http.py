@@ -42,6 +42,7 @@ class ApiResult:
     data: Any
     headers: httpx.Headers
     not_modified: bool = False
+    request: httpx.Request | None = None
 
 
 class GoodCitizenSession:
@@ -88,9 +89,14 @@ class GoodCitizenSession:
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         etag: bool = True,
+        retry_status: Callable[[httpx.Response], bool] | None = None,
+        purpose: str = "unclassified",
     ) -> ApiResult:
         """GET JSON while applying throttle, retry, rate-limit, and ETag handling."""
-        return self.request_json("GET", path, params=params, headers=headers, etag=etag)
+        return self.request_json(
+            "GET", path, params=params, headers=headers, etag=etag, retry_status=retry_status,
+            purpose=purpose,
+        )
 
     def post_json(
         self,
@@ -99,6 +105,7 @@ class GoodCitizenSession:
         json: Any | None = None,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        purpose: str = "unclassified",
     ) -> ApiResult:
         """POST JSON while applying the same good-citizen retry discipline."""
         return self.request_json(
@@ -108,6 +115,7 @@ class GoodCitizenSession:
             json=json,
             headers=headers,
             etag=False,
+            purpose=purpose,
         )
 
     def request_json(
@@ -119,8 +127,16 @@ class GoodCitizenSession:
         json: Any | None = None,
         headers: dict[str, str] | None = None,
         etag: bool = False,
+        retry_status: Callable[[httpx.Response], bool] | None = None,
+        purpose: str = "unclassified",
     ) -> ApiResult:
         """Request JSON with bounded retries and upstream-directed backoff."""
+        from agent_index.indexing.work_counts import observe_http, observe_http_purpose
+
+        observations = [
+            count for count in (observe_http_purpose(purpose), observe_http())
+            if count is not None
+        ]
         params = {key: value for key, value in (params or {}).items() if value is not None}
         retries = 0
         while True:
@@ -133,9 +149,12 @@ class GoodCitizenSession:
             if self._request_headers is not None:
                 request_headers.update(self._request_headers())
             try:
-                redirect_policy = (
+                redirect_policy: dict[str, Any] = (
                     {"follow_redirects": False} if self._request_headers is not None else {}
                 )
+                for counts in observations:
+                    counts.attempts += 1
+                    counts.retries += int(retries > 0)
                 response = self.client.request(
                     method,
                     url_path,
@@ -151,11 +170,20 @@ class GoodCitizenSession:
                 retries += 1
                 continue
             self._last_request_at = time.monotonic()
+            for counts in observations:
+                counts.responses += 1
+                counts.response_bytes += len(response.content)
 
             if response.status_code == httpx.codes.NOT_MODIFIED:
-                return ApiResult(data=None, headers=response.headers, not_modified=True)
+                for counts in observations:
+                    counts.not_modified += 1
+                return ApiResult(
+                    data=None, headers=response.headers, not_modified=True, request=response.request,
+                )
 
-            if response.status_code in self._retry_statuses:
+            if response.status_code in self._retry_statuses and (
+                retry_status is None or retry_status(response)
+            ):
                 if retries >= self._max_retries:
                     response.raise_for_status()
                 self._sleep_for_retry(response, retries)
@@ -173,7 +201,10 @@ class GoodCitizenSession:
             if etag and (response_etag := response.headers.get("ETag")):
                 self._etag_cache[cache_key] = response_etag
             self._respect_rate_limit(response)
-            return ApiResult(data=response.json(), headers=response.headers)
+            data = response.json()
+            for counts in observations:
+                counts.json_results += 1
+            return ApiResult(data=data, headers=response.headers, request=response.request)
 
     def paginate_continuation(
         self,
@@ -182,6 +213,7 @@ class GoodCitizenSession:
         params: dict[str, Any] | None = None,
         continuation_param: str = "continuationToken",
         continuation_header: str = "x-ms-continuationtoken",
+        purpose: str = "unclassified",
     ) -> list[ApiResult]:
         """Collect pages using a continuation-token response header."""
         pages: list[ApiResult] = []
@@ -190,7 +222,7 @@ class GoodCitizenSession:
             page_params = dict(params or {})
             if next_token:
                 page_params[continuation_param] = next_token
-            result = self.get_json(path, params=page_params)
+            result = self.get_json(path, params=page_params, purpose=purpose)
             if result.not_modified:
                 return pages
             pages.append(result)

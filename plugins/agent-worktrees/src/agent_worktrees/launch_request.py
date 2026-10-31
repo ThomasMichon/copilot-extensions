@@ -15,12 +15,31 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from . import config as cfg
-from . import creation_allocation, launch_admission, launch_seed_state, tracking, tracking_write
+from . import creation_allocation, creation_replay, launch_admission, launch_seed_state, tracking, tracking_write
 from .creation_identity import IdentityMode, validate_mode
 from .execution_spaces import ExecutionSpaceError, project_record_config, require_project_record_mutation
 from .worktree_naming import parse_session_worktree_id, session_worktree_id
 
 MAX_REQUEST_BYTES = 7 * 1024
+
+
+def _protocol_fields(value: dict) -> dict:
+    version = value.get("version", 1)
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("Invalid launch request protocol")
+    if version == 1:
+        if "attempt_id" in value or "native_seed_required" in value:
+            raise ValueError("Legacy launch requests cannot claim native correlation")
+        return {"version": 1}
+    attempt_id = value.get("attempt_id")
+    if (
+        "attempt_id" not in value or value.get("native_seed_required") is not True
+        or (attempt_id is not None and (
+            not isinstance(attempt_id, str) or re.fullmatch(r"[0-9a-f]{32}", attempt_id) is None
+        ))
+    ):
+        raise ValueError("Invalid native launch request correlation")
+    return {"version": 2, "attempt_id": attempt_id, "native_seed_required": True}
 
 
 def decode(encoded: str) -> dict:
@@ -40,9 +59,12 @@ def decode(encoded: str) -> dict:
             result[key] = value
         return result
     request = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object)
+    if not isinstance(request, dict):
+        raise ValueError("Invalid launch request")
+    protocol = _protocol_fields(request)
+    fields = {"version", "request_id", "kind", "worktree_id", "text", "no_mux"} | set(protocol)
     if (
-        not isinstance(request, dict) or type(request.get("version")) is not int or request["version"] != 1
-        or set(request) != {"version", "request_id", "kind", "worktree_id", "text", "no_mux"}
+        set(request) != fields
         or not isinstance(request["request_id"], str)
         or re.fullmatch(r"[0-9a-f]{32}", request["request_id"]) is None
         or request["kind"] not in ("new", "resume")
@@ -72,7 +94,6 @@ def _validate_admission(receipt: object, request_id: str) -> dict:
     }
     if (
         not isinstance(receipt, dict) or not required.issubset(receipt)
-        or type(receipt["version"]) is not int or receipt["version"] != 1
         or receipt["request_id"] != request_id or receipt["seed_id"] != request_id
         or not isinstance(receipt["suffix"], str)
         or (
@@ -91,6 +112,7 @@ def _validate_admission(receipt: object, request_id: str) -> dict:
         )
     ):
         raise ValueError("Invalid stored launch admission")
+    _protocol_fields(receipt)
     wid = receipt["worktree_id"]
     if (
         not isinstance(wid, str) or not wid or "\0" in wid
@@ -122,6 +144,10 @@ def _validate_admission(receipt: object, request_id: str) -> dict:
         if "allocation" not in receipt or not receipt.get("creation_complete"):
             raise ValueError("Invalid stored launch admission record identity")
         creation_allocation.validate_record_evidence(receipt["record_identity"])
+    if "execution_origin" in receipt:
+        if "allocation" not in receipt:
+            raise ValueError("Invalid stored launch admission execution origin")
+        creation_replay.validate_origin(receipt["execution_origin"])
     return receipt
 
 
@@ -132,25 +158,44 @@ def _read_admission(directory: Path, request_id: str) -> dict:
 
 def _require_replay_identity(receipt: dict, args: dict) -> None:
     if (
-        receipt["fingerprint"] != args["fingerprint"]
+        _protocol_fields(receipt) != _protocol_fields(args)
+        or receipt["fingerprint"] != args["fingerprint"]
         or receipt["kind"] != args["kind"]
         or (args["kind"] == "resume" and receipt["worktree_id"] != args["worktree_id"])
     ):
         raise ValueError("Launch request identity was reused for different intent")
 
 
-def _require_complete_record(receipt: dict, record: tracking.WorktreeRecord) -> None:
+def _require_complete_record(
+    receipt: dict, record: tracking.WorktreeRecord, config: cfg.Config | None = None,
+) -> None:
     if not receipt.get("creation_complete"):
         raise ValueError("Admitted New creation is incomplete; inspect before launch")
     allocation = creation_allocation.AdmittedAllocation.from_fields(receipt["allocation"])
-    allocation.require_current(project_record_config(record))
     allocation.require_record(record, nonce=receipt["creation_nonce"])
     creation_allocation.require_record_evidence(record, receipt["record_identity"])
     if record.status in ("finalized", "archived") or not Path(allocation.path).is_dir():
         raise ValueError("Stored New allocation checkout is unavailable or retired; inspect, do not recreate")
+    receiving = config if config is not None else project_record_config(record)
+    allocation.require_namespace(receiving)
+    creation_replay.require_completed_record(record, receiving, receipt)
 
 
 def _apply_admit(args: dict) -> dict:
+    from . import agent_policy
+
+    protocol = _protocol_fields(args)
+    if args["kind"] == "resume":
+        target = tracking.load_record(
+            Path(args["tracking_dir"]) / f"{args['worktree_id']}.yaml"
+        ).worktree_path
+    else:
+        project = args.get("project")
+        if not isinstance(project, str) or not project.strip():
+            raise ValueError("Hosting-aware New admission requires an explicit project identity")
+        config = project_record_config(SimpleNamespace(repo=project))
+        target = config.default_repo.anchor
+    agent_policy.require(target, operation="remote launch admission")
     directory = Path(args["tracking_dir"])
     path = _admission_path(directory, args["request_id"])
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,7 +204,7 @@ def _apply_admit(args: dict) -> dict:
             receipt = _read_admission(directory, args["request_id"])
         except FileNotFoundError:
             receipt = {
-                "version": 1, "request_id": args["request_id"],
+                **protocol, "request_id": args["request_id"],
                 "fingerprint": args["fingerprint"], "kind": args["kind"],
                 "worktree_id": args["worktree_id"], "timestamp": args["timestamp"],
                 "suffix": args.get("suffix", args["request_id"]), "seed_id": args["request_id"],
@@ -179,6 +224,7 @@ def _apply_admit(args: dict) -> dict:
                 )
                 receipt["allocation"] = allocation.to_fields()
                 receipt["worktree_id"] = allocation.worktree_id
+                receipt["execution_origin"] = creation_replay.execution_origin(config)
             _validate_admission(receipt, args["request_id"])
             record_path = directory / f"{receipt['worktree_id']}.yaml"
             if "allocation" not in receipt and record_path.exists():
@@ -190,6 +236,14 @@ def _apply_admit(args: dict) -> dict:
 
 def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") -> dict:
     """Admit once; recover the same worktree after a lost response."""
+    from . import agent_policy
+
+    target = config.default_repo.anchor
+    if request["kind"] == "resume":
+        target = tracking.load_record(
+            cfg.tracking_dir() / f"{request['worktree_id']}.yaml"
+        ).worktree_path
+    agent_policy.require(target, operation="remote launch admission")
     directory = cfg.tracking_dir()
     validate_mode(identity_mode)
     detected_platform = cfg.detect_platform()
@@ -220,6 +274,8 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
         json.dumps(request, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
     admission_args = {
+        **_protocol_fields(request),
+        "project": config.repo_name,
         "tracking_dir": str(directory), "request_id": request_id,
         "fingerprint": fingerprint, "kind": request["kind"],
         "worktree_id": wid, "timestamp": timestamp, "suffix": suffix,
@@ -239,9 +295,9 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
             creation_allocation.AdmittedAllocation.from_fields(receipt["allocation"])
             if "allocation" in receipt else None
         )
-        if admitted is not None:
-            admitted.require_current(config)
         if not path.exists():
+            if admitted is not None:
+                admitted.require_current(config)
             if receipt.get("accepted") or receipt.get("creation_started"):
                 raise ValueError(
                     "Admitted creation was started but its record is unavailable; "
@@ -289,20 +345,24 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
         if admitted is not None:
             record = tracking.load_record(path)
             completed = _read_admission(directory, request_id)
-            _require_complete_record(completed, record)
+            _require_complete_record(completed, record, config)
         _dispatch("launch_request_stage", {
             "tracking_dir": str(directory), "request_id": request_id,
             "fingerprint": fingerprint, "text": request["text"],
         })
         return {
-            "version": 1, "request_id": request_id, "worktree_id": wid,
+            **_protocol_fields(receipt), "request_id": request_id, "worktree_id": wid,
             "seed_id": request_id, "seed_kind": request["kind"],
         }
 
 
 def _apply_stage(args: dict) -> dict:
+    from . import agent_policy
+
     directory = Path(args["tracking_dir"])
     admission = _admission_path(directory, args["request_id"])
+    initial = _read_admission(directory, args["request_id"])
+    agent_policy.require_record(directory / f"{initial['worktree_id']}.yaml")
     with tracking._RecordLock(admission.with_suffix(".yaml"), require_sidecar=True):
         receipt = _read_admission(directory, args["request_id"])
         if receipt["fingerprint"] != args["fingerprint"]:
@@ -312,10 +372,16 @@ def _apply_stage(args: dict) -> dict:
             path, require_sidecar=True,
         ):
             record = tracking.load_record(path)
-            require_project_record_mutation(record)
+            agent_policy.require(record.worktree_path)
             if "allocation" in receipt:
                 _require_complete_record(receipt, record)
+            else:
+                require_project_record_mutation(record)
             seed = launch_seed_state.peek(path)
+            if seed is not None and seed.seed_id == receipt["seed_id"] and (
+                seed.kind != receipt["kind"] or seed.text != args["text"]
+            ):
+                raise ValueError("Launch-seed identity was reused for a different intent")
             if receipt.get("accepted"):
                 if seed is None or seed.seed_id != receipt["seed_id"]:
                     raise ValueError("Admitted launch intent is completed or superseded")
@@ -334,13 +400,15 @@ def _apply_stage(args: dict) -> dict:
                     revision = max(revision, durable["revision"])
                 if revision != receipt["prior_revision"]:
                     raise ValueError("Launch intent changed after admission; refusing replacement")
+                require_project_record_mutation(record)
                 launch_seed_state._apply_stage({
                     "yaml_path": str(path), "worktree_id": path.stem,
                     "seed_id": receipt["seed_id"], "kind": receipt["kind"],
                     "text": args["text"],
                 })
-            receipt["accepted"] = True
-            tracking._atomic_write(admission, json.dumps(receipt) + "\n")
+            if not receipt.get("accepted"):
+                receipt["accepted"] = True
+                tracking._atomic_write(admission, json.dumps(receipt) + "\n")
         return {"accepted": True}
 
 
@@ -389,7 +457,11 @@ def cmd_request(args) -> int:
     from . import output
     request_id = None
     try:
-        protocol_options = {"command", "json", "launch_request_b64", "launch_request_status"}
+        protocol_options = {
+            "command", "json", "launch_request_b64", "launch_request_status",
+            "require_native_seed",
+            "require_launch_attempt",
+        }
         if not args.json or any(
             value is not None and value is not False and value != []
             for key, value in vars(args).items() if key not in protocol_options
@@ -400,6 +472,10 @@ def cmd_request(args) -> int:
         if admission_present == status_present:
             raise ValueError("Specify admission or status, not both")
         if status_present:
+            if getattr(args, "require_native_seed", False):
+                raise ValueError("Native seed capability requires a launch request envelope")
+            if getattr(args, "require_launch_attempt", False):
+                raise ValueError("Launch attempt capability requires a launch request envelope")
             if not args.launch_request_status:
                 raise ValueError("Launch request identity must not be empty")
             request_id = args.launch_request_status
@@ -409,10 +485,18 @@ def cmd_request(args) -> int:
             raise ValueError("Launch request envelope must not be empty")
         request = decode(args.launch_request_b64)
         request_id = request["request_id"]
+        if bool(getattr(args, "require_native_seed", False)) != (request["version"] == 2):
+            raise ValueError("Native seed capability and launch request protocol must agree")
+        if getattr(args, "require_launch_attempt", False):
+            from .launch_attempt import identity
+
+            identity(request.get("attempt_id"))
+            if request["version"] != 2:
+                raise ValueError("Launch attempt receipts require native request protocol v2")
         config = cfg.load_config()
         # Creation helpers have human-readable output; stdout is this protocol only.
         with contextlib.redirect_stdout(sys.stderr):
-            result = execute(config, request)
+            result = execute(config, request, identity_mode="tuple-v1")
         print(json.dumps(result))
         return 0
     except (ValueError, OSError, RuntimeError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
@@ -437,7 +521,7 @@ def inspect(request_id: str) -> dict:
         and seed.seed_id == receipt["seed_id"] and seed.kind == receipt["kind"]
     )
     return {
-        "version": 1, "request_id": request_id, "worktree_id": receipt["worktree_id"],
+        **_protocol_fields(receipt), "request_id": request_id, "worktree_id": receipt["worktree_id"],
         "seed_id": receipt["seed_id"], "seed_kind": receipt["kind"],
         "ready": available and not seed.handoff_id,
         "state": (
@@ -451,7 +535,7 @@ def inspect(request_id: str) -> dict:
 
 def _dispatch(verb: str, args: dict) -> dict:
     result = launch_seed_state._dispatch(
-        verb, args, min_version=6,
+        verb, args, min_version=8,
     )
     if result.get("error"):
         raise ValueError(result["error"])
@@ -468,7 +552,7 @@ def _guard(handler):
     return apply
 
 
-tracking_write.register_verb("launch_request_admit", _guard(_apply_admit), version=6)
-tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=6)
-tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start), version=6)
-tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish), version=6)
+tracking_write.register_verb("launch_request_admit", _guard(_apply_admit), version=8)
+tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=8)
+tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start), version=8)
+tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish), version=8)

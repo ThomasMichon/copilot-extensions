@@ -48,7 +48,6 @@ import {
   findHandoffTask,
   findTaskDeliveryCheckpoint,
   formatConsumeResult,
-  logHandoffPromptReceived,
   markDeliveryPromptInjected,
   normalizeHandoffTitle,
   runCli,
@@ -56,7 +55,6 @@ import {
   triggerHandoff,
   waitForWorktreeSyncToSettle,
 } from "./handoff-core.mjs";
-import { extractRecoveryLocatorFromPrompt, recoveryLocatorFor } from "./cutover-seed.mjs";
 import { defaultConfig, loadContextHandoffConfigAsync } from "./config.mjs";
 import {
   FORCE_TIER_DENY_FEEDBACK,
@@ -73,6 +71,12 @@ import {
 } from "./thresholds.mjs";
 import { createEmergencyLog, installEmergencyDiagnostics } from "./crash-diagnostics.mjs";
 import { createNativeContextObserver, nativePressurePrompt } from "./native-context.mjs";
+import { registerNativePromptReceiptObservation } from "./prompt-receipt.mjs";
+import {
+  formatAuthorizationEvidence,
+  formatHandoffMarkdown,
+  validateAuthorizationEvidence,
+} from "./handoff-markdown.mjs";
 
 // --- Emergency crash diagnostics ---------------------------------------
 // This extension has been observed, on at least one machine, to reach the
@@ -139,6 +143,7 @@ const state = {
   handoffGenerated: false,
   pendingHandoff: null,
   firstUserPrompt: null,          // first user message (for topic bias)
+  authorizationEvidence: null,    // Caller-supplied carrier, never a live grant store.
   // Phase 3 item 3: guards the one-shot first-turn pickup-signal check
   // (extractRecoveryLocatorFromPrompt) so it never re-fires on a reforked
   // module (this module is reimported on every reconnect, not just true
@@ -227,6 +232,9 @@ function collectHandoffData(sid, overrides = {}) {
       firstUserPrompt: state.firstUserPrompt || null,
       agentSummary: overrides.summary || null,
       agentNextSteps: overrides.next_steps || null,
+      authorizationEvidence: Object.hasOwn(overrides, "authorization_evidence")
+        ? validateAuthorizationEvidence(overrides.authorization_evidence)
+        : state.authorizationEvidence,
       generatedAt: new Date().toISOString(),
     },
     modifiedEntries,
@@ -271,73 +279,6 @@ function persistState() {
   } catch {
     // Best-effort; the picker simply omits context% when the file is absent.
   }
-}
-
-// Format handoff data as a markdown document suitable for continuation.
-function formatHandoffMarkdown(handoffData, scope) {
-  const lines = [
-    `# Session Handoff`,
-    "",
-    `**Session:** ${handoffData.sessionId}`,
-    `**CWD:** ${handoffData.cwd}`,
-    `**Branch:** ${
-      handoffData.branch === null
-        ? "(unavailable)"
-        : handoffData.branch || "(detached)"
-    }`,
-    `**Turn count:** ${handoffData.turnCount}`,
-    `**Context utilization:** ${handoffData.contextUtilization}`,
-    `**Generated:** ${handoffData.generatedAt}`,
-    "",
-  ];
-
-  if (scope) {
-    lines.push(`## Continuation Scope`, `> ${scope}`, "");
-  }
-
-  if (handoffData.firstUserPrompt) {
-    lines.push(
-      `## Original Request`,
-      `> ${handoffData.firstUserPrompt.slice(0, 500)}`,
-      ""
-    );
-  }
-
-  const files = Object.entries(handoffData.filesModified || {});
-  if (files.length > 0) {
-    lines.push(`## Files Modified`);
-    for (const [path, info] of files) {
-      lines.push(`- \`${path}\` (${info.tool}, turn ${info.turnIndex})`);
-    }
-    lines.push("");
-  }
-
-  if (handoffData.gitStatus) {
-    lines.push(`## Git Status`, "```", handoffData.gitStatus, "```", "");
-  }
-
-  if (handoffData.agentSummary) {
-    lines.push(`## Summary`, handoffData.agentSummary, "");
-  }
-  if (handoffData.agentNextSteps) {
-    lines.push(`## Next Steps`, handoffData.agentNextSteps, "");
-  }
-
-  // This formatter has no agent composition step (force-tier auto-drafts
-  // without the agent), so it cannot discover background flows/external
-  // state itself. Per the schema, that must be an explicit open item, never
-  // a silent omission (see the skill's Outstanding Background Flows rule).
-  lines.push(
-    "## Outstanding Background Flows & External State",
-    "Not captured -- this handoff was auto-drafted by the force tier without " +
-      "agent composition. The successor MUST ask the user (or check the " +
-      "worktree/dispatch/PR state directly) for any active watches, polls, " +
-      "scheduled prompts, open PRs, held claims/leases, or peer-agent " +
-      "coordination this session may have owned before assuming there are none.",
-    "",
-  );
-
-  return lines.join("\n");
 }
 
 // --- Force tier (Goal 1) ---
@@ -508,6 +449,14 @@ async function autoForceHandoff(sid, cwd) {
       "Manual continuation is required -- invoke the context-handoff skill.",
       { level: "error" },
     );
+    if (result.seed && result.manualInstructions) {
+      session.send(result.manualInstructions).catch((error) =>
+        session.log(
+          `[Context Handoff] Stored baton instructions could not be delivered: ${error.message}`,
+          { level: "warning" },
+        )
+      );
+    }
     return;
   }
   session.log(
@@ -544,7 +493,9 @@ const session = await joinSession({
         "rather than treating the latest completed phase as the objective, and " +
         "carry forward any outstanding background flows (watches, polls, " +
         "scheduled prompts) or external state (open PRs, held claims/leases, " +
-        "peer-agent coordination) this session owns -- never silently drop them.",
+        "peer-agent coordination) this session owns -- never silently drop them. " +
+        "Preserve original approval evidence/limits and current holds; " +
+        "this tool does not collect or grant operator authorization.",
       skipPermission: true,
       parameters: {
         type: "object",
@@ -559,6 +510,17 @@ const session = await joinSession({
             type: "string",
             description:
               "Optional description of what should happen next.",
+          },
+          authorization_evidence: {
+            type: "string",
+            maxLength: 8192,
+            description:
+              "Optional existing canonical approval references and exact " +
+              "applicable scope/limits/holds, at most 8192 UTF-8 bytes. " +
+              "Persist originals in the current-owner checkpoint/effort first. " +
+              "The in-module cache is lost on reconnect/refork and is not " +
+              "an approval or live grant store; empty " +
+              "text explicitly marks evidence unavailable.",
           },
         },
       },
@@ -580,6 +542,7 @@ const session = await joinSession({
         }
         const sid = state.sessionId || invocation?.sessionId || "unknown";
         const { data: handoffData, modifiedEntries } = collectHandoffData(sid, args);
+        state.authorizationEvidence = handoffData.authorizationEvidence;
 
         if (!nativeObservation.native) state.handoffGenerated = true;
 
@@ -620,6 +583,7 @@ const session = await joinSession({
             "",
             args.summary ? `### Agent Summary\n${args.summary}\n` : "",
             args.next_steps ? `### Agent Next Steps\n${args.next_steps}\n` : "",
+            formatAuthorizationEvidence(handoffData.authorizationEvidence),
             "",
             "---",
             "Now follow the context-handoff skill:",
@@ -642,6 +606,13 @@ const session = await joinSession({
             "   peer-agent coordination this session owns -- carry each forward",
             "   as resumable or as an explicit open item; write \"none\" only",
             "   when genuinely none exist.",
+            "   Include 'Authorization Evidence & Limits' in either shape:",
+            "   original approval references/wording, applicable operations,",
+            "   destinations/resources/owners/effects and accepted blast radius,",
+            "   exclusions, limits, retry/revision policy and current changes.",
+            "   Stamp upfront/one-time decisions in the current-owner checkpoint",
+            "   or canonical effort first; recover missing evidence boundedly.",
+            "   Cached text is not current authority or a new permission grant.",
             "2. Distinguish the trigger BEFORE saving:",
             "   - If context pressure is the reason for the handoff and work",
             "     remains: quiesce owned background work FIRST, before",
@@ -1043,18 +1014,24 @@ const session = await joinSession({
             (args?.handoff_token ?? state.pendingHandoff?.token ?? "").toString().trim() || null,
           mode: handoffConfig.mode,
         });
+        if (result?.stored?.id && result.seed) {
+          state.pendingHandoff = {
+            seed: result.seed,
+            token: result.stored.id,
+            storage: result.stored.storage,
+            worktree: result.stored.metadata?.worktree || null,
+          };
+        }
         if (!result?.ok) {
           return (
             "Cannot trigger handoff: " +
-            `${result?.error || "the pickup signal flow failed before it could start."}`
+            `${result?.error || "the pickup signal flow failed before it could start."}` +
+            (result?.seed
+              ? `\n\n${result.manualInstructions || "The handoff remains stored."}\n\n` +
+                `Final short handoff prompt/seed:\n\n${result.seed}`
+              : "")
           );
         }
-        state.pendingHandoff = {
-          seed: result.seed,
-          token: result.stored.id,
-          storage: result.stored.storage,
-          worktree: result.stored.metadata?.worktree || null,
-        };
         const pickup = result.pickup || { via: [] };
         const pickedUp = pickup.pickedUp;
         const pickupLine = pickedUp
@@ -1347,43 +1324,8 @@ handoffConfigPromise.then((resolved) => {
 });
 
 // Turn counting + first-prompt capture (replaces onUserPromptSubmitted).
-session.on("user.message", (event) => {
-  if (event.agentId) return;
-  state.turnCount++;
-  if (!state.firstUserPrompt && event.data?.content) {
-    state.firstUserPrompt = event.data.content;
-  }
-  // Phase 3 item 3 (efforts/active/context-handoff-overhaul): the
-  // deterministic "did my launch actually land" signal. On the very first
-  // turn only, grep for the exact recovery locator every cutover seed
-  // carries (see cutover-seed.mjs's extractRecoveryLocatorFromPrompt) --
-  // no LLM judgment, just a plain string match -- and best-effort log a
-  // confirmed-receipt event the predecessor's pickupSignals can read. This
-  // fires before any tool/skill call, so it is immune to the skill-load
-  // race a mid-session reload can otherwise cause.
-  if (state.turnCount === 1 && !state.pickupSignalChecked) {
-    state.pickupSignalChecked = true;
-    const locator = extractRecoveryLocatorFromPrompt(event.data?.content);
-    if (locator) {
-      try {
-        const cwd = state.cwd || process.cwd();
-        const wtDir = agentWorktreesGet("worktree-dir", cwd, state.sessionId);
-        const worktreeId = wtDir ? basename(wtDir) : null;
-        if (worktreeId) {
-          logHandoffPromptReceived(
-            cwd, worktreeId, state.sessionId,
-            recoveryLocatorFor(locator.kind, locator.id),
-          );
-        }
-      } catch (e) {
-        session.log(
-          `[Context Handoff] pickup-signal log failed: ${e.message}`,
-          { level: "warning" },
-        );
-      }
-    }
-  }
-});
+const promptReceiptObservation = registerNativePromptReceiptObservation(session, state);
+session.on("session.shutdown", () => { void promptReceiptObservation.dispose(); });
 
 // File / tool-invocation tracking (replaces onPostToolUse's bookkeeping).
 // tool.execution_complete carries the success flag but NOT the call

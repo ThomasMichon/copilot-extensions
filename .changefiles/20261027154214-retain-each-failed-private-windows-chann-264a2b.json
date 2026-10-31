@@ -1,0 +1,9 @@
+{
+  "comment": "Retain each failed private Windows channel handle for explicit cleanup retry.",
+  "changes": [
+    {
+      "plugin": "libs/zdd",
+      "type": "patch"
+    }
+  ]
+}

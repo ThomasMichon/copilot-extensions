@@ -22,8 +22,11 @@ pytestmark = pytest.mark.contract("agent_worktrees.native_resume_admission")
 @pytest.fixture
 def owner(tmp_path, monkeypatch):
     path = tmp_path / "wt-example.yaml"
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
     record = SimpleNamespace(
         resolved_head_session="native-original", worktree_id="wt-example",
+        worktree_path=str(checkout),
         pending_handoffs=[], pending_seed=None, status="active",
     )
     monkeypatch.setattr(launch_seed_exec.tracking, "load_record", lambda _: record)

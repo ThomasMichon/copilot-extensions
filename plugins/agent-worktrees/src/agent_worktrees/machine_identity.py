@@ -28,10 +28,11 @@ from typing import Any
 
 from machine_transport import (
     MachineEntry, MachineEnvironment, MachineSelection,
-    machine_entries_to_topology, machine_name, resolve_identity,
+    machine_name, resolve_local_execution_context,
 )
 from machine_transport import resolve_machine_selection, split_machine_environment
 from machine_transport import is_local_machine as _mt_is_local_machine
+from machine_transport.registry import machine_identity_names
 
 from . import config as cfg
 
@@ -58,6 +59,7 @@ def configured_machine_binding(
 def resolve_execution_machine(
     name: str, *, guest: bool, configured: bool,
     load_entries: Callable[[], dict[str, MachineEntry]] | None,
+    preserve_native_hostname: bool = False,
 ) -> str:
     """Resolve local identity without inferring registered-space authority."""
     entries: dict[str, MachineEntry] = {}
@@ -66,28 +68,37 @@ def resolve_execution_machine(
             entries = load_entries()
         except FileNotFoundError:
             pass
-    explicit = any(entry.execution_platform and not entry.legacy_key for entry in entries.values())
-    selection = resolve_machine_selection(entries, name, "wsl" if guest else cfg.detect_platform())
-    selected = selection.entry
-    if configured:
-        if selected is not None and not selected.execution_platform and not guest:
-            return name if not split_machine_environment(name).environment else selected.key
-        return selected.key if selected is not None else selection.target.logical_machine
-    if explicit or (selected is not None and selected.execution_platform):
-        from .execution_spaces import detect_legacy_machine
-
-        return detect_legacy_machine(entries, name)
-    if selected is not None:
-        if not guest:
+    context = resolve_local_execution_context(
+        entries, hostname=cfg.socket.gethostname() if configured else name,
+        environment="wsl" if guest else cfg.detect_platform(),
+        configured_machine=name if configured else None,
+    )
+    selected = entries.get(context.customization_key) if context.customization_key else None
+    if not guest:
+        # Config.machine is a retained legacy binding, not the new compact ID.
+        if preserve_native_hostname and not configured and (
+            selected is None or not selected.execution_platform
+        ):
+            return name.lower()
+        if selected is not None and not selected.execution_platform:
+            if configured:
+                literal = name.strip().casefold() == cfg.socket.gethostname().strip().casefold()
+                return name if literal or not split_machine_environment(name).environment else selected.key
             return machine_name(selected)
-        if split_machine_environment(selected.key).environment == "wsl":
-            return selected.key
-    resolved = resolve_identity(name, machine_entries_to_topology(entries), guest=guest)
-    for warning in resolved.warnings:
-        print(f"warning: {warning}", file=sys.stderr)
-    if not guest and resolved.topology_key is not None:
-        return machine_name(entries[resolved.topology_key])
-    return resolved.canonical
+        if selected is None:
+            if configured:
+                literal = name.strip().casefold() == cfg.socket.gethostname().strip().casefold()
+                return name if literal or not split_machine_environment(name).environment else context.execution_machine
+            return context.execution_machine
+    if guest and selected is None and any(
+        entry.key.strip().casefold() == context.machine.casefold()
+        for entry in entries.values()
+    ):
+        print(
+            f"warning: no guest entry for {context.machine!r}; using {context.execution_machine!r}",
+            file=sys.stderr,
+        )
+    return context.execution_machine
 
 
 def load_execution_registry(
@@ -131,6 +142,48 @@ def resolve_execution_context(
     if selection.entry is None:
         return MachineSelection(None, MachineEnvironment(name, environment), selection.exact)
     return selection
+
+
+def runtime_policy_physical_machine(
+    machine: str, repo_dir: str | Path, *, config: cfg.Config | None = None,
+) -> str:
+    """Keep current observations literal; retain strict non-local selection."""
+    try:
+        entries = load_execution_registry(repo_dir, config=config)
+    except FileNotFoundError:
+        entries = {}
+    binding = config.configured_machine if config is not None else None
+    context = resolve_local_execution_context(
+        entries, hostname=cfg.socket.gethostname(), environment=cfg.detect_platform(),
+        configured_machine=binding,
+    )
+    local_names = {context.hostname.casefold(), context.execution_machine.casefold()}
+    selected = entries.get(context.customization_key) if context.customization_key else None
+    if selected is not None:
+        local_names.update((selected.key.strip().casefold(), machine_name(selected).casefold()))
+    if binding is not None:
+        local_names.add(binding.strip().casefold())
+        local_names.add(config.machine.casefold())
+    requested = machine.strip().casefold()
+    registered_target = any(
+        requested in {
+            name.strip().casefold() for name in machine_identity_names(entry, include_metadata=False)
+        } for entry in entries.values()
+    )
+    if requested == context.execution_machine.casefold():
+        return context.machine
+    if selected is not None and requested in {
+        name.strip().casefold() for name in machine_identity_names(selected, include_metadata=False)
+    }:
+        # Reuse observation-aware alias precedence and profile conflict checks.
+        return resolve_local_execution_context(
+            entries, hostname=context.hostname, environment=context.environment,
+            configured_machine=machine,
+        ).machine
+    if requested in local_names and not registered_target:
+        return context.machine
+    target = resolve_machine_selection(entries, machine, cfg.detect_platform())
+    return target.target.machine if target.entry is not None else machine
 
 
 def repository_config(repo_dir: Path) -> cfg.Config | None:

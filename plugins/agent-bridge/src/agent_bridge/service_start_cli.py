@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import asyncio
 import json
@@ -96,9 +98,44 @@ def _bind_listen_socket(host: str, port: int) -> socket.socket:
     return sock
 
 
+@daemon_entrypoint("agent-bridge", source=__file__, purpose="production")
 def _cmd_start(
     args: argparse.Namespace, *,
     required_runtime_environment: tuple[str, ...] | None = None,
+) -> None:
+    from .diagnostic_logs import close_file_logging, configure_file_logging
+
+    handler = None
+
+    def initialize_logging():
+        nonlocal handler
+        try:
+            handler = configure_file_logging()
+        except Exception:
+            try:
+                print("agent-bridge: application diagnostics unavailable; startup continues", file=sys.stderr)
+            except Exception:
+                pass
+    try:
+        _run_start(
+            args, required_runtime_environment=required_runtime_environment,
+            logging_initializer=initialize_logging,
+        )
+    finally:
+        from . import telemetry
+
+        telemetry.close_configured_retained_sink()
+        if handler is not None:
+            try:
+                close_file_logging(handler)
+            except Exception:
+                pass  # diagnostic cleanup must not replace the primary outcome
+
+
+def _run_start(
+    args: argparse.Namespace, *,
+    required_runtime_environment: tuple[str, ...] | None = None,
+    logging_initializer=None,
 ) -> None:
     from .app import create_app
     from .config import (
@@ -244,6 +281,10 @@ def _cmd_start(
 
         config_kwargs["loop"] = resilient_loop_factory
     config = uvicorn.Config(app, **config_kwargs)
+    # Uvicorn's dictConfig closes existing handlers, so adopt the bounded
+    # application writer only after that real configuration boundary.
+    if logging_initializer is not None:
+        logging_initializer()
     server = uvicorn.Server(config)
     app.state.uvicorn_server = server
 
@@ -423,9 +464,14 @@ def _ask_user_fields(schema: Any) -> str:
     return "  ".join(parts)
 
 
-def _cmd_version(_args: argparse.Namespace) -> None:
+def _cmd_version(args: argparse.Namespace) -> None:
     from . import __version__
 
+    if getattr(args, "contracts_json", False):
+        from .resume_cli_contract import cli_contracts
+
+        print(json.dumps(cli_contracts(), indent=2))
+        return
     print(f"agent-bridge {__version__}")
 
 
@@ -628,6 +674,8 @@ def _cmd_ui(args: argparse.Namespace) -> None:
 
 
 def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
+    from .diagnostic_logs import register_log_commands
+    register_log_commands(sub)
     core = _core()
 
     start_p = sub.add_parser("start", help="Start the agent-bridge server")
@@ -713,6 +761,7 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
     readiness_p.set_defaults(func=_cmd_installer_readiness)
 
     ver_p = sub.add_parser("version", help="Print version")
+    ver_p.add_argument("--contracts-json", action="store_true", help="Emit this executing CLI's local contract support as JSON; no daemon request")
     ver_p.set_defaults(func=_cmd_version)
 
     carrier_p = sub.add_parser("carrier", help="Run the framed remote Agent Bridge carrier endpoint")

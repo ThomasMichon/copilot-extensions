@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from contextlib import nullcontext
 import errno
+import signal
 import subprocess
 import sys
 import time
@@ -38,6 +39,43 @@ def _run(code: str, *, timeout: float = 5, stdout: int = 4096, stderr: int = 409
     )
 
 
+@native_execution
+@pytest.mark.parametrize("capture", [True, False])
+def test_binary_capture_preserves_non_utf8_and_exact_newline_bytes(capture):
+    stdout, stderr = b"\xff\x00\r\n\r\n", b"\xfe\rdiagnostic"
+    result = _run(
+        f"import sys;sys.stdout.buffer.write({stdout!r});sys.stderr.buffer.write({stderr!r})",
+        binary=True, capture=capture,
+    )
+    assert result.stdout == (stdout if capture else None)
+    assert result.stderr == (stderr if capture else None)
+
+
+@native_execution
+def test_binary_capture_still_enforces_raw_byte_limits_and_settles():
+    with pytest.raises(OutputLimitExceeded):
+        _run("import sys;sys.stdout.buffer.write(b'\\xff'*33)", binary=True, stdout=32)
+    assert _run("import sys;sys.stdout.buffer.write(b'settled\\n')", binary=True).stdout == b"settled\n"
+
+
+@pytest.mark.parametrize("contained", [False, True])
+def test_installation_exception_preserves_contained_tests_and_strict_tools(monkeypatch, contained):
+    observed = []
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1" if contained else "0")
+
+    def execute(argv, **kwargs):
+        observed.append(kwargs)
+        return subprocess.CompletedProcess(argv, 7, "installer output", "")
+
+    monkeypatch.setattr(protocol, "run", execute)
+    options = dict(timeout=5, max_stdout_bytes=4096, max_stderr_bytes=4096)
+    result = ownership.run_installation_owned(["installer"], **options)
+    assert result.returncode == 7 and result.stdout == "installer output"
+    assert observed[-1]["allow_daemon_breakaway"] is not contained
+    run_caller_owned(["ordinary-tool"], **options)
+    assert observed[-1].get("allow_daemon_breakaway", False) is False
+
+
 @pytest.mark.parametrize("capture", [True, False])
 @native_execution
 def test_separate_utf8_streams_input_and_real_returncode(capture):
@@ -50,6 +88,43 @@ def test_separate_utf8_streams_input_and_real_returncode(capture):
     assert result.returncode == 7
     assert result.stdout == ("value\u00e9\n" if capture else None)
     assert result.stderr == ("diagnostic\u00e9" if capture else None)
+
+
+@native_execution
+def test_caller_owned_uses_explicit_child_context_without_mutating_caller(tmp_path):
+    cwd = Path.cwd()
+    environment = {**os.environ, "CALLER_OWNED_CONTEXT_FIXTURE": "selected"}
+    before = dict(environment)
+    result = _run(
+        "import json,os; print(json.dumps([os.getcwd(),os.environ['CALLER_OWNED_CONTEXT_FIXTURE']]))",
+        cwd=tmp_path, env=environment,
+    )
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == [str(tmp_path), "selected"]
+    assert Path.cwd() == cwd
+    assert environment == before
+    assert os.environ.get("CALLER_OWNED_CONTEXT_FIXTURE") is None
+
+
+def test_windows_explicit_environment_is_unicode_sorted_and_double_terminated():
+    from agent_procutil._windows_caller_owned import _environment_block
+
+    assert _environment_block(None) is None
+    assert _environment_block({})[:].startswith("\0\0")
+    assert _environment_block({"b": "\u00e9", "A": "value"})[:].startswith(
+        "A=value\0b=\u00e9\0\0",
+    )
+
+
+@pytest.mark.parametrize("environment", [
+    {"": "value"}, {"BAD=KEY": "value"}, {"BAD\0KEY": "value"},
+    {"KEY": "bad\0value"}, {"KEY": 3}, {3: "value"},
+])
+def test_windows_explicit_environment_refuses_invalid_entries(environment):
+    from agent_procutil._windows_caller_owned import _environment_block
+
+    with pytest.raises((TypeError, ValueError)):
+        _environment_block(environment)
 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
@@ -105,6 +180,85 @@ def test_blocked_input_obeys_absolute_timeout_and_original_command():
     assert caught.value.timeout == 0.5
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows bounded pipe timeout evidence")
+def test_windows_timeout_retains_bounded_raw_partial_streams_after_retirement():
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        _run(
+            "import os,time;os.write(1,b'partial\\xff');"
+            "os.write(2,b'phase\\r\\n');time.sleep(60)",
+            timeout=5,
+        )
+    assert caught.value.stdout == b"partial\xff"
+    assert caught.value.stderr == b"phase\r\n"
+    assert "partial\xff" not in str(caught.value)
+    assert "phase\r\n" not in str(caught.value)
+
+
+def test_windows_timeout_after_stream_eof_retains_raw_bytes():
+    def expired():
+        raise subprocess.TimeoutExpired(["fixture"], 1)
+
+    process = SimpleNamespace(
+        stdin=None, stdout=io.BytesIO(b"partial\xff"), stderr=io.BytesIO(b"phase\r\n"),
+        poll=expired, wait=lambda **kwargs: 0, retire_job=lambda job, timeout: None,
+    )
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        ownership._communicate_windows_bounded(
+            process, object(), input_text=None, deadline=time.monotonic() + 5,
+            argv=["fixture"], timeout=1, capture_limits=(32, 32),
+        )
+    assert caught.value.output == b"partial\xff"
+    assert caught.value.stderr == b"phase\r\n"
+    assert "partial" not in str(caught.value)
+    assert "phase" not in str(caught.value)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell nested live stdin contract")
+def test_nested_powershell_json_input_reaches_eof_while_outer_stdin_stays_open(tmp_path):
+    from agent_procutil import spawn_sync_in_kill_on_close_job
+
+    powershell = Path(os.environ["SystemRoot"]) / r"System32\WindowsPowerShell\v1.0\powershell.exe"
+    source = str(Path(ownership.__file__).resolve().parents[1])
+    request = json.dumps({"config": {"value": "x" * 1000}})
+    script = tmp_path / "reader.ps1"
+    script.write_text(
+        "[Console]::Error.WriteLine('input');"
+        "$v=[Console]::In.ReadToEnd()|ConvertFrom-Json;"
+        "[Console]::Out.Write($v.config.value.Length)",
+        encoding="utf-8",
+    )
+    code = (
+        f"import sys;sys.path.insert(0,{source!r});"
+        "from agent_procutil.owned_process import run_caller_owned;"
+        "assert sys.stdin.readline()=='launch\\n';"
+        f"r=run_caller_owned([{str(powershell)!r},'-NoProfile','-NonInteractive','-File',"
+        f"{str(script)!r}],"
+        f"input_text={request!r},timeout=5,max_stdout_bytes=4096,max_stderr_bytes=4096);"
+        "assert r.returncode==0,r.stderr;print(r.stdout,flush=True)"
+    )
+    env = {
+        key: value for key, value in os.environ.items()
+        if key.upper() in {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATH", "COMSPEC"}
+    }
+    process, job = spawn_sync_in_kill_on_close_job(
+        [sys.executable, "-I", "-c", code], env=env,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        require_job=True, allow_breakaway=False, text=True, encoding="utf-8",
+        creationflags=0x08000000,
+    )
+    try:
+        process.stdin.write("launch\n")
+        process.stdin.flush()
+        process.wait(timeout=10)
+        assert process.returncode == 0, process.stderr.read()
+        assert process.stdout.read().strip() == "1000"
+    finally:
+        job.terminate_and_wait(2)
+        process.wait(timeout=2)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close()
+
+
 @native_execution
 def test_child_closing_stdin_early_preserves_result():
     result = _run(
@@ -131,6 +285,7 @@ def test_windows_input_errors_distinguish_early_closure_from_failure(number, bou
     process = SimpleNamespace(
         stdin=Input(), stdout=io.BytesIO(b"closed"), stderr=io.BytesIO(),
         poll=lambda: 7, wait=lambda **kwargs: 7,
+        retire_job=lambda job, timeout: job.terminate_and_wait(timeout),
     )
     job = SimpleNamespace(terminate_and_wait=lambda timeout: None)
 
@@ -349,6 +504,9 @@ def test_windows_cleanup_failure_is_explicit_and_not_retried():
         def wait(self, timeout):
             return 0
 
+        def retire_job(self, job, timeout):
+            job.terminate_and_wait(timeout)
+
     class Job:
         attempts = 0
 
@@ -368,6 +526,7 @@ def test_windows_cleanup_failure_is_explicit_and_not_retried():
 
 @pytest.mark.parametrize("exits", [True, False])
 def test_group_confirmation_waits_for_exit_without_releasing_root(monkeypatch, exits):
+    monkeypatch.setattr(protocol, "sys", SimpleNamespace(platform="linux"))
     process = SimpleNamespace(pid=10, returncode=None)
     observations = []
     closed = []
@@ -460,6 +619,10 @@ def test_pidfd_exit_observation_accepts_high_descriptors():
 
 @pytest.mark.parametrize("boundary", ["retire", "confirm", "wait"])
 def test_all_caller_owned_cleanup_failures_retain_process(monkeypatch, boundary):
+    monkeypatch.setattr(protocol, "sys", SimpleNamespace(
+        platform="linux", executable=sys.executable,
+    ))
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="linux"))
     process = SimpleNamespace(stdin=None, stdout=None, stderr=None, returncode=None)
     failure = (
         subprocess.TimeoutExpired(["guard"], 2) if boundary == "wait"
@@ -586,3 +749,93 @@ def test_closed_lifetime_pipe_refuses_before_target_launch(tmp_path):
         os.close(reader)
     assert result.returncode == -9
     assert not marker.exists()
+
+
+def _eperm(*args):
+    raise PermissionError(errno.EPERM, "Operation not permitted")
+
+
+class _EpermGroupSignals:
+    """Real ``os`` except that signalling any process group reports EPERM."""
+
+    killpg = staticmethod(_eperm)
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+@pytest.mark.parametrize(
+    "exited,zombie_only,inherit,settles",
+    [
+        (True, True, False, True),
+        (True, False, False, False),
+        (False, True, False, False),
+        (True, True, True, False),
+    ],
+)
+def test_group_retirement_accepts_eperm_only_for_a_confirmed_zombie_only_group(
+    monkeypatch, exited, zombie_only, inherit, settles,
+):
+    process = SimpleNamespace(pid=123, returncode=None)
+    monkeypatch.setattr(ownership, "os", SimpleNamespace(kill=_eperm, killpg=_eperm))
+    monkeypatch.setattr(ownership, "signal", SimpleNamespace(SIGKILL=9))
+    monkeypatch.setattr(ownership, "_observe_unreaped", lambda child: object() if exited else None)
+    monkeypatch.setattr(ownership, "_zombie_only_group", lambda child: zombie_only)
+    if settles:
+        ownership._retire_posix_group(process, inherit_process_group=inherit)
+    else:
+        with pytest.raises(PermissionError):
+            ownership._retire_posix_group(process, inherit_process_group=inherit)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX process-group retirement")
+@pytest.mark.parametrize("zombie_only", [True, False])
+def test_run_owned_reports_success_only_after_eperm_group_settlement(monkeypatch, zombie_only):
+    monkeypatch.setattr(ownership, "os", _EpermGroupSignals())
+    monkeypatch.setattr(ownership, "_zombie_only_group", lambda child: zombie_only)
+    argv = [sys.executable, "-I", "-c", "pass"]
+    if zombie_only:
+        assert ownership.run_owned(argv, timeout=10).returncode == 0
+    else:
+        with pytest.raises(PermissionError):
+            ownership.run_owned(argv, timeout=10)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="native Darwin process-group census")
+@pytest.mark.parametrize("live_member", [False, True])
+def test_darwin_census_refuses_eperm_while_a_group_member_lives(monkeypatch, tmp_path, live_member):
+    monkeypatch.setattr(ownership, "os", _EpermGroupSignals())
+    marker = tmp_path / "member.pid"
+    code = (
+        "import pathlib,subprocess,sys;"
+        "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'],"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);"
+        f"pathlib.Path({str(marker)!r}).write_text(str(p.pid))"
+        if live_member else "pass"
+    )
+    argv = [sys.executable, "-I", "-c", code]
+    if not live_member:
+        assert ownership.run_owned(argv, timeout=10).returncode == 0
+        return
+    try:
+        with pytest.raises(PermissionError):
+            ownership.run_owned(argv, timeout=10)
+    finally:
+        if marker.exists():
+            try:
+                os.kill(int(marker.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX process-group retirement")
+def test_group_retirement_settles_a_zombie_only_group():
+    process = subprocess.Popen(
+        [sys.executable, "-I", "-c", "pass"], stdin=subprocess.DEVNULL, start_new_session=True,
+    )
+    deadline = time.monotonic() + 5
+    while ownership._observe_unreaped(process) is None:
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    ownership._retire_posix_group(process)
+    assert process.wait(timeout=2) == 0

@@ -1,0 +1,9 @@
+{
+  "comment": "Enforce hosting intrinsically on Copilot launch paths without a Worktrees policy flag or injection into source inspection.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

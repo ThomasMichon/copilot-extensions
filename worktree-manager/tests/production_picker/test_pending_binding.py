@@ -94,6 +94,46 @@ def test_successful_binding_mounts_operational_widget_in_original_app(monkeypatc
     asyncio.run(exercise())
 
 
+def test_owner_loss_after_binding_exits_and_cancels_the_live_loader(monkeypatch):
+    from worktree_manager.production_picker.picker_tui import data_local
+
+    mounted = threading.Event()
+    class Source:
+        LOCAL = ("host", "Win")
+        bucket = staticmethod(data_local.bucket)
+        for_machine = staticmethod(data_local.for_machine)
+
+    monkeypatch.setattr(engine.PickerScreen, "_finish_mount", lambda self: mounted.set())
+    monkeypatch.setattr(engine.PickerScreen, "_after_first_refresh", lambda self: None)
+
+    async def exercise():
+        lost = False
+        cancelled = []
+        app = engine.PickerApp(
+            None, prepare=lambda: PickerBinding(Source(), True, lambda: None),
+            lifetime_cancelled=lambda: lost,
+        )
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                if mounted.is_set():
+                    break
+                await pilot.pause(.02)
+            assert mounted.is_set()
+            screen = app.query_one(engine.PickerScreen)
+            screen.loader = SimpleNamespace(cancel=lambda: cancelled.append(True))
+            app.result = {"action": "new"}
+            lost = True
+            for _ in range(50):
+                if not app.is_running:
+                    break
+                await pilot.pause(.02)
+            assert not app.is_running
+        assert app.result is None
+        assert cancelled == [True]
+
+    asyncio.run(exercise())
+
+
 def test_authoritative_loader_does_not_wait_for_advisory(monkeypatch):
     class Source:
         LOCAL = ("host", "Win")

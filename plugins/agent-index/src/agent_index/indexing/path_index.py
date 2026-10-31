@@ -18,6 +18,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+from .embedding_coverage import SCHEMA as _EMBEDDING_SCHEMA
+
 log = logging.getLogger(__name__)
 
 _SCHEMA = """\
@@ -56,7 +58,41 @@ class PathIndex:
     def _init_schema(self) -> None:
         conn = self._connect()
         try:
-            conn.executescript(_SCHEMA)
+            conn.executescript(_SCHEMA + _EMBEDDING_SCHEMA)
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'source_chunk_totals'",
+            ).fetchone() is None:
+                conn.execute(
+                    "CREATE TABLE source_chunk_totals "
+                    "(source TEXT PRIMARY KEY, chunk_count INTEGER NOT NULL)",
+                )
+                conn.execute(
+                    "INSERT INTO source_chunk_totals SELECT source, SUM(chunk_count) "
+                    "FROM indexed_files GROUP BY source",
+                )
+            for name, event, body in (
+                ("insert", "INSERT", """
+                    INSERT INTO source_chunk_totals VALUES (new.source, new.chunk_count)
+                    ON CONFLICT(source) DO UPDATE SET
+                        chunk_count = chunk_count + new.chunk_count;
+                """),
+                ("update", "UPDATE", """
+                    UPDATE source_chunk_totals SET chunk_count = chunk_count - old.chunk_count
+                        WHERE source = old.source;
+                    INSERT INTO source_chunk_totals VALUES (new.source, new.chunk_count)
+                    ON CONFLICT(source) DO UPDATE SET
+                        chunk_count = chunk_count + new.chunk_count;
+                """),
+                ("delete", "DELETE", """
+                    UPDATE source_chunk_totals SET chunk_count = chunk_count - old.chunk_count
+                        WHERE source = old.source;
+                """),
+            ):
+                conn.execute(
+                    f"CREATE TRIGGER IF NOT EXISTS indexed_files_total_{name} "
+                    f"AFTER {event} ON indexed_files BEGIN {body} END",
+                )
             conn.commit()
         finally:
             conn.close()
@@ -108,6 +144,20 @@ class PathIndex:
                        chunk_count = excluded.chunk_count,
                        indexed_at = excluded.indexed_at""",
                 [(s, p, h, c, now) for s, p, h, c in entries],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def invalidate_batch(self, identities: list[tuple[str, str]]) -> None:
+        """Revoke reuse before mutations that might only partially succeed."""
+        if not identities:
+            return
+        conn = self._connect()
+        try:
+            conn.executemany(
+                "UPDATE indexed_files SET content_hash = NULL WHERE source = ? AND file_path = ?",
+                identities,
             )
             conn.commit()
         finally:
@@ -170,6 +220,21 @@ class PathIndex:
 
     # ── Read ─────────────────────────────────────────────────
 
+    def chunk_count_by_family(self, family: str) -> int:
+        """Read transactionally maintained totals, never scan unchanged file rows."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(chunk_count), 0) AS total
+                   FROM source_chunk_totals
+                   WHERE source = ? COLLATE BINARY
+                      OR (source >= ? COLLATE BINARY AND source < ? COLLATE BINARY)""",
+                (family, f"{family}:", f"{family};"),
+            ).fetchone()
+            return row["total"]
+        finally:
+            conn.close()
+
     def get_paths(self, source: str) -> set[str]:
         """Return all file_paths for an exact source match."""
         conn = self._connect()
@@ -231,6 +296,44 @@ class PathIndex:
         finally:
             conn.close()
 
+    def get_family_page(
+        self, family: str, *, after: tuple[str, str] | None = None, limit: int = 256,
+    ) -> list[tuple[str, str]]:
+        """Keyset-read a bounded, ordered slice for explicit full reconciliation."""
+        if not isinstance(family, str) or not family:
+            raise ValueError("Reconciliation requires a source family")
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError("Reconciliation identity page must contain 1 to 256 items")
+        if after is not None and (
+            not isinstance(after, tuple) or len(after) != 2
+            or any(not isinstance(value, str) or not value for value in after)
+            or not (after[0] == family or after[0].startswith(family + ":"))
+        ):
+            raise ValueError("Invalid reconciliation identity cursor")
+        conn = self._connect()
+        try:
+            namespace = after[0] if after else family
+            path_clause = "AND file_path > ?" if after else ""
+            rows = conn.execute(
+                "SELECT source, file_path FROM indexed_files "
+                f"WHERE source = ? COLLATE BINARY {path_clause} ORDER BY file_path LIMIT ?",
+                (namespace, after[1], limit) if after else (namespace, limit),
+            ).fetchall()
+            if len(rows) < limit:
+                # Separate seeks keep SQLite from scanning the current namespace
+                # to evaluate a composite cursor as a residual predicate.
+                lower = family + ":" if namespace == family else namespace
+                relation = ">=" if namespace == family else ">"
+                rows.extend(conn.execute(
+                    "SELECT source, file_path FROM indexed_files "
+                    f"WHERE source {relation} ? COLLATE BINARY AND source < ? COLLATE BINARY "
+                    "ORDER BY source, file_path LIMIT ?",
+                    (lower, family + ";", limit - len(rows)),
+                ).fetchall())
+            return [(row["source"], row["file_path"]) for row in rows]
+        finally:
+            conn.close()
+
     def list_sources(self) -> list[str]:
         """Return exact stored source identities, including path-only remnants."""
         conn = self._connect()
@@ -257,6 +360,33 @@ class PathIndex:
             if row is None:
                 return None
             return (row["content_hash"], row["indexed_at"])
+        finally:
+            conn.close()
+
+    def get_entries(
+        self, identities: list[tuple[str, str]],
+    ) -> dict[tuple[str, str], tuple[str | None, float]]:
+        """Read only selected file checkpoints, in bounded SQLite batches."""
+        identities = list(dict.fromkeys(identities))
+        if not identities:
+            return {}
+        result: dict[tuple[str, str], tuple[str | None, float]] = {}
+        conn = self._connect()
+        try:
+            for offset in range(0, len(identities), 100):
+                batch = identities[offset:offset + 100]
+                predicate = " OR ".join("(source = ? AND file_path = ?)" for _ in batch)
+                params = [value for identity in batch for value in identity]
+                rows = conn.execute(
+                    "SELECT source, file_path, content_hash, indexed_at "
+                    f"FROM indexed_files WHERE {predicate}",
+                    params,
+                )
+                for row in rows:
+                    result[(row["source"], row["file_path"])] = (
+                        row["content_hash"], row["indexed_at"],
+                    )
+            return result
         finally:
             conn.close()
 

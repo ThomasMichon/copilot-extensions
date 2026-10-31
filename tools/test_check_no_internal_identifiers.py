@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -180,6 +182,24 @@ def test_load_identifier_data_merges_plain_and_ci_sources_without_duplicates(
     }
 
 
+def test_no_live_sweep_keeps_every_configured_input(repo: Path, monkeypatch):
+    module = _load_module(repo)
+    home_list = repo / "configured-identifiers.txt"
+    home_list.write_text("local-token\n", encoding="utf-8")
+    monkeypatch.setattr(module, "HOME_LIST", home_list)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_FORBIDDEN_IDS", "environment-token")
+    monkeypatch.setenv(module.CI_LIST_ENV, "ci-token|configured CI input")
+    monkeypatch.setattr(
+        module, "_load_live_sweep_identifiers",
+        lambda: pytest.fail("configured-only mode started discovery"),
+    )
+    identifiers, reasons, error = module._load_identifier_data(include_live_sweep=False)
+    assert identifiers == ["environment-token", "local-token", "ci-token"]
+    assert reasons["ci-token"] == "configured CI input"
+    assert error is None
+    assert module.main(["--no-live-sweep"]) == 0
+
+
 # ---------------------------------------------------------------------------
 # Source 4: the live agent-worktrees cross-repo sweep
 # ---------------------------------------------------------------------------
@@ -191,7 +211,7 @@ def test_live_sweep_disabled_by_default_env_var(repo: Path, monkeypatch: pytest.
     monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
     called = []
     monkeypatch.setattr(
-        module.subprocess, "run",
+        module, "_run_live_sweep",
         lambda *a, **k: called.append(1) or (_ for _ in ()).throw(AssertionError("should not run")),
     )
     assert module._load_live_sweep_identifiers() == []
@@ -221,7 +241,7 @@ def test_live_sweep_contributes_identifiers(repo: Path, monkeypatch: pytest.Monk
         })
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     result = module._load_live_sweep_identifiers()
     assert result == [
         ("swept-token", "swept reason"),
@@ -245,7 +265,7 @@ def test_live_sweep_treats_unknown_subcommand_as_benign_absence(
         stdout = "✗ Unknown subcommand: identifiers\n✗ Run 'agent-worktrees --help' for available commands.\n"
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     assert module._load_live_sweep_identifiers() == []
 
 
@@ -265,7 +285,7 @@ def test_live_sweep_treats_unresolved_project_as_benign_absence(
         stdout = "Could not resolve a project for 'identifiers'. Context is discovered from the cwd.\n"
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     assert module._load_live_sweep_identifiers() == []
 
 
@@ -282,7 +302,7 @@ def test_live_sweep_merges_into_load_identifier_data(repo: Path, monkeypatch: py
         })
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     identifiers, reasons, live_sweep_error = module._load_identifier_data()
     assert live_sweep_error is None
     assert "swept-token" in identifiers
@@ -299,7 +319,7 @@ def test_live_sweep_rejects_non_list_entries(repo: Path, monkeypatch: pytest.Mon
         stdout = json.dumps({"error": None, "entries": "not-a-list"})
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -314,7 +334,7 @@ def test_live_sweep_rejects_non_mapping_entry(repo: Path, monkeypatch: pytest.Mo
         stdout = json.dumps({"error": None, "entries": ["not-a-mapping"]})
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -336,7 +356,7 @@ def test_live_sweep_rejects_entry_with_missing_or_non_string_token(
         stdout = json.dumps({"error": None, "entries": [{}]})
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -351,7 +371,7 @@ def test_live_sweep_raises_on_nonzero_exit(repo: Path, monkeypatch: pytest.Monke
         stdout = json.dumps({"error": "boom", "entries": []})
         stderr = "boom"
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -371,7 +391,7 @@ def test_live_sweep_failure_preserves_partial_entries(repo: Path, monkeypatch: p
         })
         stderr = "one peer repo's blocklist failed to parse"
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure) as excinfo:
         module._load_live_sweep_identifiers()
     assert excinfo.value.pairs == [("still-valid", "a reason")]
@@ -392,7 +412,7 @@ def test_load_identifier_data_fails_loud_on_live_sweep_failure(
         })
         stderr = "boom"
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     identifiers, reasons, live_sweep_error = module._load_identifier_data()
     assert live_sweep_error is not None
     # Partial entries are still included, even though the overall result
@@ -424,8 +444,271 @@ def test_live_sweep_silently_ignores_timeout(repo: Path, monkeypatch: pytest.Mon
     def _raise(*a, **k):
         raise module.subprocess.TimeoutExpired(cmd="agent-worktrees", timeout=10)
 
-    monkeypatch.setattr(module.subprocess, "run", _raise)
+    monkeypatch.setattr(module, "_run_live_sweep", _raise)
     assert module._load_live_sweep_identifiers() == []
+
+
+def test_live_sweep_unsafe_observation_is_not_benign_absence(repo, monkeypatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    def fail(_command):
+        raise RuntimeError("owned scope could not settle")
+
+    monkeypatch.setattr(module, "_run_live_sweep", fail)
+    with pytest.raises(module.LiveSweepFailure, match="observed safely"):
+        module._load_live_sweep_identifiers()
+
+
+@pytest.mark.parametrize("failure", ["output", "cleanup"])
+def test_live_sweep_concrete_owned_failures_block_publication(repo, monkeypatch, failure):
+    monkeypatch.syspath_prepend(str(SCRIPT.parent.parent / "libs" / "agent-procutil" / "src"))
+    from agent_procutil.owned_process import OutputLimitExceeded, OwnedCleanupError
+
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+    error = OutputLimitExceeded("stdout", 32 * 1024 * 1024) if failure == "output" else OwnedCleanupError(object())
+
+    def fail(_command):
+        raise error
+
+    monkeypatch.setattr(module, "_run_live_sweep", fail)
+    with pytest.raises(type(error)) as caught:
+        module._load_live_sweep_identifiers()
+    assert caught.value is error
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows pipe-inheriting descendant boundary")
+@pytest.mark.parametrize("root_exits", [False, True])
+def test_native_live_sweep_deadline_retires_pipe_holding_descendant(tmp_path, root_exits):
+    import ctypes
+    from ctypes import wintypes
+
+    module = _load_module(SCRIPT.parent.parent)
+    pid_file = tmp_path / "owned-child.pid"
+    script = (
+        "import os,pathlib,subprocess,sys,time;"
+        "assert os.environ['AGENT_WORKTREES_NO_SELFPROVISION']=='1';"
+        "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);"
+        "pathlib.Path(sys.argv[1]).write_text(str(p.pid));"
+        + ("sys.exit(0)" if root_exits else "time.sleep(60)")
+    )
+    started = time.monotonic()
+    try:
+        module._run_live_sweep([sys.executable, "-c", script, str(pid_file)])
+    except subprocess.TimeoutExpired:
+        pass
+    assert time.monotonic() - started < 15
+    pid = int(pid_file.read_text())
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x1000, False, pid)
+    if handle:
+        try:
+            code = wintypes.DWORD()
+            assert kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+            assert code.value != 259
+        finally:
+            kernel.CloseHandle(handle)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows command-binstub boundary")
+def test_native_live_sweep_quotes_command_binstub_without_provisioning(tmp_path):
+    module = _load_module(SCRIPT.parent.parent)
+    command = tmp_path / "owner's & catalog.cmd"
+    command.write_text(
+        '@echo off\nif not "%AGENT_WORKTREES_NO_SELFPROVISION%"=="1" exit /b 9\n'
+        'echo {"error":null,"entries":[]}\nexit /b 0\n',
+    )
+    result = module._run_live_sweep([str(command), "identifiers", "sweep", "--format", "json"])
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"error": None, "entries": []}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX command and finite-reader boundary")
+def test_native_posix_live_sweep_preserves_command_and_deadline(tmp_path):
+    module = _load_module(SCRIPT.parent.parent)
+    command = tmp_path / "owner's & catalog"
+    command.write_text(
+        "#!/bin/sh\n"
+        'test "$AGENT_WORKTREES_NO_SELFPROVISION" = 1 || exit 9\n'
+        'test "$1" = "literal argument" || exit 8\n'
+        "printf '%s\\n' '{\"error\":null,\"entries\":[]}'\n",
+    )
+    command.chmod(0o700)
+    result = module._run_live_sweep([str(command), "literal argument"])
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"error": None, "entries": []}
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        module._run_live_sweep([sys.executable, "-c", "import time; time.sleep(60)"])
+    assert time.monotonic() - started < 15
+def test_live_sweep_missing_capture_helper_fails_closed(repo: Path, monkeypatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: sys.executable)
+    with pytest.raises(module.LiveSweepFailure, match="requires repository agent-procutil"):
+        module._load_live_sweep_identifiers()
+
+
+def _sweep_ownership(monkeypatch):
+    monkeypatch.syspath_prepend(str(SCRIPT.parents[1] / "libs/agent-procutil/src"))
+    from agent_procutil import owned_process
+
+    return owned_process
+
+
+def test_live_sweep_uses_fixed_owned_capture_contract(monkeypatch):
+    module = _load_module(SCRIPT.parent.parent)
+    ownership = _sweep_ownership(monkeypatch)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "selected-sweep")
+    monkeypatch.setenv("LIVE_SWEEP_CONTEXT_FIXTURE", "preserved")
+    calls = []
+
+    def run(argv, **kwargs):
+        environment = kwargs.pop("env")
+        calls.append((
+            argv, kwargs, environment.get("AGENT_WORKTREES_NO_SELFPROVISION"),
+            environment.get("LIVE_SWEEP_CONTEXT_FIXTURE"),
+        ))
+        return subprocess.CompletedProcess(argv, 0, '{"error":null,"entries":[]}', "")
+
+    monkeypatch.setattr(ownership, "run_caller_owned", run)
+    assert module._load_live_sweep_identifiers() == []
+    assert calls == [(
+        ["selected-sweep", "identifiers", "sweep", "--format", "json"],
+        {"cwd": module.REPO, "timeout": 10, "max_stdout_bytes": 32 * 1024 * 1024,
+         "max_stderr_bytes": 1024 * 1024},
+        "1", "preserved",
+    )]
+
+
+def test_live_sweep_retains_unconfirmed_cleanup_custody(monkeypatch):
+    module = _load_module(SCRIPT.parent.parent)
+    ownership = _sweep_ownership(monkeypatch)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "selected-sweep")
+    process, job = object(), object()
+    failure = ownership.OwnedCleanupError(process, job)
+
+    def run(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(ownership, "run_caller_owned", run)
+    with pytest.raises(ownership.OwnedCleanupError) as caught:
+        module._load_identifier_data()
+    assert caught.value is failure
+    assert caught.value.process is process and caught.value.job is job
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_live_sweep_output_limit_is_not_absence(monkeypatch, stream):
+    module = _load_module(SCRIPT.parent.parent)
+    ownership = _sweep_ownership(monkeypatch)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "selected-sweep")
+
+    def run(*args, **kwargs):
+        raise ownership.OutputLimitExceeded(stream, 16)
+
+    monkeypatch.setattr(ownership, "run_caller_owned", run)
+    with pytest.raises(module.LiveSweepFailure, match=f"{stream} exceeded"):
+        module._load_live_sweep_identifiers()
+
+
+@pytest.mark.skipif(
+    os.name != "nt" and not sys.platform.startswith("linux"),
+    reason="native Windows process handle or Linux pidfd observer required",
+)
+def test_live_sweep_timeout_settles_exited_parent_and_inherited_pipes(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import ExitStack
+    import ctypes
+    import signal
+    import time
+
+    module = _load_module(SCRIPT.parent.parent)
+    _sweep_ownership(monkeypatch)
+    monkeypatch.syspath_prepend(str(SCRIPT.parents[1] / "libs/agent-procutil/tests"))
+    import caller_owned_fixture as fixture
+
+    ready, gate, exited = (tmp_path / name for name in ("ready", "gate", "parent-exiting"))
+    child = (
+        "import os,sys,time; from pathlib import Path; "
+        "ready=Path(sys.argv[1]); pending=ready.with_suffix('.pending'); "
+        "pending.write_text(str(os.getpid())); pending.replace(ready); time.sleep(60)"
+    )
+    parent = (
+        "import os,subprocess,sys,time; from pathlib import Path; "
+        "from agent_procutil import no_window_kwargs; "
+        f"subprocess.Popen([sys.executable,'-I','-c',{child!r},{str(ready)!r}],"
+        "stdin=subprocess.DEVNULL,**no_window_kwargs()); "
+        f"gate=Path({str(gate)!r}); "
+        "\nwhile not gate.exists(): time.sleep(.01)\n"
+        f"Path({str(exited)!r}).write_text('exiting'); os._exit(0)"
+    )
+    # The parent needs only the same canonical helper for its hidden leaf launch.
+    bootstrap = (
+        f"import sys; sys.path.insert(0,{str(SCRIPT.parents[1] / 'libs/agent-procutil/src')!r}); "
+        + parent
+    )
+    with ExitStack() as cleanup, ThreadPoolExecutor(max_workers=1) as pool:
+        started = time.monotonic()
+        future = pool.submit(module._run_live_sweep, [sys.executable, "-I", "-c", bootstrap])
+        try:
+            deadline = started + 6
+            while not ready.exists():
+                if future.done():
+                    future.result()
+                assert time.monotonic() < deadline, "sweep leaf did not become ready"
+                time.sleep(.01)
+            identity = fixture.identity(int(ready.read_text()))
+            if os.name == "nt":
+                kernel = fixture.windows_kernel()
+                handle = kernel.OpenProcess(0x1000 | 0x100000 | 0x0001, False, identity["pid"])
+                if not handle:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                cleanup.callback(kernel.CloseHandle, handle)
+                assert fixture.handle_birth(kernel, handle) == identity["birth"]
+
+                def gone():
+                    status = kernel.WaitForSingleObject(handle, 0)
+                    assert status in (0, 0x102)
+                    return status == 0
+
+                def kill():
+                    if not gone() and not kernel.TerminateProcess(handle, 137):
+                        raise ctypes.WinError(ctypes.get_last_error())
+            else:
+                fd = fixture.open_pidfd(identity["pid"])
+                cleanup.callback(os.close, fd)
+                assert fixture.identity(identity["pid"]) == identity
+
+                def gone():
+                    return fixture.pidfd_exited(fd)
+
+                def kill():
+                    if not gone():
+                        fixture.signal_pidfd(fd, signal.SIGKILL)
+            cleanup.callback(kill)
+            gate.touch()
+            with pytest.raises(subprocess.TimeoutExpired):
+                future.result(timeout=15)
+            assert exited.read_text() == "exiting"
+            deadline = time.monotonic() + 2
+            while not gone() and time.monotonic() < deadline:
+                time.sleep(.01)
+            assert time.monotonic() - started < 15
+            assert gone(), "owned sweep leaf survived the capture timeout"
+        finally:
+            gate.touch()
 
 
 def test_live_sweep_fails_closed_on_empty_output_with_exit_zero(
@@ -446,7 +729,7 @@ def test_live_sweep_fails_closed_on_empty_output_with_exit_zero(
         stdout = "   \n"
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -465,7 +748,7 @@ def test_live_sweep_fails_closed_on_malformed_json_with_exit_zero(
         stdout = "not actually json"
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -493,7 +776,7 @@ def test_live_sweep_benign_absence_uses_exact_line_not_loose_substring(
         })
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -713,6 +996,125 @@ def test_git_ref_scan_reads_passive_pr_head_data_and_trusted_details(repo: Path,
             "reason": CI_REASON,
         }
     ]
+
+
+def test_git_ref_loader_preserves_literal_paths_binary_deletions_and_snapshot(repo: Path):
+    module = _load_module(repo)
+    paths = [" line\nbreak\tname.txt ", ":(glob)*", "binary.txt", "deleted.txt"]
+    for name, body in zip(paths, [f"{LEAK}\r\nsecond\n".encode(), b"", b"\xff", b"removed"]):
+        result = subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"], cwd=repo, input=body,
+            capture_output=True, check=True,
+        )
+        blob = result.stdout.decode("ascii").strip()
+        subprocess.run(
+            ["git", "-c", "core.protectNTFS=false", "update-index", "-z", "--index-info"],
+            cwd=repo, input=f"100644 {blob}\t{name}\0".encode(),
+            capture_output=True, check=True,
+        )
+    _git(repo, "commit", "-qm", "literal names")
+    loader = module._make_git_ref_loader("HEAD", [*paths, "missing.txt"])
+    _git(repo, "update-index", "--force-remove", "--", "deleted.txt")
+    _git(repo, "commit", "-qm", "delete selected path")
+    assert loader(paths[0]) == f"{LEAK}\r\nsecond\n"
+    assert loader(paths[1]) == ""
+    assert loader(paths[2]) is None
+    assert loader(paths[3]) == "removed"
+    assert loader("missing.txt") is None
+    assert module._make_git_ref_loader("HEAD", paths)("deleted.txt") is None
+
+
+def test_git_ref_loader_batches_and_deduplicates_blobs(monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(SCRIPT.parent.parent)
+    blobs = {f"{i:040x}": f"body {i}\n".encode() for i in range(65)}
+    names = {f"file-{i}": blob for i, blob in enumerate(blobs)}
+    names["duplicate"] = names["file-0"]
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if argv[1] == "ls-tree":
+            output = b"".join(
+                f"100644 blob {blob} {len(blobs[blob])}\t{name}\0".encode()
+                for name, blob in names.items()
+            )
+        else:
+            requested = kwargs["input"].decode().splitlines()
+            assert len(requested) <= 32
+            output = b"".join(
+                f"{blob} blob {len(blobs[blob])}\n".encode() + blobs[blob] + b"\n"
+                for blob in requested
+            )
+        return subprocess.CompletedProcess(argv, 0, output, b"")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    loader = module._make_git_ref_loader("HEAD", list(names))
+    assert all(loader(name) == blobs[blob].decode() for name, blob in names.items())
+    assert [args[1] for args in calls] == ["ls-tree", "cat-file", "cat-file", "cat-file"]
+
+
+@pytest.mark.parametrize("sizes,counts", [
+    ([4 * 1024 * 1024, 4 * 1024 * 1024, 1], [2, 1]),
+    ([8 * 1024 * 1024 + 1, 1], [1, 1]),
+])
+def test_git_ref_loader_bounds_batch_bytes(monkeypatch: pytest.MonkeyPatch, sizes, counts):
+    module = _load_module(SCRIPT.parent.parent)
+    blobs = {f"{i:040x}": b"x" * size for i, size in enumerate(sizes)}
+    observed = []
+
+    def run(argv, **kwargs):
+        if argv[1] == "ls-tree":
+            output = b"".join(
+                f"100644 blob {blob} {len(body)}\tfile-{i}\0".encode()
+                for i, (blob, body) in enumerate(blobs.items())
+            )
+        else:
+            requested = kwargs["input"].decode().splitlines()
+            observed.append(len(requested))
+            output = b"".join(
+                f"{blob} blob {len(blobs[blob])}\n".encode() + blobs[blob] + b"\n"
+                for blob in requested
+            )
+        return subprocess.CompletedProcess(argv, 0, output, b"")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    loader = module._make_git_ref_loader("HEAD", [f"file-{i}" for i in range(len(sizes))])
+    assert [len(loader(f"file-{i}")) for i in range(len(sizes))] == sizes
+    assert observed == counts
+
+
+@pytest.mark.parametrize("response", [
+    b"", b"a" * 40 + b" missing\n",
+    b"a" * 40 + b" tree 3\nabc\n",
+    b"b" * 40 + b" blob 3\nabc\n",
+    b"a" * 40 + b" blob 4\nabc\n",
+    b"a" * 40 + b" blob 3\nab",
+    b"a" * 40 + b" blob 3\nabc!",
+    b"a" * 40 + b" blob 3\nabc\nextra",
+])
+def test_git_ref_loader_refuses_incomplete_or_malformed_batches(
+    monkeypatch: pytest.MonkeyPatch, response: bytes,
+):
+    module = _load_module(SCRIPT.parent.parent)
+
+    def run(argv, **kwargs):
+        output = b"100644 blob " + b"a" * 40 + b" 3\tfile.txt\0" if argv[1] == "ls-tree" else response
+        return subprocess.CompletedProcess(argv, 0, output, b"")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    with pytest.raises(ValueError, match="identifier scan blob response"):
+        module._make_git_ref_loader("HEAD", ["file.txt"])
+
+
+def test_git_ref_loader_propagates_git_failure(monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(SCRIPT.parent.parent)
+
+    def fail(argv, **kwargs):
+        raise subprocess.CalledProcessError(1, argv)
+
+    monkeypatch.setattr(module.subprocess, "run", fail)
+    with pytest.raises(subprocess.CalledProcessError):
+        module._make_git_ref_loader("HEAD", ["file.txt"])
 
 
 def test_ci_mode_stdout_is_count_only(repo: Path):

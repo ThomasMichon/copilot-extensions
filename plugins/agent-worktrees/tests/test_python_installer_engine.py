@@ -7,10 +7,13 @@ import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -55,7 +58,7 @@ def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine, m
 
     monkeypatch.setattr(engine, "run_owned", fail)
     with pytest.raises(subprocess.CalledProcessError) as caught:
-        engine._child(["uv"], inputs=None, descriptor=0, timeout=1)
+        engine._child(["uv"], inputs=SimpleNamespace(wheel_inputs=None), descriptor=0, timeout=1)
     assert caught.value is failure
     stderr.flush()
     assert b"\\u2502 build failed" in stream.getvalue()
@@ -119,7 +122,7 @@ def test_child_timeout_surfaces_captured_backend_diagnostic(engine, monkeypatch,
 
     monkeypatch.setattr(engine, "run_owned", fail)
     with pytest.raises(subprocess.TimeoutExpired) as caught:
-        engine._child(["uv"], inputs=None, descriptor=0, timeout=1)
+        engine._child(["uv"], inputs=SimpleNamespace(wheel_inputs=None), descriptor=0, timeout=1)
     assert caught.value is failure
     diagnostic = capsys.readouterr().err
     assert "building example" in diagnostic and "backend stalled" in diagnostic
@@ -136,7 +139,7 @@ def test_child_preserves_canonical_transaction_environment_and_cwd(engine, monke
 
     monkeypatch.setattr(engine, "run_owned", run)
     engine._child(
-        [sys.executable], inputs=None, descriptor=0, timeout=1,
+        [sys.executable], inputs=SimpleNamespace(wheel_inputs=None), descriptor=0, timeout=1,
         environment=environment, cwd=tmp_path,
     )
 
@@ -396,23 +399,191 @@ def procutil(engine):
     return engine._procutil(engine.FrozenInputs(package, (package,), "unused"))
 
 
-def test_owned_child_captures_both_streams_and_surfaces_failure(engine, procutil, tmp_path):
+@pytest.mark.parametrize("progress", [False, True])
+def test_owned_child_captures_both_streams_and_surfaces_failure(engine, procutil, tmp_path, progress):
+    observed = []
+    options = {"on_output": lambda name, data: observed.append((name, data))} if progress else {}
     with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
         result = engine.run_owned(
             [sys.executable, "-c", "import sys;print('out'*20000);print('err'*20000,file=sys.stderr)"],
             cwd=tmp_path, env=dict(os.environ), timeout=10,
             procutil=procutil, construction_fd=descriptor,
+            **options,
         )
         assert result.stdout.strip() == "out" * 20000
         assert result.stderr.strip() == "err" * 20000
+        if progress:
+            assert {name for name, _data in observed} == {"stdout", "stderr"}
         with pytest.raises(subprocess.CalledProcessError) as failure:
             engine.run_owned(
                 [sys.executable, "-c", "import sys;print('diagnostic',file=sys.stderr);sys.exit(7)"],
                 cwd=tmp_path, env=dict(os.environ), timeout=10,
                 procutil=procutil, construction_fd=descriptor,
+                **options,
             )
         assert failure.value.returncode == 7
         assert "diagnostic" in failure.value.stderr
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_productive_owned_child_renews_timeout_and_relays_before_completion(
+    engine, procutil, tmp_path, retained,
+):
+    observed = []
+    native = tmp_path / "native-output"
+    first_native = []
+    stop = threading.Event()
+
+    def observe_native():
+        while not stop.wait(.02):
+            if native.stat().st_size:
+                first_native.append(time.monotonic())
+                return
+
+    engine.runtime.slot(tmp_path, "1.0")
+    with native.open("wb") as stream, engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+        watcher = threading.Thread(target=observe_native)
+        watcher.start()
+        started = time.monotonic()
+        try:
+            result = engine.run_owned(
+                [sys.executable, "-c",
+                 "import sys,time\n"
+                 "for index in range(20):\n"
+                 " stream=sys.stdout if index%2==0 else sys.stderr\n"
+                 " stream.write(f'progress{index:02d} ');stream.flush();time.sleep(.25)\n"],
+                cwd=tmp_path, env=dict(os.environ), timeout=2,
+                procutil=procutil, construction_fd=descriptor,
+                on_output=lambda name, data: observed.append((time.monotonic(), name, data)),
+                output_fds={name: stream.fileno() for name in ("stdout", "stderr")},
+                **({
+                    "runtime_root": tmp_path, "runtime_version": "1.0",
+                    "runtime_path": Path(engine.runtime.__file__),
+                } if retained else {}),
+            )
+        finally:
+            stop.set()
+            watcher.join(timeout=5)
+            assert not watcher.is_alive()
+        finished = time.monotonic()
+        assert result.returncode == 0 and finished - started > 4
+        assert "progress18" in result.stdout and "progress19" in result.stderr
+        assert first_native and first_native[0] < finished - 3
+        assert observed[0][0] >= started + 4
+        assert all(
+            f"progress{index:02d}".encode() in b"".join(data for _at, _name, data in observed)
+            for index in range(20)
+        )
+    with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
+        pass
+
+
+@pytest.mark.parametrize("condition", ["progress", "uneven", "silent"])
+def test_source_phase_initial_retention_progress_crosses_real_quiet_window(
+    engine, procutil, tmp_path, condition,
+):
+    plugin = _package(tmp_path / "source", "example")
+    for index in range(16):
+        (plugin / f"input{index}.py").write_text(f"VALUE = {index}\n", encoding="utf-8")
+    before = engine.runtime.fingerprint_source(engine._source_files((plugin,)))
+    uv = shutil.which("uv")
+    assert uv, "the initial retention contract requires native UV"
+    marker = tmp_path / "retention-writer"
+    scripts = Path(engine.__file__).parent
+    actor = (
+        "import json,os,pathlib,sys,time\n"
+        f"sys.path.insert(0,{str(scripts)!r})\n"
+        f"sys.path.insert(1,{str(Path(engine.runtime.__file__).parent)!r})\n"
+        "import installer_engine as engine\n"
+        "policy=sys.modules[engine.retain_uv_install.__module__]\n"
+        f"plugin=pathlib.Path({str(plugin)!r})\n"
+        f"pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n"
+        "packages=engine._package_roots(plugin)\n"
+        "inputs=engine.FrozenInputs(plugin,packages,engine.runtime.fingerprint_source(engine._source_files(packages)))\n"
+        "prepare=policy.prepare_uv_install\n"
+        "def measured_prepare(*args,**kwargs):\n"
+        f" time.sleep({1 if condition == 'silent' else 0})\n"
+        " return prepare(*args,**kwargs)\n"
+        "policy.prepare_uv_install=measured_prepare\n"
+        "copy=policy._copy_retained_file\n"
+        "copy_count=0\n"
+        "def measured_copy(*args,**kwargs):\n"
+        " global copy_count\n"
+        f" if {condition == 'silent'}:\n"
+        "  print('retention-copy-entered',file=sys.stderr,flush=True)\n"
+        f" delays={(1.0, .5, 2.8) if condition == 'uneven' else ()!r}\n"
+        f" delay=delays[copy_count] if copy_count<len(delays) else {20 if condition == 'silent' else .1 if condition == 'uneven' else .35}\n"
+        " copy_count+=1\n"
+        " time.sleep(delay)\n"
+        " return copy(*args,**kwargs)\n"
+        "policy._copy_retained_file=measured_copy\n"
+        f"uv=pathlib.Path({uv!r})\n"
+        "with engine._retained_inputs(inputs,uv,pathlib.Path(sys.executable),refresh=False,timeout=3) as retained:\n"
+        " print(json.dumps({'hash':retained.retained_hash}))\n"
+    )
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("UV_", "PIP_")) and key not in {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"}
+    }
+    started = time.monotonic()
+    with (tmp_path / "native-output").open("wb") as stream:
+        options = dict(
+            cwd=tmp_path, env=environment, timeout=3, procutil=procutil, construction_fd=None,
+            output_fds={"stderr": stream.fileno()},
+        )
+        if condition != "silent":
+            result = engine.run_owned([sys.executable, "-I", "-B", "-c", actor], **options)
+            assert time.monotonic() - started > 5
+            assert json.loads(result.stdout) == {"hash": before}
+            assert "Source wheel progress: phase=retention" in result.stderr
+            assert "phase=retention state=completed" in result.stderr
+        else:
+            with pytest.raises(subprocess.TimeoutExpired) as failure:
+                engine.run_owned([sys.executable, "-I", "-B", "-c", actor], **options)
+            assert time.monotonic() - started < 13
+            assert "phase=retention state=starting" in failure.value.stderr
+            preparation, entered, stalled = failure.value.stderr.partition("retention-copy-entered\n")
+            assert entered and "Source wheel progress: phase=retention" in preparation
+            assert "Source wheel progress: phase=retention" not in stalled
+            assert "phase=retention state=completed" not in failure.value.stderr
+    assert marker.is_file()
+    _assert_writers_dead(engine, [int(marker.read_text())])
+    assert engine.runtime.fingerprint_source(engine._source_files((plugin,))) == before
+
+
+def test_source_phase_and_cache_keep_productive_child_progress(
+    engine, procutil, tmp_path, monkeypatch, capsys,
+):
+    import installer_source_build as builds
+
+    monkeypatch.setattr(engine, "_procutil", lambda _inputs: procutil)
+    elapsed = {}
+    with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+        with builds._source_phase("offline", 2, elapsed) as progress:
+            def build(directory):
+                wheel = directory / "example-1.0-py3-none-any.whl"
+                engine._child(
+                    [sys.executable, "-c",
+                     "import pathlib,sys,time\n"
+                     "for index in range(16):\n"
+                     " sys.stdout.write('work ');sys.stdout.flush();time.sleep(.25)\n"
+                     "pathlib.Path(sys.argv[1]).write_bytes(b'validated wheel')", str(wheel)],
+                    inputs=SimpleNamespace(wheel_inputs=None), descriptor=descriptor, timeout=2,
+                    on_progress=progress.renew,
+                )
+                return wheel
+
+            def validate(path):
+                assert path.read_bytes() == b"validated wheel"
+
+            selected = builds.cached_source_wheel(
+                tmp_path, b"source-progress", None, build=build, validate=validate,
+                max_archive_bytes=1024, deadline=progress.deadline,
+                progress_deadline=lambda: progress.deadline,
+            )
+    assert selected.is_file() and elapsed["offline"] > 3
+    diagnostic = capsys.readouterr().err
+    assert "work work" in diagnostic and "phase=offline state=completed" in diagnostic
 
 
 def _writer_tree(marker: Path) -> str:
@@ -437,20 +608,47 @@ def _assert_writers_dead(engine, pids: list[int]):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         live = [pid for pid in pids if engine.runtime._pid_alive(pid)]
-        if os.name != "nt":
-            live = [
-                pid for pid in live
-                if not (Path(f"/proc/{pid}/stat").is_file()
-                        and Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1][0] == "Z")
-            ]
+        if sys.platform.startswith("linux"):
+            observed = []
+            for pid in live:
+                try:
+                    state = Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1][0]
+                except FileNotFoundError:
+                    continue
+                if state != "Z":
+                    observed.append(pid)
+            live = observed
         if not live:
             return
         time.sleep(0.02)
     pytest.fail(f"installer writers survived ownership settlement: {live}")
 
 
-def test_owned_child_timeout_reaps_descendants_before_lease_release(engine, procutil, tmp_path):
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux proc observation")
+@pytest.mark.parametrize("error", [FileNotFoundError, PermissionError])
+def test_owned_child_observation_handles_exit_but_not_unreadable_state(monkeypatch, error):
+    subject = SimpleNamespace(runtime=SimpleNamespace(_pid_alive=lambda pid: True))
+    stat_path = Path("/proc/12345/stat")
+    original_is_file, original_read_text = Path.is_file, Path.read_text
+
+    def read_text(path, *args, **kwargs):
+        if path == stat_path:
+            raise error("native process observation unavailable")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", lambda path: path == stat_path or original_is_file(path))
+    monkeypatch.setattr(Path, "read_text", read_text)
+    if error is FileNotFoundError:
+        _assert_writers_dead(subject, [12345])
+    else:
+        with pytest.raises(PermissionError):
+            _assert_writers_dead(subject, [12345])
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_owned_child_timeout_reaps_descendants_before_lease_release(engine, procutil, tmp_path, retained):
     marker = tmp_path / "writers"
+    engine.runtime.slot(tmp_path, "1.0")
     with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
         with pytest.raises(subprocess.TimeoutExpired) as failure:
             engine.run_owned(
@@ -460,12 +658,83 @@ def test_owned_child_timeout_reaps_descendants_before_lease_release(engine, proc
                  + _writer_tree(marker)],
                 cwd=tmp_path, env=dict(os.environ), timeout=2,
                 procutil=procutil, construction_fd=descriptor,
+                on_output=lambda _name, _data: None,
+                **({
+                    "runtime_root": tmp_path, "runtime_version": "1.0",
+                    "runtime_path": Path(engine.runtime.__file__),
+                } if retained else {}),
             )
         _assert_writers_dead(engine, _wait_for_writer(marker))
         assert "backend stdout" in failure.value.stdout
         assert "backend stderr" in failure.value.stderr
     with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
         pass
+
+
+def test_owned_child_output_callback_failure_settles_before_releasing_custody(
+    engine, procutil, tmp_path, caplog,
+):
+    marker = tmp_path / "writers"
+    failure = OSError("progress sink closed")
+    calls = []
+
+    def failed_output(name, data):
+        _assert_writers_dead(engine, _wait_for_writer(marker))
+        calls.append(name)
+        raise failure
+
+    program = _writer_tree(marker).replace(
+        "time.sleep(60)\n", "sys.stdout.write('progress'*2000);sys.stdout.flush();time.sleep(60)\n",
+    )
+    with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+        with pytest.raises(OSError) as caught:
+            engine.run_owned(
+                [sys.executable, "-c", program],
+                cwd=tmp_path, env=dict(os.environ), timeout=10,
+                procutil=procutil, construction_fd=descriptor, on_output=failed_output,
+            )
+        assert caught.value is failure and calls == ["stdout"]
+        _assert_writers_dead(engine, _wait_for_writer(marker))
+        assert "Installer teardown is unsettled" not in caplog.text
+    with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
+        pass
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_owned_child_undrained_sink_preserves_supervision_and_settlement(
+    engine, procutil, tmp_path, retained,
+):
+    marker = tmp_path / "writers"
+    program = _writer_tree(marker).replace(
+        "time.sleep(60)\n",
+        "while True:\n os.write(1,b'output'*4096);os.write(2,b'diagnostic'*4096)\n",
+    )
+    engine.runtime.slot(tmp_path, "1.0")
+    reader, writer = os.pipe()
+    try:
+        started = time.monotonic()
+        with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+            with pytest.raises(subprocess.TimeoutExpired) as failure:
+                engine.run_owned(
+                    [sys.executable, "-c", program],
+                    # The fixture creates a native grandchild before emitting output.
+                    cwd=tmp_path, env=dict(os.environ), timeout=5,
+                    procutil=procutil, construction_fd=descriptor,
+                    output_fds={name: writer for name in ("stdout", "stderr")},
+                    **({
+                        "runtime_root": tmp_path, "runtime_version": "1.0",
+                        "runtime_path": Path(engine.runtime.__file__),
+                    } if retained else {}),
+                )
+            assert "output" in failure.value.stdout
+            assert "diagnostic" in failure.value.stderr
+            _assert_writers_dead(engine, _wait_for_writer(marker))
+        assert time.monotonic() - started < 90
+        with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
+            pass
+    finally:
+        os.close(writer)
+        os.close(reader)
 
 
 def test_teardown_retry_retains_first_failure_even_when_wait_is_interrupted(
@@ -648,6 +917,244 @@ def profile_inputs(build_inputs):
             'missing=["unavailable-profile-dependency==1.0"]\n',
         )
     return plugin, uv
+
+
+@pytest.fixture
+def role_inputs(build_inputs):
+    plugin, uv = build_inputs
+    for directory, name, dependencies, sources in (
+        ("host", "example-host", 'dependencies=["example-host-leaf"]\n',
+         '[tool.uv.sources]\nexample-host-leaf={path="../host-leaf",editable=true}\n'),
+        ("host-leaf", "example-host-leaf", "", ""),
+    ):
+        package = _package(plugin.parent / directory, name)
+        (package / "pyproject.toml").write_text(
+            f'[project]\nname="{name}"\nversion="1.0.0"\n{dependencies}'
+            '[build-system]\nrequires=[]\nbuild-backend="backend"\nbackend-path=["."]\n'
+            + sources, encoding="utf-8",
+        )
+        (package / "backend.py").write_text(_WHEEL_BACKEND, encoding="utf-8")
+    with (plugin / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write(
+            'example-host={path="../host",editable=true}\n'
+            '[project.optional-dependencies]\nclient=[]\nservice=["example-host"]\n',
+        )
+    return plugin, uv
+
+
+@pytest.mark.parametrize("selection", [
+    [], "example", ("../example",), ("EXAMPLE", "example"), (False,), ("unknown",),
+])
+def test_local_package_selection_refuses_before_runtime_writes(
+    engine, tmp_path, build_inputs, selection,
+):
+    plugin, uv = build_inputs
+    root = tmp_path / "runtime"
+    with pytest.raises(ValueError, match="selection"):
+        with engine.numbered_candidate(
+            root, "1.0.0", plugin=plugin, uv=uv, base_python=Path(sys.executable),
+            health_module="example_module", local_packages=selection,
+        ):
+            pytest.fail("invalid local package selection cannot admit a candidate")
+    assert not root.exists()
+
+
+def test_local_package_profile_is_normalized_and_keeps_full_source_identity(
+    engine, role_inputs, tmp_path,
+):
+    plugin, _uv = role_inputs
+    packages = engine._package_roots(plugin)
+    selection = engine._selected_local_packages(
+        plugin, packages, ("EXAMPLE_Dependency", "AGENT.procutil"),
+    )
+    assert selection == ("agent-procutil", "example", "example-dependency")
+    files = engine._source_files(packages)
+    before = engine._construction_hash(files, ("client",), selection)
+    assert before != engine._construction_hash(files, ("client",))
+    host = plugin.parent / "host" / "src" / "module.py"
+    host.write_text("VALUE=2\n", encoding="utf-8")
+    assert engine._construction_hash(files, ("client",), selection) != before
+    assert engine._selected_local_packages(plugin, packages, ()) == ("example",)
+    root = tmp_path / "runtime"
+    with pytest.raises(ValueError, match="immutable numbered"):
+        with engine.dev_candidate(
+            root, owner="role-test", plugin=plugin, uv=tmp_path / "unused",
+            base_python=Path(sys.executable), health_module="example_module", local_packages=(),
+        ):
+            pytest.fail("mutable development must not accept role selection")
+    assert not root.exists()
+
+
+@pytest.mark.timeout(180)
+def test_selected_local_role_uses_one_retained_graph_and_exact_installed_closure(
+    engine, tmp_path, role_inputs, monkeypatch,
+):
+    from contextlib import contextmanager
+
+    plugin, uv = role_inputs
+    root = tmp_path / "runtime"
+    arguments = dict(
+        plugin=plugin, uv=uv, base_python=Path(sys.executable), health_module="example_module",
+    )
+    client = ("agent-procutil", "example-dependency")
+    retain = engine.retain_uv_install
+    transactions = []
+
+    @contextmanager
+    def trace(*args, **kwargs):
+        with retain(*args, **kwargs) as transaction:
+            transactions.append(transaction)
+            assert set(transaction.sources) == set(engine._package_roots(plugin))
+            constraints = Path(transaction.argv[transaction.argv.index("--constraint") + 1])
+            assert constraints.read_text(encoding="utf-8") == (
+                "example-host<0,>=0\nexample-host-leaf<0,>=0\n"
+            )
+            for name in ("host", "host-leaf"):
+                assert str(transaction.sources[plugin.parent / name]) not in transaction.argv
+                assert str(transaction.sources[plugin.parent / name] / "pyproject.toml") not in transaction.argv
+            yield transaction
+
+    monkeypatch.setattr(engine, "retain_uv_install", trace)
+    with engine.numbered_candidate(
+        root, "1.0.0+client", extras=("client",), local_packages=client, **arguments,
+    ) as built:
+        assert not built.reused
+        assert built.local_packages == ("agent-procutil", "example", "example-dependency")
+        assert len(transactions) == 1
+        evidence = built.slot / ".runtime-input-origins.json"
+        receipt = json.loads(evidence.read_text(encoding="utf-8"))
+        assert set(receipt["packages"]) == set(built.local_packages)
+        assert receipt["local_packages"] == list(built.local_packages)
+    assert not built.frozen_plugin.exists()
+    assert all(not path.exists() for path in transactions[0].sources.values())
+
+    def refuse_construction(*args, **kwargs):
+        pytest.fail("healthy role reuse cannot construct")
+
+    with monkeypatch.context() as reuse:
+        reuse.setattr(engine.runtime, "construction_lease", refuse_construction)
+        with engine.numbered_candidate(
+            root, "1.0.0+client", extras=("client",), local_packages=tuple(reversed(client)),
+            **{**arguments, "uv": tmp_path / "absent", "base_python": tmp_path / "absent-python"},
+        ) as existing:
+            assert existing.reused and existing.local_packages == built.local_packages
+        for selection in (None, (), (*client, "example-host")):
+            with pytest.raises(RuntimeError, match="different content"):
+                with engine.numbered_candidate(
+                    root, "1.0.0+client", extras=("client",), local_packages=selection, **arguments,
+                ):
+                    pytest.fail("another local closure cannot reuse the selected role")
+        receipt["local_packages"] = []
+        evidence.write_text(json.dumps(receipt), encoding="utf-8")
+        with pytest.raises(engine.HealthRepairRequired, match="selected local packages"):
+            with engine.numbered_candidate(
+                root, "1.0.0+client", extras=("client",), local_packages=client, **arguments,
+            ):
+                pytest.fail("changed local closure evidence must refuse reuse")
+
+    monkeypatch.setattr(engine, "retain_uv_install", retain)
+    service = (*client, "example-host", "example-host-leaf")
+    with engine.numbered_candidate(
+        root, "1.0.0+service", extras=("service",), local_packages=service, **arguments,
+    ) as host:
+        assert not host.reused
+        assert set(host.local_packages) == {
+            "example", "agent-procutil", "example-dependency", "example-host", "example-host-leaf",
+        }
+        assert set(json.loads((host.slot / ".runtime-input-origins.json").read_text())["packages"]) == (
+            set(host.local_packages)
+        )
+        assert engine.runtime.is_complete(root, host.slot.name, expect_hash=host.payload_hash)
+    assert not (root / "current-version").exists()
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.parametrize("selection", [
+    ("agent-procutil", "example-dependency"),
+    ("agent-procutil", "example-dependency", "example-host"),
+])
+def test_incomplete_local_role_cannot_fall_back_or_complete(
+    engine, role_inputs, tmp_path, monkeypatch, selection,
+):
+    plugin, uv = role_inputs
+    monkeypatch.setenv("UV_PRERELEASE", "allow")
+    for directory in ("host", "host-leaf"):
+        manifest = plugin.parent / directory / "pyproject.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace('version="1.0.0"', 'version="0.0.dev1"'),
+            encoding="utf-8",
+        )
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "current-version").write_text("previous\n", encoding="utf-8")
+    with pytest.raises(subprocess.CalledProcessError):
+        with engine.numbered_candidate(
+            root, "1.0.0+service", plugin=plugin, uv=uv, base_python=Path(sys.executable),
+            health_module="example_module", extras=("service",), local_packages=selection,
+        ):
+            pytest.fail("missing direct or transitive local dependency cannot construct")
+    assert not engine.runtime.is_complete(root, "1.0.0+service")
+    assert (root / "current-version").read_text(encoding="utf-8") == "previous\n"
+
+
+@pytest.mark.timeout(180)
+def test_deep_local_role_keeps_generated_constraints_out_of_source_ancestry(
+    engine, tmp_path, role_inputs,
+):
+    plugin, uv = role_inputs
+    deep = tmp_path / ("caller-" + "x" * 80) / "workspace" / "repo"
+    deep.parent.mkdir(parents=True)
+    shutil.move(str(plugin.parent), str(deep))
+    plugin = deep / plugin.name
+    packages = engine._package_roots(plugin)
+    files = engine._source_files(packages)
+    before = engine.runtime.fingerprint_source(files)
+    inputs = engine.FrozenInputs(plugin, packages, before)
+    with engine._retained_inputs(inputs, uv, Path(sys.executable), refresh=False) as legacy:
+        baseline_depth = len(legacy.plugin.parts)
+    with engine.numbered_candidate(
+        tmp_path / "runtime", "1.0.0+client", plugin=plugin, uv=uv,
+        base_python=Path(sys.executable), health_module="example_module",
+        extras=("client",), local_packages=("agent-procutil", "example-dependency"),
+    ) as candidate:
+        assert not candidate.reused
+        assert len(candidate.frozen_plugin.parts) == baseline_depth
+        assert len(str(candidate.frozen_plugin)) < 260
+        assert engine.runtime.is_complete(
+            tmp_path / "runtime", candidate.slot.name, expect_hash=candidate.payload_hash,
+        )
+    assert engine._source_files(packages) == files
+    assert engine.runtime.fingerprint_source(files) == before
+
+
+@pytest.mark.timeout(180)
+def test_role_health_refuses_an_excluded_installed_distribution(
+    engine, role_inputs, tmp_path, monkeypatch,
+):
+    plugin, uv = role_inputs
+    construct = engine._construct
+
+    def extra_distribution(*args, **kwargs):
+        python = construct(*args, **kwargs)
+        slot = args[1]
+        metadata = next(slot.rglob("example-1.0.0.dist-info")).with_name("example_host-1.0.0.dist-info")
+        metadata.mkdir()
+        (metadata / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: example-host\nVersion: 1.0.0\n", encoding="utf-8",
+        )
+        return python
+
+    monkeypatch.setattr(engine, "_construct", extra_distribution)
+    root = tmp_path / "runtime"
+    with pytest.raises(subprocess.CalledProcessError) as caught:
+        with engine.numbered_candidate(
+            root, "1.0.0+client", plugin=plugin, uv=uv, base_python=Path(sys.executable),
+            health_module="example_module", extras=("client",),
+            local_packages=("agent-procutil", "example-dependency"),
+        ):
+            pytest.fail("excluded installed dependencies cannot pass role health")
+    assert "excluded local package is installed: example-host" in caught.value.stderr
+    assert not engine.runtime.is_complete(root, "1.0.0+client")
 
 
 @pytest.mark.timeout(120)
@@ -1060,7 +1567,9 @@ def test_completed_runtime_launch_failure_requests_distinct_repair(
         slot = candidate.slot
     engine.runtime.activate(root, "1.0.0", link_free=True)
     if failure == "unexecutable":
-        engine.runtime.slot_python(root, "1.0.0").write_bytes(b"not an executable")
+        python = engine.runtime.slot_python(root, "1.0.0")
+        python.chmod(python.stat().st_mode | stat.S_IWRITE)
+        python.write_bytes(b"not an executable")
     else:
         next(slot.glob("**/site-packages/example_module.py")).write_text(
             "import time\ntime.sleep(60)\n", encoding="utf-8",
@@ -1119,7 +1628,10 @@ def test_unsettled_job_teardown_keeps_frozen_inputs_and_construction_custody(
             root=root, frozen=inputs.plugin, marker=marker, observations=observations,
             writer=_writer_tree(marker),
         )
-        return SimpleNamespace(__file__=injected, no_window_kwargs=owned.no_window_kwargs)
+        return SimpleNamespace(
+            __file__=injected, no_window_kwargs=owned.no_window_kwargs,
+            __name__=owned.__name__,
+        )
 
     monkeypatch.setattr(engine, "_procutil", instrument)
     with pytest.raises(RuntimeError, match="guardian did not confirm settlement"):

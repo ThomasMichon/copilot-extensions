@@ -58,7 +58,14 @@ class OrphanageScreen(ModalScreen[None]):
 
     def _body(self) -> Text:
         t = Text()
-        t.append("Local claims-orphanage\n", style=C_HEADER)
+        t.append("Local claims-orphanage · read-only cached inspection\n", style=C_HEADER)
+        t.append(
+            "  Scope: this local claims journal, not the whole fleet.\n"
+            "  Freshness: last loaded snapshot; resource liveness is not verified.\n"
+            "  These are retained obligations, not ORPHAN worktree states or failed machines.\n"
+            "  Recorded handoff/custody remains in force until explicitly settled.\n",
+            style=C_DIM,
+        )
         if not self._orphans:
             t.append("  (none)\n", style=C_DIM)
             return t
@@ -87,7 +94,8 @@ class OrphanageScreen(ModalScreen[None]):
             if note:
                 t.append(f"    {note}\n", style=C_DIM)
         t.append(
-            "\n  `agent-worktrees claims orphans` / `claims cleanup` to act.\n",
+            "\n  Inspect with `agent-worktrees claims orphans` before any explicit cleanup.\n"
+            "  Unreachable or unknown resources are not confirmed stopped or absent.\n",
             style=C_DIM,
         )
         return t

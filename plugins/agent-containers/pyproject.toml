@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-repository-policy",
     "pyyaml>=6.0.3",
     "agent-ssh-manager",
     "agent-credential-relay",
@@ -28,6 +29,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agent-repository-policy = { path = "../../libs/repository-policy", editable = true }
 agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }
 # Shared OpenSSH process/config primitives used by the trusted-fleet
 # transport. This is a `uv`-editable canonical reference
@@ -98,6 +100,7 @@ provider-exec = [
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "setuptools>=83.0.0",
 ]
 
 [tool.ruff.lint]

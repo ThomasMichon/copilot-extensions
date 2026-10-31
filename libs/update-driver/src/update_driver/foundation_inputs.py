@@ -9,16 +9,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PACKAGES = {
-    "update-driver": ("agent-update-driver", {"agent-procutil", "agent-single-instance-lease"}),
+    "update-driver": ("agent-update-driver", {
+        "agent-procutil", "agent-single-instance-lease", "agent-zdd; sys_platform == 'win32'",
+    }),
     "agent-procutil": ("agent-procutil", set()),
     "single-instance-lease": ("agent-single-instance-lease", set()),
+    "zdd": ("agent-zdd", set()),
 }
+OPTIONAL_SOURCES = {"agent-procutil": {"agent-zdd"}}
 SUPPORT = (
     "installer-engine.ps1", "installer-engine.sh",
     "installer_engine.py", "installer_engine_process.py", "installer_dependency_policy.py",
     "installer_dependency_config.py", "runtime_launcher.py", "versioned_runtime.py",
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_source.py", "versioned_runtime_publication.py",
+    "installer_source_build.py", "installer_source_wheel_cache.py",
 )
 GENERATED = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist",
@@ -65,7 +70,8 @@ def inspect(plugin: Path) -> FoundationInputs:
         if project.get("name") != name or set(project.get("dependencies", [])) != dependencies:
             raise FoundationInputError("foundation runtime dependency closure differs from its fixed recipe")
         sources = data.get("tool", {}).get("uv", {}).get("sources", {})
-        if set(sources) != dependencies:
+        mandatory = {dependency.split(";", 1)[0].strip() for dependency in dependencies}
+        if not mandatory <= set(sources) <= mandatory | OPTIONAL_SOURCES.get(directory, set()):
             raise FoundationInputError("foundation requires exactly its declared local dependency sources")
         for dependency, source in sources.items():
             target = next(key for key, value in PACKAGES.items() if value[0] == dependency)

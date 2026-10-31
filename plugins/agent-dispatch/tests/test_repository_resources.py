@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 
@@ -167,6 +168,71 @@ def test_one_invocation_uses_one_root_snapshot(tmp_path, monkeypatch):
     assert argv == ["python", str(first / "worker.py")]
     assert cwd == str(first)
     assert len(calls) == 1
+
+
+def test_relative_executable_binds_to_the_explicit_directory(tmp_path, monkeypatch):
+    directory = tmp_path / "policy cwd"
+    directory.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        resources, "run_agent_worktrees_capture",
+        lambda *a, **k: pytest.fail("plain execution context probed registry"),
+    )
+    argv, cwd = resources.resolve_execution_resources(
+        [f".{os.sep}worker", "--mode"], str(directory), bind_relative_executable=True,
+    )
+    assert argv == [str(directory / "worker"), "--mode"] and cwd == str(directory)
+    assert resources.resolve_execution_resources(["python", "worker.py"], str(directory))[0] == [
+        "python", "worker.py",
+    ]
+    assert resources.resolve_execution_resources([f".{os.sep}worker"], None) == (
+        [f".{os.sep}worker"], None,
+    )
+
+
+def test_relative_executable_keeps_parent_components_for_native_resolution(tmp_path):
+    argv, cwd = resources.resolve_execution_resources(
+        [os.path.join("nested", "..", "worker")], str(tmp_path), bind_relative_executable=True,
+    )
+    assert argv == [str(tmp_path / "nested" / ".." / "worker")] and cwd == str(tmp_path)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink/parent traversal semantics")
+def test_relative_executable_preserves_symlink_parent_traversal(tmp_path):
+    directory = tmp_path / "policy"
+    other = tmp_path / "other"
+    directory.mkdir()
+    (other / "nested").mkdir(parents=True)
+    expected = other / "worker"
+    expected.write_text("#!/bin/sh\nprintf intended", encoding="utf-8")
+    (directory / "worker").write_text("#!/bin/sh\nprintf wrong", encoding="utf-8")
+    try:
+        (directory / "link").symlink_to(other / "nested", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
+    argv, cwd = resources.resolve_execution_resources(
+        [os.path.join("link", "..", "worker")], str(directory), bind_relative_executable=True,
+    )
+    assert os.path.samefile(argv[0], expected)
+    if os.name != "nt":
+        expected.chmod(0o700)
+        assert subprocess.check_output(argv, cwd=cwd, text=True) == "intended"
+
+
+def test_relative_executable_keeps_named_cwd_admission(tmp_path, monkeypatch):
+    calls = _registry(monkeypatch, tmp_path)
+    argv, cwd = resources.resolve_execution_resources(
+        [f".{os.sep}worker"], "repo:tools:.", bind_relative_executable=True,
+    )
+    assert argv == [str(tmp_path / "worker")] and cwd == str(tmp_path)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+def test_relative_executable_cannot_normalize_away_read_only_admission(tmp_path, monkeypatch, repo_class):
+    _registry(monkeypatch, tmp_path, repo_class=repo_class)
+    with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
+        resources.resolve_execution_resources([f".{os.sep}worker"], "repo:tools:.")
 
 
 def test_distinct_repository_lookups_share_one_bounded_budget(tmp_path, monkeypatch):
@@ -367,6 +433,31 @@ def test_script_forge_named_fields_survive_cross_repo_inheritance(tmp_path, monk
     assert result["cwd"] == str(tmp_path)
     assert result["_declared_command"] == ["repo:tools:backlog.py"]
     assert result["_declared_cwd"] == "repo:tools:."
+
+
+@pytest.mark.parametrize("known_root", [False, True])
+@pytest.mark.parametrize("absolute_cwd", [False, True])
+def test_script_forge_relative_command_keeps_declaring_root_contract(
+    tmp_path, monkeypatch, known_root, absolute_cwd,
+):
+    from agent_dispatch.script_provider import validate_script_forge_config
+
+    root, daemon = tmp_path / "declaring", tmp_path / "daemon"
+    for directory in (root, daemon):
+        (directory / "tools").mkdir(parents=True)
+        (directory / "tools" / "poller.py").write_text("print('[]')", encoding="utf-8")
+    monkeypatch.chdir(daemon)
+    forge = {
+        "command": [f".{os.sep}tools{os.sep}poller.py"],
+        "cwd": str(root) if absolute_cwd else ".",
+    }
+    if known_root:
+        result = validate_script_forge_config(forge, provider="script", repo_root=root)
+        assert result["command"] == [sys.executable, str(root / "tools" / "poller.py")]
+        assert result["cwd"] == str(root)
+    else:
+        with pytest.raises(RegistrarError, match="relative script path.*known declaring repo root"):
+            validate_script_forge_config(forge, provider="script", repo_root=None)
 
 
 def test_named_recipe_ref_keeps_nested_resource_identity(tmp_path, monkeypatch):

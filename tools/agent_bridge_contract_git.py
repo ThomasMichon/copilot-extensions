@@ -162,6 +162,7 @@ def git(*args: str) -> subprocess.CompletedProcess[str]:
         ["git", "-C", str(REPO), *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
         env=clean_git_environment(),
         timeout=_LOCAL_GIT_TIMEOUT,

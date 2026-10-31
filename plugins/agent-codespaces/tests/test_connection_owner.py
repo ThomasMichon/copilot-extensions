@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import subprocess
 import time
 import types
 
@@ -511,7 +510,7 @@ def test_ensure_owner_running_is_noop_when_already_live(store, monkeypatch):
     monkeypatch.setattr(owner, "is_owner_live", lambda now=None: True)
     spawned = {"called": False}
     monkeypatch.setattr(
-        "subprocess.Popen", lambda *a, **k: spawned.__setitem__("called", True)
+        "agent_procutil.spawn_daemon", lambda *a, **k: spawned.__setitem__("called", True)
     )
     assert owner.ensure_owner_running(types.SimpleNamespace()) is True
     assert spawned["called"] is False  # already live -- never spawns
@@ -535,7 +534,7 @@ def test_ensure_owner_running_spawns_and_waits_for_liveness(store, monkeypatch):
     def fake_is_owner_live(now=None):
         return live_after_spawn["value"]
 
-    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr("agent_procutil.spawn_daemon", fake_popen)
     monkeypatch.setattr(owner, "is_owner_live", fake_is_owner_live)
     monkeypatch.setattr(owner.time, "sleep", lambda _s: None)
     assert owner.ensure_owner_running(types.SimpleNamespace(), spawn_timeout=1.0) is True
@@ -544,20 +543,16 @@ def test_ensure_owner_running_spawns_and_waits_for_liveness(store, monkeypatch):
     # daemon rooted at HOME instead.
     assert seen_kwargs.get("cwd") == os.path.expanduser("~")
     # Launched through spawn_daemon: stdio appended to a log beside its state.
-    assert seen_kwargs["stdin"] == subprocess.DEVNULL
-    assert seen_kwargs["stdout"].name == os.path.join(
-        str(owner.OWNER_FILE.parent), "logs", "owner-stdio.log"
-    )
-    assert "agent_codespaces owner" in (
-        owner.OWNER_FILE.parent / "logs" / "owner-stdio.log"
-    ).read_text(encoding="utf-8")
+    assert seen_kwargs["log_path"] == owner.OWNER_FILE.parent / "logs" / "owner-stdio.log"
+    assert seen_kwargs["console_children"] is True
+    assert seen_kwargs["env_overrides"]["AGENT_CODESPACES_HOME"] == str(store)
 
 
 def test_ensure_owner_running_returns_false_on_spawn_failure(store, monkeypatch):
     def fake_popen(argv, **kwargs):
         raise OSError("no python found")
 
-    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr("agent_procutil.spawn_daemon", fake_popen)
     monkeypatch.setattr(owner, "is_owner_live", lambda now=None: False)
     assert owner.ensure_owner_running(types.SimpleNamespace()) is False
 
@@ -583,7 +578,7 @@ def test_owner_startup_budget(store, monkeypatch, caplog, ready_after, exit_code
         owner, "is_owner_live",
         lambda: bool(spawned) and ready_after is not None and clock[0] >= ready_after,
     )
-    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: spawned.append(child) or child)
+    monkeypatch.setattr("agent_procutil.spawn_daemon", lambda *a, **k: spawned.append(child) or child)
     kwargs = {} if timeout is None else {"spawn_timeout": timeout}
 
     assert owner.ensure_owner_running(types.SimpleNamespace(), poll=0.7, **kwargs) is expected
@@ -604,7 +599,7 @@ def test_owner_startup_accepts_winner_after_contender_exits(store, monkeypatch):
     live = iter([False, False, True])
     monkeypatch.setattr(owner, "is_owner_live", lambda: next(live))
     monkeypatch.setattr(
-        "subprocess.Popen", lambda *a, **k: types.SimpleNamespace(poll=lambda: 0),
+        "agent_procutil.spawn_daemon", lambda *a, **k: types.SimpleNamespace(poll=lambda: 0),
     )
     assert owner.ensure_owner_running(types.SimpleNamespace()) is True
 

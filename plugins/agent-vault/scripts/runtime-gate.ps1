@@ -241,8 +241,11 @@ if ($runtimePython) {
     Invoke-Runtime -Python $runtimePython
 }
 if (
-    $forwardArgs.Count -ge 2 -and $forwardArgs[0] -eq 'identity-key' -and
-    $forwardArgs[1] -eq 'setup' -and $forwardArgs -contains '--require-running'
+    $forwardArgs.Count -ge 2 -and $forwardArgs -contains '--require-running' -and
+    (
+        ($forwardArgs[0] -eq 'identity-key' -and $forwardArgs[1] -eq 'setup') -or
+        ($forwardArgs[0] -eq 'ssh-key' -and $forwardArgs[1] -in @('prepare', 'install'))
+    )
 ) {
     [Console]::Out.WriteLine(
         '{"version":1,"error":"service_unavailable","message":"Provision and start the selected vault independently before delegated setup."}'

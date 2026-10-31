@@ -1,0 +1,9 @@
+{
+  "comment": "Skip identical canonical content writes and reconcile completed files by retained chunk identity.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

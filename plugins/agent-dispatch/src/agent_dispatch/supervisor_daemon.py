@@ -32,11 +32,13 @@ See ``visions/plugins/agent-dispatch`` -- Concept *the supervisor*, Feature
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import contextlib
 import copy
 import json
 import logging
-import os
+import os as os  # Re-export the existing self-update exit injection seam.
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -48,6 +50,7 @@ from typing import Any
 
 from plugin_activation import read_json_object, write_json_object_atomic
 
+from .action_controls import action_inhibited
 from .companion import (
     CompanionController,
     CompanionError,
@@ -1953,6 +1956,10 @@ class SupervisorDaemon(BoundedReconciliation):
             return False
         if target is None:
             return False
+        if action_inhibited(
+            "supervisor-self-update", logger=log, root=root, automatic=True,
+        ):
+            return False
         before_spawn = self._recheck_governance("pre-mutation:self-update")
         if before_spawn is not None and before_spawn.get("status") != "ready":
             log.warning(
@@ -1996,6 +2003,10 @@ class SupervisorDaemon(BoundedReconciliation):
                 "supervisor self-update deferred: prior status publication "
                 "still owns its generation; retaining singleton"
             )
+            return False
+        if action_inhibited(
+            "supervisor-self-update", logger=log, root=root, automatic=True,
+        ):
             return False
         daemon_audit(self, "handoff", "new-slot-selected")
         drained = self.shutdown()
@@ -2060,6 +2071,7 @@ class SupervisorDaemon(BoundedReconciliation):
         log.info("re-resolved coordinator endpoint after a connection failure")
         return True
 
+    @daemon_entrypoint("agent-dispatch-supervisor", source=__file__, purpose="production")
     def serve(
         self,
         *,
@@ -2098,6 +2110,8 @@ class SupervisorDaemon(BoundedReconciliation):
         daemon_audit(self, "start", "singleton-acquired" if single_instance else "unguarded-run", outcome="ok")
         try:
             while True:
+                from .diagnostic_logs import maintain_file_logging
+                maintain_file_logging()
                 boundary = self._recheck_governance("iteration-boundary")
                 if boundary is not None and boundary.get("status") != "ready":
                     log.warning(
@@ -2167,24 +2181,8 @@ class SupervisorDaemon(BoundedReconciliation):
                 except KeyboardInterrupt:
                     break
         finally:
-            drained = self.shutdown()
-            if self._client_factory is not None:
-                close = getattr(self.client, "close", None)
-                if callable(close):
-                    with contextlib.suppress(Exception):
-                        close()
-            if single_instance:
-                self.release_singleton()
-            if self.self_update_triggered and not drained:
-                # The handoff is committed: either native restart owns the next
-                # launch or a successor spawn returned. Avoid interpreter atexit
-                # joining stuck probe threads after every owned unit was asked
-                # to stop. This exit is a restart request, not successor proof.
-                log.warning(
-                    "supervisor self-update: probe worker outlived shutdown "
-                    "grace; forcing exit to finish the committed handoff",
-                )
-                os._exit(SELF_UPDATE_EXIT_CODE)
+            from .supervisor_retirement import finish_serving
+            finish_serving(self, single_instance=single_instance)
         if self.self_update_triggered:
             return SELF_UPDATE_EXIT_CODE
         return 0

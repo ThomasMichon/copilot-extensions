@@ -19,6 +19,7 @@ async def resume_singleton_anchor(
     from .routes import worktrees as wt
     from .routes.sessions import _session_info
     from .worktree_native_resume import _refuse
+    from .hosting_policy import require_path_hosting
 
     name = repo_name_from_anchor_key(anchor)
     repo = await asyncio.to_thread(find_singleton_repo, name) if name else None
@@ -50,6 +51,13 @@ async def resume_singleton_anchor(
         session = heads[0]
         if session.target.cwd != repo.path or not session.acp_session_id:
             raise _refuse("singleton_binding_unconfirmed", "Singleton conversation binding is incomplete")
+        ready = (
+            await wt._resolve_already_live(manager, anchor, session)
+            and session.client is not None and session.client.is_running
+        )
+        if ready:
+            return _session_info(session)
+        require_path_hosting(repo.path, operation="singleton resume")
         expected_native = session.acp_session_id
         held = db.execute_read(
             "SELECT * FROM acquisition_launch_gates WHERE worktree_id=?", (anchor,),
@@ -68,14 +76,9 @@ async def resume_singleton_anchor(
             )
         if not db.reserve_worktree_ownership(anchor, session.session_id, now=time.time()):
             raise _refuse("live_holder", "Singleton ownership changed before native load")
-        ready = (
-            await wt._resolve_already_live(manager, anchor, session)
-            and session.client is not None and session.client.is_running
-        )
-        if not ready:
-            if session.status != SessionStatus.STOPPED:
-                raise _refuse("singleton_execution_unconfirmed", "Singleton execution is not confirmed stopped")
-            session = await manager.resume_session(session.session_id, drain=False, allow_recreate=False)
+        if session.status != SessionStatus.STOPPED:
+            raise _refuse("singleton_execution_unconfirmed", "Singleton execution is not confirmed stopped")
+        session = await manager.resume_session(session.session_id, drain=False, allow_recreate=False)
     else:
         known = db.execute_read(
             "SELECT id FROM sessions WHERE json_extract(target_json, '$.worktree_id')=?",
@@ -83,6 +86,7 @@ async def resume_singleton_anchor(
         )
         if strict or sessions or known:
             raise _refuse("singleton_head_unavailable", "No exact singleton conversation can be resumed")
+        require_path_hosting(repo.path, operation="singleton launch")
         owner, entry = await wt._find_cached_worktree_entry(
             anchor, request.app.state.resolver, cache=wt.cache_for_app(request.app),
         )
@@ -93,6 +97,7 @@ async def resume_singleton_anchor(
             cwd=repo.path, worktree_id=anchor, explicit_cwd=True,
         )
         session_id = str(uuid.uuid4())[:12]
+        require_path_hosting(repo.path, operation="singleton launch")
         store.gate_workspace(anchor, delivery, "acp", session_id, None, delivery)
         session = await manager.start_session(
             target, agent_name=owner, caller_id=f"acquisition:{delivery}",

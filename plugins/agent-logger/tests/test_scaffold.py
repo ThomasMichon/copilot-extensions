@@ -89,6 +89,16 @@ def test_runtime_is_reconciled_on_every_machine() -> None:
     assert ".install-complete.json" in install_sh
 
 
+def test_posix_legacy_manifest_uses_the_canonical_lifecycle_writer() -> None:
+    installer = (Path(__file__).resolve().parents[1] / "scripts/install.sh").read_text(encoding="utf-8")
+    writer = installer.split("_write_runtime_manifest() {", 1)[1].split("\n}", 1)[0]
+    assert '"$SCRIPT_DIR/command_binding.py"' in writer
+    assert "--publish-legacy --write-manifest" in writer
+    assert '--source-payload-root "$source_path"' in writer
+    assert '--project-root "$__publication_project"' in writer
+    assert "Command ownership validation refused Logger deploy-manifest publication." in writer
+
+
 def test_log_writer_is_a_read_only_renderer() -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     agent = (plugin_root / "agents" / "session-log-writer.agent.md").read_text(

@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify shared publication locking with the independent raw instruction copier.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

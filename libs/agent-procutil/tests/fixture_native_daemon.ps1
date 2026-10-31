@@ -7,11 +7,14 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($Mode -eq 'submit') {
     . $Helper
+    . (Join-Path (Split-Path $Helper) 'daemon_instances.ps1')
     $worker = Start-NativeDaemon -Script $PSCommandPath `
         -Arguments @('worker', $Root, $Helper, $Custody) -WorkingDirectory $Root `
         -LogPath (Join-Path $Root 'worker.log')
     try {
-        [IO.File]::WriteAllText((Join-Path $Root 'worker.json'), (@{ pid = $worker.Id } | ConvertTo-Json))
+        [IO.File]::WriteAllText((Join-Path $Root 'worker.json'), (@{
+            pid = $worker.Id; birth = (Get-DaemonInstanceProcessBirth $worker)
+        } | ConvertTo-Json))
     } finally {
         $worker.Dispose()
     }
@@ -22,7 +25,7 @@ if ($Mode -eq 'submit') {
 $lease = Enter-NativeOperationLock (Join-Path $Root 'bootstrap.lock')
 try {
     $lease.AssertOwned()
-    [IO.File]::WriteAllText((Join-Path $Root 'started'), 'no Python or uv')
+    [IO.File]::WriteAllText((Join-Path $Root 'started'), 'setup-provided PATH Python')
     $deadline = [DateTime]::UtcNow.AddSeconds(25)
     while (-not [IO.File]::Exists((Join-Path $Root 'continue'))) {
         if ([DateTime]::UtcNow -gt $deadline) { throw 'native worker fixture deadline expired' }

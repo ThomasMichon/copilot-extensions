@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-21
+- **Last revised:** 2026-10-30
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -84,6 +84,15 @@ worker; those belong to the layers around it. Its transport posture matches the
 rest of the fabric's control plane: it is reached **over the fabric's secured
 mesh**, never a raw public listener (see the parent vision's transport rule).
 
+Coordination follows the service model's
+[user-owned boundary](../../plugin-services/README.md#user-owned-coordination-boundary):
+authorized local participants do not need a separate token identity per agent.
+Cross-container access authenticates at the network bridge's proxy wrapper,
+without exposing an unauthenticated service bypass. Task ownership, attachment
+incarnations and revisions still fence stale execution. A disconnect or timeout
+retains the original accepted work and unknown effects for recovery; it neither
+discards the task nor authorizes duplicate execution.
+
 ### Logical machines and local execution authority
 
 A physical machine, an OS sub-environment, or a persistent container can each
@@ -157,13 +166,16 @@ or register against them.
 
 ### Worker identity — the worktree
 A worker's durable identity is the **worktree it occupies** (the same identity
-the ground layer owns), not a per-agent account. A claim is stamped to a
-worktree; a task addressed to a worktree sticks to it, while an unaddressed task
-floats to any capable worker. This is what lets a claimed, embodied task be
-joined back to the live session doing it — the delegation layer *derives* that
+the ground layer owns), not a per-agent account. An initial supervised
+assignment belongs to its selected pool before a worktree necessarily exists;
+the allocated worktree and native session become explicit attachments as
+startup progresses, never fabricated prerequisites for placement. Once embodied,
+the claim resolves to that worktree; a task addressed to a worktree sticks to it,
+while an unaddressed task can be placed with any eligible pool. This lets an
+embodied task be joined back to the live session doing it — the delegation layer *derives* that
 liveness from the ground/coordination layers rather than keeping its own copy.
 
-Because the claim is stamped to the worktree, a task resolves **both ways** — a
+Once attached to its worktree, a task resolves **both ways** — a
 worktree enumerates the tasks it holds, and any task resolves back to the
 worktree that claimed it. This is the **inbound half** of a worktree's fabric
 **claim ledger** (parent vision §Features/*resource-claims*): the external work a
@@ -220,18 +232,24 @@ claim candidates remain observably audited rather than silently skipped.
 
 ### The lifecycle
 A task moves through a small set of states: **proposed → queued → claimed**
-(held for evaluation) → **started** (under active work) → **submitted** →
+(assigned and starting) → **started** (accepted and begun) → **submitted** →
 **completed**, with an **abandoned** terminal path reachable from any
 non-terminal state for duplicates, dropped priorities, or a completion claim
 that doesn't hold up. The two entry states are two deliberate operations: to
 **propose** is to draft a task — its concise **goal**, its detailed **goal
 payload**, the capabilities it **requires**, the work it **rejects**, and its
 other filter attributes — and get back a **task id**, *without* making it
-claimable; to **queue** it moves **proposed → queued**, at which point the
-layer **binds it to an agent whose pool filter accepts it**. The
-**claim→start** gap is then a deliberate **evaluation window**: a worker holds
-a queued task exclusively while it decides whether to accept, decline (returning it
-with a "not me" so it isn't re-offered the same task), or retire it as a duplicate.
+claimable; to **queue** it moves **proposed → queued**, waiting for eligible
+capacity. For supervised work, **queued → claimed** selects a matching pool
+and commits its assignment, spawn reservation and occupied slot together.
+The worktree and Copilot process need not exist yet. Dispatch and that pool's
+supervisor own bringing the assignment to **started**, including workspace
+allocation, session startup and an explicit worker acceptance decision.
+An existing agent/pool assignment waits for capacity in that pool instead of
+silently switching pools. A worker can decline with an explanation and
+structured routing exclusions, but finalizes its own workspace before putting
+the assignment down. Startup exhaustion and worker decline are distinct
+outcomes; neither silently loses the task or its prior effects.
 **submitted** is a deliberate review gap: it is the worker's *claim* that the
 goal is met, not a request for another instruction. Workers uniformly submit;
 only the task's designated confirmation authority makes it **completed**.
@@ -681,9 +699,13 @@ repo lane, the capabilities it **requires**, an optional target **machine** /
 logging), and its **task-type** — and a **pool declares a predicate** over exactly
 those attributes: it **permits** the work it accepts and **rejects** the work it
 won't take, under a **max-agent cap**. A task **binds** to a pool whose filter
-accepts its attributes, up to that pool's cap; two pools never fight over one task
-because their filters plus the atomic claim decide ownership. A pool is **named for
-its task-type** (the label dimension it gates), and its repo filter **defaults to
+accepts its attributes, up to that pool's cap. Placement considers all pools in
+the allocator's defined order and selects the first eligible match with a free
+slot; a retained assignment waits for its own pool. Pool binding, reservation
+creation or reuse, and slot consumption are one atomic placement decision,
+before nontransactional workspace or process startup. Two pools never fight
+over one task because their filters plus the atomic claim decide ownership.
+A pool is **named for its task-type** (the label dimension it gates), and its repo filter **defaults to
 same-repo**, so a **repo-scoped pool is the default** and a fleet-wide one is a
 deliberate exception. Specialization is nothing more than **adding filters** — a
 code-review pool permits `role=review`; a container-bound task is permitted only on
@@ -866,9 +888,42 @@ model. A manual task can select the same execution procedure without a standing
 producer. Domain-specific judgments remain with their owning evaluator or
 caller; dispatch preserves its common allocation, lifecycle and review rules.
 
+### pool-owned-assignment-startup
+
+A supervised **claimed** task is an allocation/startup responsibility, not proof
+that an agent already exists. Its pool retains the reservation through bounded
+startup attempts. Once a worker can receive the assignment, the existing
+supervision cadence nudges that same worker until it explicitly accepts or
+declines; delivery alone does not count as acceptance. Exhaustion returns the
+task to **queued** with its failure history intact. Outstanding startup effects
+are canceled or fenced before capacity is freed or replacement work can run;
+an unresolved effect remains a visible blocker, not an indefinite startup
+assignment or permission to launch twice.
+
+### decline-explains-and-constrains-routing
+
+A worker's "not me" carries an explanation and machine-readable exclusions
+scoped to the unsuitable worktree, pool or machine. Every allocation boundary
+honors those exclusions, so the next selection does not repeat the rejected
+placement. The declining worker finalizes its own workspace before
+relinquishing the assignment; failed closeout retains an explicit accountable
+blocker. Finalization readiness does not authorize removal while its runner is
+still alive, or bypass unrelated worktree obligations.
+
+### retry-eligibility-prevents-placement-churn
+
+Startup exhaustion and repeated rejection have explicit retry eligibility,
+rather than immediately bouncing the same task through the same unsuitable
+placement. A retry-after decision is durable, visible and enforced wherever
+new work is selected or admitted. It preserves assignment constraints,
+accumulated progress and prior effects; it is neither task completion nor a
+second scheduler. A future retry time never proves that an old worker is gone.
+
 ### liveness-not-lease
 A claimed or started task has **no wall-clock expiration** while the worker that
-owns it is **alive**. Recovery is **not** a lease timer that assumes a slow
+owns it is **alive** and has accepted the work. Bounded pre-acceptance startup
+is a different lifecycle from recovering an executing worker.
+Recovery is **not** a lease timer that assumes a slow
 worker is a dead one — that conflates *took a long time* with *is gone* and
 silently re-runs work. Instead the layer **reconciles outstanding work against
 worker liveness**: it periodically checks each non-terminal, owned task against
@@ -1201,6 +1256,20 @@ should run* converging on the declarations, while an override is a human's
 **higher-precedence veto** for when something must stop running *right now*,
 declaration notwithstanding — and, crucially, a later re-sync of the declaration
 does **not** quietly undo it.
+
+### reversible-action-inhibition
+An operator can inhibit selected recurring or on-demand actions without
+preventing the coordinator, supervisor or lane polling loops from starting.
+The existing consumer re-checks inhibition before each eligible action;
+clearing it restores normal eligibility on the next poll or caller retry,
+without a manual process restart. Action inhibition is distinct from a
+service/lane lifecycle override and never silently clears that independent veto.
+
+Only actions with a reliable retry or re-check path are suitable for this
+control. Inhibition preserves pending work, original execution identity and
+existing-work settlement. It does not consume a task, authorize duplicate
+execution, weaken ownership or compatibility checks, or turn unknown effects
+into absence. Effective inhibition and its reason remain observable.
 
 ### inherits-runtime-service-invariants
 The supervisor/coordinator singleton is itself a plugin-services runtime

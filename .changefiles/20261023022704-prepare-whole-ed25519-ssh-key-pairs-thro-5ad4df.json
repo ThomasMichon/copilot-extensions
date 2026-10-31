@@ -1,0 +1,9 @@
+{
+  "comment": "Prepare whole Ed25519 SSH pairs through create-only Vault records and install existing keys as protected, non-overwriting native files",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

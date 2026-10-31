@@ -9,9 +9,13 @@ from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 PROFILE = "copilot-extensions.promotion-units/v1"
+CANDIDATE_PROFILE = "copilot-extensions.promotion-candidate-units/v1"
+MAX_PACKET_FILE_BYTES = 128 * 1024 * 1024
+MAX_UNIT_EVIDENCE_FILE_BYTES = 192 * 1024 * 1024
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _SHA = re.compile(r"[0-9a-f]{40}")
 _PACKET = "tools/promotion_unit_tests/"
+BUILD_SOURCE_DATA: frozenset[str] = frozenset()
 
 
 class UnitEvidenceError(ValueError):
@@ -35,18 +39,22 @@ def relative_file(value: object) -> str:
         not isinstance(value, str) or "\\" in value
         or PurePosixPath(value).is_absolute()
         or any(part.casefold() in ("", ".", "..", ".git") for part in value.split("/"))
-        or not value.endswith(".py")
+        or (not value.endswith(".py") and not any(
+            value == name or value.endswith("/" + name) for name in BUILD_SOURCE_DATA
+        ))
     ):
-        raise UnitEvidenceError("unit source must be a canonical relative Python path")
+        raise UnitEvidenceError("unit source must be canonical Python or an explicit build-data input")
     return value
 
 
 def admit_manifest(data: object) -> dict:
-    if not isinstance(data, dict) or set(data) != {
+    candidate = isinstance(data, dict) and data.get("profile") == CANDIDATE_PROFILE
+    fields = {
         "profile", "nodes", "sources", "coverage_targets", "max_seconds",
-    }:
+    } | ({"composition"} if candidate else set())
+    if not isinstance(data, dict) or set(data) != fields:
         raise UnitEvidenceError("invalid unit manifest fields")
-    if data["profile"] != PROFILE or type(data["max_seconds"]) is not int:
+    if data["profile"] not in (PROFILE, CANDIDATE_PROFILE) or type(data["max_seconds"]) is not int:
         raise UnitEvidenceError("invalid unit profile or budget")
     if not 1 <= data["max_seconds"] <= 300:
         raise UnitEvidenceError("the entire unit packet must fit within five minutes")
@@ -71,14 +79,47 @@ def admit_manifest(data: object) -> dict:
         path, separator, case = node.partition("::")
         relative_file(path)
         if (
-            not separator or not case or not path.startswith(_PACKET)
+            not separator or not case or not path.startswith(_PACKET) or not path.endswith(".py")
             or not Path(path).name.startswith("test_") or path not in sources
         ):
             raise UnitEvidenceError(f"node is outside the admitted unit packet: {node}")
     for path in targets:
         relative_file(path)
-        if path not in sources or path.startswith(_PACKET):
+        if path not in sources or path.startswith(_PACKET) or not path.endswith(".py"):
             raise UnitEvidenceError(f"coverage target is not admitted production source: {path}")
+    if candidate:
+        composition = data["composition"]
+        if not isinstance(composition, dict) or set(composition) != {
+            "dev_sha", "candidate_tree", "source_manifest_sha256", "development_sources",
+            "origins", "required_coverage_origins",
+        }:
+            raise UnitEvidenceError("invalid candidate composition")
+        source_sha(composition["dev_sha"])
+        source_sha(composition["candidate_tree"])
+        digest = composition["source_manifest_sha256"]
+        if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
+            raise UnitEvidenceError("candidate composition has no Dev manifest binding")
+        development, origins = composition["development_sources"], composition["origins"]
+        if not isinstance(development, dict) or not development or not isinstance(origins, dict):
+            raise UnitEvidenceError("candidate composition has no source origins")
+        for name, digest in development.items():
+            relative_file(name)
+            if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
+                raise UnitEvidenceError("candidate development digest is invalid")
+        if set(origins) != set(sources) or not set(development) <= set(sources):
+            raise UnitEvidenceError("candidate source origins are incomplete")
+        for name, origin in origins.items():
+            relative_file(origin)
+            if origin not in development or (name in development and name != origin):
+                raise UnitEvidenceError("candidate source origin is not admitted")
+        required = composition["required_coverage_origins"]
+        if (
+            not isinstance(required, list) or not required
+            or any(not isinstance(name, str) or name not in development for name in required)
+            or len(required) != len(set(required))
+            or {origins[name] for name in targets} != set(required)
+        ):
+            raise UnitEvidenceError("candidate coverage origins are incomplete")
     return data
 
 
@@ -122,7 +163,7 @@ def verify_observations(
 
 
 def source_sha(value: str) -> str:
-    if not _SHA.fullmatch(value):
+    if not isinstance(value, str) or not _SHA.fullmatch(value):
         raise UnitEvidenceError("a full immutable source SHA is required")
     return value
 
@@ -178,7 +219,7 @@ def ci_requires_units(
 def ci_requires_source_ast_guards(
     event: str, base: str, head: str, read_diff: Callable[[list[str]], bytes],
 ) -> bool:
-    """Omit only PR inputs outside the three full scanners' source/policy roots."""
+    """Omit only PR inputs outside the full scanners' source/policy roots."""
     if event != "pull_request":
         return True
     paths = changed_paths(base, head, read_diff, merge_base=True)

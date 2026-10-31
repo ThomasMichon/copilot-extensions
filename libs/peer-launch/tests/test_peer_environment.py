@@ -72,6 +72,20 @@ def test_other_peers_never_inherit_pr_owner_state():
     assert not any(name.startswith("AGENT_PULL_REQUESTS_") for name in env)
 
 
+def test_machines_peer_rebinds_its_owner_without_foreign_runtime_overrides():
+    assert peer_launch.PEERS["agent-machines"] == "agent_machines"
+    env = peer_launch.peer_environment(_context("agent-machines"), {
+        "AGENT_MACHINES_PAYLOAD_ROOT": "/foreign",
+        "AGENT_RT_ROOT": "/other",
+        "AGENT_WORKTREES_PAYLOAD_ROOT": "/caller",
+        "HOME": "/user",
+    })
+    assert env["AGENT_RT_ROOT"] == "/plugin"
+    assert env["AGENT_MACHINES_PAYLOAD_ROOT"] == "/payload"
+    assert env["HOME"] == "/user"
+    assert "AGENT_WORKTREES_PAYLOAD_ROOT" not in env
+
+
 def test_agent_dispatch_retains_authority_and_separate_shared_control():
     inherited = {
         "AGENT_DISPATCH_TASK_AUTHORITY": "central",

@@ -302,12 +302,13 @@ def _ssh_argv(alias: str, remote: str) -> list[str]:
 
 
 def _argv_for(shell: str, alias: str, project: str, *, classify: bool,
-              reconcile: bool = False):
-    """Remote list argv for a machine/env: pwsh on Windows, bash elsewhere."""
-    cmd = f"{project} {_list_args(shell, classify=classify, reconcile=reconcile)}"
-    if shell == "pwsh":
-        return _ssh_argv(alias, _pwsh_remote(cmd))
-    return _ssh_argv(alias, f"bash -lc '{cmd}'")
+              reconcile: bool = False, stream: bool = False):
+    """Remote listing argv without profile forwarding, for pwsh or bash."""
+    cmd = f"{project} {_list_args(shell, classify=classify, reconcile=reconcile)}" + (" --stream" if stream else "")
+    remote = _pwsh_remote(cmd) if shell == "pwsh" else f"bash -lc '{cmd}'"
+    argv = _ssh_argv(alias, remote)
+    argv[1:1] = ["-o", "ClearAllForwardings=yes"]
+    return argv
 
 
 def _build_sources():
@@ -335,7 +336,11 @@ def _build_sources():
     local_key, local_plat = _local_identity()
     local_elabel = _ENV_LABEL.get(local_plat, local_plat.title() or "?")
     config_machine = (config.machine or "").lower()
-    local_machine = roster.local_entry(entries, config_machine, local_key, local_plat)
+    current = roster.local_context(config, entries, local_key, local_plat)
+    local_machine = (
+        entries.get(current.customization_key) if current is not None
+        else roster.local_entry(entries, config_machine, local_key, local_plat)
+    )
 
     out: list[Source] = []
     for m in entries.values():
@@ -379,14 +384,11 @@ def _build_sources():
             out.append(Source(m.key, elabel, None, ready=False))
         roster.apply_display_machine(out[first_source:], m)
 
-    # Defensive fail-safe: guarantee a local source even when this machine is
-    # entirely absent from machines.yaml (a freshly-provisioned box whose
-    # self-entry hasn't reached the anchor yet, or a stale anchor checkout).
-    # Without a local source the engine has no "this host" tab and the picker
-    # crashes. The picker runs *here*, so a hostname-based local tab (from
-    # ``data_local.LOCAL``) is always the correct, safe fallback.
+    # Optional customization cannot remove the running execution space.
+    # Older bootstraps retain their raw-hostname fallback without new authority.
     if not any(s.local for s in out):
-        out.append(Source(data_local.LOCAL[0], data_local.LOCAL[1], None,
+        key = current.execution_machine if current is not None else data_local.LOCAL[0]
+        out.append(Source(key, local_elabel, None,
                           local=True, ready=True))
     for registered in provider_sources.load(project):
         ready = bool(
@@ -520,9 +522,7 @@ def _stream_argv(source):
     rows, then classified rows, then a ``done`` frame -- one JSON object per
     flushed line -- so the whole two-phase load happens over a single SSH
     connection with progressive fill."""
-    project = _project()
-    cmd = f"{project} {_list_args(source.shell, classify=True)} --stream"
-    return _wrap_remote(source.shell, source.alias, cmd)
+    return _argv_for(source.shell, source.alias, _project(), classify=True, stream=True)
 
 
 def _parse_ndjson_line(raw: str):
@@ -1280,7 +1280,7 @@ class LiveLoader(CurrentFeedMixin, LazyLoadMixin):
         # identities as removals during the first paint.
         self._stream_incomplete: dict = {}
         self._held_sources: set = set()
-        self._feed_complete: set = set()
+        self._feed_complete: dict = {}
         self._feed_backoff: dict = {}
         # Sources whose full worktree listing has been DEFERRED behind a cheap
         # connectivity ping (see `start`'s `focus_keys`) -- machine tabs the
@@ -1469,18 +1469,13 @@ class LiveLoader(CurrentFeedMixin, LazyLoadMixin):
             try:
                 recs = _fetch(source, runner=self._spawn)
             except Exception as exc:
-                if source.source_kind == SOURCE_KIND_PROVIDER_EXEC:
-                    with self._lock:
-                        if changed:
-                            self._state[source.cache_key] = "failed"
-                            self._records[source.cache_key] = []
-                        if (
-                            changed
-                            or self._gen.get(source.cache_key, 0) == gen
-                        ):
-                            self._error[source.cache_key] = (
-                                str(exc).strip() or type(exc).__name__
-                            )
+                with self._lock:
+                    if self._gen.get(source.cache_key, 0) != gen:
+                        return
+                    if changed:
+                        self._state[source.cache_key] = "failed"
+                        self._records[source.cache_key] = []
+                    self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
                 return
             with self._lock:
                 # Commit only when still ready, not cancelled, and not
@@ -1493,8 +1488,7 @@ class LiveLoader(CurrentFeedMixin, LazyLoadMixin):
                     )
                     and self._gen.get(source.cache_key, 0) == gen
                 ):
-                    self._records[source.cache_key] = recs
-                    self._state[source.cache_key] = "ready"
+                    self._publish_source_records(source, recs)
                     if self._stream_incomplete.get(source.cache_key) == gen:
                         self._stream_incomplete.pop(source.cache_key, None)
         finally:
@@ -1754,9 +1748,7 @@ class LiveLoader(CurrentFeedMixin, LazyLoadMixin):
                     not self._cancelled.is_set()
                     and self._gen.get(source.cache_key, 0) == gen
                 ):
-                    self._records[source.cache_key] = recs
-                    self._state[source.cache_key] = "ready"
-                    self._error[source.cache_key] = ""
+                    self._publish_source_records(source, recs)
             return
         # Remote tab: try single-connection NDJSON streaming -- fast rows paint
         # as they arrive, then each upgrades in place as its classified row
@@ -1941,6 +1933,7 @@ class LiveLoader(CurrentFeedMixin, LazyLoadMixin):
                 return
             self._records[source.cache_key] = first
             self._state[source.cache_key] = "ready"
+            self._error[source.cache_key] = ""
         if not two_phase or self._cancelled.is_set():
             return
         # Phase 2: authoritative git classification on the longer classify budget
@@ -1952,6 +1945,9 @@ class LiveLoader(CurrentFeedMixin, LazyLoadMixin):
         except Exception as exc:
             self._log_fetch_failure(source, exc, t1, phase="classify",
                                     timeout=classify_timeout)
+            with self._lock:
+                if not self._cancelled.is_set() and self._gen.get(source.cache_key, 0) == gen:
+                    self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
             return  # keep the honest phase-1 rows; the tab stays resolved
         elapsed2 = (_dt.datetime.now() - t1).total_seconds()
         _ssh_log(f"  OK      {source.machine}/{source.env} classified "
@@ -1961,6 +1957,7 @@ class LiveLoader(CurrentFeedMixin, LazyLoadMixin):
                     and self._state.get(source.cache_key) == "ready"
                     and self._gen.get(source.cache_key, 0) == gen):
                 self._records[source.cache_key] = full
+                self._error[source.cache_key] = ""
 
     def _load_local_two_phase(self, source: Source, gen: int | None = None):
         """Fast-then-fill for the local tab.
@@ -1990,6 +1987,7 @@ class LiveLoader(CurrentFeedMixin, LazyLoadMixin):
                 return
             self._records[source.cache_key] = fast
             self._state[source.cache_key] = "ready"
+            self._error[source.cache_key] = ""
         # Phase 2: authoritative git classification, swapped in on success.
         t1 = _dt.datetime.now()
         try:

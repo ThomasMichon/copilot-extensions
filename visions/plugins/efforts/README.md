@@ -4,7 +4,7 @@
   for multi-session, multi-wave work.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-09-24
+- **Last revised:** 2026-10-31
 - **Reality docs:** [`efforts/README.md`](../../../efforts/README.md) ·
   [`docs/harness-runbook.md`](../../../docs/harness-runbook.md) ·
   [`plugins/efforts/README.md`](../../../plugins/efforts/README.md) ·
@@ -46,8 +46,21 @@ activity when needed.
   not adopted them is coordinated by the host effort.
 - **Current-slice derivation** treats the effort's own Plan/Validation Plan
   checklists as the ground truth for "where things stand" — the first
-  unchecked item is the current slice — rather than a separately hand-typed
-  label that a busy session can forget to advance as work moves forward.
+  unchecked item is the default current slice — rather than a separately
+  hand-typed label that a busy session can forget to advance as work moves
+  forward. An explicitly adopted agenda may identify a different execution
+  position without replacing checklist-authoritative completion.
+- **Optional agenda companion** gives an effort a coarse graph of work
+  packages, exit criteria and permitted transitions. The efforts plugin owns
+  this process aide and any optional local helpers; ordinary planning does
+  not depend on adopting it.
+- **Worktree-specific agenda** belongs to the continuing agent, alongside its
+  worktree journal. It draws from assigned efforts, tasks and asides and retains
+  execution position and work stack across sessions; canonical source contracts
+  stay with their existing owners.
+- **Nested continuation** preserves the parent objective and return position
+  while an agent follows a child effort, then refreshes the parent's agenda
+  when the child's own completion gate is met.
 
 ## Features
 
@@ -62,6 +75,13 @@ contain similarly named files or directories.
 A substantial objective has one canonical, versioned effort containing the goal,
 plan, validation, coordination, and progress needed for another participant to
 resume it without relying on conversation history.
+
+### durable-scoped-authorization
+
+An effort can preserve explicit operator pre-clearance for an objective's
+operations, destinations, owners, effects, accepted blast radius and limits.
+Original approval evidence and later narrowing or revocation remain distinct
+from the plan, execution evidence and a participant's interpretation.
 
 ### effort-scoped-session-loop
 
@@ -103,6 +123,35 @@ Cross-repository work has one clear orchestration owner. A compatible target may
 own a referenced sub-effort; otherwise the host effort retains the plan and
 coordinates changes in the target.
 
+### optional-effort-agenda
+
+An agent may voluntarily structure an effort into broad work packages with
+explicit exits, branches and bounded loops. The companion references the effort
+contract rather than copying its plan or maintaining another completion ledger.
+Optional efforts-owned helpers may scaffold the companion and identify or
+maintain its cursor, while manual use and unstructured efforts remain viable.
+
+### nested-effort-continuations
+
+A prerequisite detour has a saved parent return point, not just another effort
+binding. Nested children can finish and unwind to the correct parent agenda
+without losing the root objective. Returning refreshes relevant state and
+validation instead of blindly repeating external effects.
+
+### reversible-deferred-agenda-branches
+
+An adopted agenda can preserve a genuinely blocked branch with its original
+root, work stack, return action, evidence and limits while the agent advances
+another authorized avenue. Agents can refine trees within their accepted scope
+without inventing unrelated assignments or losing unresolved responsibility.
+
+### decision-ready-revisits
+
+A deferred node can retain real attempt/check times, the pending proposal or
+decision and an explicit revisit point. A due time or an actual response prompts
+current-condition reinspection, not consent, effect replay or false completion.
+Active and deferred work remains legible across checkpoints and handoffs.
+
 ## Behaviors
 
 ### effort-is-the-completion-gate
@@ -132,8 +181,27 @@ tracked objective; liveness is not inferred from prose or session activity.
 ### record-first-resumption
 
 A successor first loads the active effort and resumes from its next incomplete
-slice. It uses predecessor-session ramp-up as a bounded supplement for immediate
-actions and observations, never as the durable source of truth.
+slice or explicitly adopted agenda position. It uses predecessor-session
+ramp-up as a bounded supplement for immediate actions and observations, never
+as the durable source of truth.
+
+### authority-survives-within-scope
+
+Upfront approvals and one-time answers remain usable through ordinary revisions,
+bounded retries, checkpoints and handoffs while the real action fits their
+original scope. Explicit pins, single-attempt limits, expiry, revocation and
+holds remain binding. Unknown prior effects require reconciliation, not replay.
+Missing authority does not block independent already-authorized work and does
+not authorize deployment, content mutation or actions on externally controlled
+resources.
+
+### cooperative-agenda-movement
+
+An adopted agenda makes current work, exit requirements and allowed next steps
+explicit. Movement is deliberate and attributable; optional helpers can reject
+unsupported or stale cursor changes. This is a cooperative process aide, not a
+guarantee that an agent cannot act outside it. A cursor, child result, or terminal
+graph node never independently proves that the effort is complete.
 
 ### journal-is-ground-truth
 
@@ -187,6 +255,12 @@ gate and effort-discovery rule.
 - The efforts plugin does not require agent-worktrees, context-handoff, or a
   session logger to provide its basic planning lifecycle; those capabilities
   enrich continuity when present.
+- The agenda companion and any helper toolset belong to efforts, not
+  agent-dispatch. They do not require a scheduler, daemon, automatic turn driver
+  or another plugin to provide their basic process.
+- Agenda reset changes execution position; it does not authorize resetting a
+  repository, restarting processes, repeating uncertain external effects or
+  discarding unresolved obligations.
 - This vision does not prescribe a configuration filename, schema, command
   grammar, worktree record shape, or hook implementation.
 
@@ -205,9 +279,13 @@ gate and effort-discovery rule.
 
 ## Provenance
 
+- **2026-10-28** - Extended intent for a voluntary efforts-owned agenda,
+  optional cursor helpers and nested child-return continuity. Planned in
+  [effort-agenda-companion](../../../efforts/2026/10/28%20effort-agenda-companion/README.md)
+  and [#9377](https://github.com/ThomasMichon/copilot-extensions/issues/9377).
 - **2026-08-27** - Established the standing intent for explicit repository
   adoption, reviewed wave execution, effort-scoped completion, compact handoffs,
   bounded session-start recovery, and capability-aware cross-repository effort
   ownership. This intent was carved into
-  [`effort-driven-session-loops`](../../../efforts/active/effort-driven-session-loops/README.md)
+  [`effort-driven-session-loops`](../../../efforts/2026/08/28%20effort-driven-session-loops/README.md)
   and issue [#1255](https://github.com/ThomasMichon/copilot-extensions/issues/1255).

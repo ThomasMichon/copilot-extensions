@@ -1225,7 +1225,7 @@ def test_warning_cap_dedup_and_exhaustive_json(tmp_path, monkeypatch, caplog):
 
 
 def test_doctor_human_render_matches_exhaustive_json(tmp_path, capsys):
-    from agent_worktrees import __main__ as main
+    from agent_worktrees.doctor_render import render_dropin_registry_report
 
     registry = tmp_path / "pivots"
     registry.mkdir()
@@ -1237,7 +1237,7 @@ def test_doctor_human_render_matches_exhaustive_json(tmp_path, capsys):
     )
     payload = report.to_dict()
 
-    main._render_dropin_registry_report("Picker pivots", payload)
+    render_dropin_registry_report("Picker pivots", payload)
     rendered = capsys.readouterr().out
     for finding in payload["findings"]:
         assert finding["entry"] in rendered

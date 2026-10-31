@@ -6,6 +6,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,7 +24,11 @@ from test_simple_first_use_publication import _release_payload
 
 @pytest.fixture(scope="module")
 def bridge_release(tmp_path_factory) -> Path:
-    return _release_payload(tmp_path_factory.mktemp("bridge-release"), "agent-bridge")
+    payload = _release_payload(tmp_path_factory.mktemp("bridge-release"), "agent-bridge")
+    # Wire-contract golden cases are test data, not runtime or native support.
+    # Real queued construction separately retains the complete release payload.
+    shutil.rmtree(payload / "contract")
+    return payload
 
 
 def _selected_cell(fixture: dict, environment: dict) -> tuple[Path, dict]:
@@ -37,7 +42,7 @@ def _selected_cell(fixture: dict, environment: dict) -> tuple[Path, dict]:
     primitive.compare_and_swap_activation(
         context=cell["installReceipt"],
         expected_marketplace_id=cell["marketplaceId"],
-        expected_plugin_id="agent-bridge",
+        expected_plugin_id=fixture["arguments"]["plugin_id"],
         expected_namespace_generation=cell["namespaceGeneration"],
         expected_install_generation=cell["generation"],
         expected_activation_generation=0,
@@ -80,6 +85,30 @@ def _record_installer(fixture: dict, shell: str) -> None:
         )
 
 
+def _record_driver(fixture: dict, shell: str) -> None:
+    """Publication-boundary probe only; real native construction is separate."""
+    scripts = fixture["payload"] / "libs/update-driver/scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    contract = "# Installation driver lifecycle contract: bridge-command-v1\n"
+    if shell == "powershell":
+        (scripts / "first-use.ps1").write_text(
+            contract +
+            "param([string]$Root,[string]$Payload,[string]$RuntimeRoot,"
+            "[string]$Project,[string]$InstallerAction,[switch]$Wait)\n"
+            "[System.Runtime.ProfileOptimization]::StartProfile($null)\n"
+            "$record=@{action=$InstallerAction;root=$RuntimeRoot;project=$Project;"
+            "wait=[bool]$Wait;executionRoot=$Root}|ConvertTo-Json -Compress\n"
+            "[IO.File]::WriteAllText((Join-Path $RuntimeRoot 'driver-observed.json'),$record)\n"
+            "exit 37\n", encoding="utf-8",
+        )
+    else:
+        (scripts / "first-use.sh").write_text(
+            "#!/usr/bin/env bash\n" + contract +
+            '[[ "$5" == --installer-action && "$6" == provision && "$7" == --wait ]] || exit 98\n'
+            'printf observed >"$3/driver-observed"\nexit 37\n', encoding="utf-8",
+        )
+
+
 def _command(fixture: dict, shell: str, script: Path, *arguments: str) -> list[str]:
     if shell == "powershell":
         assert POWERSHELL is not None
@@ -103,6 +132,12 @@ def _initialize_shell_profiles(
 ) -> set[str]:
     if os.name != "nt":
         return set()
+    environment["PATH"] = os.pathsep.join((
+        str(Path(sys.executable).parent),
+        str(Path(os.environ["SystemRoot"]) / "System32"),
+        str(Path(POWERSHELL).parent),
+        str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0"),
+    ))
     profiles = {
         f"AppData/Local/Microsoft/{prefix}PowerShell/StartupProfileData-NonInteractive"
         for prefix in ("", "Windows/")
@@ -112,7 +147,10 @@ def _initialize_shell_profiles(
         allowed.update(parent.as_posix() for parent in Path(name).parents)
         allowed.add(name)
     before = _snapshot(fixture["home"])
-    selected = (POWERSHELL, shutil.which("pwsh")) if engines is None else engines
+    selected = (
+        POWERSHELL, shutil.which("pwsh"),
+        str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
+    ) if engines is None else engines
     for engine in dict.fromkeys(filter(None, selected)):
         control = subprocess.run(
             [engine, "-NoLogo", "-NoProfile", "-Command",
@@ -125,6 +163,154 @@ def _initialize_shell_profiles(
     changed = {name for name in before.keys() | after.keys() if before.get(name) != after.get(name)}
     assert changed <= allowed, sorted(changed)
     return profiles & after.keys()
+
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("front", [
+    "primary", pytest.param("cmd", marks=pytest.mark.skipif(os.name != "nt", reason="Windows cmd")),
+])
+@pytest.mark.parametrize("existing_global", [False, True])
+@pytest.mark.parametrize("loss", [
+    "available", "pointer", "publisher", "publisher-and-pointer",
+    "deactivated-publisher-and-pointer",
+])
+def test_bridge_cell_stamp_preserves_global_ownership(
+    binding_fixture: dict, bridge_release: Path, shell: str, existing_global: bool, loss: str,
+    front: str,
+) -> None:
+    fixture = binding_fixture
+    environment = _adopter(fixture, "agent-bridge", bridge_release)
+    for key in (
+        "COPILOT_PLUGIN_INSTALL_SMOKE", "AGENT_BRIDGE_NO_SELFPROVISION",
+        "COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH", "COPILOT_EXTENSIONS_BOOT_TRACE",
+        "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
+    ):
+        environment.pop(key, None)
+    if os.name == "nt":
+        environment.pop("PSModulePath", None)
+        environment["LOCALAPPDATA"] = str(fixture["home"] / "AppData/Local")
+        environment["APPDATA"] = str(fixture["home"] / "AppData/Roaming")
+    shell_profiles = _initialize_shell_profiles(fixture, environment)
+
+    def stamp(root: Path):
+        suffix = "ps1" if shell == "powershell" else "sh"
+        command = _command(fixture, shell, fixture["payload"] / f"scripts/install.{suffix}")
+        command += (
+            ["-Action", "stamp", "-InstallDir", str(root)] if shell == "powershell" else
+            ["stamp", "--install-dir", str(root)]
+        )
+        result = _run(fixture, environment, command, None)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result
+
+    global_paths = [
+        fixture["home"] / ".local/bin" / name
+        for name in (
+            ("agent-bridge.ps1", "agent-bridge.cmd") if shell == "powershell" else
+            ("agent-bridge",)
+        )
+    ]
+    if existing_global:
+        stamp(fixture["legacy"])
+    globals_before = {path: path.read_bytes() if path.exists() else None for path in global_paths}
+    assert all(value is not None for value in globals_before.values()) is existing_global
+
+    cell, arguments = _selected_cell(fixture, environment)
+    _policy(fixture, cell, arguments, "standalone")
+    stamped = stamp(cell)
+    assert "Scoped install keeps the global compatibility binstub unchanged" in stamped.stdout
+    assert {path: path.read_bytes() if path.exists() else None for path in global_paths} == globals_before
+    assert (cell / "payload-dir").is_file()
+    for name in ("resolve-runtime.ps1", "resolve-runtime.sh"):
+        assert (cell / "bin" / name).is_file()
+
+    selected_record = {
+        "marker": "CELL", "root": str(cell),
+        "context": environment["COPILOT_EXTENSIONS_CONTEXT"],
+        "installationId": (
+            json.loads(Path(arguments["context"]).read_text())["marketplaceId"] + "/agent-bridge"
+        ),
+        "arguments": ["--help"],
+    }
+
+    if loss.startswith("deactivated-"):
+        receipt = json.loads((cell / "installation-activation.json").read_text(encoding="utf-8"))
+        changed = fixture["primitive"].compare_and_swap_activation(
+            context=arguments["context"], expected_marketplace_id=receipt["marketplaceId"],
+            expected_plugin_id="agent-bridge",
+            expected_namespace_generation=receipt["namespaceGeneration"],
+            expected_install_generation=receipt["installGeneration"],
+            expected_activation_generation=receipt["generation"],
+            activation_mode="legacy", activation_state="deactivated", legacy_disposition="absent",
+            legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
+            legacy_root=fixture["legacy"], environment=fixture["environment"],
+        )
+        assert changed["activationChanged"], changed
+        pointer = cell / "payload-dir"
+        pointer.rename(pointer.with_name("payload-dir.unavailable"))
+    if "publisher" in loss:
+        fixture["payload"].rename(fixture["payload"].with_name("publisher-unavailable"))
+    if (loss == "pointer" or loss.endswith("and-pointer")) and existing_global:
+        pointer = fixture["legacy"] / "payload-dir"
+        pointer.rename(pointer.with_name("payload-dir.unavailable"))
+    ordinary = environment.copy()
+    for key in (
+        "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_BRIDGE_INSTALL_DIR",
+        "AGENT_BRIDGE_CONFIG_DIR", "AGENT_BRIDGE_PAYLOAD_ROOT", "AGENT_BRIDGE_INSTALLATION_ID",
+    ):
+        ordinary.pop(key, None)
+    assert {path: path.read_bytes() if path.exists() else None for path in global_paths} == globals_before
+    if not existing_global:
+        assert not any(path.exists() for path in global_paths)
+        return
+
+    # Direct selected-payload invocation is covered by the publication matrix;
+    # this case builds only the runtime the ordinary compatibility front owns.
+    selected_cell = loss in {"available", "pointer"}
+    root, marker = (cell, "CELL") if selected_cell else (fixture["legacy"], "LEGACY")
+    python = _completed_slot({**fixture, "legacy": root})
+    site = python.parent.parent / (
+        "Lib/site-packages" if os.name == "nt" else
+        f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    )
+    (site / "agent_bridge.py").write_text(
+        "import json, os, sys\n"
+        f"print(json.dumps({{'marker':{marker!r},"
+        "'root':os.environ['AGENT_BRIDGE_INSTALL_DIR'],"
+        "'context':os.environ.get('COPILOT_EXTENSIONS_CONTEXT'),"
+        "'installationId':os.environ.get('AGENT_BRIDGE_INSTALLATION_ID'),"
+        "'arguments':sys.argv[1:]}))\n", encoding="utf-8",
+    )
+    before = _snapshot(fixture["home"])
+    for entry in (global_paths[:1] if front == "primary" else global_paths[1:]):
+        command = (
+            [ordinary.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", str(entry), "--help"]
+            if entry.suffix == ".cmd" else _command(fixture, shell, entry, "--help")
+        )
+        result = _run(fixture, ordinary, command, None)
+        assert result.returncode == 0, result.stdout + result.stderr
+        record = json.loads(result.stdout)
+        if loss in {"available", "pointer"}:
+            assert record == selected_record
+        else:
+            assert record == {
+                "marker": "LEGACY", "root": str(fixture["legacy"]), "context": None,
+                "installationId": None, "arguments": ["--help"],
+            }
+    after = _snapshot(fixture["home"])
+    changed = {
+        name for name in before.keys() | after.keys()
+        if name not in shell_profiles and before.get(name) != after.get(name)
+    }
+    permitted = (
+        cell.relative_to(fixture["home"]).as_posix() if loss in {"available", "pointer"} else
+        fixture["legacy"].relative_to(fixture["home"]).as_posix()
+    )
+    assert changed <= {permitted, f"{permitted}/logs", f"{permitted}/logs/boot-trace.jsonl"}
+    assert {path: path.read_bytes() if path.exists() else None for path in global_paths} == globals_before
 
 
 @pytest.mark.portfolio_tier("T3")
@@ -142,7 +328,7 @@ def _initialize_shell_profiles(
     ("selected-cell", "deactivation-managed", "payload"),
     ("selected-cell", "deactivation-healthy", "payload"),
     ("selected-cell", "mode-changed-missing", "payload"),
-    *[(scope, "deployment-changed-under-lock", "payload")
+    *[(scope, "deployment-changed-before-submit", "payload")
       for scope in ("legacy", "selected-cell")],
     ("legacy", "standalone-unicode", "payload"),
     *[("legacy", state, "payload") for state in (
@@ -165,9 +351,14 @@ def _initialize_shell_profiles(
     *[("legacy", state, entry)
       for state in ("healthy-stale-current", "healthy-incomplete-current")
       for entry in ("stamped-global", "stamped-unavailable", "stamped-no-pointer")],
+    *[("legacy", "healthy-python-environment", entry)
+      for entry in ("stamped-global", "stamped-unavailable", "stamped-no-pointer")],
     *[pytest.param("legacy", "failed-resolver", entry, marks=pytest.mark.skipif(
         os.name == "nt", reason="Bash resolver error propagation",
     )) for entry in ("payload", "stamped-no-pointer")],
+    *[pytest.param("legacy", "standalone-no-flock", entry, marks=pytest.mark.skipif(
+        os.name == "nt", reason="POSIX no-flock provisioning lock",
+    )) for entry in ("payload", "stamped-global")],
 ])
 def test_bridge_actual_first_use_publication(
     binding_fixture: dict, bridge_release: Path, shell: str, scope: str, state: str, entry: str,
@@ -185,6 +376,8 @@ def test_bridge_actual_first_use_publication(
         "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
     ):
         environment.pop(key, None)
+    if state == "standalone-no-flock":
+        environment["COPILOT_EXT_NO_FLOCK"] = "1"
     if os.name == "nt":
         environment.pop("PSModulePath", None)
         environment["LOCALAPPDATA"] = str(fixture["home"] / "AppData/Local")
@@ -240,8 +433,10 @@ def test_bridge_actual_first_use_publication(
         "missing-helper", "old-helper", "missing-resolver", "old-resolver", "failed-resolver",
     }
     policy_state = (
-        "missing" if state in {"mode-changed-missing", "deployment-changed-under-lock"} else
-        "standalone" if state in {"standalone-unicode", "deactivation-standalone"} or readiness else
+        "missing" if state in {"mode-changed-missing", "deployment-changed-before-submit"} else
+        "standalone" if state in {
+            "standalone-unicode", "standalone-no-flock", "deactivation-standalone",
+        } or readiness else
         "managed" if ((state.startswith("healthy-") and state != "healthy-invalid") or
                       state in {"deactivation-managed", "deactivation-healthy"}) else
         "invalid" if state == "healthy-invalid" else state
@@ -260,8 +455,10 @@ def test_bridge_actual_first_use_publication(
             "installationMode": {"enabled": False, "marketplaces": {}},
         })
     _record_installer(fixture, shell)
+    _record_driver(fixture, shell)
     if retained is not None and retained != fixture["payload"]:
         _record_installer({**fixture, "payload": retained}, shell)
+        _record_driver({**fixture, "payload": retained}, shell)
     if healthy:
         slot_fixture = {**fixture, "legacy": root}
         python = _completed_slot(slot_fixture)
@@ -359,7 +556,7 @@ def test_bridge_actual_first_use_publication(
             mutation,
             encoding="utf-8-sig" if shell == "powershell" else "utf-8",
         )
-    if state == "deployment-changed-under-lock":
+    if state == "deployment-changed-before-submit":
         _policy(fixture, root, arguments, "managed")
         policy_path = root / "runtime-deployment.json"
         peer_policy = fixture["home"] / "peer-runtime-deployment.json"
@@ -371,14 +568,14 @@ def test_bridge_actual_first_use_publication(
             "# Trace contract: normal/read-only/ready-v1\n"
             "param([string]$TraceMode = 'normal')\n"
             f". {quote(real_resolver)} -TraceMode $TraceMode\n"
-            f"if ([IO.File]::Exists({quote(root / '.provision.lock')})) {{\n"
+            "if ($TraceMode -eq 'ready') {\n"
             f"  [IO.File]::Copy({quote(peer_policy)}, {quote(policy_path)}, $true)\n"
             "}\n"
             if shell == "powershell" else
             "# Trace contract: normal/read-only/ready-v1\n"
             f". {shlex.quote(str(real_resolver))}\n"
             "_real_resolver_status=$?\n"
-            f"if [[ -f {shlex.quote(str(root / '.provision.lock'))} ]]; then\n"
+            'if [[ "${AGENT_RT_RESOLVE_TRACE_MODE:-}" == ready ]]; then\n'
             f"  cp {shlex.quote(str(peer_policy))} {shlex.quote(str(policy_path))}\n"
             'fi\nreturn "$_real_resolver_status"\n'
         )
@@ -414,6 +611,24 @@ def test_bridge_actual_first_use_publication(
                                  else "# Older resolver without deferred tracing"),
                 encoding="utf-8-sig" if shell == "powershell" else "utf-8",
             )
+    if state == "healthy-python-environment":
+        if entry == "stamped-global":
+            gate = fixture["payload"] / f"scripts/runtime-gate.{suffix}"
+            gate.write_text(
+                "throw 'unqualified older gate must not execute'\n" if shell == "powershell" else
+                "printf 'unqualified older gate must not execute' >&2\nexit 99\n", encoding="utf-8",
+            )
+        ambient = fixture["home"] / "ambient-python"
+        ambient.mkdir()
+        (ambient / "agent_bridge.py").write_text(
+            'raise RuntimeError("ambient Bridge must not be imported")\n', encoding="utf-8",
+        )
+        environment.update(
+            PYTHONPATH=str(ambient), PYTHONHOME=str(fixture["home"] / "missing-python-home"),
+        )
+        if host:
+            host.close()
+            host = powershell_host(fixture, environment)
     entry_path = (
         fixture["home"] / ".local/bin/agent-bridge" if entry.startswith("stamped-") else
         fixture["payload"] / "bin/agent-bridge"
@@ -463,15 +678,16 @@ def test_bridge_actual_first_use_publication(
         assert not changed, evidence
         assert not marker.exists(), evidence
         return
-    if state == "deployment-changed-under-lock":
+    if state == "deployment-changed-before-submit":
         assert result.returncode == 3, evidence
         assert "deployment-managed" in result.stdout + result.stderr, evidence
         assert policy_path.read_bytes() == peer_policy.read_bytes(), evidence
         assert not marker.exists(), evidence
+        assert not (root / "driver-observed").exists(), evidence
+        assert not (root / "driver-observed.json").exists(), evidence
         assert not (root / ".provision-status").exists(), evidence
         assert set(changed) <= {
-            relative, f"{relative}/logs", f"{relative}/logs/boot-trace.jsonl",
-            f"{relative}/.provision.lock", f"{relative}/runtime-deployment.json",
+            relative, f"{relative}/runtime-deployment.json",
         }, evidence
         return
     if state == "mode-changed-missing":
@@ -487,7 +703,7 @@ def test_bridge_actual_first_use_publication(
     if missing_gate_refusal:
         assert not changed, evidence
         assert result.returncode == 126, evidence
-        assert "retained runtime gate is unavailable" in result.stdout + result.stderr, evidence
+        assert "retained runtime gate lacks the queued command contract" in result.stdout + result.stderr, evidence
         assert not marker.exists(), evidence
         return
     if readiness or not (standalone or healthy):
@@ -501,20 +717,31 @@ def test_bridge_actual_first_use_publication(
         assert expected in result.stdout + result.stderr, evidence
         assert not marker.exists(), evidence
         return
+    if standalone and (scope == "selected-cell" or state == "standalone-unicode"):
+        assert result.returncode == 126 and not changed, evidence
+        assert "cold namespaced/custom-root" in result.stderr, evidence
+        assert not marker.exists(), evidence
+        return
     permitted = {relative, f"{relative}/logs", f"{relative}/logs/boot-trace.jsonl"}
     if standalone:
-        permitted.update(
-            f"{relative}/{name}"
-            for name in (marker.name, ".provision-status", ".provision.lock")
-        )
+        observed = root / ("driver-observed.json" if shell == "powershell" else "driver-observed")
+        permitted.add(f"{relative}/{observed.name}")
         assert result.returncode == 37, evidence
-        assert marker.is_file(), evidence
+        assert not marker.exists() and observed.is_file(), evidence
         if shell == "powershell":
-            record = json.loads(marker.read_text(encoding="utf-8"))
+            record = json.loads(observed.read_text(encoding="utf-8"))
             assert record == {
-                "action": "provision", "root": str(root), "environmentRoot": str(root),
+                "action": "provision", "root": str(root), "project": str(fixture["home"]),
+                "wait": True,
+                "executionRoot": str(fixture["home"] / ".copilot-extensions/update-driver"),
             }, evidence
-        assert "failed rc=37" in (root / ".provision-status").read_text(encoding="utf-8-sig")
+        assert "::agent-provisioning:: plugin=agent-bridge reason=first-use status=" in result.stderr
+        assert "eta_seconds" not in result.stderr
+        assert not (root / ".provision-status").exists(), evidence
+        assert not (root / ".provision.lock").exists(), evidence
+        assert not (root / ".provision.lock.pid").exists(), evidence
+        assert not (root / ".provision.reap.mutex").exists(), evidence
+        assert not (fixture["home"] / ".copilot-extensions/update-driver").exists(), evidence
     else:
         assert result.returncode == (29 if state == "healthy-exit" else 0), evidence
         assert json.loads(result.stdout) == {
@@ -526,4 +753,5 @@ def test_bridge_actual_first_use_publication(
         assert not (root / ".provision-status").exists(), evidence
         assert not (root / ".provision.lock").exists(), evidence
     assert set(changed) <= permitted, evidence
-    assert (root / "logs/boot-trace.jsonl").is_file(), evidence
+    if healthy:
+        assert (root / "logs/boot-trace.jsonl").is_file(), evidence

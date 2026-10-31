@@ -32,7 +32,7 @@ The concrete reading path is the
 | No managed-deployment opt-in | Preserve ordinary standalone bootstrap, first-use and explicit installer behavior. |
 | Managed installation, healthy compatible runtime | Plugin hooks and commands continue using its selected installed generation; plugin-version drift does not copy payloads, construct slots or replace redirects. |
 | Managed installation, runtime absent or incompatible | Return a precise installation-owned readiness/recovery action without silently provisioning from the plugin payload. Non-deployment hook behavior still executes. |
-| Explicit Manager-owned update | Pass the selected scope and pinned source through the same canonical installer, ownership, readiness, activation and retention path. An environment-variable hint alone is not deployment authority. |
+| Explicit Manager-owned update | Pass the selected scope and pinned source through the same canonical installer, ownership, readiness, activation and retention path. An environment-variable hint alone is not deployment authority; existing-footprint receipts qualify incremental reuse, not permission to perform the requested installation. |
 | Invalid or unsupported deployment policy | Refuse new publication explicitly rather than falling back to self-provisioning; preserve validated installed operation and independent hook behavior where their contracts allow it. |
 | Another source, marketplace or installation | Preserve foreign ownership. Managed deployment never authorizes an ambient same-named command, root or source. |
 

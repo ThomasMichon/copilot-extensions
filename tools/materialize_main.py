@@ -321,6 +321,7 @@ def materialize_uv_editable_ref_into(
             # the exact same sibling location a top-level entry would.
             nested_log, nested_materialized = nuer.materialize_nested_uv_editable_refs(
                 dest_lib_dir, canonical_root=canonical_root_r, dest_root=dest_root_r,
+                _verified={dest_consumer_dir / "libs" / name for name in materialized_libs},
             )
             log.extend(nested_log)
             materialized_libs.update(nested_materialized)
@@ -501,12 +502,14 @@ def materialize_installer_engine_refs(
 def materialize_launch_wrapper_assets_into(
     *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
     dest_root: Path | None = None,
+    reuse_existing: bool = False,
 ) -> list[str]:
     return mlwa.materialize_into(
         source_consumer_dir=source_consumer_dir,
         dest_consumer_dir=dest_consumer_dir,
         canonical_root=canonical_root,
         dest_root=dest_root,
+        reuse_existing=reuse_existing,
     )
 
 
@@ -534,6 +537,19 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
     log.extend(mie.materialize_human_output_declarations(
         dest, canonical_root=canonical_root, human_sources=human_sources,
     ))
+    consumers = sorted((dest / "plugins").glob("*"))
+    standalone = {dest / extra for extra in _EXTRA_CONSUMER_DIRS}
+    consumers.extend(sorted(standalone))
+    for consumer in consumers:
+        manifest = consumer / "pyproject.toml"
+        if (
+            manifest.is_file() or manifest.is_symlink()
+            or consumer in standalone and consumer.is_dir()
+        ):
+            log.extend(
+                f"SKIP {problem}"
+                for problem in uer.materialized_local_source_problems(consumer)
+            )
     return log
 
 
@@ -602,6 +618,8 @@ def _find_symlink(tree: Path) -> str | None:
     if not tree.is_dir():
         return None
     for entry in sorted(tree.rglob("*")):
+        if ".test-runs" in entry.relative_to(tree).parts:
+            continue
         if entry.is_symlink():
             return str(entry.relative_to(tree))
     return None
@@ -674,7 +692,7 @@ def materialize_file_pointers(dest: Path, *, canonical_root: Path) -> list[str]:
 
 def _ignore(_dir: str, names: list[str]) -> set[str]:
     return {n for n in names if n in {
-        ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist",
+        ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs", "build", "dist",
     } or n.endswith((".pyc", ".pyo")) or n.endswith(".egg-info")}
 
 

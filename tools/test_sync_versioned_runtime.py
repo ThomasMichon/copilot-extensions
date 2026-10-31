@@ -17,6 +17,7 @@ SPEC.loader.exec_module(sync)
 NAMES = (
     sync.VRT_NAME, *sync.COMPONENT_NAMES,
     sync.DEPENDENCY_POLICY.name, sync.DEPENDENCY_CONFIG.name, *sync.RESOLVER_NAMES,
+    *sync.INSTALLER_INSTANCE_NAMES, sync.ARCHIVE_NAME,
 )
 
 
@@ -30,7 +31,12 @@ def repository(tmp_path, monkeypatch):
     (scripts / "install.sh").write_text("# fixture\n")
     (scripts.parent / "pyproject.toml").write_text("[project]\nname='example'\n")
     for name in NAMES:
-        source = (engine if name.startswith("installer_dependency_") else runtime) / name
+        source = (
+            sync.installer_instance_sources(tmp_path)[name]
+            if name in sync.INSTALLER_INSTANCE_NAMES
+            else (engine if name.startswith("installer_dependency_") else runtime) / name
+        )
+        source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(f"canonical {name}\n")
         (scripts / name).write_bytes(source.read_bytes())
     monkeypatch.setattr(sync, "REPO", tmp_path)
@@ -39,6 +45,9 @@ def repository(tmp_path, monkeypatch):
     monkeypatch.setattr(sync, "DEPENDENCY_POLICY", engine / sync.DEPENDENCY_POLICY.name)
     monkeypatch.setattr(sync, "DEPENDENCY_CONFIG", engine / sync.DEPENDENCY_CONFIG.name)
     monkeypatch.setattr(sync, "RESOLVER_DIR", runtime)
+    monkeypatch.setattr(
+        sync, "lifecycle_archive", lambda repo: (runtime / sync.ARCHIVE_NAME).read_bytes(),
+    )
     return scripts
 
 
@@ -46,7 +55,7 @@ def repository(tmp_path, monkeypatch):
 @pytest.mark.parametrize("name", NAMES)
 @pytest.mark.parametrize("target_state", ["different", "matching", "dangling"])
 def test_main_refuses_linked_destinations_without_any_mutation(
-    repository, monkeypatch, capsys, check, name, target_state,
+    repository, monkeypatch, capsys, check, name, target_state, native_file_symlink,
 ):
     scripts = repository
     destination = scripts / name
@@ -56,7 +65,7 @@ def test_main_refuses_linked_destinations_without_any_mutation(
     if target_state != "dangling":
         target.write_bytes(canonical if target_state == "matching" else b"unrelated bytes\n")
         target.chmod(0o600)
-    destination.symlink_to(target)
+    native_file_symlink(destination, target)
     original_link = os.readlink(destination)
     before = (
         target.read_bytes(), stat.S_IMODE(target.stat().st_mode), target.stat().st_mtime_ns,
@@ -79,11 +88,13 @@ def test_main_refuses_linked_destinations_without_any_mutation(
 
 
 @pytest.mark.parametrize("check", [False, True], ids=["sync", "check"])
-def test_main_refuses_linked_destination_ancestor(repository, monkeypatch, capsys, check):
+def test_main_refuses_linked_destination_ancestor(
+    repository, monkeypatch, capsys, check, native_file_symlink,
+):
     scripts = repository
     actual = scripts.with_name("actual-scripts")
     scripts.rename(actual)
-    scripts.symlink_to(actual, target_is_directory=True)
+    native_file_symlink(scripts, actual, target_is_directory=True)
     before = {path.name: path.read_bytes() for path in actual.iterdir()}
     monkeypatch.setattr(sys, "argv", [str(SCRIPT), *(["--check"] if check else [])])
 
@@ -106,7 +117,101 @@ def test_main_repairs_ordinary_missing_and_stale_files_and_is_idempotent(reposit
     assert sync.main() == 0
     for name in NAMES:
         source = (
-            sync.DEPENDENCY_POLICY.parent if name.startswith("installer_dependency_")
-            else sync.CANONICAL.parent
-        ) / name
+            sync.installer_instance_sources(sync.REPO)[name]
+            if name in sync.INSTALLER_INSTANCE_NAMES else (
+                sync.DEPENDENCY_POLICY.parent if name.startswith("installer_dependency_")
+                else sync.CANONICAL.parent
+            ) / name
+        )
         assert (scripts / name).read_bytes() == source.read_bytes()
+
+
+def test_instance_only_sync_preserves_unrelated_runtime_bytes(repository, monkeypatch):
+    scripts = repository
+    unrelated = scripts / sync.VRT_NAME
+    unrelated.write_bytes(b"concurrent runtime edit\n")
+    for name in sync.INSTALLER_INSTANCE_NAMES:
+        (scripts / name).unlink()
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--only-installer-instances"])
+
+    assert sync.main() == 0
+    assert unrelated.read_bytes() == b"concurrent runtime edit\n"
+    for name, source in sync.installer_instance_sources(sync.REPO).items():
+        assert (scripts / name).read_bytes() == source.read_bytes()
+
+
+def test_instance_only_sync_ships_ps_binding_and_complete_source_to_wsl_payload(repository, monkeypatch):
+    references = sync.REPO / "plugins" / "wsl-setup" / "skills" / "setting-up-wsl" / "references"
+    references.mkdir(parents=True)
+    (references / "wsl-keepalive.ps1").write_text("# explicit installer\n")
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--only-installer-instances"])
+
+    assert sync.main() == 0
+    sources = sync.installer_instance_sources(sync.REPO)
+    for name in ("daemon_instances.ps1", "installer-instance-reconcile.ps1"):
+        assert (references / name).read_bytes() == sources[name].read_bytes()
+    assert (references / sync.ARCHIVE_NAME).read_bytes() == sync.lifecycle_archive(sync.REPO)
+    assert {path.name for path in references.iterdir()} == {
+        "wsl-keepalive.ps1", "daemon_instances.ps1", "installer-instance-reconcile.ps1",
+        sync.ARCHIVE_NAME,
+    }
+
+
+def test_native_wheel_fanout_is_not_an_available_build_route(repository, monkeypatch):
+    monkeypatch.setattr(sys, "argv", [
+        str(SCRIPT), "--only-installer-instances", "--native-wheel", str(sync.REPO / "built.whl"),
+    ])
+    with pytest.raises(SystemExit) as error:
+        sync.main()
+    assert error.value.code == 2
+
+
+def test_lifecycle_source_archive_is_deterministic_and_contains_only_python():
+    import io
+    import zipfile
+    from daemon_lifecycle_assets import lifecycle_archive
+
+    first = lifecycle_archive(SCRIPT.parents[1])
+    assert lifecycle_archive(SCRIPT.parents[1]) == first
+    with zipfile.ZipFile(io.BytesIO(first)) as archive:
+        assert archive.namelist()
+        assert all(name.endswith(".py") for name in archive.namelist())
+        assert not any("build_native" in name for name in archive.namelist())
+        assert archive.read("agent_procutil/_daemon_instance_linux.py") == (
+            SCRIPT.parents[1] / "libs/agent-procutil/src/agent_procutil/_daemon_instance_linux.py"
+        ).read_bytes()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX source archive custody")
+def test_source_archive_publication_repairs_group_writable_bytes(repository, monkeypatch):
+    archive = repository / sync.ARCHIVE_NAME
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--only-installer-instances"])
+    original = os.umask(0o002)
+    try:
+        assert sync.main() == 0
+    finally:
+        os.umask(original)
+    assert stat.S_IMODE(archive.stat().st_mode) == 0o644
+    archive.chmod(0o664)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--only-installer-instances", "--check"])
+    assert sync.main() == 1
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--only-installer-instances"])
+    assert sync.main() == 0
+    assert stat.S_IMODE(archive.stat().st_mode) == 0o644
+
+
+@pytest.mark.parametrize("linked", [False, True], ids=["ordinary", "redirected"])
+def test_package_archive_publishes_the_same_complete_closure(repository, monkeypatch, linked):
+    package_archive = (
+        sync.REPO / "libs/agent-procutil/src/agent_procutil" / sync.ARCHIVE_NAME
+    )
+    if linked:
+        target = sync.REPO / "foreign-archive"
+        target.write_bytes(b"retain foreign input")
+        package_archive.symlink_to(target)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--only-installer-instances"])
+    assert sync.main() == (1 if linked else 0)
+    if linked:
+        assert target.read_bytes() == b"retain foreign input"
+    else:
+        assert package_archive.read_bytes() == (repository / sync.ARCHIVE_NAME).read_bytes()

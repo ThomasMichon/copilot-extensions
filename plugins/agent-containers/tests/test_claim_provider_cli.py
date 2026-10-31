@@ -8,6 +8,7 @@ import argparse
 import contextlib
 import json
 import types
+import pytest
 
 from agent_containers import claim_provider_cli as cpc
 from agent_containers import lifecycle
@@ -197,6 +198,35 @@ def test_claim_reclaim_already_gone_is_idempotent(monkeypatch, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["reclaimed"] is True and "already gone" in out["detail"]
     assert released["name"] == "c-a"
+
+
+@pytest.mark.parametrize(("diagnostic", "reclaimed"), [
+    ("Error: No such object: c-a", True),
+    ("error: no such object: c-a", True),
+    ("Cannot connect to the Docker daemon", False),
+    ("permission denied", False),
+    ("Error: No such object: other-container", False),
+])
+def test_reclaim_real_remove_helper_classifies_inspect_absence(
+    monkeypatch, capsys, diagnostic, reclaimed,
+):
+    from agent_containers import config
+
+    monkeypatch.setattr(config, "load_config", lambda **kwargs: config.ContainersConfig())
+    monkeypatch.setattr(cpc, "get_lease", lambda name: None)
+    monkeypatch.setattr(cpc, "deploy_hold", _fake_hold)
+    monkeypatch.setattr(cpc, "active_session_admissions", lambda name: [])
+    released = []
+    monkeypatch.setattr(cpc, "release_lease", lambda name: released.append(name))
+
+    def inspect_only(argv, **kwargs):
+        assert argv == ["docker", "inspect", "c-a"]
+        return _proc(1, stderr=diagnostic)
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", inspect_only)
+    assert cpc.cmd_claim_reclaim(argparse.Namespace(name="c-a", apply=True)) == 0
+    assert json.loads(capsys.readouterr().out)["reclaimed"] is reclaimed
+    assert released == (["c-a"] if reclaimed else [])
 
 
 def test_claim_reclaim_real_failure(monkeypatch, capsys):

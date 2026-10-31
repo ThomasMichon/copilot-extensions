@@ -1,0 +1,9 @@
+{
+  "comment": "Keep Configuration snapshots isolated when Workers use streaming catalog discovery",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

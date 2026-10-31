@@ -45,6 +45,8 @@ def _repos_usage() -> None:
     print("  remove <name>                       Remove a repo from the registry")
     print("  clone <remote> [--name N]           Clone a repo to srcroot and register")
     print("     [--target PATH]")
+    print("  setup <https-url> [--target PATH]  Plan or acquire/register and run explicit repo setup")
+    print("     [--commit FULL_COMMIT_ID] [--apply] [--trust-repository-setup]")
     print("  srcroot [--set PATH]                Show or set the source root")
     print("     [--platform windows|wsl|linux]")
     print("  migrate [--default-class C]         Import legacy ~/.git-repos")
@@ -155,7 +157,7 @@ def _clarify_registration_account(
 
 def cmd_repos_dispatch(argv: list[str]) -> int:
     """Route repos subcommands."""
-    from . import repos
+    from . import git_ops, repos
 
     if not argv or argv[0] in ("--help", "-h"):
         _repos_usage()
@@ -163,6 +165,11 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
 
     sub = argv[0]
     rest = argv[1:]
+
+    if sub == "setup":
+        from .repository_bootstrap import command
+
+        return command(rest)
 
     if sub == "configuration":
         from .repos_configuration import command
@@ -668,7 +675,11 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                 "or set an account: override for this repo."
             )
             return 1
-        env, login, injected = _core()._gh_env_for_repo(target)
+        try:
+            env, login, injected = _core()._gh_env_for_repo(target)
+        except (git_ops.AccountCredentialError, repos.RepositoryResolutionError) as exc:
+            output.err(str(exc))
+            return 1
         if login and not injected:
             output.warn(f"could not mint a gh token for '{login}'; using ambient auth")
         return subprocess.run(["gh", *gh_args], env=env).returncode

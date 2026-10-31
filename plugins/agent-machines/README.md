@@ -17,6 +17,66 @@ The legacy decision child suppresses PowerShell module-preparation progress,
 not diagnostics or refusal status. Ordinary invocation, native command decoding,
 runtime construction and publication authority remain unchanged.
 
+Cell/slot actions do not allocate the legacy `.agent-machines/.install-stage`.
+The PowerShell entrypoint retains a compiler-free, caller-owned whole-tree
+watchdog, including payload selection/hashing, provisioning-lock waits and
+runtime construction. The original PowerShell caller adopts the same shared
+shell-lifetime Job/pipe transport as the installation-context SDK before hashing
+begins; losing that caller retires the watchdog, not just its child installer.
+Its default
+deadline is 480 seconds; `AGENT_MACHINES_INSTALL_DEADLINE_SEC`, then
+`COPILOT_PLUGIN_INSTALL_DEADLINE_SEC`, may select another positive deadline.
+Nonpositive or malformed deadlines are refused instead of disabling containment.
+Captured UTF-8 stdout/stderr are returned at completion, with separate 16 MiB
+budgets; timeout fails with status 124, and cleanup uncertainty is an explicit
+error, never successful completion. The transport explicitly selects UTF-8 for
+both its Python producer and its PowerShell decoders, including Python 3.10.
+Both native adapters bind the selected package version and every copied regular file
+before waiting for the cell lock, recheck the recursive child, and verify copied
+snapshot bytes before publication. This also covers ordinary marketplace payloads
+without `runtime-source.json`. Generated/build directories and bytecode caches
+are included, not silently excluded by source-assembly filtering. Linked,
+reparse, nonregular or incompletely scanned inputs are refused; only the two
+root publication sidecars retain separate ownership/provenance checks.
+Construction, dependency-policy, lifecycle and import-health Python controls
+explicitly disable bytecode writes; isolated Python does not honor the
+environment-only equivalent. Existing cached bytes stay part of the selection.
+Package builds use the dependency installer's existing retained-input copy, so
+backend build/egg-info output does not mutate the verified snapshot.
+
+## Legacy runtime removal
+
+The native `scripts/init.ps1 -Action uninstall -InstallDir <root>` and
+`scripts/init.sh uninstall --install-dir <root>` actions remove only admitted
+runtime artifacts. Config, databases, authentication, state, logs, unknown
+entries, the root and coordination lease files remain. Uninstall is not a
+purge or an installation-cell retirement operation.
+
+All legacy publishers (including `stamp-binstub`) and uninstall serialize on
+the same whole-action `.install.lock`. Fast session-start stamps bound admission
+to one second and refuse on contention; they never publish unlocked. Removal holds the canonical
+command lifecycle, construction, retention and selector custody; a live runtime
+or an unavailable idle proof refuses removal. Bootstrap Python, the native host
+and all executing helpers must be outside the root. Paths containing raw `..`,
+linked/reparse ancestors, managed/cell roots and foreign/malformed ownership
+are refused before staging or removal. Unknown runtime-bin contents are retained,
+not selected wholesale. Missing ownership or custody proof refuses removal.
+
+The native adapter calls `installer_engine_uninstall.py` with the trusted
+`scripts/uninstall-profile.json`, under the whole-action transaction. The helper
+and native engine must be materialized in this payload's own `scripts/`; no
+ambient or sibling installation is searched. Its
+`--check` is structural/read-only, not removal authority; `--remove-runtime`
+reacquires all canonical custody and repeats admission. The finite entry-name
+installer-engine API is required; there is no purge fallback. The existing
+deploy manifest is removed last, retaining ownership for a failed removal's retry.
+
+Unexpected outer-owner death remains an integration qualification: canonical
+writer custody does not transfer a parent's noninherited .NET transaction lock
+or PID receipt. A native lifetime/handle bridge is required before claiming
+whole-gate custody across that boundary. POSIX kernel-lock release is close-only
+so an inherited finite guardian is not unlocked by the caller's exit trap.
+
 ## What works today
 
 - **Runtime is standalone.** With absent or false installation-mode policy, the
@@ -54,7 +114,9 @@ runtime construction and publication authority remain unchanged.
   settings, and machine-local self-update opt-ins / Scheduled Tasks -- that the
   engine installs/pins/writes itself (with cross-package collision detection),
   instead of hiding them in per-repo scripts. See
-  [`docs/resources.md`](docs/resources.md).
+  [`docs/resources.md`](docs/resources.md). Declared `git-config` keys use a
+  separate preview-bound consent digest and verified rollback; blanket
+  `restore --apply` or unattended maintenance cannot consent to those edits.
 - **Optional unattended self-update watchdog.** A reachable, logged-in machine
   can opt in (per machine or fleet-wide, via the `self-update` resource) to two
   independently-scheduled OS Scheduled Tasks that converge it between
@@ -205,6 +267,11 @@ scripts/init.sh slot-provision --context /path/to/install.json --expected-market
 scripts/init.sh slot-validate --context /path/to/install.json --expected-marketplace-id <marketplace-id>
 scripts/init.sh slot-cutover --context /path/to/install.json --expected-marketplace-id <marketplace-id> --expected-namespace-generation <n> --expected-install-generation <n> --expected-current-version <version>
 ```
+
+Cell/slot actions use their explicit receipt transaction without entering the
+legacy payload self-stage or creating its legacy runtime footprint. This
+exception is selected from the parsed action, not an inherited stage marker;
+ordinary legacy installation still stages a replaceable marketplace payload.
 
 `cell-provision` is reserved for the payload-local dispatcher and bootstrap
 reconciler after the shared resolver proves an already-active Agent Machines
@@ -362,6 +429,7 @@ agent-machines restore --repo myrepo    # another single repo
 agent-machines restore --only ssh       # preview one surface/module
 agent-machines restore --only ssh --apply
 agent-machines restore --json           # structured plan/surface/module result
+agent-machines restore --only git-config --json # exact Git-file preview; no live edit
 agent-machines self-update install      # register opted-in Scheduled Tasks
 agent-machines self-update status       # show opt-in + task presence
 agent-machines self-update uninstall    # remove registered self-update tasks
@@ -398,6 +466,43 @@ command, then runs `restore --apply` through the same stable `agent-machines`
 binstub. `restore --apply` reconciles the same task presence
 declaratively, including removing tasks that have since been opted out.
 `--verbose`, and always present in `--json`.
+
+### Update intent and schedule convergence
+
+Fleet-update and self-update tiers are unattended maintenance. Their update
+commands pass `--auto`, including their independently opted-in schedules. Those
+opt-ins remain required but do not exempt automatic updates from the hold.
+Running an unattended tier by hand retains that tier's automatic update intent;
+use an explicit project `update` for ordinary manual admission. See the
+[update admission contract](../../docs/install-contract.md#runtime-self-reconcile-and-command-glossary-session-start-hooks)
+for manual defaults and the separate ownership and interruption gates.
+
+An old unmarked fleet task could bypass the hold after its receiver gains manual
+defaults. Under separate deployment authority, sequence the existing owners:
+
+1. Inspect fleet/self-update status and resolve any active or interrupted
+   execution through its owner. Do not terminate an installer to migrate a trigger.
+2. Quiesce future triggers with the existing fleet/self-update `uninstall`
+   commands before upgrading the receiver. Confirm they are unregistered and
+   separately quiesce external cron/task producers and concurrent restore.
+   Timer removal does not settle a running service or interrupted request.
+3. Keep the hold intact and perform the separately authorized unified manual
+   update; do not infer force or recovery authority from manual admission.
+4. Reconcile configured opt-ins with the existing fleet/self-update `install`
+   commands. Require matching `status --json` readback before re-enabling
+   maintenance. The Windows owner compares complete tokenized expected arguments;
+   the POSIX owner compares generated service content. Both include `--auto`.
+
+Self-update tasks retain their stable binstub, whose updated sweep submits
+automatic project updates. An old running producer retains loaded behavior until
+upgraded. Source publication changes no deployed schedule. Skipped, deferred or
+failed registration is not convergence, and the hold does not replace a
+schedule's own opt-in or domain policy.
+
+A confirmed held-update exit3 is an explicit tier `noop`, not a failed update
+or completed installation. It preserves the previous success timestamp; a held
+self-update stops before machine restore. Exit3 without the receiver's exact
+no-work marker remains an error.
 
 ## Playwright CLI provisioning
 
@@ -931,3 +1036,14 @@ canonical, absent, or empty legacy layout.
 
 If the runtime is not built yet, the first command prints a provisioning message
 (POSIX also emits `::agent-provisioning::`) and may take 30–120 seconds.
+
+
+### Emergency pre-tool workflow guards
+
+The default installation supports `agent-machines pretool-killswitch on
+"<reason>"`, `status --json` and `off`. This explicitly pauses suite-owned
+preToolUse workflow guards, not native Copilot permissions or other hook events.
+For scope, hot-session delivery, installation-cell isolation and rollback, see
+[`libs/bootstrap-killswitch/README.md`](../../libs/bootstrap-killswitch/README.md#emergency-pre-tool-workflow-guard-switch).
+The control is inactive until explicitly enabled; a deployed release alone does
+not activate it.

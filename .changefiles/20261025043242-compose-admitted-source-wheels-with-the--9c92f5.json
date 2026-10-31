@@ -1,0 +1,9 @@
+{
+  "comment": "Compose admitted source wheels with the existing Manager candidate and self-install lifecycle.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

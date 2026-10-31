@@ -1,0 +1,13 @@
+{
+  "comment": "Keep all shared installer engine adopters aligned with the restricted tooling seed roster",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

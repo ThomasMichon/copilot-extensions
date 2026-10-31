@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trusted harness base build approval",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source_revision", "context_sha256", "builder", "timeout_seconds"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "source_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "context_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+    "builder": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "container_id", "max_memory_bytes", "max_cpus"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,62}$"},
+        "container_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "max_memory_bytes": {"type": "integer", "minimum": 134217728},
+        "max_cpus": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

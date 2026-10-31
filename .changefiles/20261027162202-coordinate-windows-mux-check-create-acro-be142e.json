@@ -1,0 +1,13 @@
+{
+  "comment": "Coordinate Windows mux check/create across native and detached launches; release at discovery and keep late joins seed-free",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

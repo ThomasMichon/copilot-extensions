@@ -129,6 +129,7 @@ def test_companions_execute_only_retained_bytes_across_late_replacement(installe
         assert "_runtime_construction_channels_close" in runtime.construction_shell_helpers("sh")
         assert runtime._runtime_component("versioned_runtime_construction").__name__ in sys.modules
         assert runtime._runtime_component("versioned_runtime_source").__name__ in sys.modules
+        assert len(runtime.fingerprint_source([package / "__init__.py"])) == 64
         publication = runtime._runtime_component("versioned_runtime_publication")
         assert publication.lease_component() is runtime._leases
     assert not any(name == prefix or name.startswith(prefix + "_") for name in sys.modules)

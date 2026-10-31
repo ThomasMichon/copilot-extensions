@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import os
 import sys
 
 from . import config as cfg
-from .sessions_pane_args import sweep_mux_pane_args
+from .sessions_pane_args import sweep_registered_mux_pane_args as sweep_mux_pane_args
+
+_DEFAULT_SWEEP_INTERVAL_S = 30
 
 #: Bounded grace period a shutdown/handoff (runtime superseded, a newer
 #: monitor taking ownership, or the empty-strike idle-exit path) waits for
@@ -138,11 +142,15 @@ def add_parsers(sub) -> None:
         "(one process instead of one per session; mandatory, always-on "
         "infrastructure -- not operator-configurable)",
     )
-    p.add_argument("--interval", type=int, default=15, help="Sweep cadence in seconds (min 2)")
+    p.add_argument(
+        "--interval", type=int, default=_DEFAULT_SWEEP_INTERVAL_S,
+        help="Correctness backstop in seconds (default 30, min 2); pushes wake immediately",
+    )
     p.add_argument("--passive", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--control-port", type=int, default=None, help=argparse.SUPPRESS)
 
 
+@daemon_entrypoint("agent-worktrees-status-monitor", source=__file__, purpose="production")
 def cmd_status_monitor(args: argparse.Namespace) -> int:
     """One resident, coalescing tracker for every ``wt-*`` session's status bar.
 
@@ -165,12 +173,17 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from .worktrees_runtime import READ_ACTION, WorktreesRuntime
     from .worktrees_projection_index import ProjectionError, ProjectionUnavailable
     from .worktrees_producer import publish_active_project
+    from .allocation_link_runtime import AllocationLinkRuntime
     from .hook_ipc import HookIpcServer, HookUnavailable
 
     core = _core()
     mux = "psmux" if shutil.which("psmux") else ("tmux" if shutil.which("tmux") else None)
     mux_bin = (shutil.which(mux) or mux) if mux else None
-    interval = args.interval if getattr(args, "interval", None) and args.interval >= 2 else 15
+    interval = (
+        args.interval
+        if getattr(args, "interval", None) and args.interval >= 2
+        else _DEFAULT_SWEEP_INTERVAL_S
+    )
     passive_mode = bool(getattr(args, "passive", False))
 
     # Stage D (agent-cli-lazy-dispatch): these six are owned by
@@ -211,7 +224,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if passive_mode:
             return False
         d = _locks.read_lock(lock)
-        if not (_locks.lock_is_live(d) and isinstance(d, dict)):
+        if not (_locks.lock_is_running(d) and isinstance(d, dict)):
             return False
         if d.get("pid") == os.getpid():
             return False
@@ -360,6 +373,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     lifecycle_count = 0
     lifecycle_claims: dict[str, float] = {}
     governance = loop_governance.LoopGovernance()
+
+    def _allocation_owner_elected() -> bool:
+        core._status_monitor_recheck(governance, "pre-mutation:allocation-link")
+        return status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None
+
+    allocation_linker = AllocationLinkRuntime(
+        elected=_allocation_owner_elected, context_lock=state_lock, wake=wake_event,
+    )
     hook_client = load_hook_client_module()
     hook_policy = resident_hook_policy_type(hook_client)
     if hook_policy.ready():
@@ -470,6 +491,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             print(f"current-roster authority unavailable: {exc}", file=sys.stderr)
             return False
         repositories_runtime.activate()
+        allocation_linker.activate()
         if hook_server is None and hook_policy.ready():
             try:
                 hook_server = HookIpcServer(_decide)
@@ -544,6 +566,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         receipts.close_admission()
         worktrees_runtime.close_admission("draining")
         repositories_runtime.close_admission("draining")
+        allocation_linker.close_admission()
         _close_request_surface_admission()
         # Stop admitting new managed-mux push observations too (a genuine
         # "new source" admission vector, distinct from worktree_status_runtime's
@@ -633,6 +656,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("classify")
         if _tracking_write_busy():
             reasons.append("tracking-write")
+        if allocation_linker.active_count():
+            reasons.append("allocation-link")
         if worktrees_runtime.feed.active_count():
             reasons.append("worktrees-feed")
         if control_server.current_read_count():
@@ -657,6 +682,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                                   ([tracking_write_server] if tracking_write_server is not None else [])
                                   + retired_tracking_write_servers),
             "tracking-write-compute": int(tracking_write.has_inflight_write()),
+            "allocation-link": allocation_linker.active_count(),
             "worktrees-feed": worktrees_runtime.feed.active_count(),
             "worktrees-read": control_server.current_read_count(),
             "repos-map-read": control_server.current_read_count(repository_map.READ_ACTION),
@@ -678,31 +704,18 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     def _handle_control(action: str, payload: dict) -> dict:
         nonlocal admission_closed, published_lock
         if action == "health":
-            roster_health = worktrees_runtime.health()
-            receipt_health = receipts.health()
-            repository_health = repositories_runtime.health()
-            roster_health["capabilities"] = [
-                *roster_health["capabilities"], *receipt_health["capabilities"],
-                *repository_health["capabilities"],
-            ]
-            if shutdown_requested.is_set():
-                roster_health["worktrees"]["status"] = "shutdown"
-            roster_ready = roster_health["worktrees"]["status"] in {"ready", "unready"}
-            return {
-                "status": "draining" if admission_closed else (
-                    "ready" if roster_ready else "unavailable"
-                ),
-                "published": published_lock,
-                "pid": os.getpid(),
-                **roster_health,
-                "promptReceipt": receipt_health["promptReceipt"],
-                "repositories": repository_health["repositories"],
-                "runtime_generation": PROCESS_GENERATION,
-                "version": PROCESS_VERSION,
-                "runtime_slot": os.path.basename(my_prefix),
-            }
+            from .status_monitor_health import response
+
+            return response(
+                worktrees=worktrees_runtime, receipts=receipts,
+                repositories=repositories_runtime, allocations=allocation_linker,
+                admission_closed=admission_closed, published=published_lock,
+                shutdown=shutdown_requested.is_set(),
+            )
         if action == receipt_control.ACTION:
             return receipts.handle(payload)
+        if action == "picker-bootstrap":
+            return worktrees_runtime.picker_bootstrap(payload)
         if action == READ_ACTION:
             if status_monitor_cutover.active_generation_for_pid(os.getpid()) is None:
                 worktrees_runtime.close_admission("superseded")
@@ -866,6 +879,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 _locks.write_lock(lock, extra=_lock_extra())
 
                 sweep_mux_pane_args()
+                with state_lock:
+                    allocation_linker.discover()
+                allocation_linker.tick()
                 picker_projects = monitor_roots.live_picker_projects()
                 demand_projects = core.list_cache.recent_demand_projects()
                 external_projects = picker_projects | demand_projects | worktrees_runtime.demand_projects()
@@ -887,7 +903,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     governance=governance,
                     managed_mux_cache=managed_mux_runtime.cache,
                     config_cache_for_project=_config_cache_for_project,
-                    roster_publisher=lambda: publish_active_project(worktrees_runtime),
+                    roster_publisher=lambda: publish_active_project(
+                        worktrees_runtime, observe_records=allocation_linker.observe,
+                    ),
                     roster_failure=worktrees_runtime.producer_failed,
                 )
                 wait_for_lifecycle_priority(lifecycle_priority)
@@ -930,6 +948,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 and not worktrees_runtime.demand_projects()
                 and not repositories_runtime.has_active_demand()
                 and not _tracking_write_busy()
+                and not allocation_linker.has_demand()
             ):
                 empty_strikes += 1
                 if empty_strikes >= max_empty_strikes:
@@ -948,6 +967,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         or worktrees_runtime.demand_projects()
                         or repositories_runtime.has_active_demand()
                         or _tracking_write_busy()
+                        or allocation_linker.has_demand()
                     ):
                         empty_strikes = 0
                     else:
@@ -956,22 +976,21 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 empty_strikes = 0
             _wake_interruptible_wait(wake_event, interval)
     finally:
-        with state_lock:
-            shutdown_requested.set()
-            _enter_drain_only_state()
-            worktrees_runtime.close_admission("shutdown")
-            repositories_runtime.close_admission("shutdown")
-        repositories_runtime.shutdown()
-        worktrees_runtime.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S)
-        _close_request_surfaces()
-        control_server.close()
-        receipts.wait_idle()
-        resident_push.reset()
-        worktrees_runtime.shutdown()
-        worktree_status_runtime.shutdown()
-        managed_mux_runtime.shutdown()
-        status_monitor_cutover.clear_route_if_owner(os.getpid())
-        d = _locks.read_lock(lock)
-        if isinstance(d, dict) and d.get("pid") == os.getpid():
-            _locks.remove_lock(lock)
+        from .status_monitor_retirement import retire_monitor
+
+        def _close_monitor_admission():
+            with state_lock:
+                shutdown_requested.set()
+                _enter_drain_only_state()
+                worktrees_runtime.close_admission("shutdown")
+                repositories_runtime.close_admission("shutdown")
+
+        retire_monitor(
+            close_admission=_close_monitor_admission, repositories_runtime=repositories_runtime,
+            worktrees_runtime=worktrees_runtime, close_request_surfaces=_close_request_surfaces,
+            control_server=control_server, receipts=receipts,
+            worktree_status_runtime=worktree_status_runtime, managed_mux_runtime=managed_mux_runtime,
+            lock=lock, original_error=sys.exc_info()[1],
+            allocation_linker=allocation_linker,
+        )
     return 0

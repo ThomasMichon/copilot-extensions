@@ -40,6 +40,15 @@ health before reuse. No marker, timestamp, or package file is rewritten; failed
 health requires explicit repair, and a generation with different content cannot
 be selected as a successful reuse.
 
+## Source fingerprinting
+
+`fingerprint_source()` retains its complete input, symlink and framed-digest
+contract while overlapping content reads in batches of at most four. Frames
+are hashed in label order regardless of read completion order; failures remain
+fail-closed and all in-flight readers settle before return or error. Each call
+reads current bytes again: there is no persistent content-hash cache or
+background reader. Single-entry fingerprints need no worker pool.
+
 ## Why this is vendored, not a package
 
 Unlike the other `libs/*` entries, this is **not** an installable package and has
@@ -49,7 +58,7 @@ stays out of runtime dependency resolution and ships as plain stdlib files:
 `versioned_runtime.py` owns slot identity/admission and selectors;
 `versioned_runtime_leases.py` owns kernel construction/retention/publication
 ownership; `versioned_runtime_construction.py` owns the finite attached protocol
-and shell adapters; `versioned_runtime_source.py` owns source receipts and exact
+and shell adapters; `versioned_runtime_source.py` owns complete-input fingerprints, source receipts and exact
 source-qualified recovery; `versioned_runtime_publication.py` owns created-file
 proofs and caught-failure recovery. The protocol receives explicit typed runtime operations,
 never reverse-imports a compatibility root. Each marketplace payload carries the
@@ -141,7 +150,9 @@ activation/cutover coordination. A repair's outer cutover guard remains required
 
 Shell installers use `construction-shell --shell ps1|sh` to obtain the canonical
 attached-pipe adapter. Its finite `construction-session` supervisor holds kernel
-ownership while the caller installs dependencies. Completion rechecks the
+ownership while the caller installs dependencies. Both rendered shell adapters
+explicitly launch Python controls with `-B`, preventing bytecode writes into the
+selected payload. Completion rechecks the
 payload fingerprint and transfers to retention before releasing construction;
 the caller settles that retention after selection/reconciliation. Failure or
 pipe EOF reclaims only the owned unfinished candidate. Cleanup refusals remain
@@ -209,6 +220,21 @@ separate references to the candidate and previous generation until their actual
 promotion/drain or rollback outcome settles. Neither an mtime grace period nor
 a completion helper's PID is a retention pin. These context managers must run
 in the owning installer process; a shell command that exits cannot retain them.
+
+External registrations can outlive an interrupted installer. Their existing
+execution owner uses
+`versioned_runtime_leases.replace_runtime_references(root, owner, versions, expected=previous)`
+to persist credential-free, owner-scoped generation names in
+`runtime-references.json`. Publish both old and desired generations before
+changing the external registration; retain that union until publication or
+explicit recovery settles, then compare and replace it with the remaining
+generation. Release with an empty list only after owned removal is confirmed.
+The writer takes shared target retention before publication custody, preserves
+other owners and refuses a changed expected set. Canonical cleanup reads these
+barriers under publication custody, including after the writer process dies.
+Only an absent record means no references; malformed, linked, oversized or
+unreadable evidence refuses deletion. References never expire by PID or age
+and do not provide a new mutation lock, recovery queue or force-release path.
 
 Canonical `gc`, `toss_incomplete`, and incomplete `slot` cleanup acquire
 construction, exclusive retention, then selector-publication ownership and
@@ -306,7 +332,8 @@ no check-then-replace or link-then-unlink fallback. Abandoned attempts remain
 evidence and cannot block a fresh attempt. An already-existing final name is
 never adopted or replaced, even when it contains identical bytes.
 
-Matching target-writer leases remain held until `keep()` or `rollback()`.
+Matching target-writer leases remain held until `keep()`, `retain()` or
+`rollback()`.
 `target_leases(root, targets, open_lock=None)` also accepts a pinned-directory
 opener for callers with an admitted no-follow namespace. The opener receives
 the lease-directory path and lock basename and returns an owned descriptor;
@@ -319,6 +346,23 @@ The owner chooses the terminal operation from the actual runtime outcome:
 keep candidate helpers after committed settlement, including an exception
 re-raised after commit-forward; recover them only when the previous runtime
 actually remains selected/serving.
+
+`retain()` is the successful settlement for a caller that still needs durable
+created-object attribution or later recovery. It verifies the live targets,
+backups, context and producer receipts before releasing writer custody, and
+deletes none of them. A failed verification leaves custody with the caller for
+explicit recovery; it is not a success-shaped cleanup warning. The caller owns
+the retained workspace's lifetime and exact operation binding. Later mutation
+must reacquire the normal target leases and check the current physical object
+against those original proofs through `check_owned`/`recover_owned`; retained
+bytes or a matching digest alone never authorize a foreign replacement.
+`keep()` retains its existing cleanup behavior.
+All three settlements bind the context's root and exact target-to-backup/state
+mapping to the values captured during publication. Valid JSON with altered
+recovery bindings cannot silently change restoration into removal.
+Retained settlement additionally requires each newly created output's exact
+captured physical state in the producer proofs. Unchanged normalized no-ops
+remain explicitly non-owned and do not acquire a created-output claim.
 
 Rollback restores proven uncontested outputs, preserves foreign replacements
 and reports incomplete recovery with evidence retained. The separate
@@ -341,6 +385,17 @@ contexts or complete records remain refusals; a header alone proves no target.
 Ordinary readers, registration reuse, `check_owned` and `recover_owned` retain
 their complete-receipt requirement. This is not restoration authority for an
 older runtime or a generic repair of missing evidence.
+
+`recover_uncontested(context, receipts, output, expected, baseline,
+recovery_only=True)` exposes that same narrow prefix admission for **explicit
+reversal** after producer death. It reacquires the normal target-writer leases,
+validates the caller's complete context/baseline and declared bytes, restores
+only physically proven uncontested outputs, and returns foreign targets without
+overwriting them. The default remains `False`: ordinary complete-receipt
+admission is unchanged. The lifecycle owner journals its intent and exact
+receipt/output locators before effects, retains recovery-created proofs across
+another interruption, and decides when its operation has settled. A prefix,
+an empty recovery or a returned foreign target is never publication success.
 
 ## Claim-owned development generations
 
@@ -382,6 +437,10 @@ not grant installation ownership or release attestation.
 The adapter verifies the plugin/package identity, canonical assembly bytes
 and any caller-pinned runtime selection. Malformed or changed metadata
 refuses installation rather than falling back to the ordinary package slot.
+`payload_package_version(payload, plugin)` reads that same consumer identity
+for preparation: runtime plugins use `plugin.json`, while `worktree-manager`
+requires its canonical standalone project name and version in `pyproject.toml`
+(Manager's Python 3.11+ floor). Receipt validation uses the same reader.
 The synchronizer ships the same helper to every runtime plugin without changing
 ordinary package-only installation behavior; the source-preparation guide names
 the native installer adopters. Independently deployed Python resolver bundles,
@@ -396,6 +455,10 @@ writers reuse the verified winner without rewriting it; conflicting receipts or
 copies refuse publication. The adapter's `--snapshot-root` mode returns that
 snapshot path, with `--expected-source-identity` retaining the caller's complete
 initial identity across the process boundary.
+Windows sharing/access-lock failures during the final rename use the runtime's
+existing finite retry/backoff policy. Both the candidate and original source
+are revalidated before each attempt; exhausted locks and other filesystem
+errors remain explicit publication failures, never a fallback winner.
 
 Source preparation and the metadata contract are documented at
 [`prepare_runtime_source`](../../tools/prepare_runtime_source.md). The

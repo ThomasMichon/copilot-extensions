@@ -17,11 +17,58 @@ from subprocess import CompletedProcess
 
 import pytest
 
+from promotion_unit_tests.test_installer_retention import (
+    retention_policy as retention_policy,
+    test_retained_metadata_remapping_work_is_independent_of_scalar_count as test_retained_metadata_remapping_work_is_independent_of_scalar_count,
+    test_retained_overlapping_projects_compare_each_file_pair_once as test_retained_overlapping_projects_compare_each_file_pair_once,
+    test_retained_remapping_preserves_nested_native_uri_and_escaped_forms as test_retained_remapping_preserves_nested_native_uri_and_escaped_forms,
+)
+
 PATH = Path(__file__).resolve().parents[1] / "libs" / "installer-engine" / "installer_dependency_policy.py"
 SPEC = importlib.util.spec_from_file_location("installer_dependency_policy", PATH)
 policy = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(policy)
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("names", [
+    [], "example", ("../example",), ("example", "EXAMPLE"), (False,),
+])
+def test_generated_local_exclusions_refuse_invalid_names_before_uv(names):
+    with pytest.raises(policy.DependencyPolicyError, match="excluded local packages"):
+        with policy.retain_uv_install("unused-uv", [], excluded_local_packages=names):
+            pytest.fail("invalid exclusions cannot reach UV or admit retained inputs")
+
+
+def test_generated_local_exclusions_canonicalize_owned_temp_aliases(monkeypatch):
+    from contextlib import contextmanager
+
+    temporary = policy._configuration.temporary_inputs
+    observed = []
+    expected = object()
+
+    @contextmanager
+    def aliased(parent):
+        with temporary(parent) as directory:
+            path = Path(directory)
+            yield str(path / ".." / path.name)
+
+    @contextmanager
+    def retain(_uv, arguments, **options):
+        constraint, = options["_generated_constraints"]
+        assert constraint == constraint.resolve()
+        assert constraint.read_text(encoding="utf-8") == "example-local<0,>=0\n"
+        assert arguments[-2:] == ["--constraint", str(constraint)]
+        observed.append(constraint)
+        yield expected
+
+    monkeypatch.setattr(policy._configuration, "temporary_inputs", aliased)
+    monkeypatch.setattr(policy, "_retain_uv_install", retain)
+    with policy.retain_uv_install(
+        "unused-uv", [], excluded_local_packages=("Example_Local",),
+    ) as transaction:
+        assert transaction is expected
+    assert len(observed) == 1 and not observed[0].exists()
 
 
 @pytest.mark.parametrize("fraction", ["1", "12", "123", "1234", "12345", "123456", "123456789"])
@@ -877,6 +924,7 @@ def test_native_retained_configuration_preserves_all_three_precedence_tiers(tmp_
 
 
 def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypatch):
+    import configparser
     import subprocess
     import zipfile
 
@@ -891,6 +939,15 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
         '[tool.setuptools.packages.find]\nwhere=["src"]\n',
         encoding="utf-8",
     )
+    configuration = source / "setup.cfg"
+    configuration.write_text(
+        "[metadata]\ndescription = 100%% retained\n"
+        "[egg_info]\ntag_build = .post1\negg_base = src\n",
+        encoding="utf-8",
+    )
+    original_files = {
+        path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()
+    }
     actual = subprocess.run
     retained = []
 
@@ -898,6 +955,11 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
         if "--show-settings" in command:
             return actual(command, **kwargs)
         retained.append(Path(command[command.index("-e") + 1]))
+        config = configparser.ConfigParser(interpolation=None)
+        config.read(retained[-1] / "setup.cfg", encoding="utf-8")
+        assert config["metadata"]["description"] == "100%% retained"
+        assert config["egg_info"]["tag_build"] == ".post1"
+        assert config["egg_info"]["egg_base"] == "."
         result = actual(
             [sys.executable, "-I", "-c",
              "from setuptools.build_meta import build_editable,get_requires_for_build_editable;"
@@ -907,6 +969,8 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
             timeout=30, creationflags=policy._HEADLESS,
         )
         assert result.returncode == 0, result.stdout + result.stderr
+        assert len(list(retained[-1].glob("*.egg-info"))) == 1
+        assert not list(source.rglob("*.egg-info"))
         wheels = list(retained[-1].glob("*.whl"))
         assert len(wheels) == 1, result.stdout + result.stderr
         with zipfile.ZipFile(wheels[0]) as wheel:
@@ -922,6 +986,103 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
     )
     assert built.returncode == 0, built.stdout + built.stderr
     assert len(retained) == 1 and not retained[0].exists()
+    assert {
+        path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()
+    } == original_files
+
+
+@pytest.mark.parametrize("configuration", [
+    None,
+    "[metadata]\ndescription = 100% retained\n",
+    "[metadata]\ndescription = 100% retained\n"
+    "[egg_info]\ntag_build = .fixture\negg_base = src\n"
+    "[options.data_files]\nshare/WidgetPkg = first.txt\nshare/widgetpkg = second.txt\n",
+])
+def test_retained_editable_metadata_configuration_stays_private(tmp_path, monkeypatch, configuration):
+    import configparser
+
+    source = source_project(tmp_path / "source")
+    manifest = source / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("fixture_backend", "setuptools.build_meta")
+        + '[tool.setuptools.packages.find]\nwhere=["src"]\n',
+        encoding="utf-8",
+    )
+    (source / "src").mkdir()
+    original = source / "setup.cfg"
+    if configuration is not None:
+        original.write_text(configuration, encoding="utf-8")
+    retained = []
+
+    def run(command, **kwargs):
+        if "--show-settings" in command:
+            return CompletedProcess(command, 0, settings(), "")
+        retained.append(Path(command[command.index("-e") + 1]))
+        config = configparser.ConfigParser(interpolation=None)
+        config.optionxform = str
+        config.read(retained[-1] / "setup.cfg", encoding="utf-8")
+        assert config["egg_info"]["egg_base"] == "."
+        if configuration is not None:
+            assert config["metadata"]["description"] == "100% retained"
+        if configuration is not None and "tag_build" in configuration:
+            assert config["egg_info"]["tag_build"] == ".fixture"
+            assert dict(config["options.data_files"]) == {
+                "share/WidgetPkg": "first.txt", "share/widgetpkg": "second.txt",
+            }
+        return CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    policy.run_uv_install(
+        "uv", ["--no-config", "-e", str(source)], env=offline_environment(tmp_path),
+        cwd=tmp_path, trusted_source_roots=(source,),
+    )
+    assert len(retained) == 1 and not retained[0].exists()
+    if configuration is None:
+        assert not original.exists()
+    else:
+        assert original.read_text(encoding="utf-8") == configuration
+
+
+@pytest.mark.parametrize("failure", ["malformed", "read", "write"])
+def test_retained_editable_metadata_configuration_failure_refuses(tmp_path, monkeypatch, failure):
+    source = source_project(tmp_path / "source")
+    manifest = source / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("fixture_backend", "setuptools.build_meta")
+        + '[tool.setuptools.packages.find]\nwhere=["src"]\n',
+        encoding="utf-8",
+    )
+    (source / "src").mkdir()
+    original = source / "setup.cfg"
+    configuration = "not an INI file\n" if failure == "malformed" else "[metadata]\nname = fixture\n"
+    original.write_text(configuration, encoding="utf-8")
+    opened = Path.open
+    original_native = Path(policy._native_retained_path(original))
+    retained = []
+    calls = []
+
+    def open_config(path, mode="r", *args, **kwargs):
+        if path.name == "setup.cfg" and path not in (original, original_native):
+            retained.append(path.parent)
+            if (failure == "read" and mode == "r") or (failure == "write" and mode == "w"):
+                raise OSError("fixture configuration failure")
+        return opened(path, mode, *args, **kwargs)
+
+    def probe(command, **kwargs):
+        calls.append(command)
+        assert "--show-settings" in command
+        return CompletedProcess(command, 0, settings(), "")
+
+    monkeypatch.setattr(Path, "open", open_config)
+    monkeypatch.setattr(policy.subprocess, "run", probe)
+    with pytest.raises(policy.DependencyPolicyError, match="editable.*metadata"):
+        policy.run_uv_install(
+            "uv", ["--no-config", "-e", str(source)], env=offline_environment(tmp_path),
+            cwd=tmp_path, trusted_source_roots=(source,),
+        )
+    assert len(calls) == 1
+    assert retained and all(not path.exists() for path in retained)
+    assert original.read_text(encoding="utf-8") == configuration
 
 
 def test_retained_snapshot_inside_source_refuses_before_copy(tmp_path, monkeypatch):
@@ -941,7 +1102,8 @@ def test_retained_snapshot_inside_source_refuses_before_copy(tmp_path, monkeypat
         )
 
 
-def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path, monkeypatch):
+@pytest.mark.parametrize("excluded", [(), ("unused-local",)])
+def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path, monkeypatch, excluded):
     source = source_project(
         tmp_path / "runtime" / ".install-stage" / ("stage-" + "x" * 40)
         / "plugin" / "libs" / "fixture-source",
@@ -985,6 +1147,7 @@ def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path,
     installed = policy.run_uv_install(
         shutil.which("uv"), ["--no-index", "--target", str(target), "--python", sys.executable, str(source)],
         cwd=cwd, env=offline_environment(tmp_path), trusted_source_roots=(source,),
+        excluded_local_packages=excluded,
         capture_output=True, text=True, timeout=30, now=NOW,
     )
     assert installed.returncode == 0, installed.stdout + installed.stderr
@@ -1241,7 +1404,7 @@ def test_relative_certificate_directory_list_retains_original_cwd(tmp_path, monk
     assert len(calls) == 3
 
 
-def source_project(path, name="fixture-source", sources="", dependencies=""):
+def source_project(path, name="fixture-source", sources="", dependencies="", module_code=None):
     import ast
 
     path.mkdir(parents=True, exist_ok=True)
@@ -1254,6 +1417,9 @@ def source_project(path, name="fixture-source", sources="", dependencies=""):
     metadata = f"Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n" + "".join(
         f"Requires-Dist: {requirement}\n" for requirement in ast.literal_eval(f"[{dependencies}]")
     )
+    module_name = name.replace("-", "_") + ".py"
+    if module_code is not None:
+        (path / module_name).write_text(module_code, encoding="utf-8")
     (path / "fixture_backend.py").write_text(
         "import pathlib, zipfile\n"
         "def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):\n"
@@ -1263,7 +1429,9 @@ def source_project(path, name="fixture-source", sources="", dependencies=""):
         f"        wheel.writestr(prefix + 'METADATA', {metadata!r})\n"
         "        wheel.writestr(prefix + 'WHEEL', 'Wheel-Version: 1.0\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n')\n"
         "        wheel.writestr(prefix + 'RECORD', '')\n"
-        "    return name\n",
+        + (f"        wheel.writestr({module_name!r}, pathlib.Path(__file__).with_name({module_name!r}).read_bytes())\n"
+           if module_code is not None else "")
+        + "    return name\n",
         encoding="utf-8",
     )
     return path
@@ -1658,25 +1826,31 @@ def test_explicit_project_context_does_not_trust_an_escaping_source_graph(tmp_pa
         )
 
 
-@pytest.mark.parametrize("anchor", ["canonical", "canonical-vendored", "canonical-materialized", "payload"])
+@pytest.mark.parametrize("anchor", [
+    "canonical", "canonical-vendored", "canonical-editable", "canonical-materialized", "payload",
+])
 def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anchor):
     import json
 
     repository = tmp_path / "repository"
     canonical_libraries = anchor.startswith("canonical")
-    editable = ", editable=true" if anchor == "canonical-materialized" else ""
+    editable = ", editable=true" if anchor in {"canonical-editable", "canonical-materialized"} else ""
     payload = source_project(
         repository / "plugins" / "fixture-plugin", "fixture-plugin",
         sources=f'fixture-lib={{path="../../libs/fixture-lib"{editable}}}' if canonical_libraries
         else 'fixture-lib={path="libs/fixture-lib"}',
         dependencies='"fixture-lib>=1"',
+        module_code="VALUE = 'frozen-plugin'\n",
     )
     lib = source_project(
         repository / "libs" / "fixture-lib" if canonical_libraries else payload / "libs" / "fixture-lib",
         "fixture-lib", sources=f'fixture-leaf={{path="../fixture-leaf"{editable}}}',
         dependencies='"fixture-leaf>=1"',
+        module_code="VALUE = 'frozen-lib'\n",
     )
-    leaf = source_project(lib.parent / "fixture-leaf", "fixture-leaf")
+    leaf = source_project(
+        lib.parent / "fixture-leaf", "fixture-leaf", module_code="VALUE = 'frozen-leaf'\n",
+    )
     manifest = {
         "name": "fixture-plugin", "version": "1.0",
         "repository": "https://github.com/ThomasMichon/copilot-extensions",
@@ -1717,7 +1891,12 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
     uv = shutil.which("uv")
     assert uv
     environment = offline_environment(tmp_path)
-    target = tmp_path / "venv"
+    runtime_source = PATH.parents[1] / "versioned-runtime" / "versioned_runtime.py"
+    runtime_spec = importlib.util.spec_from_file_location("installed_graph_runtime", runtime_source)
+    runtime = importlib.util.module_from_spec(runtime_spec)
+    runtime_spec.loader.exec_module(runtime)
+    runtime_root = tmp_path / "runtime"
+    target = runtime.version_dir(runtime_root, "1.0")
     created = subprocess.run(
         [uv, "venv", "--offline", "--python", sys.executable, str(target)],
         capture_output=True, text=True, env=environment, timeout=30, creationflags=policy._HEADLESS,
@@ -1733,9 +1912,19 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
         timeout=30, creationflags=policy._HEADLESS,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    for project, module in ((payload, "fixture_plugin"), (lib, "fixture_lib"), (leaf, "fixture_leaf")):
+        (project / (module + ".py")).write_text("VALUE = 'changed-checkout'\n", encoding="utf-8")
     installed = subprocess.run(
         [str(python), "-I", "-c",
-         "import importlib.metadata as m, json; "
+         "import importlib.metadata as m, json, sys; from pathlib import Path; "
+         "import fixture_plugin, fixture_lib, fixture_leaf; "
+         "assert [module.VALUE for module in (fixture_plugin, fixture_lib, fixture_leaf)] "
+         "== ['frozen-plugin','frozen-lib','frozen-leaf']; "
+         "assert all(Path(module.__file__).is_relative_to(sys.prefix) "
+         "for module in (fixture_plugin, fixture_lib, fixture_leaf)); "
+         "assert all(json.loads(m.distribution(name).read_text('direct_url.json'))"
+         ".get('dir_info',{}).get('editable') is not True "
+         "for name in ('fixture-plugin','fixture-lib','fixture-leaf')); "
          "print(json.dumps({name: m.version(name) for name in "
          "('fixture-plugin', 'fixture-lib', 'fixture-leaf')}))"],
         cwd=tmp_path, env=environment, capture_output=True, text=True,
@@ -1745,6 +1934,11 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
     assert json.loads(installed.stdout) == {
         "fixture-plugin": "1.0", "fixture-lib": "1.0", "fixture-leaf": "1.0",
     }
+    marker = runtime.mark_complete(runtime_root, "1.0", payload_hash="frozen")
+    before = marker.read_bytes()
+    assert runtime.check_admission(runtime_root, "1.0", payload_hash="frozen") == runtime.ADMIT_REUSE
+    assert runtime.mark_complete(runtime_root, "1.0", payload_hash="frozen") == marker
+    assert marker.read_bytes() == before
     unowned = source_project(repository / "unowned", "agent-lookalike")
     rejected = subprocess.run(
         [sys.executable, "-I", str(helper), "--uv", uv, "--", str(unowned)],
@@ -1961,7 +2155,7 @@ def test_registry_only_cli_does_not_discover_product_roots(monkeypatch):
     ]
     assert policy.main(["--uv", "selected-uv", "--registry-only", "--", *arguments]) == 0
     assert len(calls) == 1
-    assert calls[0][:2] == ("selected-uv", arguments)
+    assert calls[0][:2] == ("selected-uv", [*arguments, "--no-editable", "--link-mode", "copy"])
     assert calls[0][2]["trusted_source_roots"] == ()
 
 
@@ -1978,6 +2172,20 @@ def test_default_cli_retains_product_attribution(monkeypatch, tmp_path):
     )
     assert policy.main(["--uv", "selected-uv", "--", "fixture-package"]) == 0
     assert discovered == [True] and calls == [(tmp_path,)]
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--editable", "."], ["-e", "."], ["--editable=."],
+    ["--link-mode", "symlink"], ["--link-mode=hardlink"],
+])
+def test_deployment_cli_refuses_live_or_shared_code_before_resolver(monkeypatch, capsys, arguments):
+    def forbidden(*args, **kwargs):
+        pytest.fail("mutable deployment reached the resolver")
+
+    monkeypatch.setattr(policy, "run_uv_install", forbidden)
+    monkeypatch.setattr(policy, "_anchor_roots", forbidden)
+    assert policy.main(["--uv", "uv", "--", *arguments]) == 1
+    assert "deployed runtimes require" in capsys.readouterr().err
 
 
 def test_registry_only_cannot_grant_explicit_source_roots(tmp_path, capsys):

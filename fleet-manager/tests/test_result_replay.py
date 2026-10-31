@@ -200,7 +200,7 @@ def test_schema_upgrade_refuses_foreign_node_state_without_mutation(tmp_path):
         gateway(path)
     with closing(sqlite3.connect(path)) as connection:
         assert connection.execute("SELECT type,name,sql FROM sqlite_master").fetchall() == before
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
 
 
 @pytest.mark.parametrize("version", [1, 2])

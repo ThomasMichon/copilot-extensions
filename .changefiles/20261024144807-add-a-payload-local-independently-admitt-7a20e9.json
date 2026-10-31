@@ -1,0 +1,13 @@
+{
+  "comment": "Add a payload-local independently admitted Windows evaluator bootstrap, preserving native fallback and canonical installation validation.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

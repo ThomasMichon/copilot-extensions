@@ -15,7 +15,9 @@ import subprocess
 import sys
 import threading
 from dataclasses import dataclass, field
-from typing import Mapping, Protocol, runtime_checkable
+from typing import Mapping, Protocol, Sequence, runtime_checkable
+
+from .process import redirected_ssh_env
 
 
 @dataclass(frozen=True)
@@ -86,6 +88,17 @@ class SSHConfig:
         return hashlib.sha256(encoded).hexdigest()
 
 
+def ssh_option(config: SSHConfig, name: str) -> str | None:
+    """Read one declared SSH option with command-line option precedence."""
+    for key, value in config.extra_options.items():
+        if key.casefold() == name.casefold():
+            return str(value)
+    for key, value in config.effective_config:
+        if key.casefold() == name.casefold():
+            return str(value)
+    return None
+
+
 @runtime_checkable
 class ConfigSource(Protocol):
     """Protocol for pluggable SSH config providers.
@@ -109,6 +122,10 @@ class ConfigSource(Protocol):
         ...
 
 
+class SSHProfileResolutionError(RuntimeError):
+    """OpenSSH could not resolve the selected profile's effective configuration."""
+
+
 class SSHProfileSource:
     """ConfigSource that reads from the local SSH config.
 
@@ -116,6 +133,12 @@ class SSHProfileSource:
     the SSH config Host entry (e.g., "borealis", "atlas-core-wsl").
     All connection details (hostname, user, port, key, proxy) are
     resolved by OpenSSH from the config file.
+    ``resolve_timeout`` optionally bounds the local ``ssh -G`` subprocess;
+    omitted callers retain the existing unbounded configuration-read policy.
+    ``ssh_executable`` and ``resolve_cwd`` bind that read to the actual
+    transport's selected client and local working directory.
+    ``resolve_args`` preserves complete native arguments for a configuration
+    reselection instead of reconstructing their profile semantics.
     """
 
     def __init__(
@@ -124,11 +147,21 @@ class SSHProfileSource:
         user: str | None = None,
         port: int | None = None,
         config_file: str | None = None,
+        resolve_timeout: float | None = None,
+        ssh_executable: str | None = None,
+        resolve_cwd: str | None = None,
+        process_env: Mapping[str, str] | None = None,
+        resolve_args: Sequence[str] | None = None,
     ) -> None:
         self._host_alias = host_alias
         self._user = user
         self._port = port
         self._config_file = config_file
+        self._ssh_executable = ssh_executable
+        self._resolve_timeout = resolve_timeout
+        self._resolve_cwd = resolve_cwd
+        self._process_env = process_env
+        self._resolve_args = tuple(resolve_args) if resolve_args is not None else None
         self._cached_config: SSHConfig | None = None
         self._cache_lock = threading.Lock()
 
@@ -141,6 +174,7 @@ class SSHProfileSource:
                     port=self._port,
                     config_file=self._config_file,
                     effective_config=self._resolve_effective_config(),
+                    process_env=self._process_env,
                 )
             return self._cached_config
 
@@ -150,17 +184,20 @@ class SSHProfileSource:
 
     def _resolve_effective_config(self) -> tuple[tuple[str, str], ...]:
         """Resolve the routing identity OpenSSH will actually use."""
-        ssh = shutil.which("ssh")
+        ssh = self._ssh_executable or shutil.which("ssh")
         if not ssh:
-            raise RuntimeError("OpenSSH client executable `ssh` is not available")
+            raise SSHProfileResolutionError("OpenSSH client executable `ssh` is not available")
         args = [ssh, "-G"]
-        if self._config_file:
-            args.extend(["-F", self._config_file])
-        if self._port:
-            args.extend(["-p", str(self._port)])
-        if self._user:
-            args.extend(["-l", self._user])
-        args.append(self._host_alias)
+        if self._resolve_args is not None:
+            args.extend(self._resolve_args)
+        else:
+            if self._config_file:
+                args.extend(["-F", self._config_file])
+            if self._port:
+                args.extend(["-p", str(self._port)])
+            if self._user:
+                args.extend(["-l", self._user])
+            args.append(self._host_alias)
         proc = subprocess.run(
             args,
             stdin=subprocess.DEVNULL,
@@ -168,13 +205,16 @@ class SSHProfileSource:
             stderr=subprocess.PIPE,
             text=True,
             check=False,
+            env=redirected_ssh_env(self._process_env, windows=sys.platform == "win32"),
+            timeout=self._resolve_timeout,
+            cwd=self._resolve_cwd,
             creationflags=(
                 subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             ),
         )
         if proc.returncode != 0:
             detail = (proc.stderr or "").strip()
-            raise RuntimeError(
+            raise SSHProfileResolutionError(
                 detail or f"ssh -G exited {proc.returncode}"
             )
 
@@ -185,5 +225,5 @@ class SSHProfileSource:
                 continue
             resolved.append((key.casefold(), value.strip()))
         if not resolved:
-            raise RuntimeError("ssh -G returned no effective configuration")
+            raise SSHProfileResolutionError("ssh -G returned no effective configuration")
         return tuple(resolved)

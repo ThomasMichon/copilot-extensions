@@ -1,0 +1,9 @@
+{
+  "comment": "Derive internal inbox installation bindings through the existing daemon governance owner",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

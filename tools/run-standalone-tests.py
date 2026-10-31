@@ -37,6 +37,7 @@ COMPONENT_ALIASES = {
     "agent-dispatch-service": "services/dispatch",
     "agent-chat-service": "services/chat",
     "agent-pull-requests-service": "services/pr",
+    "agent-ssh-service": "services/ssh",
 }
 
 
@@ -169,7 +170,12 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
             raise ValueError("uv replaced the leased environment directory")
     sources: list[str] = []
-    if component == "services/index":
+    if component == "fleet-manager":
+        sources = [
+            str(REPO / "plugins" / "agent-ssh"),
+            str(REPO / "libs" / "single-instance-lease"),
+        ]
+    elif component == "services/index":
         sources = [
             str(REPO / "plugins" / "agent-index") + ("" if smoke else "[store,server]"),
         ]
@@ -179,6 +185,14 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         sources = [
             str(REPO / "plugins" / "agent-pull-requests") + "[fleet]",
             str(REPO / "fleet-manager") + "[service-gateway]",
+        ]
+    elif component == "services/ssh":
+        sources = [
+            "--no-editable",
+            str(REPO / "fleet-manager") + "[service-gateway,ssh-client]",
+            str(REPO / "plugins" / "agent-ssh"),
+            str(REPO / "libs" / "single-instance-lease"),
+            str(REPO / "libs" / "agent-procutil"),
         ]
     extra = ("test" if smoke else "native,test") if component == "services/index" else "dev"
     if component == "worktree-manager":
@@ -220,6 +234,19 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             override.write_text(
                 f"agent-pull-requests[fleet] @ {core}\n"
                 f"fleet-manager[service-gateway] @ {fleet}\n", encoding="utf-8",
+            )
+            overrides = ["--override", str(override)]
+        elif component == "services/ssh":
+            override = Path(temporary) / "overrides.txt"
+            fleet = (REPO / "fleet-manager").resolve().as_uri()
+            lease = (REPO / "libs" / "single-instance-lease").resolve().as_uri()
+            procutil = (REPO / "libs" / "agent-procutil").resolve().as_uri()
+            ssh = (REPO / "plugins" / "agent-ssh").resolve().as_uri()
+            override.write_text(
+                f"fleet-manager[service-gateway,ssh-client] @ {fleet}\n"
+                f"agent-ssh @ {ssh}\n"
+                f"agent-single-instance-lease @ {lease}\n"
+                f"agent-procutil @ {procutil}\n", encoding="utf-8",
             )
             overrides = ["--override", str(override)]
         run_uv_install(
@@ -306,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--chat-membership-report requires a new file in an existing directory")
     chat_suite = (args.chat_suite or "acceptance") if args.component == "services/chat" else None
     if args.timeout is None:
-        args.timeout = 120.0 if chat_suite == "acceptance" else 600.0
+        args.timeout = 180.0 if chat_suite == "acceptance" else 600.0
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be finite and positive")
     if not math.isfinite(args.admission_wait) or args.admission_wait < 0:

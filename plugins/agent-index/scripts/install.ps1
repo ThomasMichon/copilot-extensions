@@ -78,7 +78,101 @@ function Copy-InstallerStageDirectory {
 # === end install-contract:v4 payload-copy ===
 . (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')
 
+function Get-FiniteUninstallPython {
+    param([Parameter(Mandatory)][string]$InstallRoot)
+    $probe = @'
+import sys
+assert sys.version_info >= (3, 11)
+from pathlib import Path
+root = Path(sys.argv[1]).absolute()
+assert ".." not in root.parts
+roots = (root, root.resolve())
+paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+         getattr(sys, "_base_executable", sys.executable))
+for value in paths:
+    path = Path(value).absolute()
+    for actual in (path, path.resolve(strict=True)):
+        assert all(not actual.is_relative_to(boundary) for boundary in roots)
+print(Path(sys.executable).resolve(strict=True))
+'@
+    $candidates = @()
+    foreach ($name in @('python3', 'python')) {
+        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' } | ForEach-Object { $_.Source })
+    }
+    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' })) {
+        try {
+            $nativeError = ''
+            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0) {
+                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
+                    $candidates += $match.Groups[1].Value
+                }
+            }
+        } catch { }
+    }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        try {
+            $nativeError = ''
+            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
+                '-I', '-B', '-c', $probe, $InstallRoot, $candidate
+            ) -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
+                return $selected.Trim()
+            }
+        } catch { }
+    }
+    return $null
+}
+
+function Invoke-IndexFiniteUninstall {
+    param([string]$Root, [string]$Mode)
+    # This admission also runs before the installer's normal native-helper import.
+    . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+    $python = Get-FiniteUninstallPython -InstallRoot $Root
+    if (-not $python) { throw 'Native install and uninstall require an existing external Python 3.11+ outside runtime and prefix closure' }
+    $helper = Join-Path $PSScriptRoot 'installer_engine_uninstall.py'
+    if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
+        $helper = Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer_engine_uninstall.py'
+    }
+    $nativeError = ''
+    $output = Invoke-Hidden -FilePath $python -ArgList @(
+        '-I', '-B', $helper, '--payload-root', (Split-Path $PSScriptRoot),
+        '--plugin-id', 'agent-index', '--root', $Root,
+        '--shell', (Get-Process -Id $PID).Path, $Mode
+    ) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw "Index finite runtime uninstall refused: $nativeError" }
+    if ($output) { Write-Host $output.Trim() }
+}
+
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+if ($env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'update', 'provision', 'uninstall') -and
+    -not ($Action -eq 'uninstall' -and $DryRun)) {
+    $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
+        else { Join-Path $env:USERPROFILE '.agent-index' }
+    $driverOptions = @()
+    foreach ($name in @('NoService', 'Purge', 'Force', 'ZeroDowntime', 'AllowTaskElevation', 'DryRun')) {
+        if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
+            $driverOptions += $name
+        }
+    }
+    $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
+        -Plugin 'agent-index' -Action $Action -Options $driverOptions
+    if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
+    $driverPython = $driverEntry.Python
+    $driverArguments = $driverEntry.Arguments
+}
+
 if ($InstallDir) {
+    if ($Action -eq 'uninstall' -and ($InstallDir -split '[/\\]') -contains '..') {
+        throw 'Index uninstall refuses parent-traversal components'
+    }
+    $providerRoot = $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath
+    if (-not [IO.Path]::IsPathRooted($InstallDir)) { $InstallDir = Join-Path $providerRoot $InstallDir }
     $InstallDir = [IO.Path]::GetFullPath($InstallDir)
     $PSBoundParameters['InstallDir'] = $InstallDir
 }
@@ -136,6 +230,9 @@ if ($Action -notin @(
     & $probeHost -NoProfile -ExecutionPolicy Bypass -File $legacyProbe `
         -PayloadRoot $authorizationPayload -LegacyRoot $probeLegacyRoot
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if ($Action -eq 'uninstall') {
+        Invoke-IndexFiniteUninstall -Root $probeLegacyRoot -Mode '--check'
+    }
 }
 
 # Status and dependency-light cell-slot actions do not enter the self-stage
@@ -1014,8 +1111,30 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    if ($script:RuntimeConstructionReuse -and
+        -not (Test-Path -LiteralPath (Join-Path $VenvDir '.runtime-bootstrap') -PathType Container)) {
+        throw 'Completed primary runtime lacks retained helpers; select a distinct fresh runtime generation'
+    }
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
+}
+
+function Invoke-RuntimeBrokerAdoption {
+    if ($NoService -or $env:OS -ne 'Windows_NT' -or
+        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
+        $script:RuntimeConstructionSession.Process.HasExited -or
+        $script:RuntimeConstructionSession.Key -cne "$InstallDir/$SrcVersion") {
+        throw 'Primary broker adoption requires attached complete-slot retention'
+    }
+    $diagnostic = ''
+    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
+        '--runtime-root', $InstallDir, '--slot', $VenvDir,
+        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
+        -ErrorOutput ([ref]$diagnostic)
+    if ($LASTEXITCODE -ne 0) { throw "Primary runtime broker adoption failed: $diagnostic" }
+    $receipt = $result | ConvertFrom-Json
+    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Primary runtime broker adoption returned no receipt' }
 }
 # === end install-contract:v4 marker/toss helpers ===
 
@@ -1594,6 +1713,21 @@ function Install-Runtime {
     $installRole = Get-ActivationRole
     if ($installRole -eq 'unconfigured') { $installRole = Get-MachineRole }
     $pkgSpec = "$PluginDir"
+    if ($env:OS -eq 'Windows_NT') {
+        $driverPackages = @()
+        foreach ($name in @('zdd', 'agent-procutil', 'single-instance-lease', 'update-driver')) {
+            $source = Resolve-VendoredLib -LibName $name
+            if (-not $source) { throw "Native installer driver dependency source is unavailable: $name" }
+            $driverPackages += $source
+        }
+        if ($script:UvCommand) {
+            Invoke-IndexUvPipInstall --python $VenvPython @driverPackages --quiet | Out-Null
+        } else {
+            & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython @driverPackages 2>&1 | Out-Null
+        }
+        if ($LASTEXITCODE -ne 0) { throw 'Native installer driver dependencies failed provisioning' }
+        $pkgSpec = "$PluginDir[native-installer]"
+    }
     if ($script:UvCommand) {
         $out = Invoke-IndexUvPipInstall --python $VenvPython $pkgSpec | Out-String
     } else {
@@ -1651,6 +1785,7 @@ function Install-Runtime {
             Write-Fail "Runtime completion marker was not published for versions/$SrcVersion -- not activating"
             exit 1
         }
+        Invoke-RuntimeBrokerAdoption
     }
 
     if (-not (Publish-IndexRuntime)) {
@@ -1964,9 +2099,17 @@ function Restart-EngineDaemon {
         Start-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
         Write-Ok "Engine daemon restarted via task: $EngineTaskName"
     } elseif (Test-Path $EngineVenvPython) {
-        & $EngineVenvPython -I -X utf8 -m agent_index engine stop 2>&1 | Out-Host
+        # As in ensure, the current primary CLI manages the independently
+        # selected engine interpreter; an engine-only install is not a manager.
+        $managePy = Get-ActiveSlotPython
+        if (-not (Test-Path $managePy)) {
+            throw 'Primary index runtime not installed -- explicitly install it before restarting the engine; engine runtime preserved'
+        }
+        & $managePy -I -X utf8 -m agent_index engine stop 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to stop the engine' }
         Start-Sleep -Seconds 1
-        & $EngineVenvPython -I -X utf8 -m agent_index engine start 2>&1 | Out-Host
+        & $managePy -I -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to restart the engine' }
         Write-Ok 'Engine daemon restarted (user-mode, new engine runtime loaded)'
     } else {
         Write-Skip 'Engine runtime not provisioned -- restart skipped'
@@ -1974,6 +2117,9 @@ function Restart-EngineDaemon {
 }
 
 function Write-EngineFiles {
+    # The engine-local CLI below is foreground-only (task/logon supervision),
+    # not the detached launch manager. Ensure/restart use the primary CLI whose
+    # imported procutil owns its broker; the engine slot needs no adoption here.
     if (-not (Test-Path $EngineEnvFile)) {
         [System.IO.File]::WriteAllText($EngineEnvFile, "# agent-index engine daemon environment`nAGENT_INDEX_ENGINE_HOST=127.0.0.1`nAGENT_INDEX_ENGINE_PORT=8421`n", $utf8NoBom)
         Write-Ok "Engine env: $EngineEnvFile"
@@ -2244,7 +2390,9 @@ function Invoke-RegisterTasks {
     # missed-trigger recovery. Opt-in via -AllowTaskElevation /
     # AGENT_INDEX_ALLOW_TASK_ELEVATION=1.
     if ((Test-TaskElevationOptIn) -and -not (Test-Elevated)) {
-        [void](Invoke-ScopedElevation -ElevAction 'register-tasks')
+        if (-not (Invoke-ScopedElevation -ElevAction 'register-tasks')) {
+            throw 'Task-scheduling elevation did not complete; tasks were not registered'
+        }
         return
     }
     Remove-LogonAutostart -Name $TaskName
@@ -2588,6 +2736,8 @@ function Materialize-IndexSnapshot {
         'agent-zdd' = 'zdd'
         'agent-procutil' = 'agent-procutil'
         'agent-dropin-registry' = 'dropin-registry'
+        'agent-single-instance-lease' = 'single-instance-lease'
+        'agent-update-driver' = 'update-driver'
     }
     $project = Join-Path $SnapshotDir 'pyproject.toml'
     $text = [IO.File]::ReadAllText($project)
@@ -2725,6 +2875,8 @@ function Invoke-Stop {
 }
 
 function Invoke-Uninstall {
+    Invoke-IndexFiniteUninstall -Root $InstallDir -Mode '--check'
+    if (-not (Test-Path -LiteralPath $InstallDir)) { Write-Ok 'Index runtime already absent'; return }
     if ($DryRun) {
         Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow
         Write-Host '[dry-run] would stop agent-index'
@@ -2748,12 +2900,16 @@ function Invoke-Uninstall {
             if (Test-Path $EngineHome) { Write-Host "[dry-run] would PURGE engine home: $EngineHome" }
             if (Test-Path $InstallDir) { Write-Host "[dry-run] would PURGE: $InstallDir" }
         } else {
-            Write-Host "[dry-run] engine home + install dir would be kept (-Purge to delete)"
+            Write-Host '[dry-run] would remove owned runtime generations, snapshots, selectors and helpers; data kept'
         }
         Write-Host 'agent-index uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow
         return
     }
     Invoke-Stop
+    if ($env:OS -eq 'Windows_NT' -and $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+        & $driverPython @driverArguments --remove-broker
+        if ($LASTEXITCODE -ne 0) { throw 'Owned primary broker removal failed; runtimes preserved' }
+    }
     Remove-LogonAutostart -Name $TaskName
     Remove-LogonAutostart -Name $EngineTaskName
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -2763,17 +2919,34 @@ function Invoke-Uninstall {
         Stop-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $EngineTaskName -Confirm:$false -ErrorAction SilentlyContinue
     }
-    Remove-Item (Join-Path $LocalBin 'agent-index.ps1') -Force -ErrorAction SilentlyContinue
-    Remove-Item (Join-Path $LocalBin 'agent-index.cmd') -Force -ErrorAction SilentlyContinue
+    Invoke-IndexFiniteUninstall -Root $InstallDir -Mode '--remove-runtime'
     if ($Purge) {
-        if (Test-Path $EngineHome) { Remove-Item $EngineHome -Recurse -Force -ErrorAction SilentlyContinue }
-        if (Test-Path $InstallDir) { Remove-Item $InstallDir -Recurse -Force }
+        if (Test-Path -LiteralPath $EngineHome) { Remove-InstallRuntimeContent -InstallRoot $EngineHome }
+        Remove-InstallRuntimeContent -InstallRoot $InstallDir
     }
     Write-Ok 'agent-index uninstalled'
 }
 
+$transactionMutex = $null
+try {
+if ($Action -eq 'register-tasks' -and (Test-TaskElevationOptIn) -and -not (Test-Elevated)) {
+    # The elevated child owns admission; its waiting parent must not hold the mutex.
+    Invoke-RegisterTasks
+    return
+}
+if ($Action -ne 'status' -and
+    -not ($Action -eq 'uninstall' -and ($DryRun -or -not (Test-Path -LiteralPath $InstallDir)))) {
+    $transactionTimeout = 20
+    if ($env:INDEX_TRANSACTION_LOCK_TIMEOUT_SECONDS) {
+        if ($env:INDEX_TRANSACTION_LOCK_TIMEOUT_SECONDS -notmatch '^[0-9]{1,3}$' -or
+            [int]$env:INDEX_TRANSACTION_LOCK_TIMEOUT_SECONDS -gt 180) {
+            throw 'Invalid Index transaction timeout (expected 0-180 seconds)'
+        }
+        $transactionTimeout = [int]$env:INDEX_TRANSACTION_LOCK_TIMEOUT_SECONDS
+    }
+    $transactionMutex = Enter-IndexStampLock -Scope 'Transaction' -TimeoutSeconds $transactionTimeout
+}
 $ScriptDir = $PSScriptRoot
-. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 . (Join-Path $PSScriptRoot 'source-runtime.ps1')
 $PackageVersion = $SrcVersion
 $script:SourceRuntimeIdentity = $null
@@ -2793,6 +2966,10 @@ if ($Action -notin @('uninstall', 'stamp', 'engine', 'engine-update') -and
 }
 
 try {
+if ($Action -in @('install', 'update', 'provision')) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 switch ($Action) {
     'install' {
         Install-Runtime
@@ -2837,5 +3014,11 @@ switch ($Action) {
 } finally {
     if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
         Stop-RuntimeConstruction
+    }
+}
+} finally {
+    if ($transactionMutex) {
+        [void]$transactionMutex.ReleaseMutex()
+        $transactionMutex.Dispose()
     }
 }

@@ -25,6 +25,7 @@ from agent_procutil import no_window_flags
 from ssh_manager import SSHProfileSource, get_default_manager
 
 from .connect import ConnectError, ConnectStage, ConnectTracker
+from .local_launch_arguments import append_local_launch_arguments as _append_local_launch_arguments
 from .procgroup import safe_killpg, terminate_windows_tree
 from .relay_state import get_live_relay_port
 from .resolver_diagnostics import (
@@ -436,6 +437,10 @@ async def _resolve_worktree_remote(
     """
     if not target.project:
         raise RuntimeError("remote resolve requires target.project")
+    if not target.worktree_id and target.caller_owner_ref and not target.native_resume_id:
+        raise RuntimeError(
+            "owned remote creation requires the origin's retained allocation before existing-child resolve",
+        )
     base_args = [target.project, "resolve", "--json", "--no-resume"]
     if target.native_resume_id:
         base_args += ["--native-resume-session", target.native_resume_id]
@@ -565,12 +570,16 @@ async def resolve_local_launch(
     (already batch-wrapped on Windows), the working directory, and the full child
     environment.
     """
+    from .hosting_policy import require_path_hosting, require_target_hosting
+
+    await require_target_hosting(target)
     tracker = tracker or ConnectTracker(session_id=session_id)
     env = os.environ.copy()
     # Strip bridge's venv vars so child processes use their own Python
     env.pop("VIRTUAL_ENV", None)
     env.pop("PYTHONHOME", None)
     env.update(target.env)
+    record_path = None
 
     if target.project and (not target.explicit_cwd or target.native_resume_id):
         # Stage 6: create/resume the worktree. Failures propagate (no retry).
@@ -582,6 +591,7 @@ async def resolve_local_launch(
         cmd = launch.get("cmd", [])
         plan_env = launch.get("env", {})
         worktree_id = launch.get("worktree_id")
+        record_path = launch.get("record_path")
 
         if not cmd:
             raise RuntimeError("Worktree resolve returned empty cmd")
@@ -589,26 +599,21 @@ async def resolve_local_launch(
         # Store resolved values back into target for DB persistence
         if worktree_id and not target.worktree_id:
             target.worktree_id = worktree_id
-        if work_dir and not target.cwd:
+        if work_dir:
             target.cwd = work_dir
 
         # Merge plan environment into the process env
         env.update(plan_env)
 
-        # --no-auto-update pins the child to the installed build (no silent CLI updates).
-        args = cmd + ["--acp", "--stdio", "--no-auto-update"] + target.copilot_args
-        log.info(
-            "Resolved copilot launch from worktree plan: %s (cwd=%s, worktree=%s)",
-            " ".join(args), work_dir, worktree_id,
-        )
     else:
         if not target.cwd:
             raise ValueError("Local agent without 'project' requires 'cwd'")
         copilot = _find_copilot(env, cwd=target.cwd, explicit_path=target.copilot_path)
-        args = [copilot, "--acp", "--stdio", "--no-auto-update"] + target.copilot_args
+        cmd = [copilot]
         work_dir = target.cwd
-        log.info("Resolved local agent launch: %s (cwd=%s)", " ".join(args), work_dir)
 
+    require_path_hosting(work_dir)
+    native_args = target.copilot_args
     if (
         prepare_plugins and target.type == "local" and target.local_plugin_preparation
         and not target.spawn_command
@@ -631,10 +636,18 @@ async def resolve_local_launch(
         if target.elevated:
             prepared_context["execution_cwd"] = work_dir
         if replacement is not None:
-            launch_prefix = args[:-len(target.copilot_args)] if target.copilot_args else args
-            args = [*launch_prefix, *_prepared_plugin_args(target, replacement)]
+            native_args = _prepared_plugin_args(target, replacement)
             if target.elevated:
                 target.cwd = work_dir
+    # Assemble once after plugin preparation; envelope arguments are not an argv suffix.
+    args = _append_local_launch_arguments(
+        cmd, ["--acp", "--stdio", "--no-auto-update", *native_args],
+        record_path=record_path,
+    )
+    log.info(
+        "Resolved local agent launch: %s (cwd=%s, worktree=%s)",
+        " ".join(args), work_dir, target.worktree_id,
+    )
     args = _wrap_batch_for_windows(args, env)
     return args, work_dir, env
 
@@ -666,6 +679,9 @@ async def spawn_local(
     args, work_dir, env = await resolve_local_launch(
         target, tracker=tracker, session_id=session_id,
     )
+    from .hosting_policy import require_path_hosting
+
+    require_path_hosting(work_dir)
 
     proc = await asyncio.create_subprocess_exec(
         *args,
@@ -705,6 +721,27 @@ def _breadcrumb_prelude(session_id: str) -> str:
 
 
 def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
+    """Recheck in the receiving shell before any binstub or direct launch."""
+    from .hosting_policy import policy_check_args, unsupported_receiver
+
+    if not target.project or not target.cwd:
+        raise unsupported_receiver("SSH without an exact path and owner")
+    command = _unguarded_remote_cmd(target, session_id)
+    check = [target.project, *policy_check_args(target.cwd)]
+    shell = (target.ssh_shell or "bash").lower()
+    if shell in {"pwsh", "powershell", "cmd"}:
+        quoted = " ".join("'" + arg.replace("'", "''") + "'" for arg in check)
+        script = (
+            f"$ErrorActionPreference = 'Stop'; & {quoted} | Out-Null; "
+            "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; " + command
+        )
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+        exe = "pwsh" if shell == "pwsh" else "powershell"
+        return f"{exe} -NoProfile -NonInteractive -EncodedCommand {encoded}"
+    return f"{shlex.join(check)} >&2 && {command}"
+
+
+def _unguarded_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
     """Build the remote command string for SSH execution.
 
     Two modes:
@@ -803,6 +840,19 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
 
     if not target.cwd:
         raise ValueError("SSH agent without 'project' requires 'cwd'")
+    shell = (target.ssh_shell or "bash").lower()
+    if shell in {"pwsh", "powershell", "cmd"}:
+        def quote(value: str) -> str:
+            return "'" + value.replace("'", "''") + "'"
+
+        script = f"$ErrorActionPreference = 'Stop'; Set-Location -LiteralPath {quote(target.cwd)}; "
+        for key, value in target.env.items():
+            script += f"$env:{key} = {quote(value)}; "
+        argv = [copilot, "--acp", "--stdio", "--no-auto-update", *target.copilot_args]
+        script += "& " + " ".join(quote(arg) for arg in argv) + "; exit $LASTEXITCODE"
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+        exe = "pwsh" if shell == "pwsh" else "powershell"
+        return f"{exe} -NoProfile -NonInteractive -EncodedCommand {encoded}"
     parts = [breadcrumb, f"cd {shlex.quote(target.cwd)}"]
     if target.env:
         for k, v in target.env.items():
@@ -893,6 +943,9 @@ async def spawn_ssh(
     made (fast fail), preserving legacy behavior. ``tracker`` records
     per-stage checkpoints.
     """
+    from .hosting_policy import require_target_hosting
+
+    await require_target_hosting(target)
     if not target.host:
         raise ValueError("SSH target requires a host (SSH alias)")
 
@@ -1078,6 +1131,7 @@ async def spawn_ssh(
                 ConnectStage.WORKTREE, msg, retryable=False, cause=exc,
             ) from exc
 
+    await require_target_hosting(target)
     launch_target = target
     if target.static_plugin_args is not None and not target.elevated:
         from dataclasses import replace
@@ -1112,6 +1166,9 @@ async def spawn(
     """Spawn an ACP agent process (local, SSH, or command)."""
     if target.type == "remote-acp":
         raise ValueError("Remote ACP endpoints are connections, not spawn targets")
+    from .hosting_policy import require_target_hosting
+
+    await require_target_hosting(target)
     from .venue_launch_policy import gate_raw_codespace_spawn  # a resync / host-less resume asks too
 
     await gate_raw_codespace_spawn(target)
@@ -1149,6 +1206,9 @@ async def spawn_raw(
 ) -> AgentProcess:
     """Spawn an ACP agent via a raw command (provider agents that handle
     their own transport, e.g. agent-codespaces wraps SSH + copilot launch)."""
+    from .hosting_policy import require_target_hosting
+
+    await require_target_hosting(target)
     if not target.spawn_command:
         raise ValueError("Command target requires spawn_command")
 

@@ -12,7 +12,7 @@ import time
 from . import registrar_discovery as rd
 from .config import overrides_path
 from .overrides import overridden_off_ids
-from .registrar import ProfileDeclaration, RegistrarError
+from .registrar import ProfileDeclaration, RegistrarError, _load_title
 from .registrar_reconcile import declared_registration_id, declaration_to_registration
 from .supervisor_registration import registration_override_ids
 from .worker_instances import (
@@ -32,17 +32,18 @@ ACTIVATE_EFFECTS = (
     "loop templates, create agentic tasks. No second supervisor is started. "
     "Without a running supervisor activation remains pending; publication is not proof of running."
 )
-TEMPLATE_DESCRIPTIONS = {
-    "worker-pool": "Bounded pool that binds eligible queued tasks",
-    "repository-issue-loop": "Discover and reserve repository issues for one worker",
-    "goal-driven": "Drive repository issue goals through their completion gate",
-    "backlog-triager": "Classify repository backlog issues using a consumer evaluator",
-    "issue-reproducer": "Reproduce and classify issues using a consumer evaluator",
-    "effort-builder": "Shape tracked efforts from repository issues",
-    "effort-driver": "Drive tracked efforts through their completion gate",
-    "reviewer": "Discover, review and evaluate repository pull requests",
-    "conflict-resolution": "Reconcile conflicted pull requests under their landing policy",
+TEMPLATE_METADATA = {
+    "worker-pool": ("Task worker pool", "Run eligible queued tasks with a bounded number of workers."),
+    "repository-issue-loop": ("Repository issue worker", "Discover and reserve repository issues for one worker at a time."),
+    "goal-driven": ("Issue goal driver", "Work on repository issue goals until their completion requirements are met."),
+    "backlog-triager": ("Backlog triager", "Classify repository backlog issues using the configured evaluation policy."),
+    "issue-reproducer": ("Issue reproducer", "Reproduce repository issues and evaluate the findings."),
+    "effort-builder": ("Effort builder", "Turn repository issues into tracked implementation efforts."),
+    "effort-driver": ("Effort driver", "Drive tracked efforts through their planned work and validation."),
+    "reviewer": ("Pull request reviewer", "Discover, review and evaluate repository pull requests."),
+    "conflict-resolution": ("Pull request conflict resolver", "Reconcile conflicted pull requests under the repository's landing policy."),
 }
+TEMPLATE_DESCRIPTIONS = {name: description for name, (_, description) in TEMPLATE_METADATA.items()}
 
 
 def _fields(name: str, document: dict, repo_root: str = "") -> list[dict]:
@@ -73,9 +74,9 @@ def _template_defaults(fragment: dict) -> dict:
 def _observation() -> dict:
     from .remote_dispatch import local_machine
     from .supervisor_registration import supervisor_lease_scope
-    from .supervise_cli import _read_supervisor_runtime_status
+    from .supervisor_status_io import read_status, runtime_status_path
     scope = supervisor_lease_scope(local_machine(), os.environ.get("AGENT_DISPATCH_ENV", "default"))
-    payload, error = _read_supervisor_runtime_status(scope)
+    payload, error = read_status(runtime_status_path(scope))
     if error or not payload:
         return {"known": False, "reason": error or "no local supervisor receipt"}
     updated = payload.get("updated_at")
@@ -116,6 +117,13 @@ def _code_span(value: str) -> str:
 
 
 def _cards(row: dict, body: str) -> dict:
+    if row.get("operator_unsupported_reason"):
+        body += "\n\nOperator controls unavailable: " + row["operator_unsupported_reason"]
+    body += (
+        "\n\nAgent guidance and executable structure remain source-owned. "
+        "Operator controls never accept declaration JSON. "
+        "Use the advanced owning CLI for unsupported configuration."
+    )
     if row.get("component_errors"):
         row.update(validity="metadata-error", pool_toggleable="false")
         body += "\n\nComponent metadata requires repair: " + "; ".join(row["component_errors"])
@@ -225,12 +233,53 @@ def _catalog_components(
         }
 
 
+def builtin_template_rows() -> list[dict]:
+    from .worker_operator_inputs import builtin_fields, project
+    rows = []
+    for name, fragment in templates().items():
+        kind = fragment["kind"]
+        title, description = TEMPLATE_METADATA[name]
+        prerequisite = (
+            "Supply a unique instance name and complete JSON declaration. "
+            + ("Requires repository root, repo, source, task_label, cadence_seconds, forge "
+               "identity, reservation and any referenced evaluator/worker identity dependencies."
+               if kind == "repository-issue-loop" else
+               "Requires complete emitter discovery/evaluator policy and pool inputs."
+               if kind == "reviewer-loop" else
+               "Choose watched labels, placement/filter, capacity and worker body.")
+        )
+        if name == "worker-pool":
+            prerequisite = (
+                "Supply a unique local instance name, watched task label, repository scope "
+                "and worker capacity. The headless worker body remains source-owned."
+            )
+        row = _cards({
+            "id": f"template:{name}", "name": name, "title": title, "group": "Available templates",
+            "description": description,
+            "provenance": "agent-dispatch built-in recipe",
+            "validity": "fragment" if name != "worker-pool" else "template",
+            "enabled": "not-instantiated", "activity": "not-applicable",
+            "editable": "false", "instantiable": "true", "prerequisites": prerequisite,
+            "dependency_status": "inputs-required", "dependency_errors": [],
+            "revision": digest(fragment), "fields": _fields("", _template_defaults(fragment)),
+            "kind": kind, "components": [], "components_basis": "template",
+        }, f"Template: {name}\n\n{prerequisite}\n\nValidation refuses missing inputs/dependencies "
+           "before saving or publishing. The template/source remains unchanged.")
+        project(row, builtin_fields(name))
+        if row.get("operator_unsupported_reason"):
+            row["card"]["body"] += "\n\nOperator controls unavailable: " + row["operator_unsupported_reason"]
+        rows.append(row)
+    return rows
+
+
 def catalog() -> dict:
     """No mkdir, network clients, mutation, service ensure, or task access."""
     from functools import cache
     from plugin_activation import resolve_active_plugins
     from .overrides import load_overrides
     from .worker_templates import discover_templates
+    from .worker_operator_inputs import project
+    from .repository_resources import RepositoryResourceSnapshot
 
     activation = cache(resolve_active_plugins)
     errors = []
@@ -241,6 +290,11 @@ def catalog() -> dict:
         errors.append(report.trusted_error)
     overrides = overridden_off_ids(load_overrides(overrides_path()))
     observed = _observation()
+    definitions = {}
+    resources = RepositoryResourceSnapshot(execution=False)
+    provider_rows, template_discovery = discover_templates(
+        activation(), _definitions=definitions, snapshot=resources,
+    )
     rows = []
     for index, error in enumerate(errors):
         rows.append(_cards({
@@ -257,10 +311,13 @@ def catalog() -> dict:
         draft_errors = []
         declarations = ()
         try:
-            _, declarations = validate_configuration(record["name"], conf["declaration"], conf["repo_root"])
+            _, declarations = validate_configuration(
+                record["name"], conf["declaration"], conf["repo_root"], snapshot=resources,
+            )
             _validate_dependencies(
                 declarations, conf["repo_root"],
                 available_declarations=report.combined.declarations,
+                snapshot=resources,
             )
         except RegistrarError as exc:
             draft_errors.append(str(exc))
@@ -280,6 +337,7 @@ def catalog() -> dict:
                 )
                 _, active_declarations = validate_configuration(
                     record["name"], loaded_conf["declaration"], loaded_conf["repo_root"],
+                    snapshot=resources,
                 )
                 active_conf = loaded_conf
         except (RegistrarError, OSError, UnicodeError) as exc:
@@ -295,9 +353,15 @@ def catalog() -> dict:
             d.name in discovered_names for d in active_declarations
         )
         published_revision = digest(active_conf) if active_conf is not None else None
+        display_document = (active_conf or conf)["declaration"]
+        try:
+            title = _load_title(display_document.get("title"))
+        except RegistrarError:
+            title = None
         row = {
-            "id": record["id"], "title": record["name"], "group": "Configured",
-            "description": conf["declaration"].get("description") or "User-local worker instance",
+            "id": record["id"], "name": record["name"], "title": title or record["name"],
+            "group": "Configured",
+            "description": display_document.get("description") or "User-local worker instance",
             "validity": "invalid" if draft_errors or publication_errors else "valid",
             "editable": "true", "instantiable": "false",
             "revision": record["revision"], "fields": _fields(record["name"], conf["declaration"], conf["repo_root"]),
@@ -339,7 +403,8 @@ def catalog() -> dict:
         elif active_conf is None:
             row.update(enabled="not-published", activity="not-published")
         body = (
-            f"{row['description']}\n\nSource: {row['provenance']} ({record['source']['revision']}). "
+            f"{row['description']}\n\nInstance name: {record['name']}."
+            f"\n\nSource: {row['provenance']} ({record['source']['revision']}). "
             f"Local publication: {row['publication']}; effective state: {row['enabled']}; "
             f"activity: {row['activity']}. Statistics: {json.dumps(row['statistics'])}."
             f"\n\nDraft: {row['draft_state']} ({record['revision']}); "
@@ -357,13 +422,17 @@ def catalog() -> dict:
                 "runtime readiness are unknown here; the existing FleetSpawner probes "
                 "them at dispatch time. An all-asleep fleet defers without reserving tasks."
             )
+        project(
+            row, None, record=record, definitions=definitions, activation=activation(), snapshot=resources,
+        )
         rows.append(_cards(row, body))
     for declaration in report.combined.declarations:
         if declaration.owner == OWNER and declaration.name in local_names:
             continue
         row = {
             "id": f"source:{declared_registration_id(declaration)}",
-            "title": declaration.name, "group": "Source declarations",
+            "name": declaration.name, "title": declaration.title or declaration.name,
+            "group": "Source declarations",
             "description": declaration.description or f"{declaration.kind} declaration",
             "provenance": declaration.owner or "local",
             "source_path": declaration.source_path,
@@ -376,11 +445,13 @@ def catalog() -> dict:
                 context=f"source:{declared_registration_id(declaration)}", errors=errors,
             ),
         }
-        body = (f"{row['description']}\n\nOwned by {row['provenance']}. "
+        body = (f"{row['description']}\n\nDeclaration name: {declaration.name}."
+                f"\n\nOwned by {row['provenance']}. "
                 "Read-only here: edit through the owning repository/plugin configuration flow.")
         try:
             _validate_dependencies(
                 (declaration,), "", available_declarations=report.combined.declarations,
+                snapshot=resources,
             )
         except RegistrarError as exc:
             row.update(dependency_status="invalid-or-missing", dependency_errors=[str(exc)])
@@ -390,34 +461,19 @@ def catalog() -> dict:
         if declaration.fleet.enabled:
             body += "\n\nFleet hosts are probed by FleetSpawner at dispatch time; readiness is unknown here."
         rows.append(_cards(row, body))
-    for name, fragment in templates().items():
-        kind = fragment["kind"]
-        prerequisite = (
-            "Supply a unique instance name and complete JSON declaration. "
-            + ("Requires repository root, repo, source, task_label, cadence_seconds, forge "
-               "identity, reservation and any referenced evaluator/worker identity dependencies."
-               if kind == "repository-issue-loop" else
-               "Requires complete emitter discovery/evaluator policy and pool inputs."
-               if kind == "reviewer-loop" else
-               "Choose watched labels, placement/filter, capacity and worker body.")
-        )
-        rows.append(_cards({
-            "id": f"template:{name}", "title": name, "group": "Available templates",
-            "description": TEMPLATE_DESCRIPTIONS[name],
-            "provenance": "agent-dispatch built-in recipe",
-            "validity": "fragment" if name != "worker-pool" else "template",
-            "enabled": "not-instantiated", "activity": "not-applicable",
-            "editable": "false", "instantiable": "true", "prerequisites": prerequisite,
-            "dependency_status": "inputs-required", "dependency_errors": [],
-            "revision": digest(fragment), "fields": _fields("", _template_defaults(fragment)),
-            "kind": kind, "components": [], "components_basis": "template",
-        }, f"Template: {name}\n\n{prerequisite}\n\nValidation refuses missing inputs/dependencies "
-           "before saving or publishing. The template/source remains unchanged."))
+    rows.extend(builtin_template_rows())
     if errors:
         for row in rows:
             if "pool_toggleable" in row:
                 row["pool_toggleable"] = "false"
-    provider_rows, template_discovery = discover_templates(activation())
+    for row in provider_rows:
+        if row["instantiable"] == "true":
+            row["fields"] = _fields("", {}, row["source"]["root"])
+            row["fields"][1]["label"] = "Declaration overrides JSON (recipe params supported)"
+            _cards(row, row["card"]["body"])
+        project(row, row.get("operator_parameters"))
+        if row.get("operator_unsupported_reason"):
+            row["card"]["body"] += "\n\nOperator controls unavailable: " + row["operator_unsupported_reason"]
     rows.extend(provider_rows)
     for index, finding in enumerate(template_discovery["findings"]):
         detail = f"{finding['source']}: {finding['reason']}: {finding['detail']}"
@@ -448,6 +504,9 @@ def catalog() -> dict:
 def command(args: argparse.Namespace) -> int:
     try:
         if args.workers_command == "catalog":
+            if getattr(args, "stream", False):
+                from .workers_catalog_stream import stream_catalog
+                return stream_catalog()
             result = catalog()
         else:
             fields = {}
@@ -459,21 +518,27 @@ def command(args: argparse.Namespace) -> int:
             result = save_instance(
                 args.id, args.revision, fields,
                 activate=args.activate, consent=args.consent,
+                operator_inputs=getattr(args, "operator_inputs", False),
             )
         print(json.dumps(result, indent=2))
         return 1 if result.get("activation") == "failed" else 0
     except (RegistrarError, OSError, ValueError, KeyError, TypeError) as exc:
+        if getattr(args, "stream", False):
+            print(json.dumps({"type": "error", "message": f"Workers discovery failed: {exc}"}), flush=True)
         print(f"agent-dispatch workers: {exc}", file=sys.stderr)
         return 2
 
 
 def register_commands(sub) -> None:
     listing = sub.add_parser("catalog", help="read-only local worker instances, source declarations and templates")
+    listing.add_argument("--stream", action="store_true", help="stream known templates before source discovery")
     listing.set_defaults(func=command)
     save = sub.add_parser("save", help="save user-local configuration; activation requires explicit consent")
     save.add_argument("id")
     save.add_argument("--revision", required=True)
     save.add_argument("--field", action="append", default=[])
+    save.add_argument("--operator-inputs", action="store_true",
+                      help="accept only source-declared operator controls, never declaration overrides")
     save.add_argument("--activate", action="store_true")
     save.add_argument("--consent", choices=[ACTIVATION_CONSENT])
     save.set_defaults(func=command)

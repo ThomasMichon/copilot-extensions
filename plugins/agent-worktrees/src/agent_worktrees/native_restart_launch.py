@@ -177,6 +177,9 @@ def cmd_embody(args: argparse.Namespace) -> int:
             return 0
         config = cli.cfg.load_config()
         record = tracking.load_record(path)
+        from . import agent_policy
+
+        agent_policy.require(record.worktree_path)
         repo = cli._repo_for_record(config, record)
         if repo is None or repo is not config.default_repo:
             raise ValueError("Restart target does not match the selected repository")
@@ -235,7 +238,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 result = sessions.mux_new_session(
                     expected["worktree_id"], expected["worktree_path"], command, env,
                 )
-                if result.get("ok") is True:
+                if result.get("ok") is True and result.get("created") is not False:
                     receipt = {**receipt, "state": "mux-created"}
                     native_restart_receipt.write(path, receipt, reserve=False)
             return _emit(receipt)

@@ -158,7 +158,7 @@ class _SteerSelectionList(SelectionList):
 
 def field_label(f: dict) -> str:
     """Humanized field name, e.g. ``"prompt"`` -> ``"Prompt"``."""
-    return str(f["name"]).replace("_", " ").capitalize()
+    return str(f.get("label") or str(f["name"]).replace("_", " ").capitalize())
 
 
 def compose_field(f: dict, i: int) -> tuple[list[Widget], dict]:

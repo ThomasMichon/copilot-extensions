@@ -88,6 +88,22 @@ def test_json_emits_structured_result_with_stdout(monkeypatch, capsys):
     assert data["scope"] == "repo:acme"
 
 
+def test_git_config_restore_reuses_restore_owner_with_strict_resource_scope(monkeypatch, capsys):
+    result = _fake_result("")
+    _patch(monkeypatch, result)
+    calls = []
+
+    def restore(*args, **kwargs):
+        calls.append(kwargs)
+        return result
+
+    monkeypatch.setattr(cli._reconcile, "restore", restore)
+    assert cli.main(["git-config", "restore", "--machine", "box", "--repo", "acme", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["ok"]
+    assert calls[0]["resource_types"] == frozenset({"git-config"})
+    assert calls[0]["dry_run"] is True
+
+
 def test_restore_prints_exact_plugin_removal(monkeypatch, capsys):
     result = _fake_result("")
     result.module_results = []
@@ -164,6 +180,20 @@ def test_resource_error_makes_human_restore_exit_nonzero(monkeypatch, capsys):
     assert rc != 0
     assert "resource package:example.package: ERROR install failed" in captured.err
     assert "did error" not in captured.out
+
+
+def test_text_restore_error_includes_mutation_and_recovery_backup(monkeypatch, capsys):
+    result = _resource_error_result()
+    resource = result.resource_results[0]
+    resource.type = "git-config"
+    resource.id = "user-global"
+    resource.detail = "post-write verification failed"
+    resource.backup_path = "retained-recovery/receipt.json"
+    _patch(monkeypatch, result)
+    assert cli.main(["restore", "--machine", "box", "--apply"]) != 0
+    captured = capsys.readouterr()
+    assert "changed" in captured.err.lower()
+    assert resource.backup_path in captured.err
 
 
 def _resource_deferred_result() -> reconcile.RestoreResult:

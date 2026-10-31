@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -152,3 +153,61 @@ def test_native_owned_rejects_all_partially_qualified_paths_before_opening_log(t
     assert len(outcomes) == 6
     assert all("fully qualified" in item["error"] for item in outcomes), outcomes
     assert not log.exists()
+
+
+def test_native_owned_publishes_one_fresh_scope_without_changing_parent_environment(tmp_path):
+    shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    report = tmp_path / "scopes.txt"
+    child = encoded(
+        f"[IO.File]::WriteAllText({quoted(report)}, $env:COPILOT_EXTENSIONS_OWNED_JOB_SCOPES)"
+    )
+    body = (
+        f"$ErrorActionPreference='Stop'; . {quoted(HELPER)}; "
+        "$before=$env:COPILOT_EXTENSIONS_OWNED_JOB_SCOPES; "
+        f"$code=Invoke-NativeOwnedProcess -FilePath {quoted(shell)} "
+        f"-Arguments @('-NoProfile','-NonInteractive','-EncodedCommand','{child}') "
+        f"-WorkingDirectory {quoted(tmp_path)} -LogPath {quoted(tmp_path / 'owned.log')}; "
+        "@{code=$code;before=$before;after=$env:COPILOT_EXTENSIONS_OWNED_JOB_SCOPES} "
+        "| ConvertTo-Json -Compress"
+    )
+    result = subprocess.run(
+        [str(shell), "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded(body)],
+        capture_output=True, text=True, timeout=30, **pu.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    outcome = json.loads(result.stdout)
+    assert outcome["code"] == 0 and outcome["before"] == outcome["after"]
+    before = outcome["before"].split(";") if outcome["before"] else []
+    after = report.read_text().split(";")
+    assert after[:-1] == before
+    assert re.fullmatch(r"Local\\ce-owned-job-[0-9a-f]{32}", after[-1])
+    assert after[-1] not in before
+
+
+@pytest.mark.parametrize("scopes", [
+    "", "Local\\ce-owned-job-invalid",
+    ";".join(["Local\\ce-owned-job-" + "a" * 32] * 2),
+    ";".join(f"Local\\ce-owned-job-{value:032x}" for value in range(64)),
+    "x" * 4097,
+])
+def test_native_owned_refuses_invalid_or_full_scope_chain_before_child_start(tmp_path, scopes):
+    shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    report = tmp_path / "unexpected.txt"
+    child = encoded(f"[IO.File]::WriteAllText({quoted(report)}, 'unexpected')")
+    body = (
+        f"$ErrorActionPreference='Stop'; . {quoted(HELPER)}; "
+        "try { "
+        f"Invoke-NativeOwnedProcess -FilePath {quoted(shell)} "
+        f"-Arguments @('-NoProfile','-NonInteractive','-EncodedCommand','{child}') "
+        f"-WorkingDirectory {quoted(tmp_path)} -LogPath {quoted(tmp_path / 'owned.log')}; exit 91 "
+        "} catch { $_.Exception.ToString() }"
+    )
+    result = subprocess.run(
+        [str(shell), "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded(body)],
+        env={**os.environ, "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES": scopes},
+        capture_output=True, text=True, timeout=30, **pu.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Job scope" in result.stdout
+    assert not report.exists()
+    assert not (tmp_path / "owned.log").exists()

@@ -21,16 +21,23 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from worktree_identity import parse_machine_identity
 
-from . import agent_plugin_runtime
+from . import agent_plugin_runtime, picker_review
+from .worktree_rows_contract import (
+    _int_field as _int_field,
+    _bool_field as _bool_field,
+    _dirty_field as _dirty_field,
+)
 from .engine_environment import (
     _PYTHON_PARENT_ENV as _PYTHON_PARENT_ENV,
     _engine_environment as _engine_environment,
     _is_parent_python_variable as _is_parent_python_variable,
+    _terminal_aware_launch_options as _terminal_aware_launch_options,
 )
 
 #: The engine binstub name (the self-provisioning agent-worktrees tool CLI).
@@ -51,7 +58,7 @@ ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
 #: A generous ceiling: a cold engine self-provisions on first use, and a classify
 #: pass can enumerate many worktrees. Kept bounded so the Manager never hangs.
 _DEFAULT_TIMEOUT = 120
-_REMOTE_ADMISSION_TIMEOUT = 240
+_REMOTE_ADMISSION_TIMEOUT = 300
 class EngineError(RuntimeError):
     """The agent-worktrees engine is absent, failed, or returned no valid JSON.
 
@@ -198,6 +205,7 @@ def _run(
     cwd: str | None = None,
     stream_progress: bool = False,
     environment: dict[str, str] | None = None,
+    engine_command: list[str] | None = None,
 ) -> str:
     """Run ``agent-worktrees [--project <p>] <args>`` and return stdout.
 
@@ -205,7 +213,10 @@ def _run(
     the process fails, or times out. A non-zero exit whose stdout is a JSON
     error envelope surfaces the engine's own ``error`` message. ``cwd``, when
     given, runs the engine from that directory (cwd-scoped verbs)."""
-    base = engine_base_command()
+    resolve = engine_base_command if environment is None else lambda: installed_engine_command(environment)
+    base = picker_review.engine_command(
+        args, lambda: list(engine_command) if engine_command is not None else resolve(),
+    )
     if base is None:
         raise EngineError(
             f"the {ENGINE_BIN} engine is not installed", install_hint=True)
@@ -219,7 +230,7 @@ def _run(
         else:
             kwargs = {
                 "capture_output": True, "text": True, "timeout": timeout,
-                "check": False, "env": {**_engine_environment(), **(environment or {})},
+                "check": False, "env": _engine_environment(environment),
                 "stdin": subprocess.DEVNULL,
                 **({"cwd": cwd} if cwd else {}),
             }
@@ -237,7 +248,8 @@ def _run(
                     if detail:
                         proc.stderr = detail
             else:
-                proc = subprocess.run(cmd, **kwargs)
+                execute = picker_review.run_read if picker_review.active() else subprocess.run
+                proc = execute(cmd, **kwargs)
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
     except OSError as e:
@@ -274,7 +286,8 @@ def run_json(project: str | None, args: list[str], *,
              allow_nonzero: bool = False,
              runner=None,
              stream_progress: bool = False,
-             environment: dict[str, str] | None = None) -> dict:
+             environment: dict[str, str] | None = None,
+             engine_command: list[str] | None = None) -> dict:
     """Run a ``--json`` verb and parse its stdout envelope into a dict."""
     raw = _run(
         project,
@@ -284,6 +297,7 @@ def run_json(project: str | None, args: list[str], *,
         runner=runner,
         stream_progress=stream_progress,
         **({"environment": environment} if environment is not None else {}),
+        **({"engine_command": engine_command} if engine_command is not None else {}),
     )
     try:
         obj = json.loads(raw)
@@ -297,7 +311,10 @@ def run_json(project: str | None, args: list[str], *,
 
 def run_engine_passthrough(project: str | None, args: list[str], *,
                            timeout: int | None = None,
-                           environment: dict[str, str] | None = None) -> int:
+                           environment: dict[str, str] | None = None,
+                           terminal_aware: bool = False,
+                           headless: bool = False,
+                           engine_command: list[str] | None = None) -> int:
     """Run an engine verb with **inherited stdio**, returning its exit code.
 
     Unlike :func:`run_json` (which captures + parses), this streams the engine's
@@ -309,7 +326,10 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     A supplied environment is the complete call-scoped selection and child
     environment; it bypasses stale inherited command handles.
     """
-    base = engine_base_command() if environment is None else installed_engine_command(environment)
+    picker_review.require_writable()
+    base = engine_command if engine_command is not None else (
+        engine_base_command() if environment is None else installed_engine_command(environment)
+    )
     if base is None:
         raise EngineError(
             f"the {ENGINE_BIN} engine is not installed", install_hint=True)
@@ -321,10 +341,18 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
 
     handoff = handoff_environment(args)
     child_environment = _engine_environment() if environment is None else _engine_environment(environment)
+    from agent_procutil import no_window_kwargs
+
+    headless_options = no_window_kwargs() if headless else {}
+    if headless and os.name == "nt":
+        # CREATE_NO_WINDOW needs explicit streams to retain a caller's capture pipes.
+        headless_options.update(stdout=sys.stdout, stderr=sys.stderr)
     try:
         return subprocess.run(
             cmd, timeout=timeout, check=False,
-            **handoff_launch_options(child_environment, handoff),
+            **{**handoff_launch_options(child_environment, handoff),
+               **(_terminal_aware_launch_options() if terminal_aware else {}),
+               **headless_options},
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
@@ -353,6 +381,7 @@ def run_project_passthrough(
     timeout: int | None = None,
 ) -> int:
     """Run one installed project binstub with inherited stdio."""
+    picker_review.require_writable()
     command = project_binstub_command(project)
     argv = [str(command), *args]
     if os.name == "nt":
@@ -465,33 +494,6 @@ class Worktree:
         return "".join(bits)
 
 
-def _int_field(value: object, *, name: str) -> int:
-    if value in (None, ""):
-        return 0
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be an integer")
-    try:
-        return int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be an integer") from exc
-
-
-def _bool_field(value: object, *, name: str) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value in (None, "", 0):
-        return False
-    if value == 1:
-        return True
-    if isinstance(value, str):
-        normalized = value.strip().casefold()
-        if normalized in ("true", "yes", "1"):
-            return True
-        if normalized in ("false", "no", "0", ""):
-            return False
-    raise ValueError(f"{name} must be a boolean")
-
-
 def worktree_from_dict(d: dict) -> Worktree:
     """Build the Manager's cross-cutting worktree model from a contract row."""
     identity = parse_machine_identity(d)
@@ -511,14 +513,6 @@ def worktree_from_dict(d: dict) -> Worktree:
         path=d.get("path"),
         raw=d,
     )
-
-
-def _dirty_field(value: object) -> bool:
-    if type(value) is int:
-        if value < 0:
-            raise ValueError("dirty must be a nonnegative count")
-        return value > 0
-    return _bool_field(value, name="dirty")
 
 
 @dataclass(frozen=True)
@@ -575,6 +569,13 @@ def launch_plan_from_dict(d: dict) -> LaunchPlan:
     )
 
 
+def require_agent_hosting(path: str, *, operation: str = "launch") -> dict:
+    """Require fresh engine policy, including on unadopted source repositories."""
+    from .hosting_admission import require_agent_hosting as require
+
+    return require(path, operation=operation, request=run_json, failure=EngineError)
+
+
 def resolve_launch_plan(
     project: str,
     *,
@@ -586,6 +587,7 @@ def resolve_launch_plan(
     target_environment: str | None = None,
     target_no_mux: bool = False,
     seed: str | None = None,
+    launch_attempt_id: str | None = None,
     defer_new_seed: bool | None = None,
     defer_projections: bool = False,
     timeout: int | None = None,
@@ -608,10 +610,11 @@ def resolve_launch_plan(
 
     Prompted New/Resume requests require typed retry staging. An older engine
     must refuse the capability flag before mutation, rather than silently
-    dropping preservation. Ordinary seedless launches retain version-skew
-    compatibility.
-    Explicitly bounded remote prompted requests allow at least 240 seconds:
-    the outer engine must outlive its 180-second SSH admission and startup.
+    dropping preservation. Every launch also requires hosting-policy admission;
+    an engine predating that capability is refused without a weaker fallback.
+    Explicitly bounded remote prompted requests allow at least 300 seconds:
+    the outer engine must outlive its 60-second owner-policy check and
+    180-second SSH admission/startup, retaining a transport margin.
 
     Version-skew tolerant: an older engine that does not know ``--bare-resume`` is
     retried as a plain resume (degrade the feature, don't fail) -- the same contract
@@ -628,6 +631,18 @@ def resolve_launch_plan(
         raise EngineError(
             "resolve requires exactly one of worktree_id, new=True, or base=True"
         )
+    from .seed_launch import require_launch_capabilities, require_attempt_plan, require_attempt_target
+    require_attempt_target(launch_attempt_id, target_machine=target_machine, seed=seed)
+    from .hosting_admission import require_owner_hosting
+
+    def admit_owner() -> None:
+        require_owner_hosting(
+            project, worktree_id,
+            request=lambda owner, argv: run_json(owner, argv, allow_nonzero=True),
+            failure=EngineFeatureUnavailable, support_only=bool(target_machine),
+        )
+
+    admit_owner()
 
     args = ["resolve", "--json"]
     require_staging = bool(seed) or bool(defer_new_seed)
@@ -649,6 +664,8 @@ def resolve_launch_plan(
             args.append("--target-no-mux")
     if seed:
         args += ["--seed", seed]
+    if launch_attempt_id is not None:
+        args += ["--require-launch-attempt", "--launch-attempt-id", launch_attempt_id]
 
     try:
         obj = run_json(
@@ -658,18 +675,12 @@ def resolve_launch_plan(
                 if target_machine and seed and timeout is not None else timeout
             ),
             stream_progress=True,
-            **({"environment": {"AGENT_WORKTREES_DEFER_PROJECTIONS": "1"}} if defer_projections else {}),
+            environment={**os.environ, "AGENT_WORKTREES_DEFER_PROJECTIONS": "1"} if defer_projections else None,
+            engine_command=engine_base_command() if defer_projections else None,
         )
     except EngineError as e:
         detail = _engine_error_detail(e)
-        if require_staging and "unrecognized arguments" in detail and any(
-            flag in detail for flag in ("--stage-launch-seed", "--require-native-seed")
-        ):
-            raise EngineFeatureUnavailable(
-                "the installed engine predates staged launch-prompt ownership "
-                "with an atomic native-transport fence; "
-                "update agent-worktrees before launching this prompt"
-            ) from e
+        require_launch_capabilities(detail, attempt_id=launch_attempt_id, staged=require_staging)
         if (
             bare_resume
             and "unrecognized arguments" in detail
@@ -680,6 +691,7 @@ def resolve_launch_plan(
                 base=base, target_machine=target_machine,
                 target_environment=target_environment,
                 target_no_mux=target_no_mux, seed=seed,
+                launch_attempt_id=launch_attempt_id,
                 defer_new_seed=defer_new_seed,
                 defer_projections=defer_projections,
                 bare_resume=False, timeout=timeout)
@@ -690,10 +702,11 @@ def resolve_launch_plan(
             raise EngineFeatureUnavailable(
                 "the installed engine predates remote Picker launch plans"
             ) from e
-        if base and (
+        if base and launch_attempt_id is None and (
             "--base" in detail
             or "--json requires --worktree-id or --new" in detail
         ):
+            admit_owner()
             obj = run_json(
                 project,
                 ["resolve", "--base", "--no-mux"],
@@ -708,6 +721,10 @@ def resolve_launch_plan(
     # the shell launcher's own unwrap).
     if isinstance(obj.get("launch"), dict):
         obj = obj["launch"]
+    require_attempt_plan(obj, launch_attempt_id)
+    if target_machine and seed:
+        from .seed_launch import require_remote_seed_plan
+        require_remote_seed_plan(obj, new=new, worktree_id=worktree_id, attempt_id=launch_attempt_id)
     if seed and obj.get("action") == "exec" and (
         obj.get("seed_pending") is not True
         or not isinstance(obj.get("seed_id"), str) or not obj["seed_id"]
@@ -736,6 +753,10 @@ def list_worktree_rows(
     Current-roster authority is mandatory by default. Optional presentation
     flags may be dropped for compatibility; authority is never downgraded.
     """
+    if picker_review.active():
+        if not current or refresh:
+            raise EngineError(picker_review.MESSAGE)
+        return picker_review.worktree_rows(project, worktree_id=worktree_id)
     args = ["list", "--json"]
     if current:
         args.append("--current")

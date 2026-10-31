@@ -290,8 +290,10 @@ def build_remote_browse_argv(
 
     Forwards the read filters (``--status``/``--label``/``--limit``, plus
     ``--repo``/``--target-machine``/``--target-repo`` for ``list``). ``list``
-    scopes to a repo lane, which can't be resolved from the peer's SSH home dir,
-    so the locally-resolved ``repo`` is passed explicitly.
+    scopes to a repo lane by default, which can't be resolved from the peer's
+    SSH home dir, so the locally-resolved ``repo`` is passed explicitly.
+    An explicit ``--all-repos`` instead retains its cross-lane scope; an older
+    peer rejects that unsupported flag rather than silently narrowing the read.
 
     ``--machine Y`` handling differs by subcommand:
 
@@ -315,6 +317,8 @@ def build_remote_browse_argv(
     board = subcommand == "inbox" and getattr(args, "board", False)
     if board:
         argv += ["--board"]
+        if getattr(args, "limit_per_category", False):
+            argv += ["--limit-per-category"]
         recent_mins = getattr(args, "recent_mins", None)
         if recent_mins is not None:
             argv += ["--recent-mins", str(recent_mins)]
@@ -331,7 +335,9 @@ def build_remote_browse_argv(
     if limit:
         argv += ["--limit", str(limit)]
     if subcommand == "list":
-        if repo:
+        if getattr(args, "all_repos", False):
+            argv += ["--all-repos"]
+        elif repo:
             argv += ["--repo", repo]
         if getattr(args, "target_machine", None):
             argv += ["--target-machine", args.target_machine]

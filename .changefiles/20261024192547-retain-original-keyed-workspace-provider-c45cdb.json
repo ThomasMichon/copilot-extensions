@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original keyed workspace/provider creation inputs and runtime admission atomically; preserve immutable history and refuse ordinary-path custody downgrade.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

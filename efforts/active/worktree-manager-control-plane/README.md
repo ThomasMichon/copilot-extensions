@@ -910,6 +910,11 @@ Direct writes are machine-local; repository, knowledge, plugin, and preset
 sources are read-only. The sequencing and validation below are
 _(agent-recommended)_ realizations of that operator-approved boundary.
 
+- [ ] Optional bootstrap repository caller (#8545): establish core readiness,
+      then compose attended acquisition and explicitly trusted repository setup.
+      The [proposed concrete caller contract](optional-repository-bootstrap.md)
+      preserves #356's first-repository registration/setup/trust/readiness
+      ownership; it is not a second registration engine or a shipped option.
 - [x] Wave 0: review contribution, effective-state, and local-write contracts
       against existing owners; reconcile #543's old direct-repository-write
       premise without claiming its implementation complete.
@@ -926,6 +931,13 @@ _(agent-recommended)_ realizations of that operator-approved boundary.
 - [ ] Wave 5: cross-platform, compatibility, clean-room, live-surface, and
       documentation acceptance; reconcile Phase 7 preset scope to avoid a
       second implementation.
+- [x] Installation and Updates (#8877, `ticking-compass`): delivered the bounded
+      standing inventory and genuinely component-scoped durable updates in the
+      [Phase 5 slice](phase-5-configuration-workbench.md#installation-and-updates---bounded-vertical-slice-8877).
+      Reviewed intent #8879 and runtime #8891 are merged. The operator request
+      and source Plan/Validation live there; native/installed/release/rollout
+      acceptance remains in Wave 5. #7028 maintenance,
+      #8545/#356 setup and all broader workbench waves retain existing owners.
 
 ### Phase 6 — Retire the bundled Picker (Done — the operator-visible end-state)
 - [x] Once the Manager Picker reaches parity (Phase 3), remove the in-plugin
@@ -1707,7 +1719,505 @@ revive completed relocation or seize lifecycle work.
   incumbent Plan/Validation/Journal clause unchanged and name the next bounded
   unfinished item.
 
+<!-- backlog-reconciliation:7556:transfer:4096:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+### Direct repository-class confirmation/intent policy from #4096
+
+Append DIRECTLY to the EXISTING Active ROOT's owner-bound registration/local-write Plan,
+own Validation, actual global Validation Plan and continuing Journal/Coordination.
+Preserve every incumbent phase, accepted source-read-only boundary and SAME
+repository-class API/CLI, configuration/contribution, agent/project/unadoption and
+current source/resource owners. This is a finite safety-policy intake, not Manager
+takeover of the registry writer or completed GUI/registration work.
+
+#### Plan
+
+- [ ] P1: Credit #7547's real explicit bidirectional class repair, omitted sentinel,
+  explicit reference/legacy aliases, validation-before-write and independent
+  agent/project/metadata/platform behavior. Do not reopen the repaired downgrade or
+  completed finite #7510 unadoption axes.
+- [ ] P2: Resolve the ORIGINAL confirmation prompt OR explicit force flag through the
+  existing repository-class owner, OR obtain an explicit reviewed requirement-preserving
+  decision replacing that mechanism with the supported intentional-change contract. A
+  registration success line, old provider merge or silently assuming --class already
+  supplies the requested prompt is not a decision.
+- [ ] P3: Preserve interactive/noninteractive/refusal behavior, invalid/missing values
+  failing before writes and unchanged omitted/default registration semantics.
+  Reclassification must not uninstall, unadopt a project, change agent exposure/runtime,
+  transfer a command or rewrite private lifecycle state.
+- [ ] P4: Reuse the actual engine registration/API/CLI and any owner-declared Manager
+  adapter. Do not invent a new registry, generic YAML editor, global confirmation
+  service or compulsory GUI dependency; repository/versioned source remains read-only
+  under the existing workbench contract.
+
+#### Validation
+
+- [ ] V1: Cover upward/downward/explicit-reference and omitted classes, valid aliases,
+  invalid/missing input, the chosen actual prompt/force or explicitly accepted
+  intent-disposition, cancellation/refusal and noninteractive use. Verify preserved
+  agent/project/metadata/platform state through the actual supported writer, not a
+  post-write message.
+- [ ] V2: Qualify this finite source/consumer policy at the ORIGINAL tier. Do not
+  require unrelated full Configurator/adoption/runtime/native-every-host completion;
+  existing per-wave/source-specific gates remain independent.
+- [ ] V3: BEFORE #4096 administrative supersession, obtain a NEW normal reviewed ACTUAL
+  merge containing this COMPLETE direct ROOT Plan/Validation/Coordination/Journal and
+  actual global row, then read back CURRENT FULL receiving sections. Closed #7510,
+  #7547, a child-only link, old creation or this proposal is not this receipt. If finite
+  scope/custody is not accepted, retain the source.
+
+#### Continuing Coordination and Journal
+
+- [ ] C1: Keep actual repository-class API/CLI and owner-declared
+  registration/configuration adapter custody, current #356 adoption claim, #542
+  assignment and all other module/wave/source/resource holds unchanged. Continue through
+  this existing ROOT Journal and eligible OPEN bounded-source claims; no new blanket ACK
+  or closed-source live token.
+- [ ] C2: Journal the NEW reviewed intake/current full readback, delivered class
+  behavior, exact remaining confirmation/intent decision and next bounded Plan item.
+  Keep this ROOT Active and all incumbent Plan/Validation/Journal rows intact. No
+  registration/configuration/process/test/native action occurs.
+
+<!-- backlog-reconciliation:7556:transfer:4098:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+### Direct configuration mutation fidelity from #4098
+
+Receive the COMPLETE original comments/unknown-data round-trip case and accepted
+supported project-write refinements DIRECTLY in the EXISTING Active ROOT's plugin-owned
+machine-local writer safety Plan, own Validation, actual global Validation Plan and
+continuing Coordination/Journal. Preserve ALL current phases/Journal and SAME
+engine/config-migrate/registry, configuration-adapter and source/resource owners.
+Manager does NOT gain a generic YAML/source writer.
+
+#### Plan
+
+- [ ] P1: Preserve BOTH lexical user comments AND unrecognized top-level/nested values
+  through the ACTUAL supported machine-local config.yaml read/write round trip, plus the
+  accepted supported project-config mutation refinements at their existing authority
+  boundary. Map actual file/schema and writer, not every unrelated YAML file or
+  hypothetical future migrator.
+- [ ] P2: Credit raw-map deep copy, baseline/no-op textual marker insertion and current
+  baseline machine config. Reconcile changed-value/adoption/template and applicable real
+  shape-migration paths separately; typed load, a no-op fixture or an unrelated
+  registry-preference writer is not all mutation fidelity.
+- [ ] P3: Preserve deliberately reviewed known obsolete/duplicated-field removal and
+  registry-owned identity as a distinct accepted migration. Unknown user data cannot be
+  dropped by typed-model normalization, but this intake does not restore shadow
+  ownership fields.
+- [ ] P4: Preserve malformed/newer/unsupported/missing-migration refusal, idempotence,
+  atomic publication/backups and source/owner/error behavior without lossy fallback or
+  accidental write-on-read. Do not claim every current read loses comments simply
+  because real-shape safe_dump is lexical-lossy.
+- [ ] P5: Keep serialization/migration with the ACTUAL existing owning plugin/library
+  API. Manager only composes declared machine-local preview/apply/reset;
+  repository/knowledge/plugin/preset views remain read-only and versioned changes retain
+  their existing reviewed maintenance owner. No generic source editor or second config
+  authority.
+
+#### Validation
+
+- [ ] V1: Exercise actual supported file consumers for no-op, baseline stamp, changed
+  value and applicable migration with comments and unknown nested/top-level values.
+  Prove byte/semantic preservation according to the original contract; separately assert
+  deliberately removed known fields and unchanged unrelated settings.
+- [ ] V2: Cover malformed/newer/unsupported/refused/interrupted writes, atomic
+  retry/idempotence and owned recovery without touching real user config. A successful
+  template, raw-map copy or no-op test alone is not the full result; keep source versus
+  actual consumer proof explicit.
+- [ ] V3: Preserve the finite ORIGINAL supported-file tier and per-wave applicability.
+  Do not add every schema/every host, whole Configurator or mandatory live GUI
+  acceptance for an independently delivered engine/library fidelity fix; preserve
+  existing native/source gates where originally applicable.
+- [ ] V4: BEFORE #4098 administrative supersession, obtain a NEW normal reviewed ACTUAL
+  merge of this COMPLETE direct ROOT Plan/Validation/Coordination/Journal plus actual
+  global row, then read back CURRENT FULL receiving sections and unchanged
+  writers/custody. Closed #357, an old migration foundation, a child link or this
+  proposal is not receipt. Retain #4098 if any clause/owner cannot survive.
+
+#### Continuing Coordination and Journal
+
+- [ ] C1: Continue SAME engine/config-migrate/registry and owning local-write adapter
+  roles through this ROOT Journal and eligible OPEN bounded-source claims. Preserve
+  current #356/#542 and all config/domain/native/source/resource reservations without a
+  new generic ACK or source-write entitlement.
+- [ ] C2: Journal new reviewed intake/current full readback, actual baseline
+  preservation, precise remaining changed-value/migration fidelity and next bounded
+  item. Keep this ROOT Active, every incumbent Plan/Validation/Journal clause intact,
+  and perform no config read/write, migration, test/import or native operation through
+  this intake.
+
+### Direct retained observation, adoption and selected-action acceptance
+
+*The following tracking intake was assisted using GitHub Copilot.*
+
+This agent-recommended administrative mapping preserves unfinished acceptance,
+not implemented capability. All incumbent phases, checked states, alternatives,
+Participants, Journal history and source/native/resource custodians remain.
+Manager composes the existing engine/setup and provider authorities; it gains
+no parallel registry, head store or execution authority.
+
+The following outcomes remain independently tracked:
+
+- #542 remains assigned: TTY-gated bare/front-door Picker, state-derived
+  Setup/Doctor landing, missing-source provisioning actions and the original
+  empty/partial/provisioned TTY/non-TTY matrix. Project-only routing,
+  absent-Manager onboarding and bounded text status are partials.
+- #4182 retains its bounded eligibility-repair claimant and inherited-lineage
+  OR parent-activity display. Preserve actual own-session precedence, Owned
+  visibility/controller navigation, no ordinary Resume/fresh Open for an
+  owned sessionless child, orphan recovery and genuine unowned Open. Do not
+  copy a parent's conversation or invent child turns.
+- #8404 retains its narrow continuation and original post-containing-release
+  installed one-bootstrap/zero-scalar comparison. Credit the real optional
+  complete tuple while preserving the default fast path, configured overrides,
+  execution-space checks, current-source authority and old-option-only
+  compatibility fallback. Do not add the separate two-second-load/200ms-paint
+  programme to its finite gate.
+- #8545 retains its current caller/first-entry claim. The owned
+  [caller contract](optional-repository-bootstrap.md) records the bounded
+  shared acquisition/registration/setup/trust/readiness seam transfer; #356's
+  standalone discovery and guided local/remote/skip choices remain separate.
+  Its newer progress records credit the #8706 caller/declaration source and
+  #8827 call-local Git checkout repair, not absent-tool, real attended-provider
+  or adopter readiness. Preserve user work, installed core, no-repository
+  behavior, separate Manager source/update configuration and the next bounded
+  signed physical Python 3.11+/WinGet qualification. Source-worktree
+  finalization is not whole-issue completion.
+- #3004 remains the independent ambient harness/knowledge outcome: the actual
+  first restarted model session after fresh stateless-clone/plugin installation
+  receives one create/register-new OR bind-existing-adopted prompt. Preserve
+  prior topology and knowledge/executable roles, explicit unbound decline,
+  hard-blocked stateful writes without fallback, legitimate local setup writes
+  and original fresh-clone/install/restart/decline qualification. A Manager
+  panel, resolved binding API or produced guidance file is not that result;
+  #3030/#3005 and the harness/knowledge owners remain independent.
+
+#### Scheme-aware adoption and optional hygiene from #4115
+
+<!-- backlog-reconciliation:7556:transfer:4115:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+##### Plan
+
+- [ ] **M13-4115-P1:** Preserve the complete supported-remote auth-scheme and
+  readiness decision during registration/adoption, including exact selected
+  provider/account, legitimate SSH/native-key/helper authority and truthful
+  not-applicable, refused, unknown and unavailable results. GitHub HTTPS
+  clarification/pinning is real partial work, not every scheme's proof.
+- [ ] **M13-4115-P2:** Missing verification, caught errors or underivable
+  identity cannot become authenticated success merely to avoid a prompt.
+  Preserve scheme-specific HTTPS host matching and no HTTPS machinery on other
+  transports; no unrequested auth ceremony, global account switch, token
+  copying or silent source fallback.
+- [ ] **M13-4115-P3:** Distinguish repos-add registration/auth handling from
+  full project-adoption hook installation. Optional pre-push hygiene follows
+  the repository contribution policy, selected PR mode and explicitly armed
+  managed-session/worktree gates, not universal all-shell/anchor protection.
+- [ ] **M13-4115-P4:** Preserve existing user hooks, chaining, arguments/stdin
+  and failure results, with explicit supported installation/refusal/failure
+  diagnostics. Registration success or a hook filename is not the whole result.
+- [ ] **M13-4115-P5:** Reuse existing engine registration/auth/hook owners and
+  declared Manager composition. No generic source editor or second registry.
+  #8545's bounded HTTPS-v1/GCM caller and shared-seam transfer neither extend
+  that caller to all transports nor waive this full supported-scheme outcome.
+
+##### Local Validation
+
+- [ ] **M13-4115-V1:** Exercise actual supported registration/adoption consumers
+  for GitHub HTTPS, legitimate native SSH/helpers, N/A/refused/unknown/unavailable
+  verification, selected identity and scheme-specific rejection. Distinguish
+  synthetic/owner-contract evidence from authorized native auth proof.
+- [ ] **M13-4115-V2:** Cover repos-add versus full adoption, hook opt-in/PR
+  policy, armed/unarmed callers, existing-hook preservation/chaining and
+  failure propagation. No account helper, bootstrap success or shim presence
+  alone proves the combined source.
+
+##### Continuing Coordination
+
+- [ ] **M13-4115-C1:** Keep engine registry/auth/hook and approved shared-setup
+  custody, #356 standalone/discovery exclusions, #542 assignment and #8545
+  continuation intact. Manager composes owners without acquiring their source
+  or resources.
+- [ ] **M13-4115-C2:** Tracking supersession requires the complete reviewed
+  direct ROOT intake and full current readback. Retain #4115 if any scheme,
+  hook clause or actual hold cannot survive; do not receive a GitHub-only subset.
+
+#### Paired parent and indented companion rows from #4204
+
+<!-- backlog-reconciliation:7556:transfer:4204:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+##### Plan
+
+- [ ] **M13-4204-P1:** Render the actual paired parent row and indented
+  companion sub-row. Existing pair identity/roles/linkage, glyphs, sibling
+  summaries, jump actions and aggregate attention are partials, not nesting.
+- [ ] **M13-4204-P2:** Preserve each half's own state-section behavior,
+  selection/action identity and unknown sibling facts. Do not merge ownership,
+  copy sessions, invent state or change pair lifecycle to obtain the arrangement.
+
+##### Local Validation
+
+- [ ] **M13-4204-V1:** Exercise the actual supported row/section/selection
+  consumer for nesting, state sections and exact per-half actions, including
+  missing/unknown siblings. Preserve the finite UI/source tier without a new
+  native-fleet or deployment gate.
+
+##### Continuing Coordination
+
+- [ ] **M13-4204-C1:** Preserve pair lifecycle, controller, row-data/UI owners,
+  #4182's separately claimed display acceptance and all incumbent obligations.
+  This intake performs no pair mutation or implementation claim.
+
+#### Unavailable versus empty history from #5908
+
+<!-- backlog-reconciliation:7556:transfer:5908:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+##### Plan
+
+- [ ] **M13-5908-P1:** Preserve empty-success, unavailable, malformed and failed
+  history through local subprocess/remote adapters, worker results and BOTH
+  Sessions overlay AND Companion. Retain actual error/ok/reason results rather
+  than catch-to-empty or error=None solely because a worktree ID exists.
+- [ ] **M13-5908-P2:** Use bounded attributable error surfaces without
+  transcript/credential dumps. Genuine empty history remains normal; keep the
+  Companion's otherwise useful status panel available.
+- [ ] **M13-5908-P3:** Preserve responsive cached browsing and no live venue
+  connection/ensure merely to render Worktrees or fabricate supported history.
+  A separate Messages error channel does not repair swallowed Sessions errors.
+
+##### Local Validation
+
+- [ ] **M13-5908-V1:** Cover deterministic local EngineError/timeout/malformed
+  and remote ok:false/error/unsupported results versus true empty success
+  through actual workers/results and both consumers. Assert safe diagnostics,
+  useful unaffected status and no render-triggered venue connection. No real
+  SSH, session or history mutation is required.
+
+##### Continuing Coordination
+
+- [ ] **M13-5908-C1:** Preserve engine/adapter/Manager history authority and
+  #5935 action custody. Historical #352/#3307 references are not live claim
+  tokens; archive/sweep delivery is not runtime completion.
+
+#### Protection, agency and observed liveness from #5909
+
+<!-- backlog-reconciliation:7556:transfer:5909:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+##### Plan
+
+- [ ] **M13-5909-P1:** Keep conservative protection/occupancy, durable
+  agency/execution-leg status and observed native process/session liveness
+  distinct through API, normalization, labels and details. An unknown-protection
+  Boolean alone cannot justify positive ACTIVE/PROC/ACP observations.
+- [ ] **M13-5909-P2:** Retain opaque provider envelopes, explicit uncertainty,
+  observation age/freshness and mixed-version compatibility. Do not clear
+  protection, hide unresolved agency or weaken unfamiliar-provider/live/unknown
+  launch refusal to improve labels.
+- [ ] **M13-5909-P3:** Preserve positive observation separately from stale,
+  unknown or unavailable state. The incumbent #3935 confirmed-positive
+  launch-to-ACTIVE case is complementary, not proof this inverse path is fixed.
+
+##### Local Validation
+
+- [ ] **M13-5909-V1:** Exercise opaque/unknown, stale and positively observed
+  legs and mixed-version consumers through actual producer/normalization/label/
+  detail shapes; assert unchanged conservative protection. Deterministic shape
+  tests require neither an unsupported live host nor a new native-every-leaf trial.
+
+##### Continuing Coordination
+
+- [ ] **M13-5909-C1:** Preserve distinct engine observation/finality and Manager
+  UI owners, the entire #3935 case and current source/resource claims. No
+  liveness probe, ownership release or process action follows from intake.
+
+#### Selected prior-session Companion recovery from #5935
+
+<!-- backlog-reconciliation:7556:transfer:5935:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+##### Plan
+
+- [ ] **M13-5935-P1:** Offer explicit prior-session selection/recovery directly
+  from Companion lineage without opening the full Picker. Forward exact selected
+  identity through existing agency/hosting resume owners, not a new head store
+  or execution path.
+- [ ] **M13-5935-P2:** Preserve Cut over/Refresh/Exit, unavailable versus
+  supported-empty lineage, conservative live-head/ownership refusal and visible
+  failure/recovery. Row selection does not permit displacing a live session.
+- [ ] **M13-5935-P3:** Keep ordinary manual cutover/current-head verification,
+  raw attributed break-glass override and popup/exit/quoting independent.
+  Queue wake/reconstitution or keyed lineage rows alone are not this action.
+
+##### Local Validation
+
+- [ ] **M13-5935-V1:** Exercise actual action/selected-identity forwarding and
+  refusal, ordinary controls and error/empty behavior; THEN qualify original
+  supported in-pane recovery with exact build/host/mode attribution. Source
+  rows alone are not native proof; no unrelated whole-host portfolio is added.
+
+##### Continuing Coordination
+
+- [ ] **M13-5935-C1:** Preserve prior-session/head/provider owners and
+  #4369/#5833/#2696 boundaries. No prompt, head write, automatic recovery or
+  displacement is authorized by administrative consolidation.
+
+#### Provider-observed correlated loss and recovery from #5936
+
+<!-- backlog-reconciliation:7556:transfer:5936:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+##### Plan
+
+- [ ] **M13-5936-P1:** The hosting provider publishes an attributable ended
+  HOST-INSTANCE observation naming exactly its hosted execution legs, backed
+  by durable liveness across full restart. Picker renders that authority;
+  stale rows or a timeout cannot invent correlated host death.
+- [ ] **M13-5936-P2:** Offer one explicit CONFIRMED batch to resume the named
+  worktrees' CURRENT heads through existing resume/host owners, preserving exact
+  forwarded targets, per-target liveness/head/refusal and honest outcomes.
+  No automatic resurrection or second resume ledger.
+- [ ] **M13-5936-P3:** Do not offer bulk recovery for independent ordinary
+  terminal closes, unrelated work or stale/unknown evidence. Loss observation,
+  UI confirmation, native invocation and restored execution are separate facts.
+- [ ] **M13-5936-P4:** Preserve supported restart/loss and unrelated-close
+  counterexamples with source/build attribution. Existing machine-restart
+  evidence, detached per-worktree launch and provider relocation are partials,
+  not this complete result or permission for automatic recovery.
+
+##### Local Validation
+
+- [ ] **M13-5936-V1:** Cover supported provider restart/loss, full-restart
+  durable evidence, unrelated closes, stale/foreign/unknown legs, confirmation
+  and exact current-head forwarding/refusal through actual producer/Manager/
+  owner consumers.
+- [ ] **M13-5936-V2:** Preserve original live supported-host recovery
+  qualification with exact build/mode attribution. A row, synthetic notification,
+  mapping count or source merge is not that proof; no every-provider/all-host
+  or whole machine-restart completion gate is added.
+
+##### Continuing Coordination
+
+- [ ] **M13-5936-C1:** Provider owns loss/liveness evidence, Manager presents
+  and confirms, and agency/native resume owners act. Preserve #3586/#2062/#5555
+  and restart-recovery implementers, their existing ROOT references and separate
+  qualification without transferring or completing their work.
+- [ ] **M13-5936-C2:** Preserve all source/resource/native holds and default-off
+  recovery/enrollment. No host restart, close, launch, native fixture or repair
+  is authorized by receiving this unfinished case.
+
+#### Selected target and effective provider disclosure from #5937
+
+<!-- backlog-reconciliation:7556:transfer:5937:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+##### Plan
+
+- [ ] **M13-5937-P1:** Keep local Manager/controller identity distinct from
+  selected execution target and show the actual provider/version expected to
+  create, resume or attach. Consume owning observations, not guessed local
+  defaults or Manager installation as provider proof.
+- [ ] **M13-5937-P2:** Preserve unavailable/skew/freshness and consequential
+  target clarity on narrow screens, coordinating prelaunch and active-host
+  representation without removing correct Manager version, target/session
+  context or explicit launch modifiers.
+- [ ] **M13-5937-P3:** Final native-title routes were not globally proved
+  absent. Preserve #5555 data authority, assigned #1193 convergence, #3588
+  native-title composition and #5898 AHP/mux presentation as independent owners;
+  their partials are not this whole disclosure outcome.
+
+##### Local Validation
+
+- [ ] **M13-5937-V1:** Exercise selected target/provider/version, local
+  controller, unavailable/skew and narrow-width behavior through actual
+  prelaunch/active representation; retain original supported live cross-host/
+  mode acceptance with exact build attribution. No global absence claim or
+  expanded all-host trial is introduced.
+
+##### Continuing Coordination
+
+- [ ] **M13-5937-C1:** Existing observation/provider/UI/native-title/contribution
+  custodians remain. This intake queries no live provider, alters no title/
+  profile/default and retires no adjacent held source.
+
+#### Exact selected session identity through venue Open from #5961
+
+<!-- backlog-reconciliation:7556:transfer:5961:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+##### Plan
+
+- [ ] **M13-5961-P1:** Carry the row's exact session_id/mux_session_name through
+  the existing Open decision, launcher and actual provider/agency attachment.
+  Forwarding provider/venue/title alone and choosing its default is not proof
+  that an arbitrary selected registration was attached.
+- [ ] **M13-5961-P2:** Reject stale, unavailable or contradictory explicit
+  selections honestly, preserving legitimate anchor/worktree defaults for
+  supported unselected/default use. Credit real default attachment without
+  relabeling it selected-identity evidence.
+- [ ] **M13-5961-P3:** Reuse actual provider/agency APIs and existing action/
+  supervision custody; no new host path, blanket lifecycle parity or duplicate
+  attachment store. A checked baseline pivot is not this later exact forwarding.
+
+##### Local Validation
+
+- [ ] **M13-5961-V1:** Prove selected-identity forwarding through real supported
+  decision/attachment consumers, stale/unavailable refusal and unchanged valid
+  defaults. Preserve the original finite source/consumer tier and disclose
+  unavailable lanes; no blanket native/venue/whole-parent matrix is added.
+
+##### Continuing Coordination
+
+- [ ] **M13-5961-C1:** Actual provider/agency attachment and #3657 action/
+  supervision owners retain custody. No venue, mux, session or live selection
+  is contacted or changed by this intake.
+
+### Direct retained adoption reporting from #4304
+
+**Agent-recommended tracking amendment.** Preserve the complete original and
+current refined contract, existing engine registration/auth/hook, setup/Manager
+and source/resource custodians. Already-delivered branch protection is credit,
+not proof that adoption reporting is complete.
+
+#### Plan
+
+- [ ] **P4304-1:** Retain explicit adoption-owned default/protected-branch guard
+  OR equivalent cooperative hygiene, configured branch precedence,
+  PR/direct-push/base/singleton/break-glass semantics and auth-scheme readiness.
+- [ ] **P4304-2:** Complete installed/skipped/error reporting in adoption
+  output/doctor diagnostics: nonempty installed names, policy-disabled and
+  empty-result skipped reasons, caught native/install errors and explicit
+  refusal/unsupported outcomes.
+- [ ] **P4304-3:** Preserve idempotent foreign-hook chaining/arguments/failure
+  behavior and independent machine-local install/update versus explicitly
+  authorized ownership-aware repository integration; no new security guarantee
+  or adoption action.
+
+#### Local Validation
+
+- [ ] **V4304-1:** Exercise actual reporting owner with synthetic installed,
+  policy-disabled, empty result, exception/refusal and doctor/readiness cases;
+  errors cannot become a success receipt.
+- [ ] **V4304-2:** Retain existing branch/policy/hook/chaining/idempotence
+  controls and ownership-aware integration boundary at original scope; not
+  whole #5852, whole Manager or all-host/native qualification.
+
+#### Continuing Coordination
+
+Keep all engine registration/auth/hook, setup/Manager and original
+source/resource custodians. This Active ROOT's normal reviewed complete Plan,
+local AND global Validation, Coordination and Journal plus actual receiving
+readback precede any separate #4304 supersession. This amendment transfers no
+claim, appoints no executor and grants no adoption, implementation or rollout.
+
 ## Validation Plan
+
+- [ ] G1: Resolve EVERY directly retained #4096 original
+  confirmation-OR-force/accepted-disposition and validation/continuing Coordination
+  clause at its finite tier, preserving delivered class repair, independent axes and
+  SAME custodians. Administrative intake is not policy implementation, GUI/native
+  acceptance or parent completion.
+
+- [ ] G1: Resolve EVERY directly retained #4098 comment/unknown-data,
+  supported-writer/migration, refusal and continuing Coordination clause at its original
+  finite source/consumer tier, preserving known-field migration policy, source-read-only
+  authority and SAME writer custodians. Administrative consolidation is not general
+  round-trip fidelity, native rollout or parent completion.
+
 
 - [ ] Resolve EVERY directly retained #3935 Plan/Validation/continuing Coordination
   clause above at its original finite source/native tier, preserving same custodians,
@@ -1785,7 +2295,61 @@ revive completed relocation or seize lifecycle work.
   explicit child `env` to the spawn call rather than mutating `os.environ`
   globally (`test_new_window_passes_no_mux_as_an_explicit_child_env_not_a_global_mutation`).
 
+### Direct retained Manager case validation
+
+- [ ] **M13-G4115:** Resolve every direct #4115 Plan, local Validation and
+  continuing Coordination clause above at its original finite scope, preserving
+  alternatives, supported auth/hook outcomes and actual custodians.
+- [ ] **M13-G4204:** Resolve every direct #4204 Plan, local Validation and
+  continuing Coordination clause above at its original finite UI/source tier,
+  preserving per-half state/action identity and actual custodians.
+- [ ] **M13-G5908:** Resolve every direct #5908 Plan, local Validation and
+  continuing Coordination clause above for both consumers, preserving distinct
+  failure/empty results, render bounds and actual custodians.
+- [ ] **M13-G5909:** Resolve every direct #5909 Plan, local Validation and
+  continuing Coordination clause above, preserving opaque uncertainty,
+  conservative protection, supported versions and actual custodians.
+- [ ] **M13-G5935:** Resolve every direct #5935 Plan, local Validation and
+  continuing Coordination clause above, including original supported in-pane
+  native qualification and separate cutover/override ownership.
+- [ ] **M13-G5936:** Resolve every direct #5936 Plan, local Validation and
+  continuing Coordination clause above, including provider loss authority,
+  confirmed current-head batch and original supported live-host qualification.
+- [ ] **M13-G5937:** Resolve every direct #5937 Plan, local Validation and
+  continuing Coordination clause above, including target/provider distinction,
+  unavailable/skew states and original supported live cross-host/mode tier.
+- [ ] **M13-G5961:** Resolve every direct #5961 Plan, local Validation and
+  continuing Coordination clause above at its finite supported consumer tier,
+  preserving selected identity, valid defaults and actual attachment owners.
+
+- [ ] **G4304:** Resolve every directly retained #4304 Plan and local Validation
+  row, preserving guard-OR-equivalent alternatives, exact reporting outcomes,
+  existing branch/hook/auth semantics and the independent installed-versus-
+  repository-integration boundary under the same custodians. Administrative
+  intake is not an adoption action, security guarantee, whole #5852/Manager
+  completion or new all-host/native qualification.
+
+Administrative intake is not implementation, native/installed acceptance,
+rollout or unrelated parent completion. Each case preserves its original
+alternatives, refusal/compatibility conditions and source/consumer/native/build
+tiers without imposing every-host or native-on-every-leaf requirements.
+
 ## Coordination
+
+The direct #4304 reporting contract continues through this SAME Active ROOT's
+Plan, local AND actual global Validation, Journal and existing open bounded-
+source process under the incumbent engine/hook/auth/setup/Manager and resource
+owners. No tracker closure releases custody; any later administrative judgment
+requires actual reviewed delivery and full current receiving readback without
+changing literal source-specific holds or inventing a generic ACK gate.
+
+The direct retained #4096/#4098 acceptance continues through this SAME existing Active
+ROOT's Plan, own and actual global Validation, and Journal under the incumbent domain,
+source, native and resource custodians. Every prior phase, alternative, hold and
+responsibility remains. Administrative supersession retires only duplicate tracking; a
+closed source is historical provenance, not a required live claim token. This intake
+grants no implementation, rollout, process action, reassignment or new blanket approval
+gate.
 
 The complete #3935 retained finite family continues through this existing Active ROOT's
 reviewed Plan, actual global Validation and Journal/open bounded-source process under
@@ -1845,7 +2409,82 @@ a different machine -- that would give future contributors a way to *notice*
 overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
+### Continuing direct observation/adoption/selected-action coordination
+
+The eight retained cases above continue through this SAME existing Active ROOT,
+its actual global Validation and existing dated Journal/open bounded-source
+claim process. Every current Participant, accepted phase, alternative and
+source/native/resource hold remains. No implementation slice is claimed or
+reassigned, and closed source/umbrella references are historical provenance,
+not live claim tokens.
+
+Preserve the #4564 restart-recovery and #7305 platform-runtime participants,
+engine/API/configuration/native/source/installation/rollout custodians, and
+the bounded #356-to-#8545 shared caller seam documented in this effort.
+Standalone discovery/local-remote-skip and earlier unpublished work remain
+outside that bounded transfer; engine APIs remain authoritative. This intake
+does not authorize another transfer or require a new blanket acknowledgement.
+
+BEFORE any administrative source supersession, obtain a NEW normal reviewed
+ACTUAL merge of the complete direct Plan, local and actual global Validation,
+continuing Coordination and dated Journal, then read back the ENTIRE CURRENT
+ROOT with all concurrent incumbent content preserved. A draft, hash, title,
+old phase merge or child link is not receiving delivery. Retain a source if
+any whole clause, alternative, actual assignment/hold or receiving authority
+cannot survive. Keep this effort Active after any individual intake.
+No product, native, credential, host, process, service or resource operation
+is authorized by tracker consolidation.
+
 ## Journal
+
+### 2026-10-28 - Direct retained adoption reporting
+
+- Added the complete #4304 reporting remainder directly to this existing
+  ROOT's Plan/local Validation, actual global Validation and continuing
+  Coordination, preserving original Request, status, participants, checked
+  credit and first unchecked gates.
+- Retained delivered branch/hook controls, guard OR equivalent hygiene,
+  installed/skipped/error/refusal reporting and ownership-aware integration
+  under the same source/resource custodians. This amendment performs no
+  adoption, native operation, implementation, claim release or source
+  disposition. Actual reviewed delivery/readback precede a separate judgment.
+
+### 2026-10-25 - Installation and Updates bounded source delivered
+
+- Merged reviewed intent #8879 (`9caead7b9065688367ffb70ffbd631cb073d2d47`),
+  then runtime #8891 (`3e9cea6b20c48c8e19e562baec20262edf85514b`), after
+  current-head independent review and green required CI. The canonical
+  [Phase 5 slice](phase-5-configuration-workbench.md#installation-and-updates---bounded-vertical-slice-8877)
+  records the actual owner interfaces, isolated validation and remaining
+  evidence tiers. No plugin roster, installation queue or scheduler was
+  duplicated, and no host rollout was performed.
+- Re-read the parent and phase Plan/Validation. Only #8877's bounded source
+  acceptance is resolved: 182 Manager / 50 engine tests passed, with the
+  existing opt-in live Workers check skipped. Native Windows, installed
+  cutover/UI, release and rollout gates remain in Phase 5 Wave 5 with their
+  existing owners. The effort stays Active; #7028 maintenance, #8545/#356 setup,
+  the broader workbench and all other unchecked Plan items retain custody.
+
+### 2026-10-24 - Installation and Updates proposal
+
+- Claimed #8877's finite Phase 5 vertical slice as `ticking-compass`. Captured
+  the operator request verbatim in the canonical phase document and proposed
+  the corresponding Configurator vision extension and Plan/Validation.
+  Review/merge precedes runtime implementation. This does not complete Phase 5
+  or authorize background maintenance, native installation or rollout.
+
+- [2026-10-24 - Direct retained acceptance from #4096, #4098](<journal/2026/10.24 backlog-intake-85-86.md>)
+
+### 2026-10-24 - Optional repository bootstrap contract proposal
+
+- Added the [concrete caller proposal](optional-repository-bootstrap.md) for
+  #8545 after the neutral installer vision refinement in #8546 and the
+  core-readiness prerequisite in #8556. It specifies proposed arguments,
+  ordered core/acquisition/setup composition and a shared repository-owned
+  check/apply declaration. #356 retains registration/setup/trust/readiness
+  implementation and its standalone adoption/discovery scope. This is
+  agent-recommended design before code, not a supported option, setup
+  implementation, adoption result or rollout.
 
 ### 2026-10-23 - Direct retained acceptance from #3935
 
@@ -1926,6 +2565,15 @@ claiming discipline alone.
   acceptance. The source worktree is being closed at the operator's request;
   its Phase 5 binding is released back to this canonical effort for a separately
   claimed continuation. No rollout, service or pool activation is claimed.
+
+- **2026-10-20** - Explicit exact-original survivor inspection merged in
+  [#7358](https://github.com/ThomasMichon/copilot-extensions/pull/7358) after
+  genuine exact-head approval, no open findings and required green checks.
+  Re-read the [focused recovery gate](machine-restart-recovery.md); it remains
+  active. Next is the owner-mediated pending-seed/acknowledgement seam for
+  safe survivor reuse, not automatic attachment or prompt injection.
+  Actual native qualification, task/profile policy and platform
+  startup/enrollment remain open; no fixture or live rollout is implied.
 
 - **2026-10-20** - Implemented explicit exact-original survivor inspection in
   the owner and Manager for the [focused recovery slice](machine-restart-recovery.md).
@@ -4601,3 +5249,21 @@ claiming discipline alone.
   clean on both trees, `python tools/check-install-contract.py` still reports
   12 plugins, and a direct bare-launch smoke with no `worktree-manager` on
   `PATH` produced the documented install trigger instead of a crash.
+
+### 2026-10-24 - Direct observation, adoption and selected-action intake
+
+- Retained complete unfinished #4115/#4204/#5908/#5909/#5935/#5936/#5937/#5961
+  acceptance directly in this existing Plan, local and actual global Validation,
+  with continuing Coordination and standard source anchors. All incumbent
+  bytes, checked states, alternatives, Participants and history remain.
+- #3004 remains the independent ambient knowledge-bootstrap outcome;
+  assigned #542 and claimed #4182/#8404/#8545 remain independently tracked.
+  The newer #8545 progress and owned caller history credit implemented source
+  and its bounded shared setup seam without claiming absent-tool, attended
+  authentication or adopter qualification, or releasing the next continuation.
+- This is documentation-only intake under #7556. A new normal reviewed actual
+  merge and full current ROOT readback must precede administrative source
+  supersession; this entry does not assert either has already occurred.
+  Existing source/native/resource custodians and every substantive acceptance
+  gate remain. The effort stays Active; no product execution, tests,
+  credentials, installation, session, service or rollout operation occurs.

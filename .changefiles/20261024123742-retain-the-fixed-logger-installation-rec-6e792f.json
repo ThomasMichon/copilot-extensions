@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the fixed Logger installation recipe through the shared canonical driver without adopting ordinary publishers.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

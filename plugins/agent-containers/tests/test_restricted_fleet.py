@@ -444,6 +444,7 @@ def test_restricted_existing_container_with_stale_policy_is_refused(monkeypatch)
     )
     stale = SimpleNamespace(
         name="sandbox-1",
+        labels={},
         security_profile="restricted",
         security_policy="old-policy",
         security_image_id="sha256:image",

@@ -359,6 +359,8 @@ def test_serve_drains_handlers_and_joins_pollers_before_releasing_lease(
     class Server:
         def __init__(self, *args, **kwargs):
             self.checks = 0
+            self._serve_thread = threading.Thread()
+            self._reap_thread = threading.Thread()
 
         def start(self):
             pass
@@ -376,7 +378,7 @@ def test_serve_drains_handlers_and_joins_pollers_before_releasing_lease(
         def active_handler_count(self):
             self.checks += 1
             lifecycle.append("drain")
-            return 1 if drain_timeout or self.checks == 1 else 0
+            return int(self.checks <= (2 if drain_timeout else 1))
 
     monkeypatch.setattr(single_instance_lease, "SingleInstance", Lease)
     monkeypatch.setattr(work_coalescing_singleton, "CoalescingServer", Server)
@@ -388,7 +390,10 @@ def test_serve_drains_handlers_and_joins_pollers_before_releasing_lease(
         monkeypatch.setattr(cli, "_WATCH_HANDLER_DRAIN_TIMEOUT_S", 0)
         with pytest.raises(TimeoutError, match="request handlers did not drain"):
             cli._cmd_serve(SimpleNamespace(poll_interval=30))
-        assert lifecycle == ["acquire", "close-admission", "stop-listener", "drain", "join"]
+        assert lifecycle == [
+            "acquire", "close-admission", "stop-listener",
+            "drain", "drain", "drain", "join", "release",
+        ]
     else:
         assert cli._cmd_serve(SimpleNamespace(poll_interval=30)) == 0
         assert lifecycle == [

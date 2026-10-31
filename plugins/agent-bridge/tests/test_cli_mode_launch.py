@@ -14,6 +14,7 @@ real HTTP server, ``agent-worktrees``, or ``copilot`` process is needed.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -78,6 +79,37 @@ def _embody_stdout(**fields: Any) -> str:
     return json.dumps(payload)
 
 
+def _owner_runner(
+    client: _FakeClient,
+    embody: Callable[..., _FakeCompletedProcess],
+) -> Callable[..., _FakeCompletedProcess]:
+    reads: list[str] = []
+
+    def run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+        if argv[1] == "record":
+            assert client.create_calls == [] and reads == []
+            assert argv == ["agent-worktrees", "record", "--worktree-id", "wt-A", "--json"]
+            reads.append("record")
+            return _FakeCompletedProcess(0, json.dumps({
+                "worktree": {"id": "wt-A", "path": "/example/workspace"},
+            }))
+        if argv[1] == "agent-policy":
+            assert client.create_calls == [] and reads == ["record"]
+            assert argv == [
+                "agent-worktrees", "agent-policy", "check", "--path", "/example/workspace",
+                "--operation", "CLI embodiment", "--json",
+            ]
+            reads.append("policy")
+            return _FakeCompletedProcess(0, json.dumps({
+                "version": 1, "allowed": True, "repository": "/example/workspace",
+                "expose_agent": None, "sources": [], "denied_by": [],
+            }))
+        assert argv[1] == "embody" and reads == ["record", "policy"]
+        return embody(argv, **kwargs)
+
+    return run
+
+
 def test_launch_reserves_then_embodies_the_worktree() -> None:
     client = _FakeClient(
         reservation={"reservation_id": "r1", "claimed_by_session_id": None},
@@ -89,7 +121,7 @@ def test_launch_reserves_then_embodies_the_worktree() -> None:
         seen_argv.append(list(argv))
         return _FakeCompletedProcess(0, stdout=_embody_stdout())
 
-    outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
+    outcome = _launch_cli_mode_session(client, "wt-A", run=_owner_runner(client, fake_run))
 
     assert client.create_calls == [("wt-A", 300.0)]
     argv = seen_argv[0]
@@ -119,7 +151,7 @@ def test_launch_forwards_seed_and_driver_and_verify_timeout() -> None:
 
     _launch_cli_mode_session(
         client, "wt-A", driver="my-agent", seed="hello there",
-        verify_timeout=45.0, run=fake_run,
+        verify_timeout=45.0, run=_owner_runner(client, fake_run),
     )
 
     argv = seen_argv[0]
@@ -135,7 +167,7 @@ def test_launch_propagates_active_reservation_conflict() -> None:
         raise AssertionError("embody must not be invoked when reserve fails")
 
     with pytest.raises(BridgeClientError) as excinfo:
-        _launch_cli_mode_session(client, "wt-A", run=fake_run)
+        _launch_cli_mode_session(client, "wt-A", run=_owner_runner(client, fake_run))
     assert excinfo.value.status == 409
 
 
@@ -145,7 +177,7 @@ def test_launch_surfaces_nonzero_embody_exit_code() -> None:
     def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
         return _FakeCompletedProcess(3, stdout="")
 
-    outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
+    outcome = _launch_cli_mode_session(client, "wt-A", run=_owner_runner(client, fake_run))
     assert outcome["exit_code"] == 3
     assert outcome["session"] is None
     assert client.release_calls == [("wt-A", "r1", True)]
@@ -158,7 +190,7 @@ def test_launch_releases_reservation_when_embody_raises() -> None:
         raise RuntimeError("boom")
 
     with pytest.raises(RuntimeError, match="boom"):
-        _launch_cli_mode_session(client, "wt-A", run=fake_run)
+        _launch_cli_mode_session(client, "wt-A", run=_owner_runner(client, fake_run))
     assert client.release_calls == [("wt-A", "r1", True)]
 
 
@@ -169,7 +201,7 @@ def test_launch_releases_reservation_when_interrupted() -> None:
         raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        _launch_cli_mode_session(client, "wt-A", run=fake_run)
+        _launch_cli_mode_session(client, "wt-A", run=_owner_runner(client, fake_run))
     assert client.release_calls == [("wt-A", "r1", True)]
 
 
@@ -179,7 +211,7 @@ def test_launch_tolerates_non_json_embody_stdout_and_releases_reservation() -> N
     def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
         return _FakeCompletedProcess(0, stdout="not json")
 
-    outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
+    outcome = _launch_cli_mode_session(client, "wt-A", run=_owner_runner(client, fake_run))
     assert outcome["embody"] == {}
     assert outcome["session"] is None
     assert client.release_calls == [("wt-A", "r1", True)]
@@ -191,7 +223,7 @@ def test_launch_releases_reservation_when_embody_produces_no_session() -> None:
     def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
         return _FakeCompletedProcess(0, stdout=_embody_stdout(session=None))
 
-    outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
+    outcome = _launch_cli_mode_session(client, "wt-A", run=_owner_runner(client, fake_run))
     assert outcome["exit_code"] == 0
     assert outcome["session"] is None
     assert client.release_calls == [("wt-A", "r1", True)]
@@ -206,7 +238,7 @@ def test_launch_failure_does_not_release_a_claimed_reservation() -> None:
     def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
         return _FakeCompletedProcess(0, stdout="not json")
 
-    outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
+    outcome = _launch_cli_mode_session(client, "wt-A", run=_owner_runner(client, fake_run))
     assert outcome["session"] is None
     assert client.release_calls == []
 
@@ -220,7 +252,7 @@ def test_launch_failure_releases_only_the_original_reservation_id() -> None:
     def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
         return _FakeCompletedProcess(3, stdout="")
 
-    _launch_cli_mode_session(client, "wt-A", run=fake_run)
+    _launch_cli_mode_session(client, "wt-A", run=_owner_runner(client, fake_run))
     assert client.release_calls == [("wt-A", "r1", True)]
 
 
@@ -234,6 +266,6 @@ def test_launch_releases_reservation_when_final_reservation_read_raises() -> Non
         return _FakeCompletedProcess(0, stdout=_embody_stdout())
 
     with pytest.raises(RuntimeError, match="bridge unavailable"):
-        _launch_cli_mode_session(client, "wt-A", run=fake_run)
+        _launch_cli_mode_session(client, "wt-A", run=_owner_runner(client, fake_run))
 
     assert client.release_calls == [("wt-A", "r1", True)]

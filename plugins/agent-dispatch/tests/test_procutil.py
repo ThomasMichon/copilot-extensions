@@ -286,7 +286,7 @@ def _make_live_peer(cell: Path, plugin: str, version: str) -> Path:
 @pytest.mark.parametrize(
     "owner", [
         "agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger",
-        "agent-pull-requests",
+        "agent-pull-requests", "agent-ssh",
     ],
 )
 @pytest.mark.timeout(180)
@@ -346,7 +346,7 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
         if owner == "agent-codespaces":
             adapter = _codespaces_adapter(monkeypatch)
             result = adapter.run(*raw_args)
-        elif owner in ("agent-containers", "agent-logger", "agent-pull-requests"):
+        elif owner in ("agent-containers", "agent-logger", "agent-pull-requests", "agent-ssh"):
             from agent_dispatch import peer_launch
 
             prefix = peer_launch.launch_prefix(
@@ -405,6 +405,71 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
         assert os.environ["COPILOT_EXTENSIONS_CONTEXT"] == str(own_root / "install.json")
         if os.name != "nt":
             assert expected.is_symlink()
+
+
+@pytest.mark.timeout(180)
+def test_ssh_snapshot_uses_real_same_cell_peer_and_refuses_foreign_receipts(tmp_path, monkeypatch):
+    source = Path(__file__).resolve().parents[2] / "agent-ssh" / "src"
+    monkeypatch.syspath_prepend(str(source))
+    from agent_ssh import _worktrees, session_snapshot
+
+    first_cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    second_cell = tmp_path / "marketplaces" / SECOND_MARKETPLACE_ID
+    own = _make_namespaced_context(first_cell, plugin_id="agent-ssh")
+    foreign = _make_namespaced_context(second_cell, plugin_id="agent-ssh")
+    sentinel = tmp_path / "executed"
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    monkeypatch.setenv("AGENT_RT_ROOT", str(own.parent))
+    monkeypatch.setenv("PEER_EXECUTION_SENTINEL", str(sentinel))
+    monkeypatch.setattr("shutil.which", lambda _: pytest.fail("ambient PATH selected"))
+    context = _worktrees.validate_context()
+    assert _worktrees.state_root(tmp_path, context) == (None, "unavailable")
+    python = _make_live_peer(first_cell, "agent-worktrees", "1.0.0-dev1")
+    slot = python.parent.parent
+    site = (
+        slot / "Lib" / "site-packages" if os.name == "nt"
+        else slot / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
+    (site / "agent_worktrees" / "__main__.py").write_text(
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "assert sys.argv[1:] == ['state-root', '--json']\n"
+        f"assert Path.cwd() == Path({str(tmp_path)!r})\n"
+        "assert sys.flags.isolated == sys.flags.utf8_mode == 1\n"
+        f"assert os.environ['COPILOT_EXTENSIONS_CONTEXT'] == {str(slot.parent.parent / 'install.json')!r}\n"
+        "assert 'PYTHONPATH' not in os.environ\n"
+        "assert 'AGENT_RT_PY' not in os.environ\n"
+        "Path(os.environ['PEER_EXECUTION_SENTINEL']).write_text('executed')\n"
+        f"print(json.dumps({{'requires_external': True, 'bound': True, 'state_root': {str(tmp_path)!r}}}))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(second_cell))
+    monkeypatch.setenv("AGENT_RT_PY", str(tmp_path / "foreign-python"))
+    assert _worktrees.state_root(tmp_path, context) == (tmp_path, "bound")
+    assert sentinel.read_text() == "executed"
+    sentinel.unlink()
+
+    peer_receipt = first_cell / "plugins" / "agent-worktrees" / "install.json"
+    original = peer_receipt.read_bytes()
+    _update_receipt(peer_receipt, lambda value: value.update(marketplaceId=SECOND_MARKETPLACE_ID))
+    with pytest.raises(_worktrees.ContextRefused):
+        _worktrees.state_root(tmp_path, context)
+    assert not sentinel.exists()
+    peer_receipt.write_bytes(original)
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(foreign))
+    value = session_snapshot.capture(path=tmp_path / "machines.yaml")
+    assert value["topology"]["status"] == "refused"
+    assert value["profiles"]["status"] == "not-inspected"
+    assert not sentinel.exists()
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    activation = own.with_name("installation-activation.json")
+    activation.write_text("{", encoding="utf-8")
+    with pytest.raises(_worktrees.ContextRefused):
+        _worktrees.validate_context()
+    assert not sentinel.exists()
 
 
 def _codespaces_adapter(monkeypatch):

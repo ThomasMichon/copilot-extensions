@@ -5,7 +5,7 @@
   Copilot execution.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-10-26
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -131,6 +131,38 @@ case where some part of the provider survives to notice its own child died.
 
 ## Features
 
+### installation-independent-running-sessions
+
+A directly hosted, muxed session remains interactive with the same execution
+identity when its launcher and coordination installations are updated,
+uninstalled or replaced around it. Its essential process lifetime and terminal
+attachment do not depend on keeping an old runtime or mutable installed helper
+alive. Initial launch and final exit reach the compatible implementation
+selected at that boundary within the owning installation, rather than a stale
+implementation captured before the session began.
+
+An affirmative end observation belongs to one execution incarnation; it never
+retires a replacement or conflates an observed process exit with an unobserved
+host loss. If no compatible lifecycle implementation exists at exit, the
+session can close without provisioning or disturbing unrelated installations,
+and the fabric retains honest uncertainty about undelivered notification.
+Installation independence preserves host-owned containment and retirement
+authority rather than escaping them.
+
+The guarantee includes complete intentional removal of the noncritical supporting suite,
+its command surfaces and plugin payloads, not only a rolling replacement with
+some old installation retained. The Copilot process, terminal host and durable
+session/work records stay outside that removal scope. A maintenance banner and
+native agent standby remain usable while support services are absent; the
+session is not retired merely because its coordination tools disappear. See
+[Disposable Supporting Runtimes](../plugin-services/disposable-runtimes/README.md).
+
+Critical machine-to-machine connectivity is also outside that removal scope.
+Its real SSH host/client, proxy, tunnel or Gateway dependencies survive so an
+operator's existing management connection and reconnection path remain usable.
+This does not protect disposable agent credential relays or all functionality
+of a plugin that happens to provision the transport.
+
 ### interchangeable-session-hosts
 
 Copilot CLI, multiplexer-backed CLI, ACP/session-host, SDK, application, and
@@ -182,6 +214,19 @@ identity*), not a new durable field the agency ledger stores.
 A human control plane can present launch, resume, join, and handoff actions
 across available providers while preserving the user's preferred Copilot
 experience.
+
+### idempotent-worktree-session-restoration
+
+A worktree has one straightforward terminal entry point: reattach its existing
+execution when it is live, or restore its associated conversation when it is
+stopped. Ensuring that execution exists is independently available without
+attaching the caller's terminal, so automation and human presentation share the
+same admission and resume semantics rather than creating competing sessions.
+
+An intentional migration can preserve and restore an explicitly selected set of
+active worktrees and their associated conversations. Restoring that set does
+not start unrelated dormant worktrees, silently substitute fresh conversations,
+or treat replacement processes as evidence that the original processes survived.
 
 ### control-independent-terminal-attachment
 

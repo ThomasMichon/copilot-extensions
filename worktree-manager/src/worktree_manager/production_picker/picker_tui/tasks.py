@@ -31,15 +31,21 @@ import os
 import signal
 import subprocess
 import threading
-import time
 from collections.abc import Mapping, Sequence
 
-from agent_procutil import no_window_flags
+from agent_procutil import no_window_flags, spawn_sync_in_kill_on_close_job
+from agent_procutil.owned_process import run_caller_owned
 
-from ...engine_client import _engine_environment
-from .command_transport import command_result, resolve_command as _resolve_command
+from ... import picker_review
+from .command_transport import (
+    _CHILD_ENV_UNSET as _CHILD_ENV_UNSET,
+    child_process_env as _child_process_env,
+    command_result,
+    resolve_command as _resolve_command,
+)
 from .configuration_context import run_list
-from .pivots import RegisteredPivot, format_template, parse_list_payload
+from .pivots import RegisteredPivot, format_template, parse_list_payload as parse_list_payload
+from .pivot_requests import PivotRequestsMixin
 
 #: Hard cap on how long a pivot's ``list``/action command may run.
 LIST_TIMEOUT = 20.0
@@ -64,31 +70,6 @@ STRICT_OPTIONS_COMMAND_TIMEOUT = 20.0
 SUBSCRIBE_MAX_RECONNECT_ATTEMPTS = 5
 SUBSCRIBE_RECONNECT_BACKOFF_SECS = 2.0
 
-#: Plugin-identity env vars that must never leak from the picker's own process
-#: into a *different* plugin's CLI. Mirrors ``reconcile._RUNTIME_ENV_UNSET``
-#: (the installer's own "clean child environment" list) -- kept as an
-#: independent, dependency-light copy here so this hot-path module doesn't pull
-#: in ``reconcile``'s (and its ``yaml``) import weight just for one tuple.
-_CHILD_ENV_UNSET = (
-    "COPILOT_EXTENSIONS_CONTEXT",
-    "COPILOT_PLUGIN_INSTALL_STAGED",
-    "COPILOT_PLUGIN_ROOT",
-    "COPILOT_PLUGIN_STAGED_FROM",
-    "PYTHONPATH",
-)
-
-
-def _child_process_env() -> dict[str, str]:
-    """A copy of the current environment with this plugin's own identity vars
-    removed, safe to hand to *any other* plugin's CLI. See the module
-    docstring for why this matters -- without it, a pivot action can fail with
-    a spurious cross-plugin "payload context mismatch"."""
-    env = _engine_environment()
-    for key in _CHILD_ENV_UNSET:
-        env.pop(key, None)
-    return env
-
-
 def resolve_dynamic_options(argv: Sequence[str], *, strict: bool = False) -> list[str]:
     """Run a ``create_action`` field's ``options_command`` and return its
     JSON array of strings, or (by default) ``[]`` on failure (not found, non-zero exit,
@@ -103,6 +84,10 @@ def resolve_dynamic_options(argv: Sequence[str], *, strict: bool = False) -> lis
     if not argv:
         if strict:
             raise ValueError("empty options command")
+        return []
+    if picker_review.active():
+        if strict:
+            raise ValueError(picker_review.MESSAGE)
         return []
     try:
         argv = _resolve_command(argv)
@@ -170,6 +155,9 @@ def _kill_proc_tree(proc: subprocess.Popen) -> None:
     """Best-effort terminate a streaming child (and its process group on posix,
     so a ``list --stream`` that shelled out to ``gh`` dies with it). Mirrors
     :func:`picker_tui.data_ssh._kill_proc_tree`; never raises."""
+    job = getattr(proc, "_picker_job", None)
+    if job is not None:
+        job.close()
     if proc.poll() is not None:
         return
     try:
@@ -286,7 +274,7 @@ def _stream_entry(obj: Mapping) -> dict:
 
 
 
-class RegisteredPivotRuntime:
+class RegisteredPivotRuntime(PivotRequestsMixin):
     """Background loader + action runner for one registered pivot.
 
     Thread-safe: the render loop calls :meth:`ensure` / :meth:`get` on every
@@ -326,20 +314,14 @@ class RegisteredPivotRuntime:
         # since the last successful ``ready`` frame, reset on success.
         self._subscribe_live: dict[object, bool] = {}
         self._subscribe_retries: dict[object, int] = {}
+        self._init_requests()
 
     # -- listing -------------------------------------------------------------
 
     def ensure(self, machine: object) -> None:
         """Kick off a background ``list`` fetch for ``machine`` if not already
         cached or in flight. Cheap + idempotent -- safe to call every frame."""
-        with self._lock:
-            if machine in self._cache or machine in self._inflight:
-                return
-            self._inflight.add(machine)
-            gen = self._gen
-        threading.Thread(
-            target=self._run_list, args=(machine, gen), daemon=True
-        ).start()
+        self._schedule_list(machine)
 
     def get(self, machine: object) -> tuple[str, list, str]:
         """The cached ``(state, rows, error)`` for ``machine`` (``idle`` before
@@ -357,22 +339,6 @@ class RegisteredPivotRuntime:
         a bare array (no summary) or nothing has loaded yet."""
         with self._lock:
             return dict(self._summaries.get(machine, {}))
-
-    def invalidate(self, machine: object = None) -> None:
-        """Drop cached results so the next :meth:`ensure` refetches. ``None``
-        clears every machine (used after an action mutates the queue).
-
-        Bumps :attr:`_gen` so a one-shot fetch already in flight when this runs
-        discards its stale result instead of racing it back into the cache (see
-        :meth:`_run_list`)."""
-        with self._lock:
-            self._gen += 1
-            if machine is None:
-                self._cache.clear()
-                self._summaries.clear()
-            else:
-                self._cache.pop(machine, None)
-                self._summaries.pop(machine, None)
 
     def repoll(self, machine: object) -> None:
         """Force a background, swap-in-place refetch for ``machine``.
@@ -406,31 +372,27 @@ class RegisteredPivotRuntime:
         # 0) clears this no-op.
         if self.pivot.subscribe and self._subscribe_live.get(machine, True):
             return
-        with self._lock:
-            if machine in self._inflight:
-                return
-            self._inflight.add(machine)
-            gen = self._gen
-        threading.Thread(
-            target=self._run_list, args=(machine, gen), daemon=True
-        ).start()
+        self._schedule_list(machine, force=True)
 
     def close(self) -> None:
         """Tear down every tracked streaming child (picker exit). Idempotent --
         a held ``subscribe`` stream reader unblocks when its pipe closes, so no
         ``list --stream`` process is orphaned after the picker quits."""
         self._closed.set()
+        self._cancel_pending_lists()
         with self._procs_lock:
             procs = list(self._procs)
             self._procs.clear()
         for proc in procs:
             _kill_proc_tree(proc)
+        self._join_scope_retirements()
 
     def _spawn_stream(self, argv: Sequence[str]) -> subprocess.Popen:
         """Spawn a tracked, killable streaming child (line-buffered stdout so
         rows surface as the provider flushes them). Registered in ``self._procs``
         so :meth:`close` tears it down. Mirrors
         :meth:`picker_tui.data_ssh.RemoteLoader._spawn_stream`."""
+        picker_review.require_writable()
         if self._closed.is_set():
             raise RuntimeError("closed")
         kwargs: dict = dict(
@@ -446,12 +408,20 @@ class RegisteredPivotRuntime:
             kwargs["creationflags"] = (
                 getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | _CREATE_NO_WINDOW  # headless-guard: allow: own process group for Ctrl-C signal delivery (+ no-window)
             )
-        proc = subprocess.Popen(list(argv), **kwargs)
+        proc, job = spawn_sync_in_kill_on_close_job(
+            list(argv), require_job=True, allow_breakaway=False, **kwargs,
+        )
+        proc._picker_job = job
+        proc._picker_scope = getattr(self._request_context, "machine", None)
         with self._procs_lock:
             self._procs.append(proc)
         # Close the spawn/close race: if close() fired between the guard and the
         # Popen, it never saw this child -- kill it now.
-        if self._closed.is_set():
+        with self._lock:
+            current = self._generation_matches(
+                proc._picker_scope, getattr(self._request_context, "generation", None),
+            )
+        if self._closed.is_set() or not current:
             _kill_proc_tree(proc)
         return proc
 
@@ -459,6 +429,9 @@ class RegisteredPivotRuntime:
         with self._procs_lock:
             if proc in self._procs:
                 self._procs.remove(proc)
+        job = getattr(proc, "_picker_job", None)
+        if job is not None:
+            job.close()
 
     def _run_list(self, machine: object, gen: object = None) -> None:
         run_list(self, machine, gen)
@@ -531,16 +504,34 @@ class RegisteredPivotRuntime:
         # No overall deadline for a held ``subscribe`` stream (it runs until the
         # picker exits); a one-shot stream is watchdogged so a stalled producer
         # can't wedge the loader thread.
-        timer: threading.Timer | None = None
-        if not self.pivot.subscribe:
-            timer = threading.Timer(STREAM_TIMEOUT, lambda: _kill_proc_tree(proc))
-            timer.daemon = True
-            timer.start()
+        timed_out = threading.Event()
+        first_read_lock = threading.Lock()
+        initial_read_complete = False
+        def expired():
+            with first_read_lock:
+                if self.pivot.subscribe and initial_read_complete:
+                    return
+                timed_out.set()
+            _kill_proc_tree(proc)
+        timer = threading.Timer(STREAM_TIMEOUT, expired)
+        timer.daemon = True
+        timer.start()
 
         def publish() -> None:
-            with self._lock:
-                self._cache[machine] = ("ready", [by_id[i] for i in order], "")
-                self._summaries[machine] = dict(summary)
+            nonlocal initial_read_complete
+            with first_read_lock:
+                if timed_out.is_set():
+                    return
+                with self._lock:
+                    generation = getattr(self._request_context, "generation", None)
+                    if not self._generation_matches(machine, generation):
+                        return
+                    self._cache[machine] = ("ready", [by_id[i] for i in order], "")
+                    self._summaries[machine] = dict(summary)
+                initial_read_complete = True
+                if self.pivot.subscribe:
+                    timer.cancel()
+            self._release_startup(machine)
 
         try:
             for raw in proc.stdout:  # type: ignore[union-attr]
@@ -621,6 +612,13 @@ class RegisteredPivotRuntime:
                     stderr = ""
             self._untrack(proc)
 
+        if timed_out.is_set():
+            self._subscribe_live[machine] = False
+            self._finish(machine, (
+                "error", [by_id[i] for i in order],
+                f"{self.pivot.label}: no completed initial read within {STREAM_TIMEOUT:g}s; press r to retry",
+            ), summary)
+            return
         if err_frame:
             self._handle_subscribe_drop(
                 machine, ctx, ("error", [], err_frame[:200]), {}, had_rows=ready
@@ -670,78 +668,41 @@ class RegisteredPivotRuntime:
         A non-``subscribe`` pivot (one-shot ``stream``) just finishes
         normally -- EOF ending its lifecycle is the designed, not an
         exceptional, outcome."""
+        generation = getattr(self._request_context, "generation", None)
+        with self._lock:
+            if not self._generation_matches(machine, generation):
+                return
         self._finish(machine, result, summary)
         if not self.pivot.subscribe:
             return
-        if had_rows:
-            # Having delivered at least one real row this session resets the
-            # budget -- only CONSECUTIVE drops with zero rows delivered (a
-            # bare/early ``done``, an immediate crash, a repeated ``error``
-            # with nothing ever produced) count toward exhaustion.
-            self._subscribe_retries[machine] = 0
-        attempts = self._subscribe_retries.get(machine, 0)
-        if self._closed.is_set() or attempts >= SUBSCRIBE_MAX_RECONNECT_ATTEMPTS:
-            # Exhausted (or shutting down): stop pretending this channel is
-            # live so repoll() resumes ordinary one-shot polling instead of
-            # trusting a dead subscribe forever.
-            self._subscribe_live[machine] = False
-            return
-        self._subscribe_retries[machine] = attempts + 1
-        self._subscribe_live[machine] = False  # not live during the backoff
-        # Claim in-flight NOW (not inside the backoff thread) so a concurrent
-        # ensure()/repoll() can't race a duplicate fetch while we wait.
         with self._lock:
+            if not self._generation_matches(machine, generation) or machine in self._resetting_scopes:
+                return
+            if had_rows:
+                self._subscribe_retries[machine] = 0
+            attempts = self._subscribe_retries.get(machine, 0)
+            self._subscribe_live[machine] = False
+            if self._closed.is_set() or attempts >= SUBSCRIBE_MAX_RECONNECT_ATTEMPTS:
+                return
+            self._subscribe_retries[machine] = attempts + 1
             self._inflight.add(machine)
+            self._reconnecting_scopes.add(machine)
 
         def _reconnect() -> None:
-            time.sleep(SUBSCRIBE_RECONNECT_BACKOFF_SECS)
-            if self._closed.is_set():
-                with self._lock:
-                    self._inflight.discard(machine)
+            if self._closed.wait(SUBSCRIBE_RECONNECT_BACKOFF_SECS):
                 return
-            self._run_list_stream(machine, ctx)
+            with self._lock:
+                if not self._generation_matches(machine, generation):
+                    return
+                self._inflight.discard(machine)
+                self._reconnecting_scopes.discard(machine)
+            self._schedule_list(machine, force=True)
 
         threading.Thread(target=_reconnect, daemon=True).start()
 
-    def _finish(
-        self,
-        machine: object,
-        cache: tuple[str, list, str],
-        summary: dict,
-    ) -> None:
-        """Atomically write a terminal ``(state, rows, error)`` + summary and drop
-        the in-flight marker (the streaming runner's single write-back point)."""
-        with self._lock:
-            self._cache[machine] = cache
-            self._summaries[machine] = summary
-            self._inflight.discard(machine)
-
-
     def _exec_list(self, ctx: Mapping[str, object]) -> tuple[str, list, str, dict]:
-        argv = format_template(self.pivot.list_cmd, ctx)
-        if not argv:
-            return ("error", [], "empty list command", {})
-        try:
-            argv = _resolve_command(argv)
-            proc = subprocess.run(
-                argv, capture_output=True, text=True, timeout=LIST_TIMEOUT,
-                check=False, env=_child_process_env(), creationflags=no_window_flags(),
-            )
-        except FileNotFoundError:
-            return ("error", [], f"{argv[0]} not found on PATH", {})
-        except (OSError, subprocess.SubprocessError) as exc:
-            return ("error", [], str(exc)[:200], {})
-        if proc.returncode != 0:
-            detail = (proc.stderr or "").strip().splitlines()
-            msg = detail[-1] if detail else f"exit {proc.returncode}"
-            return ("error", [], msg[:200], {})
-        try:
-            data = json.loads(proc.stdout or "[]")
-        except ValueError:
-            return ("error", [], "list command did not print JSON", {})
-        # D1: accept a bare array (back-compat) OR a {entries, summary} object.
-        rows, summary = parse_list_payload(data)
-        return ("ready", rows, "", summary)
+        from .pivot_list_command import exec_list
+        return exec_list(self, ctx)
 
     # -- actions -------------------------------------------------------------
 
@@ -793,6 +754,8 @@ class RegisteredPivotRuntime:
         self, argv: Sequence[str], *, timeout: float, preserve_output: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str] | None, str]:
         argv = list(argv)
+        if picker_review.active():
+            return None, picker_review.MESSAGE
         if not argv:
             return None, "empty action command"
         try:
@@ -839,6 +802,8 @@ class RegisteredPivotRuntime:
         :meth:`close` also tears it down on picker exit. Falls back to treating a
         non-envelope exit as a plain sync result so a mis-declared ``progress``
         action still completes."""
+        if picker_review.active():
+            return False, picker_review.MESSAGE
         argv = format_template(action.run, ctx)
         if not argv:
             return (False, "empty action command")
@@ -944,6 +909,8 @@ def run_config_section(
     its status line. Mirrors :func:`run_worktree_action` -- a config section is
     the same run-on-Enter shape, but rides the ⚙ Configuration menu rather than
     a worktree row, and is global (not per-worktree) in scope."""
+    if picker_review.active():
+        return False, picker_review.MESSAGE
     if fields is None:
         argv = format_template(action.run, ctx)
     else:
@@ -955,13 +922,23 @@ def run_config_section(
         return (False, "empty config command")
     try:
         argv = _resolve_command(argv)
-        proc = subprocess.run(
-            argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT,
-            check=False, env=_child_process_env(), creationflags=no_window_flags(),
-        )
+        if fields is None:
+            proc = run_caller_owned(
+                argv, timeout=ACTION_TIMEOUT, env=_child_process_env(),
+                max_stdout_bytes=8 * 1024 * 1024, max_stderr_bytes=256 * 1024,
+            )
+        else:
+            proc = subprocess.run(
+                argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT,
+                check=False, env=_child_process_env(), creationflags=no_window_flags(),
+            )
     except FileNotFoundError:
         return (False, f"{argv[0]} not found on PATH")
-    except (OSError, subprocess.SubprocessError) as exc:
+    except subprocess.TimeoutExpired as exc:
+        if fields is None:
+            return False, f"{getattr(action, 'label', 'Configuration')} read timed out after {exc.timeout:g}s."
+        return False, str(exc)[:200]
+    except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
         return (False, str(exc)[:200])
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip().splitlines()
@@ -975,6 +952,8 @@ def run_worktree_action(action, ctx: Mapping[str, object]) -> tuple[bool, str]:
     ``(ok, message)`` and never raises, so the picker can surface the outcome in
     its status line. Mirrors :meth:`RegisteredPivotRuntime.run_action` but is
     stand-alone: worktree actions are not bound to a pivot's runtime."""
+    if picker_review.active():
+        return False, picker_review.MESSAGE
     argv = format_template(action.run, ctx)
     if not argv:
         return (False, "empty action command")

@@ -166,6 +166,20 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$instanceHelper = Join-Path $PSScriptRoot 'daemon_instances.ps1'
+if (-not (Test-Path -LiteralPath $instanceHelper -PathType Leaf)) {
+    $instanceHelper = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\..\..\libs\agent-procutil\src\agent_procutil\daemon_instances.ps1'))
+}
+if (-not (Test-Path -LiteralPath $instanceHelper -PathType Leaf) -or
+    ((Get-Item -LiteralPath $instanceHelper).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw 'The common daemon instance binding is unavailable.'
+}
+. $instanceHelper
+$launcherInstance = Enter-DaemonInstance -Service 'agent-ssh-dtssh-watchdog' `
+    -RuntimeRoot $PSScriptRoot -Source $PSCommandPath -Purpose production
+$script:HostInstances = @{}
+
+try {
 # ── Paths, logging ───────────────────────────────────────────────────────
 
 $dtExe = if (Get-Command dtssh -ErrorAction SilentlyContinue) {
@@ -623,8 +637,24 @@ function Start-HostProc {
     # allocated -- unlike -WindowStyle Hidden, which the DefTerm handoff ignores and
     # can flash (windows-launch-hardening #786). It keeps the REAL child handle (pid
     # tracking + kill in the watchdog) and the native stdio->file redirects.
+    foreach ($key in @($script:HostInstances.Keys)) {
+        $owned = $script:HostInstances[$key]
+        if ($owned.Process.HasExited) {
+            Exit-DaemonInstance -Receipt $owned.Receipt -Process $owned.Process
+            $script:HostInstances.Remove($key)
+        }
+    }
+    $childInstance = New-DaemonInstanceReservation -Service 'agent-ssh-dtssh-host' `
+        -RuntimeRoot $PSScriptRoot -Source $PSCommandPath
     $proc = Start-Process -FilePath $dtExe -ArgumentList $dtArgs -NoNewWindow -PassThru `
         -RedirectStandardOutput $childOut -RedirectStandardError $childErr -ErrorAction Stop
+    try {
+        $null = Set-DaemonInstanceProcess $childInstance $proc -Admitted
+    } catch {
+        try { $proc.Kill(); $null = $proc.WaitForExit(5000) } catch { }
+        throw
+    }
+    $script:HostInstances[$proc.Id] = @{ Receipt=$childInstance; Process=$proc }
     Write-Log "dtssh host started hidden (pid $($proc.Id))"
     return $proc
 }
@@ -857,4 +887,12 @@ try {
     }
 } finally {
     if ($mutex) { try { $mutex.ReleaseMutex() } catch { }; $mutex.Dispose() }
+}
+} finally {
+    foreach ($owned in $script:HostInstances.Values) {
+        if ($owned.Process.HasExited) {
+            Exit-DaemonInstance -Receipt $owned.Receipt -Process $owned.Process
+        }
+    }
+    Exit-DaemonInstance -Receipt $launcherInstance
 }

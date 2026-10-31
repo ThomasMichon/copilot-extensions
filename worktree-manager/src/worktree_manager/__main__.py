@@ -14,15 +14,30 @@ Everything here is **programmatic and non-agentic**: no AI agent is in the loop.
 
 from __future__ import annotations
 
+if __name__ == "__main__":
+    import sys as _entry_sys
+
+    if _entry_sys.argv[1:2] == ["--resident-picker"]:
+        from .resident_picker import main as _resident_picker_main
+
+        raise SystemExit(_resident_picker_main(_entry_sys.argv[2:]))
+    if _entry_sys.argv[1:2] == ["--resident-result"]:
+        from .resident_picker import finish as _resident_picker_finish
+
+        raise SystemExit(_resident_picker_finish(_entry_sys.argv[2:]))
+
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .runtime_source import ResolvedSource
 
 from . import __version__
 from .catalog import load_catalog
-from .core_install import core_status, install_command, install_core
 from .engine_client import (
     EngineError,
     accept_inherited_engine_command,
@@ -35,10 +50,6 @@ from .harness_state import (
     user_enabled_plugins,
 )
 from .model import Model, build_model, coverage, effective_prereqs
-from .prereqs import detect_baseline, missing
-from .provision import apply as provision_apply
-from .provision import plan as provision_plan
-from .provision import restart_needed
 from .relocated_launch import _relocated_launch_script, _run_relocated_mux_launch
 from .self_install import self_install
 from .self_install import status as self_status
@@ -799,8 +810,24 @@ def _cmd_companion(rest: list[str]) -> int:
     return run_companion()
 
 
+def _cmd_companion_pane(rest: list[str]) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="worktree-manager companion-pane")
+    parser.add_argument("--action", required=True, choices=("show", "return"))
+    parser.add_argument("--cwd")
+    options = parser.parse_args(rest)
+    from .companion_pane import run
+
+    return run(action=options.action, cwd=options.cwd)
+
+
 def _cmd_picker(rest: list[str]) -> int:
     """Run, mock, or capture the Manager-owned production Picker."""
+    if rest and rest[0] == "review":
+        from .picker_review_cli import main as review
+
+        return review(rest[1:])
     args = list(rest)
     action = "run"
     if args and args[0] in {"mock", "screenshot"}:
@@ -964,7 +991,7 @@ def _remote_machine_env(decision: dict) -> tuple[str | None, str | None]:
     return decision.get("machine") or None, decision.get("env") or None
 
 
-def _run_production_picker(project: str) -> int:
+def _run_production_picker(project: str, *, initial_decision=None) -> int:
     """Run the transplanted production UX and act on its launch decision.
 
     ``"refresh"``/``"manager-update"`` apply an update and loop back to
@@ -983,17 +1010,21 @@ def _run_production_picker(project: str) -> int:
         # a launch dispatch below: a dispatched decision (resume/restore/...)
         # spawns the actual workload (shell, Copilot session) as a CHILD of
         # this process, which would otherwise silently inherit the boost.
-        raise_current_process_priority()
-        try:
-            decision = runner.run(project)
-        except runner.ProjectSelectionError as error:
-            print(f"error: {error}")
-            return 2
-        except Exception as error:
-            print(f"error: production Picker failed: {error}")
-            return 1
-        finally:
-            restore_normal_process_priority()
+        if initial_decision is not None:
+            decision = initial_decision
+            initial_decision = None
+        else:
+            raise_current_process_priority()
+            try:
+                decision = runner.run(project)
+            except runner.ProjectSelectionError as error:
+                print(f"error: {error}")
+                return 2
+            except Exception as error:
+                print(f"error: production Picker failed: {error}")
+                return 1
+            finally:
+                restore_normal_process_priority()
         if not decision:
             return 0
         if not project:
@@ -1009,17 +1040,21 @@ def _run_production_picker(project: str) -> int:
             if not decision.get("is_local", True) and opts.get("ahp"):
                 print("error: AHP is supported only for same-machine launches.")
                 return 1
+            if opts.get("bare_resume"):
+                print("error: Bare resume is retired from Manager; use Resume in Actions.")
+                return 1
             machine, environment = _remote_machine_env(decision)
             return _run_launch(picker_app.LaunchRequest(
                 project=str(decision.get("project") or project or ""),
                 worktree_id=str(worktree_id),
-                mode="bare-resume" if opts.get("bare_resume") else "resume",
+                mode="resume",
                 title=str(decision.get("title") or "") or None,
                 no_mux=bool(opts.get("no_mux")),
                 ahp=bool(opts.get("ahp")),
                 machine=machine,
                 environment=environment,
                 seed_prompt=str(opts.get("seed_prompt") or "") or None,
+                attempt_id=decision.get("attempt_id"),
             ))
         if action == "restore":
             worktree_id = decision.get("worktree_id")
@@ -1027,12 +1062,13 @@ def _run_production_picker(project: str) -> int:
                 print("error: Picker returned a restore decision with no worktree id.")
                 return 1
             return _restore_production_picker_session(
-                project,
+                str(decision.get("project") or project),
                 str(worktree_id),
                 title=str(decision.get("title") or "") or None,
                 is_local=bool(decision.get("is_local", True)),
                 machine=str(decision.get("machine") or "") or None,
                 environment=str(decision.get("env") or "") or None,
+                attempt_id=decision.get("attempt_id"),
             )
         if action == "dispose-hosted-session":
             worktree_id = decision.get("worktree_id")
@@ -1077,7 +1113,7 @@ def _run_production_picker(project: str) -> int:
                 return 1
             machine, environment = _remote_machine_env(decision)
             return _run_launch(picker_app.LaunchRequest(
-                project=project,
+                project=str(decision.get("project") or project),
                 worktree_id=None,
                 mode="base" if opts.get("anchor") else "new",
                 no_mux=bool(opts.get("no_mux")),
@@ -1085,6 +1121,7 @@ def _run_production_picker(project: str) -> int:
                 machine=machine,
                 environment=environment,
                 seed_prompt=str(opts.get("seed_prompt") or "") or None,
+                attempt_id=decision.get("attempt_id"),
             ))
         if action in ("refresh", "manager-update"):
             # Apply the update, then loop back to reopen the Picker rather
@@ -1092,8 +1129,11 @@ def _run_production_picker(project: str) -> int:
             _cmd_update(["--project", project])
             continue
         if action == "open-venue":
-            from . import launcher
-            return launcher.open_venue(decision.get("provider", ""), decision.get("venue", ""))
+            from . import launch_observations, launcher
+            attempt_id = decision.get("attempt_id")
+            return launch_observations.run_attempt(attempt_id, lambda: launch_observations.launch(
+                attempt_id, lambda: launcher.open_venue(decision.get("provider", ""), decision.get("venue", "")),
+            ))
         print(f"error: Picker returned an unsupported decision: {action!r}")
         return 1
 
@@ -1106,11 +1146,14 @@ def _restore_production_picker_session(
     is_local: bool,
     machine: str | None,
     environment: str | None,
+    attempt_id: str | None = None,
 ) -> int:
     """Run platform remux prep, then immediately launch/attach through mux."""
-    from . import engine_client, picker_app
+    from . import engine_client, launch_observations, picker_app
+    from .launch_attempts import LaunchAttemptError
 
     try:
+        launch_observations.observe(attempt_id, "restore-requested")
         if is_local:
             # Resolve the interactive launch boundary before terminating the
             # unreachable owner. A missing binstub must fail without mutation.
@@ -1134,7 +1177,7 @@ def _restore_production_picker_session(
                     "error: Picker returned a remote restore decision without "
                     "a machine and environment."
                 )
-                return 1
+                return launch_observations.refuse(attempt_id)
             argv = data_ssh.remote_op_argv(
                 machine,
                 environment,
@@ -1143,25 +1186,38 @@ def _restore_production_picker_session(
             )
             if argv is None:
                 print("error: the selected source does not support session restore.")
-                return 1
+                return launch_observations.refuse(attempt_id)
             result = maintenance._ssh_json(argv)
+    except LaunchAttemptError:
+        print("error: could not retain restore observation; no further restore step was authorized.")
+        return 1
     except (engine_client.EngineError, OSError, subprocess.SubprocessError) as error:
         print(f"error: could not prepare session restore: {error}")
+        launch_observations.observe(attempt_id, "unknown", required=False, code="engine-error")
         return 1
+    except (Exception, KeyboardInterrupt) as error:
+        launch_observations.observe(
+            attempt_id, "unknown", required=False,
+            code="interrupted" if isinstance(error, KeyboardInterrupt) else "engine-error",
+        )
+        raise
 
     if not result.get("ok"):
         print(
             "error: could not prepare session restore: "
             f"{result.get('reason') or 'unknown engine error'}"
         )
+        launch_observations.observe(attempt_id, "unknown", required=False, code="engine-error")
         return 1
     if result.get("action") != "reclaimed" and not result.get("verified"):
         print(
             "error: could not prepare session restore: the live process was "
             "not confirmed inside the mux pane"
         )
+        launch_observations.observe(attempt_id, "unknown", required=False, code="engine-error")
         return 1
 
+    launch_observations.observe(attempt_id, "restore-returned", required=False)
     request = picker_app.LaunchRequest(
         project=project,
         worktree_id=worktree_id,
@@ -1170,44 +1226,15 @@ def _restore_production_picker_session(
         no_mux=False,
         machine=None if is_local else machine,
         environment=None if is_local else environment,
+        attempt_id=attempt_id,
     )
     return _run_launch(request)
 
 
 def _resolve_for(req, *, defer_projections: bool = False) -> "tuple[object | None, int]":
-    """Resolve a picker :class:`LaunchRequest` to a launch plan (shared).
-
-    Returns ``(plan, 0)`` on success, else ``(None, exit_code)`` after printing
-    the engine error. The whole thing goes through the process boundary --
-    ``engine_client.resolve_launch_plan`` shells to ``agent-worktrees resolve
-    --json`` and never imports the plugin.
-    """
-    from .engine_client import (
-        EngineError,
-        EngineFeatureUnavailable,
-        resolve_launch_plan,
-    )
-    try:
-        from .seed_launch import require_supported_seed
-
-        require_supported_seed(req)
-        plan = resolve_launch_plan(
-            req.project, worktree_id=req.worktree_id,
-            new=(req.mode == "new"), bare_resume=(req.mode == "bare-resume"),
-            base=(req.mode == "base"),
-            target_machine=getattr(req, "machine", None),
-            target_environment=getattr(req, "environment", None),
-            target_no_mux=getattr(req, "no_mux", False),
-            seed=getattr(req, "seed_prompt", None),
-            **({"defer_projections": True} if defer_projections else {}),
-        )
-    except EngineFeatureUnavailable as e:
-        print(f"error: could not resolve a launch plan: {e}")
-        return None, 1
-    except EngineError as e:
-        print(f"error: could not resolve a launch plan: {e}")
-        return None, 1
-    return plan, 0
+    """Resolve through the engine process boundary and retain Manager evidence."""
+    from .launch_observations import resolve_for
+    return resolve_for(req, defer_projections=defer_projections)
 
 
 def _is_windows() -> bool:
@@ -1216,8 +1243,19 @@ def _is_windows() -> bool:
 
 
 def _run_launch(req) -> int:
+    from .launch_observations import run_attempt
+    return run_attempt(getattr(req, "attempt_id", None), lambda: _execute_launch(req))
+
+
+def _execute_launch(req) -> int:
     """Resolve + execute the operator's launch/resume (real engine)."""
-    from . import engine_client, launcher
+    from . import engine_client, launch_observations, launcher
+
+    attempt_id = getattr(req, "attempt_id", None)
+
+    if getattr(req, "mode", "resume") == "bare-resume":
+        print("error: Bare resume is retired from Manager; use Resume in Actions.")
+        return launch_observations.refuse(attempt_id)
 
     use_ahp = bool(getattr(req, "ahp", False))
     script = (
@@ -1230,7 +1268,7 @@ def _run_launch(req) -> int:
             use_ahp = launcher.uses_ahp(req, str(getattr(req, "worktree_id", None) or ""))
         except engine_client.EngineError as error:
             print(f"error: could not inspect the persisted execution leg: {error}")
-            return 1
+            return launch_observations.refuse(attempt_id, "engine-error")
         if use_ahp:
             script = None
     plan, code = _resolve_for(
@@ -1239,34 +1277,43 @@ def _run_launch(req) -> int:
     if plan is None:
         return code
     if plan.action == "none":
+        launch_observations.observe(attempt_id, "refused", exit_code=plan.exit_code)
         return plan.exit_code
     new_window = bool(getattr(req, "new_window", False))
     if plan.action == "remote":
         if new_window:
             print('error: "new window" launches are supported only for local worktrees.')
-            return 1
+            return launch_observations.refuse(attempt_id)
         if use_ahp:
             print("error: AHP is supported only for same-machine launches")
-            return 1
-        return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
+            return launch_observations.refuse(attempt_id)
+        return launch_observations.launch(
+            attempt_id, lambda: launcher.launch(plan, want_mux=not getattr(req, "no_mux", False)),
+        )
     if not backend_checked:
         try:
             use_ahp = launcher.uses_ahp(req, str(getattr(plan, "worktree_id", None) or ""))
         except engine_client.EngineError as error:
             print(f"error: could not inspect the persisted execution leg: {error}")
-            return 1
+            return launch_observations.refuse(attempt_id, "engine-error")
     if use_ahp:
+        try:
+            engine_client.require_agent_hosting(str(plan.work_dir))
+        except engine_client.EngineError as error:
+            print(f"error: repository hosting admission refused: {error}")
+            return launch_observations.refuse(attempt_id)
         if new_window:
             print('error: "new window" launches are not yet supported for AHP-backed sessions.')
-            return 1
+            return launch_observations.refuse(attempt_id)
         from . import ahp_provider, engine_client, manager_config
 
         if getattr(req, "machine", None):
             print("error: AHP is supported only for same-machine launches")
-            return 1
-        if req.mode in {"base", "bare-resume"}:
+            return launch_observations.refuse(attempt_id)
+        if req.mode == "base":
             print("error: AHP requires an agent-worktrees-managed worktree")
-            return 1
+            return launch_observations.refuse(attempt_id)
+        launch_observations.observe(attempt_id, "launch-requested")
         try:
             attachment = ahp_provider.ensure_session(
                 req.project,
@@ -1280,86 +1327,37 @@ def _run_launch(req) -> int:
             manager_config.ManagerConfigError,
         ) as error:
             print(f"error: could not prepare AHP launch: {error}")
+            launch_observations.observe(attempt_id, "unknown", required=False, code="engine-error")
             return 1
         # AHP already rewrote plan.cmd to the attach client; the relocated
         # launch-session script would re-resolve a vanilla plan and clobber
         # that rewrite, so AHP stays on the direct-exec path (no mux wrapping
         # for AHP attachment in this pass -- a known follow-up gap, not a
         # regression: AHP launches never went through launch-session.ps1).
-        return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
+        return launch_observations.returned(
+            attempt_id, launcher.launch(plan, want_mux=not getattr(req, "no_mux", False)),
+        )
     if getattr(req, "machine", None) is None and plan.action == "exec":
         if script is not None:
-            return _run_relocated_mux_launch(req, plan, script)
+            return launch_observations.launch(
+                attempt_id, lambda: _run_relocated_mux_launch(req, plan, script),
+            )
     if new_window:
         print('error: "new window" launches require the relocated launch-session script, which was not found.')
-        return 1
-    return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
-
-def _cmd_setup(rest: list[str]) -> int:
-    do_apply = "--apply" in rest
-    statuses = detect_baseline()
-    gaps = missing(statuses)
-    actions = provision_plan(gaps)
-    core = core_status()
-
-    print()
-    print(f"  {_BANNER} — setup {'(APPLY)' if do_apply else '(plan / dry-run)'}")
-    print()
-    if not actions:
-        print("  prerequisites: all satisfied — nothing to provision.")
-    else:
-        print("  prerequisites to provision (in order):")
-        for a in actions:
-            tag = "manual" if a.manual else a.method
-            print(f"    - {a.name}  [{tag}]"
-                  f"{'  (restart after)' if a.changes_path else ''}")
-            if a.command:
-                print(f"        $ {a.command}")
-            if a.note:
-                print(f"        {a.note}")
-    results = provision_apply(actions, dry_run=not do_apply)
-    manual = [r for r in results if r.skipped_reason == "manual"]
-
-    print()
-    print("  agent-worktrees core:")
-    cmd = install_command()
-    if core.installed:
-        print("    ✓ already installed (idempotent — nothing to do).")
-    elif cmd is None:
-        print("    ! the real installer needs a copilot-extensions checkout;")
-        print("      run `worktree-manager setup` from (or after adopting) a checkout.")
-    else:
-        print(f"    state: {core.state} → drive the harness's own installer:")
-        print(f"        $ {' '.join(cmd)}")
-    core_res = install_core(dry_run=not do_apply)
-    if do_apply and core_res.ran:
-        print(f"    installer exit code: {core_res.returncode}")
-        # Refresh: the `core` snapshot above predates the install we just ran, so
-        # basing the summary/exit code on it would report failure on a successful
-        # first-time install (it would only "pass" on a second run).
-        core = core_status()
-        if core.installed:
-            print("    ✓ core install complete.")
-        else:
-            print(f"    ! core still {core.state} after install — see output above.")
-
-    print()
-    if not do_apply:
-        print("  (plan only — nothing was changed. Re-run with --apply to execute.)")
-    else:
-        if restart_needed(results):
-            print("  ⟳ PATH changed — RESTART your shell (or open a new one) before")
-            print("    continuing so the newly-installed tools are found.")
-        if manual:
-            names = ", ".join(r.action.name for r in manual)
-            print(f"  ! manual prerequisites still needed: {names} — install them, then re-run.")
-    print()
-    # Non-zero while anything remains to be done.
-    done = not gaps and core.installed
-    return 0 if done else 1
-
+        return launch_observations.refuse(attempt_id)
+    return launch_observations.launch(
+        attempt_id, lambda: launcher.launch(plan, want_mux=not getattr(req, "no_mux", False)),
+    )
 
 def _cmd_self_install(rest: list[str]) -> int:
+    if "--apply" in rest and os.name == "nt":
+        from .update_driver_cli import self_install_request
+
+        return self_install_request(lambda: _render_self_install(rest))
+    return _render_self_install(rest)
+
+
+def _render_self_install(rest: list[str]) -> int:
     do_apply = "--apply" in rest
     st = self_status()
     res = self_install(dry_run=not do_apply)
@@ -1476,31 +1474,56 @@ def _cmd_update(rest: list[str]) -> int:
     The run is recorded through ``update_events``; the exit code follows the
     shared update table (0 success, non-zero failure classes).
     """
+    if any(arg == "--target" or arg.startswith("--target=") for arg in rest):
+        from .installation_updates import run_targeted_update
+
+        return run_targeted_update(rest)
     from .update_bootstrap import prepare_update
     from .update_events import UpdateRun
+    from .update_orchestration import preflight_runtime_source
+    from .runtime_source import SourceAcquisitionError
+    from .runtime_source_update import repair_selection
 
-    prepared = prepare_update(rest)
-    if prepared.exit_code:
-        return prepared.exit_code
-    run = UpdateRun()
+    if not preflight_runtime_source(suite=True):
+        return 1
+    run = None
     try:
-        return run.finish(_cmd_update_steps(
-            prepared.arguments, run, fresh_manager=prepared.fresh_manager,
-            environment=prepared.environment,
-        ))
+        with repair_selection(rest) as runtime_source:
+            source_arguments = (
+                {"runtime_source": runtime_source} if runtime_source is not None else {}
+            )
+            prepared = prepare_update(rest, **source_arguments)
+            if prepared.exit_code:
+                return prepared.exit_code
+            run = UpdateRun()
+            rc = _cmd_update_steps(
+                prepared.arguments, run, fresh_manager=prepared.fresh_manager,
+                environment=prepared.environment, **source_arguments,
+            )
+        return run.finish(rc)
+    except (OSError, ValueError, SourceAcquisitionError) as error:
+        if run is None:
+            print(f"Runtime source: {error}", file=sys.stderr)
+            return 1
+        run.say(f"Runtime source: {error}", state="failed")
+        run.record_engine_error(str(error), missing=False)
+        return run.finish(1)
     except BaseException as exc:
-        run.abort(exc)
+        if run is not None:
+            run.abort(exc)
         raise
 
 
 def _cmd_update_steps(
     rest: list[str], run, *, fresh_manager: bool = False,
     environment: dict[str, str] | None = None,
+    runtime_source: ResolvedSource | None = None,
 ) -> int:
     from .update_orchestration import run_update_steps
 
     return run_update_steps(
         rest, run, version=__version__, fresh_manager=fresh_manager, environment=environment,
+        **({"runtime_source": runtime_source} if runtime_source is not None else {}),
     )
 
 
@@ -1524,6 +1547,8 @@ def main(argv: list[str] | None = None) -> int:
         print("  doctor [--json] [--apply-daemon-health]")
         print("                         report prerequisites + the agent-worktrees core")
         print("  setup [--apply]        plan (default) or run prereq provisioning + core install")
+        print("    [--repository HTTPS_URL] [--repository-target ABSOLUTE_PATH]")
+        print("    [--repository-commit FULL_COMMIT_ID] [--trust-repository-setup]")
         print("  self-install [--apply] version the app: current-version marker + ~/.local/bin binstub")
         print("  source                 show the self-update source (git repo + ref/branch)")
         print("  source set [--repo URL] [--ref BRANCH]   track a fork / canary branch for updates")
@@ -1532,6 +1557,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  update --request-status ID [--json]        read a durable request without installing")
         print("  update --recovery-status|--recover-after-restart [--json]  inspect/settle interrupted work")
         print("  update --recover-for-repair [--json]  authorize queue release without cleanup proof; no install")
+        print("  runtime-source show|set|reset|resolve  independent runtime source policy/acquisition; no install")
         print("  plugins                list the plugins the installer knows about")
         print("  plugins <name>         show one plugin's prereqs / config / steps")
         print("  plugins --prereqs      the de-duplicated union of all prerequisites")
@@ -1540,6 +1566,8 @@ def main(argv: list[str] | None = None) -> int:
         print("  projects [<name>]      registered projects (harness repos: binstubs + profiles)")
         print("  repos [<name>]         every known repo + its config-state indicators")
         print("  worktrees [<project>]  live worktrees via the agent-worktrees engine (--json)")
+        print("  launch-attempts [ID] [--json] [--include-input] [--sweep-project NAME --source-machine ID]")
+        print("                         read local intent/receipts or explicit configured SSH metadata; never retry")
         print("  terminal-fragment <project> [--machine K] [--explain|--doctor|--migrate-selections]")
         print("                         preview the Windows Terminal fragment a project would emit")
         print("  profiles <project> get|apply [--machine K] [--set '<json>'] [--json]")
@@ -1549,14 +1577,17 @@ def main(argv: list[str] | None = None) -> int:
         print("  picker [<project>]     launch the production Picker (Textual)")
         print("  picker mock [<project>] [--local] [--json]")
         print("                         production UX with simulated mutations")
+        print("  picker review <project> [--candidate LABEL] [--capture F]")
+        print("                         read-only candidate with real local owner data")
         print("  picker screenshot [<project>] [--format svg|text|ansi] [--out F]")
         print("                         capture the production Picker headlessly")
         print("  picker [screenshot] --demo|--preview [<project>]")
         print("                         same, against deterministic mock data (no live")
         print("                         engine/session state required); real Picker,")
         print("                         real project identity, faked worktree/pivot data")
-        print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
+        print("                         (in the Picker: l launch/resume · n new)")
         print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
+        print("  companion-pane --action show|return [--cwd PATH]  same-window Companion navigation")
         print("  mux-daemon <run|ensure|register|remove|show|status|recovery-evidence>  (managed mux)")
         print()
         print("A bare invocation reads current installation state without changing it.")
@@ -1569,6 +1600,9 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_repos(args[1:])
     if args and args[0] == "worktrees":
         return _cmd_worktrees(args[1:])
+    if args and args[0] == "launch-attempts":
+        from .launch_history_cli import main as launch_history
+        return launch_history(args[1:])
     if args and args[0] == "terminal-fragment":
         return _cmd_terminal_fragment(args[1:])
     if args and args[0] == "profiles":
@@ -1582,6 +1616,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_picker(args[1:])
     if args and args[0] == "companion":
         return _cmd_companion(args[1:])
+    if args and args[0] == "companion-pane":
+        return _cmd_companion_pane(args[1:])
     if args and args[0] == "mux-daemon":
         return _cmd_mux_daemon(args[1:])
     if args and args[0] == "daemons":
@@ -1592,11 +1628,17 @@ def main(argv: list[str] | None = None) -> int:
 
         return doctor_cli.cmd_doctor(args[1:])
     if args and args[0] == "setup":
-        return _cmd_setup(args[1:])
+        from .setup_cli import cmd_setup
+
+        return cmd_setup(args[1:], banner=_BANNER)
     if args and args[0] == "self-install":
         return _cmd_self_install(args[1:])
     if args and args[0] == "source":
         return _cmd_source(args[1:])
+    if args and args[0] == "runtime-source":
+        from .runtime_source_cli import main as runtime_source
+
+        return runtime_source(args[1:])
     if args and args[0] == "update":
         from .update_driver_cli import cmd_update_request
         return cmd_update_request(args[1:])

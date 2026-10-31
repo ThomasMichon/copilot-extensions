@@ -16,13 +16,16 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-update-driver",
     "agent-work-coalescing-singleton",
     "agent-procutil",
     "agent-single-instance-lease",
     "agent-zdd",
+    "agent-update-driver",
 ]
 
 [tool.uv.sources]
+agent-update-driver = { path = "../../libs/update-driver", editable = true }
 # Shared coalescing/rendezvous daemon primitive (module
 # ``work_coalescing_singleton``) -- resolved live from its canonical path so
 # this plugin never vendors its own copy.

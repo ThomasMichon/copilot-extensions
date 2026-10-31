@@ -23,8 +23,9 @@ import sys
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from . import config as cfg
 from . import launch_wrapper_assets as lwa
@@ -377,12 +378,13 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     for name in ("resolve-runtime.ps1", "resolve-runtime.sh",
                  "session-conduct.ps1", "session-conduct.sh",
                  "session-machine.ps1", "session-machine.sh",
+                 "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py", "anchor_shell_parser.py",
                  "anchor_write_guard.py", "pr_supersede_guard.py", "registry_root.py",
-                 "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_lifecycle_runtime.py",
-                 "native_source_context.py", "hook_client.py",
-                 "post-tool-hook.ps1", "terminal_probe.py"):
+                 "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_process_identity.py", "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py", "hook_lifecycle_runtime.py",
+                 "native_source_context.py", "pretool_killswitch.py", "hook_client.py",
+                 "hook-read-policy.json", "versioned_runtime_native.ps1", "pre-tool-hook.ps1", "post-tool-hook.ps1", "terminal_probe.py"):
         src = scripts / name
         if name == "native_source_context.py":
             src = plugin_dir / "src" / "agent_worktrees" / name
@@ -423,6 +425,10 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     sd.mkdir(parents=True, exist_ok=True)
     for name in (
         "default-setup.ps1",
+        "native-seed-boundary.ps1",
+        "native-seed-reply.sh",
+        "native-seed-boundary.sh",
+        "native-seed-setup.sh",
         "default-setup.sh",
         "launch-command.ps1",
         "launch-command.sh",
@@ -1438,15 +1444,25 @@ def read_projects_registry(*, strict: bool = False) -> dict:
     Returns ``{"projects": {}}`` if the file is missing, and if it can't be read
     or parsed unless ``strict`` (see :func:`projects_registry.parse_projects_registry`).
     """
-    from .projects_registry import parse_projects_registry
+    from .projects_registry import _ORIGINAL_PROJECTS_PARSER, parse_projects_registry
 
     path = projects_yaml_path()  # an invalid installation context raises, never reads as empty
+    acquisition = cfg.config_acquisition
+    start = acquisition.registry_call_started()
     try:
-        return parse_projects_registry(path)
-    except Exception:
+        value = parse_projects_registry(path)
+    except Exception as exc:
+        acquisition.registry_call_failed(str(path), exc)
         if strict:
             raise
         return {"projects": {}}
+    if parse_projects_registry is not _ORIGINAL_PROJECTS_PARSER:
+        acquisition.opaque_source(str(path))
+    acquisition.registry_call_finished(start, str(path), stage="projects-registry")
+    return value
+
+
+_ORIGINAL_PROJECTS_READER = read_projects_registry
 
 
 def _format_yaml_value(v: object) -> str:
@@ -1500,6 +1516,34 @@ def write_projects_registry(registry: dict, path: Path | None = None) -> None:
     write_registry(path, "\n".join(lines) + "\n")
 
 
+def require_project_hosting(project: str, repo_dir: Path | str | None = None) -> None:
+    from . import agent_policy, repos
+    from repository_policy import RepositoryPolicyError
+
+    target = repo_dir
+    if target is None:
+        entry = repos.find_repo(project)
+        target = entry.local_path() if entry is not None else None
+    if not target:
+        raise RepositoryPolicyError(
+            f"Cannot establish repository policy for project {project}; provide --repo-dir"
+        )
+    agent_policy.require(target, operation="project adoption")
+
+
+def _hosting_admitted(function: Callable[..., None]) -> Callable[..., None]:
+    @wraps(function)
+    def admitted(
+        project: str, repo_dir: Path | str | None = None,
+        *args: object, **kwargs: object,
+    ) -> None:
+        if not is_reserved_project_command(project):
+            require_project_hosting(project, repo_dir)
+        return function(project, repo_dir, *args, **kwargs)
+    return admitted
+
+
+@_hosting_admitted
 @pr_authority.registry_transaction
 def register_project(
     project: str,
@@ -1572,6 +1616,7 @@ def register_project(
             "skipping projects.yaml registration")
         return
 
+    require_project_hosting(project, repo_dir)
     registry = read_projects_registry()
     if is_windows:
         collision = next(

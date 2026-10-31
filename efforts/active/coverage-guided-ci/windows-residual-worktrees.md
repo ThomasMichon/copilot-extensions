@@ -88,6 +88,617 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### MX-HELPERS relocation, prepared reuse and retained publication control
+
+This reconciles only `tests/pr_test_helpers.py:1`, header
+`@@ -0,0 +1,99 @@`, full original hunk SHA256
+`a95367a4ca8c6bbbb5d9fc95b7cc4c2f8e63077bf956306f00e4bafbcc700071`.
+Its original census header, hash and `MX-HELPERS` disposition remain
+unchanged. Source-delta reconciliation does not close the failed native
+validation described below.
+
+The complete `_git` and `_stub_remote_target` ASTs at comparison
+`243b2014f3` match the immutable source. Only the latter adapter and its
+`replace` import belong to B-PUBSTUB, actual #7886 merge
+`c1ca9083463d0b0b7bad22cc401c37ab3e462b78`; the adapter still performs
+real transport validation before scenario relabeling.
+
+The five original `PRWorkflowSetup` methods now live in
+`tests/pr_workflow_setup.py`, not in the historical helper file. Their
+relocation belongs to M-MOVE, actual #7427 merge
+`039208cd6022e3cedb42b76f69a5d5ddb28dcb6c`.
+`_refspec_config`, `_fork_config` and `_move_head_to_fork` retain their
+complete immutable-source ASTs. `_required_config` retains all executable
+statements; its historical extra docstring is not reapplied as a cosmetic
+patch. The additional current `_branch_on_both`, `_blocked_while` and
+`_simulate_squash_merge` methods are outside this original key.
+
+The complete current `_fork_headed_rerun` matches actual B-FORK #7544
+merge `855ffa066206401e0b02bfddfac375ca5dc5ca1c`. Its prepared-fork
+recognition and feedback assertion match the immutable source. That
+accepted optimization already serves all eleven `test_pr_ops.py`
+consumers. The remaining `test_push_changes.py` consumer supplies
+unpublished input in both snapshot and refspec cases.
+
+The separate B-FORK-PUBLISHED source delta is deliberately not applied:
+the historical conditional initial `create_pr`/success-assertion/reload
+block would omit publication for already-published, unprepared input.
+That input occurs only in the adapter's explicit publication control,
+which currently requires one real `create_pr` call and verifies the
+resulting fork-only refs, record and feedback ancestry. Applying the
+shortcut would remove this exercised path without reducing setup in any
+of the eleven prepared consumers or the unpublished push consumer.
+Retire this shortcut delta from extraction, not the test, its real
+publication or its assertions. No runtime or test code changes.
+
+Five existing adapter cases retain their identities and expectations:
+unpublished and published inputs publish once; prepared input publishes
+zero times and leaves bytes unchanged; missing/changed prepared feedback
+refuses without publication or mutation. Their successful native result
+at the actual #7544 merge is recorded in B-FORK below, not represented as
+a current-head pass.
+
+Current native validation remains open under #5682. A nine-case cold
+selection lost two workers at the unchanged 30-second item watchdog;
+seven other cases passed after worker replacement, which is not accepted
+two-worker validation evidence. A separate instrumented diagnostic,
+with exactly two workers and replacement disabled, reproduced both
+losses: unpublished adapter setup reached its final ref checks, while
+the changed-feedback case was still constructing its session fork seed.
+Base seed setup took about 7.8 seconds and published seed setup another
+16.4 seconds before fork construction. This identifies cumulative
+setup cost, not a failed publication assertion or permission to move
+setup outside the watchdog. The diagnostic stopped with two failures
+and the other seven cases unexecuted. Its instrumentation was removed.
+An earlier invalid class selector collected no tests and supplies no
+evidence.
+
+No timing failure is waived or erased by this source reconciliation.
+Do not rerun the unchanged selection to obtain a lucky pass. A real
+setup optimization and successful unchanged-limit validation are still
+owed; normal-group and repeated complete same-head qualification remain
+open. No marks, skips, exclusions, selection policy, item/group/plugin
+deadlines, process/memory/temp ceilings or CI jobs change. Documentation
+impact is this ledger; provisioning clean-room and external deployment
+are inapplicable to a documentation-only disposition.
+
+### MX-LANDING existing copy, no-mux and retained-case boundaries
+
+This settles only these two original keys; their census headers, hashes
+and `MX-LANDING` dispositions remain unchanged:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_finalize_landing.py:2` | `9f397fc0fcdfb908df4e0350b7c16a3a90f23228449381701ea2b57c8732bd50` |
+| `tests/test_finalize_landing.py:8` | `8bb8b00d93c7bf5c0d1dff538bf7f8dd3b8f3492b2bfc668bc72cef9995b0bac` |
+
+Hunk 2's `shutil` import and `_seed_directory` alias from `conftest`
+belong to B-LANDING, actual foundation #7661 merge
+`a51b337947f6d1a1f0a6430b624c267e6d958086`. Both remain at comparison
+`446c84f5c1`. The complete current `conftest` import also retains the
+accepted hermetic `_published_seed_environment`; the historical import
+is not reapplied over that setup. The module-level
+`pytest.mark.usefixtures("git_only_mux")` instead belongs to B-MUX,
+actual #7497 merge `91e6b9bbea7e65e958a8903016e03a710dfe9d87`.
+That complete mark matches the actual merge and immutable source by AST.
+It is explicit Git-only fixture isolation, not process-ownership proof.
+
+Hunk 8's explain-test fixture substitution belongs to B-LANDING,
+actual consumer #7662 merge
+`86f055d12f95f5162d1adc8ff681cf071fe5a493`. The complete
+`test_explain_reports_every_base_and_check` matches that merge and the
+immutable source by AST; `merged_env` matches the accepted consumer
+implementation, not a claim that every fixture body matches the source.
+Actual landing and provider-base observations still occur per case.
+
+The default-base/provider-call-zero test remains in its original
+location. Its complete AST matches the historical base, immutable source
+and each actual merge cited here at comparison. The
+historical removal/relocation delta retains its accepted B-LANDING-ASSERT
+#7701 disposition, merge `a912a66b8ec44e8bf2705c59bee17f341fea7a56`;
+that retires a delta, never the separately collected test.
+
+Six native controls pass: base/merged private-copy isolation, the retained
+default-base case, the actual explain consumer and both no-mux
+discovery/termination canaries with restored bindings. Result: 60.68
+pytest seconds, 77.53 seconds including preparation and cleanup, exactly
+two contained Windows workers with unchanged marks, item deadlines and
+resource limits. This focused functional selection is not full-module,
+normal-group or repeated complete same-head plugin qualification.
+No code/test edit is needed; other residuals and parent qualification
+remain open.
+
+### MX-LEASE private preview input with original test identities retained
+
+This settles only these three original keys; their census headers, hashes
+and `MX-LEASE` dispositions remain unchanged:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_lease_store.py:8` | `6246565fedce0d2ae6d933cb61564d2eb55f9e1074f54f19242f37df61c3f435` |
+| `tests/test_lease_store.py:9` | `dd00fa7b0faa942ef8e8c08552f822c0d924a6add0811110964ed2fd350bc2cb` |
+| `tests/test_lease_store.py:10` | `93e1649380ec5da8ba23ad5188156cd1f45e7bd9029e287978b8c724cee863fd` |
+
+The kind-filter and mid-sweep reacquisition tests retain their complete
+ASTs from actual B-LEASE-SEED #7665 merge
+`85ff7d66cddb174a5ff91aa45b9d68bfbc2345aa` and the immutable source.
+Their fixture substitution and prepared-history unpacking belong to
+B-LEASE-SEED, not B-LEASE-ASSERT. The real reacquisition still occurs
+between the list observation and force-with-lease push.
+
+One fixture conversion remained unapplied at comparison `9445fea093`:
+`test_squash_stale_dry_run_reports_without_pushing` still rebuilt its
+acquire/renew/release inputs. It now takes `released_history`, using a
+private physical copy and deep-copied snapshots from the existing fixture.
+Only its fixture argument and four setup statements change. Every
+statement after setup, including preview/no-push, real apply, exact OIDs
+and stable repeated apply, remains AST-identical to actual B-LEASE-ASSERT
+#7698 merge `df0ab9b2ada18528d7fc8389246dd46a878f048a`.
+The complete converted function matches the immutable candidate after
+retaining its original function name; this final setup delta belongs
+to B-LEASE-SEED.
+
+The standalone idempotence test remains AST-identical to the historical
+base and both actual merges. Its historical deletion and the preview
+function's historical rename retain their accepted B-LEASE-ASSERT
+retirement: removal/rename deltas are retired, never tests. Every test
+identity, decorator, assertion and other function is unchanged.
+
+The complete native Windows lease-store module passes all 21 cases
+without skips: 108.56 pytest seconds, 129.55 seconds including preparation
+and cleanup. Exactly two contained workers retain original marks,
+item deadlines and resource ceilings. The private-copy controls, live
+holder protection, real race and retention consumers all execute.
+This module-level functional result is not normal-group or repeated
+complete same-head plugin qualification. Other residuals and parent
+qualification remain open.
+
+### MX-RECOVERED existing fixture and publication-adapter boundary
+
+This settles only `tests/test_pr_break_glass.py:3`, header
+`@@ -231,6 +232,51 @@`, full original hunk SHA256
+`67b9fddab49e377bfaa99c067b35c2443f7267d03b5f7b419517332299705f9a`.
+Its original census header, hash and `MX-RECOVERED` disposition remain
+unchanged.
+
+The three complete functions `_recovered_pr_seed`, `_copy_recovered_pr`
+and `recovered_pr` match actual B-RECOVERED #7904 merge
+`f18c945017e9d2533a448b817ce976756118255d` by AST at comparison
+`c5694fee01`. The latter two also match the immutable source. The seed
+intentionally differs: its accepted `_published_seed_environment` replaces
+the historical bare `MonkeyPatch.context()` plus monitor-disable setting.
+That existing hermetic setup supplies isolated HOME, Git configuration,
+identity key and disabled monitor without depending on function-scoped
+autouse fixtures. The historical seed setup is not reapplied.
+
+Only `_copy_recovered_pr`'s `_stub_remote_target` call belongs to
+B-PUBSTUB; the adapter's complete AST matches actual #7886 merge
+`c1ca9083463d0b0b7bad22cc401c37ab3e462b78`, #7904 and the comparison.
+It retains real fresh transport validation before scenario relabeling.
+The copied fixture's remote-tip observer instead belongs to B-RECOVERED:
+it reads the current private remote on invocation, not a cached shared
+observation or publication authorization.
+
+Four native consumer controls pass: seed/sibling byte isolation despite
+first-copy commit/ref/record/hook changes, relocation of an existing
+rewrite identity without inventing an absent one, real confirmed recovery
+with retained commits and unchanged seed record/refs, and scenario-adapter
+refusal after actual transport disagreement. Result: 45.73 pytest
+seconds, 72.73 seconds including preparation and cleanup, exactly two
+contained Windows workers with unchanged marks, item deadlines and
+resource limits. This focused functional selection is not full-module,
+normal-group or repeated complete same-head performance qualification.
+No code/test edit is needed; other residuals and parent qualification
+remain open.
+
+### MX-BACKED-TYPES existing recovered and backed tuple contracts
+
+This settles only `tests/test_pr_recovery_advanced_head.py:2`, header
+`@@ -20,7 +22,8 @@ pytestmark = [`, full original hunk SHA256
+`e44ed090d48bf6d3ef11e99d5d65644331d7f97ca2fbba61cef15f524d63d509`.
+The original census header, hash and `MX-BACKED-TYPES` disposition remain
+unchanged.
+
+The six-field `RecoveredPR = tuple[Config, str, Path, Path, str, str]`
+belongs to B-RECOVERED, actual #7904 merge
+`f18c945017e9d2533a448b817ce976756118255d`. The seven-field
+`BackedPR = tuple[Config, str, Path, Path, str, str, str]` belongs to
+B-BACKED, actual #7918 merge
+`59ca4d10403d517063528539e3b9e8a9ef173178`. Each alias occurs exactly
+once and matches its actual merge and the immutable source by AST at
+comparison `6f2fb93448`. These are test fixture tuple shapes, not new
+runtime evidence types or a combined fixture implementation.
+
+The four-field `PrRepo = tuple[Config, str, Path, Path]` remains as in
+the historical base and both actual merges. Its deletion from the
+historical hunk is not applied: the existing public `backed_publication`
+helper still accepts that four-field input and returns seven fields.
+The separately admitted fixture contracts preserve that compatibility;
+removing its alias would leave a live annotation unresolved.
+
+Four native consumer variants pass: the recovered six-field preview,
+both backed-copy base variants and the routine-recovery
+`after-reconciliation` case that actually invokes the four-field public
+helper. They retain no-effect/refusal, private evidence/copy isolation
+and real lost-ack publication assertions: 141.40 pytest seconds,
+176.50 seconds including preparation and cleanup, exactly two contained
+Windows workers and all original marks, deadlines and resource bounds.
+This focused functional selection does not qualify the known timed-out
+routine-recovery normal group or the repeated complete same-head plugin.
+No code/test edit is needed; other residuals and parent qualification
+remain open.
+
+### MX-PROVIDER existing record setup and assertions retain separate ownership
+
+This settles only these three original keys, with their census headers,
+hashes and `MX-PROVIDER` dispositions unchanged:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_providers.py:4` | `6db6024d74dfbbaa623dda25c8bffad69d4e509c0a7b09d129d88dacaab42241` |
+| `tests/test_providers.py:14` | `5fd5cf6df59515601007e9840bf3da9182ec303bda64b05427a0e0a94ec7e73a` |
+| `tests/test_providers.py:15` | `62224877e5561ed71cefe2c2d03ba3aa8b21007763ec52cf19d60c12203a78db` |
+
+Hunk 4's explicit `"Hello"` input and exact output assertion belong to
+B-PROVIDER-ASSERT, actual #7695 merge
+`08db822fe28f887ced822580a6a0f3fb3c25b609`. The following encrypted-identity
+case's fixture argument/unpack instead belongs to B-PROVIDER-RECORD,
+actual #7691 merge `5106ca4d00f69dfbc74b7486da85ae9d55636d2b`.
+Both complete functions match their respective merges and the immutable
+source by AST at comparison `09bce158f3`.
+
+Hunk 14's malformed-codename stale-marker case calls `_open_record` under
+B-PROVIDER-RECORD; its added no-marker-text and empty `attribution_head`
+assertions belong to B-PROVIDER-ASSERT. The complete strengthened function
+matches #7695 and the immutable source. The next disabled-attribution
+stale-marker case's fixture argument/unpack (hunk 14) and `_open_record`
+call (hunk 15) belong to B-PROVIDER-RECORD; that complete function matches
+#7691 and the immutable source. These record-boundary controls do not
+replace actual publication tests or bypass provider/attribution decisions.
+
+Hunk 15's non-string-codename guard signature belongs to B-PROVIDER-RECORD:
+actual #7710 merge `d96da43cc8f905d74e86cc144ba00ed73c424ab8`
+removed only its unused fixture parameters. Its complete function matches
+that merge and the immutable source. The two historical function-removal
+deltas in the same hunk retain their accepted B-PROVIDER-ASSERT retirement:
+`test_codename_mode_skips_marker_for_a_malformed_codename` and
+`test_codename_mode_skip_does_not_record_attribution_head` still execute,
+and their complete ASTs match the historical base and all three actual
+merges above. This retires removal deltas, never their tests. The separate
+`test_no_attribution_omits_marker` removal delta in hunk 16 is outside
+this reconciliation.
+
+All seven affected native consumer cases pass: 33.57 pytest seconds,
+39.59 seconds including preparation and cleanup, exactly two contained
+Windows workers with unchanged marks, item deadlines and resource bounds.
+This focused functional selection is not a normal-group, full-module or
+repeated complete same-head qualification result. No code/test edit is
+needed; other residuals and the parent Windows qualification gate stay open.
+
+### MX-IMPERFECT existing fixture and fault prerequisites remain separate
+
+This settles only these two original keys; their headers, hashes and
+`MX-IMPERFECT` dispositions below remain unchanged:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_pr_recovery_imperfect_evidence.py:1` | `1f82f652d7f943859137afca807e46728abda964d4f96597a9d56a550ee9707f` |
+| `tests/test_pr_recovery_imperfect_evidence.py:2` | `b05aada0c2ef638008644b590df6bdf065fc1e6ef1b8763df435d05d904744d4` |
+
+Hunk 1's recovered/backed seed and `backed_pr` imports, plus the replacement
+`BackedPR` type, belong to B-BACKED. Hunk 2's `backed_pr: BackedPR` argument
+and direct seven-field unpack replace fresh `backed_publication` construction
+under that same fixture contract. Actual #7918 merge
+`59ca4d10403d517063528539e3b9e8a9ef173178` contains these changes. The
+complete imperfect-evidence module matches both that merge and the immutable
+source by AST at comparison `8f53af6dfc`.
+
+The added `pr_rebase` import in hunk 1 and `encoding_probes` accumulator in
+hunk 2 instead belong to B-RECOVERY-FAULT. Both already exist in actual #7898
+merge `74dfe1d06ab9085648d5444c270d937de1650fa0` and remain present exactly
+once. The unusable-checkpoint test's body after the initial unpack matches
+that merge by AST, including the accumulator and its real binary-transport
+consumer. Only its fixture signature and initial unpack were subsequently
+replaced by B-BACKED; there is no whole-function equivalence claim against
+#7898. The separately admitted fault hunks 3-4 are not reopened.
+
+Surrounding unchanged imports, parameters, checkpoint reads and defect
+labels are context, not extra ownership. No implementation or test change
+is needed. The complete imperfect-evidence module passes all 15 cases:
+190.37 pytest seconds, 210.30 seconds including preparation and cleanup,
+exactly two contained native Windows workers and all original marks and
+limits. This is focused functional evidence only, not normal-group or
+repeated complete same-head timing qualification. Other residuals and the
+parent Windows qualification obligation remain open.
+
+### MX-FINAL existing imports retain separate S and F ownership
+
+This settles only `src/agent_worktrees/finalize_ref.py:1`. Its exact header is:
+
+```text
+@@ -5,9 +5,10 @@ Split out of ``finalize.py`` (module-size guard) -- see ``resolve_finalize_ref``
+```
+
+Full original hunk SHA256:
+`256d56179603dac9a0f417b0af15bdeee7fe6854a4b7458fd74097efb47eed4d`.
+Its only changed subspans are `import re` (S) and the added relative
+`git_tree_diff` import (F); surrounding imports and probe identity are
+unchanged context, not additional ownership.
+
+Actual #7830 merge `86945bf1c3c514640c9613597075098f4e3c97c4`
+introduced the unaliased `re` import for ordered squash-tree validation.
+Actual #7842 merge `b921cd03708bb5aa38453ab5e8d16aaee32168ff`
+introduced `git_tree_diff` for upstream blob comparison while retaining
+`re`. Each original import is present exactly once in accepted comparison
+`e049c2d2114e5e80f3a414bdd3f77cd53a7da833` by AST.
+Current S validation still checks both complete
+object-ID widths; F still calls the actual relative tree-diff reader and
+object-map helpers. G's separate use of `re` does not make its behavior
+depend on S, and later unrelated imports are not credited to this key.
+
+The existing real-Git no-ref-movement squash probe, ordered-ID controls
+and changed-object file/deletion/directory-replacement cases pass all
+10 native Windows variants without skips: 34.83 pytest seconds,
+74.02 seconds including preparation and cleanup, exactly two contained
+workers with all existing marks, deadlines and resource bounds.
+This is focused import-consumer evidence only. It neither repeats nor
+qualifies a timed-out normal landing group or the complete plugin.
+
+No code/test edit or combined finalization implementation is needed.
+This accounts for both changed import spans, not any other S/F/G hunk,
+fixture, mixed partition or repeated complete same-head qualification.
+
+### N-UTF8-LAUNCH explicit encoded-intent child mode
+
+This settles only `tests/test_launch_request.py:1`, header
+`@@ -696,7 +696,9 @@ def test_real_powershell_transport_preserves_encoded_intent(tmp_path):`,
+full original hunk SHA256
+`05a7137dc04d8936a6c33077c1c807e094fb6a0ac246d6461e4621f56f7c7c22`.
+The prior native disposition below already names actual #7821 merge
+`b55d6811210ff472006db72e78abda7b459ae203`; this entry adds exact-key
+accounting, not another implementation.
+
+The complete real-PowerShell transport test has identical ASTs in that
+merge and accepted comparison `5744f3de143fa41dca67be0437241e8e4d9cbe8b`.
+It retains the source's explicit `-X utf8` Python child arguments and UTF-8
+pipe decoding. Relative to the immutable source, the accepted test also
+sets `PYTHONUTF8=0` and asserts UTF-8 mode inside the actual child. This
+proves the command-line override rather than inheriting an enabling
+environment. The non-ASCII intent reaches the maximum request-byte bound,
+passes through the real encoded PowerShell command and base64 Python
+decoder, and must compare equal after the actual JSON stdout round trip.
+The original 20-second native timeout and hidden-process flag remain.
+
+The exact native consumer passes without skips: 1 case, 9.15 pytest
+seconds, 19.64 seconds including preparation and cleanup, exactly two
+contained Windows workers with existing marks and resource bounds.
+This is single-key functional evidence only, not complete-module,
+normal-group or repeated complete-plugin qualification. No runtime/test,
+retirement, CI, mark, selection-policy or deadline edit is needed.
+Attribution and other residual contracts remain separately owned and open.
+
+### N-UTF8-AUTHORITY explicit native registration-child encoding
+
+This settles only `tests/test_pr_authority.py:1`, header
+`@@ -178,8 +178,9 @@ installer.register_project(sys.argv[3], 'unused', 'main')`,
+full original hunk SHA256
+`ced29797ff226876b8b363b25d308053b2c041a46775694805553132fb7b0f30`.
+The prior native disposition below already names actual #7823 merge
+`ecd9213ba1fb353a6eda1bd0ef7bdfd75bbca41a`; this entry supplies its exact
+census-key accounting, not another implementation claim.
+
+That merge retains the immutable source's `-X utf8` child argument and
+explicit UTF-8 pipe decoding. Its complete concurrent-registration test
+matches accepted comparison `9bf6ac7aaaa1eff79ecda7e6e525ce78444b1fdc`
+by AST. Relative to the immutable source, it additionally sets parent
+`PYTHONUTF8=0` and asserts `sys.flags.utf8_mode == 1` inside each real child,
+proving the command-line override rather than inheriting an enabling
+environment. The two delayed registry transactions must still preserve
+both project entries, with the original native child timeout and hidden
+process flags.
+
+Current repository policy exposed two separately owned fixture failures
+when registration received the nonexistent literal directory `unused`.
+Actual #8549 merge `7da3ef4155ed51456a444587d862956ebaedaf48`
+repairs the registry-guard and concurrent-registration consumers with
+fresh private repository directories, passing the absolute path to both
+existing child interpreters. This preserves real policy admission, not a
+mock or bypass. It does not change the UTF-8 assertions or production
+registration behavior; no whole-function equality with #7823 is claimed
+after that repair.
+
+The corrected complete authority module passes 39 cases in 33.54 pytest
+seconds, 48.03 seconds including preparation and cleanup. All four existing
+adoption-veto boundaries also pass, 24.83 seconds inclusive. Both runs use
+exactly two contained native Windows workers with unchanged marks,
+deadlines and resource bounds. This is functional evidence only. No new
+runtime/test edit, normal-group or repeated complete-plugin qualification
+is included in this key admission. Other residuals remain open.
+
+### B-REPLAY-OBSERVE existing fresh range and raw-message assertions
+
+This settles only these four original keys; the historical candidate table's
+three-hunk summary does not replace the exact census keys below:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_pr_rebase.py:6` | `bd3815a8dda8a1783fcef5592fb95758900a2ef287699bd7bdc68fe871a8396d` |
+| `tests/test_pr_rebase.py:7` | `ea9bfbef4b732769d73f200b6fee9037f3fe6eeb787e7cf8e46d8f5aff407063` |
+| `tests/test_pr_rebase.py:8` | `dc35785bd8c4ced8aee47605c7949d6f35b29419d563b3538da58de1a90fac4c` |
+| `tests/test_pr_rebase.py:9` | `517fd04c1940e27f7252a51d77d96392901713aa1f2b9b9dfcac896b16a6406c` |
+
+Actual merged #7893 commit `39e1ec02de5d4aa46bf0e230e4d868093eb3e9cd`
+already contains these observations. The complete original-lease and
+unstripped-conflict-message test functions have identical ASTs in that merge,
+the immutable source and accepted comparison
+`1e994739bd0f993ad3a5969281fdf7a723660cb1`.
+
+The original-lease consumer wraps the real `_commit_rows` reader and requires
+exactly two range reads for verification. A later manual publication requires
+two new reads with equal contents but distinct list objects. Actual temporary
+Git histories still exercise snapshot/refspec publication, sync/manual flows,
+the original lease, source-feedback preservation, tracking/base/patch IDs,
+credential-free proof serialization and subsequent incremental publication.
+The conflict-message double supplies complete pinned IDs and raw tree rows,
+then requires both unstripped author/message reads before refusing either a
+leading-space or extra-newline change. These observations do not authorize
+replay or replace the independently owned R implementation.
+
+All four original-lease variants and both raw-message variants pass with the
+existing exhaustive opt-in enabled: 6 cases, 163.42 pytest seconds and
+203.09 seconds including preparation and cleanup, exactly two contained
+native Windows workers. Existing item marks, deadlines and process/memory/temp
+bounds remain unchanged. This is focused functional evidence only. The
+previous complete replay-module timing failure remains recorded below;
+neither this selection nor its timing qualifies a normal group or repeated
+complete same-head plugin run.
+
+No runtime/test edit is needed. Fixture reuse, other residual keys and full
+Windows qualification remain separate and open.
+
+### B-RECOVERY-FAULT existing binary-transport fault injection
+
+This settles only these three original keys, not the separately partitioned
+imports/accumulator in `MX-IMPERFECT` or recovered/backed fixture ownership:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_pr_recovery.py:4` | `442749b50c5226648718ca9632931afa0c6fc6f046929e4e2ae1392ccc2c0ecf` |
+| `tests/test_pr_recovery_imperfect_evidence.py:3` | `092a07413ebf4f619e133b03747d5c070806a2ad31759430030edca0c8eb0c59` |
+| `tests/test_pr_recovery_imperfect_evidence.py:4` | `42bbd46f07add3f3d6bbdb638966282846362fdb9076215a1c6332a289153a64` |
+
+Actual merged #7898 commit `74dfe1d06ab9085648d5444c270d937de1650fa0`
+already contains these adapters. The complete backup-failure and unusable-
+checkpoint test functions match the immutable source by AST in accepted
+comparison `5127a36d82ca00163ea9232740ee2c0f44e563f4`. The backup-failure
+function also matches the actual merge completely. The unusable-checkpoint
+function differs from that merge only in its later, separately owned fixture
+signature and initial unpack; its fault branches and remaining body match.
+
+Backup failure is injected at the actual `_git_bytes` `update-ref`
+transaction boundary; sync must refuse before moving HEAD or writing a
+checkpoint. Encoding failure intercepts exactly the NUL-framed `cat-file`
+batch request containing the retained local commit reference and requires
+one probe. The separate spawn-failure branch remains intact. Preview still
+reports unusable optional evidence without inventing consent, preserves the
+saved/expected heads, and writes no audit before confirmation. A confirmed
+rewrite retains the published recovery commit, records the truthful audit
+and preserves the checkpoint bytes.
+
+The complete imperfect-evidence module and native backup-failure regression
+pass all 16 cases with exactly two contained Windows workers: 144.61 pytest
+seconds, 167.66 seconds including preparation and cleanup. Existing item
+marks and containment bounds are unchanged. This is focused functional
+evidence only, not a normal-group or repeated complete-plugin timing result.
+No runtime/test edit is needed; other residual keys and the Windows
+qualification obligation remain open.
+
+### B-PUBSTUB existing transport-preserving scenario labels
+
+This settles only these six original keys; their headers and dispositions
+in the census below remain unchanged:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_pr_break_glass.py:1` | `12af3ab7448260054e7f3e9c28cea67a5c41ca509236ea7555b066d6315dd827` |
+| `tests/test_pr_break_glass.py:2` | `4286283f0def863ba0691b24f04c7dd6e68d60aa941606656f115cbd0a7b53c9` |
+| `tests/test_pr_break_glass.py:4` | `9a79c77f23d3871bf9b8fadff4464d0f39c66be4ed9da585f5ece6b892e13cc7` |
+| `tests/test_pr_custom_head.py:1` | `e4b49a73473e5c3396b80962afca6aaaf0690338b3942a8d60c44ed1d7bfd36c` |
+| `tests/test_pr_custom_head.py:2` | `fb488e13c0bc76276c61a3c51a76e4534edfca835c0d33df598552f17ecac2f5` |
+| `tests/test_pr_custom_head.py:3` | `6342b54cc4ecda26670b67950e5e0fcc8374f125802e9b6fcd7e5666fa7bf71c` |
+
+Actual merged #7886 commit `c1ca9083463d0b0b7bad22cc401c37ab3e462b78`
+already contains the adapter and all six consumers/import changes. The
+complete `_stub_remote_target`, `_recovered_pr`, Azure recovery-preview
+test and public custom-head rewrite test have identical ASTs in that merge,
+the immutable source and accepted comparison
+`ed488d7dfce78da4ac10f1bcbae23415960725fe`. `_attested` matches the merge
+exactly; its intentional difference from the immutable source is the remote
+selector `None` instead of `"origin"`, labeling all valid scenario remotes.
+This is not a claim of literal whole-file equivalence.
+
+The shared helper wraps the real fresh `_remote_snapshot`, replacing only
+the scenario slug and optional identity after a valid transport result.
+It retains invalid results unchanged. The real-Git adapter regression
+introduces a conflicting push URL and requires both destination fields to
+become empty, proving scenario labels cannot hide transport disagreement.
+The recovery and custom-head consumers retain actual Git publications,
+confirmation/refusal paths, tracking and remote-head checks. No old
+`push_slug`/`push_identity` stub replaces those snapshot reads.
+
+The complete remote-evidence and custom-head modules plus both Azure
+preview variants and real confirmed-recovery regression pass 23 native
+Windows cases: 141.83 pytest seconds, 152.12 preparation/cleanup-inclusive
+seconds, exactly two contained workers with existing marks and bounds.
+This is focused functional evidence, not a normal-group or full-plugin
+timing result. No runtime/test edit is needed. The mixed helper hunk,
+other publication/recovery keys and repeated complete same-head Windows
+qualification remain separately owned and open.
+
+### B-PUB-REWRITE existing fresh destination refusal
+
+This settles only `tests/test_pr_rewrite.py:7`, header
+`@@ -272,6 +272,37 @@ def test_explicit_rewrite_preserves_hook_rejection_and_dry_run(pr_repo, capsys):`,
+full hunk SHA256
+`dba58dd3f182a5480b1b34b59de0265a2f3c2bc72bf4aa23f4f567068b91ad04`.
+The complete `test_explicit_rewrite_uses_one_fresh_destination_snapshot`
+function has identical ASTs in the immutable source, actual merged #7886
+commit `c1ca9083463d0b0b7bad22cc401c37ab3e462b78`, and accepted comparison
+`3f93390187a00e538f5ae69f3ecef466015924ee`.
+
+The regression wraps the real `_remote_snapshot` and changes an actual
+local Git remote between target selection and the rewrite's later check.
+The first dry-run requires exactly two equal snapshots. The next invocation
+requires two fresh snapshots with unequal destination identities and the
+explicit destination-changed refusal. Tracking bytes and the recorded PR
+head in both original and repointed bare repositories must remain unchanged.
+The existing P implementation and B-REBASED fixture provide the separately
+owned dependencies; no cached authority or test double replaces those reads.
+
+The exact regression passes with two native Windows workers, retaining all
+existing marks and containment bounds: 37.72 seconds pytest, 46.91 seconds
+including preparation and cleanup. This is single-key functional evidence,
+not a normal-group timing result. The attempted complete rewrite module
+reached its unchanged 240-second wall limit after 36 passing cases and
+returned exit 124 at 244.55 seconds including preparation and cleanup.
+That attempt does not qualify the module; the #5682 timing obligation stays
+open, and no unchanged retry or increased limit is authorized by this entry.
+
+No runtime or test edit is needed. This admits one historical semantic key,
+not another fixture/publication residual or the still-open repeated complete
+same-head native Windows qualification.
+
+### B-PUB-DEADLINE existing NUL absence and configured bounds
+
+This settles only `tests/test_publication_deadline.py:1`, header
+`@@ -117,8 +117,12 @@ def test_verified_rebase_retains_configured_bound(monkeypatch):`,
+full hunk SHA256
+`7d5e82b9d533802e6bd0569e161ef47c3987ff95d2a7aee877ee45f0501157fe`.
+The complete `test_verified_rebase_retains_configured_bound` function has
+identical ASTs in the immutable source, actual merged #7886 commit
+`c1ca9083463d0b0b7bad22cc401c37ab3e462b78`, and accepted comparison
+`e38e62981c410de3041215d1a6eafc24a1aff18e`.
+
+The Git double recognizes the NUL-framed `config --null --get-regexp`
+absence query with exit 1 and empty stdout/stderr, rather than returning a
+URL as malformed configuration evidence. Other reads retain their scenario
+URL. The test still exercises ordinary-push refusal followed by a separately
+verified push, requires the original `old` lease, checks both attempts retain
+the configured 300-second bound and requires the verified source head in
+the result. This is compatibility with P's fresh transport evidence, not a
+new timeout value, authority cache or permissive configuration fallback.
+
+The complete current publication-deadline module passes all 27 cases in
+97.83 seconds preparation/cleanup inclusive, with exactly two native workers
+and unchanged item marks, watchdog and process/memory/temp bounds. Its real
+snapshot/refspec publications, client hook markers, publication/finalization
+lock budgets, auth retry, invalid values, maximum usable subprocess bound
+and fractional diagnostic assertions remain intact.
+
+No runtime or test edit is needed. This is one historical-key semantic
+disposition, not settlement of another publication/rewrite fixture or
+normal-group/repeated complete same-head performance qualification.
+
 ### B-INCONCLUSIVE retains five independently collected native refusals
 
 This settles only `tests/test_finalize_precondition.py:4`, header

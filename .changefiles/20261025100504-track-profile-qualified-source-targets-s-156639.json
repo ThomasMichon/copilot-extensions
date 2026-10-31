@@ -1,0 +1,9 @@
+{
+  "comment": "Track profile-qualified source targets separately from source pins and verify their selected completion through the installed owner.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

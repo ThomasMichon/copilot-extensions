@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-10-30
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -45,7 +45,7 @@ source.
   artifacts. Admission verifies against this identity rather than against a
   name or version string.
 - **Approved artifact source** — wherever an installation is permitted to
-  acquire artifacts: the public first-party release, a governed internal
+  acquire artifacts: a qualified public release, a governed internal
   feed, an adopter accelerant, or a pre-seeded local cache. Which sources
   are approved is adopter desired state, not suite configuration.
 - **Assembled generation** — an immutable runtime generation built only from
@@ -57,7 +57,36 @@ source.
 
 ## Features
 
+### copyable-wheel-first-application-inputs
+
+Canonical release composition produces complete application inputs that can
+be copied into an owned immutable generation and initialized through their exact
+dependency lock. First-party dependencies and non-package build resources are
+closed within that representation; no live dependency on a development checkout
+or replaceable Copilot plugin payload remains.
+
+Associated prebuilt first-party wheels are the preferred construction path.
+They cover the complete selected first-party closure, not only the top-level
+application. Registry dependencies retain their selected approved-source policy,
+and native tags and optional profiles remain explicit. Missing associated
+artifacts can select the separately governed source path; incompatible or corrupt
+artifacts do not masquerade as ordinary absence.
+
+Source, version composition and artifact association use native Git/release and
+uv identities with existing release authority. Assembly does not add a parallel
+whole-source fingerprint or a full-suite attestation barrier merely to copy
+already-selected applications. Native ownership, package integrity, immutable
+completion and readiness remain independent obligations.
+
 ### adopter-supplied-complete-defaults
+
+Direct invocation of a trusted harness setup flow by a user or an authorized
+agent is the installation action that authorizes the dependencies required by
+the selected harness configuration. That authority carries through the
+installer and its selected components, including their transitive dependencies;
+it does not require a separate approval service, per-package consent or an
+adopter-authored approval map. An already-authorized controller applies the
+same boundary for its addressed installation.
 
 An adopting harness can supply a complete, reviewed selection policy that
 works for operators who never customize local runtime settings. Its existing
@@ -74,6 +103,10 @@ still binds independently verified source and freezes a complete exact closure
 within declared constraints before assembly. Neither the presence of a
 candidate nor its self-declared approval authorizes it. Adopting a default
 never grants service activation, model download or unattended execution.
+The invoked setup approves the required dependency operation, not arbitrary
+packages, changed configuration or acquisition-policy exceptions. Signature,
+integrity, source, seasoning and revocation checks enforce that authorization;
+they are not another actor from whom ordinary setup must obtain consent.
 
 ### one-verified-acquisition-path
 
@@ -95,13 +128,16 @@ outcome is deferred or refused (see *deferred-not-degraded*). If an update
 leaves the dependency set unchanged, assembly reuses artifacts already
 admitted on the host and needs no access to a package index or feed.
 
-### first-party-only-public-distribution
+### license-compliant-distribution
 
-Public releases carry first-party code and the release lock only. Third-party
-dependencies are acquired by each installation from its approved sources
-according to the lock, never bundled into a public artifact. Any
-redistribution of third-party code happens only through a governed channel
-whose terms permit it.
+Runtime artifacts carry only content whose actual license and distribution
+terms permit the chosen channel. Required copyright/license notices, source
+access and replacement rights remain intact where applicable. First-party or
+third-party classification, and public availability alone, are neither a grant
+of rights nor a blanket prohibition. Qualification of a private source does not
+itself authorize public redistribution, and approved-source routing remains
+binding. Compliance follows the actual obligations without inventing a
+parallel approval framework or an artificial first-party-only restriction.
 
 ### governed-consumption-without-public-fallback
 
@@ -115,6 +151,20 @@ It never falls back to a public runtime index, relaxes a pin, or substitutes
 another version within that lock. The installation authority may instead
 select the governed local-source fallback below; if that cannot satisfy
 policy either, the prior healthy generation remains serving.
+
+### release-time-feed-evidence-without-client-authority-transfer
+
+A release's dependency requirements are qualified against the declared
+consumer-feed scopes before promotion, using the same production resolution
+and admission rules consumers enforce. An eligible feed-access worker can
+provide bounded, attributable evidence without transferring feed credentials
+or becoming an installation authority. Evidence for one target, optional
+profile or policy never stands in for another.
+
+Release-time observations do not authorize a later installation or override
+changed feed policy, revoked artifacts, source integrity or local admission.
+Indeterminate availability fails closed, and consumer-side deferred outcomes
+and the separately authorized governed-source fallback remain intact.
 
 ### governed-client-source-fallback
 
@@ -136,7 +186,7 @@ an ordinary availability fallback. If no permitted dependency closure can
 be assembled, the outcome is explicit and the current generation survives.
 
 ### selected-development-source-assembly
-An authority-selected, clean merged development snapshot can be assembled
+An authority-selected development snapshot can be assembled
 directly, without waiting for a generated release-branch payload or installing
 Copilot plugin content from that checkout. This explicit source mode is not
 an artifact-availability fallback and does not claim promotion attestation.
@@ -148,13 +198,21 @@ from the selected snapshot, including development-only source indirections.
 Materialization and version composition use the canonical source
 representation rather than a second approximation of promotion. The
 assembled runtime contains no live dependency on the source checkout.
+Default installation follows trusted upstream Main/release selection. Explicit
+local promotion and controlled source-change validation can use a committed
+development snapshot under their stated authority before public artifact
+publication, without claiming it is merged or promotion-attested. A selected
+last-known-good Main ancestor keeps its own finalized version/lock identity
+rather than impersonating the latest Main.
+
 Source identity, package version, optional capability profile and exact
 assembly/dependency identity remain separately observable.
 
 Interactive development also freezes source and build inputs before assembly;
-it never deploys an editable venv linked to the working checkout. The complete
-source hash contributes to generation identity even when the package version
-is unchanged. A new edit requires a new immutable generation or exact healthy
+it never deploys an editable venv linked to the working checkout.
+Native Git source and exact dependency/artifact identity distinguish a changed
+generation even when a package version is unchanged, without a new independent
+whole-source hashing framework. A new edit requires a new immutable generation or exact healthy
 reuse, not mutation of the selected environment. This does not relax the clean,
 merged-source admission required for unattended Dev deployment.
 
@@ -168,6 +226,11 @@ its predecessor cannot cooperate. The service lifecycle owns identity-checked
 termination and exclusive ownership, and consumers tolerate the outage while
 the newcomer recovers durable work. Immutable construction, source admission
 and state-safe recovery are not waived.
+
+An operator-selected atomic local set keeps its last good selection until every
+incoming member has admitted readiness and state-compatible rollback. A member
+that cannot participate safely blocks that atomic transition; independent cold
+takeover does not silently downgrade a requested all-prepared set.
 
 ### optional-client-artifacts-complete-promotion
 
@@ -246,7 +309,8 @@ silently.
   ([plugin-services *one-authority-per-lifecycle-decision*](../README.md#one-authority-per-lifecycle-decision)).
   Admission realizes a selection. It never chooses one.
 - **No public runtime-index fallback** for an installation routed to a
-  governed source, and **no third-party code in public releases**.
+  governed source, and **no redistribution that violates the actual license
+  or distribution terms of its contents**.
 - **No adopter-specific feeds, organizations, mirrors, or credentials** in
   the generic suite.
 - **Not a format specification.** This vision does not pin lock, manifest,

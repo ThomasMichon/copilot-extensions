@@ -28,7 +28,8 @@
     (inert), and the generated launcher hard-refuses a label-less run (#2869).
 
 .PARAMETER Action
-    install (default) | update | status | start | stop | uninstall.
+    install (default) | prepare | update | status | start | stop | uninstall.
+    prepare constructs and health-gates a candidate without adopting it.
 
 .PARAMETER InstallDir
     Override the runtime install directory (default: ~/.agent-dispatch).
@@ -54,6 +55,10 @@
     routed coordinator cuts over successfully. Runtime selection may already
     have changed when a cutover fails.
 
+.PARAMETER PreserveSupervisors
+    With update -RequireGracefulCutover: leave supervisor definitions, processes
+    and retained runtimes unchanged. This does not disable resident self-update.
+
 .PARAMETER RetainedRuntime
     With restore: a record captured by retained_runtime.py before the update.
     Reuses its completed immutable marketplace assembly with mandatory strict
@@ -61,7 +66,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'stamp', 'provision', 'restore')]
+    [ValidateSet('install', 'prepare', 'update', 'status', 'start', 'stop', 'uninstall', 'stamp', 'provision', 'restore')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [switch]$NoService,
@@ -70,7 +75,9 @@ param(
     [switch]$Purge,
     [switch]$Force,
     [switch]$RequireGracefulCutover,
+    [switch]$PreserveSupervisors,
     [string]$RetainedRuntime,
+    [string]$RetainedRuntimeSha256,
 
     # DEPRECATED / no-op (Thread B): the graceful zdd cutover
     # (Invoke-CoordinatorCutover) is already the DEFAULT on `update` whenever a
@@ -122,12 +129,40 @@ function Copy-InstallerStageDirectory {
 if ($RequireGracefulCutover -and ($Action -ne 'update' -or $NoService)) {
     throw '-RequireGracefulCutover requires update without -NoService'
 }
+if ($PreserveSupervisors -and ($Action -ne 'update' -or -not $RequireGracefulCutover -or
+    $NoService -or $NoSupervisor)) {
+    throw '-PreserveSupervisors requires update -RequireGracefulCutover without -NoService or -NoSupervisor'
+}
 if ($Action -eq 'restore') {
     if (-not $RetainedRuntime -or $NoService -or $NoSupervisor) {
         throw 'restore requires -RetainedRuntime and full coordinator/supervisor reconciliation'
     }
-} elseif ($RetainedRuntime) {
+} elseif ($RetainedRuntime -or $RetainedRuntimeSha256) {
     throw '-RetainedRuntime is valid only with restore'
+}
+
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+
+if ($env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'update', 'provision', 'uninstall', 'restore') -and
+    -not ($Action -eq 'uninstall' -and $DryRun)) {
+    $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
+        else { Join-Path $env:USERPROFILE '.agent-dispatch' }
+    $driverOptions = @()
+    foreach ($name in @('NoService', 'NoSupervisor', 'Interactive', 'Purge', 'Force',
+        'RequireGracefulCutover', 'PreserveSupervisors', 'ZeroDowntime', 'DryRun')) {
+        if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
+            $driverOptions += $name
+        }
+    }
+    $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
+        -Plugin 'agent-dispatch' -Action $Action -Options $driverOptions `
+        -RetainedRuntime $RetainedRuntime -RetainedRuntimeSha256 $RetainedRuntimeSha256
+    if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
+    $driverPython = $driverEntry.Python
+    $driverArguments = $driverEntry.Arguments
 }
 
 # Raise the shared self-stage watchdog's deadline for THIS plugin specifically,
@@ -465,6 +500,7 @@ function Clear-UpdateMarker {
 
 $PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $PkgSrcDir = Join-Path $PluginDir 'src\agent_dispatch'
+$script:ActionControlsHelper = Join-Path $PSScriptRoot 'action_controls.py'
 
 if (-not $InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-dispatch'
@@ -660,6 +696,11 @@ function Invoke-VersionedActivate {
             $script:ActivationSuperseded = $true
             return $true
         }
+        $actions = @('runtime-activation', 'coordinator-replacement')
+        if (-not (Get-Variable PreserveSupervisors -ValueOnly -ErrorAction SilentlyContinue)) {
+            $actions += 'supervisor-reconcile'
+        }
+        Assert-DispatchActions $actions
         $legacyVenv = Join-Path $InstallDir '.venv'
         if ((Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)) {
             if ($RequireGracefulCutover) {
@@ -669,6 +710,7 @@ function Invoke-VersionedActivate {
             try { Stop-DispatchProcess -Subcommand serve | Out-Null } catch {}
             try { Retire-SupervisorProcesses | Out-Null } catch {}
         }
+        Assert-DispatchActions @('runtime-activation')
         $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
         $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
         & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
@@ -782,6 +824,75 @@ function Get-BootstrapPython {
     return $null
 }
 
+function Assert-DispatchActions {
+    param([Parameter(Mandatory)][string[]]$Actions)
+    try {
+    $names = $Actions -join ', '
+    # Preserve Python-free stamping only after proving explicit policy absence.
+    $policy = Join-Path $InstallDir 'action-controls.json'
+    $paths = @()
+    $path = $policy
+    do {
+        $paths = @($path) + $paths
+        $parent = [IO.Path]::GetDirectoryName($path)
+        $path = if ($parent) { $parent } else { '' }
+    } while ($path)
+    foreach ($path in $paths) {
+        try { $attributes = [IO.File]::GetAttributes($path) }
+        catch [IO.FileNotFoundException] { return }
+        catch [IO.DirectoryNotFoundException] { return }
+        catch {
+            throw "[agent-dispatch] Action policy prerequisite failed for ${names}: cannot establish policy absence at ${path}: $($_.Exception.Message)"
+        }
+        if ($attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "[agent-dispatch] Action policy prerequisite failed for ${names}: linked policy path at $path"
+        }
+        if ($path -cne $policy -and -not ($attributes -band [IO.FileAttributes]::Directory)) {
+            throw "[agent-dispatch] Action policy prerequisite failed for ${names}: policy ancestor is not a directory: $path"
+        }
+    }
+    if (-not (Test-Path -LiteralPath $script:ActionControlsHelper -PathType Leaf)) {
+        throw "[agent-dispatch] Action policy prerequisite unavailable for ${names}: read-only helper is missing"
+    }
+    $python = Get-BootstrapPython
+    if (-not $python -or -not [IO.Path]::IsPathRooted($python) -or
+        -not (Test-Path -LiteralPath $python -PathType Leaf)) {
+        throw "[agent-dispatch] Action policy prerequisite unavailable for ${names}: absolute Python interpreter is missing"
+    }
+    $arguments = @('-I', '-B', $script:ActionControlsHelper, '--root', $InstallDir)
+    foreach ($name in $Actions) { $arguments += @('--action', $name) }
+    $diagnostic = ''
+    $output = Invoke-Hidden -FilePath $python -ArgList $arguments -ErrorOutput ([ref]$diagnostic)
+    $code = $LASTEXITCODE
+    if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+    if ($code -ne 0) {
+        throw "[agent-dispatch] Required action policy refused ${names} (exit $code): $output$diagnostic"
+    }
+    try { $decision = $output | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw "[agent-dispatch] Invalid action policy response for ${names}: $($_.Exception.Message)" }
+    if ($decision.ok -isnot [bool] -or -not $decision.ok) {
+        throw "[agent-dispatch] Action policy did not admit ${names}: $output"
+    }
+    } catch {
+        # Callable guards still throw; only the installer boundary maps this to exit 3.
+        $_.Exception.Data['AgentDispatch.ActionPolicyRefusal'] = $true
+        throw
+    }
+}
+
+function Assert-InstallActions {
+    if ($Action -in @('install', 'update', 'provision', 'restore')) {
+        if ($Action -eq 'update' -and
+            (Get-Variable PreserveSupervisors -ValueOnly -ErrorAction SilentlyContinue)) {
+            Assert-DispatchActions @('runtime-activation', 'coordinator-replacement')
+        } else {
+            Assert-DispatchActions @('runtime-activation', 'coordinator-replacement', 'supervisor-reconcile')
+        }
+    } elseif ($Action -eq 'stamp') {
+        Assert-DispatchActions @('runtime-activation')
+    }
+}
+
 function Get-PayloadHash {
     if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
         Assert-SourceRuntime
@@ -833,8 +944,27 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
+}
+
+function Invoke-RuntimeBrokerAdoption {
+    param([switch]$Retained)
+    if ($NoService -or $env:OS -ne 'Windows_NT' -or
+        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    if (-not $Retained -and
+        (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
+         $script:RuntimeConstructionSession.Process.HasExited)) {
+        throw 'Broker adoption requires attached complete-slot retention'
+    }
+    $diagnostic = ''
+    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
+        '--runtime-root', $InstallDir, '--slot', $VenvDir,
+        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
+        -ErrorOutput ([ref]$diagnostic)
+    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
+    $receipt = $result | ConvertFrom-Json
+    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
 }
 # === end install-contract:v4 marker/toss helpers ===
 
@@ -1216,6 +1346,7 @@ function Materialize-DispatchSnapshot {
     param([string]$SnapshotDir, [string]$PluginDir)
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     $libraries = [ordered]@{
+        'agent-update-driver' = 'update-driver'
         'agent-zdd' = 'zdd'
         'agent-procutil' = 'agent-procutil'
         'agent-dropin-registry' = 'dropin-registry'
@@ -1224,6 +1355,7 @@ function Materialize-DispatchSnapshot {
         'agent-worktree-identity' = 'worktree-identity'
         'agent-process-telemetry' = 'process-telemetry'
         'agent-plugin-activation' = 'plugin-activation'
+        'agent-repository-policy' = 'repository-policy'
     }
     $libsDir = Join-Path $SnapshotDir 'libs'
     New-Item -ItemType Directory -Path $libsDir -Force | Out-Null
@@ -1559,103 +1691,37 @@ function Deploy-SelfProvisioningBinstub {
     # (uniform-runtime-resolution, #765).
     $binDir = Join-Path $InstallDir 'bin'
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
-    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh',
+    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh', 'runtime-gate.ps1', 'runtime-gate.sh',
             'delegated-waiter-callback.ps1', 'delegated-waiter-callback.sh')) {
         $rSrc = Join-Path $PSScriptRoot $r
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
+    }
+    $contextDir = Join-Path $binDir 'installation-context'
+    [void][IO.Directory]::CreateDirectory($contextDir)
+    foreach ($r in @('installation-context.ps1', 'installation-context.sh',
+        'guest-environment.ps1', 'guest-environment.sh', 'json-query.awk')) {
+        Copy-Item -LiteralPath (Join-Path (Join-Path $PSScriptRoot 'installation-context') $r) `
+            -Destination (Join-Path $contextDir $r) -Force
+    }
+
+    if (-not (Test-Path -LiteralPath $legacyInstallDir -PathType Container) -or
+        (Get-InstallDirectoryIdentity -Path $InstallDir) -cne
+            (Get-InstallDirectoryIdentity -Path $legacyInstallDir)) {
+        Write-Ok 'Scoped install keeps the global compatibility binstubs unchanged'
+        return
     }
 
     $ps1Path = Join-Path $LocalBin 'agent-dispatch.ps1'
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
-$_root = Join-Path $env:USERPROFILE '.agent-dispatch'
-$_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
-function _Resolve-Py {
-    $AgentRtPy = $null
-    if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver }
-    return $AgentRtPy
-}
-$_py = _Resolve-Py
-if ($_py) { & $_py -m agent_dispatch @args; exit $LASTEXITCODE }
-if ($env:AGENT_DISPATCH_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-dispatch] runtime not provisioned (AGENT_DISPATCH_NO_SELFPROVISION set).'); exit 1 }
-[Console]::Error.WriteLine('[agent-dispatch] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
-[Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-dispatch eta_seconds=120 reason=first-use')
-$_pwsh = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-$_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
-# Primary path (agent-dispatch-standalone-container Phase 4): fetch and run the
-# UPSTREAM installer via the STABLE public-install-surface proxy
-# (install/dispatch/bootstrap.ps1 -- see
-# docs/patterns/standalone-service-layout.md), which itself resolves to
-# whatever the real standalone bootstrap currently is, rather than relying
-# on this plugin's own already-staged payload. This is a deliberate
-# transition toward a single installer source of truth; the locally stamped
-# snapshot below remains only as an offline/network-restricted fallback and
-# is expected to be dropped once this path is validated.
-# AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to the fallback (e.g. an
-# air-gapped host).
-$_provisioned = $false
-$_sourcePinned = $false
-$_sourceVersion = ''
-$_sourceMarkerPresent = $false
-$_sourcePayload = ''
-try { $_sourcePayload = [IO.File]::ReadAllText((Join-Path $_root 'payload-dir')).Trim() } catch [IO.FileNotFoundException] {}
-foreach ($_marker in @('stamped-version', 'current-version', 'last-known-good')) {
-    try {
-        $_selected = [IO.File]::ReadAllText((Join-Path $_root $_marker)).Trim()
-        if ($_selected -match '[+.]source\.') {
-            $_sourceMarkerPresent = $true
-            $_expectedSnapshot = Join-Path (Join-Path $_root 'snapshots') $_selected
-            if ([string]::Equals($_sourcePayload, $_expectedSnapshot, [StringComparison]::OrdinalIgnoreCase)) {
-                $_sourcePinned = $true; $_sourceVersion = $_selected; break
-            }
-        }
-    } catch [IO.FileNotFoundException] {}
-}
-if ($_sourceMarkerPresent -and -not $_sourcePinned) {
-    [Console]::Error.WriteLine('Selected source snapshot is unavailable; refusing a different provisioning source.')
-    exit 126
-}
-if (-not $_sourcePinned) {
-    $_sourceSlots = @(Get-ChildItem -LiteralPath (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match '[+.]source\.' })
-    if ($_sourceSlots.Count -gt 0) {
-        [Console]::Error.WriteLine('Source runtime recovery requires an exact source selector; refusing upstream provisioning.')
-        exit 126
-    }
-}
-if (-not $_sourcePinned -and -not $env:AGENT_DISPATCH_PROVISION_OFFLINE) {
-    $_bootUrl = 'https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/install/dispatch/bootstrap.ps1'
-    $_bootFile = Join-Path ([IO.Path]::GetTempPath()) "agent-dispatch-bootstrap-$PID.ps1"
-    try {
-        [Console]::Error.WriteLine('[agent-dispatch] fetching upstream installer (install/dispatch/bootstrap.ps1, main)...')
-        Invoke-WebRequest -Uri $_bootUrl -UseBasicParsing -TimeoutSec 20 -OutFile $_bootFile
-        & $_exe -NoProfile -ExecutionPolicy Bypass -File $_bootFile provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-        if ($LASTEXITCODE -eq 0) { $_provisioned = $true }
-    } catch {
-        [Console]::Error.WriteLine("[agent-dispatch] upstream installer fetch/run failed ($($_.Exception.Message)); falling back to the locally stamped snapshot.")
-    } finally {
-        Remove-Item -LiteralPath $_bootFile -Force -ErrorAction SilentlyContinue
-    }
-}
-if (-not $_provisioned) {
-    $_snap = ''
-    try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-    if ($_sourcePinned) {
-        $_expectedSnapshot = Join-Path (Join-Path $_root 'snapshots') $_sourceVersion
-        if (-not [string]::Equals($_snap, $_expectedSnapshot, [StringComparison]::OrdinalIgnoreCase)) {
-            [Console]::Error.WriteLine('Selected source snapshot is unavailable; refusing a different provisioning source.')
-            exit 126
-        }
-    }
-    $_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
-    if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-dispatch] cannot self-provision: no upstream installer reachable (set AGENT_DISPATCH_PROVISION_OFFLINE=1 to skip that attempt) and no local snapshot installer found. Re-enable the plugin, then retry.'); exit 127 }
-    & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-}
-$_py = _Resolve-Py
-if ($_py) { & $_py -m agent_dispatch @args; exit $LASTEXITCODE }
-[Console]::Error.WriteLine('[agent-dispatch] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
-exit 1
+$env:AGENT_DISPATCH_COMMAND_MODULE = 'agent_dispatch'
+$env:AGENT_DISPATCH_PAYLOAD_ROOT = '@PAYLOAD_ROOT@'
+& (Join-Path '@INSTALL_DIR@' 'bin\runtime-gate.ps1') @args
+exit $LASTEXITCODE
 '@
+    $ps1Content = $ps1Content.Replace('@INSTALL_DIR@', $InstallDir.Replace("'", "''"))
+    $publisher = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+    $ps1Content = $ps1Content.Replace('@PAYLOAD_ROOT@', $publisher.Replace("'", "''"))
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
 
     $stubPath = Join-Path $LocalBin 'agent-dispatch.cmd'
@@ -1665,7 +1731,7 @@ exit 1
 @echo off
 setlocal
 set "PYTHONUTF8=1"
-set "_PS1=%USERPROFILE%\.local\bin\agent-dispatch.ps1"
+set "_PS1=%~dp0agent-dispatch.ps1"
 if not exist "%_PS1%" (echo [agent-dispatch] binstub not found: %_PS1%>&2 & exit /b 127)
 set "_PSHOST="
 for /f "delims=" %%I in ('"%SystemRoot%\System32\where.exe" pwsh 2^>nul') do if not defined _PSHOST set "_PSHOST=%%I"
@@ -1674,22 +1740,14 @@ if not defined _PSHOST set "_PSHOST=%SystemRoot%\System32\WindowsPowerShell\v1.0
 exit /b %ERRORLEVEL%
 '@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
+    $boardPs1Path = Join-Path $LocalBin 'agent-dispatch-board.ps1'
+    [System.IO.File]::WriteAllText(
+        $boardPs1Path,
+        $ps1Content.Replace("AGENT_DISPATCH_COMMAND_MODULE = 'agent_dispatch'", "AGENT_DISPATCH_COMMAND_MODULE = 'agent_dispatch.board_cli'"),
+        $utf8NoBom
+    )
     $boardStubPath = Join-Path $LocalBin 'agent-dispatch-board.cmd'
-    $boardStubContent = @'
-@echo off
-setlocal
-set "PYTHONUTF8=1"
-set "_ROOT=%USERPROFILE%\.agent-dispatch"
-set "_VER="
-if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
-set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
-if exist "%_PY%" (
-  "%_PY%" -m agent_dispatch.board_cli %*
-  exit /b %ERRORLEVEL%
-)
-agent-dispatch inbox %* --board
-exit /b %ERRORLEVEL%
-'@
+    $boardStubContent = $stubContent.Replace('%~dp0agent-dispatch.ps1', '%~dp0agent-dispatch-board.ps1')
     [System.IO.File]::WriteAllText($boardStubPath, $boardStubContent, $utf8NoBom)
     Write-Ok "Binstub: $stubPath (self-provisioning)"
     Write-Ok "Fast board binstub: $boardStubPath"
@@ -1717,10 +1775,12 @@ function Install-RetainedRuntime {
     $slotOk = ($LASTEXITCODE -eq 0)
     $ErrorActionPreference = $prevEAP
     if (-not $slotOk) { throw 'Retained runtime failed its health gate; not activating' }
+    Invoke-RuntimeBrokerAdoption -Retained
     $mutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
     try {
         if (-not (Invoke-VersionedActivate)) { throw 'Retained runtime activation failed' }
         if (Test-ActivationSupersededNow) { throw 'Retained runtime activation was superseded' }
+        Assert-DispatchActions @('runtime-activation')
         Deploy-SelfProvisioningBinstub
         Write-Manifest
     } finally {
@@ -1730,6 +1790,19 @@ function Install-RetainedRuntime {
 }
 
 function Install-Runtime {
+    param([switch]$PrepareOnly)
+    if ($PrepareOnly -and -not $VersionedRuntime) {
+        throw 'Preparation requires a versioned runtime candidate'
+    }
+    if (Get-Variable PreserveSupervisors -ValueOnly -ErrorAction SilentlyContinue) {
+        $legacyVenv = Join-Path $InstallDir '.venv'
+        try {
+            [IO.File]::GetAttributes($legacyVenv) | Out-Null
+            throw 'Supervisor preservation requires an installation without a legacy .venv path'
+        } catch [IO.FileNotFoundException] {
+        } catch [IO.DirectoryNotFoundException] {
+        }
+    }
     if ($RetainedRuntime) { Install-RetainedRuntime; return }
     Assert-SourceRuntime
     $selectedBasePython = Resolve-DispatchBasePython
@@ -1798,7 +1871,8 @@ function Install-Runtime {
         Write-Warn 'uv acquisition failed -- using Python venv/pip fallback'
     }
 
-    foreach ($dir in @($InstallDir, $LocalBin)) {
+    $directories = if ($PrepareOnly) { @($InstallDir) } else { @($InstallDir, $LocalBin) }
+    foreach ($dir in $directories) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
     Write-Ok "Directories: $InstallDir"
@@ -1915,6 +1989,7 @@ function Install-Runtime {
         @{ Dir = 'plugin-resolve'; Pkg = 'agent-plugin-resolve'; Display = 'plugin-resolve' },
         @{ Dir = 'single-instance-lease'; Pkg = 'agent-single-instance-lease'; Display = 'single-instance-lease' },
         @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil'; Display = 'agent-procutil' },
+        @{ Dir = 'update-driver'; Pkg = 'agent-update-driver'; Display = 'update-driver' },
         @{ Dir = 'worktree-identity'; Pkg = 'agent-worktree-identity'; Display = 'worktree-identity' },
         @{ Dir = 'process-telemetry'; Pkg = 'agent-process-telemetry'; Display = 'process-telemetry' },
         @{ Dir = 'plugin-activation'; Pkg = 'agent-plugin-activation'; Display = 'plugin-activation' }
@@ -1963,6 +2038,7 @@ function Install-Runtime {
     # agent-procutil is exactly one of these.
     $StaleCacheRefreshPackages = @(
         'agent-dispatch',
+        'agent-update-driver',
         'agent-procutil',
         'agent-zdd',
         'agent-dropin-registry',
@@ -2103,6 +2179,11 @@ function Install-Runtime {
         }
         if (-not (Invoke-VersionedMarkComplete)) { exit 1 }
         Invoke-SupervisorAudit -Event runtime-ready -Reason import-health-gate -Outcome ok
+        if ($PrepareOnly) {
+            Write-Ok "Prepared runtime: $VenvDir (not activated; retention ends when this command exits)"
+            return
+        }
+        Invoke-RuntimeBrokerAdoption
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         # The supersession check and the shared publication it protects
         # (the binstub + deploy-manifest, both readable/overwritable by any
@@ -2161,6 +2242,7 @@ function Install-Runtime {
                 Write-Skip "Not publishing: source $SrcVersion is older than already-stamped $publishStampedVersion (a newer stamp published first; -Force to override)"
                 return
             }
+            Assert-DispatchActions @('runtime-activation')
             Deploy-SelfProvisioningBinstub
             Write-Manifest
             # The Picker materializes templates only from its verified active
@@ -2173,6 +2255,7 @@ function Install-Runtime {
         }
     } else {
         # Legacy (non-versioned) mode: no supersession concept, no lock.
+        Assert-DispatchActions @('runtime-activation')
         Deploy-SelfProvisioningBinstub
         Write-Manifest
         Register-PickerPivot
@@ -2207,7 +2290,10 @@ function Install-Runtime {
 
     # Versioned layout: prune old slots, keeping current + the previous-good (the
     # slot a not-yet-cycled daemon may still run from) + any live-pid-pinned slot.
-    if ($VersionedRuntime) { Invoke-VersionedGc -KeepPrev $prevVersion }
+    if ($VersionedRuntime -and
+        -not (Get-Variable PreserveSupervisors -ValueOnly -ErrorAction SilentlyContinue)) {
+        Invoke-VersionedGc -KeepPrev $prevVersion
+    }
 
     # -- PATH --
     $pathDirs = $env:PATH -split ';'
@@ -2229,7 +2315,8 @@ function Write-Manifest {
         $nativeError = ''
         $text = Invoke-Hidden -FilePath $VenvPython -ArgList @(
             '-I', '-B', (Join-Path $ScriptDir 'retained_runtime.py'), 'manifest',
-            '--root', $InstallDir, '--record', $RetainedRuntime
+            '--root', $InstallDir, '--record', $RetainedRuntime,
+            '--expected-record-sha256', $RetainedRuntimeSha256
         ) -ErrorOutput ([ref]$nativeError)
         if ($LASTEXITCODE -ne 0) { throw "Retained manifest validation failed: $text$nativeError" }
         Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-dir') -Content "$PluginDir`n" -Encoding $utf8NoBom
@@ -2487,9 +2574,9 @@ function Retire-SupervisorProcessesFallback {
                     )
                 } catch { }
             }
-            $dispatchArgv = @()
-            if ($underRoot) { $dispatchArgv = @(Get-SupervisorDispatchArguments -CommandLine $cmd) }
-            $isSupervisor = $underRoot -and $dispatchArgv.Count -gt 0 -and (
+            $dispatchArgv = @(Get-SupervisorDispatchArguments -CommandLine $cmd)
+            $ownedRuntime = $underRoot -or (Test-SupervisorInstallMarker -Executable $exe -CommandLine $cmd -Root $InstallDir)
+            $isSupervisor = $ownedRuntime -and $dispatchArgv.Count -gt 0 -and (
                 $dispatchArgv[0] -eq 'supervise'
             ) -and (
                 $dispatchArgv.Count -eq 1 -or $dispatchArgv[1] -eq 'serve' -or $dispatchArgv[1].StartsWith('-')
@@ -2670,6 +2757,7 @@ function Install-CoordinatorTask {
     # -- used after a graceful cutover already brought the new coordinator up, so a
     # Start-ScheduledTask here would race a SECOND coordinator (Thread B).
     param([switch]$NoStart)
+    Assert-DispatchActions @('coordinator-replacement')
     if ($NoService) {
         # Remove a coordinator task left from a prior full install so a host asked
         # to be client-only stops running one. Removal may be blocked without
@@ -3263,16 +3351,57 @@ function Start-DispatchDetachedLogonLauncher {
         [string[]]$LauncherArguments = @()
     )
     $spawn = @'
+import base64
+import json
 import sys
 from pathlib import Path
 from agent_procutil import spawn_daemon
+from agent_procutil.owned_process import run_caller_owned
+
+command = sys.argv[2:]
+launcher = Path(command[command.index('-File') + 1])
+with launcher.open(encoding='utf-8-sig') as stream:
+    if stream.readline().strip() != '# agent-dispatch-supervisor-launch-v1':
+        raise ValueError('Supervisor launcher does not support launch description v1')
+result = run_caller_owned(
+    [*command, '-DescribeLaunch'], cwd=sys.argv[1], timeout=30,
+    max_stdout_bytes=512 * 1024, max_stderr_bytes=65536,
+)
+if result.returncode != 0:
+    raise RuntimeError(
+        'Supervisor launch description failed: '
+        + result.stderr
+    )
+description = json.loads(base64.b64decode(result.stdout.strip(), validate=True).decode('utf-8'))
+if (
+    not isinstance(description, dict)
+    or set(description) != {'version', 'executable', 'arguments', 'log_path'}
+    or type(description['version']) is not int or description['version'] != 1
+    or not isinstance(description['executable'], str)
+    or not Path(description['executable']).is_absolute()
+    or not Path(description['executable']).is_file()
+    or not isinstance(description['arguments'], list)
+    or not all(isinstance(value, str) for value in description['arguments'])
+    or not isinstance(description['log_path'], str)
+):
+    raise ValueError('Invalid supervisor launch description v1')
 spawn_daemon(
-    sys.argv[2:], cwd=sys.argv[1],
-    log_path=Path(sys.argv[1]) / 'supervise-launcher.log',
+    [description['executable'], '-X', 'agent_dispatch_install_dir=' + sys.argv[1],
+     *description['arguments']], cwd=sys.argv[1],
+    log_path=description['log_path'],
+    env_overrides={'PYTHONUTF8': '1', 'AGENT_DISPATCH_INSTALL_DIR': sys.argv[1]},
     console_children=True,
 )
 '@
-    & $LinkPython -c $spawn $InstallDir powershell.exe -NoProfile -ExecutionPolicy Bypass `
+    $application = Get-Command powershell.exe -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    $windowsPowerShell = if ($application) { $application.Source } else { $null }
+    if (-not $windowsPowerShell -or -not [IO.Path]::IsPathRooted($windowsPowerShell) -or
+        -not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
+        throw 'Could not resolve a usable Windows PowerShell application (powershell.exe)'
+    }
+    $windowsPowerShell = (Get-Item -LiteralPath $windowsPowerShell -ErrorAction Stop).FullName
+    & $LinkPython -c $spawn $InstallDir $windowsPowerShell -NoProfile -ExecutionPolicy Bypass `
         -File $Launcher @LauncherArguments
     if ($LASTEXITCODE -ne 0) {
         throw "Could not launch durable service '$Launcher' outside the installer Job"
@@ -3379,7 +3508,11 @@ function Write-SupervisorLauncher {
     # stderr is captured, not a terminating NativeCommandError.
     $launcher = Join-Path $InstallDir 'supervise-service.ps1'
     $launcherBody = @"
-param([string]`$EnvFile = (Join-Path `$PSScriptRoot 'supervisor.env'))
+# agent-dispatch-supervisor-launch-v1
+param(
+    [string]`$EnvFile = (Join-Path `$PSScriptRoot 'supervisor.env'),
+    [switch]`$DescribeLaunch
+)
 # agent-dispatch embody supervisor launcher (generated by install.ps1; #2869).
 # Do not edit; edit supervisor.env or supervisors/<name>.env instead.
 `$ErrorActionPreference = 'Stop'
@@ -3497,6 +3630,16 @@ try {
         Move-Item -Force `$logFile "`$logFile.1"
     }
 } catch { }
+if (`$DescribeLaunch) {
+    `$description = @{
+        version = 1
+        executable = `$_py
+        arguments = @('-m', 'agent_dispatch') + `$argsList
+        log_path = `$logFile
+    } | ConvertTo-Json -Compress -Depth 4
+    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(`$description))
+    exit 0
+}
 try {
     "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (env=`$envFile labels=`$labels interval=`$interval log=`$logFile)" |
         Out-File -FilePath `$logFile -Append -Encoding utf8
@@ -3696,6 +3839,7 @@ function Install-SupervisorTaskInstance {
 }
 
 function Install-SupervisorTask {
+    Assert-DispatchActions @('supervisor-reconcile')
     $script:SupervisorReconcileFailed = $false
     $script:SupervisorReconciledNames = @{}
     Invoke-SupervisorAudit -Event service-reconcile -Reason configured-supervisor-pass
@@ -3715,6 +3859,10 @@ function Install-SupervisorTask {
     if ($NoSupervisor -or $NoService) {
         $reason = if ($NoSupervisor) { 'explicit-no-supervisor' } else { 'explicit-client-only' }
         Invoke-SupervisorAudit -Event selection -Reason $reason -Name $SupervisorTaskName -Outcome skipped
+        if ($env:OS -eq 'Windows_NT' -and $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+            & $driverPython @driverArguments --remove-broker
+            if ($LASTEXITCODE -ne 0) { throw 'Owned broker removal failed; runtimes preserved' }
+        }
         Remove-AllSupervisorTasks
         Invoke-SupervisorAudit -Event service-reconcile -Reason sequence-complete -Name $SupervisorTaskName -Outcome $(if ($script:SupervisorReconcileFailed) { 'fail' } else { 'ok' })
         Write-Skip 'Embody supervisor skipped (client-only / -NoSupervisor)'
@@ -3990,6 +4138,7 @@ function Invoke-Stamp {
         # Publish-FileAtomically guards the binstub's self-provisioning read
         # (which never takes this mutex) against observing a torn,
         # partially-written marker file.
+        Assert-DispatchActions @('runtime-activation')
         if ($script:SourceRuntimeIdentity) {
             Publish-SourceRedirects -Snapshot $snapDir
         } else {
@@ -4062,6 +4211,7 @@ function Invoke-CoordinatorCutover {
        autonomous units alive.
        Returns $true when the cutover brought up the new coordinator (so the
        caller skips a normal task-start), $false to fall back to a normal start. #>
+    Assert-DispatchActions @('coordinator-replacement')
     $py = if (Test-Path $VenvPython) { $VenvPython } elseif (Test-Path $LinkPython) { $LinkPython } else { $null }
     if (-not $py) { return $false }
     Write-Step 'Graceful cutover: standing the new coordinator up beside the old, then flipping routing...'
@@ -4074,6 +4224,12 @@ function Invoke-CoordinatorCutover {
     }
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
+    if ($rc -eq 3) {
+        $refusal = [InvalidOperationException]::new(
+            "[agent-dispatch] coordinator-replacement inhibited during cutover; runtime selection may already have changed. No restart fallback attempted. $($out.Trim())")
+        $refusal.Data['AgentDispatch.ActionPolicyRefusal'] = $true
+        throw $refusal
+    }
     $ok = $false
     try {
         $jsonLine = if ($RequireGracefulCutover) { $out } else {
@@ -4181,6 +4337,7 @@ function Invoke-Update {
                     # Pre-Thread-B coordinator (unrouted, no /drain): one-time
                     # stop-and-swap (invariant #2 fallback). Every future update from a
                     # Thread-B build is graceful. The supervisor is left running.
+                    Assert-DispatchActions @('coordinator-replacement')
                     $stopped = Stop-DispatchProcess -Subcommand serve
                     if ($stopped -gt 0) {
                         Write-Step "Stopped $stopped pre-cutover coordinator process(es) -- one-time transition to graceful cutover"
@@ -4194,7 +4351,11 @@ function Invoke-Update {
             # Refresh the boot task definition either way; -NoStart avoids launching a
             # SECOND coordinator when the cutover already brought the new one up.
             Install-CoordinatorTask -NoStart:$didCutover
-            Install-SupervisorTask
+            if (-not (Get-Variable PreserveSupervisors -ValueOnly -ErrorAction SilentlyContinue)) {
+                Install-SupervisorTask
+            } else {
+                Write-Skip 'Supervisor reconciliation and runtime collection explicitly preserved'
+            }
             if (-not $didCutover) { Confirm-CoordinatorRunning }
         } finally {
             [void]$cutoverMutex.ReleaseMutex()
@@ -4289,7 +4450,91 @@ function Invoke-Uninstall {
     Write-Host ''; Write-Host '=== agent-dispatch uninstall ===' -ForegroundColor Cyan
     if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
     Write-Host ''
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
 
+    function Get-DispatchUninstallProcesses {
+        Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir -Check
+        if ('..' -in ($InstallDir -split '[\\/]')) { throw 'Refusing traversal in uninstall root' }
+        $root = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\', '/')
+        if ($root -eq [IO.Path]::GetPathRoot($root).TrimEnd('\', '/') -or
+            $root -eq [IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\', '/')) {
+            throw 'Refusing uninstall of a filesystem or home root'
+        }
+        $ancestor = $root
+        while ($ancestor) {
+            $item = Get-Item -LiteralPath $ancestor -Force -ErrorAction Stop
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Refusing linked uninstall root' }
+            $ancestor = Split-Path -Parent $ancestor
+        }
+        $manifest = Join-Path $root 'deploy-manifest.json'
+        if (Test-Path -LiteralPath $manifest) {
+            $item = Get-Item -LiteralPath $manifest -Force -ErrorAction Stop
+            if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+                throw 'Refusing linked or non-file Dispatch deploy manifest'
+            }
+            $record = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json -ErrorAction Stop
+            if ($record.service -ne 'agent-dispatch' -or $record.source.plugin -ne 'agent-dispatch') {
+                throw 'Refusing foreign Dispatch deploy manifest'
+            }
+        }
+        $tasks = @(Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) +
+            @(Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue) +
+            @(Get-ScheduledTask -TaskName "$SupervisorTaskName-*" -ErrorAction SilentlyContinue)
+        foreach ($task in $tasks) {
+            $launcher = if ($task.TaskName -eq $TaskName) { 'serve-service.ps1' } else { 'supervise-service.ps1' }
+            if (@($task.Actions).Count -ne 1) { throw 'Refusing ambiguous Dispatch task actions' }
+            foreach ($taskAction in $task.Actions) {
+                if ((Split-Path -Leaf ([string]$taskAction.Execute)) -notin @('conhost.exe', 'pwsh.exe', 'powershell.exe') -or
+                    -not ([string]$taskAction.Arguments).Contains((Join-Path $root $launcher))) {
+                    throw "Refusing foreign Dispatch scheduled task: $($task.TaskName)"
+                }
+                $autoruns = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue
+                if ($autoruns) {
+                    foreach ($entry in $autoruns.PSObject.Properties) {
+                        if ($entry.Name -eq $TaskName -or $entry.Name -eq $SupervisorTaskName -or $entry.Name -like "$SupervisorTaskName-*") {
+                            $launcher = if ($entry.Name -eq $TaskName) { 'serve-service.ps1' } else { 'supervise-service.ps1' }
+                            if (-not ([string]$entry.Value).Contains((Join-Path $root $launcher))) {
+                                throw 'Refusing foreign Dispatch autorun binding'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+        $owned = @()
+        foreach ($row in $rows) {
+            if (-not $row.ExecutablePath -or -not ([string]$row.ExecutablePath).StartsWith(
+                    $root + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
+            $controller = [string]$row.CommandLine -match '(?i)(?:^|\s)-m\s+agent_dispatch\s+(?:--local\s+)?(?:serve|supervise(?:\s+serve)?)(?:\s|$)'
+            $registrar = [string]$row.CommandLine -match '(?i)(?:^|\s)-m\s+agent_dispatch\s+(?:emitter|schedule|webhook)\s+(?:serve\s+)?'
+            $ownedSpec = ([string]$row.CommandLine).IndexOf(
+                (Join-Path $root 'run\supervisor\'), [StringComparison]::OrdinalIgnoreCase) -ge 0
+            if (-not $controller -and -not ($registrar -and $ownedSpec)) {
+                throw "Runtime still in use by an unclassified process (pid=$($row.ProcessId))"
+            }
+            $owner = Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid -ErrorAction Stop
+            if ($owner.ReturnValue -ne 0 -or $owner.Sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+                throw 'Dispatch daemon user ownership cannot be validated'
+            }
+            $owned += $row
+        }
+        $ownedIds = @($owned | ForEach-Object { [int]$_.ProcessId })
+        foreach ($row in $rows) {
+            if ([int]$row.ParentProcessId -in $ownedIds -and [int]$row.ProcessId -notin $ownedIds) {
+                throw "Dispatch still owns a live worker/transport (pid=$($row.ProcessId)); refusing uninstall"
+            }
+        }
+        $endpoint = Join-Path $root 'run\endpoint.json'
+        if (Test-Path -LiteralPath $endpoint) {
+            $record = Get-Content -LiteralPath $endpoint -Raw | ConvertFrom-Json -ErrorAction Stop
+            if ($record.pid -and @($rows | Where-Object { $_.ProcessId -eq [int]$record.pid }).Count -and
+                [int]$record.pid -notin $ownedIds) { throw 'Dispatch endpoint names a foreign process' }
+        }
+        return $owned
+    }
+
+    $ownedProcesses = @(Get-DispatchUninstallProcesses)
     if ($DryRun) {
         Write-Host '[dry-run] would stop supervisors + retire supervisor processes'
         if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
@@ -4303,8 +4548,20 @@ function Invoke-Uninstall {
         }
     } else {
         Invoke-SupervisorsStop
-        $retired = Retire-SupervisorProcesses
-        if ($retired -gt 0) { Write-Ok "Embody supervisor stopped ($retired process(es))" }
+        foreach ($row in $ownedProcesses) {
+            $now = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
+            if ($now -and ($now.CreationDate -ne $row.CreationDate -or $now.CommandLine -cne $row.CommandLine)) {
+                throw 'Dispatch process identity changed; refusing uninstall'
+            }
+            if ($now) {
+                Stop-Process -Id $row.ProcessId -ErrorAction Stop
+                Wait-Process -Id $row.ProcessId -Timeout 15 -ErrorAction SilentlyContinue
+                $remaining = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
+                if ($remaining -and $remaining.CreationDate -eq $row.CreationDate) {
+                    throw 'Owned Dispatch daemon did not stop'
+                }
+            }
+        }
         Remove-AllSupervisorTasks
         Write-Ok 'Embody supervisor tasks removed'
     }
@@ -4340,63 +4597,68 @@ function Invoke-Uninstall {
         }
     }
 
-    foreach ($n in @(
-        'agent-dispatch.cmd', 'agent-dispatch.ps1', 'agent-dispatch',
-        'agent-dispatch-board.cmd'
-    )) {
-        $p = Join-Path $LocalBin $n
-        if (Test-Path $p) {
-            if ($DryRun) { Write-Host "[dry-run] would remove binstub: $p" }
-            else { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+    function Remove-DispatchRuntimeCode {
+        if ($DryRun) {
+            Write-Host "[dry-run] would remove owned runtime code at: $InstallDir"
+            return
         }
+        Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
     }
-    if (-not $DryRun) { Write-Ok 'Binstub removed' }
 
-    $pivot = Join-Path $env:USERPROFILE '.agent-worktrees\pivots\agent-dispatch.json'
-    if (Test-Path $pivot) {
-        if ($DryRun) { Write-Host "[dry-run] would remove pivot: $pivot" }
-        else { Remove-Item $pivot -Force -ErrorAction SilentlyContinue }
+    function Remove-DispatchHelperFiles {
+        param([string]$Directory, [string[]]$Names)
+        $ancestor = $Directory
+        while ($ancestor -and $ancestor -ne $InstallDir) {
+            $item = Get-Item -LiteralPath $ancestor -Force -ErrorAction Stop
+            if (-not $item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Refusing linked or non-directory runtime helpers'
+            }
+            $ancestor = Split-Path -Parent $ancestor
+        }
+        foreach ($name in $Names) {
+            $path = Join-Path $Directory $name
+            if (-not (Test-Path -LiteralPath $path)) { continue }
+            $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+                throw "Refusing linked or non-file runtime helper: $path"
+            }
+        }
+        foreach ($name in $Names) {
+            $path = Join-Path $Directory $name
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+        }
     }
 
     if ($Purge) {
         if (Test-Path $InstallDir) {
             if ($DryRun) { Write-Host "[dry-run] would PURGE (config + DB): $InstallDir" }
-            else { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue; Write-Ok "Runtime purged: $InstallDir (config + DB deleted)" }
+            else {
+                Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
+                Remove-InstallRuntimeContent -InstallRoot $InstallDir
+                Write-Ok "Runtime purged: $InstallDir (config + DB deleted; coordination retained)"
+            }
         }
     } else {
-        # Remove the runtime venv. Versioned: the `.venv` link + the versions/
-        # tree; otherwise the single real venv dir.
-        if ($VersionedRuntime) {
-            if ($DryRun) {
-                if ((Test-VenvIsLink $LinkDir) -or (Test-Path $LinkDir)) { Write-Host "[dry-run] would remove: $LinkDir" }
-                $verRoot = Join-Path $InstallDir 'versions'
-                if (Test-Path $verRoot) { Write-Host "[dry-run] would remove: $verRoot" }
-            } else {
-                if (Test-VenvIsLink $LinkDir) { & cmd /c rmdir "$LinkDir" 2>$null }
-                elseif (Test-Path $LinkDir) { Remove-Item -Recurse -Force $LinkDir -ErrorAction SilentlyContinue }
-                $verRoot = Join-Path $InstallDir 'versions'
-                if (Test-Path $verRoot) { Remove-Item -Recurse -Force $verRoot -ErrorAction SilentlyContinue }
-            }
-        } elseif (Test-Path $VenvDir) {
-            if ($DryRun) { Write-Host "[dry-run] would remove venv: $VenvDir" }
-            else { Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue }
-        }
+        Remove-DispatchRuntimeCode
         if ($DryRun) {
             Write-Host "[dry-run] config + DB at $InstallDir would be kept (-Purge to delete)"
         } else {
             Write-Ok 'Venv removed (config + DB kept; -Purge to delete)'
         }
     }
-
     if ($DryRun) { Write-Host 'agent-dispatch uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow }
 }
 
+$script:InstallerLifecycleAction = ''
+$script:InstallerLifecycleOutcome = 'fail'
+$installerActionRefusal = $null
+try {
 $ScriptDir = $PSScriptRoot
-. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 . (Join-Path $PSScriptRoot 'source-runtime.ps1')
 $PackageVersion = $SrcVersion
 $script:SourceRuntimeIdentity = $null
 if ($Action -eq 'restore') {
+    Assert-InstallActions
     $restorePython = Get-BootstrapPython
     if (-not $restorePython) { throw 'Retained restoration requires a bootstrap Python interpreter' }
     # Recursion control only; the parent helper owns the real retention lease.
@@ -4405,7 +4667,8 @@ if ($Action -eq 'restore') {
         $result = Invoke-Hidden -FilePath $restorePython -ArgList @(
             '-I', '-B', (Join-Path $ScriptDir 'retained_runtime.py'), 'restore',
             '--root', $InstallDir, '--record', $RetainedRuntime, '--shell', 'ps1',
-            '--shell-executable', (Get-Process -Id $PID).Path
+            '--shell-executable', (Get-Process -Id $PID).Path,
+            '--expected-record-sha256', $RetainedRuntimeSha256
         ) -ErrorOutput ([ref]$nativeError)
         $restoreExit = $LASTEXITCODE
         if ($result) { [Console]::Out.Write($result) }
@@ -4416,7 +4679,8 @@ if ($Action -eq 'restore') {
     $nativeError = ''
     $restored = Invoke-Hidden -FilePath $restorePython -ArgList @(
         '-I', '-B', (Join-Path $ScriptDir 'retained_runtime.py'), 'inspect',
-        '--root', $InstallDir, '--record', $RetainedRuntime
+        '--root', $InstallDir, '--record', $RetainedRuntime,
+        '--expected-record-sha256', $RetainedRuntimeSha256
     ) -ErrorOutput ([ref]$nativeError)
     if ($LASTEXITCODE -ne 0) { throw "Retained runtime validation failed: $restored$nativeError" }
     $restored = $restored | ConvertFrom-Json
@@ -4469,13 +4733,18 @@ $script:InstallerLifecycleAction = if ($Action -in @('install', 'provision')) { 
     elseif ($Action -in @('update', 'start', 'stop')) { $Action } else { '' }
 $script:InstallerLifecycleOutcome = 'fail'
 if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
-try {
-if ($Action -in @('install', 'update', 'provision', 'stamp')) {
+Assert-InstallActions
+if ($Action -in @('install', 'update', 'provision', 'stamp', 'prepare')) {
     Initialize-SourceRuntime
     Assert-SourceRuntime
 }
+if ($Action -in @('install', 'update', 'provision') -and -not $PreserveSupervisors) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 switch ($Action) {
     'install'   { Invoke-Install }
+    'prepare'   { Install-Runtime -PrepareOnly }
     'update'    { Invoke-Update }
     'start'     { Invoke-Start }
     'stop'      { Invoke-Stop }
@@ -4487,6 +4756,19 @@ switch ($Action) {
 $script:InstallerLifecycleOutcome = 'ok'
 exit 0
 
+} catch {
+    $failure = $_
+    $cause = $failure.Exception
+    while ($cause) {
+        $marker = $cause.Data['AgentDispatch.ActionPolicyRefusal']
+        if ($marker -is [bool] -and $marker) {
+            $installerActionRefusal = $failure
+            break
+        }
+        $cause = $cause.InnerException
+    }
+    if (-not $installerActionRefusal) { throw }
+    [Console]::Error.WriteLine($installerActionRefusal.ToString())
 } finally {
     try {
         if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
@@ -4494,10 +4776,12 @@ exit 0
         }
     } catch {
         $script:InstallerLifecycleOutcome = 'fail'
-        throw
+        if (-not $installerActionRefusal) { throw }
+        [Console]::Error.WriteLine("[agent-dispatch] Action policy refusal cleanup also failed: $($_.Exception.Message)")
     } finally {
         if ($script:InstallerLifecycleAction) {
             Write-InstallerLifecycle $script:InstallerLifecycleOutcome
         }
     }
+    if ($installerActionRefusal) { exit 3 }
 }

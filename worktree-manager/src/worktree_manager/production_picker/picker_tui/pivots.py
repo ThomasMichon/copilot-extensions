@@ -105,7 +105,8 @@ def find_claiming_task(pivots, pivot_runtimes, machine, wid, wid4):
         rt = pivot_runtimes.get(reg.name)
         if rt is None:
             continue
-        scope = "" if getattr(reg, "account_scoped", False) else machine
+        from .registered_scopes import read_scope
+        scope = read_scope(reg, machine)
         state, rows, _err = rt.get(scope)
         if state != "ready":
             continue
@@ -140,7 +141,8 @@ def supervised_workers_by_worktree(pivots, pivot_runtimes, machine):
         rt = pivot_runtimes.get(reg.name) if spec is not None else None
         if rt is None:
             continue
-        scope = "" if getattr(reg, "account_scoped", False) else machine
+        from .registered_scopes import read_scope
+        scope = read_scope(reg, machine)
         state, rows, _err = rt.get(scope)
         if state != "ready":
             continue

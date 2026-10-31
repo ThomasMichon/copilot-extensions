@@ -69,7 +69,8 @@ def test_manager_helper_sync_detects_missing_or_foreign_bytes(tmp_path, monkeypa
 def test_bare_bootstrap_does_not_resolve_a_project_before_construction(extension):
     text = (REPO / "worktree-manager" / f"bootstrap.{extension}").read_text(encoding="utf-8")
     assert "uv run" not in text
-    assert "uv python find --no-project" in text
+    command = "& $Uv python find --no-project" if extension == "ps1" else "uv python find --no-project"
+    assert command in text
     assert "runtime_install.py" in text
 
 

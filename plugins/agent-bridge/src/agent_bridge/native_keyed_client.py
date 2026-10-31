@@ -22,7 +22,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--native-invocation-file",
                         help="UTF-8 keyed native JSON; '-' reads stdin; returns admission receipt only")
     parser.add_argument("--receipt-only", action="store_true",
-                        help="Read the existing native invocation receipt; never admit on a miss")
+                        help="Read keyed-invocation or ordinary native-send admission; "
+                             "ordinary mode requires --expected-native-session-id and "
+                             "--idempotency-key; never admit or resume on a miss")
 
 
 def validate_options(args: argparse.Namespace) -> None:

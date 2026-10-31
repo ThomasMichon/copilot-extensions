@@ -153,6 +153,28 @@ def test_zero_signal_accounting_cannot_certify_nonempty_observations(signal):
     assert result["modes"]["enabled"]["telemetry_incomplete"] == 1
 
 
+def _assert_readback_resource_instance(request, *, signal, **expected):
+    from worktree_manager.performance_report import signal_readback
+
+    attributes = request["resourceLogs" if signal == "logs" else "resourceMetrics"][0]["resource"]["attributes"]
+    value = "01234567-89ab-4cde-8f01-23456789abcd"
+    instance = {"key": "service.instance.id", "value": {"stringValue": value}}
+    attributes.append(instance)
+    assert signal_readback([json.dumps(request)], signal=signal, **expected)["complete"]
+    for invalid in ("invalid", value.upper(), value.replace("-", ""), value.replace("4cde", "1cde"), 1):
+        instance["value"] = {"stringValue": invalid}
+        assert not signal_readback([json.dumps(request)], signal=signal, **expected)["complete"]
+    instance["value"] = {"stringValue": value}
+    for extra in (
+        {"key": "unexpected", "value": {"stringValue": "unexpected"}},
+        instance.copy(),
+    ):
+        attributes.append(extra)
+        assert not signal_readback([json.dumps(request)], signal=signal, **expected)["complete"]
+        attributes.pop()
+    assert signal_readback([json.dumps(request)], signal=signal, **expected)["complete"]
+
+
 def test_readback_scopes_logs_before_validating_foreign_batch_content():
     from copy import deepcopy
     from worktree_manager.performance_report import signal_readback
@@ -179,6 +201,7 @@ def test_readback_scopes_logs_before_validating_foreign_batch_content():
         "scopeLogs": [{"logRecords": [{"traceId": "d" * 32}]}],
     }]}
     assert signal_readback([json.dumps(request)], signal="logs", expected_logs=expected)["complete"]
+    _assert_readback_resource_instance(request, signal="logs", expected_logs=expected)
     upper = deepcopy(request)
     upper_log = upper["resourceLogs"][0]["scopeLogs"][0]["logRecords"][2]
     upper_log["traceId"] = upper_log["traceId"].upper()
@@ -230,6 +253,7 @@ def test_readback_uses_received_metric_type_and_rejects_conflicting_points(corru
         }]}}]}],
     })
     assert signal_readback([json.dumps(request)], signal="metrics", expected_metrics=expected)["complete"]
+    _assert_readback_resource_instance(request, signal="metrics", expected_metrics=expected)
     bad = deepcopy(metric)
     if corruption == "wrong_unit":
         bad["unit"] = "s"

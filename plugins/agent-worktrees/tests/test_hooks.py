@@ -423,6 +423,10 @@ class TestInstallHooks:
             assert shim.exists()
             text = shim.read_text()
             assert hooks._SHIM_MARKER in text
+            if name == "pre-push":
+                assert "agent-worktrees hook" not in text
+                assert "aw_check_update" in text
+                continue
             assert f"hook {name}" in text
             # The PR guard is gated on AGENT_WORKTREES_HOOKS=1 ...
             assert 'if [ "$AGENT_WORKTREES_HOOKS" = "1" ]' in text
@@ -439,6 +443,28 @@ class TestInstallHooks:
         hooks.install_hooks(anchor)  # no raise, still present
         hdir = hooks.hooks_dir_for(anchor)
         assert (hdir / "pre-commit").exists()
+
+    def test_refreshes_legacy_managed_shim_without_replacing_local_hook(self, anchor_and_worktree):
+        anchor, _ = anchor_and_worktree
+        hdir = hooks.hooks_dir_for(anchor)
+        hdir.mkdir(parents=True, exist_ok=True)
+        target = hdir / "pre-push"
+        target.write_text(
+            "#!/bin/sh\n"
+            f"# {hooks._SHIM_MARKER} -- managed; do not edit.\n"
+            'if [ "$AGENT_WORKTREES_HOOKS" = "1" ]; then\n'
+            '  agent-worktrees hook pre-push "$@" || exit $?\n'
+            "fi\n"
+            'if [ -x "$(dirname "$0")/pre-push.local" ]; then\n'
+            '  exec "$(dirname "$0")/pre-push.local" "$@"\n'
+            "fi\nexit 0\n",
+            encoding="utf-8",
+        )
+        local = hdir / "pre-push.local"
+        local.write_bytes(b"#!/bin/sh\nexit 53\n")
+        hooks.install_hooks(anchor)
+        assert target.read_text() == hooks._pre_push_shim(anchor)
+        assert local.read_bytes() == b"#!/bin/sh\nexit 53\n"
 
     def test_preserves_foreign_hook(self, anchor_and_worktree):
         anchor, _ = anchor_and_worktree

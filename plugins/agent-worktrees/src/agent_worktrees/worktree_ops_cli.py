@@ -82,7 +82,16 @@ def add_parsers(sub) -> None:
         help="Opaque logical allocation identity; replay returns the original "
         "worktree, while changed facts, pending effects, or terminal results refuse",
     )
+    p.add_argument("--machine", default=None, help="Destination registered execution space (default: local)")
+    p.add_argument("--repo", default=None, help="Destination repository (default: original CWD repository)")
     p.add_argument(
+        "--creation-request-id", default=None,
+        help="Recover an existing remote allocation by its retained origin request ID; never reserve a new one",
+    )
+    kinds = p.add_mutually_exclusive_group()
+    kinds.add_argument("--bridge", action="store_true", help="Create an agent-owned bridge worktree without launching it")
+    p.add_argument("--caller-worktree", default=None, help="With --bridge: retain the caller's navigation identity")
+    kinds.add_argument(
         "--system",
         action="store_true",
         help="Create a daemon-owned worktree (hidden from Picker, "
@@ -295,6 +304,8 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
 
 def cmd_create(args: argparse.Namespace) -> int:
     """Create a new worktree non-interactively."""
+    from .create_destination import creation_kind
+
     is_system = getattr(args, "system", False)
     no_owner = getattr(args, "no_owner", False)
     owner_ref = (
@@ -303,7 +314,6 @@ def cmd_create(args: argparse.Namespace) -> int:
         else (
             getattr(args, "owner_ref", None)
             or os.environ.get("AGENT_WORKTREES_OWNER_REF")
-            or _resolve_owner_ref()
             or None
         )
     )
@@ -355,27 +365,42 @@ def cmd_create(args: argparse.Namespace) -> int:
     dispatch_attempt = dispatch_fields if present_dispatch_fields else None
     with output.stdout_to_stderr():
         try:
+            kind = creation_kind(args)
             if project_state.namespaced():
                 project_state.ensure_project_state(cfg.project_name())
             config = cfg.load_config()
-            result = _create_worktree_core(
-                config,
-                no_mux=True,
-                kind="system" if is_system else "session",
-                owner=(getattr(args, "owner", None) or getattr(args, "name", None))
-                if is_system
-                else None,
-                name=getattr(args, "name", None) if is_system else None,
-                interface=getattr(args, "interface", None),
-                origin=getattr(args, "origin", None),
-                owner_ref=owner_ref,
-                inherit_parent_session=not (is_system or no_owner),
-                dispatch_attempt=dispatch_attempt,
-                bound_agent=getattr(args, "bound_agent", None),
-                no_pair=getattr(args, "no_pair", False),
-                pending_seed=getattr(args, "seed", None),
-                creation_key=getattr(args, "creation_key", None),
-            )
+            if any(getattr(args, field, None) is not None for field in ("machine", "repo", "creation_request_id")):
+                from . import create_destination
+
+                result = create_destination.create(
+                    args, owner_ref=owner_ref, dispatch_attempt=dispatch_attempt,
+                    invocation_cwd=_core()._INVOCATION_CWD or Path.cwd(),
+                    create_local=_create_worktree_core,
+                )
+            else:
+                if not owner_ref and not (is_system or no_owner):
+                    owner_ref = _resolve_owner_ref()
+                result = _create_worktree_core(
+                    config,
+                    no_mux=True,
+                    kind=kind,
+                    owner=(getattr(args, "owner", None) or getattr(args, "name", None))
+                    if is_system
+                    else None,
+                    name=getattr(args, "name", None) if is_system else None,
+                    interface=getattr(args, "interface", None),
+                    origin=getattr(args, "origin", None),
+                    caller_worktree=getattr(args, "caller_worktree", None),
+                    owner_ref=owner_ref,
+                    inherit_parent_session=not (is_system or no_owner),
+                    dispatch_attempt=dispatch_attempt,
+                    bound_agent=getattr(args, "bound_agent", None),
+                    no_pair=getattr(args, "no_pair", False),
+                    pending_seed=getattr(args, "seed", None),
+                    creation_key=getattr(args, "creation_key", None),
+                    build_launch_plan=False,
+                    identity_mode="tuple-v1",
+                )
         except CreationRequestFailure as exc:
             if args.json:
                 output._json_output(exc.payload())
@@ -401,6 +426,11 @@ def cmd_create(args: argparse.Namespace) -> int:
     print(f"✅ Created {label}: {wt['id']}")
     print(f"   Path:   {wt['path']}")
     print(f"   Branch: {wt['branch']}")
+    if "allocation" in result:
+        print(f"   Origin linkage: {result['allocation']['linkage']}")
+        if result["allocation"]["creation_key"] is not None:
+            print(f"   Retry creation key: {result['allocation']['creation_key']!r}")
+        print(f"   Recovery request ID: {result['allocation']['request_id']}")
     return 0
 
 
@@ -418,15 +448,18 @@ def _resolve_owner_ref() -> str | None:
     except Exception:
         project = config.repo_name
     session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-    return tracking.format_claim_ref(config.machine, project, caller_id, session)
+    machine = worktree_identity.reference_machine(config, caller_id, project=project)
+    return tracking.format_claim_ref(machine, project, caller_id, session)
 
 
-def _resolve_anchor_owner_ref(config: cfg.Config) -> str | None:
+def _resolve_anchor_owner_ref(
+    config: cfg.Config, *, cwd: Path | None = None, project: str | None = None,
+) -> str | None:
     """Resolve an ANCHOR owner ref when the CWD is a **singleton** repo's anchor."""
     try:
         from . import repos as _repos
 
-        project = cfg.project_name()
+        project = project or cfg.project_name()
     except Exception:
         return None
     if not project:
@@ -441,14 +474,15 @@ def _resolve_anchor_owner_ref(config: cfg.Config) -> str | None:
     if not anchor:
         return None
     try:
-        cwd = Path.cwd().resolve()
+        cwd = (cwd or Path.cwd()).resolve()
         anchor_p = Path(anchor).resolve()
         if cwd != anchor_p and anchor_p not in cwd.parents:
             return None
     except Exception:
         return None
     session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-    return tracking.format_anchor_ref(config.machine, project, session)
+    machine = worktree_identity.reference_machine(config, tracking.ANCHOR_ID, project=project)
+    return tracking.format_anchor_ref(machine, project, session)
 
 
 def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
@@ -500,32 +534,29 @@ def _ensure_anchor_ledger(
     tracking_dir,
 ) -> tracking.WorktreeRecord | None:
     """Lazily materialize a singleton project's ``@anchor`` claim ledger."""
-    try:
-        from . import repos as _repos
+    from types import SimpleNamespace
 
-        config = cfg.load_config()
-    except Exception:
-        return None
-    project = parsed.project or getattr(config, "repo_name", None)
+    from . import execution_spaces, repos as _repos
+
+    project = parsed.project or cfg.project_name()
     if not project:
-        return None
-    anchor = None
-    try:
-        entry = _repos.find_repo(project)
-        anchor = entry.local_path() if entry else None
-    except Exception:
-        anchor = None
-    if not anchor:
-        try:
-            anchor = config.default_repo.anchor
-        except Exception:
-            return None
-    try:
-        return tracking.load_or_create_anchor_record(
-            anchor, project, config.machine, config.platform, tracking_dir
+        raise execution_spaces.ExecutionSpaceError("anchor requires a receiving project")
+    config = execution_spaces.project_record_config(SimpleNamespace(repo=project))
+    anchor = config.default_repo.anchor
+    entry = _repos.find_repo(project)
+    registered_anchor = entry.local_path() if entry else None
+    if registered_anchor and Path(registered_anchor).resolve() != Path(anchor).resolve():
+        raise execution_spaces.ExecutionSpaceError(
+            "registered anchor conflicts with the receiving project configuration",
         )
-    except Exception:
-        return None
+    if parsed.machine and not execution_spaces.require_owner_identity(parsed.machine, config):
+        raise execution_spaces.ExecutionSpaceError(
+            "anchor owner belongs to a different execution space",
+        )
+    return tracking.load_or_create_anchor_record(
+        anchor, project, config.machine, config.platform, tracking_dir,
+        identity_mode="tuple-v1", config=config,
+    )
 
 
 def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | None:
@@ -536,7 +567,10 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None:
         return None
-    tdir = cfg.tracking_dir()
+    tdir = (
+        cfg.tracking_dir(parsed.project)
+        if parsed.is_anchor and parsed.project else cfg.tracking_dir()
+    )
     rec_path = tdir / f"{parsed.worktree_id}.yaml"
     if not rec_path.exists():
         if parsed.is_anchor:
@@ -550,6 +584,11 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
         from .execution_spaces import require_project_record_mutation
 
         require_project_record_mutation(record)
+        from .allocation_run import existing_claim
+
+        protected = existing_claim(record, stdout)
+        if protected is not None:
+            return protected
         # Idempotency contract matches `pr_ops._ensure_pr_claim`: capture
         # whether this ref is already an active `pr` claim BEFORE mutating
         # -- `add_resource_claim` reuses a matching ref rather than
@@ -602,7 +641,17 @@ def cmd_run(args: argparse.Namespace) -> int:
             f"machine/project/worktree_id ref (got {owner_ref!r})"
         )
         return 1
-    if parsed_owner.machine != run_config.machine:
+    from .execution_spaces import ExecutionSpaceError, require_owner_identity
+
+    try:
+        local_owner = (
+            parsed_owner.machine == run_config.machine
+            or require_owner_identity(parsed_owner.machine, run_config)
+        )
+    except ExecutionSpaceError as exc:
+        output.err(f"run: cannot resolve owner execution space: {exc}")
+        return 1
+    if not local_owner:
         output.err(
             f"run: cross-machine owner {owner_ref} cannot synchronously reserve "
             "this resource; use a dispatch/lease flow that persists remote "
@@ -654,17 +703,24 @@ def cmd_run(args: argparse.Namespace) -> int:
             output.err(f"run: cannot freeze owner ledger before creation: {exc}")
             return 1
 
+    reused_allocation = False
+
     def _finish_pending(claim: tracking.ResourceClaim | None) -> bool:
+        nonlocal reused_allocation
+
         if owner_path is None or not pending_ref:
             return claim is not None
-        if claim is None:
-            return False
         try:
             with tracking._RecordLock(owner_path, require_sidecar=True):
                 owner_record = tracking.load_record(owner_path)
                 from .execution_spaces import require_project_record_mutation
 
                 require_project_record_mutation(owner_record)
+                from .allocation_run import existing_claim
+
+                protected = existing_claim(owner_record, child_stdout)
+                if claim is None and protected is None:
+                    return False
                 owner_record.resources = [
                     item for item in owner_record.resources if item.ref != pending_ref
                 ]
@@ -673,14 +729,16 @@ def cmd_run(args: argparse.Namespace) -> int:
                 # BEFORE mutating -- a repeat `run` observing the same
                 # already-claimed PR must never feed a spurious second
                 # "claimed" event.
-                already_active = claim.kind == "pr" and any(
+                already_active = claim is not None and claim.kind == "pr" and any(
                     item.ref == claim.ref and item.kind == "pr"
                     and item.state == obligations.ACTIVE
                     for item in owner_record.resources
                 )
-                tracking.add_resource_claim(owner_record, claim, save=False)
+                if protected is None and claim is not None:
+                    tracking.add_resource_claim(owner_record, claim, save=False)
                 tracking.save_record(owner_record, owner_path)
-            if claim.kind == "pr" and not already_active:
+                reused_allocation = protected is not None
+            if claim is not None and claim.kind == "pr" and not already_active:
                 # worktree-claims-transitive-finalization Phase 3b: this is
                 # the actual live save site for `run`'s produced PR claim
                 # (the pending-ref placeholder above is replaced with the
@@ -717,15 +775,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     sys.stdout.flush()
 
     claim = _claim_from_run_output(child_stdout) if child_stdout.strip() else None
-    if claim is None:
-        output.err(
-            f"run: resource command exited {proc.returncode} but no claim could "
-            f"be parsed; pending ownership {pending_ref or '(cross-machine)'} is retained"
-        )
-        return proc.returncode or 1
     if not _finish_pending(claim):
-        return 1
-    output.err(f"run: journaled outbound claim {claim.ref} ({claim.kind}) on {owner_ref}")
+        if claim is None:
+            output.err(
+                f"run: resource command exited {proc.returncode} but no claim could "
+                f"be parsed; pending ownership {pending_ref or '(cross-machine)'} is retained"
+            )
+        return proc.returncode or 1
+    if reused_allocation:
+        output.err("run: retained original protected allocation responsibility; linkage reconciles asynchronously")
+    elif claim is not None:
+        output.err(f"run: journaled outbound claim {claim.ref} ({claim.kind}) on {owner_ref}")
     return proc.returncode
 
 

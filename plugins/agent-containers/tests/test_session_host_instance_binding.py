@@ -11,6 +11,32 @@ from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers.session_host_context import resolve_context
 
 
+@pytest.mark.parametrize(("configured", "observed"), [
+    ("external", None), ("agent-containers", "external"),
+])
+def test_session_host_ownership_mismatch_precedes_projection(monkeypatch, configured, observed):
+    selected = "a" * 64
+    config = ContainersConfig(fleets={
+        "example": FleetConfig(lifecycle_owner=configured, security_profile="trusted"),
+    })
+    labels = {"agent-containers.security-profile": "trusted"}
+    if observed is not None:
+        labels["agent-containers.lifecycle-owner"] = observed
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr("agent_containers.lifecycle.get_container", lambda *args: SimpleNamespace(
+        fleet="example", state="running", container_id=selected,
+    ))
+    monkeypatch.setattr("agent_containers.lifecycle.inspect_container", lambda target: {
+        "Id": selected, "Config": {"Labels": labels},
+    })
+    for effect in ("prepare_ssh_config", "container_environment", "host_gh_token", "write_remote_env"):
+        monkeypatch.setattr(cli, effect, lambda *a, **kw: pytest.fail("projection before ownership"))
+    with pytest.raises(RuntimeError, match="lifecycle owner does not match"):
+        cli._cmd_session_host_prepare(SimpleNamespace(
+            name="example-1", expected_instance=selected, host_relay_port=None,
+        ))
+
+
 @pytest.mark.parametrize("replacement_phase", ["discovery", "inspection"])
 def test_replaced_instance_refuses_before_any_projection(monkeypatch, replacement_phase):
     config = ContainersConfig()
@@ -73,6 +99,11 @@ def test_preparation_pins_every_remote_operation_to_selected_id(monkeypatch, cap
             return result
         return call
 
+    def hosting(instance, user, workspace):
+        assert instance == selected
+        effects.append("policy")
+
+    monkeypatch.setattr("agent_containers.hosting_policy.require_container_checkout", hosting)
     monkeypatch.setattr(cli, "prepare_ssh_config", operation("ssh", ssh))
     monkeypatch.setattr(cli, "cleanup_remote_envs", operation("cleanup", None))
     monkeypatch.setattr(cli, "container_environment", operation("environment", {}))
@@ -81,9 +112,33 @@ def test_preparation_pins_every_remote_operation_to_selected_id(monkeypatch, cap
         name="example-1", expected_instance=selected, host_relay_port=None,
     )) == 0
     result = json.loads(capsys.readouterr().out)
-    assert effects == ["ssh", "cleanup", "environment", "write"]
+    assert effects == ["policy", "ssh", "cleanup", "environment", "write"]
     assert result["execution_instance"] == selected
     assert result["state_command"][-2:] == ["--expected-instance", selected]
+
+
+def test_repository_denial_precedes_session_host_projection(monkeypatch):
+    from agent_containers.session_host_context import TrustedContext
+
+    config = ContainersConfig()
+    fleet = FleetConfig(security_profile="trusted")
+    context = TrustedContext(config, fleet, "node", "/workspaces/source", "a" * 64)
+    monkeypatch.setattr(cli, "_trusted_session_host_context", lambda *args: context)
+    effects = []
+
+    def denied(*args):
+        effects.append("policy")
+        raise RuntimeError("expose_agent: false")
+
+    monkeypatch.setattr("agent_containers.hosting_policy.require_container_checkout", denied)
+    for name in ("prepare_ssh_config", "cleanup_remote_envs", "container_environment",
+                 "host_gh_token", "write_remote_env"):
+        monkeypatch.setattr(cli, name, lambda *args, **kwargs: effects.append("projection"))
+    with pytest.raises(RuntimeError, match="expose_agent: false"):
+        cli._cmd_session_host_prepare(SimpleNamespace(
+            name="example-1", expected_instance="a" * 64, host_relay_port=None,
+        ))
+    assert effects == ["policy"]
 
 
 def test_context_inspects_immutable_id_not_name(monkeypatch):

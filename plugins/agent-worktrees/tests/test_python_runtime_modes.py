@@ -27,8 +27,11 @@ def modes(monkeypatch):
     return sys.modules["runtime_install_modes"]
 
 
-def test_dev_bootstrap_attributes_worktree_inputs_not_authority_payload(
-    modes, tmp_path, monkeypatch,
+@pytest.mark.parametrize(("mode", "recover_manager"), [
+    ("dev", False), ("repair", False), ("repair", True),
+])
+def test_mode_bootstrap_attributes_inputs_and_retains_recovery_intent(
+    modes, tmp_path, monkeypatch, mode, recover_manager,
 ):
     owner = tmp_path / "owner"
     plugin = owner / "plugins" / "agent-worktrees"
@@ -75,8 +78,12 @@ def test_dev_bootstrap_attributes_worktree_inputs_not_authority_payload(
 
         def __init__(self, argv, **_kwargs):
             assert argv[argv.index("--payload") + 1] == str(authority)
-            assert argv[argv.index("--owner") + 1] == str(owner.resolve())
-            Path(argv[argv.index("--result") + 1]).write_text('{"runtime_version":"dev"}')
+            if mode == "dev":
+                assert argv[argv.index("--owner") + 1] == str(owner.resolve())
+            else:
+                assert "--owner" not in argv
+            assert ("--recover-adopted-manager" in argv) is recover_manager
+            Path(argv[argv.index("--result") + 1]).write_text(json.dumps({"runtime_version": mode}))
 
         def wait(self):
             return self.returncode
@@ -96,8 +103,9 @@ def test_dev_bootstrap_attributes_worktree_inputs_not_authority_payload(
     )
     assert modes.run(
         root, plugin, payload=authority, uv=tmp_path / "uv",
-        base_python=Path(sys.executable), mode="dev", owner=owner,
-    ) == {"runtime_version": "dev"}
+        base_python=Path(sys.executable), mode=mode, owner=owner if mode == "dev" else None,
+        recover_adopted_manager=recover_manager,
+    ) == {"runtime_version": mode}
 
 
 def test_dev_owner_refuses_inputs_outside_claiming_worktree(modes, tmp_path):
@@ -115,14 +123,43 @@ def test_dev_owner_refuses_inputs_outside_claiming_worktree(modes, tmp_path):
         modes._resolve_owner(outside, owner, source_required=True)
 
 
+@pytest.mark.parametrize("owned", [False, True])
+@pytest.mark.parametrize("recover_manager", [False, True])
+def test_mode_cli_retains_requested_manager_recovery(
+    modes, tmp_path, monkeypatch, owned, recover_manager,
+):
+    calls = []
+
+    def run(root, plugin, **kwargs):
+        assert kwargs["recover_adopted_manager"] is recover_manager
+        calls.append(owned)
+        return {"runtime_version": "distinct-repair"}
+
+    monkeypatch.setattr(modes, "run_owned" if owned else "run", run)
+    arguments = [
+        "--root", str(tmp_path / "runtime"), "--plugin", str(tmp_path / "plugin"),
+        "--payload", str(tmp_path / "owner"), "--uv", str(tmp_path / "uv"),
+        "--base-python", sys.executable, "--result", str(tmp_path / "result.json"),
+        "--mode", "repair",
+    ]
+    if owned:
+        arguments += ["--mode-owner", "--governance-generation", "{}"]
+    if recover_manager:
+        arguments.append("--recover-adopted-manager")
+    assert modes.lifecycle.main(arguments) == 0
+    assert calls == [owned]
+
+
 @pytest.mark.parametrize("construction_failure", [False, True])
 @pytest.mark.parametrize("package_version", ["1.0.0-dev7", "1.0.0+local"])
+@pytest.mark.parametrize("recover_manager", [False, True])
 def test_repair_namespace_then_cutover_precede_allocation_and_real_construction(
     modes,
     tmp_path,
     monkeypatch,
     construction_failure,
     package_version,
+    recover_manager,
 ):
     from agent_worktrees import status_monitor_cutover as cutover
 
@@ -200,6 +237,7 @@ def test_repair_namespace_then_cutover_precede_allocation_and_real_construction(
         assert kwargs["lifecycle_slot"] == Path(sys.prefix).resolve()
         assert kwargs["package_version"] == package_version
         assert kwargs["previous"] == "broken"
+        assert kwargs["recover_adopted_manager"] is recover_manager
         events.append("settle")
         return {"runtime_version": version, "package_version": package_version}
 
@@ -226,6 +264,7 @@ def test_repair_namespace_then_cutover_precede_allocation_and_real_construction(
         base_python=Path(sys.executable),
         mode="repair",
         expected_governance={"generation": 1},
+        recover_adopted_manager=recover_manager,
     )
     if construction_failure:
         with pytest.raises(OSError, match="construction storage failure"):

@@ -15,12 +15,142 @@ configured provider. Managed installation/cutover, Gateway adaptation, native
 attachment and fleet-manager integration remain separate slices. A working
 client or foreground host is not evidence of those capabilities.
 
+## Construction resources in the artifact
+
+Normal wheel and sdist builds deliver byte-identical canonical
+`versioned-runtime` and Python `installer-engine` resources through the shared
+`standalone_build.py` hooks. An sdist carries the same build helper and complete
+resource family, so building its wheel does not require the repository or a
+sibling installation. A checkout build requires the canonical inputs and
+refuses conflicting included copies. There is no second maintained constructor
+or dependency resolver in Chat.
+
+Chat's callable core and installed client retain their Python3.10 minimum.
+The delivered canonical constructor has a separate **Python3.11+ bootstrap
+requirement**, as specified by the standard installation contract. Its presence
+does not add a TOML parser dependency to a core/client environment or make that
+environment a construction-compatible interpreter. Constructor import
+qualification runs positively on Python3.11+ and verifies that separate
+requirement, rather than claiming construction support, on Python3.10.
+
+The offline installed catalog verifies these resources against this wheel's
+RECORD along with Chat's own modules. This remains **local installed-resource
+evidence**, not release selection, installation authority or service
+supervision. Delivering the constructor does not execute
+it, acquire tools or credentials, create a slot, change commands or select a
+role. Explicit selected manual-client setup is described below.
+
+The internal `construction.client_candidate` seam applies Chat's exact client
+extra/local closure to that canonical engine; it does not construct a service
+role. It verifies the installed resource RECORD before loading, refuses an
+already occupied canonical import scope, and leaves no top-level import aliases.
+Its installed construction callback copies the unchanged canonical retention
+launcher and runtime family into the **unpublished** slot. Fresh and reuse health
+check that bootstrap against the installed wheel. The slot-local launcher can
+then retain the completed runtime before site/application imports and invoke the
+manual client without source inputs or a predecessor runtime. This is not a
+selected command catalog or an independently runnable installer. No selector,
+client configuration, host registration or legacy installation is changed.
+
+The canonical engine's wheel-inspection and snapshot companions are included
+unchanged as required transitive bootstrap resources. This adapter still uses
+declared-source construction; delivering those companions does not select a
+wheel profile or grant artifact admission.
+
+## Explicit selected manual-client setup
+
+The installed `agent_chat_service.setup` module is Chat's **manual-client**
+adapter over those canonical resources. Run it from an independently installed
+Chat client using Python3.11+; the selected client itself retains Python3.10
+support. It does not create a marketplace cell, change PATH, enroll a
+participant, obtain credentials, join a channel or register/start a host.
+Manager and Fleet are not prerequisites.
+
+All paths below stand for explicit absolute paths on the target platform.
+Supply an already-created nonsecret [client configuration](#installed-client-role).
+Its configuration and state directory must live outside the dedicated runtime
+root. The root must be absent on first install; a preexisting root without this
+adapter's matching journal is refused rather than adopted.
+
+```text
+<installed-client-python> -I -B -m agent_chat_service.setup
+  --root <dedicated-runtime-root> --installation-id <nonsecret-installation-id>
+  install --config <client.json> --project <independent-chat-source-project>
+  --version <immutable-slot-name> --uv <absolute-uv> --python <absolute-base-python>
+```
+
+`--project` supplies the complete independent sdist/source inputs and their
+unchanged declared local library layout; the adapter does not fetch a release
+or infer a source from PATH. `update` takes the same inputs and converges through
+the same implementation. A repeat with the same completed source/role selection
+does not republish selectors. A different-code update needs a distinct immutable
+slot. Slot names are 1-128 ASCII letters/digits plus `.`, `+`, `_` and `-`,
+begin with a letter/digit, and cannot be `dev`; setup validates this before
+creating the installation. Publication inputs/selectors use explicit private
+file modes independently of the caller's umask. Construction health and exact
+role closure finish before selection.
+Configuration drift is an explicit refusal, not permission to migrate state or
+rewrite configuration.
+
+With the same `--root` and `--installation-id`, the other commands are:
+
+| Command | Meaning |
+| --- | --- |
+| `status` | Read local selection/recovery state without acquiring a writer lease, spawning a child, contacting a provider or repairing anything. |
+| `catalog` | Derive the exact retained manual-client argv from the selected slot after its installed-resource RECORD check. |
+| `recover` | Explicitly reverse an unresolved publication, or finish an interrupted preserving removal, using retained created-object proofs. |
+| `uninstall` | Withdraw attributable selectors/selected command availability while preserving runtime slots, configuration, state and operation evidence. |
+
+There is one Chat installation-operation journal, not a second command registry
+or installer engine. It binds installation identity, immutable source hash,
+configuration hash and role to canonical `current-version`/`last-known-good`
+selectors and `selected.json`. Canonical copy publication retains the original
+context, backups and producer receipts. An interrupted operation blocks later
+mutation until explicit recovery. Same-byte replacements do not establish
+physical ownership; foreign objects remain protected and recovery stays visibly
+unresolved. Removal is resumable and does not reselect a previous generation.
+The supported journal is bounded to one MiB; reaching that bound refuses rather
+than dropping provenance.
+
+The selected catalog uses the slot-local canonical retention launcher before
+application imports. Retained explicit invocations remain usable after source
+removal and preserving uninstall, because removal does not delete runtime slots.
+Neither local selection nor this catalog authenticates a release feed, proves
+remote connectivity or establishes native listening/assignment. The service
+role, stable service launcher, health-gated activation, Manager discovery and
+optional container/Komodo execution remain separate lifecycle-owner integrations.
+
+## Optional container loadout contribution
+
+The explicitly selected [container contribution](container/README.md) supplies
+the portable `chat.service` loadout template and synthetic allocation/Komodo
+binding examples through Fleet Manager's existing data-only schemas. It requires
+explicit image, configuration, credential, retained-storage, Gateway, manager,
+network and resource inputs; it does not install or run Fleet Manager.
+Private template actualization preserves the adopter's selected provenance and
+overrides. The contribution is not a delivered image, supported Gateway
+connector, applied Stack, private configuration or deployment readiness.
+Those remain open under the reviewed container contract and parent effort.
+
 ## Callable core
 
 Install the distribution with the chosen package manager. Runtime dependencies
 are only Python's standard library; Copilot and a source checkout are not needed.
 The caller supplies its owned data directory and nonsecret installation identity.
 Use one owning store instance per directory, and close it during owned cleanup.
+
+`__version__`, CLI version output and store health use the installed
+distribution's metadata, retaining the `-devN` display spelling. A source tree
+without installed metadata reads its own matching `[project]` name and version;
+missing, malformed or ambiguous metadata fails explicitly. The source fallback
+counts bare and simply quoted key declarations before validating their values:
+non-string duplicates cannot be ignored. Simple table headers support comments
+and quoted components, and duplicate project tables are refused. Multiline
+strings, escaped keys, dotted project keys and array-of-table headers are outside
+this fallback's supported subset and fail explicitly. Python 3.10 remains
+supported without another runtime dependency. Version allocation changes
+package metadata, not imported Python bytes, so promotion can retain exact
+source-unit equivalence.
 
 ```python
 from agent_chat_service import ChatStore, json_bytes, strict_json
@@ -53,10 +183,11 @@ create another ownership registry.
 
 ## Explicit local host artifact
 
-The distribution's `service` extra adds only the canonical
-`agent-single-instance-lease` and `agent-endpoint-rendezvous` libraries. It
+The distribution's `service` extra adds the canonical `agent-procutil`,
+`agent-single-instance-lease` and `agent-endpoint-rendezvous` libraries for
+daemon-instance custody, single-instance ownership and endpoint publication. It
 requires neither Copilot, another service, a source checkout, a sibling runtime,
-Docker nor a process-provider helper. Installing the core without that extra
+nor Docker. Installing the core without that extra
 does not acquire those dependencies; attempting to host reports
 `host_service_dependencies_missing` without creating data or provisioning them.
 

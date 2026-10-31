@@ -1,0 +1,9 @@
+{
+  "comment": "Support explicit all-repository task listing in generated worker startup commands while preserving scoped defaults and peer routing.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

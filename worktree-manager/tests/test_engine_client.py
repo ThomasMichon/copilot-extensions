@@ -9,12 +9,14 @@ assert the parsing, the version-skew retry, and the error paths.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import subprocess
 import sys
 
 import pytest
 
 from worktree_manager import engine_client as ec
+from worktree_manager import companion_client as cc
 
 
 @pytest.fixture(autouse=True)
@@ -30,6 +32,13 @@ def _fake_completed(cmd, returncode=0, stdout="", stderr=""):
     return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
 
 
+def _hosting_policy() -> dict:
+    return {
+        "version": 1, "repository": str(Path.cwd()), "expose_agent": None,
+        "sources": [], "denied_by": [], "allowed": True,
+    }
+
+
 def _install_fake(monkeypatch, handler):
     """Point the client at a fake engine binstub + a scripted ``subprocess.run``."""
     monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
@@ -39,10 +48,16 @@ def _install_fake(monkeypatch, handler):
     monkeypatch.setattr(
         ec, "installed_engine_command", lambda: ["/fake/agent-worktrees"]
     )
+    def with_policy(cmd: list[str], kw: dict) -> subprocess.CompletedProcess[str]:
+        verb = 3 if cmd[1:2] == ["--project"] else 1
+        if cmd[verb:verb + 2] == ["agent-policy", "check"]:
+            return _fake_completed(cmd, stdout=json.dumps(_hosting_policy()))
+        return handler(cmd, kw)
+
     monkeypatch.setattr(ec.subprocess, "run",
-                        lambda cmd, **kw: handler(cmd, kw))
+                        lambda cmd, **kw: with_policy(cmd, kw))
     monkeypatch.setattr(
-        "worktree_manager.engine_process.run", lambda cmd, **kw: handler(cmd, kw),
+        "worktree_manager.engine_process.run", lambda cmd, **kw: with_policy(cmd, kw),
     )
 
 
@@ -65,6 +80,50 @@ def test_engine_environment_removes_parent_python_runtime(monkeypatch):
     assert env["PYTHONUTF8"] == "1"
     assert env["PYTHONSAFEPATH"] == "1"
     assert env["UV_DEFAULT_INDEX"] == "https://example.invalid/simple"
+
+
+def test_worktree_status_bundle_uses_selected_engine_contract(monkeypatch):
+    bundle = {"worktree_id": "wt-selected", "facts": {"claims": {"value": None}}}
+    calls = []
+    monkeypatch.setattr(
+        ec, "run_json",
+        lambda project, args, **kw: calls.append((project, args)) or bundle,
+    )
+    assert cc.worktree_status_bundle("project", "wt-selected") is bundle
+    assert calls == [("project", [
+        "worktree-status-bundle", "--worktree", "wt-selected", "--json",
+    ])]
+
+
+@pytest.mark.parametrize("payload", [
+    {"worktree_id": "other", "facts": {}},
+    {"worktree_id": "wt-selected", "facts": []},
+    {"error": "not found"},
+    None,
+])
+def test_worktree_status_bundle_refuses_wrong_or_unavailable_identity(monkeypatch, payload):
+    monkeypatch.setattr(ec, "run_json", lambda *a, **k: payload)
+    with pytest.raises(ec.EngineError, match="selected worktree"):
+        cc.worktree_status_bundle(None, "wt-selected")
+
+
+def test_worktree_status_bundle_through_real_subprocess(tmp_path):
+    script = tmp_path / "example engine.py"
+    script.write_text(
+        "import json, sys\n"
+        "assert sys.argv[1:] == ['--project', 'example project', "
+        "'worktree-status-bundle', '--worktree', 'wt-selected', '--json']\n"
+        "print(json.dumps({'worktree_id': 'wt-selected', 'facts': {"
+        "'claims': {'value': {'resources': []}, 'confirmed': True, "
+        "'observed_at': 1700000000}}}))\n",
+        encoding="utf-8",
+    )
+    ec.set_engine_command([sys.executable, str(script)])
+    try:
+        bundle = cc.worktree_status_bundle("example project", "wt-selected")
+    finally:
+        ec.set_engine_command(None)
+    assert bundle["facts"]["claims"]["value"]["resources"] == []
 
 
 def test_engine_environment_preserves_differently_cased_posix_names(monkeypatch):
@@ -929,7 +988,7 @@ def test_resolve_without_seed_omits_seed_flag(monkeypatch):
 
 @pytest.mark.parametrize("new", [False, True])
 @pytest.mark.parametrize("target,seed,timeout,expected", [
-    ("target", "task", 30, 240),
+    ("target", "task", 30, 300),
     ("target", "task", 500, 500),
     ("target", "task", None, None),
     (None, "task", None, None),
@@ -942,9 +1001,20 @@ def test_resolve_without_seed_omits_seed_flag(monkeypatch):
 def test_resolve_remote_prompt_timeout_floor(new, target, seed, timeout, expected, monkeypatch):
     seen = []
 
-    def run_json(project, args, *, timeout, stream_progress):
+    def run_json(project, args, *, timeout=None, stream_progress=False, **kwargs):
+        if args[:2] == ["agent-policy", "check"]:
+            assert kwargs["allow_nonzero"] is True
+            return _hosting_policy()
         assert stream_progress is True
         seen.append(timeout)
+        if target and seed:
+            return {
+                "action": "remote", "ssh_alias": "target", "remote_command": "fixture",
+                "launch_request_version": 2, "native_seed_required": True,
+                "launch_attempt_id": None, "launch_request_id": "a" * 32,
+                "seed_id": "a" * 32, "seed_pending": True,
+                "worktree_id": "wt-a", "seed_kind": "new" if new else "resume",
+            }
         return {
             **_RESUME_PLAN, "seed_pending": bool(seed),
             "seed_id": "intent" if seed else None,
@@ -957,6 +1027,64 @@ def test_resolve_remote_prompt_timeout_floor(new, target, seed, timeout, expecte
         target_machine=target, seed=seed, timeout=timeout,
     )
     assert seen == [expected]
+
+
+@pytest.mark.parametrize("new", [False, True])
+@pytest.mark.parametrize("damage", [
+    None, "action", "launch_request_version", "native_seed_required", "launch_attempt_id",
+    "launch_request_id", "seed_id", "seed_kind", "worktree_id", "missing",
+])
+def test_remote_prompt_requires_bound_native_receipt(monkeypatch, new, damage):
+    calls = []
+    def run_json(project, args, **kwargs):
+        if args[:2] == ["agent-policy", "check"]:
+            return _hosting_policy()
+        calls.append(args)
+        assert args[args.index("--launch-attempt-id") + 1] == "b" * 32
+        assert "--require-native-seed" in args
+        result = {
+            "action": "remote", "ssh_alias": "target", "remote_command": "fixture",
+            "launch_request_version": 2, "native_seed_required": True,
+            "launch_attempt_id": "b" * 32, "launch_request_id": "a" * 32,
+            "seed_id": "a" * 32, "seed_pending": True,
+            "worktree_id": "wt-a", "seed_kind": "new" if new else "resume",
+            "launch_attempt_receipt": {
+                "version": 1, "operation_id": "d" * 32, "phase": "remote-admission-returned",
+                "worktree_id": "wt-a", "seed_id": "a" * 32, "request_id": "a" * 32,
+            },
+        }
+        if damage == "missing":
+            del result["launch_attempt_id"]
+        elif damage:
+            result[damage] = {
+                "action": "exec", "launch_request_version": 1, "native_seed_required": False,
+                "launch_attempt_id": "c" * 32, "launch_request_id": "invalid",
+                "seed_id": "c" * 32, "seed_kind": "wrong", "worktree_id": "",
+            }[damage]
+        return result
+    monkeypatch.setattr(ec, "run_json", run_json)
+    options = dict(new=new, worktree_id=None if new else "wt-a", target_machine="target",
+                   seed="fixture", launch_attempt_id="b" * 32)
+    if damage:
+        with pytest.raises(ec.EngineFeatureUnavailable, match="inspect"):
+            ec.resolve_launch_plan("example", **options)
+    else:
+        assert ec.resolve_launch_plan("example", **options).action == "remote"
+    assert len(calls) == 1
+
+
+def test_old_engine_never_retries_without_attempt_correlation(monkeypatch):
+    calls = []
+    def run_json(project, args, **kwargs):
+        if args[:2] == ["agent-policy", "check"]:
+            return _hosting_policy()
+        calls.append(args)
+        raise ec.EngineError("unrecognized arguments: --launch-attempt-id")
+    monkeypatch.setattr(ec, "run_json", run_json)
+    with pytest.raises(ec.EngineFeatureUnavailable, match="launch-resolution receipts"):
+        ec.resolve_launch_plan("example", new=True, target_machine="target",
+                               seed="fixture", launch_attempt_id="b" * 32)
+    assert len(calls) == 1
 
 
 def test_resolve_base_sends_base_flag(monkeypatch):

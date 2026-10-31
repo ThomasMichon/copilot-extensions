@@ -347,6 +347,7 @@ class CliNamespaceResolver(NamespaceResolver):
             if source:
                 argv += selection_cli_args({
                     "source": source, "enable": getattr(plugin, "enable", True),
+                    "allow_missing": getattr(plugin, "allow_missing", False),
                 })
         res = await self._run(argv)
         if res is not None:
@@ -518,10 +519,19 @@ class CliNamespaceResolver(NamespaceResolver):
                                 f"{self._binstub} namespace-resolve returned "
                                 "an invalid host"
                             )
+                        project = spec.get("project")
+                        if project is not None and (
+                            not isinstance(project, str) or not project.strip()
+                        ):
+                            raise RuntimeError(
+                                f"{self._binstub} namespace-resolve returned "
+                                "an invalid project"
+                            )
                         self.invalidate_list_cache()
                         return SpawnTarget(
                             type="ssh" if host else "local",
                             worktree_id=worktree_id,
+                            project=project,
                             host=host,
                             user=spec.get("user"),
                             venue=venue or None,

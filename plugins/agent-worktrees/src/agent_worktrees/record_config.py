@@ -56,7 +56,9 @@ def metadata_project(explicit: str | None, *, cwd: Path | None = None) -> str | 
     return None
 
 
-def configured_repository_paths(project: str) -> dict[str, Path]:
+def configured_repository_paths(
+    project: str, *, require_project_absolute: bool = False,
+) -> dict[str, Path]:
     """Read declared anchors without loading repository policy or Git."""
     from .config_dropins import read_operator_config_fragments
 
@@ -87,7 +89,12 @@ def configured_repository_paths(project: str) -> dict[str, Path]:
         registered = registry.repos.get(name)
         path = anchor or (registered.local_path(platform) if registered is not None else None)
         if path:
-            configured[name] = Path(path).resolve()
+            declared_path = Path(path)
+            if require_project_absolute and name == project:
+                declared_path = declared_path.expanduser()
+                if not declared_path.is_absolute():
+                    raise ValueError(f"Repository anchor must be absolute for hosting inspection: {name!r}")
+            configured[name] = declared_path.resolve()
     if project not in configured:
         raise ValueError(f"No repository configured for active project {project!r}")
     return configured

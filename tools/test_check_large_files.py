@@ -3,11 +3,8 @@ always-blocked source-map/diff/patch denylist).
 
 Drives the real ``tools/check-large-files.py`` as a subprocess inside a
 throwaway git repo, the same pattern ``test_check_module_size.py`` uses --
-except for the single in-process unit test at the end of this file, which
-needs to mock a git subprocess call to exercise a failure path no amount of
-real repo setup can reliably reproduce (a successful blob lookup that then
-fails to read -- corrupting a real git object store on purpose is not a
-reliable, portable way to test this).
+with focused in-process controls for Git metadata failures and bounded batch
+protocols that a real object store cannot reliably reproduce without corruption.
 
 Run:  python -m pytest tools/test_check_large_files.py
 """
@@ -37,8 +34,108 @@ def _load_module():
     return module
 
 
+def test_final_diff_uses_one_lossless_diff_and_one_metadata_batch():
+    module = _load_module()
+    blob = "c" * 40
+    names = ["line\nbreak.txt", "line\tbreak.map"]
+    raw = b"".join(
+        f":000000 100644 {'0' * 40} {blob} A\0{name}\0".encode()
+        for name in names
+    )
+    with mock.patch.object(module, "_publication_commits", side_effect=lambda refs: {ref: ref for ref in refs}), \
+            mock.patch.object(module, "_blob_sizes", return_value={blob: 1}) as metadata, \
+            mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        [], 0, raw, b"",
+    )) as git:
+        assert module._blobs_in_diff("base", "head") == [(names[1], 1)]
+    assert git.call_count == 1
+    assert git.call_args.args[0] == "diff"
+    assert git.call_args.args[-3:] == ("base", "head", "--")
+    assert "--no-renames" in git.call_args.args
+    metadata.assert_called_once_with([blob])
+
+
+def test_final_diff_refuses_failed_or_incomplete_metadata():
+    module = _load_module()
+    with mock.patch.object(module, "_publication_commits", side_effect=lambda refs: {ref: ref for ref in refs}):
+        with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+            [], 1, b"", b"unavailable diff",
+        )):
+            with pytest.raises(module.GitEnumerationError, match="diff --raw"):
+                module._blobs_in_diff("base", "head")
+        for raw in (b"truncated", b"metadata\0", b"metadata\0path\0"):
+            with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+                [], 0, raw, b"",
+            )):
+                with pytest.raises(module.GitEnumerationError, match="diff metadata"):
+                    module._blobs_in_diff("base", "head")
+
+
+def test_publication_commit_resolution_batches_and_binds_each_reference():
+    module = _load_module()
+    raw = f"{'a' * 40} commit 123 HEAD\n{'b' * 40} commit 456 origin/dev\n".encode()
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        [], 0, raw, b"",
+    )) as git:
+        assert module._publication_commits(["HEAD", "origin/dev", "HEAD"]) == {
+            "HEAD": "a" * 40, "origin/dev": "b" * 40,
+        }
+    assert git.call_count == 1
+    assert git.call_args.kwargs["input"] == b"HEAD^{commit} HEAD\norigin/dev^{commit} origin/dev\n"
+
+
+@pytest.mark.parametrize("raw", [
+    b"", b"not-a-sha commit 1 HEAD\n",
+    ("a" * 40 + " blob 1 HEAD\n").encode(),
+    ("a" * 40 + " commit invalid HEAD\n").encode(),
+    ("a" * 40 + " commit 1 another-ref\n").encode(),
+])
+def test_publication_commit_resolution_refuses_incomplete_or_mismatched_data(raw):
+    module = _load_module()
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess([], 0, raw, b"")):
+        with pytest.raises(module.GitEnumerationError):
+            module._publication_commits(["HEAD"])
+
+
+def test_publication_commit_resolution_retains_missing_ref_and_refuses_batch_injection():
+    module = _load_module()
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        [], 0, b"absent^{commit} missing\n", b"",
+    )):
+        assert module._publication_commits(["absent"]) == {"absent": None}
+    with mock.patch.object(module, "_git_bytes") as git:
+        with pytest.raises(module.GitEnumerationError):
+            module._publication_commits(["HEAD\nother"])
+        git.assert_not_called()
+
+
+def test_pinned_annotated_tag_keeps_original_identity_separate_from_commit():
+    module = _load_module()
+    tag, commit = "a" * 40, "b" * 40
+    raw = f"{tag} tag 123 {tag}\n{commit} commit 456 {tag}\n".encode()
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        [], 0, raw, b"",
+    )) as git:
+        assert module._publication_commits([tag]) == {tag: commit}
+    assert git.call_args.kwargs["input"] == f"{tag} {tag}\n{tag}^{{commit}} {tag}\n".encode()
+
+
+@pytest.mark.parametrize("raw", [
+    f"{'b' * 40} tag 123 {'a' * 40}\n{'b' * 40} commit 456 {'a' * 40}\n",
+    f"{'a' * 40} commit 123 {'a' * 40}\n{'b' * 40} commit 456 {'a' * 40}\n",
+    f"{'a' * 40} missing\n{'b' * 40} commit 456 {'a' * 40}\n",
+])
+def test_pinned_publication_objects_refuse_identity_or_peeling_mismatch(raw):
+    module = _load_module()
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        [], 0, raw.encode(), b"",
+    )):
+        with pytest.raises(module.GitEnumerationError):
+            module._publication_commits(["a" * 40])
+
+
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True, encoding="utf-8")
 
 
 def _write_bytes(repo: Path, rel: str, size: int) -> None:
@@ -65,7 +162,7 @@ def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess[str]:
         [sys.executable, str(repo / "tools" / SCRIPT.name), *extra],
         cwd=repo,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8",
     )
 
 
@@ -82,6 +179,26 @@ def repo(tmp_path: Path) -> Path:
 def _commit_all(repo: Path) -> None:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "snapshot")
+
+
+@pytest.mark.parametrize("size,expected", [(1024, 0), (2 * 1024 * 1024, 1)])
+def test_annotated_tag_final_diff_checks_destination_blobs(repo, monkeypatch, size, expected):
+    module = _load_module()
+    monkeypatch.setattr(module, "REPO", repo)
+    _write_bytes(repo, "src/existing.txt", 20)
+    _commit_all(repo)
+    _git(repo, "tag", "-a", "published", "-m", "published baseline")
+    published = module._rev_parse("refs/tags/published")
+    _write_bytes(repo, "src/introduced.json", size)
+    _commit_all(repo)
+    _git(repo, "tag", "-a", "candidate", "-m", "candidate")
+    candidate = module._rev_parse("refs/tags/candidate")
+    assert published and candidate
+    result = _run(repo, "--base", published, "--head", candidate)
+    assert result.returncode == expected, result.stdout + result.stderr
+    assert "malformed" not in result.stdout
+    if expected:
+        assert "introduced.json" in result.stdout
 
 
 def test_a_small_file_passes(repo: Path):
@@ -165,13 +282,8 @@ def test_diff_scoped_mode_catches_a_newly_added_oversized_file(repo: Path):
     assert "new-big.json" in result.stdout
 
 
-def test_diff_scoped_mode_base_sharing_no_merge_base_degrades_to_soft_skip(repo: Path):
-    """A `--base` that RESOLVES but shares no common ancestor with HEAD at
-    all (the confirmed fallout of a deliberate `main` history rewrite --
-    see docs/pipelines.md's "If main's history is force-rewritten") must
-    degrade to the same soft "skipping" no-op an unresolvable base already
-    gets, never silently enumerate every commit reachable from raw `--base`
-    itself and risk flagging a file this branch never actually touched."""
+def test_final_diff_handles_unrelated_base_and_head_snapshots(repo: Path):
+    """Endpoint comparison does not require a shared commit history."""
     _write_bytes(repo, "src/small.txt", 10)
     _commit_all(repo)
     original_branch = subprocess.run(
@@ -192,12 +304,12 @@ def test_diff_scoped_mode_base_sharing_no_merge_base_degrades_to_soft_skip(repo:
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "huge-in-rewritten-main.json" not in result.stdout
-    assert "shares no common history" in result.stdout + result.stderr
+    assert "skipping" not in result.stdout.lower()
 
 
 def test_explicit_staged_paths_mode(repo: Path):
     _write_bytes(repo, "src/big.json", 2 * 1024 * 1024)
-    _commit_all(repo)
+    _git(repo, "add", "src/big.json")
 
     result = _run(repo, "src/big.json")
 
@@ -219,10 +331,7 @@ def test_deleted_file_in_diff_is_skipped(repo: Path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_renaming_an_oversized_image_to_a_disallowed_extension_is_caught(repo: Path):
-    # A 2MB file is within the image cap as a .png but would violate the
-    # default (non-image) cap under a renamed, non-image extension -- the
-    # rename itself must not let it dodge detection at its new path.
+def test_rename_checks_the_destination_file_cap(repo: Path):
     _write_bytes(repo, "docs/assets/picture.png", 2 * 1024 * 1024)
     _commit_all(repo)
     _git(repo, "branch", "-f", "base_marker", "HEAD")
@@ -232,11 +341,11 @@ def test_renaming_an_oversized_image_to_a_disallowed_extension_is_caught(repo: P
 
     result = _run(repo, "--base", "base_marker")
 
-    assert result.returncode == 1
+    assert result.returncode == 1, result.stdout + result.stderr
     assert "picture.json" in result.stdout
 
 
-def test_renaming_a_small_file_to_an_always_blocked_extension_is_caught(repo: Path):
+def test_rename_to_blocked_destination_extension_is_rejected(repo: Path):
     _write_bytes(repo, "notes/small.txt", 10)
     _commit_all(repo)
     _git(repo, "branch", "-f", "base_marker", "HEAD")
@@ -246,7 +355,7 @@ def test_renaming_a_small_file_to_an_always_blocked_extension_is_caught(repo: Pa
 
     result = _run(repo, "--base", "base_marker")
 
-    assert result.returncode == 1
+    assert result.returncode == 1, result.stdout + result.stderr
     assert "small.patch" in result.stdout
 
 
@@ -290,10 +399,7 @@ def test_staged_mode_does_not_false_positive_on_working_tree_growth(repo: Path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_diff_scoped_mode_catches_an_oversized_file_added_then_deleted_in_range(repo: Path):
-    # The oversized blob is still permanently in the pushed history the
-    # instant the add commit lands, even though HEAD's own tree no longer
-    # references it -- a naive tree-to-tree diff would miss this entirely.
+def test_final_diff_ignores_oversized_file_removed_before_squash(repo: Path):
     _write_bytes(repo, "src/small.txt", 10)
     _commit_all(repo)
     _git(repo, "branch", "-f", "base_marker", "HEAD")
@@ -306,16 +412,17 @@ def test_diff_scoped_mode_catches_an_oversized_file_added_then_deleted_in_range(
 
     result = _run(repo, "--base", "base_marker")
 
-    assert result.returncode == 1
-    assert "transient-big.json" in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "transient-big.json" not in result.stdout
 
 
-def test_diff_scoped_mode_catches_an_always_blocked_file_added_then_deleted_in_range(repo: Path):
+@pytest.mark.parametrize("new_content", [True, False])
+def test_final_diff_ignores_blocked_path_removed_before_squash(repo: Path, new_content):
     _write_bytes(repo, "src/small.txt", 10)
     _commit_all(repo)
     _git(repo, "branch", "-f", "base_marker", "HEAD")
 
-    _write_bytes(repo, "dist/transient.patch", 10)
+    _write_bytes(repo, "dist/transient.patch", 17 if new_content else 10)
     _commit_all(repo)
     (repo / "dist" / "transient.patch").unlink()
     _git(repo, "add", "-A")
@@ -323,14 +430,11 @@ def test_diff_scoped_mode_catches_an_always_blocked_file_added_then_deleted_in_r
 
     result = _run(repo, "--base", "base_marker")
 
-    assert result.returncode == 1
-    assert "transient.patch" in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "transient.patch" not in result.stdout
 
 
-def test_diff_scoped_mode_catches_a_file_oversized_in_an_earlier_commit_then_shrunk(repo: Path):
-    # Same shape as the add-then-delete case, but shrunk back under cap
-    # rather than deleted outright -- the earlier, oversized blob is still
-    # what got pushed and must still be reported.
+def test_final_diff_accepts_file_shrunk_before_squash(repo: Path):
     _write_bytes(repo, "src/small.txt", 10)
     _commit_all(repo)
     _git(repo, "branch", "-f", "base_marker", "HEAD")
@@ -342,8 +446,7 @@ def test_diff_scoped_mode_catches_a_file_oversized_in_an_earlier_commit_then_shr
 
     result = _run(repo, "--base", "base_marker")
 
-    assert result.returncode == 1
-    assert "shrinks.json" in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_all_mode_respects_an_explicit_head_other_than_the_checkout(repo: Path):
@@ -471,13 +574,14 @@ def test_diff_scoped_mode_skips_submodule_gitlinks_without_error(repo: Path, tmp
     sub = tmp_path.parent / f"{tmp_path.name}-sub"
     sub.mkdir()
     _git(sub, "init", "-q")
-    _git(sub, "config", "user.email", "test@example.com")
-    _git(sub, "config", "user.name", "Test")
     (sub / "f.txt").write_text("hi")
     _git(sub, "add", "-A")
-    _git(sub, "commit", "-q", "-m", "sub commit")
-
-    _git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "vendor/sub")
+    _git(sub, "-c", "user.email=test@example.com", "-c", "user.name=Test",
+         "commit", "-q", "-m", "sub commit")
+    foreign_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=sub, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{foreign_head},vendor/sub")
     _git(repo, "commit", "-q", "-m", "add submodule")
 
     result = _run(repo, "--base", "base_marker")
@@ -492,41 +596,37 @@ def test_staged_mode_skips_submodule_gitlinks_without_error(repo: Path, tmp_path
     sub = tmp_path.parent / f"{tmp_path.name}-sub2"
     sub.mkdir()
     _git(sub, "init", "-q")
-    _git(sub, "config", "user.email", "test@example.com")
-    _git(sub, "config", "user.name", "Test")
     (sub / "f.txt").write_text("hi")
     _git(sub, "add", "-A")
-    _git(sub, "commit", "-q", "-m", "sub commit")
-
-    _git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "vendor/sub")
+    _git(sub, "-c", "user.email=test@example.com", "-c", "user.name=Test",
+         "commit", "-q", "-m", "sub commit")
+    foreign_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=sub, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{foreign_head},vendor/sub")
 
     result = _run(repo, "--", "vendor/sub")
 
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_commit_touched_blobs_raises_on_a_failed_blob_size_read(repo: Path):
-    # An in-process unit test (the only one in this file -- see the module
-    # docstring): a blob sha diff-tree itself just reported, that then
-    # fails a size read, must raise GitEnumerationError, never be silently
-    # skipped as though it were a legitimate non-blob (e.g. gitlink) entry.
+def test_new_blob_metadata_failure_raises_instead_of_skipping(repo: Path):
+    _commit_all(repo)
+    _git(repo, "branch", "base_marker")
     _write_bytes(repo, "src/big.json", 2 * 1024 * 1024)
     _commit_all(repo)
-    commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True,
-    ).stdout.strip()
 
     module = _load_module()
     real_run = subprocess.run
 
     def _failing_cat_file(args, **kwargs):
-        if "cat-file" in args:
+        if "--batch-check=%(objectname) %(objecttype) %(objectsize)" in args:
             return subprocess.CompletedProcess(args, 1, b"", b"fatal: simulated failure")
         return real_run(args, **kwargs)
 
     with mock.patch.object(module, "REPO", repo), mock.patch("subprocess.run", side_effect=_failing_cat_file):
         with pytest.raises(module.GitEnumerationError):
-            module._commit_touched_blobs(commit)
+            module._blobs_in_diff("base_marker", "HEAD")
 
 
 def test_staged_mode_handles_a_dot_slash_prefixed_path(repo: Path):
@@ -571,3 +671,137 @@ def test_an_inherited_git_dir_does_not_redirect_the_check_elsewhere(repo: Path, 
     assert "big.json" in result.stdout
 
 
+def test_many_paths_to_one_new_blob_are_checked_once_per_mode(repo: Path):
+    _commit_all(repo)
+    _git(repo, "branch", "base_marker")
+    for index in range(32):
+        _write_bytes(repo, f"src/file-{index}.txt", 17)
+    _git(repo, "add", "src")
+    module = _load_module()
+    calls = []
+    original = module._git_bytes
+
+    def observed(*args, **kwargs):
+        calls.append(args)
+        return original(*args, **kwargs)
+
+    with mock.patch.object(module, "REPO", repo), mock.patch.object(module, "_git_bytes", observed):
+        staged = module._staged_blobs([f"src/file-{index}.txt" for index in range(32)])
+        _git(repo, "commit", "-qm", "introduce one blob under many paths")
+        rows = module._blobs_in_diff("base_marker", "HEAD")
+    assert sum(args == ("cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)") for args in calls) == 2
+    assert sum(args == ("cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize) %(rest)") for args in calls) == 1
+    assert len(calls) <= 8
+    assert rows == [("src/file-0.txt", 17)]
+    assert staged == [("src/file-0.txt", 17)]
+
+
+def test_blob_metadata_batch_deduplicates_objects_not_paths():
+    module = _load_module()
+    first, second = "a" * 40, "b" * 40
+    response = f"{first} blob 0\n{second} blob 17\n".encode("ascii")
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        ["git"], 0, response, b"",
+    )) as invoked:
+        assert module._blob_sizes([first, second, first]) == {first: 0, second: 17}
+    invoked.assert_called_once_with(
+        "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        input=f"{first}\n{second}\n".encode("ascii"),
+    )
+
+
+@pytest.mark.parametrize("response", [
+    b"", b"a" * 40 + b" missing\n", b"a" * 40 + b" tree 17\n",
+    b"b" * 40 + b" blob 17\n", b"a" * 40 + b" blob -1\n",
+    b"a" * 40 + b" blob invalid\n", b"a" * 40 + b" blob 17 extra\n",
+    (b"a" * 40 + b" blob 17\n") * 2,
+])
+def test_missing_or_malformed_blob_batch_is_not_a_success(response):
+    module = _load_module()
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        ["git"], 0, response, b"",
+    )):
+        with pytest.raises(module.GitEnumerationError):
+            module._blob_sizes(["a" * 40])
+
+
+def test_empty_or_invalid_object_batch_never_spawns_git():
+    module = _load_module()
+    with mock.patch.object(module, "_git_bytes", side_effect=AssertionError):
+        assert module._blob_sizes([]) == {}
+        with pytest.raises(module.GitEnumerationError):
+            module._blob_sizes(["a" * 40 + "\nHEAD"])
+
+
+def test_manual_staged_selection_checks_copied_file_content(repo: Path):
+    _write_bytes(repo, "existing.json", 2 * 1024 * 1024)
+    _commit_all(repo)
+    (repo / "copied.json").write_bytes((repo / "existing.json").read_bytes())
+    _git(repo, "add", "copied.json")
+    result = _run(repo, "--", "existing.json", "copied.json")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "copied.json" in result.stdout
+
+
+def test_unpublished_local_branch_does_not_exempt_a_new_blob(repo: Path):
+    _commit_all(repo)
+    _git(repo, "branch", "base_marker")
+    _write_bytes(repo, "large.json", 2 * 1024 * 1024)
+    _commit_all(repo)
+    _git(repo, "branch", "unpublished")
+    _git(repo, "checkout", "-qb", "candidate", "base_marker")
+    _write_bytes(repo, "large.json", 2 * 1024 * 1024)
+    _commit_all(repo)
+    result = _run(repo, "--base", "base_marker")
+    assert result.returncode == 1 and "large.json" in result.stdout
+
+
+def test_final_diff_does_not_exempt_content_from_another_branch(repo: Path):
+    _commit_all(repo)
+    _git(repo, "branch", "base_marker")
+    _write_bytes(repo, "published-large.json", 2 * 1024 * 1024)
+    _commit_all(repo)
+    _git(repo, "branch", "published-tip")
+    _git(repo, "checkout", "-qb", "advanced", "base_marker")
+    (repo / "advance.txt").write_text("already published advance")
+    _commit_all(repo)
+    _git(repo, "branch", "-f", "base_marker", "HEAD")
+    _write_bytes(repo, "published-large.json", 2 * 1024 * 1024)
+    (repo / "new.txt").write_text("genuinely new blob")
+    _commit_all(repo)
+    result = _run(repo, "--base", "base_marker")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "published-large.json" in result.stdout
+
+
+def test_new_blob_at_multiple_paths_still_checks_a_disallowed_name(repo: Path):
+    _commit_all(repo)
+    _git(repo, "branch", "base_marker")
+    _write_bytes(repo, "new.txt", 17)
+    _write_bytes(repo, "new.patch", 17)
+    _commit_all(repo)
+    result = _run(repo, "--base", "base_marker")
+    assert result.returncode == 1 and "new.patch" in result.stdout
+
+
+def test_history_exemption_option_is_no_longer_supported(repo: Path):
+    _commit_all(repo)
+    result = _run(repo, "--base", "HEAD", "--published", "unavailable-tip")
+    assert result.returncode == 2 and "unrecognized arguments" in result.stderr
+
+
+def test_first_publication_with_zero_old_tip_checks_all_introduced_blobs(repo: Path):
+    _write_bytes(repo, "new-large.json", 2 * 1024 * 1024)
+    _commit_all(repo)
+    result = _run(repo, "--base", "0" * 40)
+    assert result.returncode == 1 and "new-large.json" in result.stdout
+
+
+@pytest.mark.parametrize("arguments,message", [
+    (("--base", "unavailable-base"), "publication base is unavailable"),
+    (("--base", "HEAD", "--head", "unavailable-head"), "publication head is unavailable"),
+])
+def test_missing_publication_history_never_means_no_new_blobs(repo: Path, arguments, message):
+    _commit_all(repo)
+    result = _run(repo, *arguments)
+    assert result.returncode == 1 and message in result.stdout

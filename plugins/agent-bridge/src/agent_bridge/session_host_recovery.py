@@ -156,6 +156,10 @@ class _SessionHostRecoveryMixin:
         for rec in self._live_host_records():
             from .cold_outages import latest
 
+            stored = self._db.get_session(rec.session_id)
+            if stored is not None and stored.get("runtime_custody_json") is not None:
+                log.info("Skipping unenrolled acquisition Host reattach for %s", rec.session_id)
+                continue
             if latest(self._db, rec.session_id) is not None:
                 # Cold-series attachment and launch share the durable/kernel
                 # recovery owner, including registered replacement hosts.
@@ -377,6 +381,7 @@ class _SessionHostRecoveryMixin:
                     spawner = build_codespace_spawner(
                         codespace_name,
                         cs_target.get("repo") or "",
+                        ready_timeout=self._timeouts.session_host_ready,
                         relay_port=get_live_relay_port(),
                         unexpected_reap_seconds=(
                             self._session_host_unexpected_reap_seconds
@@ -593,6 +598,9 @@ class _SessionHostRecoveryMixin:
         prompt drives the turn itself, and it avoids re-entering ``submit_prompt``
         from within a resume.
         """
+        from .acquisition_launch_owner import require_unassociated_session
+
+        require_unassociated_session(self, session, operation="Host reattachment")
         if self._host_index is None:
             return False
         if not session.acp_session_id:
@@ -836,6 +844,7 @@ class _SessionHostRecoveryMixin:
             spawner = build_codespace_spawner(
                 cs_target["name"],
                 cs_target.get("repo") or "",
+                ready_timeout=self._timeouts.session_host_ready,
                 relay_port=relay_port,
                 provision_prelude=relay_prelude,
                 unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,

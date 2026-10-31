@@ -7,6 +7,7 @@ its reconcile loop is doing.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import Callable, Iterable
@@ -121,3 +122,100 @@ class BeaconKeeper:
             self._thread.join(timeout=5)
         log.info("Connection Owner stopping (pid %s%s)", os.getpid(),
                  ", yielded to another Owner" if self.yielded else "")
+
+    async def wait_stopped(self) -> None:
+        """Retain the beacon until its last native write has actually returned."""
+        if self._thread.ident is not None:
+            await owner_native_call(self._thread.join)
+
+
+async def settle_owner_task(task: asyncio.Future[Any]) -> bool:
+    """Finish admitted Owner work; report cancellation for its custodian to replay."""
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if task.cancelled():
+                break
+            cancelled = True
+        except Exception:
+            break
+    return cancelled
+
+
+async def owner_native_call(function: Callable[..., Any], *args: Any) -> Any:
+    """Settle value-only native work before propagating cancellation."""
+    task = asyncio.create_task(asyncio.to_thread(function, *args))
+    cancelled = await settle_owner_task(task)
+    try:
+        result = task.result()
+    except Exception:
+        if cancelled:
+            raise asyncio.CancelledError from None
+        raise
+    if cancelled:
+        raise asyncio.CancelledError
+    return result
+
+
+async def build_owner_channel(
+    factory: Callable[..., Any], *args: Any, retain: Callable[[Any], None],
+) -> Any:
+    """Publish even a late constructor result to its Owner before replaying cancellation."""
+    task = asyncio.create_task(asyncio.to_thread(factory, *args))
+    cancelled = await settle_owner_task(task)
+    try:
+        channel = task.result()
+    except Exception:
+        if cancelled:
+            raise asyncio.CancelledError from None
+        raise
+    retain(channel)
+    if cancelled:
+        raise asyncio.CancelledError
+    return channel
+
+
+async def stop_owner_channel(channel: Any) -> None:
+    """Retain a channel's actual native cleanup, including after a bounded stop."""
+    from ssh_manager import SupervisedRelayForward
+    from ssh_manager.forward import LocalForward
+    from ssh_manager.process import run_process_cleanup
+
+    async def finish() -> None:
+        transport = channel if isinstance(channel, SupervisedRelayForward) else getattr(
+            channel, "_forward", None,
+        )
+        proc = getattr(transport, "_proc", None) if isinstance(
+            transport, (SupervisedRelayForward, LocalForward),
+        ) else None
+        try:
+            try:
+                await channel.stop()
+            except Exception:
+                # A failed monitor can make stop raise before it reaches the
+                # native process. Use that transport's existing teardown, never start.
+                if proc is not None and proc.returncode is None:
+                    if isinstance(transport, SupervisedRelayForward):
+                        await transport._terminate(proc)
+                    else:
+                        await transport._kill(proc)
+                raise
+        finally:
+            # Lower stop APIs may bound their process wait or clear their handle.
+            # Keep the original process and its registered proxy cleanup in custody.
+            try:
+                if proc is not None:
+                    await proc.wait()
+                    await run_process_cleanup(proc)
+            finally:
+                tasks = tuple(getattr(channel, "_cleanup_tasks", ()))
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+
+    task = asyncio.create_task(finish())
+    cancelled = await settle_owner_task(task)
+    task.result()
+    if cancelled:
+        raise asyncio.CancelledError

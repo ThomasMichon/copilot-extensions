@@ -8,6 +8,7 @@ from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
 import pytest
+from multidict import CIMultiDict
 
 from fleet_manager.gateway_service_channel import BODY_BYTES, TransportError
 from fleet_manager.gateway_service_connector import Exchange, ServiceConnector
@@ -138,6 +139,7 @@ def test_real_caller_withdrawal_cancels_handler_before_completion(tmp_path):
                 async with await pending as response:
                     assert response.status == 403
                 await asyncio.wait_for(stopped.wait(), 3)
+                await eventually(lambda: not rig.connectors[-1].active)
                 assert not rig.connectors[-1].active
                 with pytest.raises(RequestDisconnected):
                     received[0].lifetime.check()
@@ -192,6 +194,123 @@ def test_lifetimes_are_independent_and_never_reopen():
     with pytest.raises(RequestDisconnected):
         first.check()
     second.check()
+
+
+@pytest.mark.parametrize("stage", ["response-start", "header-send", "body-read", "chunk-send"])
+def test_http_response_cannot_enter_ack_wait_after_native_read_swallows_cancellation(stage):
+    async def scenario():
+        started, closed, body_started = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        frames = []
+
+        async def native_read():
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                return
+
+        class Response:
+            status = 200
+            headers = CIMultiDict()
+
+            def __init__(self):
+                self.content = self
+
+            async def __aenter__(self):
+                if stage == "response-start":
+                    await native_read()
+                return self
+
+            async def __aexit__(self, *_args):
+                closed.set()
+
+            async def iter_chunked(self, _size):
+                body_started.set()
+                if stage == "header-send":
+                    await asyncio.Event().wait()
+                if stage == "body-read":
+                    await native_read()
+                yield b"must-not-wait-for-an-ack"
+
+        class Session:
+            def request(self, *_args, **_kwargs):
+                return Response()
+
+        class Socket:
+            async def send_str(self, raw):
+                frame = json.loads(raw)
+                if ((stage == "chunk-send" and frame["type"] == "chunk")
+                        or (stage == "header-send" and frame["type"] == "headers")):
+                    await native_read()
+                else:
+                    frames.append(frame)
+
+        connector = ServiceConnector(
+            slot="service-a", gateway_origin="https://gateway.example",
+            backend_origin="http://backend.example",
+            access_token_callback=lambda: None, proof_key=None,
+        )
+        exchange = Exchange("1" * 48)
+        pending = asyncio.create_task(connector._exchange(
+            Socket(), Session(), exchange, ("GET", "/", {}, b"", 0.05, None),
+        ))
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            await asyncio.wait_for(pending, 1)
+            assert closed.is_set()
+            if stage == "header-send":
+                assert not body_started.is_set()
+            assert all(frame["type"] not in ("chunk", "end") for frame in frames)
+            assert frames[-1] == {"type": "error", "id": exchange.id, "code": "backend-timeout"}
+        finally:
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+    asyncio.run(scenario())
+
+
+def test_handler_chunk_send_cannot_enter_ack_wait_after_cancellation():
+    async def scenario():
+        started = asyncio.Event()
+        frames = []
+
+        async def handle(_request):
+            return ServiceResponse(200, body=b"must-not-wait-for-an-ack")
+
+        class Socket:
+            async def send_str(self, raw):
+                frame = json.loads(raw)
+                if frame["type"] == "chunk":
+                    started.set()
+                    try:
+                        await asyncio.Event().wait()
+                    except asyncio.CancelledError:
+                        return
+                frames.append(frame)
+
+        connector = ServiceConnector(
+            slot="service-a", gateway_origin="https://gateway.example",
+            access_token_callback=lambda: None, proof_key=None,
+            handler=HandlerBinding("fleet-a", "gateway-a", handle),
+        )
+        request = ServiceRequest(
+            CallerContext("fleet-a", "gateway-a", "service-a", "caller-a", 2**52),
+            "GET", "/", (), b"",
+        )
+        exchange = Exchange("1" * 48, request=request)
+        pending = asyncio.create_task(connector._exchange(
+            Socket(), None, exchange, ("GET", "/", {}, b"", 0.05, request),
+        ))
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            await asyncio.wait_for(pending, 1)
+            with pytest.raises(RequestDisconnected):
+                request.lifetime.check()
+            assert frames[-1] == {"type": "error", "id": exchange.id, "code": "backend-timeout"}
+            assert not any(frame["type"] in ("chunk", "end") for frame in frames)
+        finally:
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("loss", ["deadline", "cancellation"])

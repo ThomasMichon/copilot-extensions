@@ -54,6 +54,7 @@ def _publish_result(request, text: str) -> None:
 
 def _run_request(
     verb: str, flags: list[str], args: argparse.Namespace, execute, *, emit_json: bool = True,
+    retained_dev: bool = False,
 ) -> int:
     import update_driver as driver
 
@@ -92,9 +93,19 @@ def _run_request(
             source=str(cfg.install_dir().resolve()), context=update_driver_cli._request_context(),
         )
         project_args = ["--project", project] if project else []
-        command, environment = driver.runtime_command(
-            "agent_worktrees", [*project_args, verb, *flags],
-        )
+        invocation = [*project_args, verb, *flags]
+        if retained_dev:
+            if (
+                verb != "dev-release" or getattr(args, "detach", False)
+                or Path(sys.prefix).resolve() != cfg.install_dir().resolve() / "versions" / "dev"
+            ):
+                raise driver.StateError("retained dev execution is limited to foreground dev-release")
+            from agent_procutil import direct_python
+
+            executable, environment = direct_python(sys.executable)
+            command = (executable, "-I", "-B", "-m", "agent_worktrees", *invocation)
+        else:
+            command, environment = driver.runtime_command("agent_worktrees", invocation)
         request = driver.enqueue(
             spec, runner=driver.TrustedRunner(
                 command, str(cwd), env=tuple(environment.items()),
@@ -102,11 +113,15 @@ def _run_request(
             ),
         )
         print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)
-        worker, environment = driver.runtime_command("update_driver", ["worker"])
-        worker_process = driver.ensure_worker(worker, env={
-            **os.environ, **environment, "GIT_TERMINAL_PROMPT": "0",
-            "GH_PROMPT_DISABLED": "1", "GCM_INTERACTIVE": "never",
-        })
+        worker_process = None
+        if retained_dev:
+            driver.drain()
+        else:
+            worker, environment = driver.runtime_command("update_driver", ["worker"])
+            worker_process = driver.ensure_worker(worker, env={
+                **os.environ, **environment, "GIT_TERMINAL_PROMPT": "0",
+                "GH_PROMPT_DISABLED": "1", "GCM_INTERACTIVE": "never",
+            })
         if getattr(args, "detach", False):
             if emit_json:
                 print(json.dumps({
@@ -117,6 +132,8 @@ def _run_request(
         result = driver.wait(request.id, output=sys.stderr, worker=worker_process)
         if result.state != "completed" or result.exit_code is None:
             raise driver.StateError(result.error or "update request did not complete")
+        if result.started_at is None and result.exit_code != 0:
+            raise driver.StateError(result.error or "update request did not execute")
         path = _result_path(result)
         if path.stat().st_size > _PROTOCOL_LIMIT or path.is_symlink():
             raise driver.StateError("update executor result is invalid")
@@ -129,18 +146,13 @@ def _run_request(
     except (driver.DriverError, driver.ParticipantError, OSError, ValueError) as error:
         print(f"Update driver: {error}", file=sys.stderr)
         failure = {"ok": False, "reason": "update-driver", "message": str(error)}
+        # Stage's lease has unwound here; never publish an unleased stage record.
         try:
             if verb == "reconcile-plugins":
                 repo = getattr(args, "repo", None) or update_cli.worktree_identity._find_repo_dir()
                 update_cli.write_reconcile_status(
                     getattr(args, "status", None),
                     {**failure, "repo": str(Path(repo).resolve()) if repo else None, "failed": []},
-                )
-            elif verb == "stage-update":
-                update_cli.write_reconcile_status(
-                    getattr(args, "status", None) or update_stage.status_path(),
-                    {**failure, "stage_done": False, "plugin_changed": False,
-                     "runtime_apply_blocked": "update-driver"},
                 )
         except (OSError, ValueError) as status_error:
             print(f"Update failure status could not be written: {status_error}", file=sys.stderr)
@@ -154,6 +166,8 @@ def cmd_reconcile_request(args: argparse.Namespace) -> int:
     if not getattr(args, "apply", False) or getattr(args, "check_update", False):
         return update_cli.cmd_reconcile_plugins(args)
     flags = ["--apply"]
+    if getattr(args, "auto", False):
+        flags.append("--auto")
     for name in ("repo", "status", "machine"):
         value = getattr(args, name, None)
         if value:
@@ -172,6 +186,8 @@ def cmd_stage_request(args: argparse.Namespace) -> int:
     if getattr(args, "indicator_state", False):
         return update_stage.cmd_stage_update(args)
     flags = ["--json"]
+    if getattr(args, "auto", False):
+        flags.append("--auto")
     value = getattr(args, "status", None)
     if value:
         value = str(Path(value).expanduser().resolve())

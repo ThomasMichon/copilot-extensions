@@ -32,6 +32,7 @@ def run_tui_picker(
     after_first_refresh=None,
     prepare=None,
     project_label="project",
+    lifetime_cancelled=None,
 ):
     """Run the TUI picker and return its result (a launch decision or None).
 
@@ -95,6 +96,8 @@ def run_tui_picker(
             app_kwargs["after_first_refresh"] = after_first_refresh
         if prepare is not None:
             app_kwargs.update(prepare=prepare, project_label=project_label)
+        if lifetime_cancelled is not None:
+            app_kwargs["lifetime_cancelled"] = lifetime_cancelled
         app = PickerApp(source, **app_kwargs)
         from .frame_health import append_launch_event
 
@@ -131,7 +134,12 @@ def _write_picker_crash_log(exc, *, live, mock_mode, app=None):
     try:
         from .. import project_config as cfg
 
-        logs_dir = cfg.install_dir() / "logs"
+        from ... import picker_review
+
+        logs_dir = (
+            picker_review.current().state_dir if picker_review.active()
+            else cfg.install_dir()
+        ) / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         now = datetime.now(timezone.utc)
         path = logs_dir / f"picker-crash-{now.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"

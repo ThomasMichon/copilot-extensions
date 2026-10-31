@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original control-plane preference decision provenance and exact selected callbacks without promoting delegated acquisition coverage.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

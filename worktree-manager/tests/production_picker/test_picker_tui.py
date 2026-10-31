@@ -66,7 +66,7 @@ def test_codespaces_view_action_actual_click_and_modal(monkeypatch, auth_state, 
                 self.refreshed += 1
                 self.summary = {"auth_status": "ready", "auth_account": "example-user"}
 
-        def invalidate(self):
+        def invalidate(self, scope=None):
             self.invalidated += 1
 
         def close(self):
@@ -95,7 +95,14 @@ def test_codespaces_view_action_actual_click_and_modal(monkeypatch, auth_state, 
             assert scr._task_rows() == []
             assert scr._pivot_view_actions()[0].label == label
             assert calls == []
-            assert label in scr.query_one("#nf-buttons").render().plain
+            from rich.style import Style
+            from worktree_manager.production_picker.picker_tui.styles import C_BTN, C_BTN_SEL
+
+            buttons = scr.query_one("#nf-buttons").render()
+            offset = buttons.plain.index(label)
+            assert buttons.get_style_at_offset(app.console, offset) in (
+                Style.parse(C_BTN), Style.parse(C_BTN_SEL),
+            )
             await pilot.click("#nf-buttons", offset=(4, 1))
             await pilot.pause()
             assert calls == [] and not isinstance(app.screen, PivotProgressScreen)
@@ -311,10 +318,10 @@ def _scope_dlg_open(scr):
 
 
 def _prompt_dlg(scr):
-    """The F4 PromptDlgScreen instance on the app's screen stack, or None."""
-    from worktree_manager.production_picker.picker_tui.engine import PromptDlgScreen
+    """The Actions menu with an inline Resume prompt, or None."""
+    from worktree_manager.production_picker.picker_tui.engine import SubMenuScreen
     for s in scr.app.screen_stack:
-        if isinstance(s, PromptDlgScreen):
+        if isinstance(s, SubMenuScreen) and s._can_prompt():
             return s
     return None
 
@@ -411,6 +418,15 @@ async def _wait_for_initial_setup(pilot, scr, *, timeout: float = 5.0):
         "timed out waiting for setup epoch "
         f"{current} to finish (applied={applied}, failed={failed})"
     )
+
+
+async def _wait_for_launch_confirmation(pilot):
+    from worktree_manager.launch_confirmation import _SavingLaunch
+
+    async with asyncio.timeout(10):
+        while any(isinstance(screen, _SavingLaunch) for screen in pilot.app.screen_stack):
+            await pilot.pause(0.01)
+    await pilot.pause()
 
 
 @pytest.fixture(autouse=True)
@@ -534,6 +550,9 @@ def test_setup_uses_one_source_snapshot_for_tabs_and_loader():
 
         def records(self):
             return []
+
+        def counts(self):
+            return (0, 1, 0)
 
     def source_snapshot():
         nonlocal snapshot_calls
@@ -839,12 +858,15 @@ def test_clean_modal_cancel_is_noop():
     asyncio.run(run())
 
 
-def test_progress_screen_confirm_gate_cancel_via_keyboard():
+def test_progress_screen_confirm_gate_cancel_via_keyboard(monkeypatch):
     """#88 F4: the maintenance progress run is a native ProgressScreen. A
     beyond-clean (gated) run opens the modal in its confirm-gate state; Esc
     through the real keyboard pipeline cancels it -- the screen dismisses and the
     engine clears the run without touching anything."""
     src = _maint_source()
+    from worktree_manager.production_picker.picker_tui import data_ssh
+
+    monkeypatch.setattr(data_ssh, "machine_key_map", lambda: {})
 
     async def run():
         app = PickerApp(src, live=False, mock_mode=True)
@@ -2169,6 +2191,7 @@ def test_open_worktree_cli_exits_with_resume_decision():
                 "open-cli", {"worktree": "emancipation-cube-win-bridge-2222"})
             assert ok is True
             assert "CLI session" in msg
+            await _wait_for_launch_confirmation(pilot)
             # The picker recorded a resume decision for that worktree and exited.
             assert app.result is not None
             assert app.result["action"] == "resume"
@@ -2215,6 +2238,7 @@ def test_open_venue_exits_with_open_venue_decision():
             )
             assert ok is True
             assert "my-codespace" in msg
+            await _wait_for_launch_confirmation(pilot)
             assert app.result is not None
             assert app.result["action"] == "open-venue"
             assert app.result["provider"] == "agent-codespaces"
@@ -2275,6 +2299,7 @@ def test_embody_cli_internal_action_exits_with_resume_decision(monkeypatch):
             )
             assert ok is True
             assert "interactive CLI session" in msg
+            await _wait_for_launch_confirmation(pilot)
             assert app.result is not None
             assert app.result["action"] == "resume"
             assert app.result["worktree_id"] == "fresh-task-worktree"
@@ -2372,6 +2397,7 @@ def test_launch_in_new_window_runs_in_background_without_exiting_picker(
                 if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
             )
             scr._wt_submenu_dispatch(rec, ("Launch in new window", False, False))
+            await _wait_for_launch_confirmation(pilot)
 
             assert app.result is None  # the Picker was never exited
             assert len(calls) == 1
@@ -2418,6 +2444,7 @@ def test_launch_in_new_window_failure_is_reported_via_debug_not_raised(
                 if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
             )
             scr._wt_submenu_dispatch(rec, ("Launch in new window", False, False))
+            await _wait_for_launch_confirmation(pilot)
 
             assert app.result is None
             assert "Launch in new window failed" in scr.debug
@@ -2464,6 +2491,7 @@ def test_launch_in_new_window_does_not_leak_stdout_into_the_live_tui(
                 if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
             )
             scr._wt_submenu_dispatch(rec, ("Launch in new window", False, False))
+            await _wait_for_launch_confirmation(pilot)
 
             assert scr.debug == "Opened in a new window"
             # The captured message never reached the real stdout.
@@ -2472,7 +2500,7 @@ def test_launch_in_new_window_does_not_leak_stdout_into_the_live_tui(
     asyncio.run(run())
 
 
-def test_resume_prompt_offered_only_for_local_cold_resume_rows():
+def test_resume_prompt_offered_only_for_local_or_remote_cold_resume_rows():
     """Live and sessionless Open never offer a Resume prompt."""
     from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
         PickerScreenWorktreeActionsMixin as M,
@@ -2497,7 +2525,7 @@ def test_resume_prompt_offered_only_for_local_cold_resume_rows():
     }
     acts = M._session_action_verbs(local_resumable)
     assert "Resume" in acts
-    assert "Resume prompt…" in acts
+    assert "Resume prompt…" not in acts
     assert "Resume prompt…" not in M._session_action_verbs(
         dict(local_resumable, is_local=False))
     assert "Resume prompt…" not in M._session_action_verbs(
@@ -2535,16 +2563,17 @@ def test_resume_prompt_seed_carries_through_to_resume_decision():
                 if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
             )
             rec.update(mux_live=False, sessionless=False)
-            scr._wt_submenu_dispatch(rec, ("Resume prompt…", False, False))
+            scr._push_wt_submenu(rec)
             await pilot.pause()
 
             dlg = _prompt_dlg(scr)
             assert dlg is not None
             assert app.result is None  # the Picker has not exited yet
             dlg.query_one("#q-0", _AutoExpandTextArea).text = "sync, then status"
+            dlg.query_one("#q-0").focus()
             await pilot.press("enter")   # the textarea's own accept + advance
             await pilot.press("enter")   # confirm
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
 
         assert app.result is not None
         assert app.result["action"] == "resume"
@@ -2571,7 +2600,7 @@ def test_resume_prompt_cancel_leaves_the_picker_open():
                 if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
             )
             rec.update(mux_live=False, sessionless=False)
-            scr._wt_submenu_dispatch(rec, ("Resume prompt…", False, False))
+            scr._push_wt_submenu(rec)
             await pilot.pause()
 
             assert _prompt_dlg(scr) is not None
@@ -2601,15 +2630,16 @@ def test_resume_prompt_refuses_live_dispatch_but_retains_confirmed_racing_intent
             assert app.result is None
 
             rec.update(mux_live=False, sessionless=False)
-            scr._wt_submenu_dispatch(rec, ("Resume prompt…", False, False))
+            scr._push_wt_submenu(rec)
             await pilot.pause()
             dlg = _prompt_dlg(scr)
             assert dlg is not None
             dlg.query_one("#q-0", _AutoExpandTextArea).text = "must not run"
+            dlg.query_one("#q-0").focus()
             rec["mux_live"] = True
             await pilot.press("enter")
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
             assert app.result["action"] == "resume"
             assert app.result["options"]["seed_prompt"] == "must not run"
 
@@ -2640,6 +2670,7 @@ def test_embody_cli_internal_action_reports_transaction_failure(monkeypatch, res
     from worktree_manager.production_picker.picker_tui import engine_worktree_actions
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
 
+    monkeypatch.setattr(PickerScreen, "_prewarm_machine_key_map", lambda self: None)
     src = _fixture_source()
 
     async def run():
@@ -2685,6 +2716,7 @@ def test_embody_cli_internal_action_reports_transaction_failure(monkeypatch, res
             )
             assert ok is True
             assert "interactive CLI session" in msg
+            await _wait_for_launch_confirmation(pilot)
             assert app.result is None
             assert ("launcher metadata unreadable" if resolve_error else "started") in scr.debug
 
@@ -2767,6 +2799,7 @@ def test_embody_cli_internal_action_ssh_dispatches_for_remote_machine(monkeypatc
                 },
             )
             assert ok is True
+            await _wait_for_launch_confirmation(pilot)
             assert captured["argv"][:4] == [
                 "ssh",
                 "-o",
@@ -4924,7 +4957,7 @@ def test_new_worktree_bare_refuses_prompt_but_allows_blank_launch(monkeypatch):
             await pilot.press("space")          # toggle Bare on
             await pilot.press("tab")            # options -> buttons
             await pilot.press("enter")          # confirm Create
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
             assert app.screen is dlg and app.result is None
             field = dlg.query_one("#q-0", _AutoExpandTextArea)
             assert field.text == "fix the flaky test"
@@ -4932,7 +4965,7 @@ def test_new_worktree_bare_refuses_prompt_but_allows_blank_launch(monkeypatch):
             from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
             dlg.on_focus_group_activated(
                 FocusGroup.Activated(dlg.query_one(FocusGroup), 0, "confirm"))
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["options"]["bare"] is True
@@ -4970,7 +5003,7 @@ def test_new_worktree_no_mux_preserves_seed_prompt(monkeypatch):
             await pilot.press("space")          # toggle No Mux on
             await pilot.press("tab")            # options -> buttons
             await pilot.press("enter")          # confirm Create
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["options"]["no_mux"] is True
@@ -5003,7 +5036,7 @@ def test_new_worktree_seed_prompt_carries_through(monkeypatch):
             dlg = _scope_dlg(scr)
             dlg.query_one("#q-0", _AutoExpandTextArea).text = "fix the flaky test"
             await pilot.press("enter")          # confirm Create, no options
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
         assert app.result["action"] == "new"
         assert app.result["options"]["seed_prompt"] == "fix the flaky test"
 
@@ -5041,7 +5074,7 @@ def test_new_worktree_no_mux_option():
             assert dlg._dlg["opts"][nm]["on"] is True
             await pilot.press("tab")            # options -> button group
             await pilot.press("enter")          # confirm Create
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
             # No Mux bypasses the mux pane `embody`'s delivery depends on
             # entirely, so the (blank) prompt is dropped -- this must go
             # straight to the launch decision, same as Bare.
@@ -5074,7 +5107,7 @@ def test_new_worktree_ahp_option_defaults_off_and_toggles():
             await pilot.press("space")
             await pilot.press("tab")
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
         assert app.result["options"]["ahp"] is True
         assert app.result["options"]["no_mux"] is False
 
@@ -5109,7 +5142,7 @@ def test_new_worktree_modifiers_can_be_combined():
             await pilot.press("space")
             await pilot.press("tab")
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
             # No Mux bypasses the mux pane `embody`'s delivery depends on
             # entirely, so the (blank) prompt is dropped here too.
         assert app.result["options"]["no_mux"] is True
@@ -5119,7 +5152,7 @@ def test_new_worktree_modifiers_can_be_combined():
 
 
 def test_remote_new_worktree_options_hide_ahp():
-    """Remote targets hide unsupported prompts and same-machine-only AHP."""
+    """Remote targets offer native prompts but hide same-machine-only AHP."""
     src = _fixture_source()
 
     async def run():
@@ -5133,7 +5166,7 @@ def test_remote_new_worktree_options_hide_ahp():
             assert dlg is not None
             labels = [o["label"] for o in dlg._dlg["opts"]]
             assert "AHP" not in labels
-            assert dlg._show_prompt is False
+            assert dlg._show_prompt is True
 
     asyncio.run(run())
 
@@ -5165,7 +5198,7 @@ def test_new_worktree_anchor_option_shows_selected_state():
             assert "Selected: Anchor repo" in prompt.render().plain
             await pilot.press("tab")
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
             # Anchor resolves via `--base`, which the engine's own resolve
             # CLI rejects alongside `--seed` -- the (blank) prompt is
             # dropped here too, same as Bare/No Mux.
@@ -5177,8 +5210,8 @@ def test_new_worktree_anchor_option_shows_selected_state():
 
 
 @pytest.mark.parametrize("target", ["remote", "cross-environment"])
-def test_new_worktree_remote_target_remains_seedless(monkeypatch, target):
-    """Unsupported targets never offer a prompt; ordinary launches remain valid."""
+def test_new_worktree_remote_target_retains_prompt_and_selected_venue(monkeypatch, target):
+    """Both SSH and cross-environment New use negotiated target admission."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
     monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
     src = _fixture_source()
@@ -5196,13 +5229,16 @@ def test_new_worktree_remote_target_remains_seedless(monkeypatch, target):
             assert dlg is not None
             from worktree_manager.production_picker.picker_tui.engine import FocusGroup
             assert dlg.query_one("#scope-buttons", FocusGroup).has_focus
-            assert dlg._show_prompt is False
+            assert dlg._show_prompt is True
+            from worktree_manager.production_picker.picker_tui.seed_prompt_field import SeedPromptField
+            dlg.query_one(SeedPromptField).load_text("remote fixture prompt")
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["machine"] == machine
-        assert app.result["options"]["seed_prompt"] == ""
+        assert app.result["env"] == environment and app.result["is_local"] is False
+        assert app.result["options"]["seed_prompt"] == "remote fixture prompt"
         from worktree_manager.seed_launch import require_supported_seed
         require_supported_seed(types.SimpleNamespace(
             mode="new", machine=machine, environment=environment,
@@ -5659,13 +5695,13 @@ def test_orphan_chip_appears_in_status_text_when_orphans_present():
 
     s._orphans = [{"kind": "codespace", "ref": "cs-1"}]
     text = s.status_text(False).plain
-    assert "1 orphaned (local, 'o')" in text
+    assert "1 local re-homed obligation(s) · o details" in text
     assert "\u26a0" in text   # ⚠
     # The compact form (used when the full status doesn't fit) still
     # preserves the local scope and the 'o' shortcut -- never a bare
     # "⚠N" that a narrow terminal could mistake for a fleet-wide count.
     compact = s.status_text(True).plain
-    assert "\u26a01(local,'o')" in compact
+    assert "\u26a01 local obligation(s) · o" in compact
 
 
 def test_poll_orphan_state_fetches_from_source_orphans(monkeypatch):
@@ -8338,7 +8374,7 @@ def _write_tasks_manifest(directory):
     manifest = {
         "label": "Tasks",
         "after": "Worktrees",
-        "list": [sys.executable],
+        "list": [sys.executable, "--machine", "{machine}"],
         "entry": {
             "id": "id", "title": "title", "worktree": "target_worktree",
             "subtitle": "repo_name", "badges": ["labels"],
@@ -8455,7 +8491,9 @@ def test_registered_pivot_inserted_between_worktrees_and_maintenance(tmp_path, m
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             await pilot.pause()
-            assert scr.htabs == ["Worktrees", "Tasks", "Maintenance", "Profiles"]
+            assert scr.htabs == [
+                "Worktrees", "Tasks", "Maintenance", "Profiles", "Installation & Updates",
+            ]
             assert scr._kind(1) == "registered"
             assert scr._kind(2) == "maintenance"     # built-ins shifted, not renumbered logic
             assert scr._kind(3) == "profiles"
@@ -8490,7 +8528,12 @@ def test_registered_pivot_lists_and_navigates(tmp_path, monkeypatch):
             scr.refresh()
             await pilot.pause()
 
-            assert scr._task_rows() == rows
+            actual = scr._task_rows()
+            assert [
+                {key: value for key, value in row.items() if not key.startswith("_manager_")}
+                for row in actual
+            ] == rows
+            assert all(row["_manager_scope_state"] == "ready" for row in actual)
             # One ('T', i) stop per task; machine sub-nav ('M') present.
             zones = [z for z, _ in scr.stops()]
             assert zones.count("T") == 2
@@ -9011,7 +9054,7 @@ def test_worktree_claiming_task_uses_the_rows_own_machine_not_the_selected_tab()
     holder = _pickerscreen_holder()
     inst = holder.__new__(holder)
     reg = types.SimpleNamespace(name="agent-dispatch", worktree_field="target_worktree",
-                                 group_field="group")
+                                 group_field="group", list_cmd=("tasks", "{machine}"))
     remote_task = {"id": "t4", "target_worktree": "remote-win-20260101-000000-abcd",
                     "group": "Started"}
     inst.pivots = [{"kind": "registered", "pivot": reg}]
@@ -10822,7 +10865,7 @@ def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
             assert not _cfg_menu_open(scr)
             labels = [scr.htabs[index] for index in scr._config_pivots()]
             assert labels[0] == "Profiles"
-            assert labels[1:] == ["SSH", "MCP"]
+            assert labels[1:] == ["SSH", "MCP", "Installation & Updates"]
 
             await pilot.press("right")
             await pilot.pause()

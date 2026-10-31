@@ -37,6 +37,8 @@ def _args(**kw):
 
 @pytest.fixture
 def seams(monkeypatch):
+    monkeypatch.setattr("agent_codespaces.hosting_policy.require_codespace_hosting",
+                        lambda *args, **kwargs: None)
     calls = types.SimpleNamespace(
         holds=[], releases=[], reserve=[], release_res=[], remote=[], ssh=[], deregistered=[], ref_payloads=[],
         live_rows={"anchor-example-web@cs-1": {"session_id": "sid-42", "venue": {"target": "cs-1"}},
@@ -116,6 +118,20 @@ def seams(monkeypatch):
     monkeypatch.setattr("venue_copilot.refs.deliver_note",
                         lambda sid, note, **kwargs: calls.messages.append((sid, note, kwargs)) or True)
     return calls
+
+
+def test_repository_refusal_precedes_owner_reservation_and_launch(seams, monkeypatch, capsys):
+    def denied(*args, **kwargs):
+        raise RuntimeError("expose_agent: false")
+
+    monkeypatch.setattr("agent_codespaces.hosting_policy.require_codespace_hosting", denied)
+    assert detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=_CREATED)) == 1
+    assert seams.holds == []
+    assert seams.reserve == []
+    assert seams.ssh == []
+    assert seams.remote == []
+    captured = capsys.readouterr()
+    assert "expose_agent: false" in captured.out + captured.err
 
 
 def _ssh(calls, *, stdout="", stderr="", code=0, rc=None):
@@ -770,6 +786,104 @@ def test_venue_tooling_prefix_is_valid_bash(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("initial,repair,bridge,context,allowed,action", [
+    ("healthy", "healthy", True, False, True, None),
+    ("unhealthy", "healthy", True, False, True, "repair"),
+    ("unhealthy", "failed", True, False, False, "repair"),
+    ("unhealthy", "unhealthy", True, False, False, "repair"),
+    ("missing", "healthy", True, False, True, "install"),
+    ("healthy", "healthy", False, False, False, None),
+    ("unhealthy", "healthy", True, True, False, None),
+    ("healthy", "healthy", True, True, False, None),
+    ("missing", "healthy", True, True, False, None),
+])
+def test_venue_tooling_checks_real_command_before_launch_effects(
+    tmp_path, initial, repair, bridge, context, allowed, action,
+):
+    import os
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from agent_codespaces.copilot_detach_startup import build_owned_command
+
+    bash = shutil.which("bash")
+    if bash and "system32" in bash.lower():
+        git = shutil.which("git")
+        native = Path(git).parent.parent / "bin" / "bash.exe" if git else None
+        bash = str(native) if native and native.is_file() else None
+    if not bash or "WindowsApps" in bash:
+        pytest.skip("no POSIX bash")
+    payloads = tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
+    scripts = payloads / "agent-worktrees" / "scripts"
+    scripts.mkdir(parents=True)
+    if bridge:
+        (payloads / "agent-bridge").mkdir()
+    binaries = tmp_path / ".local" / "bin"
+    binaries.mkdir(parents=True)
+    tool = """#!/usr/bin/env bash
+touch "$HOME/provision-attempt"
+printf '%s\\n' "probe:$*" >> "$HOME/trace"
+[ "$1" = --help ] || exit 98
+[ -f "$HOME/healthy" ] || { printf 'runtime unhealthy\\n' >&2; exit 7; }
+"""
+    source = tmp_path / "fixture-tool"
+    source.write_text(tool, encoding="utf-8", newline="\n")
+    source.chmod(0o755)
+    if initial != "missing":
+        target = binaries / "agent-worktrees"
+        target.write_text(tool, encoding="utf-8", newline="\n")
+        target.chmod(0o755)
+    if initial == "healthy":
+        (tmp_path / "healthy").touch()
+    (scripts / "install.sh").write_text(
+        'printf "%s\\n" "$1" >> "$HOME/actions"\n'
+        + ("exit 9\n" if repair == "failed" else "")
+        + 'cp "$HOME/fixture-tool" "$HOME/.local/bin/agent-worktrees"\n'
+        + 'chmod +x "$HOME/.local/bin/agent-worktrees"\n'
+        + ('touch "$HOME/healthy"\n' if repair == "healthy" else ""),
+        encoding="utf-8", newline="\n",
+    )
+    (binaries / "copilot").write_text("#!/usr/bin/env bash\nexit 9\n", encoding="utf-8", newline="\n")
+    (binaries / "copilot").chmod(0o755)
+    environment = dict(os.environ)
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    if context:
+        environment["COPILOT_EXTENSIONS_CONTEXT"] = "selected-installation"
+    command = build_owned_command(
+        [], captured={"prepared_context": {"plugin_context": {
+            "version": 1, "cwd": tmp_path.as_posix(), "plugins": [],
+        }}},
+        plan={"identity": "synthetic", "anchor": False, "scope_id": "synthetic"},
+        args=_args(), seed_ready_timeout=1, copilot_args=[],
+        reservation={"reservation_id": "synthetic"}, seed=None,
+        build_command=lambda *args, **kwargs: 'printf launch > "$HOME/launched"',
+        tooling=detach._VENUE_TOOLING,
+        trust_folder=lambda workspace: 'printf trusted > "$HOME/trusted"',
+    )
+    result = subprocess.run(
+        [bash, "-c", 'export HOME="$PWD"; export PATH="$HOME/.local/bin:/usr/bin:/bin"; '
+         + command],
+        cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert (result.returncode == 0) is allowed, result.stderr
+    assert (tmp_path / "launched").exists() is allowed
+    assert (tmp_path / "trusted").exists() is allowed
+    actions = tmp_path / "actions"
+    assert (actions.read_text().splitlines() if actions.exists() else []) == (
+        [action] if action else []
+    )
+    if not allowed:
+        assert result.stderr.strip(), "tooling refusal must be visible"
+    if context:
+        assert not (tmp_path / "provision-attempt").exists()
+        assert not (tmp_path / "trace").exists()
+
+
 def test_new_session_id_added_unless_resuming():
     fresh = detach.with_new_session(["--no-ask-user"])
     assert fresh[0] == "--no-ask-user" and fresh[1].startswith("--session-id=")
@@ -1102,13 +1216,15 @@ def test_owned_readiness_refusal_never_falls_back_or_reports_seeded(
     seams, monkeypatch, capsys, tmp_path, created,
 ):
     attempted = []
-    from venue_copilot.refs import owned_result
     def refuse(sid, note, **kwargs):
         attempted.append(kwargs)
-        return dataclasses.replace(owned_result(
-            False, session_id=sid, operation=kwargs["operation"], note=note,
-            context=kwargs["prepared_context"],
-        ), status="refused")
+        return _real_deliver_note(
+            sid, note, **kwargs,
+            run=lambda *a, **k: types.SimpleNamespace(returncode=69, stdout=json.dumps({
+                "owned_delivery_version": 1, "admission_status": "not_admitted",
+                "reason": "plugins_not_ready", "error": "private readiness detail",
+            })),
+        )
     monkeypatch.setattr("venue_copilot.refs.deliver_note",
                         refuse)
     output = json.dumps({"ok": True, "created": created})
@@ -1116,6 +1232,9 @@ def test_owned_readiness_refusal_never_falls_back_or_reports_seeded(
     assert detach.cmd_detach(args, ssh_session=_ssh(seams, stdout=output)) == 1
     report = json.loads(capsys.readouterr().out)
     assert report["ok"] is False and "not admitted" in report["error"]
+    assert report["refusal_reason"] == "plugins_not_ready"
+    assert "plugins_not_ready" in report["error"]
+    assert "private readiness detail" not in json.dumps(report)
     assert len(attempted) == 1 and attempted[0]["prepared_context"]["version"] == 1
     assert any("tmux kill-session" in command for command in seams.remote) is created
 
@@ -1167,6 +1286,9 @@ def test_admitted_seed_with_lost_responses_retains_owner_and_rejoins_same_operat
     assert pending["creation_receipt"] == receipt and pending["operation"] == "r1"
     # Connection expiry does not remove the separately retained delivery.
     monkeypatch.setattr(owner, "get_hold", lambda *args: None)
+    def deny_new_launch(*args, **kwargs):
+        raise RuntimeError("expose_agent: false must not block retained delivery settlement")
+    monkeypatch.setattr("agent_codespaces.hosting_policy.admit_detached_launch", deny_new_launch)
     # A failed reconciliation preserves the ledger and never relaunches.
     assert detach.cmd_detach(_args(worktree_id="wt-7"), ssh_session=_ssh(seams)) == 75
     capsys.readouterr()
@@ -1183,6 +1305,19 @@ def test_admitted_seed_with_lost_responses_retains_owner_and_rejoins_same_operat
     assert queue.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
     assert all(value == attempts[0] for value in attempts)
     queue.close()
+
+
+def test_vanished_pending_delivery_rechecks_hosting_before_new_launch(seams, monkeypatch, capsys):
+    snapshots = iter([{"status": "admitted"}, None])
+    monkeypatch.setattr(owner, "get_pending_delivery", lambda *args: next(snapshots))
+    def deny(*args, **kwargs):
+        raise RuntimeError("expose_agent: false")
+    monkeypatch.setattr("agent_codespaces.hosting_policy.admit_detached_launch", deny)
+    assert detach.cmd_detach(
+        _args(worktree_id="wt-7"), ssh_session=_ssh(seams),
+    ) == 1
+    assert "expose_agent: false" in json.loads(capsys.readouterr().out)["error"]
+    assert seams.ssh == [] and seams.holds == []
 
 
 def test_pending_recovery_probe_failure_retains_journal_without_task_or_mux_launch(

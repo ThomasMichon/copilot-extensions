@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from contextlib import ExitStack
 from pathlib import Path
 import stat
 import subprocess
@@ -13,7 +14,7 @@ import time
 import unicodedata
 
 from plugin_resolve import (
-    PLUGIN_MANIFEST_RELS, RepoPluginSettings, SETTINGS_RELS, load_marketplace, marketplace_manifest_name,
+    RepoPluginSettings, SETTINGS_RELS, load_marketplace, marketplace_manifest_name,
     plugin_dir, split_source,
 )
 from plugin_activation import validate_identity
@@ -23,6 +24,7 @@ from plugin_activation.state import _reject_duplicates, _split_jsonc_header
 from . import static_preparation as preparation
 
 NAMESPACE = ".github/instructions/agent-worktrees-generated"
+_MAX_EXCLUDE_BYTES = 2 * 1024 * 1024
 _RESERVED_NAMES = {
     "con", "prn", "aux", "nul",
     *(f"com{index}" for index in range(1, 10)),
@@ -44,13 +46,9 @@ def _remaining(deadline: float | None, ceiling: float | None = None) -> float | 
 
 
 def _read_regular_bytes(path: Path) -> bytes:
-    preparation.observe(path)
     if not stat.S_ISREG(path.stat().st_mode):
         raise ValueError(f"instruction input is not a regular file: {path}")
-    content = path.read_bytes()
-    preparation.observe(path)
-    preparation.remember_bytes(path, content)
-    return content
+    return path.read_bytes()
 
 
 def _object(path: Path, *, jsonc_header: bool = False) -> dict:
@@ -163,39 +161,32 @@ def _plugin(identity: str, markets: dict, home: Path, *, deadline: float | None 
     return candidate.root
 
 
-def _selection(root: Path, home: Path, *, deadline: float | None = None) -> tuple[list, dict, dict]:
+def _selection(root: Path, home: Path, *, deadline: float | None = None) -> tuple[dict, dict]:
     enabled, markets = _settings(root, home, deadline=deadline)
-    selection, plugins, failures = [], {}, {}
+    plugins, failures = {}, {}
     for identity in sorted(enabled):
         _remaining(deadline)
         if not enabled[identity]:
             continue
         try:
             plugin = _plugin(identity, markets, home, deadline=deadline).resolve(strict=True)
-            selection.append([identity, str(plugin), [
-                preparation.stamp(
-                    plugin.joinpath(*relative), content_digest=True, allow_links=True, deadline=deadline,
-                )
-                for relative in PLUGIN_MANIFEST_RELS
-            ]])
             plugins[identity] = plugin
         except (OSError, ValueError, RuntimeError) as exc:
             failures[identity] = f"{identity}: {exc}"
-    return selection, plugins, failures
+    return plugins, failures
 
 
 class _Snapshot(dict):
-    def __init__(self, selection: list, failures: dict):
+    def __init__(self, failures: dict):
         super().__init__()
-        self.selection = selection
         self.failures = list(failures.values())
         self.failed_sources = set(failures)
         self.owners: dict[str, str] = {}
 
 
 def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> _Snapshot:
-    selection, plugins, failures = _selection(root, home, deadline=deadline)
-    result = _Snapshot(selection, failures)
+    plugins, failures = _selection(root, home, deadline=deadline)
+    result = _Snapshot(failures)
     folded: set[str] = set()
     for identity, plugin in plugins.items():
         _remaining(deadline)
@@ -246,7 +237,6 @@ def _plugin_snapshot(root: Path, identity: str, plugin: Path, *, deadline: float
         template = entry.get("template")
         if not isinstance(template, str):
             raise ValueError(f"missing instruction template: {identity}/{source_id}")
-        preparation.observe(plugin / template)
         source = (plugin / template).resolve(strict=True)
         if Path(template).is_absolute() or not source.is_relative_to(plugin):
             raise ValueError(f"instruction template escapes plugin: {identity}/{source_id}")
@@ -329,16 +319,12 @@ def _protect_partial_outputs(
         record = previous.get(relative)
         proven = (
             overlaps == [relative] and isinstance(record, dict)
-            and isinstance(record.get("source"), str) and isinstance(record.get("sha256"), str)
+            and isinstance(record.get("source"), str)
         )
         if proven:
             try:
                 validate_identity(record["source"])
-                proven = (
-                    record["source"] not in desired.failed_sources
-                    and hashlib.sha256(_read_regular_bytes(root / NAMESPACE / relative)).hexdigest()
-                    == record["sha256"]
-                )
+                proven = record["source"] not in desired.failed_sources
             except (OSError, ValueError, KeyError, TypeError):
                 proven = False
         if not proven:
@@ -382,25 +368,117 @@ def _safe_path(root: Path, path: Path, *, removable_files: set[Path] | None = No
             raise ValueError(f"instruction output parent is not a directory: {candidate}")
 
 
-def current(root: Path, home: Path, *, deadline: float | None = None) -> preparation.Publication | None:
-    selection, _, failures = _selection(root, home, deadline=deadline)
-    return None if failures else preparation.read(root, home, selection, deadline=deadline)
+def _read_exclude(exclude: Path) -> str:
+    _safe_path(Path(exclude.anchor), exclude)
+    if not exclude.exists():
+        return ""
+    info = exclude.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError(f"instruction input is not a regular file: {exclude}")
+    if info.st_size > _MAX_EXCLUDE_BYTES:
+        raise ValueError("instruction exclude exceeds the 2 MiB limit")
+    with exclude.open("rb") as handle:
+        content = handle.read(_MAX_EXCLUDE_BYTES + 1)
+    if len(content) > _MAX_EXCLUDE_BYTES:
+        raise ValueError("instruction exclude exceeds the 2 MiB limit")
+    return content.decode("utf-8")
+
+
+def _exclude_path(root: Path, *, deadline: float | None) -> Path:
+    exclude = Path(os.fsdecode(_git(root, "rev-parse", "--git-path", "info/exclude", deadline=deadline)).strip())
+    if not exclude.is_absolute():
+        exclude = root / exclude
+    exclude = Path(os.path.abspath(exclude))
+    _safe_path(Path(exclude.anchor), exclude)
+    return exclude
+
+
+def _exclude_lock(exclude: Path, *, deadline: float | None = None):
+    """Use the existing file-lock owner for the common Git exclude resource."""
+    return publication_lock(exclude.resolve(), deadline=deadline)
+
+
+def _namespace_preflight(root: Path, exclude: Path, *, deadline: float | None) -> dict:
+    _safe_path(root, root / NAMESPACE)
+    if _exclude_path(root, deadline=deadline) != exclude:
+        raise ValueError("Git exclude identity changed before preflight; retry preparation")
+    # Git's index queries may read ignore rules before our later append.
+    _read_exclude(exclude)
+    validated_git = preparation.git_state(root, deadline=deadline)
+    # Include staged removals, even when Git could classify one as a rename.
+    tracked = (
+        _git(root, "ls-files", "-z", "--", ":(icase).github", deadline=deadline)
+        + _git(root, "diff", "--cached", "--name-only", "--diff-filter=D", "--no-renames", "-z", "--", ":(icase).github", deadline=deadline)
+    ).split(b"\0")
+    # An independent append must not be lost while index evidence stays fixed.
+    for path in validated_git:
+        if Path(path).resolve() == exclude.resolve():
+            validated_git[path] = preparation.stamp(Path(path), deadline=deadline)
+    preparation.require_git_state(root, validated_git, deadline=deadline)
+    namespace = NAMESPACE.casefold()
+    for raw in tracked:
+        path = os.fsdecode(raw).casefold()
+        if path and (path == namespace or path.startswith(namespace + "/") or namespace.startswith(path + "/")):
+            raise ValueError(f"tracked instruction output is protected: {os.fsdecode(raw)}")
+    return validated_git
+
+
+def _ensure_output_ignored(
+    root: Path, exclude: Path, validated_git: dict, relatives, *, deadline: float | None,
+) -> None:
+    rule = f"/{NAMESPACE}/"
+    previous = _read_exclude(exclude)
+    if rule not in previous.splitlines():
+        addition = f"{os.linesep}{rule}{os.linesep}".encode("utf-8")
+        if len(previous.encode("utf-8")) + len(addition) > _MAX_EXCLUDE_BYTES:
+            raise ValueError("instruction exclude would exceed the 2 MiB limit")
+        _remaining(deadline)
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        with exclude.open("ab") as handle:
+            handle.write(addition)
+        for path in validated_git:
+            if Path(path).resolve() == exclude.resolve():
+                validated_git[path] = preparation.stamp(Path(path), deadline=deadline)
+    paths = {os.fsencode(f"{NAMESPACE}/")}
+    paths.update(os.fsencode(f"{NAMESPACE}/{relative}") for relative in relatives)
+    if paths:
+        ignored = _git(
+            root, "check-ignore", "--no-index", "-z", "-v", "--stdin",
+            input=b"\0".join(sorted(paths)) + b"\0", deadline=deadline,
+        )
+        fields = ignored.rstrip(b"\0").split(b"\0")
+        if len(fields) % 4:
+            raise ValueError("instruction Git ignore evidence is malformed")
+        # A negative or empty-pattern match is not directory exclusion.
+        covered = {
+            fields[index + 3] for index in range(0, len(fields), 4)
+            if fields[index + 2] and not fields[index + 2].startswith(b"!")
+        }
+        if paths - covered:
+            raise ValueError("instruction output namespace is not completely ignored by Git")
+    preparation.require_git_state(root, validated_git, deadline=deadline)
+
+
+def prepare_output_namespace(root: Path, *, deadline: float | None = None) -> None:
+    """Prepare a companion's disposable namespace without discovering its sources."""
+    root = root.resolve()
+    with publication_lock(root, deadline=deadline):
+        exclude = _exclude_path(root, deadline=deadline)
+        with _exclude_lock(exclude, deadline=deadline):
+            validated_git = _namespace_preflight(root, exclude, deadline=deadline)
+            _ensure_output_ignored(root, exclude, validated_git, (), deadline=deadline)
 
 
 def publish(root: Path, home: Path, *, deadline: float | None = None) -> preparation.Publication:
     """Resolve inside the publication lock; preflight the whole set before copying."""
-    with publication_lock(root, deadline=deadline):
+    with publication_lock(root, deadline=deadline), ExitStack() as locks:
         try:
             pair_pending_path(root).lstat()
         except FileNotFoundError:
             pass
         else:
             raise ValueError("paired worktree preparation is incomplete; repair the pair before publishing instructions")
-        cached = current(root, home, deadline=deadline)
-        if cached is not None:
-            return cached
-        with preparation.capture() as inputs:
-            desired = _snapshot(root, home, deadline=deadline)
+        desired = _snapshot(root, home, deadline=deadline)
         if desired.failures and not desired:
             raise ValueError("; ".join(desired.failures))
         output = root / NAMESPACE
@@ -425,60 +503,15 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
         )
         stale = set() if desired.failures else existing - desired.keys()
         removable_files = {output / relative for relative in stale}
-        exclude = Path(os.fsdecode(_git(root, "rev-parse", "--git-path", "info/exclude", deadline=deadline)).strip())
-        if not exclude.is_absolute():
-            exclude = root / exclude
-        # Git's index queries may read ignore rules before our later append.
-        if exclude.exists():
-            _read_regular_bytes(exclude)
-        validated_git = preparation.git_state(root, deadline=deadline)
-        # Include staged removals, even when Git could classify one as a rename.
-        tracked = (
-            _git(root, "ls-files", "-z", "--", ":(icase).github", deadline=deadline)
-            + _git(root, "diff", "--cached", "--name-only", "--diff-filter=D", "--no-renames", "-z", "--", ":(icase).github", deadline=deadline)
-        ).split(b"\0")
-        # The exclude file is reread and checked by check-ignore below; an
-        # independent append must not be lost while index evidence stays fixed.
-        for path in validated_git:
-            if Path(path).resolve() == exclude.resolve():
-                validated_git[path] = preparation.stamp(
-                    Path(path), content_digest=True, allow_links=True, deadline=deadline,
-                )
-        preparation.require_git_state(root, validated_git, deadline=deadline)
-        namespace = NAMESPACE.casefold()
-        for raw in tracked:
-            path = os.fsdecode(raw).casefold()
-            if path and (path == namespace or path.startswith(namespace + "/") or namespace.startswith(path + "/")):
-                raise ValueError(f"tracked instruction output is protected: {os.fsdecode(raw)}")
+        exclude = _exclude_path(root, deadline=deadline)
+        locks.enter_context(_exclude_lock(exclude, deadline=deadline))
+        validated_git = _namespace_preflight(root, exclude, deadline=deadline)
         for relative in desired:
             path = output / relative
             _safe_path(root, path, removable_files=removable_files)
             if path.exists() and not path.is_file() and not path.is_dir():
                 raise ValueError(f"instruction destination is not a regular file: {path}")
-        selected, _, _ = _selection(root, home, deadline=deadline)
-        if not preparation.matches(inputs, deadline=deadline) or desired.selection != selected:
-            raise ValueError("instruction sources changed during preparation; retry publication")
-        rule = f"/{NAMESPACE}/"
-        previous = _read_regular_bytes(exclude).decode("utf-8") if exclude.exists() else ""
-        if rule not in previous.splitlines():
-            _remaining(deadline)
-            exclude.parent.mkdir(parents=True, exist_ok=True)
-            with exclude.open("a", encoding="utf-8") as handle:
-                handle.write(f"\n{rule}\n")
-            for path in validated_git:
-                if Path(path).resolve() == exclude.resolve():
-                    validated_git[path] = preparation.stamp(
-                        Path(path), content_digest=True, allow_links=True, deadline=deadline,
-                    )
-        if desired:
-            paths = {os.fsencode(f"{NAMESPACE}/{relative}") for relative in desired}
-            ignored = _git(
-                root, "check-ignore", "--no-index", "-z", "--stdin",
-                input=b"\0".join(sorted(paths)) + b"\0", deadline=deadline,
-            )
-            if paths - set(ignored.split(b"\0")):
-                raise ValueError("instruction output namespace is not completely ignored by Git")
-        preparation.require_git_state(root, validated_git, deadline=deadline)
+        _ensure_output_ignored(root, exclude, validated_git, desired, deadline=deadline)
         revision = preparation.publication_revision(root)
         mutation_started = False
 
@@ -505,13 +538,13 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
             if directory not in retained_parents:
                 _remaining(deadline)
                 directory.rmdir()
-        changed = unchanged = 0
+        changed = 0
         for relative, content in desired.items():
             _remaining(deadline)
             path = output / relative
-            if path.exists() and _read_regular_bytes(path) == content:
-                unchanged += 1
-                continue
+            if path.exists():
+                if not stat.S_ISREG(path.stat().st_mode):
+                    raise ValueError(f"instruction destination is not a regular file: {path}")
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary: Path | None = None
             try:
@@ -527,15 +560,11 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
                     temporary.unlink(missing_ok=True)
             changed += 1
         _remaining(deadline)
-        if not preparation.matches(inputs, deadline=deadline):
-            raise ValueError("instruction sources changed during publication; retry preparation")
         preparation.require_git_state(root, validated_git, deadline=deadline)
-        identity = preparation.save(
-            root, home, selected, inputs, desired, NAMESPACE,
-            validated_git=validated_git, revision=revision, deadline=deadline,
-            ready=not desired.failures, sources=desired.owners, previous_owners=previous_owners,
+        preparation.save_owners(
+            root, home, desired.owners, previous_owners=previous_owners,
         )
         return preparation.Publication(
-            changed, unchanged, len(stale), identity, failures=tuple(desired.failures),
+            changed, removed=len(stale), failures=tuple(desired.failures),
             publication_revision=revision,
         )

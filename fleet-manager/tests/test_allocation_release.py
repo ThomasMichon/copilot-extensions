@@ -265,6 +265,8 @@ def test_upgrade_preserves_held_ownership_and_old_writer_refuses(
     store = n if kind == "node" else g
     with closing(sqlite3.connect(store.path)) as connection:
         connection.execute("DROP TABLE allocation_releases")
+        if kind == "node":
+            connection.execute("DROP TABLE external_owners")
         connection.execute(f"PRAGMA user_version={version}")
     with pytest.raises(PlanError, match="schema"):
         store.inspect(intent)
@@ -272,7 +274,7 @@ def test_upgrade_preserves_held_ownership_and_old_writer_refuses(
     assert reopened.inspect(intent) is not None
     with closing(sqlite3.connect(store.path)) as connection:
         assert connection.execute("SELECT count(*) FROM allocation_releases").fetchone()[0] == 0
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == version + 1
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
     if kind == "node":
         assert reopened.allocation_owner(resource="workspace-1") == intent
     else:

@@ -96,6 +96,7 @@ same file. It — not the conversation transcript — is the source of truth.
 | **Coordination** | optional; multi-agent branch topology + host/delegate roles + PR ownership (the *branches* binding) |
 | **Context** | background, source issue/plan/idea, prior decisions, references |
 | **Request** | the operator's ask, captured verbatim |
+| **Scope Approvals** | optional original authorization evidence and current effect limits; one record or linked canonical sidecar, not a grant engine |
 | **Plan** | phased implementation plan with checklists |
 | **Validation Plan** | how we'll know it works (efforts are validation-driven) |
 | **Proposal** | optional detailed findings once the plan firms up |
@@ -106,6 +107,42 @@ repo-specific sections, or omit optional sections such as **Coordination** or
 **Proposal**. The header, Guiding Intent, Request, Plan, Validation Plan, and
 Journal are the irreducible core. **Participants** is the canonical executor
 seam, but a single local effort may omit it.
+
+### Scope approvals
+
+An optional **Scope Approvals** section or linked canonical record preserves
+explicit upfront instructions and one-time answers. Existing efforts without
+it remain valid; established charter authority and original approvals do not
+require migration to a new schema.
+
+Retain the original operator/charter reference and necessary exact wording,
+objective/role and publication destinations, allowed operations, target selector
+and resource/executing owners, effects and accepted blast radius, exclusions,
+limits, repetition/revision policy, validity, actual limited uses and later
+holds/narrowing/revocation. Capture only established scope; missing information
+is unresolved, not an unlimited grant. Keep agent interpretation visibly
+separate from the original decision.
+
+The conduct capability owns the full procedural
+[approval-evidence contract](../../../../agent-conduct-guidance/skills/using-standing-authority/references/approval-evidence.md)
+when available. The fields above remain sufficient for standalone effort use:
+there is no mandatory sibling, evaluator, command or strict schema adoption.
+Existing execution, resource, repository and security owners retain enforcement.
+
+Capture and validate approvals when received, then stamp the current owner's
+existing checkpoint. Reuse within current scope across ordinary revisions and
+bounded retries; an explicit pin, single attempt, expiry, pause or revocation
+still governs. Unknown effects need owner-led reconciliation, not blind replay.
+Deployment, personal/non-source-controlled data, disclosure and external-owner
+effects need applicable explicit clearance; confidence and recoverability are
+not permission.
+
+Checkpoints and both handoff shapes carry the canonical reference, applicable
+limits, unresolved decisions and current changes, plus evidence not yet durable
+elsewhere. A successor reads current authority before effects and repairs missing
+evidence through bounded history. A plan, status, summary or delivery receipt
+does not create permission; a blocked effect does not stop independent
+already-authorized work.
 
 ### Validation-driven
 

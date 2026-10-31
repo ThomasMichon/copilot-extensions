@@ -5,7 +5,8 @@ from __future__ import annotations
 import time
 
 from . import derive
-from .engine_helpers import ACTIVE_SPECS, BUTTON_SETS, DISPO_MARK, LIST_SPECS, SPINNER
+from .engine_helpers import ACTIVE_SPECS, BUTTON_SETS, C_DIM, C_READY, C_WARN, DISPO_MARK, LIST_SPECS, SPINNER
+from .source_read_notices import worktree_reload_pending, worktree_row_identity, worktree_setup_failed, worktree_source_instance
 
 class PickerScreenModelMixin:
     def button_set(self):
@@ -40,8 +41,19 @@ class PickerScreenModelMixin:
             return (
                 (["NC"] if reg is not None and reg.create_action is not None else [])
                 + [f"VA:{index}" for index, _action in enumerate(self._pivot_view_actions())]
+                + (["TM"] if self._has_task_category_filter() else [])
             )
         return BUTTON_SETS.get(kind, [])
+    def _has_task_category_filter(self):
+        from .task_category_filter import dispatch_category
+        return dispatch_category(self._reg_pivot()) is not None
+    def _registered_button_labels(self, reg):
+        return (
+            ([f"+ {reg.create_action.label}"] if reg.create_action else [])
+            + [action.label for action in self._pivot_view_actions()]
+            + ([f"{'☑' if getattr(self, 'include_maintenance', False) else '☐'} Include maintenance"]
+               if self._has_task_category_filter() else [])
+        )
     def active_button(self):
         bset = self.button_set()
         if not bset:
@@ -69,6 +81,10 @@ class PickerScreenModelMixin:
         if not ok:
             return "disabled"
         if self.live:
+            if worktree_reload_pending(self):
+                return "loading"
+            if worktree_setup_failed(self):
+                return "failed"
             loader = self.loader
             if loader is None:
                 return "loading"
@@ -80,21 +96,53 @@ class PickerScreenModelMixin:
             return "ready"
         return "ready" if (time.monotonic() - self.t0) >= self.load_delay[i] else "loading"
     def ready_envs(self):
+        from .source_read_notices import has_worktree_snapshot
+
         out = set()
         for i, (label, m, e, ok) in enumerate(self.machines):
             tab = self.source_tabs[i] if self.source_tabs else {}
             if (
                 label != "All"
                 and tab.get("source_kind") in (None, "machine-ssh")
-                and self.machine_state(i) == "ready"
+                and (
+                    self.machine_state(i) == "ready"
+                    or has_worktree_snapshot(self, i, self.machine_state(i))
+                )
             ):
                 out.add((m, e))
         return out
+    def _source_read_connected(self, index):
+        tab = self.source_tabs[index] if self.source_tabs else {}
+        status = getattr(self.loader, "read_status_for_source", None)
+        if not tab.get("source_id") or not callable(status):
+            return False
+        evidence = status(tab["source_id"])
+        return bool(evidence.get("error")) and evidence.get("failure_kind") == "content"
+    def _source_read_error(self, index):
+        if not self.live or self.loader is None:
+            return None
+        tab = self.source_tabs[index] if self.source_tabs else {}
+        if tab.get("source_id") and callable(getattr(self.loader, "error_for_source", None)):
+            return self.loader.error_for_source(tab["source_id"])
+        if callable(getattr(self.loader, "error", None)):
+            return self.loader.error(*self.machines[index][1:3])
+        return None
+    def _source_failure_marker(self, index):
+        from .source_read_notices import has_worktree_snapshot
+
+        if has_worktree_snapshot(self, index, "failed"):
+            return "~", C_DIM
+        return ("✓", C_READY) if self._source_read_connected(index) else ("✗", C_WARN)
     def ready_source_ids(self):
+        from .source_read_notices import has_worktree_snapshot
+
         return {
             tab.get("source_id")
             for i, tab in enumerate(self.source_tabs)
-            if i and tab.get("source_id") and self.machine_state(i) == "ready"
+            if i and tab.get("source_id") and (
+                self.machine_state(i) == "ready"
+                or has_worktree_snapshot(self, i, self.machine_state(i))
+            )
         }
     def spin(self):
         return SPINNER[self.frame % len(SPINNER)]
@@ -122,30 +170,26 @@ class PickerScreenModelMixin:
         reg = self._reg_pivot()
         if reg is None:
             return ("idle", [], "")
-        machine = self._pivot_scope_key()
-        if machine is None:
-            return (
-                "error",
-                [],
-                "machine-scoped pivots are unavailable for provider sources",
-            )
-        rt = self._pivot_runtime(reg)
-        rt.ensure(machine)
-        return rt.get(machine)
+        from .registered_scopes import snapshot
+        from .task_category_filter import visible_tasks
+        state, rows, error, _summary = snapshot(self, reg)
+        return state, visible_tasks(
+            reg, rows, getattr(self, "include_maintenance", False),
+        ), error
     def _task_rows(self):
         """The flat, selectable list of task entries (dicts) for the current
         registered pivot -- the ('T', i) stops index into this."""
         rows = self._task_state()[1]
         rows = rows if isinstance(rows, list) else []
         reg = self._reg_pivot()
-        if reg is not None and reg.placement == "config":
+        if reg is not None:
             cache = getattr(self, "_config_row_ids", None)
             if cache is None:
                 cache = self._config_row_ids = {}
             key = (reg.name, self._pivot_scope_key())
-            ids = tuple(row.get(reg.id_field) for row in rows)
+            ids = tuple(row.get("_manager_row_key", row.get(reg.id_field)) for row in rows)
             previous = cache.get(key, ())
-            if previous != ids and self.sel and self.sel[0] == "T":
+            if key in cache and previous != ids and self.sel and self.sel[0] == "T":
                 index = self.sel[1]
                 identity = previous[index] if index < len(previous) else None
                 self.sel = ("T", ids.index(identity)) if identity in ids else ("M", 0)
@@ -160,12 +204,8 @@ class PickerScreenModelMixin:
         reg = self._reg_pivot()
         if reg is None:
             return {}
-        rt = self._pivot_runtime(reg)
-        getter = getattr(rt, "get_summary", None)
-        if getter is None:
-            return {}
-        scope = self._pivot_scope_key()
-        return {} if scope is None else getter(scope)
+        from .registered_scopes import summary
+        return summary(self, reg)
     def _worktree_title_map(self):
         """``{short-id: title}`` from the Picker's loaded worktree records -- the
         lookup that correlates an account-scoped pivot's *claiming worktree id*
@@ -239,6 +279,7 @@ class PickerScreenModelMixin:
             return []
     def _worktree_supervised_workers_index(self, records):
         from .pivots import supervised_workers_by_worktree
+        from .registered_scopes import read_scope
 
         machine_keys = self._machine_key_map()
         scopes = {}
@@ -254,7 +295,7 @@ class PickerScreenModelMixin:
             workers = []
             for d in worker_pivots:
                 reg = d["pivot"]
-                scope = "" if getattr(reg, "account_scoped", False) else machine
+                scope = read_scope(reg, machine)
                 key = (reg.name, scope)
                 if key not in scopes:
                     scopes[key] = supervised_workers_by_worktree(
@@ -292,6 +333,8 @@ class PickerScreenModelMixin:
         if self.sel[0] != "T":
             return None
         rows = self._task_rows()
+        if self.sel[0] != "T":
+            return None
         i = self.sel[1]
         return rows[i] if 0 <= i < len(rows) else None
     def cur_machine(self):
@@ -362,11 +405,18 @@ class PickerScreenModelMixin:
         return bool((tab.get("capabilities") or {}).get(capability))
     def _scope_data(self):
         """Worktrees in the active source-tab scope."""
+        instances = {tab.get("source_id"): instance for tab in self.source_tabs
+                     if (instance := worktree_source_instance(self, tab))}
+        data = [
+            row for row in self.data
+            if row.get("source_id") not in instances
+            or worktree_row_identity(row)[1] == instances[row["source_id"]]
+        ] if instances else self.data
         if self.is_all():
             ready_sources = self.ready_source_ids()
             ready_envs = self.ready_envs()
             return [
-                w for w in self.data
+                w for w in data
                 if (
                     w.get("source_id") in ready_sources
                     or (w.get("machine"), w.get("env")) in ready_envs
@@ -375,9 +425,9 @@ class PickerScreenModelMixin:
         tab = self._current_tab()
         source_id = tab.get("source_id")
         if source_id:
-            return [w for w in self.data if w.get("source_id") == source_id]
+            return [w for w in data if w.get("source_id") == source_id]
         m, e, _ = self.cur_machine()
-        return [w for w in self.data if w["machine"] == m and w["env"] == e]
+        return [w for w in data if w["machine"] == m and w["env"] == e]
     def _hidden_count(self):
         """How many bridge/system worktrees are hidden in the current scope."""
         return sum(1 for w in self._scope_data() if w.get("hidden"))
@@ -470,14 +520,13 @@ class PickerScreenModelMixin:
         return getattr(self, "manager_update_state", "idle") == "available"
     def _v_stops(self):
         """Top-region vertical stops, in visual (top-to-bottom) order: the
-        Manager's own update icon ("MUP", 0) when ITS update is staged, then
-        the engine/marketplace update refresh icon ("UPD", 0) when staged,
+        one update icon (Manager "MUP" takes precedence over payload "UPD"),
         then the View pivot row ("V", 0). The ⚙ Configuration entry is NOT a
         vertical stop -- it rides the pivot row's horizontal ◀▶ nav (#1426)."""
         out = []
         if self._manager_update_actionable():
             out.append(("MUP", 0))
-        if self._update_actionable():
+        if self._update_actionable() and not self._manager_update_actionable():
             out.append(("UPD", 0))
         out.append(("V", 0))
         return out

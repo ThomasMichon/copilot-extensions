@@ -14,7 +14,7 @@ if [[ $# -eq 0 ]]; then
     exit 2
 fi
 
-_aw_machine_settings_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reconcile-machine-settings.sh"
+_aw_machine_settings_helper="$(cd "$(builtin command -p dirname "${BASH_SOURCE[0]}")" && pwd)/reconcile-machine-settings.sh"
 if [[ -f "$_aw_machine_settings_helper" ]]; then
     # shellcheck disable=SC1090
     . "$_aw_machine_settings_helper" "$_aw_launch_recovery"

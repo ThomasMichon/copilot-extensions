@@ -11,7 +11,7 @@ import re
 import pytest
 
 import agent_worktrees.__main__ as m
-from agent_worktrees import config as cfg
+from agent_worktrees import config as cfg, state_root
 
 
 def _create_config(tmp_path: Path) -> cfg.Config:
@@ -43,14 +43,17 @@ def _stub_create_worktree_core_internals(monkeypatch, tmp_path: Path, config: cf
     monkeypatch.setattr(
         m, "_prepare_worktree_source", lambda *_a, **_k: SimpleNamespace(start_point="HEAD"),
     )
-    monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        m.git_ops, "create_worktree",
+        lambda _anchor, path, *_a, **_k: Path(path).mkdir(parents=True, exist_ok=True),
+    )
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda *_a: False)
     monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *_a: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)
     monkeypatch.setattr(
         m.state_root_mod,
         "resolve_state_root",
-        lambda config, cwd=None: m.state_root.StateRoot(
+        lambda config, cwd=None: state_root.StateRoot(
             path=None, source="knowledge_repo", repo="", stateless=False,
             requires_external=False, bound=False, error=None,
         ),
@@ -93,6 +96,11 @@ def test_create_worktree_core_with_no_seed_has_execution_admission_fence(
 
     result = m._create_worktree_core(config)
 
+    assert Path(result["launch"]["record_path"]) == (
+        tmp_path / "tracking" / f'{result["worktree"]["id"]}.yaml'
+    )
+    assert type(result["launch"]["pane_shell_version"]) is int
+    assert result["launch"]["pane_shell_version"] == 1
     assert "--interactive" not in result["launch"]["cmd"]
     assert "--admission-only" in result["launch"]["cmd"]
     assert result["launch"]["cmd"][-2:] == ["--", "copilot"]
@@ -138,6 +146,7 @@ def test_creation_uses_one_environment_suffix_and_short_identity(
 ) -> None:
     config = replace(_create_config(tmp_path), machine=machine, platform=platform)
     monkeypatch.setattr(m.cfg, "detect_platform", lambda: platform)
+    monkeypatch.setattr(m.cfg.socket, "gethostname", lambda: machine)
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
 

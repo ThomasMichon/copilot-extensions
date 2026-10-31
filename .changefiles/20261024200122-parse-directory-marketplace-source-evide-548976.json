@@ -1,0 +1,9 @@
+{
+  "comment": "Parse directory marketplace source evidence once in the shared update-driver JSON consumer.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

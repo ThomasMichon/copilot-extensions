@@ -11,6 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .native_keyed_admission import KeyedNativePrompt
+    from .native_send_admission import NativeSendPrompt
+    from .native_turn_transport import NativeTurnAttempt
+    from .runtime_custody import RuntimeAdmission, RuntimeInstallation
 
 from .db_events import PendingPromptRemovedError
 from .models import SessionStatus
@@ -37,6 +40,29 @@ class SessionNotRunningError(ValueError):
 class _SessionPromptMixin:
     """Prompt admission, queueing, and usage tracking helpers."""
 
+    async def enroll_native_turn_transport(
+        self, session_id: str, installation: RuntimeInstallation, admission: RuntimeAdmission,
+    ) -> None:
+        """Explicit internal opt-in; no negotiation, spawn, resume or history upgrade."""
+        from .native_turn_transport import NativeTurnTransport
+        from .runtime_custody import RuntimeCustodyError
+
+        if self._draining:
+            raise DaemonDrainingError("native transport enrollment")
+        session = self.get_session(session_id)
+        if session is None:
+            raise KeyError(f"Session {session_id} not found")
+        async with session._turn_start_lock:
+            owner = session._native_turn_transport
+            if owner is not None:
+                owner.require_current()
+                if owner.installation != installation or owner.admission != admission:
+                    raise RuntimeCustodyError("Native transport enrollment cannot replace its owner")
+                return
+            owner = NativeTurnTransport.capture(self, session, installation, admission)
+            session._native_turn_transport = owner
+            owner.client._native_turn_transport = owner
+
     async def submit_prompt(
         self, session_id: str, prompt: str, *, no_resume: bool = False,
         expected_native_session_id: str | None = None,
@@ -60,7 +86,7 @@ class _SessionPromptMixin:
     async def _submit_prompt_locked(
         self, session_id: str, prompt: str, *, no_resume: bool = False,
         delivery_id: str | None = None,
-        native_admission: KeyedNativePrompt | None = None,
+        native_admission: KeyedNativePrompt | NativeSendPrompt | None = None,
         pending_prompt_id: int | None = None,
         pending_prompt_caller_id: str | None = None,
     ) -> int:
@@ -93,12 +119,22 @@ class _SessionPromptMixin:
             )
         if no_resume and session.status == SessionStatus.STOPPED:
             raise SessionStoppedError(f"{SessionStoppedError.code}: Session {session_id} is stopped")
+        native_owner = session._native_turn_transport
+        if native_owner is not None:
+            native_owner.require_current()
+        else:
+            from .acquisition_launch_owner import require_unassociated_session
+
+            require_unassociated_session(self, session, operation="prompt")
 
         # Auto-resume if the process is dead but session is recoverable
         if not session.client or not session.client.is_running:
             if no_resume:  # re-checked here: a stop may have landed since admission
                 raise SessionNotRunningError(
                     f"{SessionNotRunningError.code}: Session {session_id} has no running client")
+            from .hosting_policy import require_session_hosting
+
+            await require_session_hosting(self, session, operation="implicit resume")
             log.info(
                 "Session %s (%s) process is dead -- auto-%s",
                 session_id,
@@ -131,12 +167,17 @@ class _SessionPromptMixin:
             validate_holder(self, session_id, session, native_admission)
         turn_index = session.turn_count
         now = time.time()
+        native_attempt = native_owner.attempt(turn_index, prompt) if native_owner is not None else None
+        custody = ({
+            "runtime_admission": native_owner.admission, "native_consumer": native_owner.consumer,
+        } if native_owner is not None else {})
 
         # Persist turn skeleton
         if native_admission is not None:
             admitted = self._db.create_turn(
                 session_id, turn_index, prompt, now, delivery_id=delivery_id,
                 native_admission=native_admission,
+                **custody,
             )
             if not admitted["inserted"]:
                 return admitted["receipt"]["turn_index"]
@@ -144,11 +185,12 @@ class _SessionPromptMixin:
             self._db.create_turn(
                 session_id, turn_index, prompt, now, delivery_id=delivery_id,
                 pending_prompt_id=pending_prompt_id,
+                **custody,
             )
         elif delivery_id is None:
-            self._db.create_turn(session_id, turn_index, prompt, now)
+            self._db.create_turn(session_id, turn_index, prompt, now, **custody)
         else:
-            self._db.create_turn(session_id, turn_index, prompt, now, delivery_id=delivery_id)
+            self._db.create_turn(session_id, turn_index, prompt, now, delivery_id=delivery_id, **custody)
         session.turn_count += 1
         if pending_prompt_id is not None and session.event_log:
             session.event_log.append("prompt_dequeued", {
@@ -193,7 +235,12 @@ class _SessionPromptMixin:
             # the prompt bubble, not only the agent's response. This mirrors
             # what the agent's load-time replay emits during a resync, keeping
             # live and replayed histories consistent.
-            session.event_log.append("user_message", {"content": prompt})
+            from .native_send_admission import NativeSendPrompt
+            provenance = (
+                {"source": "agent-bridge", "caller_id": native_admission.caller_id}
+                if isinstance(native_admission, NativeSendPrompt) else {}
+            )
+            session.event_log.append("user_message", {"content": prompt, **provenance})
             session.event_log.append("session_state_changed", {
                 "status": SessionStatus.RUNNING.value,
                 "turn_index": turn_index,
@@ -201,7 +248,8 @@ class _SessionPromptMixin:
 
         # Run the prompt as a background task
         session._prompt_task = asyncio.create_task(
-            self._run_prompt(session, turn_index, prompt)
+            self._run_prompt(session, turn_index, prompt) if native_attempt is None
+            else self._run_prompt(session, turn_index, prompt, native_attempt=native_attempt)
         )
 
         # The child is now busy: tell its session host it is NOT reapable so a
@@ -477,11 +525,15 @@ class _SessionPromptMixin:
         return self._clear_pending_queue(session, reason="cleared")
 
     async def _run_prompt(
-        self, session: Session, turn_index: int, prompt: str
+        self, session: Session, turn_index: int, prompt: str, *,
+        native_attempt: NativeTurnAttempt | None = None,
     ) -> None:
         """Background task: send prompt via ACP and persist the result."""
         try:
-            result = await session.client.send_prompt(prompt)
+            result = await (
+                session.client.send_prompt(prompt) if native_attempt is None
+                else native_attempt.owner.client.send_prompt(prompt, native_attempt=native_attempt)
+            )
 
             # Persist completed turn
             self._db.update_turn(
@@ -627,8 +679,14 @@ class _SessionPromptMixin:
     def _host_reapable(self, session: Session) -> bool:
         """Is the child safe to free? True only when its turn has completed and
         no background sub-agents are still running (#51)."""
-        return (session.status == SessionStatus.IDLE
-                and not session.has_active_background_tasks)
+        if (
+            session.status != SessionStatus.IDLE or session.has_active_background_tasks
+            or session._native_turn_transport is not None
+        ):
+            return False
+        from .acquisition_launch_owner import session_association
+
+        return session_association(self, session) is None
 
     def _is_codespace_target(self, target: "SpawnTarget") -> bool:
         """True if this target is a CodeSpace boundary agent -- structured

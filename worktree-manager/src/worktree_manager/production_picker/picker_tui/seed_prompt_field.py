@@ -10,37 +10,49 @@ from .field_widgets import _AutoExpandTextArea
 
 
 class SeedPromptField(_AutoExpandTextArea):
-    def __init__(self) -> None:
+    def __init__(self, *, history_on_mount=True) -> None:
         super().__init__(id="q-0")
         self.seed_store: SeedHistory | None = None
         self.seed_cursor = HistoryCursor([])
+        self._history_on_mount = history_on_mount
 
     def on_mount(self) -> None:
         super().on_mount()
-        self.seed_store = SeedHistory(context.project())
+        if not self._history_on_mount:
+            return
         try:
-            self.seed_cursor = HistoryCursor(self.seed_store.entries())
-        except SeedHistoryError as exc:
+            self.seed_store = SeedHistory(context.project())
+            self.seed_cursor = self.seed_store.cursor()
+        except (SeedHistoryError, RuntimeError) as exc:
             self.notify(str(exc), severity="error")
 
-    def remember(
+    def refusal(
         self, *, options: Iterable[str] = (), refusal_reason: str | None = None,
-    ) -> bool:
+    ) -> str | None:
+        """Validate a snapshot without persisting or changing the draft."""
         unsupported = {"Anchor repo", "Bare", "AHP", "Local model"} & set(options)
         if unsupported and not refusal_reason:
             refusal_reason = (
                 "Prompt launch is unsupported with " + ", ".join(sorted(unsupported))
                 + "; clear the prompt or change the options."
             )
-        if refusal_reason and self.text.strip():
-            self.notify(refusal_reason, severity="error")
+        return refusal_reason if self.text.strip() else None
+
+    def remember(
+        self, *, options: Iterable[str] = (), refusal_reason: str | None = None,
+    ) -> bool:
+        if not self.text.strip():
+            return True
+        reason = self.refusal(options=options, refusal_reason=refusal_reason)
+        if reason:
+            self.notify(reason, severity="error")
             self.focus()
             return False
         try:
             if self.seed_store is None:
                 self.seed_store = SeedHistory(context.project())
             self.seed_store.remember(self.text)
-        except SeedHistoryError as exc:
+        except (SeedHistoryError, RuntimeError) as exc:
             self.notify(str(exc), severity="error")
             self.focus()
             return False
@@ -55,7 +67,13 @@ class SeedPromptField(_AutoExpandTextArea):
             event.key == "down" and row == self.document.line_count - 1
         )
         if older or newer:
-            text = self.seed_cursor.move(self.text, 1 if older else -1)
+            try:
+                text = self.seed_cursor.move(self.text, 1 if older else -1)
+            except SeedHistoryError as exc:
+                event.prevent_default()
+                event.stop()
+                self.notify(str(exc), severity="error")
+                return
             if text is not None:
                 event.prevent_default()
                 event.stop()
@@ -67,6 +85,6 @@ class SeedPromptField(_AutoExpandTextArea):
         super().on_key(event)
 
 
-def compose_seed_prompt():
-    widget = SeedPromptField()
+def compose_seed_prompt(*, history_on_mount=True):
+    widget = SeedPromptField(history_on_mount=history_on_mount)
     return [widget], {"primary": widget}

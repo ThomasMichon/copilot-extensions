@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve authoritative absent-ref results during pinned first PR publication without weakening strict post-push tracking checks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

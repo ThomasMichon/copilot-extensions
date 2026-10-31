@@ -19,12 +19,16 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from attribution_profile import ProfileError, guidance as profile_guidance, load_profile
+
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 _MAX_INPUT_BYTES = 64 * 1024
 _GUIDANCE_MAX_BYTES = 4 * 1024
 _SUBPROCESS_TIMEOUT_S = 10.0
 _GIT_SUBPROCESS_TIMEOUT_S = 5.0
 _GUIDANCE_HEADER = "# AI attribution session guidance\n\n"
+_CONSERVATIVE_HEADER = "Disclose AI for ALL contributions.\n\n"
 
 #: The full policy computation (spawn a fresh shell interpreter to run
 #: emit-policy.*, which itself shells out to git and reads config files) costs
@@ -36,7 +40,7 @@ _GUIDANCE_HEADER = "# AI attribution session guidance\n\n"
 #: read/write failure of any kind always falls through to a full recompute; a
 #: stale-but-unexpired cache is the only risk this introduces, bounded by the
 #: TTL below.
-_CACHE_FORMAT_VERSION = 1
+_CACHE_FORMAT_VERSION = 3
 _CACHE_TTL_SECONDS = int(os.environ.get("AI_ATTRIBUTION_CACHE_TTL_SECONDS", "3600"))
 #: Escape hatch for an operator (or a future setup/refresh skill step) who
 #: knows policy/config changed and does not want to wait out the TTL.
@@ -51,7 +55,7 @@ def _read_bounded_stdin() -> bytes:
 def _additional_context(raw: bytes) -> str:
     try:
         value = json.loads(raw.decode("utf-8"))
-    except (UnicodeError, TypeError, ValueError):
+    except (UnicodeError, TypeError, ValueError, RecursionError):
         return ""
     context = value.get("additionalContext") if isinstance(value, dict) else None
     return context.strip() if isinstance(context, str) else ""
@@ -91,6 +95,7 @@ def _run_contributor(root: Path, payload: bytes) -> str:
             timeout=_SUBPROCESS_TIMEOUT_S,
             check=False,
             env={**os.environ, "PYTHONPATH": ""},
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -99,7 +104,7 @@ def _run_contributor(root: Path, payload: bytes) -> str:
     return _additional_context(completed.stdout)
 
 
-def _repo_cache_key(cwd: str) -> str:
+def _repo_root(cwd: str) -> str:
     """A stable per-repository cache key, keyed by the git toplevel when one
     can be resolved (grouping every subdirectory of the same repo onto one
     cache entry), falling back to the raw ``cwd`` string otherwise. The git
@@ -113,6 +118,7 @@ def _repo_cache_key(cwd: str) -> str:
             text=True,
             timeout=_GIT_SUBPROCESS_TIMEOUT_S,
             check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         if completed.returncode == 0:
             candidate = completed.stdout.strip()
@@ -120,7 +126,11 @@ def _repo_cache_key(cwd: str) -> str:
                 root = candidate
     except (OSError, subprocess.SubprocessError):
         pass
-    digest = hashlib.sha256(root.encode("utf-8", "surrogateescape")).hexdigest()
+    return root
+
+
+def _repo_cache_key(cwd: str, *, root: str | None = None) -> str:
+    digest = hashlib.sha256((root or _repo_root(cwd)).encode("utf-8", "surrogateescape")).hexdigest()
     return digest[:16]
 
 
@@ -128,11 +138,11 @@ def _cache_dir(home: Path) -> Path:
     return home / ".copilot" / "ai-attribution-cache"
 
 
-def _read_cached_guidance(home: Path, cwd: str) -> str | None:
+def _read_cached_guidance(home: Path, cwd: str, *, key: str | None = None) -> str | None:
     try:
-        path = _cache_dir(home) / f"{_repo_cache_key(cwd)}.json"
+        path = _cache_dir(home) / f"{key or _repo_cache_key(cwd)}.json"
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     if not isinstance(data, dict) or data.get("version") != _CACHE_FORMAT_VERSION:
         return None
@@ -145,11 +155,11 @@ def _read_cached_guidance(home: Path, cwd: str) -> str | None:
     return guidance
 
 
-def _write_cached_guidance(home: Path, cwd: str, guidance: str) -> None:
+def _write_cached_guidance(home: Path, cwd: str, guidance: str, *, key: str | None = None) -> None:
     try:
         directory = _cache_dir(home)
         directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{_repo_cache_key(cwd)}.json"
+        path = directory / f"{key or _repo_cache_key(cwd)}.json"
         data = {
             "version": _CACHE_FORMAT_VERSION,
             "computed_at": time.time(),
@@ -170,20 +180,63 @@ def _write_cached_guidance(home: Path, cwd: str, guidance: str) -> None:
         pass
 
 
-def _run_contributor_cached(root: Path, payload: bytes, *, home: Path, cwd: str | None) -> str:
+def _cache_profile(
+    home: Path, key: str, profile: dict, guidance: str, repo: str, header: str
+) -> None:
+    """Keep base policy separate so removing the last profile cannot replay it."""
+    temporary = None
+    try:
+        path = _cache_dir(home) / f"{key}.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return
+        data.update(
+            profile_inputs=profile["_inputs"], profile_probes=profile["_probes"],
+            profile_guidance=guidance, profile_header=header,
+            profile_environment={
+                "version": 1, "home": str(home), "repo": repo, "cwd": os.getcwd(),
+                "home_environment": (
+                    (os.environ.get("USERPROFILE") or os.environ.get("HOME", ""))
+                    if os.name == "nt" else os.environ.get("HOME", "")
+                ),
+                "dirs": os.environ.get("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", ""),
+                "xdg": os.environ.get("XDG_CONFIG_HOME", ""),
+                "appdata": os.environ.get("APPDATA", ""),
+            },
+        )
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=".ai-attribution-profile.", suffix=".tmp", delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump(data, handle)
+        os.replace(temporary, path)
+    except (OSError, ValueError, TypeError, RecursionError):
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _run_contributor_cached(
+    root: Path, payload: bytes, *, home: Path, cwd: str | None,
+    repo_root: str | None = None,
+) -> str:
     """`_run_contributor`, but reused from a per-repository cache when one is
     fresh, so a session whose repository and config haven't changed since the
     last computation skips the (much costlier) shell-script invocation
     entirely. Never used when ``cwd`` is absent/invalid, or when the operator
     has set the force-refresh escape hatch."""
     force_refresh = bool(os.environ.get(_FORCE_REFRESH_ENV))
+    key = _repo_cache_key(cwd, root=repo_root) if cwd else None
     if cwd and not force_refresh:
-        cached = _read_cached_guidance(home, cwd)
+        cached = _read_cached_guidance(home, cwd, key=key)
         if cached is not None:
             return cached
     guidance = _run_contributor(root, payload)
     if cwd and guidance:
-        _write_cached_guidance(home, cwd, guidance)
+        _write_cached_guidance(home, cwd, guidance, key=key)
     return guidance
 
 
@@ -210,9 +263,42 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
     raw_payload = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     payload_cwd = payload.get("cwd")
     cwd = payload_cwd if isinstance(payload_cwd, str) and payload_cwd else None
-    guidance = _run_contributor_cached(_plugin_root(), raw_payload, home=home, cwd=cwd)
+    repo_root = _repo_root(cwd) if cwd else None
+    guidance = _run_contributor_cached(
+        _plugin_root(), raw_payload, home=home, cwd=cwd, repo_root=repo_root
+    )
+    header = _GUIDANCE_HEADER
     if guidance:
-        content = _GUIDANCE_HEADER + guidance + "\n"
+        profile, errors = load_profile(home, Path(repo_root) if repo_root else None)
+        try:
+            addition = profile_guidance(profile)
+        except ProfileError:
+            addition = ""
+            errors.append("assembled signature rejected")
+        if errors:
+            header = _CONSERVATIVE_HEADER
+            addition = "Signature profile unavailable: " + "; ".join(errors) + (
+                ". Disclose on all contributions until the profile is resolved."
+            )
+        if addition:
+            candidate = header + guidance + "\n\n" + addition + "\n"
+            if len(candidate.encode("utf-8")) <= _GUIDANCE_MAX_BYTES:
+                guidance += "\n\n" + addition
+            else:
+                header = _CONSERVATIVE_HEADER
+                notice = (
+                    "\n\nSignature profile exceeds the session budget. Disclose on ALL "
+                    "contributions until attribution_profile.py resolves the profile "
+                    "before preview/approval. Baseline exemptions do not apply meanwhile."
+                )
+                if len((header + guidance + notice + "\n").encode("utf-8")) <= _GUIDANCE_MAX_BYTES:
+                    guidance += notice
+        if cwd and not errors:
+            _cache_profile(
+                home, _repo_cache_key(cwd, root=repo_root), profile, guidance, repo_root, header
+            )
+    if guidance:
+        content = header + guidance + "\n"
     else:
         content = (
             _GUIDANCE_HEADER
@@ -221,7 +307,7 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
         )
     if guidance and len(content.encode("utf-8")) > _GUIDANCE_MAX_BYTES:
         content = (
-            _GUIDANCE_HEADER
+            header
             + "Current AI attribution guidance was omitted because it exceeded "
             "the bounded file budget. Treat guidance as unavailable for this "
             "session-start invocation.\n"

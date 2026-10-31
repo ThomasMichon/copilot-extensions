@@ -125,10 +125,9 @@ class RepoEntry:
     # :func:`resolve_copilot_account` / :func:`copilot_account_for` and
     # ThomasMichon/copilot-extensions#3296.
     copilot_account: str = ""
-    # Whether this repo backs a same-machine agent in agent-bridge. Defaults
-    # ON for worktree/singleton repos (you adopt them to work in them); OFF for
-    # reference repos (read-only). `register`/`add --no-agent` forces it off.
-    agent: bool = True
+    # Registry agent discovery is opt-in, independently of editing class.
+    # A direct repository policy check remains permissive unless vetoed.
+    agent: bool = False
     # Audience-exposure tier ("private"/"internal"/"public") -- see
     # ``VALID_VISIBILITY`` above. Empty string means unset; resolve a
     # fail-safe default via ``identifier_blocklist.resolve_visibility_rank``
@@ -169,6 +168,7 @@ class ReposRegistry:
     # :func:`account_for_github_owner`. Keys are compared case-insensitively.
     account_map: dict[str, str] = field(default_factory=dict)
     _baseline: tuple[str, str] | None = field(default=None, repr=False, compare=False)
+    schema_version: int | None = field(default=None, kw_only=True)
 
 
 # ---------------------------------------------------------------------------
@@ -425,6 +425,7 @@ def account_from_map(
 def resolve_account(
     entry: RepoEntry | None, *, registry: ReposRegistry | None = None,
     index: AccountLookupIndex | None = None,
+    configured_only: bool = False,
 ) -> str | None:
     """Resolve the preferred GitHub account for a repo entry: explicit
     ``account:`` -> ``account_map`` -> remote owner -> None (ambient)."""
@@ -439,7 +440,7 @@ def resolve_account(
     )
     if mapped:
         return mapped
-    return owner
+    return None if configured_only else owner
 
 
 def resolve_copilot_account(entry: RepoEntry | None) -> str | None:
@@ -526,6 +527,7 @@ def unset_copilot_account(name: str) -> bool:
 def account_for_github_owner(
     owner: str | None, *, registry: ReposRegistry | None = None,
     index: AccountLookupIndex | None = None,
+    configured_only: bool = False,
 ) -> str | None:
     """Resolve the effective account for a github ``owner`` (from a repo slug).
 
@@ -547,12 +549,12 @@ def account_for_github_owner(
     if not owner:
         return None
     if index is not None:
-        return index.owners.get(owner.casefold()) or index.account_map.get(owner.casefold()) or owner
+        return (
+            index.owners.get(owner.casefold()) or index.account_map.get(owner.casefold())
+            or (None if configured_only else owner)
+        )
     if registry is None:
-        try:
-            registry = read_registry()
-        except Exception:
-            registry = ReposRegistry()
+        registry = read_registry(strict=True) if configured_only else read_registry()
     for entry in registry.repos.values():
         if not entry.account:
             continue
@@ -562,7 +564,7 @@ def account_for_github_owner(
     for key, login in registry.account_map.items():
         if key.casefold() == owner.casefold() and login:
             return login
-    return owner
+    return None if configured_only else owner
 
 
 def resolve_slug_owner(target: str | None) -> str | None:
@@ -608,37 +610,53 @@ def is_unresolved_registered_target(target: str | None) -> bool:
 def account_for_github_slug(
     slug: str | None, *, registry: ReposRegistry | None = None,
     index: AccountLookupIndex | None = None,
+    configured_only: bool = False,
 ) -> str | None:
     """Resolve a GitHub slug or registry alias to its configured account.
 
     Exact registered repository matches take precedence over owner-wide policy,
     so sibling repositories can use different accounts. Bare registered names
     resolve directly through their entry; unregistered slugs use owner policy.
+    ``configured_only`` excludes the derived-owner heuristic, distinguishing
+    an operator's identity choice from legacy best-effort authentication.
     """
     if not slug:
         return None
+    if configured_only and registry is None:
+        registry = read_registry(strict=True)
     if "/" in slug:
         if index is not None:
             entry = index.slugs.get(slug.casefold())
             if entry is not None:
-                return resolve_account(entry, registry=registry, index=index)
-            return account_for_github_owner(slug.split("/", 1)[0], index=index)
+                return resolve_account(
+                    entry, registry=registry, index=index, configured_only=configured_only,
+                )
+            return account_for_github_owner(
+                slug.split("/", 1)[0], index=index, configured_only=configured_only,
+            )
         entries = (registry if registry is not None else read_registry()).repos
         for entry in entries.values():
             remote_slug = github_slug(entry.remote)
             if remote_slug and remote_slug.casefold() == slug.casefold():
-                return resolve_account(entry) if registry is None else resolve_account(entry, registry=registry)
+                return (
+                    resolve_account(entry) if registry is None
+                    else resolve_account(entry, registry=registry, configured_only=configured_only)
+                )
     if "/" not in slug:
         entry = find_repo(slug) if registry is None else registry.repos.get(slug)
         if entry is not None:
             return (
                 resolve_account(entry) if registry is None and index is None
-                else resolve_account(entry, registry=registry, index=index)
+                else resolve_account(
+                    entry, registry=registry, index=index, configured_only=configured_only,
+                )
             )
     owner = resolve_slug_owner(slug) if registry is None else slug.split("/", 1)[0]
     return (
         account_for_github_owner(owner) if registry is None
-        else account_for_github_owner(owner, registry=registry, index=index)
+        else account_for_github_owner(
+            owner, registry=registry, index=index, configured_only=configured_only,
+        )
     )
 
 
@@ -711,8 +729,8 @@ def resolve_registration_account(
             if shutil.which("gh") is None:
                 return True  # can't verify -> don't nag
             return git_ops.gh_token_for_account(login) is not None
-        except Exception:
-            return True
+        except (OSError, subprocess.SubprocessError, git_ops.AccountCredentialError):
+            return False
 
     if explicit_account:
         return AccountResolution(
@@ -789,7 +807,7 @@ def add_repo(
             tags=list(tags) if tags else [],
             contributing=contributing,
             account=account,
-            agent=agent if agent is not None else (normalized_class != "reference"),
+            agent=agent if agent is not None else False,
             visibility=normalize_visibility(visibility),
             paths={plat: path},
         )
@@ -899,8 +917,9 @@ def clone_repo(
     if is_https_remote(remote):
         try:
             extra_args = git_ops._auth_config_args_for_url(remote)
-        except Exception:
-            extra_args = []
+        except (git_ops.GitError, RepositoryResolutionError) as exc:
+            output.err(str(exc))
+            return None
     argv = ["git", *extra_args, "clone", remote, str(target_path)]
 
     def _redact(text: str) -> str:

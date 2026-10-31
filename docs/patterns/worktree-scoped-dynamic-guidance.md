@@ -4,16 +4,12 @@
 behaviors `resilient-safety-boundary`, `ambient-delivery-fails-open`,
 `resume-stable-context`).
 
-> **Precedence note (`local-cache-delivery-primacy`):** the gitignored
-> local cache this pattern describes is the **primary** delivery path for
-> worktree-scoped projected instruction content -- it reflects the
-> currently installed payload, not a sync-lagged approximation of it. The
-> reviewed checked-in body below is strictly the **fallback**: the floor a session
-> falls back to only when no pre-session hook could render anything
-> fresher, or hasn't yet had the chance to. Precedence between the two is
-> decided by comparing their own embedded marker `pluginVersion` (§2),
-> never by the local file's mere existence -- a stale leftover must not be
-> able to outrank a genuinely newer checked-in copy.
+> **Direct-copy precedence:** enabled plugins' declared files in the managed
+> generated namespace are the primary runtime instructions. Read them without
+> hash, fingerprint, version, provenance or receipt admission. Reviewed checked-in
+> bodies are the offline fallback, not a gate on available managed copies.
+> The independent compatibility publisher uses the same raw-copy namespace and
+> workspace lease; checked-in authoring and offline maintenance remain separate.
 
 ## Problem
 
@@ -24,24 +20,25 @@ belong there: "the session-folder file carries only the values that had to
 be computed this session... everything else... is a second, ordinary static
 projection... checked in and reviewed like any other static fail-safe."
 
-Projected static instruction content -- the rendered body of a plugin's own
+Projected static instruction content -- the body of a plugin's own
 `instructions/*.instructions.md` template, synced into a consumer repo via
 `projection-reflect`/`instruction-projections.json` -- is exactly that
 "everything else" case. It is:
 
-- **too large and too stable** to regenerate on every `sessionStart` (that
-  would rewrite identical text into a fresh file every session, burning
-  budget and producing content that can't be reviewed or diffed as checked-in
-  guidance, the precise cost §2a exists to avoid); and
+- **already authored and reviewed** in its plugin payload, so startup can copy
+  the file directly rather than regenerate policy or provenance envelopes; and
 - **not session-specific at all** -- the same rendered content applies to
   every session in a given worktree, changing only when the plugin's
   installed payload changes or the consumer repo's enablement changes.
 
-This content belongs in a reviewed worktree-scoped artifact, never a
-per-session rewrite. Current delivery separates a concise checked-in
+This content belongs in reviewed plugin source and a disposable worktree copy.
+Creation and session start replace that copy, including while another session
+is running; replacement does not claim the model has reloaded it.
+Legacy checked-in delivery separates a concise
 `.github/instructions/**/*.instructions.md` selector from its lock-owned,
-non-auto-loaded full body in `.github/copilot/context-fallbacks/`; explicitly
-declared inline kernels retain their ambient policy. Relying only on the
+non-auto-loaded full body in `.github/copilot/context-fallbacks/`. Every newly
+maintained full fallback uses this pair, including former inline kernels.
+Relying only on the
 reviewed body as the source of truth would leave two gaps:
 
 1. **Sync-lag is user-facing, and the fix requires rights an ordinary
@@ -54,10 +51,11 @@ reviewed body as the source of truth would leave two gaps:
    bug.
 2. **Some launch paths have no hook and no session-state folder at all** (a
    fully headless, sandboxed, or cloud-hosted agent invocation). For those,
-   the checked-in selector plus reviewed fallback (or explicit inline kernel)
+   the checked-in selector plus reviewed fallback
    remains the usable offline path without cache writes. Other launch paths
-   can acquire authenticated current local bodies instead; file existence
-   alone does not establish their authority or delivery.
+   can acquire current managed copies instead. Plugin enablement and the
+   declaration own source selection; a separate content-authentication graph is
+   not a prerequisite to copying.
 
 ## Standard approach
 
@@ -127,6 +125,27 @@ It rejects nonregular exclude inputs before index queries can consult them,
 then reads the current exclude contents again immediately before appending its
 rule. A FIFO must fail explicitly without waiting for a writer or consuming the
 Git timeout, and a refusal leaves the previous generated instructions intact.
+The same publisher-owned namespace preparation is used for a validated paired
+knowledge **worktree** before its overlay composition can complete. It resolves
+`info/exclude` through Git (including a linked worktree's common directory),
+preserves existing rules, adds the reserved rule at most once, and checks
+effective ignore coverage without discovering or publishing companion sources.
+This preparation runs even when plugin overlay composition is disabled; it
+does not enable plugins. Anchor pairs are not companion write targets.
+The overlay transaction remains outermost, followed by the worktree publication
+lock and then the shared-exclude lock. The last lock reuses the native file-lock
+owner, keyed by the safely resolved actual Git exclude path, so separately locked
+linked companions cannot duplicate the rule or race past the byte limit. Resolve
+that Git path again under the shared lock before reading/index preflight, and
+retain the lock through final Git-state validation for both preparation and
+publication. Effective coverage requires a positive, nonempty Git ignore rule
+for the generated namespace directory itself, not a guessed filename; selective
+repository-owned unignore rules cannot falsely qualify companion preparation.
+Tracked namespace conflicts, indirect/nonregular or oversized exclude
+inputs (over 2 MiB), and unwritable excludes fail visibly, retain the harness's
+pending-pair marker, and can be retried through normal composition after repair.
+No tracked ignore file, settings declaration, or source roster is changed by
+namespace preparation.
 It resolves user, repository and local activation settings in process and uses
 the existing vendored `plugin_resolve` marketplace/path helpers and host
 installed-root resolver. Built-in unqualified plugin settings are outside this
@@ -173,45 +192,34 @@ installing replacements, allowing file/directory destination migrations in
 either direction without manual cleanup. Tracked blockers still fail the batch
 before any of those removals.
 
-Successful publication records a versioned `prepared.json` in the checkout's
-existing Git-administrative guidance directory. It binds the canonical root and
-home, exact current settings-derived plugin identities and payload roots,
-manifest generations, captured input-file identities/timestamps/content hashes, generated
-files/directories and Git index/HEAD evidence. A subsequent unchanged boundary
-revalidates that evidence (including current file bytes) without rebuilding the desired set, running Git or
-copying files. Changed settings, payloads, template links, pairing output,
-generated files, index/HEAD or malformed receipts require preparation again.
-Ignore-file evidence includes absent repository ignore files, so creating an
-override invalidates reuse. A receipt retains the Git evidence actually checked
-by preflight; changes to that evidence before mutation or receipt creation
-refuse publication rather than certifying an unchecked newer index. Regular
-symlinked source inputs retain both link identity and target content hashes;
-output-link redirection remains refused.
-Pending paired composition always refuses reuse. Partial/failed publications
-never create reusable readiness. The receipt is disposable local evidence, not
-a source of instruction authority or a model-admission receipt.
+Every creation/resume preparation copies the complete resolved instruction set,
+including when the same files were copied earlier. Session start queues another
+copy rather than probing a prepared generation. The publisher does not inspect
+old instruction bytes, compare content hashes or fingerprints, or reuse a
+`prepared.json` receipt. Old readiness receipts are ignored. Generated files may
+be replaced while a session is running; restart/new context loads the updated
+files through normal discovery.
 
-Version 2 distinguishes ready preparation from partial ownership history.
-Partial records are never reusable readiness. Their bounded source/byte
-ownership map lets healthy providers update proven slots without replacing
-guidance owned by an unresolved provider. Unknown legacy slots and structural
-overlaps remain untouched with an explicit ownership finding; a later complete
-source set can reconcile the generated namespace normally. Successful partial
-publication records ownership for newly delivered sources, so another partial
-pass can safely update them. This is a file-ownership safeguard, not a content
-selection policy; all tracked-file and path checks still apply.
+A small `owners.json` in the existing Git-administrative guidance directory
+records destination-to-plugin names only. During partial discovery it keeps an
+unresolved provider's destinations from being reassigned, without hashing or
+authenticating their content. Unknown legacy slots and structural overlaps
+remain untouched with an explicit ownership finding until a complete source
+set can reconcile the namespace. Git index and ignore metadata are checked
+around preflight to retain tracked-file protection; those checks do not inspect
+or authenticate instruction content.
 
-The complete desired set is built once inside the publication lock. Captured
-input identities and current source selection are checked again before copying,
-rather than reconstructing every desired byte a second time. All mutation-path
-Git protection remains in place. Cross-process callers use the same gate and
-resolve current inputs after acquiring it; an older waiting caller cannot
-publish its pre-lock selection over a newer generation.
+The desired bytes are read once inside the publication lock. A plugin update
+during a copy is not an authentication failure: the next serialized publication
+copies its current files. Cross-process callers resolve sources after acquiring
+the same gate, so an older waiting caller cannot publish a pre-lock selection
+over a newer one. Each destination is atomically replaced, without a cross-file
+rollback transaction or a content-match prerequisite.
 
 Bridge's local Session-Host path invokes the attributable optional Worktrees
 `knowledge compose-plugins --prepare-projections --json` owner after static
-plugin preparation and before spawn. Its successful generation is reused, not
-rendered into a competing namespace. This foreground call retains async
+plugin preparation and before spawn. It copies into the same managed namespace,
+not a competing renderer's output. This foreground call retains async
 cancellation/tree custody and operation-specific owner limits, without a broad
 five-second render cutoff. Without a Worktrees owner, the independent bounded
 compatibility renderer remains available; refused identity or a failed owner
@@ -235,11 +243,9 @@ missing custody is an explicit unavailable result, not an unsafe spawn.
 Fresh identity reads retain PID-reuse and unreadable-identity refusal.
 Native Darwin descendant controls remain distinct from adapter unit tests.
 
-SessionStart verifies current readiness before queueing its bounded backup.
-An exhausted reuse-probe budget means unverified readiness, not disabled
-backup: the remaining hook budget is checked again before queueing.
-That probe budget reaches receipt, file-hash and Git-evidence validation;
-expiry cannot be converted to reused readiness or swallowed as a cache miss.
+SessionStart queues its bounded backup on every invocation with sufficient hook
+dispatch budget, including after a successful foreground copy. It does not probe
+instruction fingerprints or prepared readiness before dispatch.
 For a late backup, the exact session retains a watch on the checkout-local
 completion status. The existing post-tool hook surfaces completion once:
 changed/removed files explicitly require restart/new context before discovery;
@@ -247,20 +253,19 @@ partial and failed outcomes retain reviewed-fallback guidance. An idle session
 is not awakened and no restart is automatic. Written files, a successful hook
 result and an acknowledgment never assert that the running model admitted the
 new instructions.
-The watch captures an initial generated-file publication revision before its
-readiness probe. A prospective output mutation advances that revision under the
+The watch captures an initial generated-file publication revision before
+dispatch. A prospective output mutation advances that revision under the
 publication lock before the first write or removal, including partial
 publications. It survives post-copy verification failure or abnormal exit;
-failed-publication counts remain explicitly unavailable. Complete readiness
-receipts also bind this revision, so failed mutation cannot reuse an older
-receipt. Completion compares revisions,
+failed-publication counts remain explicitly unavailable. This revision is only
+a change-notification token, not a content receipt or admission gate. Completion compares revisions,
 not only the backup's own copy counts: a foreground publisher that finishes
-before the backup is still a late change requiring a restart notice. An
-unchanged backup does not invent a new publication revision. Failure after
+before the backup is still a late change requiring a restart notice. A backup
+with no selected files or removals does not invent a new publication revision. Failure after
 possible changes reports repair and restart/new-context requirements while
 retaining reviewed fallback, never a successful refresh or model-admission claim.
-The watch timestamp precedes the probe as well, so a worker finishing during
-the probe is not discarded as an older completion. Abnormal worker exits
+The watch timestamp precedes dispatch as well, so a worker finishing while
+dispatch is being recorded is not discarded as an older completion. Abnormal worker exits
 persist a terminal timestamp and failure result for the same post-tool
 consumer; existing completed results are preserved.
 The consumer also compares the current publication revision, not just the
@@ -272,73 +277,100 @@ exit checks and retains the watch on access denial or other uncertainty.
 It neither kills a process nor rewrites another worker's request.
 
 A third delivery tier, **worktree-scoped** rather than session-scoped or
-purely checked-in: a gitignored, locally re-rendered cache of auto-discovered
-instruction siblings that lives for as long as the worktree exists, refreshed
-at worktree lifecycle boundaries and session start.
+purely checked-in: disposable copies of declared instructions, refreshed at
+worktree lifecycle boundaries and session start.
 
-### 1. The gitignored auto-discovered local body
+### 1. The ignored auto-discovered copy
 
-The sibling layout below describes the authoring renderer's compatibility path;
-the startup contract above requires a dedicated ignored generated namespace.
-
-Every projection destination
-`.github/instructions/<plugin>/<sourceId>.instructions.md` gains a gitignored
-body at `.github/instructions/<plugin>/<sourceId>.local.instructions.md`,
-**except** a source that opts out via its own declaration's
-`skipLocalCache: true` (the repo-wide catch-all in step 3 is the one shipped
-example: its own body would join its recovery inventory and get read back,
-repeating the identical directive for no benefit). The consumer repo's root
-`.gitignore` covers the new body tree and legacy siblings during migration:
+Both startup and the independent compatibility publisher use
+`.github/instructions/agent-worktrees-generated/<marketplace>/...`, preserving
+the declared destination beneath `.github/instructions/` with a
+`.local.instructions.md` suffix. Every declared source is copied, including
+`skipLocalCache: true`: that legacy authoring flag does not opt out of runtime
+delivery. The compatibility publisher requires existing ignore coverage, while
+startup owns its Git-local exclude rule. A consumer can cover both current
+copies and historical local bodies with:
 
 ```gitignore
 .github/copilot/context-locals/**/*.local.md
 .github/instructions/**/*.local.instructions.md
 ```
 
-Nested destination subdirectories are preserved. Local bodies are gitignored
-instruction siblings that creation and resume populate before discovery.
+Nested destination subdirectories are preserved. Creation and resume populate
+the managed copies before discovery.
 Reviewed fallbacks are ordinary Markdown outside instruction roots, referenced
-using code spans rather than automatic imports. `local_sibling_destination()`
-returns the local instruction sibling path.
-The body holds a fresh re-render of the **currently installed** payload --
-never a network fetch, never a marketplace check, purely a local, offline
-render from whatever plugin payload already sits on disk. Keeping installed
-payloads themselves current remains the scheduled `projection-reflect` sync
-worker's job (its own `update --force` step); this cache only answers "given
-what's already installed right now, what would the correct projection look
-like," which is cheap, safe to run unprompted, and requires no repository
-write permission of any kind.
+using code spans rather than automatic imports. `managed_destination()` computes
+the copy path; `local_sibling_destination()` describes the historical layout.
+The copy contains the **currently installed** template's exact bytes, without
+network fetching, rendering, instruction hashes or unchanged-content reuse.
+Keeping installed payloads current belongs to normal authorized updates, not
+this permissionless copy step.
 
 ### 2. Selectors, reviewed bodies, and exact authority
 
-Declarations explicitly choose `deliveryMode: "selector"` or `"inline"`.
-Undeclared mode remains legacy inline for compatibility; the shipped suite
-declares every source. A selector replaces the checked-in full body at the
+New authoring always produces a selector and a non-discovered reviewed body.
+Declarations may still contain legacy `deliveryMode: "inline"` or omit the mode;
+the maintenance provider accepts these inputs but normalizes their output to
+`"selector"`. `skipLocalCache` remains accepted legacy metadata, not a requirement
+for an automatically discovered control floor. Canonical policy templates remain
+unchanged and startup still copies their complete bodies.
+A selector replaces the checked-in full body at the
 existing `.github/instructions/<plugin>/...instructions.md` destination.
 Its complete reviewed body is owned separately at the derived literal path
 `.github/copilot/context-fallbacks/<plugin>/...md`, preserving the destination's
-subdirectories. This path is outside instruction discovery, has no instruction
-suffix, and is referenced using code spans rather than auto-expanding links.
+subdirectories. The entire derived path must exclude `.instructions.md`,
+case-insensitively, including repeated or embedded forms; its basename must not
+be a native `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` or
+`copilot-instructions.md` name. This path is outside instruction discovery and
+is referenced using code spans rather than auto-expanding links.
+
+Selectors are locators, not independent delivery policy. They name candidate
+paths and the existing resolver argv without adding selection precedence,
+admission waivers or full-read exceptions. New authoring may consume an older
+complete catch-all template: its reviewed fallback retains that template's
+rules unchanged, rather than contradicting them in the locator. This does not
+change the current provider's raw-copy publication or managed-copy-first lookup.
 
 The version-2 lock owns both artifacts, their digests and byte counts. Sync
 validates legacy version-1 lock/preimages before migrating; fallback, selector
 and lock participate in the same compare-before-replace rollback transaction.
-Changing a selector back to inline retires only its integrity-verified owned
-fallback in that transaction; rollback restores it. Foreign edits block
-retirement, and unrelated/orphan files are never swept automatically.
+An inline declaration cannot turn a selector back into an automatically
+discovered full body or retire its fallback. Foreign edits block updates,
+and unrelated/orphan files are never swept automatically.
 Missing/malformed reviewed content, foreign ownership and unsafe paths block
-resolution. Source-update freshness remains an advisory distinct from those
+offline reviewed maintenance, not available managed-copy selection.
+Source-update freshness remains an advisory distinct from those
 integrity failures. A new enabled source without reviewed artifacts blocks as
 `projection-missing` until its complete enabled canonical local body is verified;
-partial, forged or absent bodies do not qualify. A required cache-free inline
-control kernel still needs its static delivery floor. Authenticated complete
-local delivery permits advisory `projection-source-update` for pending reviewed
+partial, forged or absent bodies do not qualify. Complete canonical local
+delivery permits advisory `projection-source-update` for pending reviewed
 freshness; valid stale reviewed guidance remains advisory even without local
 refresh. An unowned existing destination or missing locked artifact still
 blocks. Adopted, consented
 deterministic maintenance normally refreshes reviewed projections once daily;
 ordinary work does not require synchronous checked-in resync. This does not
 assert that installed payloads or running systems have been updated.
+
+#### Provider-first upgrade and rollback window
+
+The existing declaration contract remains version 1 and the authored lock
+remains version 2; no command or argument is added. Current readers retain
+legacy version-1 inline locks and version-2 inline/selector pairs. A valid
+legacy inline preimage migrates through the same transaction, with rollback
+restoring its bytes and lock if any write fails. A malformed, edited, foreign
+or unsafe preimage is not migration authority.
+
+Readers that already support version-2 selector/fallback pairs can read newly
+authored pairs without an upgrade. Providers predating that pair format are
+outside this window: upgrade them before maintaining or reading these artifacts,
+rather than deleting lock fields or treating malformed output as success.
+Introduce the normalizing provider before migrating declarations or adopters.
+Then explicitly declare selectors and remove obsolete cache-free flags before
+allowing a prior selector-capable writer to resume maintenance. An older writer
+given an old inline declaration can recreate the duplicate automatic body;
+reader compatibility alone does not establish writer rollback safety or enforce
+the new startup-only requirement. Keep that writer paused until its supported
+declaration inputs are in place, or retain the upgraded provider.
 
 Generated projections are not an authoring surface: change the canonical
 template or declaration instead of touching its generated output. Adopters may
@@ -357,51 +389,80 @@ artifacts. There is no shadow/update-blocking mechanism in this contract.
 Absent destinations use exclusive no-clobber publication; a concurrently
 created unowned file is never replaced. Consent, lock and output integrity are
 rechecked after publication, with best-effort rollback on failure.
-Legacy local compatibility reads still authenticate enabled canonical bytes;
-legacy markers alone are never authority. After publishing the new canonical
-body, migration retires an old auto-discovered local only when its bytes match
-the enabled canonical template rendered with its validated recorded version,
-tracking confirms it is untracked, and its path
-and preimage remain unchanged. Foreign, edited, tracked, or unsafe legacy
-files are retained with visible findings. They can remain auto-discovered until
-the adopter resolves the finding; relocation never silently deletes them.
-Git worktrees must first adopt ignore coverage for the new tree: until
-`git check-ignore` confirms coverage, publication and legacy retirement are
-skipped with `projection-local-cache-ignore`. Plain non-Git directories remain
-supported. Tracking/ignore probes are batched, never one Git process per body.
-These checks are not filesystem content CAS or protection against
-noncooperating filesystem attackers. Supported local filesystems must provide
-exclusive hard-link publication and atomic rename; unsupported filesystems
-fail closed, without a clobbering fallback. Fallback retirement still requires
-its full integrity proof. This opt-in changes neither the eight inline floors
-nor local-cache discovery; pointer-only local-body relocation is separate.
+The compatibility publisher uses declaration-only discovery and raw atomic
+replacement in the managed namespace. It shares startup's per-workspace native
+file lease, with discovery inside the lease, and does not compare old bytes.
+An earlier copy remains available if a refresh fails, accompanied by the actual
+failure rather than a successful-refresh claim. A refresh failure suppresses
+stale cleanup without blocking independently resolved existing copies.
+Incomplete declaration discovery also prevents reassignment of existing slots.
+Complete successful publication removes stale untracked copies inside the
+reserved namespace. Case-only aliases of a current destination are reconciled
+by filesystem identity, so case-insensitive cleanup cannot unlink a new copy;
+Git protection also includes portable spelling aliases. Historical bodies outside
+that namespace are retained with visible migration findings, regardless of
+their content, version or self-supplied markers. Runtime selection does not use
+those old bodies as current copies.
+Git worktrees must adopt ignore coverage before compatibility publication:
+missing coverage reports `projection-local-cache-ignore`. Plain non-Git
+directories remain supported. Index queries are batched and rechecked before
+mutation, including cached deletions with rename detection disabled. Staged
+deletions and paths renamed out of the namespace remain protected. The cached
+deletion query adds one Git operation per tracking probe; it protects files,
+not instruction-content authority.
+Compatibility publication also checks startup's pending-pair marker under the
+shared lease, before discovery. Incomplete pairing cannot publish an interim
+selection or remove earlier outputs.
+Checked-in fallback retirement remains a separate reviewed integrity operation.
 
 Before dependent/consequential action the reader acquires authoritative
 content, or reports a visible blocker without assuming authorization.
 `manage-instruction-projections.py resolve-source <repository> <destination>
---from-settings --json` performs read-only exact selection. Both paired and
-unpaired locals must match a canonical render of the currently enabled payload;
-self-consistent cache markers/hashes/receipts cannot authenticate provenance.
-Canonical authentication and local-source admission honor the existing exact
-persisted repository-folder trust boundary. Untrusted checkout settings cannot
-introduce a same-named directory marketplace as authenticated authority.
+--from-settings --json` performs read-only declaration/path selection. It first
+looks for the enabled declaration's exact managed path under
+`.github/instructions/agent-worktrees-generated/<marketplace>/...`, before reading
+the checked-in selector, fallback or lock. Plain copied bytes need no envelope,
+content equality, version comparison or receipt. A same-version edit or an older
+enabled plugin version is not a reason to reject the copy. Stale or damaged
+reviewed artifacts cannot block an available declared copy.
+Effective discovery includes user and user-local settings, then repository and
+repository-local settings in their existing precedence order. User-relative
+marketplace paths use the user Copilot directory, matching startup publication.
+Repository layers still honor the existing persisted-folder trust boundary.
+Malformed selected settings report errors rather than silently dropping a layer.
+Native built-in plugin settings are filtered before marketplace-entry validation.
+Runtime discovery accepts startup's local/remote source kinds and all four
+marketplace-manifest layouts, without a network fetch.
+Local catalog identity must match its registration or an explicit valid
+`source.manifestName` mapping. Supported plugin manifests identify the enabled
+plugin before declarations or their absence are accepted; missing, malformed
+or mismatched manifests are incomplete discovery, not authority to delete old
+copies. These are configuration identity checks, not instruction attestation.
+Runtime destination mapping also accepts top-level declared instruction files;
+the stricter subdirectory/suffix rules remain authoring-only.
+Source-qualified activation keys must be well formed before discovery can
+authorize cleanup. Runtime identity components follow startup's portable-name
+rules, including case and underscores; stricter authoring identifiers do not
+gate copies. Declaration and plugin-manifest JSON accept an optional UTF-8 BOM,
+while copied instruction templates remain byte-identical.
+The complete declaration set is checked for equal and ancestor/descendant
+portable output collisions before publication or selection. All conflicting
+copies are excluded with visible findings; independently safe new paths remain
+eligible. Compatibility results retain the declared-source count.
 Reviewed offline lock/artifact validation remains available without source
 freshness or folder trust. Explicit committed-source maintenance sync is a
 separate reviewable consent-owned write path, not authentication evidence.
-Without enabled canonical proof, paired resolution uses the reviewed fallback.
-Newer `pluginVersion` wins; equal
-version/equal `templateSha256` favors local; equal version/different hash favors
-reviewed content. Owner identity includes marketplace, plugin, source ID,
-destination and `applyTo`. Local content must reconstruct its canonical
-template hash, including legacy bodies. A malformed local is rejected with a
-diagnostic while the valid reviewed fallback remains usable.
+When no managed copy is available, lookup uses the existing reviewed fallback
+and its offline integrity checks. An obsolete sibling's self-supplied marker
+does not redirect that lookup. A disabled plugin's leftover generated copy is
+not selected. Unsafe paths and ambiguous declarations remain real errors.
 
 For local authority, supply `--from-settings` (and the attributable
 `--agent-worktrees-path` where required): the utility validates the enabled
-declaration/canonical template rather than trusting arbitrary cache files.
-Without canonical payload verification, retain reviewed fallback authority;
-metadata comparisons alone are insufficient. Neither timestamps nor file
-existence establish authority.
+declaration rather than parsing or authenticating the instruction content.
+No new attestation replaces the removed checks. Installation and normal harness
+review own trust; runtime lookup owns only activation, declaration and path
+selection.
 
 The resolver is a script, not a bare executable subcommand. Selectors expose
 its exact argv and instruct the agent to invoke `reviewing-customizations`;
@@ -410,51 +471,41 @@ entry or installed-directory scan. An absolute Python interpreter and checkout
 root complete the three explicit argv placeholders. Catalog-based marketplace
 resolution may additionally require `--agent-worktrees-path`. A fresh-fixture
 test executes the actual rendered argv with an empty PATH, exercising settings
-discovery and canonical paired-cache selection rather than mocking the parser.
+discovery and raw managed-copy selection rather than mocking the parser, including
+user, user-local, repository and repository-local activation.
 
-#### Inline decision kernels
+#### Decision kernels use the same delivery path
 
-The explicit inline allowlist retains existing policy prose intact:
+Safety, publication, completion and recovery kernels retain their complete
+canonical policy prose. Startup publishes those templates like other declared
+sources; periodic maintenance keeps only their thin selectors automatically
+discoverable. Their full offline copies wait outside discovery until needed.
+There is no inline allowlist authorizing a second automatic policy body.
+Repository-authored invariants remain repository-owned and are not removed by
+this plugin-source migration.
 
-- `agent-conduct-guidance`: `process-hygiene-fallback` governs every spawn;
-  `delegation-fallback` governs the initial research/delegation decision;
-  `scratch-space-fallback` governs every ad hoc write;
-  `secret-masking-fallback` governs credential-shaped construction.
-- `ai-attribution:publication-safety` governs publication before it happens.
-- `copilot-extensions-harness:contribution-boundary` governs contribution intake.
-- `efforts:completion-gate` governs termination and completion claims.
-- `customizing-copilot:local-cache-catchall` is the recovery control kernel.
+### 3. Full reads and late-source recovery
 
-This is a source-owned declaration list, not a substring classifier. Other
-sources are acquisition-gated procedures/pointers. No policy prose is slimmed
-to fabricate savings; inline kernels can remain duplicated when both copies
-are discovered, because their identified decision-point contract requires
-ambient retention.
-
-### 3. Per-source body evidence and late-source recovery
-
-Full modern bodies carry opening provenance (`deliveryKind: "body"`,
+Checked-in authoring renders still carry opening provenance (`deliveryKind: "body"`,
 `bodySha256`) and a closing `copilot-guidance-body-end:v1` receipt whose
 `bindingSha256` hashes the canonical marketplace/plugin, source ID, version,
 template hash, scope and body hash. This compact binding covers every identity
-field without repeating the metadata corpus at each boundary. The selection
-utility exposes the exact binding; never compare it by freehand transcription.
+field without repeating the metadata corpus at each boundary. These are authoring/offline-maintenance artifacts, not runtime copy admission.
 Compact version-2 selectors retain source identity, scope, version/hash,
 destination and rendered size; full template provenance remains in the lock.
 Selectors contain no body receipt. The pure envelope validator detects omitted
 middle bytes, truncated bodies, receipt-only summaries and quoted envelopes.
 It verifies byte completeness, **not model admission or compliance**.
 
-The catch-all remains unconditionally inline and opts out of its own local
-cache. It inventories after startup because a bare launch can discover
+The current generated catch-all inventories managed copies
+after startup because a bare launch can discover
 instructions before a hook writes local bodies. It covers late, partial and
 unpaired sources without treating a global marker as whole-corpus coverage.
 
-A read may be skipped only if the complete selected body and matching opening/
-closing provenance are directly visible in the current applicable context.
+A read may be skipped only if the complete selected body is directly visible
+in the current applicable context. No provenance envelope or receipt is needed.
 Filesystem existence, quoted examples, omitted ranges, truncated tool output,
-compacted summaries and earlier-context claims are insufficient. Legacy
-receipt-free bodies remain readable but cannot license skipping. On uncertainty
+compacted summaries and earlier-context claims are insufficient. On uncertainty
 read the full selected content. Recompute selection/coverage after source
 changes, resume or reconstruction; persist no loaded-state. No global coverage
 file is required.
@@ -468,32 +519,18 @@ contracts, not native CLI/App/no-hook/resume/new-context behavior or provider
 credit savings. Those native acceptance cases remain **not verified** by
 structural tests.
 
-### 4. Refresh at worktree lifecycle boundaries, not every session
+### 4. Refresh at every worktree and session boundary
 
-#### Historical renderer and compatibility boundary
+#### Current publisher and independent compatibility boundary
 
-The implementation description below records the previous renderer and its
-reader/backup compatibility contracts, not the current startup publisher.
-Startup no longer packages or invokes that engine: the seven-file asset
-manifest and its runtime resolver have been removed from agent-worktrees.
-The authoring manager remains in customizing-copilot for explicit checked-in
-maintenance. Its content/admission behavior is not part of startup copying.
-
-The render step is triggered by `agent-worktrees` at worktree **create,
-resume, and local JSON launch planning** -- before the first (or next) session in that worktree even starts,
-so the harness's own directory scan (if it reads live files rather than a git
-index) may pick it up with zero reliance on the catch-all at all. This
-mirrors the existing manual "an anchor-repo user restarts to pick up a
-freshly-synced set" behavior, made automatic and moved earlier. **Historical**:
-`agent_worktrees.local_cache_refresh.refresh_local_cache()` previously invoked
-`render-local-cache` from **agent-worktrees' own payload**, across a
-process boundary. On `dev`, the canonical projection engine remains in
-customizing-copilot's scripts directory; `agent-worktrees/packaged-assets.json`
-declared its complete seven-file runtime closure. Promotion and release preview
-vendored those files byte-identically into agent-worktrees' own
-`scripts/instruction-projections/` directory. Canonical changes charge both
-the authoring plugin and packaged consumers in the release/changefile guards.
-There is one authoring source, not a maintained fork.
+`agent-worktrees` copies at **create, resume and local JSON launch planning**,
+before discovery, and requests another copy at every session start.
+Its in-process publisher is independently usable without the customization
+manager. The retired seven-file engine manifest and runtime resolver are not
+part of startup. The authoring manager remains in customizing-copilot for
+checked-in maintenance and the optional `render-local-cache` compatibility
+command; that command now copies raw declared templates rather than rendering
+authoring envelopes.
 
 The projection CLI explicitly anchors adjacent imports to its resolved payload
 directory. Manager safe-path isolation (`PYTHONSAFEPATH`, `-P`, or `-I`) therefore
@@ -501,13 +538,11 @@ does not remove the renderer's own modules, and checkout modules cannot shadow
 them. This does not disable the launcher's import isolation or add the working
 directory to the import path.
 
-A shipped standalone agent-worktrees installation never discovers, imports,
-or executes a sibling customizing-copilot payload. Its own installation
-identity selects its own engine. Only a verified monorepo-shaped development
-checkout may resolve the declared canonical source before materialization.
-The engine discovers the selected repository's instruction sources directly,
-without importing the full customization scanner or enumerating unrelated
-registered repositories just to find the renderer.
+A shipped standalone agent-worktrees installation never discovers, imports
+or executes a sibling customizing-copilot payload. The independent compatibility
+CLI uses effective user, user-local, repository and repository-local settings,
+with the same trust boundary as runtime lookup, rather than shared committed-only
+authoring discovery.
 
 Foreground create/resume waits for projection preparation to complete, with
 start/end, elapsed-time heartbeats and the actual delivery outcome. The
@@ -560,7 +595,14 @@ Admission holds a short kernel gate across reservation, process launch, and
 publication of the exact request nonce plus PID/start-time owner. The child
 claims only that request; another hook observes the live pending owner even
 before the child starts rendering. No lease or inherited log handle stays open
-in the Git administrative directory during rendering. The worker atomically
+in the Git administrative directory during rendering. A request arriving during
+an active copy records a pending rerun under that same admission gate. Completion
+checks and clears it under the gate, repeating discovery and copying without
+starting a second worker. Requests coalesce, but all copies share the original
+120-second budget; a pending copy at exhaustion reports failure, never success
+for an older snapshot. A caller that cannot acquire the short admission gate
+reports that its request was **not queued**, rather than acknowledging work it
+did not record. The worker atomically
 publishes a latest-result log capped at 8 KiB and its completed receipt.
 Snapshot replacement uses a short, bounded retry for transient Windows reader
 handles; persistent permission failures still propagate rather than reporting delivery.
@@ -571,7 +613,7 @@ Owner birth identity uses native process APIs on Windows and macOS, and
 Creation and resume still perform synchronous primary publication before launch.
 The asynchronous backup can race instruction discovery and first-turn reads:
 neither a successful spawn nor a completed cache write proves model admission.
-Selectors and the catch-all must continue using authenticated existing caches or
+Selectors and the catch-all use applicable existing managed copies or
 reviewed fallbacks while that backup is pending; they must not assume it completed
 merely because the hook returned. Files published later are available for
 subsequent explicit source resolution and discovery.
@@ -610,15 +652,15 @@ Consented reviewable sync owns the checked-in selector, non-auto-loaded full
 fallback and lock as one transaction; permissionless local rendering never
 writes those artifacts. A write-incapable or hookless launch can read the
 owned reviewed fallback through its selector without installed-source
-freshness requirements. Explicit inline kernels, including the recovery
-control, remain ambient.
+freshness requirements. Former inline kernels, including the recovery control,
+use the same generated-current and on-demand-fallback paths.
 
-This floor means available verified guidance, not unconditional admission of
-every full body. A new source with no reviewed artifacts needs a complete
-authenticated local body before dependent action; cache-free controls still
-require their static floor. Missing/damaged owned artifacts remain visible
-blockers, while valid stale reviewed content remains usable and freshness is
-advisory. Native host delivery acceptance is a separate proof obligation.
+A new enabled source can be read from its managed copy without a checked-in
+selector, fallback or lock entry. The offline floor remains useful when there
+is no copy. Missing or damaged offline artifacts remain maintenance findings,
+not reasons to withhold an available current copy. Valid stale reviewed content
+remains usable as fallback and freshness is advisory. Native host delivery
+acceptance is a separate proof obligation.
 
 ### 6. Local delivery and context auditing are separate
 
@@ -629,9 +671,11 @@ and byte-count attribution, not admission failures or reasons to erase existing
 guidance. Invalid or unreadable budget configuration also warns and retains
 default size accounting; it does not prevent a safe local render.
 
-The renderer retains separate safety limits for bounded input/provenance reads,
-safe paths, source identity, tracked destinations and foreign files. Oversized
-local guidance remains refreshable and reconcilable within those safety bounds.
+The compatibility publisher retains bounded input reads, safe paths, source
+identity, declaration ambiguity and tracked-destination checks. It does not
+inspect an old instruction body's provenance or compare its content.
+Oversized local guidance remains refreshable and reconcilable within input
+safety bounds.
 Those protections are not context-budget enforcement.
 
 The checked-in `scan`/`sync` path also reports aggregate excess as an
@@ -668,9 +712,9 @@ attempt a privileged sync merely to see current guidance.
 ## Exemplars
 
 `customizing-copilot:reviewing-customizations`'s
-`instruction_projections.render_local_cache()` and
-`local_sibling_destination()` are the reference implementation of this
-pattern's render side, landed as part of
+`instruction_projections.render_local_cache()` is the independent raw-copy
+compatibility implementation. Its historical sibling-render predecessor and
+`local_sibling_destination()` landed as part of
 `efforts/2026/10/02 ambient-guidance-navigability` Phase 7
 ([ThomasMichon/copilot-extensions#4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674)).
 **Historical delivery/proof:** Phase 7 landed full checked-in projections with
@@ -685,16 +729,17 @@ catch-all each independently drive an agent to the fresher
 (see the effort README's own Journal for the scenarios and results).
 `efforts/2026/10/03 local-cache-delivery-primacy` Phase 1 later replaced the
 existence-only precedence this proof covered with the marker-provenance
-comparison underlying the current precedence rule, closing the stale-sibling gap that
+comparison used by the former precedence rule, closing the stale-sibling gap that
 existence-only check left open. That same effort's Phase 2 landed the
 `agent-bridge` local-spawn-path wiring step 4 describes above
 (`agent_bridge.local_cache_refresh`), closing the one remaining local-spawn
 boundary the Phase 7 wiring didn't already cover.
 
 **Current reference:** `instruction_delivery` renders selectors/full bodies
-and receipt bindings; `instruction_delivery_io` authenticates canonical locals
-and validates reviewed bytes; `instruction_projections` owns lock migration,
-admission, sync and offline scanning. The inline catch-all and literal rendered
+and offline receipt bindings; `instruction_copies` selects declared managed
+copies without content admission; `instruction_delivery_io` validates reviewed
+fallback bytes; `instruction_projections` owns lock migration, sync and offline
+scanning. The generated catch-all and literal rendered
 argv fixture cover recovery and executable resolver discovery. Historical
 preamble proofs do not substitute for current native host acceptance.
 

@@ -2041,7 +2041,11 @@ def test_self_update_force_exits_rather_than_wait_on_a_stuck_probe():
 
     forced: list[int] = []
     real_exit = supervisor_daemon_module.os._exit
-    supervisor_daemon_module.os._exit = forced.append  # type: ignore[assignment]
+    def confirmed_exit(code):
+        forced.append(code)
+        release.set()
+
+    supervisor_daemon_module.os._exit = confirmed_exit  # type: ignore[assignment]
 
     client = FakeClient([_reg("a")])
     launcher = FakeLauncher()

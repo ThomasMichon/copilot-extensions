@@ -13,7 +13,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from agent_dispatch import bridge, ordinary_assignment, ordinary_bridge
+from agent_dispatch import bridge, embody, ordinary_assignment, ordinary_bridge
 from agent_dispatch.acquisition_receipts import validate_start
 from agent_dispatch.client import DispatchClient
 from agent_dispatch.ordinary_agent_storage import reservation_native_facts
@@ -29,7 +29,9 @@ def assigned(tmp_path, monkeypatch, request):
                         **getattr(request, "param", {}))
     reservation, _ = queue.reserve_spawn(task.id, reserved_by="supervisor", driver="ordinary-bridge")
     queue.record_spawn_allocation(reservation.key, "execution-project")
-    worktree_path = str(tmp_path / "worktree-a")
+    workspace = tmp_path / "worktree-a"
+    workspace.mkdir()
+    worktree_path = str(workspace)
     queue.record_spawn_worktree(
         reservation.key, "worktree-a", ownership="targeted", driver="ordinary-bridge",
         allocation_project="execution-project", worktree_path=worktree_path,
@@ -97,7 +99,9 @@ def assigned(tmp_path, monkeypatch, request):
         if command == "resume":
             saved = queue.get_reservation(snapshot["spawn_reservation_key"])
             target = saved.agent_info["session_id"] if saved.agent_info else "worktree-a"
-            assert argv == ["bridge", "--json", "resume", target, "--strict"]
+            assert argv == [
+                "bridge", "--json", "resume", target, "--require-agent-hosting", "--strict",
+            ]
             assert kwargs.get("input") is None
             return subprocess.CompletedProcess(argv, 0, json.dumps({
                 "session_id": response["session_id"], "status": "idle", "verb": "loaded",
@@ -143,6 +147,13 @@ def assigned(tmp_path, monkeypatch, request):
 
     monkeypatch.setattr(ordinary_bridge, "agent_bridge_launch_prefix", lambda: ["bridge"])
     monkeypatch.setattr(ordinary_assignment, "agent_worktrees_launch_prefix", lambda: ["ground"])
+    projects = {"execution-project": worktree_path, "changed-routing": worktree_path}
+
+    def resolve_workspace(worktree_id, *, project=None, timeout=None):
+        assert worktree_id == "worktree-a"
+        return {"path": projects[project]}
+
+    monkeypatch.setattr(embody, "resolve_worktree", resolve_workspace)
     process_api = SimpleNamespace(**vars(subprocess))
     process_api.run = run
     monkeypatch.setattr(ordinary_bridge, "subprocess", process_api)

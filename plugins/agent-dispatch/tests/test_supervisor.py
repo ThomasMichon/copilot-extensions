@@ -107,11 +107,12 @@ class QueueBackedClient:
         return {"reserved": ok, "reservation": asdict(res)}
 
     def record_spawn(self, key, *, session_handle=None, worktree=None, startup_complete=None,
-                     startup_revision=None):
+                     startup_revision=None, ordinary_redrive=None):
         try:
             return asdict(self._q.record_spawn(
                 key, session_handle=session_handle, worktree=worktree,
                 startup_complete=startup_complete, startup_revision=startup_revision,
+                ordinary_redrive=ordinary_redrive,
             ))
         except TaskError as exc:
             raise DispatchError(409, str(exc)) from exc
@@ -3025,7 +3026,16 @@ def test_reconcile_ends_terminal_local_body_before_settling(q, client):
     assert q.latest_reservation(t.id).state == SpawnState.SETTLED
 
 
-def test_disposable_terminal_local_body_ends_before_conclusion(q, client):
+@pytest.mark.parametrize(
+    ("outcome", "conclusion_state"),
+    [
+        ({"action": "removed", "reason": "managed-gc-removed"}, "complete"),
+        ({"action": "skipped", "reason": "not-cli-worktree"}, "held"),
+    ],
+)
+def test_disposable_terminal_local_body_ends_before_conclusion(
+    q, client, outcome, conclusion_state,
+):
     task = q.create(
         "review",
         labels=["review"],
@@ -3050,6 +3060,11 @@ def test_disposable_terminal_local_body_ends_before_conclusion(q, client):
         ended.append(sid)
         return True
 
+    def conclude(worktree, session):
+        assert ended == ["brg-disposable"]
+        concluded.append((worktree, session))
+        return outcome
+
     sup = Supervisor(
         client,
         spawn_fn=spawn,
@@ -3060,10 +3075,7 @@ def test_disposable_terminal_local_body_ends_before_conclusion(q, client):
         local_body_activity_fn=lambda _sid: "IDLE",
         local_acp_session_fn=lambda _sid: "session-exact",
         local_end_fn=end_body,
-        conclusion_fn=lambda worktree, session: (
-            concluded.append((worktree, session))
-            or {"action": "removed", "reason": "managed-gc-removed"}
-        ),
+        conclusion_fn=conclude,
     )
     sup.poll_once()
     q.claim_one("local-o", task_id=task.id)
@@ -3075,10 +3087,13 @@ def test_disposable_terminal_local_body_ends_before_conclusion(q, client):
     assert concluded == [("worktree-disposable", "session-exact")]
     reservation = q.latest_reservation(task.id)
     assert reservation.state == SpawnState.SETTLED
-    assert reservation.conclusion_state == "complete"
+    assert reservation.conclusion_state == conclusion_state
     assert json.loads(reservation.conclusion_detail)["acp_session_id"] == (
         "session-exact"
     )
+    assert sup.reconcile() == 0
+    assert ended == ["brg-disposable"]
+    assert concluded == [("worktree-disposable", "session-exact")]
 
 
 def test_stopped_disposable_local_body_is_ended_before_conclusion(q, client):

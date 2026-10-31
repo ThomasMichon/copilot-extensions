@@ -1,0 +1,9 @@
+{
+  "comment": "Retain sanitized Manager probe diagnostics without changing front-door health or onboarding behavior",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

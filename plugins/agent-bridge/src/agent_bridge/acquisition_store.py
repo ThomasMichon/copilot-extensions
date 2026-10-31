@@ -217,12 +217,13 @@ class AcquisitionStore:
                 data.setdefault("prepared_context", previous_data["prepared_context"])
             if "plugin_preparation_required" in previous_data:
                 data.setdefault("plugin_preparation_required", previous_data["plugin_preparation_required"])
-        self.db.execute_write(
+        self.db._execute_runtime_admitted_write(
             "INSERT INTO acquisition_effects VALUES (?, ?, ?) "
             "ON CONFLICT(delivery_id) DO UPDATE SET stage=excluded.stage, data_json=excluded.data_json",
             (request.delivery_id, stage, json.dumps(
                 {**data, "_request": request.model_dump(mode="json")}, sort_keys=True,
             )),
+            self.journal.original_admission(request),
         )
 
     def recovery(self, request: AcquisitionRequest) -> tuple[str, str, dict[str, Any]]:

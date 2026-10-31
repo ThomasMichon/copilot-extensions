@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from pathlib import Path
 
@@ -65,9 +66,12 @@ def add_parsers(sub) -> None:
     p.add_argument(
         "--repo", default=None, help="Target repo 'owner/name' for the PR (default: tracked repo)"
     )
-    p.add_argument(
+    selector = p.add_mutually_exclusive_group()
+    selector.add_argument(
         "--pr", type=int, default=None, help="Select which tracked PR to abandon by number"
     )
+    selector.add_argument("--creation", default=None, help="Cancel one unpublished local attempt by immutable PR ID")
+    p.add_argument("--expected-revision", type=int, default=None, help="Exact creation revision being confirmed")
     p.add_argument(
         "--reason", default=None, required=True,
         help="Why this PR is being abandoned (required on every call, not "
@@ -274,9 +278,16 @@ def cmd_pr_abandon(args: argparse.Namespace) -> int:
         pr_number=getattr(args, "pr", None),
         reason=getattr(args, "reason", None) or "",
         confirm=getattr(args, "confirm", False),
+        creation_id=getattr(args, "creation", None),
+        expected_revision=getattr(args, "expected_revision", None),
     )
     if use_json:
         output._json_output(result)
+    elif result.get("creation_cancelled"):
+        output.ok(
+            f"Local PR creation {result['pr_id']} cancelled; no provider PR was closed. "
+            "Source, claims and ordinary finalization gates are unchanged."
+        )
     elif result.get("success"):
         n = result.get("number")
         repo = result.get("repo")
@@ -447,10 +458,12 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         reason=(live.get("self_merge_note") or "") if isinstance(live_block, dict) else "",
         flow=flow,
     )
+    if result.get("reconciliation_pending"):
+        reminder = None
     if reminder is not None:
         result["reminder"] = reminder.as_dict()
     want_threads = getattr(args, "threads", False) or getattr(args, "resolve_threads", False)
-    if want_threads and result.get("has_pr"):
+    if want_threads and result.get("has_pr") and not result.get("error"):
         result["thread_report"] = pr_ops.pr_threads(
             worktree_id,
             resolve=getattr(args, "resolve_threads", False),
@@ -458,14 +471,14 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         )
     if use_json:
         output._json_output(result)
-        if result.get("live_error"):
+        if result.get("live_error") or result.get("error"):
             return 1
         return 0 if result.get("has_pr") or "error" not in result else 1
-    if result.get("live_error"):
-        output.err("PR live observation unavailable: " + result["live_error"])
-        return 1
     if result.get("error"):
         output.err(result["error"])
+        return 1
+    if result.get("live_error"):
+        output.err("PR live observation unavailable: " + result["live_error"])
         return 1
     flow_detail = flow.profile
     if actor_flow.resolution != "configured":
@@ -608,12 +621,12 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
         return 0 if result.get("success") else 1
     if result.get("success"):
         output.ok(result.get("message", f"pr-complete: {result.get('action')}"))
-        if result.get("action") == "reset-past-squash" and result.get("backup_ref"):
-            print(
-                f"  recover the pre-complete state with: git reset --hard {result['backup_ref']}"
-            )
     else:
         output.err(result.get("error", "pr-complete failed."))
+    if result.get("backup_ref"):
+        print(
+            f"  revisit the pre-complete state with: git switch --detach {shlex.quote(result['backup_ref'])}"
+        )
     return 0 if result.get("success") else 1
 
 

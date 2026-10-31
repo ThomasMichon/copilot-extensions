@@ -1,0 +1,13 @@
+{
+  "comment": "Connect normal Manager suite updates to capability-qualified prepared runtime sources",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

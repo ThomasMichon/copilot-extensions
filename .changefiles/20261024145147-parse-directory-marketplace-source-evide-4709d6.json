@@ -1,0 +1,9 @@
+{
+  "comment": "Parse directory marketplace source evidence once while preserving native provenance and refusal checks.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

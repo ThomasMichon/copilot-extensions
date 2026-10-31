@@ -41,6 +41,10 @@ def add_copilot_subparser(sub) -> None:
     )
     copilot_parser.add_argument("name", help="CodeSpace name")
     copilot_parser.add_argument("--stage-plugin", dest="stage_plugins", action="append", default=[])
+    from plugin_resolve.reflection import selection_json
+    copilot_parser.add_argument(
+        "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json,
+    )
     from .plugin_preparation import disabled_plugin
     copilot_parser.add_argument(
         "--stage-plugin-disabled", dest="stage_plugins", action="append", type=disabled_plugin,
@@ -479,6 +483,24 @@ def cmd_copilot(
             return copilot_detach.cmd_stop(args, ssh_session=ssh_session)
         return copilot_detach.cmd_detach(args, ssh_session=ssh_session)
 
+    from venue_copilot import live_session_for
+    from .config import load_merged_config
+    from .copilot_detach import plan_for
+    from .hosting_policy import require_codespace_hosting
+
+    plan = (
+        {"scope_id": f"{args.worktree_id}@{args.name}", "workspace_folder": None}
+        if args.worktree_id else plan_for(args, load_merged_config())
+    )
+    rejoining = (live_session_for(plan["scope_id"]) or {}).get("status") == "live"
+    try:
+        require_codespace_hosting(
+            args.name, plan["workspace_folder"], worktree_id=getattr(args, "worktree_id", None),
+            live_attachment=rejoining,
+        )
+    except (RuntimeError, OSError) as exc:
+        print(f"[FAIL] {exc}", file=sys.stderr)
+        return 1
     claim_rc = claim_or_exit_code(args)
     if claim_rc is not None:
         return claim_rc

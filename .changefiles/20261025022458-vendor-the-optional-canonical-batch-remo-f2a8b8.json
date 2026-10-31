@@ -1,0 +1,9 @@
+{
+  "comment": "Vendor the optional canonical batch-removal custody API; existing runtime construction, retention and publication behavior is unchanged.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

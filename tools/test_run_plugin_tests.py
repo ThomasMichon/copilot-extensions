@@ -1,6 +1,7 @@
 """Focused contract tests for repository test-runner admission."""
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -12,6 +13,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -84,6 +86,64 @@ def cleanup_runner(monkeypatch, tmp_path):
         )
 
     return run
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows short TEMP alias")
+def test_short_temp_alias_reaches_real_daemon_registry(monkeypatch, tmp_path, cleanup_runner):
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = ctypes.windll.kernel32.GetShortPathNameW(str(tmp_path), buffer, len(buffer))
+    if not length or length >= len(buffer) or Path(buffer.value) == tmp_path:
+        pytest.skip("filesystem has no short alias for the temporary parent")
+    monkeypatch.setenv("TEMP", buffer.value)
+    observed = []
+
+    def run_contained(*args, **kwargs):
+        from agent_procutil.daemon_instances import daemon_test_lifecycle
+
+        sandbox = kwargs["sandbox"]
+        assert sandbox == sandbox.resolve(strict=True)
+        with daemon_test_lifecycle(
+            owner="short-temp-regression", registry_root=sandbox / "daemon-instances",
+        ):
+            observed.append(sandbox)
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run_contained)
+    assert cleanup_runner() == 0
+    assert observed
+
+
+@pytest.mark.parametrize("noncanonical", [False, True])
+def test_temp_parent_is_canonical_before_sandbox_and_native_admission(
+    monkeypatch, tmp_path, cleanup_runner, noncanonical,
+):
+    from agent_procutil import _daemon_instance_store as store
+
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    requested = nested / ".." if noncanonical else tmp_path
+    monkeypatch.setenv("TEMP", str(requested))
+    original = runner._TestSandbox
+    parents = []
+
+    class CanonicalSandbox(original):
+        def __init__(self, *args, **kwargs):
+            parent = Path(kwargs["dir"])
+            assert parent == parent.resolve(strict=True)
+            parents.append(parent)
+            super().__init__(*args, **kwargs)
+
+    def admitted(*args, **kwargs):
+        root = kwargs["sandbox"] / "daemon-instances"
+        assert store._root(root, create=True) == root
+        return 0
+
+    monkeypatch.setattr(runner, "_TestSandbox", CanonicalSandbox)
+    monkeypatch.setattr(runner, "run_contained", admitted)
+    assert cleanup_runner() == 0
+    assert parents == [tmp_path.resolve()]
 
 
 def test_plugin_budget_includes_final_sandbox_cleanup(
@@ -533,7 +593,7 @@ def selectable_tests(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("name,extra", [
     ("agent-index", "auth"), ("agent-pull-requests", "service-gateway"),
-    ("agent-dispatch", "service-gateway"),
+    ("agent-dispatch", "service-gateway"), ("agent-ssh", ""),
 ])
 def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch, name, extra):
     monkeypatch.setattr(runner, "REPO", tmp_path)
@@ -542,16 +602,25 @@ def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatc
     plugin.mkdir(parents=True)
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
     (plugin / "pyproject.toml").write_text(
-        f'[project.optional-dependencies]\ndev = ["fleet-manager[{extra}]>=0.1.0.dev1"]\n',
+        f'[project]\nname = "{name}"\n[project.optional-dependencies]\ndev = ["fleet-manager'
+        + (f"[{extra}]" if extra else "") + '>=0.1.0.dev1"]\n',
         encoding="utf-8",
     )
     fleet = tmp_path / "fleet-manager"
     fleet.mkdir()
     metadata = fleet / "pyproject.toml"
-    metadata.write_text('[project]\nversion = "0.1.0.dev1"\n', encoding="utf-8")
+    metadata.write_text('[project]\nname = "fleet-manager"\nversion = "0.1.0.dev1"\n', encoding="utf-8")
+    for resource in runner.standalone_build_resources("fleet-manager", source_root=tmp_path):
+        resource.mkdir(parents=True)
+    if name == "agent-dispatch":
+        replay = tmp_path / "plugins" / "agent-pull-requests"
+        replay.mkdir()
+        (replay / "pyproject.toml").write_text(
+            '[project]\nname = "agent-pull-requests"\n', encoding="utf-8",
+        )
     (runner.VENV_ROOT / name).mkdir(parents=True)
     before = runner._dep_fingerprint(name)
-    metadata.write_text('[project]\nversion = "0.1.0.dev2"\n', encoding="utf-8")
+    metadata.write_text('[project]\nname = "fleet-manager"\nversion = "0.1.0.dev2"\n', encoding="utf-8")
     assert runner._dep_fingerprint(name) != before
     calls = []
     monkeypatch.setattr(
@@ -570,7 +639,7 @@ def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatc
     if name == "agent-dispatch":
         assert str(tmp_path / "plugins" / "agent-pull-requests") + "[fleet]" in install
     assert install[-len(runner.RUNNER_DEPENDENCIES) - 2:] == [
-        "-e", str(fleet) + f"[{extra}]", *runner.RUNNER_DEPENDENCIES,
+        "-e", str(fleet) + (f"[{extra}]" if extra else ""), *runner.RUNNER_DEPENDENCIES,
     ]
     assert not any("http" in argument for argument in install)
     assert retained == [(
@@ -585,10 +654,26 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(tmp_p
     monkeypatch.setattr(runner, "_plugin_dir", lambda name: tmp_path / "plugins" / name)
     metadata = tmp_path / "plugins" / "agent-pull-requests" / "pyproject.toml"
     metadata.parent.mkdir(parents=True)
-    metadata.write_text('[project]\nversion = "1.0"\n', encoding="utf-8")
+    metadata.write_text('[project]\nname = "agent-pull-requests"\nversion = "1.0"\n', encoding="utf-8")
+    fleet = tmp_path / "fleet-manager"
+    fleet.mkdir()
+    (fleet / "pyproject.toml").write_text('[project]\nname = "fleet-manager"\n', encoding="utf-8")
+    for resource in runner.standalone_build_resources("fleet-manager", source_root=tmp_path):
+        resource.mkdir(parents=True)
     before = runner._dep_fingerprint("agent-dispatch")
-    metadata.write_text('[project]\nversion = "1.1"\n', encoding="utf-8")
+    metadata.write_text('[project]\nname = "agent-pull-requests"\nversion = "1.1"\n', encoding="utf-8")
     assert runner._dep_fingerprint("agent-dispatch") != before
+
+
+def test_ssh_optional_sdk_is_not_misattributed_as_a_canonical_library():
+    import tomllib
+
+    metadata = tomllib.loads(
+        (runner.REPO / "plugins" / "agent-ssh" / "pyproject.toml").read_text(encoding="utf-8"),
+    )
+    assert "fleet-manager" not in metadata["tool"]["uv"]["sources"]
+    assert any(item.startswith("fleet-manager>=") for item in metadata["project"]["optional-dependencies"]["fleet"])
+    assert any(item.startswith("fleet-manager>=") for item in metadata["project"]["optional-dependencies"]["dev"])
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows editable staging contract")
@@ -710,6 +795,13 @@ def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
     assert {path.name for path in native} == {
         "test_manager_runtime_install.py", "test_manager_mux_callbacks.py",
         "test_manager_updater_recovery.py",
+        "test_manager_runtime_uninstall.py",
+        "test_launch_attempts_native.py", "test_mux_discovery_native.py",
+        "test_psmux_home_directory.py", "test_warm_picker_lifetime.py",
+        "test_companion_pane_native.py", "test_companion_pane_tmux.py",
+        "test_manager_engine_source.py", "test_launch_retention_native.py",
+        "test_manager_source_update.py", "test_launch_history_sweep_native.py",
+        "test_launch_history_cli_native.py", "test_manager_source_install.py",
     }
     default = {path for group in runner._test_file_groups("worktree-manager", 25) for path in group}
     assert default == set((root / "tests").rglob("test_*.py")) - native
@@ -723,6 +815,29 @@ def test_manager_explicit_native_selection_remains_available():
     assert runner._test_file_groups("worktree-manager", 25, test_files=files) == [
         [root / value for value in files],
     ]
+
+
+def test_manager_uninstall_native_groups_preserve_existing_contracts_and_bounds():
+    source = SCRIPT.with_name("run-manager-runtime-acceptance.py").read_text(encoding="utf-8")
+    assignment = next(
+        node for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "groups" for target in node.targets)
+    )
+    expression = compile(ast.Expression(assignment.value), "native-groups", "eval")
+    for contract, count in (("runtime", 1), ("callbacks", 1), ("updater", 3), ("uninstall", 2)):
+        groups = eval(expression, {"str": str}, {
+            "args": SimpleNamespace(contract=contract), "prepare_command": ["prepare"],
+            "assertions": ["assert"], "python": "python", "native": "native", "sandbox": "sandbox",
+        })
+        assert len(groups) == count
+        assert groups[0][1][0] == ["prepare"]
+        assert groups[-1][1][-1] == ["assert"]
+        if contract == "uninstall":
+            assert groups[0][1] == [["prepare"]]
+            assert groups[1][1][0] == ["python", "-I", "-B", "native", "--exercise", "sandbox"]
+    assert "remaining = 300 - (time.monotonic() - started)" in source
+    assert "limits=Limits(wall_seconds=remaining)" in source
 
 
 @pytest.mark.parametrize("setting", [
@@ -1375,6 +1490,9 @@ def test_external_targets_are_explicit_and_contained_in_repository(monkeypatch, 
     assert runner._plugin_dir("payload-invocation") == tmp_path / "libs" / "payload-invocation"
     assert runner._plugin_dir("runtime-source") == tmp_path / "libs" / "versioned-runtime"
     assert runner._plugin_dir("worktree-identity") == tmp_path / "libs" / "worktree-identity"
+    assert runner._plugin_dir("repository-policy") == tmp_path / "libs" / "repository-policy"
+    assert runner._plugin_dir("agent-procutil") == tmp_path / "libs" / "agent-procutil"
+    assert runner.EXTERNAL_TEST_DEPENDENCIES["repository-policy"] == ("pyyaml>=6.0.3",)
     assert runner.EXTERNAL_TEST_DEPENDENCIES["payload-invocation"] == ("pyyaml>=6.0.3",)
     assert runner.EXTERNAL_TEST_DEPENDENCIES["runtime-source"] == ("pyyaml>=6.0.3",)
 

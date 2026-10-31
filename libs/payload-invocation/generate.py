@@ -256,11 +256,16 @@ def load_manifest(path: Path) -> dict[str, object]:
     catalog_binding = data.get("catalogBinding", False)
     if not isinstance(catalog_binding, bool):
         raise ValueError(f"{path}: catalogBinding must be a boolean")
+    in_process_catalog = data.get("inProcessCatalog", False)
+    if not isinstance(in_process_catalog, bool):
+        raise ValueError(f"{path}: inProcessCatalog must be a boolean")
+    if in_process_catalog and (catalog_gate or catalog_binding):
+        raise ValueError(f"{path}: inProcessCatalog cannot compose catalogGate or catalogBinding")
     installer_lifecycle = data.get("installerLifecycle", False)
     if not isinstance(installer_lifecycle, bool):
         raise ValueError(f"{path}: installerLifecycle must be a boolean")
     if installer_lifecycle and (
-        installation_context != "required"
+        (manifest_version != LEGACY_VERSION and installation_context != "required")
         or not (path.parent / "scripts/installation-context/installation_context.py").is_file()
     ):
         raise ValueError(f"{path}: installerLifecycle requires a vendored installation primitive")
@@ -297,6 +302,7 @@ def load_manifest(path: Path) -> dict[str, object]:
     data["powershellPipelineInput"] = powershell_pipeline_input
     data["catalogGate"] = catalog_gate
     data["catalogBinding"] = catalog_binding
+    data["inProcessCatalog"] = in_process_catalog
     data["installerLifecycle"] = installer_lifecycle
     data["catalogBindingModule"] = binding_module
     data["plugin"] = plugin
@@ -481,14 +487,39 @@ def render(
             " -I -B -X utf8" if data["catalogBinding"] else ""
         ),
         "CATALOG_BINDING_POWERSHELL": (
+            "function Write-CatalogBindingTrace([string]$Phase) {\n"
+            "    if ($env:COPILOT_EXTENSIONS_BOOT_TRACE) {\n"
+            "        $timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()\n"
+            f"        [Console]::Error.WriteLine('::boot-trace:: plugin={data['plugin']} "
+            "phase=' + $Phase + ' t=' + $timestamp)\n"
+            "    }\n"
+            "}\n"
+            "Write-CatalogBindingTrace 'catalog-binding-start'\n"
             "$bindingPython = $null\n"
+            "$bindingJson = $null\n"
+            "$bindingHelper = Join-Path $selfRoot 'scripts\\command_binding.py'\n"
+            f"$legacyRoot = Join-Path $env:USERPROFILE '{data['runtimeRoot']}'\n"
             "$bindingLauncher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue "
             "| Select-Object -First 1\n"
+            "Write-CatalogBindingTrace 'catalog-launcher-discovered'\n"
             "if ($bindingLauncher) {\n"
-            "    $candidate = & $bindingLauncher.Source -3 -I -B -E -X utf8 -c "
-            "'import sys; print(sys.executable)' 2>$null\n"
-            "    if ($LASTEXITCODE -eq 0 -and $candidate -and "
-            "[System.IO.File]::Exists([string]$candidate)) { $bindingPython = [string]$candidate }\n"
+            "    Write-CatalogBindingTrace 'catalog-launcher-start'\n"
+            "    $candidate = @(& $bindingLauncher.Source -3 -I -B -E -X utf8 -c "
+            "'import os,runpy,sys,time; "
+            f"print(''::boot-trace:: plugin={data['plugin']} phase=catalog-python-start t='' "
+            "+ str(int(time.time()*1000)),file=sys.stderr,flush=True) "
+            "if os.environ.get(''COPILOT_EXTENSIONS_BOOT_TRACE'') else None; "
+            "print(sys.executable,flush=True); sys.argv=sys.argv[1:]; "
+            "runpy.run_path(sys.argv[0],run_name=''__main__'')' "
+            f"$bindingHelper --payload-root $selfRoot --plugin-id '{data['plugin']}' "
+            "--legacy-root $legacyRoot)\n"
+            "    $bindingExitCode = $LASTEXITCODE\n"
+            "    Write-CatalogBindingTrace 'catalog-launcher-complete'\n"
+            "    if ($candidate.Count -gt 0 -and "
+            "[System.IO.File]::Exists([string]$candidate[0])) {\n"
+            "        $bindingPython = [string]$candidate[0]\n"
+            "        $bindingJson = ($candidate | Select-Object -Skip 1) -join \"`n\"\n"
+            "    }\n"
             "}\n"
             "if (-not $bindingPython) {\n"
             "    foreach ($name in @('python3', 'python')) {\n"
@@ -499,19 +530,27 @@ def render(
             "        }\n"
             "    }\n"
             "}\n"
+            "Write-CatalogBindingTrace 'catalog-interpreter-resolved'\n"
             "$catalog['binding'] = @{ schema = 'copilot-extensions.command-installation-binding'; "
             "version = 1; status = 'unresolved'; reason = 'binding-interpreter-unavailable'; "
             "source = $null; installation = $null }\n"
             "if ($bindingPython) {\n"
-            "    $bindingHelper = Join-Path $selfRoot 'scripts\\command_binding.py'\n"
-            f"    $legacyRoot = Join-Path $env:USERPROFILE '{data['runtimeRoot']}'\n"
-            "    $bindingJson = & $bindingPython -I -B -E -X utf8 $bindingHelper "
+            "    if ($null -eq $bindingJson) {\n"
+            "        Write-CatalogBindingTrace 'catalog-helper-start'\n"
+            "        $bindingJson = & $bindingPython -I -B -E -X utf8 $bindingHelper "
             f"--payload-root $selfRoot --plugin-id '{data['plugin']}' --legacy-root $legacyRoot\n"
-            "    if ($LASTEXITCODE -eq 0) {\n"
-            "        try { $catalog['binding'] = $bindingJson | ConvertFrom-Json -ErrorAction Stop }\n"
+            "        $bindingExitCode = $LASTEXITCODE\n"
+            "        Write-CatalogBindingTrace 'catalog-helper-complete'\n"
+            "    }\n"
+            "    if ($bindingExitCode -eq 0) {\n"
+            "        try {\n"
+            "            if ([string]::IsNullOrWhiteSpace($bindingJson)) { throw 'Binding response is empty' }\n"
+            "            $catalog['binding'] = $bindingJson | ConvertFrom-Json -ErrorAction Stop\n"
+            "        }\n"
             "        catch { [Console]::Error.WriteLine($_); $catalog['binding'].reason = 'binding-response-invalid' }\n"
             "    } else { $catalog['binding'].reason = 'binding-resolver-failed' }\n"
             "}\n"
+            "Write-CatalogBindingTrace 'catalog-binding-complete'\n"
             if data["catalogBinding"] else ""
         ),
         "PAYLOAD_DISPATCH_POSIX": (
@@ -600,6 +639,12 @@ def render(
         "CATALOG_SPECS_JSON_PS": json.dumps(
             catalog_specs_ps, ensure_ascii=True, separators=(",", ":")
         ),
+        "CATALOG_PLUGIN_PYTHON": repr(data["plugin"]),
+        "CATALOG_SPECS_PYTHON": repr(catalog_specs),
+        "CATALOG_INSTALLER_PYTHON": repr(data["installer"]),
+        "CATALOG_WINDOWS_SUFFIX_PYTHON": repr(windows_catalog_suffix),
+        "CATALOG_WINDOWS_SHELL_PYTHON": repr(windows_catalog_shell),
+        "CATALOG_MULTI_PYTHON": repr(data["multiCommandManifest"]),
         "CATALOG_CONTRACT_JSON": json.dumps(
             {
                 "plugin": data["plugin"],
@@ -685,6 +730,10 @@ def expected_files(manifest: Path) -> dict[Path, str]:
             f"{catalog_prefix}-powershell.tmpl",
         ),
     )
+    if data["inProcessCatalog"]:
+        catalog_outputs += (
+            (manifest.parent / "scripts" / "emit_command_catalog.py", "catalog-python.tmpl"),
+        )
     protected_paths.update(path for path, _template in catalog_outputs)
     command_paths = set(generated)
     collisions = sorted(command_paths & protected_paths)

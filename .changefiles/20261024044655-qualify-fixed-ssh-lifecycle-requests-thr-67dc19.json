@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify fixed SSH lifecycle requests through the shared native installation driver without adopting SSH publishers",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

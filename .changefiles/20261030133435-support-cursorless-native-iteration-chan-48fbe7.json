@@ -1,0 +1,9 @@
+{
+  "comment": "Support cursorless native iteration-change pages with explicit terminal probing",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

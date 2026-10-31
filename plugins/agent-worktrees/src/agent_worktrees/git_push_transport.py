@@ -13,11 +13,18 @@ from contextvars import ContextVar
 from pathlib import Path
 
 from . import git_ops, push_timeout
+from .github_credentials import GitAuthArgs
 
 _destination: ContextVar[
     tuple[str, tuple[str, ...], tuple[tuple[str, str], ...], str | None] | None
 ] = ContextVar("push_destination", default=None)
 REMOTE_TRANSPORT_SETTINGS = ("receivepack", "uploadpack", "proxy", "proxyauthmethod", "vcs", "mirror", "pushoption")
+
+
+def _auth_attempts(auth: list[str]) -> list[list[str]]:
+    if auth and isinstance(auth, GitAuthArgs) and auth.allow_ambient_retry:
+        return [auth, []]
+    return [auth]
 
 
 @contextmanager
@@ -97,9 +104,12 @@ def push(
         )],
     ] if pinned and pinned[0] == remote else [])
     auth_destination = next((url for url in destinations if url.lower().startswith("https://")), destination)
-    auth_args = (git_ops._auth_config_args_for_url(auth_destination) if pinned and pinned[0] == remote
-                 else git_ops._auth_config_args(remote, cwd=cwd))
-    attempts = [auth_args, []] if auth_args else [[]]
+    try:
+        auth_args = (git_ops._auth_config_args_for_url(auth_destination) if pinned and pinned[0] == remote
+                     else git_ops._auth_config_args(remote, cwd=cwd))
+    except git_ops.GitError as exc:
+        return git_ops.PushResult(ok=False, stderr=exc.stderr)
+    attempts = _auth_attempts(auth_args)
     last_stderr = last_stdout = ""
     for prefix in attempts:
         try:
@@ -132,9 +142,9 @@ def push(
     return git_ops.PushResult(ok=False, stderr=last_stderr, stdout=last_stdout)
 
 
-def published_ref(remote: str, destinations: tuple[str, ...], target: str,
-                  cwd: str | Path) -> str:
-    """Observe a pinned destination without resolving its mutable remote name."""
+def observed_ref(remote: str, destinations: tuple[str, ...], target: str,
+                 cwd: str | Path) -> str:
+    """Read a pinned exact ref: its SHA, empty when absent, or raise on failure."""
     alias = f"agent-worktrees-observe-{uuid.uuid4().hex}-url"
     pinned = _destination.get()
     probe_settings = tuple((key, value) for key, value in (pinned[2] if pinned else ())
@@ -142,7 +152,7 @@ def published_ref(remote: str, destinations: tuple[str, ...], target: str,
     probe_remote = f"agent-worktrees-probe-{uuid.uuid4().hex}"
     auth = git_ops._auth_config_args_for_url(destinations[0])
     with _url_aliases([(destinations[0], alias)]) as alias_args:
-        for prefix in [auth, []] if auth else [[]]:
+        for prefix in _auth_attempts(auth):
             published = git_ops.git(
                 *prefix, *alias_args,
                 "-c", f"remote.{probe_remote}.url={alias}",
@@ -156,7 +166,16 @@ def published_ref(remote: str, destinations: tuple[str, ...], target: str,
                 break
     rows = [line.split() for line in published.stdout.splitlines()]
     sha = next((row[0] for row in rows if len(row) == 2 and row[1] == target), "")
-    if published.returncode or not sha:
+    if published.returncode:
+        raise OSError("Cannot observe published remote ref for tracking refresh")
+    return sha
+
+
+def published_ref(remote: str, destinations: tuple[str, ...], target: str,
+                  cwd: str | Path) -> str:
+    """Require a present pinned ref for post-push tracking refresh."""
+    sha = observed_ref(remote, destinations, target, cwd)
+    if not sha:
         raise OSError("Cannot observe published remote ref for tracking refresh")
     return sha
 

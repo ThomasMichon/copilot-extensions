@@ -7,16 +7,18 @@ import asyncio
 import json
 import logging
 import time
-import uuid
 from dataclasses import replace
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
+from repository_policy import AgentHostingError
 
 from .acquisition_authority import read_worktree_record, worktree_command
 from .acquisition_contract import AcquisitionRefused
 from .acquisition_executor import executor
 from .acquisition_store import AcquisitionStore
+from .creation_custody import legacy_creation
 from .models import SessionStatus, StartSessionRequest, StartSessionResponse
 from .preference_models import PreferenceSource
 from .routes.worktrees import _fresh_start_locks
@@ -38,6 +40,28 @@ def creation_fact_options(options: dict[str, Any]) -> dict[str, Any]:
         if len(owner_parts) == 3 and all(owner_parts):
             facts["caller_owner_ref"] = owner_scope
     return facts
+
+
+async def allocate_workspace(
+    target: SpawnTarget, key: str, owner_ref: str | None, *,
+    before_spawn: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    """The existing allocation command; selected custody fences its actual spawn."""
+    args = ["create", "--creation-key", key, "--no-owner",
+            "--interface", "acp", "--origin", "delegate", "--json"]
+    if owner_ref:
+        args += ["--owner-ref", owner_ref]
+    allocation = await worktree_command(
+        args, target.project, **({"before_spawn": before_spawn} if before_spawn is not None else {}),
+    )
+    creation = allocation.get("creation")
+    saved = allocation.get("worktree")
+    if (
+        not isinstance(creation, dict) or creation.get("version") != 1
+        or creation.get("status") != "complete" or not isinstance(saved, dict)
+    ):
+        raise AcquisitionRefused("creation_unproven", "ground owner did not prove keyed allocation")
+    return saved
 
 
 async def start_request(
@@ -145,6 +169,9 @@ async def start(
         )
     if manager.is_draining:
         raise AcquisitionRefused("creation_draining", "bridge is draining", effect="not_started")
+    from .hosting_policy import require_target_hosting
+
+    await require_target_hosting(target, operation="keyed creation")
     db = manager.db
     store = AcquisitionStore(db)
     digest = hashlib.sha256(json.dumps([target.project, key]).encode()).hexdigest()
@@ -154,14 +181,7 @@ async def start(
     }
     facts_digest = hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()
     with executor(db, f"creation:{digest}"):
-        db.execute_write(
-            "INSERT OR IGNORE INTO workspace_embodiments "
-            "(key_digest,facts_digest,state,session_id) VALUES (?,?,'allocating',?)",
-            (digest, facts_digest, str(uuid.uuid4())[:12]),
-        )
-        operation = dict(db.execute_read(
-            "SELECT * FROM workspace_embodiments WHERE key_digest=?", (digest,),
-        )[0])
+        operation = legacy_creation(db, "workspace", digest, facts_digest)
         if operation["facts_digest"] != facts_digest:
             raise AcquisitionRefused("creation_conflict", "creation key is bound to different embodiment facts")
         saved = json.loads(operation["worktree_json"]) if operation["worktree_json"] else None
@@ -171,19 +191,7 @@ async def start(
             if target.worktree_id:
                 saved, _ = await _workspace(target.project, target.worktree_id)
             else:
-                args = ["create", "--creation-key", key, "--no-owner",
-                        "--interface", "acp", "--origin", "delegate", "--json"]
-                owner_ref = options.get("caller_owner_ref")
-                if owner_ref:
-                    args += ["--owner-ref", owner_ref]
-                allocation = await worktree_command(args, target.project)
-                creation = allocation.get("creation")
-                saved = allocation.get("worktree")
-                if (
-                    not isinstance(creation, dict) or creation.get("version") != 1
-                    or creation.get("status") != "complete" or not isinstance(saved, dict)
-                ):
-                    raise AcquisitionRefused("creation_unproven", "ground owner did not prove keyed allocation")
+                saved = await allocate_workspace(target, key, options.get("caller_owner_ref"))
         if (
             not isinstance(saved.get("id"), str) or not saved["id"]
             or saved.get("repo") != target.project or not saved.get("path")
@@ -234,6 +242,10 @@ async def start(
                     _update(db, digest, state="terminal")
                     raise AcquisitionRefused("creation_terminal", "original native conversation was ended")
                 if operation["state"] == "allocated":
+                    await require_target_hosting(
+                        replace(target, cwd=row["path"], explicit_cwd=True),
+                        operation="keyed creation",
+                    )
                     if not _sessionless(manager, row, head, worktree_id):
                         raise AcquisitionRefused("creation_history_occupied", "workspace is not positively sessionless")
                     store.gate_workspace(
@@ -248,7 +260,7 @@ async def start(
                             raise AcquisitionRefused("creation_conflict", "workspace identity changed before native start")
                         if not _sessionless(manager, current, current_head, worktree_id):
                             raise AcquisitionRefused("live_holder", "workspace changed before native start")
-                    except AcquisitionRefused:
+                    except (AcquisitionRefused, AgentHostingError):
                         store.release_workspace_gate(worktree_id, delivery_id)
                         raise
                     target = replace(target, worktree_id=worktree_id, cwd=saved["path"], explicit_cwd=True)
@@ -257,6 +269,7 @@ async def start(
 
                     async def before_launch() -> None:
                         try:
+                            await require_target_hosting(target, operation="keyed creation")
                             current, current_head = await _workspace(
                                 target.project, worktree_id, expected=saved,
                             )
@@ -283,6 +296,10 @@ async def start(
                         raise AcquisitionRefused(
                             "creation_preparation_failed", str(exc), effect="not_started",
                         ) from exc
+                    except AgentHostingError:
+                        if db.get_session(operation["session_id"]) is None:
+                            _update(db, digest, state="allocated")
+                        raise
                     finally:
                         state = db.execute_read(
                             "SELECT state FROM workspace_embodiments WHERE key_digest=?", (digest,),

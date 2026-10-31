@@ -34,6 +34,14 @@
 
 <The operator request, kept public-safe.>
 
+## Scope Approvals
+
+<!-- Optional original operator/charter source and exact applicable wording;
+     operations/destinations/owners/effects and accepted blast radius; exclusions,
+     limits, retry/revision policy, validity and later holds/revocation.
+     Use one canonical record; preserve its reference in checkpoints/handoffs.
+     A reviewed plan is not deployment or data-effect authority. -->
+
 ## Plan
 
 ### Phase 1 — <name>

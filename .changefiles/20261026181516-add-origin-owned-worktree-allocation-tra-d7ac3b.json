@@ -1,0 +1,9 @@
+{
+  "comment": "Add origin-owned worktree allocation transactions and recoverable receiving creation without gating local admission on claim acknowledgement",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

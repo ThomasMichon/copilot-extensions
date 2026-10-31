@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from textual.app import App, ComposeResult
 from textual.events import Key
@@ -28,6 +28,7 @@ from . import engine_client as ec
 from .engine_client import EngineError, Worktree
 from .pivot_runtime import PivotLoadError, PivotPayload, load_pivot
 from .plugin_contracts import PivotContract, PluginContribution, parse_manifest
+from .picker_button import PickerButton
 
 Source = Callable[[], "list[Worktree]"]
 ContextSource = Callable[[], "Mapping[str, object]"]
@@ -74,13 +75,6 @@ def _worktrees_contract() -> PivotContract:
                     "kind": "internal",
                     "verb": "resume",
                     "shortcut": "l",
-                },
-                {
-                    "key": "bare-resume",
-                    "label": "Bare resume",
-                    "kind": "internal",
-                    "verb": "bare-resume",
-                    "shortcut": "b",
                 },
             ],
             "view_actions": [
@@ -132,8 +126,7 @@ class LaunchRequest:
     records this request and quits the app; :func:`run_picker`'s ``on_launch``
     callback then resolves + executes it (fetch the plan across the engine
     boundary, compose by mux capability, run). ``mode`` maps to the engine's
-    ``resolve`` selectors: ``resume`` -> ``--worktree-id``, ``bare-resume`` ->
-    ``--worktree-id --bare-resume``, ``new`` -> ``--new``.
+    ``resolve`` selectors: ``resume`` -> ``--worktree-id``, ``new`` -> ``--new``.
 
     ``new_window``, unlike every other field here, is NOT dispatched through
     the exit-the-app-then-run cycle above -- it opens a brand-new, visible
@@ -157,6 +150,7 @@ class LaunchRequest:
     environment: str | None = None
     seed_prompt: str | None = None
     new_window: bool = False
+    attempt_id: str | None = None
 
 
 def _state_cell(w: Worktree) -> str:
@@ -218,6 +212,7 @@ class WorktreeManagerApp(App):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh"),
+        ("ctrl+shift+h", "launch_history", "Launch history"),
     ]
 
     def __init__(
@@ -277,7 +272,7 @@ class WorktreeManagerApp(App):
         yield Static("", id="status")
         from textual.containers import Horizontal
         yield Horizontal(*(
-            Button(action.label, id=f"view-{descriptor.key}-{action.key}")
+            PickerButton(action.label, id=f"view-{descriptor.key}-{action.key}")
             for descriptor in self._pivots for action in descriptor.pivot.view_actions
             if action.kind == "command" and action.run
         ), id="view-actions")
@@ -395,6 +390,8 @@ class WorktreeManagerApp(App):
             self._activate(self._pivot_by_tab[event.tab.id])
 
     def on_key(self, event: Key) -> None:
+        if self.screen is not self.screen_stack[0]:
+            return
         descriptor = self._active_pivot()
         actions = (*descriptor.pivot.actions, *descriptor.pivot.view_actions)
         action = next(
@@ -403,7 +400,7 @@ class WorktreeManagerApp(App):
                 if action.available
                 and action.shortcut == event.key
                 and descriptor.pivot.entity == "worktree"
-                and action.internal in ("resume", "bare-resume", "new")
+                and action.internal in ("resume", "new")
             ),
             None,
         )
@@ -414,6 +411,12 @@ class WorktreeManagerApp(App):
 
     def action_refresh(self) -> None:
         self._start_load(self._active_pivot(), force=True)
+
+    def action_launch_history(self) -> None:
+        from .launch_history_screen import LaunchHistoryScreen
+
+        if self.screen is self.screen_stack[0]:
+            self.push_screen(LaunchHistoryScreen(self._project))
 
     def _active_pivot(self) -> _PivotDescriptor:
         return next(pivot for pivot in self._pivots if pivot.key == self._active_key)
@@ -635,7 +638,7 @@ class WorktreeManagerApp(App):
             if action.available
             and action.shortcut
             and pivot.entity == "worktree"
-            and action.internal in ("resume", "bare-resume", "new")
+            and action.internal in ("resume", "new")
         ]
         return " · ".join([ready, *action_hints, "r: refresh", "q: quit"])
 
@@ -667,17 +670,28 @@ class WorktreeManagerApp(App):
             self._set_status("pivot actions are not available in this parity slice.")
             return
         if mode == "new":
-            self.pending_launch = LaunchRequest(
+            request = LaunchRequest(
                 project=self._project, worktree_id=None, mode="new")
+        else:
+            w = self._selected_worktree()
+            if w is None:
+                self._set_status("no worktree selected — move the cursor to a row first.")
+                return
+            request = LaunchRequest(
+                project=self._project, worktree_id=w.id, mode=mode, title=w.title)
+
+        from .launch_confirmation import confirm_before_effect
+
+        def saved(decision):
+            self.pending_launch = replace(request, attempt_id=decision["attempt_id"])
             self.exit()
-            return
-        w = self._selected_worktree()
-        if w is None:
-            self._set_status("no worktree selected — move the cursor to a row first.")
-            return
-        self.pending_launch = LaunchRequest(
-            project=self._project, worktree_id=w.id, mode=mode, title=w.title)
-        self.exit()
+
+        confirm_before_effect(
+            self, self._project, {
+                "action": mode, "worktree_id": request.worktree_id,
+                "title": request.title, "is_local": True,
+            }, surface="compact-picker", saved=saved,
+        )
 
     def _set_status(self, text: str) -> None:
         self._last_status = text
@@ -687,6 +701,8 @@ class WorktreeManagerApp(App):
             pass
 
     def on_data_table_row_selected(self, event) -> None:  # Enter on a row
+        if self.screen is not self.screen_stack[0]:
+            return
         descriptor = self._active_pivot()
         if (
             descriptor.pivot.entity == "worktree"

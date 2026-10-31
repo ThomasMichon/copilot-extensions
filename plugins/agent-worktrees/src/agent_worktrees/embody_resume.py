@@ -52,8 +52,12 @@ def with_seed(launch_cmd, seed: str | None) -> list[str]:
     execute the new prompt in the SAME process (verified live: `copilot
     --resume=<id> --interactive "<prompt>"` resumes full history and
     auto-executes the prompt as the next turn).
+    Option-leading text is bound with ``=`` so it cannot become a CLI option.
     """
-    return append_native_arguments(launch_cmd, ["--interactive", seed]) if seed else list(launch_cmd)
+    if not seed:
+        return list(launch_cmd)
+    arguments = [f"--interactive={seed}"] if seed.startswith("-") else ["--interactive", seed]
+    return append_native_arguments(launch_cmd, arguments)
 
 
 def live_head_refusal(target: str | None, worktree_id: str) -> str | None:

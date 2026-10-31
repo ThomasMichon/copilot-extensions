@@ -22,6 +22,20 @@ The installer builds an immutable versioned venv under
 `~/.agent-pull-requests/versions/<version>/`, deploys a real
 `~/.local/bin/agent-pull-requests` binstub, and self-reconciles that runtime on
 session start the same way the other Python runtime plugins do.
+Before completing or selecting a legacy runtime generation, both native
+installers run its actual CLI in isolation with `--help`. A successful package
+import alone is not candidate health; a failed entry point leaves the prior
+selection and completion intact.
+
+The Windows legacy `install`, `update`, and `provision` actions enter the finite
+native installation driver before staging, then adopt the finite launch broker
+after immutable-slot completion and before runtime selection. Construction
+retention stays attached through adoption. Durable watch launches only consume
+an already-adopted broker; `status` and `stamp` never install one. Owned legacy
+uninstall removes the broker contract before removing launchers or runtime
+content, preserving them if removal is refused. The explicit installation-cell
+adapter remains a separate contract; these legacy recipes do not admit cell
+actions or context arguments.
 
 Both native installers also accept an explicitly
 [prepared source payload](../../tools/prepare_runtime_source.md). Its verified
@@ -39,10 +53,15 @@ dispatch; cold refusal and missing/older helper readiness do not provision.
 Retained snapshots preserve canonical source identity after publisher removal.
 
 The installer's `uninstall` action holds the same transaction lock as
-install/update. It removes runtime/config contents but retains the lock files
-and `.install-stage` coordination, so the install directory may remain.
-Normal self-staging reap removes dead-owner stages on later invocations; purge
-never replaces a held lock.
+install/update. It removes only explicitly named runtime code and selectors;
+watch subscriptions, journals, replay and observation state, authentication,
+configuration, unknown entries, lock files and `.install-stage` remain.
+Matching deployment ownership and the installer-engine entry-list API are
+required. Foreign roots and links refuse before removal; unowned binstubs are
+retained. The canonical uninstall engine holds runtime, snapshot and
+redirect-publication custody throughout finite native cleanup. Persistent
+lease registries alone do not veto removal, and their inodes remain intact.
+Normal self-staging reap removes dead-owner stages on later invocations.
 
 The installation-cell adopter remains under validation below. Its generated
 payload command and `scripts/init.ps1` / `scripts/init.sh` resolve native
@@ -60,8 +79,40 @@ nonempty scoped map requires resolvable source identity.
 Legacy self-staging revalidates the original installed marketplace against the
 current policy. The child accepts an origin hint only inside its own canonical
 staging layout, with an existing installed payload and identical, link-free
-payload contents; staging flags alone never bypass admission. A replaced or
+payload contents; staging flags alone never bypass admission. A canonical
+frozen input may omit generated artifacts and empty directories, but its
+complete admitted file set and bytes must still match. Arbitrary copied
+payloads cannot borrow an installed origin through environment hints.
+A replaced or
 unavailable origin fails closed rather than guessing its marketplace.
+
+The legacy cold payload command and generated primary command submit provisioning
+to the packaged standalone installation driver before any outer provisioning
+lock or cold trace write. Waiting observes the caller-independent owner and
+relays its result; there is no foreground fallback. The primary command retains
+its exact selected snapshot rather than switching to the current marketplace
+payload. Healthy runtime dispatch does not require the driver or permission to
+publish. Missing/older helpers, nested installation custody, pinned reads and
+no-self-provision controls refuse cold provisioning explicitly.
+
+The fixed recipe requires the default legacy root, canonical installed payload
+or selected snapshot, native staging layout and existing installer. It accepts
+neither a service option nor an arbitrary source/root. Cold custom-root and
+namespaced command provisioning require explicit installation management;
+healthy namespaced dispatch remains supported. Explicit installer callers
+remain separate from driver adoption.
+
+The legacy session bootstrap submits first stamping and drift provisioning
+through those same fixed native actions and queue. It does not install inline,
+write a reconcile PID lock, or reap an installer by age. The hook captures the
+supervisor launch acknowledgement and emits only its empty JSON response;
+stderr names the diagnostics and makes clear that launch is not durable request
+acceptance. Its healthy-runtime, namespaced and active-killswitch branches remain
+no-ops. No-self-provision presence and pinned reads defer cold publication;
+nested custody, missing support and publication-policy failures refuse visibly.
+The POSIX hook retains its existing Python metadata-reader prerequisite (and
+read-only no-op without it); only the native command path claims Python-free
+genesis. The separate guidance hook is unchanged.
 
 ## Verbs
 
@@ -799,3 +850,27 @@ while stage-observed execution completed in 26.92 seconds and was still doing
 native source verification near the former cap. Only that native parameter
 gets the additional margin; the other parameters, subprocess deadlines,
 group/plugin budgets, production code and all assertions remain unchanged.
+## Review workspace candidate
+
+The first offline, source-invokable read-generation slice is documented in
+[review workspaces](docs/review-workspaces.md). It normalizes supplied ADO
+evidence and reports synchronization deltas; live acquisition, exact source,
+service caching and submission are not yet supported by that entry point.
+The [protected owner-read embedding](docs/owner-read.md) provides the next
+source integration contract; an actual authorized owner must adopt it before
+any live owner-backed operation exists.
+The [exact local source attachment](docs/source-attachment.md) verifies already
+prepared common/head objects through the existing Worktrees workspace owner and
+returns a separate attachment envelope, without fetching or rewriting metadata.
+
+The [review owner-store data APIs](docs/review-owner-store.md) explicitly extend
+the same durable replay owner with selected review intents and fenced native
+receipts. They are not a backend executor or serving authorization.
+
+The [protected review executor](docs/protected-review-executor.md) orchestrates
+selected actions over those same records and the actual existing owner's pinned
+write transport. Source support is not installed backend authority or adoption.
+
+The [explicit generation cache](docs/generation-cache.md) stores retained
+immutable views with CAS publication; it starts no provider read or service
+and is separate from replay state and submission receipts.

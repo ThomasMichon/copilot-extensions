@@ -20,24 +20,39 @@ def test_payload_manifest_describes_agent_dispatch_runtime() -> None:
     )
     assert manifest == {
         "schema": "copilot-extensions.payload-invocation",
-        "version": 1,
+        "version": 2,
         "command": "agent-dispatch",
         "module": "agent_dispatch",
-        "runtimeRoot": ".agent-dispatch",
+        "legacyRuntimeRoot": ".agent-dispatch",
+        "installationContext": "required",
         "noSelfProvisionEnv": "AGENT_DISPATCH_NO_SELFPROVISION",
         "purpose": "Coordinate queued agent work and task lifecycles",
         "installer": "install",
+        "installerLifecycle": True,
         "windowsCatalogShim": "cmd",
         "provisionMode": "direct",
+        "payloadRootEnv": "AGENT_DISPATCH_PAYLOAD_ROOT",
+        "payloadDispatcher": {
+            "posix": "scripts/runtime-gate.sh",
+            "windows": "scripts/runtime-gate.ps1",
+        },
     }
 
     posix = (PLUGIN / "bin" / "agent-dispatch").read_text(encoding="utf-8")
     powershell = (PLUGIN / "bin" / "agent-dispatch.ps1").read_text(
         encoding="utf-8"
     )
-    assert 'bash "$_installer" provision' in posix
+    assert 'exec bash "$_payload_root/scripts/runtime-gate.sh" "$@"' in posix
+    assert 'export AGENT_DISPATCH_PAYLOAD_ROOT="$_payload_root"' in posix
+    assert '"$_installer" provision' not in posix
     assert "payload-dir" not in posix
-    assert "$_installer provision" in powershell
+    assert "$env:AGENT_DISPATCH_PAYLOAD_ROOT = $_payloadRoot" in powershell
+    assert (
+        "$_payloadDispatcher = Join-Path $_payloadRoot 'scripts\\runtime-gate.ps1'"
+        in powershell
+    )
+    assert "& $_payloadDispatcher @args" in powershell
+    assert "$_installer provision" not in powershell
     assert "payload-dir" not in powershell
 
 
@@ -73,6 +88,25 @@ def test_session_catalog_hook_is_payload_root_aware_and_fail_open() -> None:
     ).read_text(encoding="utf-8")
     assert r"bin\agent-dispatch.cmd" in powershell_catalog
     assert "shell = 'cmd'" in powershell_catalog
+
+
+def test_scoped_installer_preserves_legacy_launchers_after_deploying_helpers() -> None:
+    powershell = (PLUGIN / "scripts/install.ps1").read_text(encoding="utf-8")
+    publisher = powershell.split("function Deploy-SelfProvisioningBinstub {", 1)[1].split(
+        "function Test-DispatchVenv {", 1,
+    )[0]
+    guard = publisher.index("if (-not (Test-Path -LiteralPath $legacyInstallDir")
+    assert "(Get-InstallDirectoryIdentity -Path $InstallDir) -cne" in publisher
+    assert publisher.index("$contextDir = Join-Path $binDir 'installation-context'") < guard
+    assert guard < publisher.index("$ps1Path = Join-Path $LocalBin 'agent-dispatch.ps1'")
+    assert "return" in publisher[guard:publisher.index("$ps1Path =")]
+
+    posix = (PLUGIN / "scripts/install.sh").read_text(encoding="utf-8")
+    publisher = posix.split("deploy_binstub() {", 1)[1].split("_ensure_runtime() {", 1)[0]
+    guard = publisher.index('if [[ ! "$INSTALL_DIR" -ef "$LEGACY_INSTALL_DIR" ]]')
+    assert publisher.index('mkdir -p "$INSTALL_DIR/bin/installation-context"') < guard
+    assert guard < publisher.index('_runtime_publication_stage "$STUB"')
+    assert "return 0" in publisher[guard:publisher.index("local STUB_STAGE")]
 
 
 def test_out_of_session_boundaries_remain_explicit() -> None:
@@ -129,9 +163,12 @@ def test_posix_payload_command_ignores_shadow_path_and_preserves_stdin(
     shadow.chmod(0o755)
 
     env = os.environ.copy()
+    env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     env.update(
         {
             "HOME": str(home),
+            "AGENT_DISPATCH_INSTALL_DIR": str(runtime),
+            "AGENT_DISPATCH_NO_SELFPROVISION": "1",
             "COPILOT_PLUGIN_ROOT": str(PLUGIN),
             "PATH": f"{shadow_bin}{os.pathsep}{env['PATH']}",
         }
@@ -142,8 +179,10 @@ def test_posix_payload_command_ignores_shadow_path_and_preserves_stdin(
         env=env,
         capture_output=True,
         text=True,
-        check=True,
+        timeout=30,
+        check=False,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == "-m agent_dispatch create example|payload"
     assert not shadow_marker.exists()
 

@@ -11,18 +11,18 @@ The only sanctioned full walk of the state root is the explicit
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import platform
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 import yaml
 
-from . import activity
-from .sessions_pane_args import cleanup_mux_pane_args, file_mux_pane_cmd
+from . import activity, mux_creation
+from .mux_creation import is_psmux as _is_psmux
+from .sessions_pane_args import cleanup_mux_pane_args, file_mux_pane_cmd, prompt_controls
 from .sessions_pane_retire import (
     _mux_bin,
     _mux_last_window_guard,  # noqa: F401 -- re-export for tests
@@ -1683,8 +1683,6 @@ _IDENTITY_ENV_VARS = ("WORKTREE_PROJECT", "WORKTREE_ID")
 # CreateProcess, so the multi-word prompt travels as base64 to the pane wrapper.
 # A receipt token lets the parent verify that the wrapper decoded and appended
 # the real argument before declaring the successor seeded.
-_INITIAL_PROMPT_B64_FLAG = "--aw-prompt-b64"
-_INITIAL_PROMPT_RECEIPT_B64_FLAG = "--aw-prompt-receipt-b64"
 _LEGACY_RUNTIME_DIR = ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
 _LEGACY_BIN_DIR = "~/.agent-worktrees/bin"  # marketplace-isolation: allow legacy-compatibility
 
@@ -1697,10 +1695,6 @@ def _mux_session_target(worktree_id: str, mux_bin: str) -> str:
     """Session target string. tmux uses the ``=`` exact-match prefix; psmux
     does not support it (rejected as an unknown session)."""
     return _mux_named_session_target(mux_session_name(worktree_id), mux_bin)
-
-def _is_psmux(mux_bin: str) -> bool:
-    return PureWindowsPath(mux_bin).stem.casefold() == "psmux"
-
 
 def _mux_named_session_target(session_name: str, mux_bin: str) -> str:
     """Return an exact mux target for an already-known session name."""
@@ -1767,6 +1761,8 @@ def _mux_pane_cmd(
     pane_wrapper: str | None = None,
     initial_prompt: str | None = None,
     prompt_receipt: str | None = None,
+    mux_bin: str | None = None,
+    session_name: str | None = None,
 ) -> list[str]:
     """Build the in-pane command vector shared by new-window and new-session.
 
@@ -1780,29 +1776,27 @@ def _mux_pane_cmd(
     no safe place after psmux to reconstruct the multi-word prompt, so failing
     the spawn is safer than opening an unseeded successor.
     """
-    controls: list[str] = []
-    if initial_prompt is not None and not prompt_receipt:
-        raise RuntimeError("initial prompt transport requires a receipt token")
-    if prompt_receipt:
-        receipt_encoded = base64.b64encode(prompt_receipt.encode("utf-8")).decode("ascii")
-        controls += [_INITIAL_PROMPT_RECEIPT_B64_FLAG, receipt_encoded]
-    if initial_prompt is not None:
-        encoded = base64.b64encode(initial_prompt.encode("utf-8")).decode("ascii")
-        controls = [_INITIAL_PROMPT_B64_FLAG, encoded, *controls]
+    controls = prompt_controls(initial_prompt, prompt_receipt)
     wrapper = pane_wrapper
-    if wrapper is None and not is_tmux:
+    if wrapper is None:
         from .manager_launch_cli import _usable_worktree_manager_launcher_dir
 
         launch_dir = _usable_worktree_manager_launcher_dir()
         if launch_dir is not None and all(
             (launch_dir / name).is_file()
-            for name in ("pane-wrapper.ps1", "pane-launch.ps1")
+            for name in (("pane-wrapper.sh",) if is_tmux else ("pane-wrapper.ps1", "pane-launch.ps1"))
         ):
-            wrapper = str(launch_dir / "pane-wrapper.ps1")
+            wrapper = str(launch_dir / ("pane-wrapper.sh" if is_tmux else "pane-wrapper.ps1"))
     if wrapper is None:
         name = "pane-wrapper.sh" if is_tmux else "pane-wrapper.ps1"
         wrapper = os.path.expanduser(f"{_LEGACY_BIN_DIR}/{name}")
     if wrapper and os.path.isfile(wrapper) and os.access(wrapper, os.R_OK):
+        from .session_shell import prepare_for_mux
+
+        wrapper, boundary_controls = prepare_for_mux(
+            worktree_id, wrapper, is_tmux=is_tmux, mux_bin=mux_bin, session_name=session_name,
+        )
+        controls = [*boundary_controls, *controls]
         if is_tmux:
             clean: list[str] = ["env"]
             for var in _IDENTITY_ENV_VARS:
@@ -1810,7 +1804,7 @@ def _mux_pane_cmd(
             return clean + [
                 "bash", wrapper, "--aw-wt", worktree_id, *controls, *cmd,
             ]
-        return file_mux_pane_cmd(wrapper, ["-AwWt", worktree_id, *controls, *cmd])
+        return file_mux_pane_cmd(wrapper, ["-AwWt", worktree_id, *controls], cmd=cmd)
     if controls:
         raise RuntimeError(
             "pane wrapper is required for launch receipt or native interactive prompt transport"
@@ -1866,6 +1860,8 @@ def build_mux_new_window_argv(
         pane_wrapper=pane_wrapper,
         initial_prompt=initial_prompt,
         prompt_receipt=prompt_receipt,
+        mux_bin=mux_bin,
+        session_name=session_name,
     )
 
     # No ``--`` separator: mux option parsing stops at the first non-option
@@ -1912,6 +1908,8 @@ def build_mux_new_session_argv(
         pane_wrapper=pane_wrapper,
         initial_prompt=initial_prompt,
         prompt_receipt=prompt_receipt,
+        mux_bin=mux_bin,
+        session_name=sess,
     )
     return argv
 
@@ -1926,7 +1924,7 @@ def mux_new_session(
 ) -> dict:
     """Create a detached ``wt-<id>`` session running ``cmd``; return its pane.
 
-    Returns ``{ok, session, new_pane, error}``. Detached, so the caller does not
+    Returns ``{ok, session, new_pane, error, created}``. Detached, so the caller does not
     take over a terminal -- the embodied Copilot registers itself with the local
     bridge (Phase 1), which is how the spawn is later verified and viewed.
     """
@@ -1935,10 +1933,18 @@ def mux_new_session(
     sess = mux_session_name(worktree_id)
     argv: list[str] = []
     try:
-        argv = build_mux_new_session_argv(worktree_id, work_dir, cmd, env, mux=mux)
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+        r = mux_creation.run_or_join(
+            argv, binary=_mux_bin(mux), session=sess,
+            prepare=lambda: build_mux_new_session_argv(
+                worktree_id, mux_creation.pane_work_dir(work_dir), cmd, env, mux=mux,
+            ),
+        )
+        if r is None:
+            return {
+                "ok": True, "session": sess, "new_pane": None, "error": None, "created": False,
+            }
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
-        if not isinstance(e, subprocess.TimeoutExpired):
+        if not isinstance(e, (subprocess.TimeoutExpired, mux_creation.CreationUncertain)):
             cleanup_mux_pane_args(argv)
         return {"ok": False, "session": sess, "new_pane": None, "error": str(e)}
     if r.returncode != 0:
@@ -1956,7 +1962,7 @@ def mux_new_session(
     )
     return {
         "ok": True, "session": sess,
-        "new_pane": r.stdout.strip() or None, "error": None,
+        "new_pane": r.stdout.strip() or None, "error": None, "created": True,
     }
 
 
@@ -2494,7 +2500,7 @@ def mux_new_window(
     try:
         argv = build_mux_new_window_argv(
             worktree_id,
-            work_dir,
+            mux_creation.pane_work_dir(work_dir),
             cmd,
             env,
             mux=mux,
@@ -2502,7 +2508,7 @@ def mux_new_window(
             prompt_receipt=str(receipt_path) if receipt_path else None,
             session_name=session_name,
         )
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+        r = mux_creation.run(argv)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
         if not isinstance(e, subprocess.TimeoutExpired):
             cleanup_mux_pane_args(argv)

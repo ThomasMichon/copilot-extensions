@@ -5,9 +5,45 @@ The **SSH connectivity layer** for the agent fabric. It provides a standalone
 and defines the transport-provider contract used by direct and tunnel
 transports.
 
+The payload carries canonical installer-engine Python helpers for the shared
+installation driver's fixed legacy `stamp`/`provision` recipe. Those files are
+maintained by `tools/sync-installer-engine.py`, not a separate SSH copier.
+The legacy session bootstrap packages that same standalone foundation through
+the canonical dependency materializer. First stamp and manifest-selected drift
+submit fixed native actions before holding any outer provisioning lock. The
+15-second hook returns exactly `{}`; stderr identifies its launched supervisor
+and log, not durable acceptance. The ordinary request receipt and result in that
+log remain authoritative. Healthy and namespaced hooks remain no-ops; companion
+registration and session guidance keep their independent hooks.
+
+Managed publication, disabled self-provisioning, pinned reads, nested owners,
+unavailable sources and unsupported retained/custom sources refuse before queue
+or installation writes. Drift never replaces the manifest's selected source
+with the current hook payload. Native service-less actions/options and
+transaction custody are unchanged. Checkout stamping retains the foundation's
+complete local dependency graph so later snapshot provisioning stays
+self-contained; this is packaging, not adoption of the snapshot publisher.
+The generated legacy primary and payload commands also use this packaged driver.
+Their fixed SSH-only `stamp-provision` request holds the same queue custody
+across stamping and provisioning from the exact selected snapshot, including
+caller loss between those steps. The primary delegates to its own tagged
+snapshot dispatcher rather than today's installed payload. Healthy commands
+still dispatch directly with their original arguments and exit outcomes;
+cold custom roots/cells and missing/skewed support refuse without an outer
+provision lock, status writes or a foreground fallback. Explicit installers and
+network-backed retained-source qualification under #5379 remain separate.
+
 The installer's `uninstall` action serializes with install/update. It removes
-runtime/config contents but keeps transaction-lock files and `.install-stage`
-coordination, so the install directory may remain. Normal self-staging reap
+only explicitly named runtime code and selectors, retaining configuration,
+authentication, forward keepers, host/workspace settings, warning state, unknown
+entries, transaction locks and `.install-stage` coordination. It requires a
+matching deployment owner and an installer-engine with entry-list removal.
+Linked roots and configured SSH reconnect closures refuse before removal;
+unowned binstubs remain untouched. The canonical uninstall engine holds runtime, snapshot and
+redirect-publication custody throughout finite native cleanup. Persistent
+lease registries remain in place and do not imply contention; actual held
+leases refuse admission. These refusals do not disconnect SSH or stop keepers.
+Normal self-staging reap
 removes dead-owner stages on later invocations. Its preview takes no transaction lock and removes no contents;
 normal transient payload self-staging still applies.
 
@@ -18,10 +54,14 @@ registry plus a transport `module.yaml` it writes one managed SSH fragment:
 
 ```powershell
 agent-ssh emit-profile registry.yaml --module transports\direct\module.yaml
+agent-ssh gateway-profile selected-gateway.json --json
+agent-ssh gateway-provider --policy policy.json --directory admitted.json --machine worker-a --environment linux --gateway chosen-gateway --identity-file <absolute-key> --public-key-file <absolute-public-key> --json
+agent-ssh gateway-authorization --policy policy.json --directory admitted.json --machine worker-a --environment linux --public-key-file <absolute-public-key> --state-dir <dedicated-absolute-directory> --json
 agent-ssh doctor
 agent-ssh verify --timeout 8 my-machine
 agent-ssh explore my-machine --json
 agent-ssh mesh-status
+agent-ssh session-snapshot --json
 agent-ssh fleet-targets registry.yaml --module transports\direct\module.yaml --provider-instance lab-ssh --target my-machine
 agent-ssh refresh-mesh --json
 agent-ssh copilot-config set my-machine --workspace /workspaces/repo
@@ -30,9 +70,102 @@ agent-ssh copilot my-machine --detach --seed-file task.md
 agent-ssh copilot my-machine --stop
 ```
 
-The CLI manages only SSH aliases. Once `ssh <name>` works, sibling plugins such
+The profile core manages SSH aliases. Once `ssh <name>` works, sibling plugins such
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
+
+On Windows, `verify` and `refresh-mesh` resolve the selected client's profile and
+use the shared owned SSH launcher, including its jump/proxy chain. The transport
+wait is finite, and timeout/cancellation awaits the existing cleanup owner.
+Configuration and cleanup errors remain explicit rather than being classified
+as an unreachable target. An unpaired older shared library refuses before
+transport instead of falling back to the legacy launcher.
+Windows probe timeouts must be positive integers; zero does not request an
+unbounded subprocess.
+POSIX probe behavior is unchanged.
+See [native qualification](../../TESTING.md#optional-owned-windows-jump-probes);
+source changes do not silently replace an installed runtime.
+
+### Session topology and profile evidence
+
+`session-snapshot` captures fresh declared aliases and this client's managed
+fragment coverage without running OpenSSH, evaluating `Match exec`, probing a
+host, emitting profiles, persisting warnings, or provisioning a runtime.
+`--path` and `--config-d` select explicit topology and fragment inputs. Without
+`--path`, existing caller/repository discovery wins; only when no caller source
+is selected may an available Worktrees peer resolve an external state root.
+An invalid selected source does not fall through to a different topology.
+In an installation cell the optional peer is resolved in that same cell, never
+through ambient `PATH`; absent, unbound and refused peers are not an empty mesh.
+Worktrees remains optional for standalone use.
+Its bounded lookup uses the existing caller-lifetime process owner, including
+stream limits and descendant cleanup on timeout or snapshot-caller death.
+
+Coverage distinguishes generated, unattributed, missing, refused and
+indeterminate fragments. It does not inspect the effective OpenSSH include
+chain or claim route/connectivity health: both remain `unobserved`, and
+`ssh.ready` remains declared state. A generated fragment can exist without
+being selected by OpenSSH.
+
+The output-free session-start writer combines the attributable command catalog
+with a bounded snapshot in the exact session's guidance file. It uses the
+payload's existing runtime with self-provisioning disabled; an absent, older
+or refused runtime produces an explicit unavailable status. Resume replaces
+the prior snapshot. Contributor timeouts retire the owned process group on
+POSIX or strict, non-breakaway Job on Windows, including nested runtimes.
+The Windows writer loads the process primitive from this payload's shipped
+`agent-procutil` dependency (or the canonical in-repository development source),
+not an ambient Python package. It does not install that dependency at launch.
+If the combined 4 KiB budget is exceeded, a fitting command
+catalog is preserved and snapshot omission is explicit. Run the catalog's
+`session-snapshot --json` command for the full current report; use the
+`agent-ssh` skill for diagnosis and route repair, not automatic launch-time repair.
+
+### Gateway transport
+
+The supported [Gateway transport](docs/gateway-transport.md) projects explicitly
+approved peer names, finite reverse-listener ports and public host pins through
+an existing Gateway SSH alias. It retains source-independent local inputs and
+uses the same profile writer; it does not enroll peers, fetch keys, open a
+connection or start another controller.
+
+The optional `fleet` extra adds the
+[Fleet policy/public-directory provider](../../fleet-manager/docs/gateway-ssh-provider.md).
+`gateway-provider` previews independent-direction filtering; `--apply` uses
+the same writer and refuses superseded or equal-revision/changed directories.
+Missing SDK support is actionable, not a fallback to unfiltered peer routes.
+Ordinary standalone profile commands remain SDK-free.
+
+The same optional extra supplies `gateway-authorization`: a read-only preview,
+or explicit `--apply` of a dedicated target-local `AuthorizedKeysFile` for a
+separately owned sshd. It grants only source-outbound/target-inbound logins
+selected by the same public directory and policy; forwarding remains disabled.
+It does not edit the user's ordinary key file, enroll a Gateway, fetch a secret,
+start a listener, or create a reconciliation loop. See the
+[native authorization contract](docs/gateway-transport.md#target-local-login-authorization).
+On Windows the directory remains current-account-owned with its protected
+user/SYSTEM DACL. Files may retain the OS's privileged default owner under an
+elevated token, but their closed user/SYSTEM grants are unchanged and still
+verified; foreign owners or extra grants are not adopted or repaired.
+
+The installed `agent_ssh.gateway_sshd` module is the native foreground listener
+entrypoint for an existing target-local lifecycle owner. It verifies the real
+login principal and admitted host pin, consumes that dedicated authorization
+file, and keeps its native child within the owner's process lifetime. It is
+not a new supervisor or complete Gateway setup installer. See
+[native listener integration](docs/gateway-transport.md#native-listener-integration).
+
+For an already authenticated
+[Fleet SSH service directory notification](../../services/ssh/README.md),
+`agent_ssh.gateway_directory.apply_update` is the fixed local consumer selected
+by the machine's existing Fleet setup/lifetime owner. It verifies the local
+policy/controller and local public key, then uses the same profile builder and
+target-local authorization writer. A later admitted peer therefore gains both
+its strict-pinned route and the appropriate login-key grant without a service
+restart. Each writer retains its existing monotonic revision and conflict
+checks; a partial write fails visibly and does not acknowledge convergence.
+No new operator command, listener, private-key transfer or background owner is
+introduced. Profile-only emission is not a complete native authorization update.
 
 `fleet-targets` is the read-only static-machine fleet driver. It uses the SAME
 normalized registry and matching transport recipe as `emit-profile`, validates

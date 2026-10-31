@@ -1,0 +1,9 @@
+{
+  "comment": "Select physical/environment tuples at ordinary creation and adoption boundaries while preserving legacy defaults and retained allocations",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

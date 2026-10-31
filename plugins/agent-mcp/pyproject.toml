@@ -16,14 +16,16 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-update-driver",
     "pyyaml>=6.0.3",
     "agent-credential-relay",
-    "agent-procutil",
+    "agent-procutil[retirement-custody]",
     "agent-single-instance-lease",
     "agent-zdd",
 ]
 
 [tool.uv.sources]
+agent-update-driver = { path = "../../libs/update-driver", editable = true }
 # credential-relay framework + host-credential sources (module ``credential_relay``).
 # The injectors reuse the az_login / gh_auth / git_credential token-acquisition
 # logic from this lib. This is a `uv`-editable canonical reference

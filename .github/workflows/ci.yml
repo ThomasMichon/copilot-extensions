@@ -99,11 +99,21 @@ jobs:
     - name: Module size (hard cap + shrink-only baseline, full sweep)
       if: steps.code-impact.outputs.run == 'true' && github.event_name != 'pull_request'
       run: python tools/check-module-size.py
-    - name: Large files (generous image cap, tight default cap, PR diff only)
+    - name: Large files (final PR diff)
       if: github.event_name == 'pull_request'
       run: python tools/check-large-files.py --base ${{ github.event.pull_request.base.sha }} --head ${{ github.event.pull_request.head.sha }}
-    - name: Large files (full sweep)
-      if: github.event_name != 'pull_request'
+    - name: Large files (final pushed diff)
+      if: github.event_name == 'push'
+      env:
+        BASE: ${{ github.event.before }}
+        HEAD: ${{ github.sha }}
+      run: |
+        if [[ ! "$BASE" =~ ^0+$ ]] && ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+          git fetch --no-tags --depth=1 origin "$BASE"
+        fi
+        python tools/check-large-files.py --base "$BASE" --head "$HEAD"
+    - name: Large files (explicit manual full-tree audit)
+      if: github.event_name == 'workflow_dispatch'
       run: python tools/check-large-files.py --all
     - name: No agent-machines consuming-side packages in this repo
       if: steps.code-impact.outputs.run == 'true'
@@ -132,7 +142,7 @@ jobs:
             output.write("run=" + str(needed).lower() + "\n")
         print(json.dumps({"run_source_ast_guards": needed}))
         PY
-    - name: Full source AST guards (three bounded workers)
+    - name: Full source guards (bounded workers)
       if: steps.code-impact.outputs.run == 'true' && steps.source-ast-impact.outputs.run == 'true'
       timeout-minutes: 6
       run: python tools/run-source-ast-guards.py
@@ -171,6 +181,9 @@ jobs:
     - name: Vendored library synchronization
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-vendored-libs-sync.py
+    - name: Release controller and implementation compatibility
+      if: steps.code-impact.outputs.run == 'true'
+      run: python tools/check-release-controller-compatibility.py --main-ref refs/remotes/origin/main
     - name: Picker inbox discipline
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-picker-inbox-discipline.py

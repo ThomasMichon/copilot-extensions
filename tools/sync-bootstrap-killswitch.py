@@ -107,6 +107,16 @@ def main(argv: list[str] | None = None) -> int:
         for name in GUARD_NAMES
     ]
 
+    pretool = CANONICAL_DIR / "pretool_killswitch.py"
+    if not pretool.is_file():
+        print("canonical pretool-killswitch helper missing", file=sys.stderr)
+        return 1
+    pairs.extend((pretool.read_bytes(), REPO / target) for target in (
+        "plugins/agent-worktrees/scripts/pretool_killswitch.py",
+        "plugins/copilot-extensions-harness/scripts/pretool_killswitch.py",
+        "plugins/agent-machines/src/agent_machines/pretool_killswitch.py",
+    ))
+
     drifted: list[str] = []
     written: list[str] = []
     for want_bytes, dest in pairs:
@@ -125,6 +135,14 @@ def main(argv: list[str] | None = None) -> int:
 
     scope = f"{len(plugins)} plugins"
     call_site_gaps = _call_site_gaps(plugins)
+    for entry, marker in (
+        ("plugins/agent-worktrees/scripts/hook_client.py", "switch.is_active()"),
+        ("plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py", "switch.is_active()"),
+        ("plugins/agent-machines/src/agent_machines/__main__.py", "pretool_killswitch.register_parser(sub)"),
+    ):
+        source = REPO / entry
+        if not source.is_file() or marker not in source.read_text(encoding="utf-8"):
+            call_site_gaps.append(f"{entry} (does not call its vendored guard)")
     if args.check:
         ok = True
         if drifted:

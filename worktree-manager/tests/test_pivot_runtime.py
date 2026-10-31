@@ -76,6 +76,31 @@ def test_load_pivot_surfaces_invalid_json():
         load_pivot(_pivot([sys.executable, "-c", "print('nope')"]), {})
 
 
+@pytest.mark.parametrize("output", ["", " \r\n", "not JSON"])
+def test_load_pivot_never_substitutes_empty_json_for_invalid_output(output):
+    script = (
+        f"import sys; sys.stdout.write({output!r}); "
+        "sys.stderr.write('provider: unsupported category window\\n')"
+    )
+    with pytest.raises(
+        PivotLoadError,
+        match="did not print JSON: provider: unsupported category window",
+    ):
+        load_pivot(_pivot([sys.executable, "-c", script]), {})
+
+
+def test_load_pivot_accepts_an_explicit_empty_array():
+    payload = load_pivot(_pivot([sys.executable, "-c", "print('[]')"]), {})
+    assert payload.rows == () and payload.summary == {}
+
+
+def test_load_pivot_bounds_invalid_json_diagnostic():
+    script = "import sys; sys.stderr.write('earlier line\\n' + 'x' * 300)"
+    with pytest.raises(PivotLoadError) as caught:
+        load_pivot(_pivot([sys.executable, "-c", script]), {})
+    assert str(caught.value) == "list command did not print JSON: " + "x" * 200
+
+
 def test_load_pivot_rejects_oversized_output():
     with pytest.raises(PivotLoadError, match="output exceeded"):
         load_pivot(

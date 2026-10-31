@@ -26,6 +26,7 @@ reuse is a first-class investigation, not a preselected mandatory global broker.
 |-------------|---------------------|-------------|
 | Coordinator | Proposal, integration, sequential PRs and completion | Managed upstream worktree |
 | Helper investigator | Bounded shared-runtime and ZDD evidence | Read-only delegated investigation |
+| Compiler-free implementer | Compiler-free first-party execution amendment and owner integration | #6234 / #8403; managed source worktree |
 
 ## Coordination
 
@@ -100,6 +101,41 @@ Optional local/knowledge overlays are not prerequisites. This authorizes
 driving source implementation, not production rollout, model/corpus mutation or
 new package feeds.
 
+### 2026-10-26 - Compiler-free execution requirement
+
+Operator verbatim:
+
+> Great. I just want to avoid having to compile anything at either end. No native-code in the repo, and no on-demand native compilation on device.
+
+The operator accepted thin shell launchers with shared standard-library Python
+for process-lifetime safety. This supersedes the earlier prebuilt-C/source-build
+choice in leased-daemon custody; compiling at release time is not a substitute.
+The [amendment](compiler-free-execution.md) preserves the safety contract and
+separates this required subtraction from agent-recommended implementation
+sequencing. It does not authorize installed changes.
+
+The operator clarified the prerequisite owner:
+
+> Installing Python is a prereq of the whole harness, which is installed by agent-machines
+
+Use that existing machine-provisioning boundary, not a second embedded-Python
+download or interpreter installer in each helper. The amendment's
+[Python prerequisite boundary](compiler-free-execution.md#python-prerequisite-boundary)
+defines the resulting Windows ordering and qualification.
+
+### 2026-10-27 - Setup-owned PATH Python
+
+Operator verbatim:
+
+> We don't need any signature verification and any of that stuff; it's way more robust to *trust* python from PATH, because this allows the system to be more composable. All this extra logic does is slow stuff down. It's better to have our own upfront setup flow from the harness set up the correct Python, and then just call `python` on path. Now, it's good if we can avoid putting random versions of python on PATH, like versions from our own worktrees or temporary folders, but that's a matter of us keeping tidy, not adding signature verification and everything.
+
+This supersedes the earlier interpreter-admission design: upfront setup owns
+supported Python and PATH hygiene; helpers trust normal PATH selection without
+signature, registry, physical-path or disposable-location admission gates.
+Process identity, containment, leases, authenticated endpoints and safe cleanup
+remain separate requirements. The [amendment](compiler-free-execution.md#python-prerequisite-boundary)
+owns the revised implementation and validation boundary.
+
 ## Plan
 
 ### Phase 1 - Reviewed intent and dependency baseline
@@ -134,6 +170,8 @@ new package feeds.
   automatically authorized governed source fallback, optional overrides only.
   Do not require users to assemble an approval map or wait for artifact
   publication before source installation.
+  Configuration-intent resolution merged in #8494; authenticated selection,
+  governed closure and constructor acceptance remain open.
 - [x] Make restricted-SSH Paramiko provisioning genuinely opt-in.
   _(agent-recommended)_
 - [x] Replace full-table pandas statistics materialization with projected
@@ -154,9 +192,61 @@ new package feeds.
 ### Phase 6 - Close the measured delta
 - [x] Publish before/after profile footprint and fresh-install evidence, with
   running-state proof for any authorized rollout.
+- [ ] Remove redundant package-preparation transactions identified by the
+  installation-latency audit, preserving build prerequisites, source/feed
+  admission, immutable construction and health/cutover semantics.
 - [ ] Resolve or explicitly transfer every implementation and validation item;
   experimental ONNX/storage replacements remain separately tracked decisions.
 - [ ] Update reality docs and archive only after the campaign completion gate.
+
+### Phase 7 - Compiler-free first-party execution
+
+- [x] Review the [compiler-free execution amendment](compiler-free-execution.md)
+  and `plugin-services/compiler-free-first-party-execution` intent before
+  implementation (#9120).
+- [ ] Complete the shared daemon replacement through the reactivated
+  [leased-daemon instance owner](../leased-daemon-instances/README.md), preserving
+  its existing registry, lifecycle protocol and safety guarantees.
+- [x] Replace the shared compiled evaluator interpreter selector and its two
+  Windows adopters with setup-provided PATH Python, removing registry,
+  signature, PE and physical-path interpreter attestation (#9262). This closes
+  selector and consumer compatibility, not the remaining compiled SDK,
+  installer or daemon entrypoints.
+- [x] Replace the compiled installation-context PowerShell SDK with its shared
+  standard-library Python owner and preserve original-shell lifetime, strict
+  action/policy behavior and source-only distribution. The complete bounded
+  44-case Windows SDK packet passes; merged in #9354. This does not migrate
+  daemon-instance entrypoints or complete Manager's separate native gate.
+- [x] Qualify the compiler-free PowerShell instance adapter and requalify its
+  changed common archive: all 107 native installer, instance and SDK cases pass
+  with independent source, desktop and retirement reconciliation. See the
+  [slice journal](journal/2026/10.30%20powershell-instance-custody.md);
+  current-head source review/CI/merge and remaining compiled launchers stay open.
+- [ ] Replace remaining executable embedded Windows helper compilation and runtime code
+  emission through their existing installation-context, operation-lock,
+  update-driver, process and session-host owners. Establish the existing
+  setup-owned Python prerequisite before these helpers, invoke normal PATH
+  Python without interpreter attestation, and remove the superseded signature,
+  registry and physical-path gates rather than introduce another acquisition
+  or admission path.
+- [ ] Remove first-party native sources, generated copies, custom compiled
+  artifacts, compiler build hooks and release construction/verification
+  compilation; retain normal integrity and source admission.
+- [ ] Prove compiler-free fresh construction, installed invocation, expiry and
+  cleanup on the supported platforms, with regression guards against both
+  checked-in native code and embedded/on-demand compilation.
+- [ ] Reconcile source-managed maintenance and native adopter gates from
+  actual evidence. A source merge does not authorize rollout or close their
+  independent acceptance.
+
+The Linux slice merged in #9129. The leased-daemon owner's
+[implementation journal](../leased-daemon-instances/journal/2026/10.26%20compiler-free-amendment.md#linux-implementation-merged)
+records compiler-absent construction, installed lifecycle qualification and
+namespace-bound monotonic leases. The shared SDK migration merged in #9354
+after its complete bounded native packet passed. Remaining Windows
+bootstrap/embedded-code replacement,
+whole-campaign acceptance, release attribution and authorized rollout remain
+open.
 
 ## Validation Plan
 
@@ -182,14 +272,45 @@ new package feeds.
   live-venue evidence, or a specific reason a tier is unavailable.
 - [x] Measurement separates compressed downloads, unpacked logical files,
   hardlink-aware physical allocation, model/cache data and retained version slots.
+- [ ] Measure complete cold and unchanged-path update latency from the existing
+  updater's phase logs. Footprint reductions or isolated constructor timings
+  alone do not establish an end-to-end installation speedup.
 - [ ] Publication checks, changefiles, review, merge and release attribution are
   satisfied; rollout authorization and its completion owner are explicit.
+- [ ] The compiler-free amendment's complete source, packaging, bootstrap,
+  kernel-identity, Windows Job/headlessness and minimal-machine checks pass;
+  unsupported lanes remain explicit blockers, not assumed parity.
 
 ## Proposal
 
 Approved and merged in #6235. Implementation proceeds in reviewed slices.
 Shared reuse is a design investigation; neither one global ZDD process nor one
 shared mutable venv is presumed acceptable.
+
+The compiler-free Phase 7 amendment merged in #9120 after current-head approval
+with no findings and successful required CI. The Linux shared-instance
+replacement subsequently merged in #9129; the Windows evaluator selector
+migration to setup-provided PATH Python merged in #9262. These slices do not
+close the complete bootstrap, platform, release or adoption gates.
+The prerequisite clarification and Linux merge reconciliation then merged in
+#9162. Windows implementation now proceeds from the existing machine-owned
+Python prerequisite, not another interpreter acquisition mechanism.
+The private original-parent Windows Job primitive merged in #9170. It has
+native parent-loss and descendant-settlement evidence, but no compiled caller
+has switched and the interpreter admission boundary remains open.
+The unused stock-framework file guard merged in #9181, including native
+directory sharing and same-process refusal-cleanup controls. The cached-only
+held-file signer merged in #9187. The unused Core file/final-path adapter
+merged in #9197 and the Core signer in #9204. Retained ancestors and the current
+drive-query primitives merged in #9210. Complete canonical-name, short-alias,
+drive-stability and source admission remain open before any compiled bootstrap
+migration; these private primitives do not enable a caller.
+The unused physical-address custody and per-component long-name candidate
+subsequently merged in #9235. Its bounded dual-shell qualification does not
+establish complete interpreter/source admission or actual physical-executable
+and helper startup. The 2026-10-27 PATH-Python direction removes interpreter
+attestation from the migration gate. Actual compiler-free helper startup,
+process/Job behavior and caller compatibility still require qualification.
 
 ### Current execution boundary
 
@@ -210,11 +331,25 @@ this campaign contributes the bounded
 [exact-profile contract](../governed-python-artifact-promotion/exact-profile-contract.md)
 to #4876's existing authority design. The inert exact record and pure selection
 API merged in #7044, not approval-source integration, a loader, publication or
-acquisition. #6941 retains the separate contributor-owned
+acquisition. The repository-only actual-wheel verifier merged in #8399; it
+closes the byte/metadata comparison prerequisite, not authority, governed
+acquisition, reusable admission or native engine integration.
+The bounded shared inspector (#8419) and invocation-owned exact wheel snapshots
+(#8523) now supply the underlying byte and custody primitives. Neither approves
+a profile, authorizes acquisition or supplies an admitted reuse receipt.
+The existing-owner configuration-intent reader merged in #8494, including
+management publication holds and policy invalidation. It does not close the
+authenticated adopting-policy/source adapter or its actual governed closure.
+The release-authentication adapter (#8568) and policy/release planner (#8586)
+also merged under the artifact owner's continuation. They remain repository-only
+preparation: no independently locked source closure, governed acquisition or
+production consumer is enabled. Coordinate actual source-lock/acquisition
+composition with that owner under #4876 rather than duplicating it.
+#6941 retains the separate contributor-owned
 candidate-input generator. Native/standalone queue, schema, canary, warm-engine and
 Darwin acceptance remain with #5768. Apply the reviewed profile contract under
-#6737, composing #6598 construction and #6707 admission rather than overlapping
-their open implementations. The effort and retained runtime/state stay open.
+#6737, composing the merged #6598 construction and #6707 admission rather than
+creating another constructor. The effort and retained runtime/state stay open.
 
 The next stretch follows the operator-approved
 [zero-configuration default](zero-configuration-defaults.md). A harness-supplied
@@ -222,9 +357,877 @@ policy reaches the same authority seam for release and source modes; hand-built
 adopter approval files are not the default integration. The amended intent and
 plan merged in #7066. The next implementation boundary is the authenticated
 adopting-policy/source adapter and its actual governed closure, not another
-profile-record API or a competing admission constructor.
+profile-record API or a competing admission constructor. Direct invocation of
+the trusted setup by a user or authorized agent is the dependency-operation
+authority for the selected configuration. Carry it through the existing
+installation/custody owner rather than introducing a separate package approver;
+configuration reads and candidate discovery alone do not establish invocation.
+Continue the source/helper consumer through direct reviewed contributions;
+unreliable peer acknowledgement is not a prerequisite for implementation.
+Reconcile overlapping source changes through the PR flow rather than leaving
+the campaign blocked. Preserve the accepted immutable-helper-artifact boundary
+from #6767: no rejected routing broker or shared mutable venv, and no claimed
+transfer without acceptance by a named tracked objective.
 
 ## Journal
+
+- [2026-10-30 - compiler-free PowerShell instance custody](journal/2026/10.30%20powershell-instance-custody.md)
+
+- [2026-10-28 - SDK caller bounds and native qualification](journal/2026/10.28%20sdk-caller-qualification.md)
+
+### 2026-10-28 - Complete the full installation-context fixture repair
+
+- The remaining snapshot packet now exhausts all 377 distinct cases:
+  356 pass, 21 existing exhaustive-adapter opt-in cases skip, and none fail.
+  All 51 previously failing cases pass, including the two new real-host
+  no-legacy-stage controls. Actual JUnit identities and outcomes were
+  independently reconciled, not inferred from the worker's summary.
+- Combined with the already-exhausted other 24 files, the full library
+  inventory is 1,423 passed and 45 explicit capability/opt-in skips out of
+  1,468 cases. No prior failure became a skip or disappeared from inventory.
+  Every packet stayed within its original bounded supervisor and settled.
+- Fixtures now include current source-runtime assertions, canonical engine
+  layout, complete paired helpers and attached construction ownership.
+  Marker-write failure has an explicit execution witness, and the actual
+  production completion guard must prevent the activation witness.
+  Refusal, retryability, publication identity and primary cleanup errors
+  retain their behavioral checks.
+- These are Linux/source-fixture results, not current native Windows
+  acceptance. Fresh source-bound publication, PR review and the reserved
+  single-attempt Windows qualification remain open before SDK merge.
+
+### 2026-10-28 - Exhaust the exposed suite and restore cell-slot isolation
+
+- The full installation-context inventory exhausted all 25 files in bounded
+  serial packets: 1,370 passed, 45 explicit skips and 51 snapshot-provenance
+  failures. Other files' obsolete adapter fixtures are repaired; no failed
+  case is being hidden behind a partial whole-suite run or a platform skip.
+- Actual cell/slot calls exposed a source defect: the intended no-legacy-stage
+  fast path used an environment marker that the common self-stage guard
+  correctly distrusts for replaceable payloads. Consequently those calls
+  staged into legacy state and asserted the wrong staged payload identity.
+- Both adapters now select that existing fast path from the parsed action,
+  outside the unchanged common staging block. Ordinary installer staging and
+  its anti-environment-bypass guard remain intact. Two real-host regressions
+  reproduce the old provenance mismatch, then verify slot provision/validation
+  without legacy footprint or activation. The install contract passes.
+- Remaining snapshot fixture dependencies and canonical engine layouts are
+  still under repair. Full-suite, current Windows, PR merge and aggregate
+  acceptance remain open; the reserved native attempt is still unspent.
+
+### 2026-10-28 - Keep public offer custody and exact qualification identity
+
+- Review found that the newly exposed pipe-server transfer could discard its
+  pinned parent reference before receipt delivery. The unreleased immediate
+  entry point is replaced by `offer_lifetime_to_pipe_server` returning a public
+  `ParentJobOffer`. Acceptance, explicit unadopted abort and unknown abandonment
+  retain their one-shot semantics through the same original parent. The
+  pre-existing direct-parent primitive remains unchanged.
+- The native JUnit gate now requires the exact source-derived classname,
+  including its complete prefix. Missing and suffix-matching unrelated
+  classnames are refused. Actual cold pytest metadata confirms the exact
+  classname rather than only testing a synthetic suffix.
+- The focused offer/identity/mock-native/cold-source packet passes 238 cases.
+  Stale full-suite fixtures are being migrated from removed PowerShell/C#
+  internals to the shared Python owner through the actual thin adapter.
+  The migrated focused fixtures pass, but two additional bootstrap/diagnostic
+  failures remain under diagnosis and the full suite is not yet qualified.
+- No fresh Windows producer or visible attempt has started. The reserved
+  single-run grant and original containment limits remain unchanged; current
+  source and producer review must clear before it is armed.
+
+### 2026-10-28 - Cover actual adapter receipt-parse failure
+
+- Independent source scrutiny distinguished missing-receipt EOF and malformed
+  ACK from malformed nonempty receipt JSON: the prepared 42-case roster did
+  not exercise the adapter's JSON-parse refusal with a real pending offer.
+- The startup packet now includes EOF and malformed-receipt cases on both
+  PowerShell hosts, giving 44 literal cases in packets of 16, 16, 8 and 4.
+  The malformed control uses the canonical lifetime owner, corrupts only its
+  wire receipt, forbids callback admission and refuses unknown native cleanup.
+  All four actual Linux startup controls pass; Windows remains unexecuted.
+- Original packet/resource/deadline limits and the single calibration grant
+  remain unchanged and unspent. The frozen source must be reviewed again
+  before a producer is armed; neither a coverage claim nor the historical
+  negative qualification is silently promoted to acceptance.
+
+### 2026-10-28 - Prepare fresh source-bound native qualification
+
+- Startup-failure scrutiny found a wait cycle: receipt EOF waited for worker
+  exit before cleanup could deliver the abort/input EOF that worker needed.
+  The new real PowerShell regression reproduced the timeout; unwinding first
+  now preserves diagnostics and settles the failed startup on both Linux hosts.
+  All shipped adapter copies carry the same correction.
+- The explicitly consented fresh qualification is prepared as four literal
+  packets of 16, 16, 8 and 2 cases under one unchanged whole-run deadline and
+  one calibration/quiet epoch. Additional native controls cover Job-offer
+  permission, explicit abort, receipt-write failure, unknown/adopted ACK custody,
+  exact parent handle settlement and both hosts' receipt-EOF unwind.
+- Source scrutiny also corrected the native offer fixture to name its original
+  pipe owner explicitly, not an ordinary venv launcher returned by parent-PID
+  discovery. An actor-free AST control preserves that distinction.
+- The focused source controls pass 122 actor-free cases, 42 actual Linux
+  lifetime/startup/completion cases and three cold source-binding cases.
+  Eight Windows-only controls remain unexecuted here. The new native attempt
+  remains unspent pending frozen-source/producer review; the old negative
+  artifacts remain immutable. PR review, native qualification, helper migration
+  and every aggregate completion gate remain open.
+
+### 2026-10-28 - Restore explicit management authorization
+
+- The next #9354 review had no inline findings but flagged context fallback
+  for authorization assessment. Comparing the adapter with the original
+  implementation and documented management boundary confirmed a regression:
+  the broad fallback could turn an ambient receipt into an explicit management
+  argument.
+- Ambient selection is now limited to `resolve`, `validate` and the four
+  read-only mode actions. All nine activation/snapshot/slot management forms
+  preserve their original explicit-pointer behavior, including the management
+  validators; no receipt or generation check is weakened.
+- The new actor-free matrix reproduced 18 missing/empty-pointer failures before
+  correction. All 110 adapter controls now pass. The existing exhaustive
+  cross-runner activation refusal test also reproduced two PowerShell failures
+  while Python/POSIX stayed correct; all six cases now refuse without fixture
+  activation publication. Source copies are synchronized. Fresh PR review and
+  all aggregate qualification/helper-migration gates remain open.
+
+### 2026-10-28 - Keep inherited payload expectations consistent
+
+- The full #9354 reassessment accepted the packaging-selector repair, then
+  found one remaining adapter-intake mismatch: an inherited
+  `COPILOT_PLUGIN_ROOT` stayed raw while an explicit expected root expanded.
+- The private worker now expands that inherited path once only when the shell
+  did not supply an already-normalized value. It preserves relative-value
+  refusal and ordinary Python SDK/canonical-path semantics. All 13 script SDK
+  worker copies are synchronized; the worker remains outside Python validator
+  packages.
+- The focused 36-case actor-free regression reproduced 12 raw-root failures
+  before the fix. All 86 adapter cases now pass. Twelve actual Linux
+  PowerShell controls cover matching stamped receipts through explicit,
+  inherited and absent pointers, validation, chained literal tokens and the
+  pre-existing no-context path behavior. No Windows producer or visible
+  qualification was replayed; PR review and aggregate completion remain open.
+
+### 2026-10-27 - Preserve caller custody across SDK startup failures
+
+- The next #9354 review identified three additional defects. Pointer-based
+  resolution left `PayloadRoot` unexpanded; leader death also killed the only
+  POSIX lifetime watcher; cancellation before Windows receipt adoption could
+  leave the offered Job handle in a long-lived shell.
+- The adapter now distinguishes raw pointer-based payload expectations from
+  already-normalized paths. A forked POSIX watcher member pins the original
+  group independently of its leader and acknowledges startup before the
+  callback gate opens. The new actual Linux leader-death regression first
+  reproduced surviving callback/descendant processes, then confirmed their
+  retirement on original-pipe EOF before observer cleanup.
+- Windows now requires complete request delivery and explicit offer permission,
+  retains the original pinned process handle until adoption, and reclaims an
+  unadopted offer only on a nonce-bound abort. EOF or malformed acknowledgement
+  preserves unknown custody instead of closing a possibly reused numeric
+  handle. Raw bootstrap reads prevent a coalesced permission line from being
+  stranded in Python's buffered reader.
+- The actual Linux PowerShell lifetime matrix and bootstrap framing controls
+  pass. These source repairs have not run in a new Windows producer; the
+  retained negative qualification and consumed visible grant remain unchanged.
+  PR merge, current native Windows qualification, remaining helper migrations
+  and every aggregate completion gate remain open.
+
+### 2026-10-27 - SDK review repairs and a stricter qualification source boundary
+
+- Review of #9354 found and resolved two runtime defects: POSIX exit zero
+  did not prove the callback returned, and repeated path canonicalization
+  could expand a literal environment token a second time. Separate return
+  witnesses and raw-input-only expansion now preserve those boundaries.
+  Actual Linux SDK lifetime, zero/nonzero return-versus-abrupt and chained
+  percent-path controls pass; Windows has not rerun these repairs.
+- A later review found that the fixture could mix a runner/observer checkout
+  with another SDK source root. The exact manifest now includes every runner
+  helper under the selected SDK; the running runner and loaded helper origins
+  must match that tree before native binding or visible work. The focused
+  controls pass 109 actor-free cases and three cold subprocess cases,
+  including a separately copied runner refused against the selected SDK.
+- The retained Windows request used separately located, hash-bound runner
+  helpers. It therefore does not meet the corrected single-root gate either.
+  Its negative result, raw capture, original consent consumption and
+  independent reconciliation of the already-observed properties remain
+  historical and unchanged, not acceptance of the corrected qualifier or
+  newer runtime bytes. No new window, native producer or replay occurred.
+- The 13 shipped synchronous SDK workers are explicitly caller-contained in
+  the lifecycle census. Normal PR review and merge remain open; no remaining
+  helper, release, rollout or aggregate Plan/Validation item closes here.
+
+### 2026-10-27 - Retained SDK desktop properties independently reconciled
+
+- The consented source-only witness recorded a 0.125-second visible control,
+  raw owned foreground activation, exact original foreground restoration and
+  retirement. One continuous 38.938-second quiet epoch covered both disjoint
+  16-case workers and their cleanup with zero violations, 47-ms maximum gap,
+  two closed hooks, sealed capture and no observation error.
+- All 32 native cases passed. Their literal source-bound selectors and exact
+  JUnit names, complete source hashes, closed-publication records, 144 per-case
+  unique birth-identity slots, original Job drain and controller disposal were
+  independently reconciled within the original 180-second bound.
+- The original qualification still returned negative because an external
+  pytest configuration root produced empty JUnit class names. Its strict
+  checker correctly rejected that metadata. The original result and all 267
+  evidence artifacts remain unchanged; no failed case is retrospectively
+  relabelled as a pass.
+- The fixture now supplies the verified SDK as pytest's root. Cold synthetic
+  subprocess controls reproduce the old metadata failure and check the fix;
+  strict empty/foreign-class rejection remains. The corrected producer has
+  not run natively, and no new window or replay was authorized.
+- Independent source/data review accepts only the caller-lifetime and
+  no-unintended-window/foreground properties actually exercised by the retained
+  matrix. This is not a positive corrected-fixture native end-to-end run,
+  full Manager desktop acceptance, publication, release, rollout or aggregate
+  effort completion.
+- The current actor-free packet passes 2,715 units with unchanged effect
+  refusal; focused source/metadata/policy checks pass 100. Source publication
+  and normal independent PR review remain next. The complete compiler-free
+  Plan and Validation Plan remain open.
+
+### 2026-10-27 - Critical Windows matrix complete; visibility remains separate
+
+- Exhaust the authorized 114-case Windows matrix: 112 pass, no failure or unrun
+  case, and the same two explicit directory-symlink privilege skips. All 32
+  real lifetime cases, 34 bootstrap cases, four composed-status cases and
+  the remaining foundation cases pass, including the missing-drive,
+  junction-escape and case-stability checks.
+- Independently verify the 63 artifact hashes, unique JUnit inventory,
+  complete frozen source closure and all 14 native owner/controller
+  settlements. The real lifetime cases retain 32 closed-publication markers
+  and 144 per-case birth-pinned identities. None of the prior failed cases
+  becomes retrospective evidence.
+- The new compiler-free SDK launch still needs independently calibrated
+  visibility/foreground observation. Prepare a source-only, opt-in witness
+  through the original bounded owner; preserve the existing whole-stream
+  observer's exact gap, delivery, overflow and sealing rules. Do not equate
+  functional/lifetime acceptance or launch flags with desktop proof.
+- The portable observer/consent controls are positively admitted without
+  native actors in required CI. The candidate still needs independent source
+  audit and passive binding qualification before any deliberately visible
+  control. No visibility, review, merge, aggregate effort or rollout claim
+  follows from source preparation.
+
+### 2026-10-27 - Preserve the required-path diagnostic contract
+
+- Fixed-fixture Windows qualification passes all 32 actual lifetime cases,
+  all 34 PowerShell bootstrap cases and all four composed-status cases.
+  Independent evidence correlates the lifetime cases to 32 closed-publication
+  markers and 144 per-case birth-pinned identities, including real venv
+  launcher/base-worker/leaf chains.
+- The same run stops on a late foundation diagnostic mismatch: a missing
+  drive is correctly rejected, but Python's strict resolver emits
+  `Cannot resolve path` before the legacy PowerShell `Path does not exist`
+  branch. The bounded result is 95 passes, one failure, two genuine symlink
+  privilege skips and 16 unrun cases, not an aggregate pass.
+- A separate read-only native control confirms `FileNotFoundError` with
+  errno 2/Windows error 3 for the exact missing drive. Translate only that
+  type when both the PowerShell adapter scope and `must_exist` are active.
+  Ordinary Python, optional-path, access-denied and other resolution errors
+  retain their previous diagnostics; no refusal becomes success.
+- Six new actor-free cases cover those scope/type distinctions without
+  weakening the native diagnostic assertion. Fresh frozen-source Windows
+  conformance, review, desktop visibility and broader effort gates remain
+  open; no installation or rollout is inferred.
+- Inspection of the remaining Windows-only fixtures also makes the concurrent
+  PowerShell and junction-command launches explicitly windowless. The
+  previously uncapped junction command now has a ten-second child deadline;
+  no existing deadline grows and no visible calibration is run.
+
+### 2026-10-27 - Close the native fixture publication boundary
+
+- Corrected-source Windows qualification passed 24 lifetime cases, including
+  the repaired Desktop result path. The next case stopped before process-pin
+  admission when the observer could not read its newly visible identity report.
+  The remaining 89 cases are unrun, not a pass; no permissions changed.
+- A bounded, separate Windows control reproduces the relevant filesystem
+  hazard: an already-visible renamed file can refuse ordinary reads with
+  `PermissionError` while a DELETE-access handle remains open. Native reads
+  without delete sharing return error 32; delete-sharing reads and reads after
+  the owned handle closes succeed on the same file. This proves that class of
+  publication hazard, not the historical failed read's exact cause.
+- Strengthen the test protocol instead of swallowing that error. The producer
+  emits a separate exclusive marker only after closing and renaming its
+  report; the observer waits for that causal completion before reading.
+  Controls require no premature admission and preserve explicit failures
+  after admission. Process-birth pins, retirement-before-cleanup assertions
+  and every existing deadline remain unchanged.
+- Production SDK/process bytes remain identical to the already unit-qualified
+  corrected source. The fixture change still owes fresh Windows qualification;
+  no source, review, desktop, effort or rollout gate closes from a fixture fix.
+
+### 2026-10-27 - Desktop cleanup and request framing corrections
+
+- The first actual SDK lifetime packet reached two normal-PATH completion
+  cases: Core passed; PowerShell 5.1 returned the correct application JSON but
+  then failed its exit contract. Both cases had already observed pinned
+  callback/descendant retirement. Stop on that first failure; the remaining
+  108 cases are unrun, not qualification evidence.
+- A separate, read-only stock .NET control identifies the cause: Framework's
+  `StreamWriter.Close` makes `BaseStream` null, while Core retains the disposed
+  stream reference. Retaining and disposing the original stream is safe and
+  idempotent on both. The adapter now owns that original reference and closes
+  captured readers explicitly rather than re-querying the closed writer.
+- A new 120,000-character in-memory request exposed a separate native argv
+  limit in the encoded-packet transport. Move the encoded request to the
+  private input pipe, with asynchronous delivery under the same startup
+  deadline before custody acknowledgement. No application deadline grows.
+  A closed request pipe must also retain the child's prerequisite error;
+  its regression initially exposed a generic broken-pipe diagnostic and now
+  preserves the actual prerequisite message.
+- The corrected focused Linux packet passes 94 cases with eight explicit
+  Windows path skips, including large requests, unsupported-prerequisite
+  diagnostics and all 32 actual caller-lifetime controls. Native Windows
+  SDK requalification requires a new frozen source; the earlier failure,
+  declared test-dependency repair and all bounded evidence remain retained.
+  No review, merge, aggregate effort or rollout gate closes here.
+
+### 2026-10-27 - Original-caller custody source and bounded qualification
+
+- Extend the existing shared process owner, not interpreter admission. A
+  distinct pipe-server-bound Windows entry retains the original direct-parent
+  API's strict contract and uses one birth-pinned caller handle for the Job
+  transfer. Stock .NET adopts the continuing handle and pins the actual worker
+  before acknowledgement; a normal venv launcher remains supported.
+- Native PowerShell 5.1 and Core each observed the original shell's kernel pipe
+  server PID through both normal PATH Python and an existing venv. All four
+  queries succeeded; the venv workers' direct parents were launcher stubs.
+  This establishes pipe-origin observability while the caller is alive, not
+  complete SDK lifetime or desktop qualification.
+- The source-only SDK worker now uses that shared receipt/acknowledgement
+  boundary. Linux/macOS reuse caller-owned session/group retirement and a
+  private lifetime pipe; completion and cancellation are not inferred from
+  `Process.Dispose`. Generated source archives use the existing lifecycle
+  builder, not another runtime or service.
+- The final focused Linux packet passes 90 cases with eight explicit Windows
+  path skips. Its actual PowerShell lifetime controls cover two cycles of
+  completion, abrupt callback exit, original caller death and runspace
+  cancellation, under normal PATH and an existing test venv. Pinned callback,
+  child and grandchild processes must retire before observer cleanup.
+  The new 32 actor-free framing/Job cases are admitted without adding native
+  actors to required CI; full packet qualification for this source is next.
+- The earlier bounded Windows compatibility packet completed 48 cases,
+  skipped two directory-symlink cases for unavailable privilege and left
+  28 foundation cases unrun. Optional slot cases were not invoked. No
+  aggregate Windows SDK pass is claimed, and no privilege/settings remedy
+  or deadline extension is authorized by those skips.
+- Actual Windows SDK lifetime/venv qualification, remaining compatibility,
+  independent review and merge remain publication gates. All broader
+  compiler-free, daemon, desktop, release and authorized rollout gates remain
+  open; no installed runtime has changed.
+
+### 2026-10-27 - PowerShell SDK source candidate and caller-lifetime gate
+
+- Replace the canonical embedded-C# SDK with a thin PowerShell adapter to its
+  existing stdlib Python owner and synchronize the complete script, wheel and
+  standalone consumer roster. Keep strict action/generation/supplied-empty
+  behavior, native rooted paths, default homes and the success pipeline.
+- Composed status and independent receipt validation share one request's
+  validation scope, retaining detection of a receipt changed between reads.
+  The positively admitted packet passes 2,462 cases with source coverage.
+  Focused source/adapter/shipping controls pass 80 cases with five explicit
+  platform skips; six additional literal/large-output controls pass on Linux
+  PowerShell Core. An isolated POSIX governance/deployment partition passes
+  105 cases. Native Windows compatibility qualification is still in progress.
+- Direct integration review identifies an additional completion gate: the new
+  Python worker must remain owned by the original PowerShell caller across
+  exit/cancellation. Disposing a `Process` object does not establish that
+  lifetime. Reuse the canonical process-custody owner and preserve normal PATH
+  composition, including a Windows venv's launcher/base-process boundary;
+  do not replace this with interpreter attestation or an unowned fallback.
+- This is a source candidate, not merged or installed completion. Keep all
+  aggregate helper, daemon, desktop, release and rollout items open. Finish the
+  caller-lifetime binding and its native evidence before publishing this slice.
+
+### 2026-10-27 - PATH selector merged; continue the SDK migration
+
+- #9262 merged as `d671040c56453823fbfbf305c6259301f75953cf` after genuine
+  current-head Copilot approval, resolution of the obsolete shared-consumer
+  expectations and successful required CI. The completed selector and consumer
+  slice retains 156 cases of bounded Windows coverage as recorded below.
+- Re-read both entire owning effort READMEs and their complete Plan and
+  Validation Plans after merge. Close only the selector migration item.
+  Windows shared-daemon entrypoints, compiled installation-context and
+  operation-lock/update-driver helpers, desktop acceptance, release attribution
+  and authorized rollout remain open.
+- Post-merge pull-forward initially replayed intermediate commits already
+  present in the squash merge. Retained the original tip, proved every owned
+  path already matched the provider-confirmed merge with no unmerged tail,
+  dropped only that delivered range and completed managed reconciliation.
+  No new work, source or qualification evidence was discarded.
+- Next replace the compiled PowerShell installation-context entrypoint with
+  the existing stdlib Python owner. Preserve strict action/argument behavior,
+  Windows path and home semantics, complete status/context validation, locks,
+  finite cleanup and error propagation. Do not remove the remaining native
+  path-semantics route by silently changing valid inputs, or reintroduce
+  interpreter attestation. No installed change follows from this source merge.
+
+### 2026-10-27 - Implement the PATH selector
+
+- Replace the compiled evaluator selector with application-only PATH lookup.
+  Selection preserves the first PATH match and performs no candidate execution,
+  registry/signature/PE inspection or interpreter-file custody. The previous
+  exclusion argument and result fields remain compatible without an allowlist.
+- Update both declared Windows adopters. Missing Python or payload evaluator
+  support now refuses explicitly; interpreter/SDK failure never selects another
+  evaluator. Existing native SDK handling for environment/drive-relative path
+  inputs remains a separately tracked compiler-free migration item.
+- The standalone bounded PowerShell packet passed 24 cases on Linux PowerShell
+  Core, covering PATH composition, absent prerequisites, discovery errors and
+  actual caller failure routing. Both installed command names resolve to Core
+  in that venue; this is not Windows PowerShell or Windows platform acceptance.
+  The same source-frozen standalone packet also passed 24 cases with no skips
+  on actual Windows PowerShell 5.1 and PowerShell 7.6.9. Its original bounded
+  process owner drained all Jobs and disposed the controller wrapper. The
+  canonical sources were unchanged; no compiler, registry/DOS-map control,
+  installation or host-setting change was used. This qualifies the selector
+  and finite failure paths, not the remaining SDK or desktop acceptance.
+  Review remains pending for this source slice.
+- Review identified obsolete expectations in the shared Windows consumer
+  suite. Migrate its prerequisite, real-SDK, home fallback, argument and
+  generation controls rather than remove them. Invalid selector results now
+  retain their distinct error and finite compatibility-guard cleanup.
+  Include changefiles for all nine declared shared installer-engine consumers.
+- Independent empty-host controls on Desktop and Core reproduce their distinct
+  CLR startup-profile writes without executing product code. Refusal snapshots
+  exempt only those two exact runtime files; four focused controls retain
+  detection of product-state changes and neighboring unexpected writes.
+  Native consumer coverage now accounts for all 132 cases: 110 unchanged
+  passing cases retained across the bounded runs plus 22 final focused passes.
+  The standalone selector's 24 cases retain identical executable inputs,
+  yielding 156 cases of current bounded coverage, not a fresh full-suite rerun.
+  Every final Job drained and controller disposed; no host cache policy changed.
+- Installer-engine vendoring, the 13-plugin installation contract, documentation
+  consistency and touched-Python lint passed. No installed payload, system PATH,
+  service or provisioning policy changed. Phase 7 and both complete effort
+  validation plans remain open.
+
+### 2026-10-27 - Trust setup-provided PATH Python
+
+- #9258 merged as `ef670dcf5d7ef3bb6de0572517b8588552e28f36`
+  after current-head Copilot approval, no open or inline findings and
+  successful required CI. The complete bounded source-bound packet passed
+  2,443 units, in addition to the nine focused loader/vendoring controls.
+  The unit manifest now binds the changed canonical loader without changing
+  the packet inventory, evidence rules or budget.
+- Re-read both entire owning effort READMEs and their Plan/Validation Plans
+  after merge. The revised prerequisite intent is reviewed, not implemented:
+  next replace the shared compiled evaluator selector with normal PATH
+  invocation, update its declared adopters and refusal/compatibility tests,
+  then continue the remaining compiled helper and installer migration.
+  No aggregate compiler-free or native acceptance item closes from this merge.
+- Captured the operator's explicit removal of interpreter signature and related
+  attestation machinery in Request, the service-model vision and the canonical
+  compiler-free amendment. Supported Python and durable PATH hygiene belong to
+  upfront setup, not a replacement blacklist in each helper.
+- Physical interpreter/source-admission experiments are no longer prerequisites
+  for this campaign. Their results remain historical; no caller or installed
+  runtime changed from them. The generic fragment-loader compatibility fix is
+  separate from interpreter trust and does not create an admission gate.
+- Next implement normal PATH invocation and remove compiled interpreter
+  admission through the existing bootstrap and packaging owners, then continue
+  the shared lifecycle migration. Preserve process/Job, endpoint, lock and
+  cleanup safety; review, complete platform qualification and rollout remain
+  distinct gates.
+
+### 2026-10-27 - Preserve physical helper-source addressing
+
+- Read-only inspection on both qualified shells observed native OS
+  architecture, physical-path version metadata, a bounded PE-header read from
+  the original retained handle and cached PSF signature verification without
+  closing that original handle. These are inspection interfaces, not an
+  interpreter-selection or helper-startup verdict.
+- A controlled existing-dependency startup comparison separated an ordinary
+  filename from a physical one while keeping all other process-start fields
+  unchanged. The ordinary baseline completed; the physical PS5 managed seam
+  failed with native error 87. No caller falls back to the ordinary path from
+  that failure. Existing stock process-creation metadata is being qualified
+  before any alternative seam or policy change.
+- Direct stock process-creation controls subsequently failed with error 87
+  for both null and explicit physical application names. A single ordinary
+  application-name control completed with the same full command line and
+  three-pipe protocol, including successful returned-handle ownership and
+  closure. This narrows the observed failure without establishing a general
+  namespace restriction or authorizing an ordinary-path production fallback.
+- That ordinary application-name control reported a physical `sys.executable`
+  while its standard-library paths and module origins remained DOS-addressed.
+  The command line's executable spelling is therefore not image-selection or
+  complete interpreter-namespace proof. Physical startup and prerequisite
+  admission remain open.
+- The baseline separately proved that resolving a physical source path
+  reintroduces an extended DOS drive path. The Python fragment loader now keeps
+  a `GLOBALROOT` entrypoint's lexical parent; ordinary and relative entrypoints
+  retain their previous resolution behavior. This does not change SDK input
+  normalization, source admission, interpreter authority or an active caller.
+- Regenerated all declared copies through the installation-context owner.
+  Five focused loader controls and four vendoring regressions passed through
+  the bounded supervisor. Actual complete held-source import and physical
+  executable startup remain distinct native gates; publication and review
+  are still required.
+
+### 2026-10-26 - Physical-address canonical custody candidate
+
+- Continued the reviewed compiler-free bootstrap slice without changing a
+  caller. A single strict current-volume mapping now supplies an internally
+  derived physical address; root, ancestors and leaf remain retained while
+  each actual long name is checked. DOS device aliases, wildcard components,
+  nonphysical mappings and nonfixed volumes refuse explicitly.
+- Reused the existing handle-open/identity worker and reverse-order closure.
+  Windows PowerShell uses existing native declarations; Core uses its existing
+  file-system and DriveInfo wrappers. The Core long-name getter returns a
+  non-boxable span, so bounded owned memory reads the qualified existing
+  value-type record without defining a type or emitting code.
+- Native callability and complete helper qualification remain distinct.
+  The new source and controls are under qualification; no full native pass,
+  interpreter/helper admission or migration is claimed here. The parent
+  Plan and Validation Plan remain open.
+- The first complete native candidate run exposed an observer defect. A
+  bounded diagnostic confirmed on both shell editions that a new live
+  allocation could reuse an earlier freed address; the observer then rejected
+  the address before calling the real free. Replaced its historical-address
+  check with live-allocation tracking and added deterministic address-reuse,
+  double-free and unknown-address controls. The helper is unchanged, and the
+  corrected complete native packet remains required before qualification.
+- The corrected packet isolated four remaining alias-control failures. A
+  bounded diagnostic proved that both shells already expanded the aliases and
+  rejected their original spelling before any guarded open; the controls had
+  required only the later long-name error. Preserve that early refusal and
+  separately exercise the post-open defense with an unexpanded-input
+  validation control and actual native alias lookup. No production validator,
+  helper policy or caller changed; complete fresh qualification remains open.
+- Final exact-source qualification passed all 270 selected cases, with zero
+  failures or skips and 2,542 deselected, on Windows PowerShell
+  5.1.26100.9711 and Core 7.6.9/CLR 10.0.14. The count comprises five portable
+  source contracts and 265 host-dependent tests, not native-call counts.
+  All eight actual-alias controls ran, separating stock early normalization
+  from the explicitly injected unexpanded-input post-open defense.
+- The packet used a fresh source-only snapshot and its own canonical offline
+  environment. All eleven tested source files matched the frozen export and
+  repository bytes before and after execution. Selected controls asserted
+  search/file closure, allocation release and zero live state; the original
+  bounded Job owner settled all contained processes before fixture cleanup.
+  Runtime limits and the twenty-second PowerShell child bound were unchanged.
+- The final portable packet separately passed five source contracts with 265
+  explicit native skips. Neither packet proves actual DOS-remap races,
+  interpreter/helper startup, complete source admission or desktop behavior.
+  Review and merge remain required; next compose the existing Python
+  prerequisite and complete helper closure before switching any caller.
+- #9235 merged as `0b65e67063d41777193128eb4c6d192782f83ae1` after
+  genuine current-head Copilot approval `5663099778`, no inline or open review
+  issues and successful required CI. Managed publication retained all eleven
+  qualified source files unchanged, and the continuing worktree advanced
+  onto the verified merge without finalization.
+- Both entire owning READMEs and their complete Plan/Validation Plans were
+  re-read after merge. No aggregate item closes from this unused candidate.
+  Next qualify physical-path version/architecture/signer inspection and
+  retained-handle reads for the existing Python prerequisite, then its actual
+  complete helper handoff. No new interpreter acquisition, shell prerequisite,
+  caller switch or production rollout is authorized by this source merge.
+
+### 2026-10-26 - Retained ancestors and current-drive query candidate
+
+- Added unused root-to-leaf custody composition over the existing file guard,
+  with a bounded component count, no-follow directory/file checks and reverse
+  release on partial admission. Cleanup attempts every retained entry and
+  preserves both admission and cleanup errors.
+- Added an unused current-drive mapping query through the exact existing
+  Windows PowerShell and Core declarations. Bounded preliminary native
+  callability succeeded on both editions; Core accepts owned IntPtr arguments
+  for its existing pointer parameters. The Core raw thunk does not capture
+  native last error, and the Windows PowerShell StringBuilder marshaler does
+  not expose the native MULTI_SZ tail. The implementation preserves these
+  limits rather than reporting stale errors or pretending to observe the tail.
+- Earlier metadata searches hit their declared limits; they do not prove
+  Windows PowerShell final-path support absent. The exact symbolic-link
+  helper type has no matching final-path method in its completed narrow
+  inspection. Other incomplete scopes remain unknown.
+- Complete source-helper tests, native composed-custody qualification,
+  independent review and merge remain gates. These primitives do not decide
+  canonical names, short-name aliases, drive stability or interpreter/source
+  admission, and no compiled caller or installed runtime changes. This targets
+  a prerequisite delta of `plugin-services/compiler-free-first-party-execution`;
+  no aggregate Plan or Validation Plan item is complete from this candidate.
+- The first native preparation stopped before environment construction because
+  expected PowerShell hashes described Git's LF blobs rather than the
+  repository's CRLF archive exports. Actual archive entries and extracted
+  bytes agree exactly, and their LF-normalized content matches Git; no source
+  normalization or repair was performed. Qualification must bind the actual
+  exported bytes. The exact component-limit fixture now uses one-character
+  names to avoid depending on long-path settings, and the count gate precedes
+  framework normalization.
+- The corrected source packet passed all 155 controls with zero failures or
+  skips on Windows PowerShell 5.1 and Core 7.6.9: four portable source contracts
+  and 151 host-dependent tests, not 151 asserted native API calls. Test time
+  was 81.88 seconds, 100.69 seconds including preparation and settlement.
+  The fresh canonical environment used existing offline inputs; all nine bound
+  source/runner files and the original signed executable remained unchanged.
+  The selected cleanup assertions and canonical Job/sandbox settlement passed.
+  The final hardened Linux packet passed four source controls with 151
+  explicit native skips.
+- Corrected a containment-description error without changing the runner:
+  the original canonical monitored thresholds are 128 target processes,
+  4096 MiB peak Job memory and 2048 MiB temporary storage; kernel emergency
+  ceilings are 257 total Job processes and 8192 MiB Job memory. There is no
+  per-process memory cap. The same canonical source governed the earlier
+  signer packet. Monitored thresholds must not be reported as kernel caps.
+  Independent review and merge remain gates, and complete canonical-path,
+  interpreter/source admission and compiled-caller replacement remain open.
+- Review identified a file-mode trailing-separator path that composition could
+  silently shorten before opening. The shared validator now refuses non-root
+  trailing separators for both guard forms before binding or opening anything,
+  while preserving drive-root directory custody. Existing-file/directory,
+  zero-output/before-binding and root-directory regressions cover the class.
+  The earlier 155-control packet is historical evidence for the preceding
+  source; final-candidate native requalification remains pending.
+- The initial CI attempt also caught incomplete shared-library changefile
+  coverage. All eight declared installer-engine consumers now have release
+  entries in this contribution; no helper or caller behavior changed for that
+  metadata-only repair.
+- The final corrected packet passed 169 controls with zero failures or skips,
+  including the existing-object trailing-separator refusals and valid
+  root-directory custody on both hosts. Test time was 87.27 seconds, 101.35
+  seconds including preparation and settlement. All nine bound source/runner
+  files remained unchanged and the canonical cleanup completed. The matching
+  hardened Linux packet passed four source controls with 165 explicit native
+  skips. Current-head independent review, required CI and merge remain gates;
+  no complete canonical-path or interpreter/source admission is inferred.
+- A later review identified the .NET regex end-anchor exception for a final LF
+  in a drive value. The drive grammar now uses absolute start/end anchors.
+  Malformed-input controls preserve newline, NUL and Unicode separator data
+  through an encoded test transport, require rejection before binding and
+  assert zero output. Focused corrected-drive native qualification is pending;
+  the preceding combined packet continues to cover unchanged custody/signer
+  code, not this new drive-validator revision.
+- The final drive revision passed its focused 57-control native packet with
+  zero failures or skips on both shell editions, including faithful transport
+  of all 12 malformed values, zero binding calls and zero helper output.
+  Test time was 32.71 seconds, 49.95 seconds including preparation and
+  settlement. All nine bound source/runner files and the original signed
+  executable remained unchanged; canonical cleanup passed. The focused
+  hardened Linux source control passed with 56 explicit native skips.
+  This focused result complements the preceding 169-control custody/signer
+  packet; no 181-control combined rerun is claimed. Current-head review and
+  merge remain gates, and complete canonical/interpreter admission stays open.
+- #9210 merged as `506a17c83760bf1811cd1a35e18adc75519b7833` after
+  exact-head Copilot approval `5662234581`, no active review issues and
+  successful required CI. Both entire owning effort READMEs and their
+  Plan/Validation Plans were re-read after merge; all aggregate compiler-free
+  and bootstrap obligations remain open.
+  Post-merge reconciliation retained the original head and dropped only
+  provider-confirmed merged history before the managed sync succeeded.
+  No unmerged tail was discarded, and the worktree remains active.
+- A bounded, read-only Windows PowerShell witness qualified existing physical
+  volume-path opens, exact file/directory identity comparisons, the stock
+  long-name getter after handle retention and physical-root drive-type queries.
+  This is two-target callability, not short-alias refusal, remap-race,
+  equivalent canonical-path or interpreter-startup proof. Next compose and
+  qualify canonical namespace/name and source custody through the existing
+  Python prerequisite owner before changing a compiled caller. No additional
+  interpreter acquisition, new shell prerequisite or runtime rollout is enabled.
+
+### 2026-10-26 - Core held-file signer candidate
+
+- The existing typed Core `WINTRUST_DATA` and `WINTRUST_FILE_INFO` passed a
+  full-byte owned-heap roundtrip through public Marshal APIs, including their
+  pointer fields. All five owned allocations were freed before host exit.
+  That witness made no WinTrust/provider/library calls and is not native
+  signer or interpreter admission.
+- Added an unused Core adapter through those shape-checked existing records
+  and stock by-reference WinTrust imports. Preserve no-UI/cache-only flags,
+  the caller's exact file handle and returned provider state through CLOSE,
+  including exceptions after a real verification call.
+- Source verification rejected the candidate's public loader choice:
+  CoreCLR first tries an altered-search-path load for absolute paths, stripping
+  the requested dependency-search flags even through the three-argument API.
+  A matching loaded module path cannot prove the original System32-only
+  dependency policy. Qualify an existing stock flag-preserving binding before
+  publishing Core signer support; do not emit or compile another binding.
+- Core has no provider signer/certificate records in the inspected managed
+  scope. The shared x64 `wintrust.h` provider ABI remains the extraction
+  contract, with native signed-file/provider-state qualification required;
+  neither scoped absence nor pointer roundtrip is treated as impossibility
+  or positive signature evidence.
+- The candidate's combined dual-shell native packet is pending. No compiled
+  caller, synchronizer or installation path enables the helper; complete
+  canonical path, drive/ancestor/source closure and shell handoff remain open.
+- The first candidate passed 73 combined native-host tests without skips,
+  including actual Core provider extraction and exception-path state cleanup.
+  That did not qualify the rejected public loader's dependency-search policy.
+  A subsequent bounded metadata pass found existing CoreLib managed
+  `LoadLibraryEx(String, IntPtr, Int32)` and BOOL `FreeLibrary` wrappers.
+  The corrected candidate validates those declarations and passes the
+  original flags directly, with exact path/flag/type/module-reference controls.
+  Its native qualification remains pending; no earlier signer pass waives it.
+- The corrected packet passed all 73 controls with zero skips on both shell
+  editions in 48.80 seconds, 64.75 seconds including canonical preparation and
+  cleanup. Read-only inspection of the installed Core wrapper proved that
+  the original flags argument reaches the existing `LoadLibraryExW` thunk
+  unchanged; the actual call-through tests retained `0x800`, its exact integer
+  type and balanced owned references before success. This is installed-wrapper
+  argument-flow evidence, not global OS interception or universal version
+  support. Every owned test handle, provider state, module reference, shell
+  host and Job process settled.
+- The final hardened, network-disconnected portable packet passed two source
+  controls with 71 explicit native skips. Independent review and merge remain
+  gates; complete interpreter/source admission, compiled-caller replacement
+  and production rollout remain open.
+- #9204 merged as `5cf50e5f0e78f2efb1a6142e3bfefb8a82e438f1` after
+  current-head Copilot review `5661678432` reported no open or inline issues
+  and required CI passed. The owner-authored clean-comment policy applies;
+  the native concerns were assessed against the actual dual-shell packet and
+  direct loader argument-flow evidence, not portable source inspection alone.
+  Both entire owning effort READMEs were re-read after merge; all aggregate
+  implementation and validation gates remain open.
+  Next qualify Windows PowerShell final paths and both editions' drive-target
+  queries, then compose canonical-path/ancestor/source custody before any
+  compiled-caller switch. The source worktree is reconciled; no runtime
+  rollout or complete admission is inferred.
+
+### 2026-10-26 - Core held-file and managed final-path adapter
+
+- Extended the unused file guard with a shape-checked CoreLib 10 adapter:
+  the existing managed `CreateFile` wrapper, the same `SafeFileHandle` passed
+  into file-information queries, and the qualified 52-byte identity layout.
+  Windows PowerShell retains its existing stock-framework adapter.
+- Added a Core-only fixed-buffer final-path operation through the existing
+  managed array-pin wrapper, with retained-handle lifetime and explicit native,
+  length and termination failures. The preliminary callability witness used
+  the same handle for a small and full buffer and closed it before host exit;
+  that witness was not file-guard or complete interpreter admission.
+- Extended the bounded native packet to both shell editions, with additional
+  Core final-path file/directory, same-handle and failure/release controls.
+  The combined native-host packet passed 58 tests with zero skips, including
+  the two portable source contracts, on Windows PowerShell 5.1 and Core 7.6.9.
+  It retained the existing held-file signer and explicit Core trust refusal.
+  Test time was 35.52 seconds, 52.25 seconds including canonical preparation
+  and cleanup. The isolated Linux source contract passed two portable tests
+  with 56 explicit native skips. All owned test handles, shell hosts and Job
+  processes settled; the source fixture remains retained for verification.
+- Core signature verification still refuses before native binding or library
+  load. Complete path/drive/ancestor/source admission and the compiled-caller
+  migration remain open; no production caller, synchronizer or installation
+  path enables these primitives. No aggregate Plan or Validation item closes.
+- #9197 merged as `fbb1b5dc4974e82f8bf4379aadd1ef7f506f2064` after
+  exact-head Copilot approval `5661422757`, no open review findings and
+  successful required CI. Both entire owning effort READMEs were re-read
+  after merge; all remaining Plan and Validation Plan obligations stay open.
+  The managed source worktree is reconciled with `dev`; this is neither
+  release attribution nor an installed update.
+  Next qualify the existing Core by-reference WinTrust record marshalling,
+  provider layouts and owned native-library lifetime before implementing
+  Core signer parity. The current explicit Core trust refusal remains until
+  that separate native qualification passes.
+
+### 2026-10-26 - Stock-framework held-file signer qualification
+- Added an unused, repository-only WinTrust adapter through the existing
+  qualified Windows PowerShell bindings. It retains its own System32 library
+  reference, passes the caller's held file handle, preserves no-UI/cache-only
+  verification and extracts the actual verified leaf before closing provider
+  state. The original selector and distributed bootstrap callers remain
+  unchanged; the adapter does not enforce interpreter/source admission.
+- Bounded native qualification is in progress. The hardened portable packet
+  passed its source contract with 12 explicit native skips. Signed, unsigned,
+  modified and mismatched path/handle controls, repeated closure and failure
+  cleanup are separate native obligations, not inferred from metadata or
+  portable success. Independent review remains pending.
+- This is a prerequisite slice of
+  `plugin-services/compiler-free-first-party-execution`, consistent with the
+  existing independent-installation, explicit-error and platform-parity
+  contracts. Complete canonical paths, ancestors, drive mappings,
+  interpreter/helper closure, Core parity and bounded shell handoff remain
+  open before any compiled caller switches. No production rollout is enabled.
+- The final native packet passed all 13 controls without skips (12 native and
+  one portable), including consumer-visible publication only after cleanup
+  and zero success objects on provider/close failures. The final hardened
+  portable packet passed its control with 12 explicit native skips.
+  The first candidate was rejected by the stock parser before native calls
+  because its return was inside `finally`; the corrected return follows
+  completed cleanup. The signed, unsigned, modified and mismatched path/handle
+  controls retained their original expectations. Independent review and merge
+  remain gates; neither complete admission nor Core parity is inferred.
+- #9187 merged as `f2580c7aa4999257047d3f7806b3f50b6aa66efd` after
+  exact-head Copilot review `5661216451` reported no open issues and all
+  required checks passed. The owner-authored clean-comment verdict satisfies
+  the repository's review policy; actual bounded Windows qualification
+  supplies execution evidence the reviewer environment could not run.
+  Both owning Plan/Validation Plans were re-read after merge and remain open.
+  Existing Core metadata now identifies a managed final-path wrapper with
+  safe-handle/character-array inputs and the stock by-reference WinTrust
+  interface. Next qualify their actual callability and lifetime before
+  enabling a Core adapter or changing any compiled caller. Metadata is not
+  parity or interpreter admission; no installed runtime changed.
+
+### 2026-10-26 - Stock-framework file custody qualification
+- Added an unused, repository-only Windows PowerShell file-guard primitive
+  through exact existing framework bindings, without embedded compilation or
+  runtime interop emission. The original selector and distributed bootstrap
+  callers remain unchanged.
+- The initial native packet passed 18 controls and failed directory custody.
+  An attribute-only directory handle retained identity but allowed rename;
+  treating its sharing flags as immutability was incorrect. Directory guards
+  now request directory-list access too, with an explicit differential control
+  retaining the weaker metadata-only behavior. No custody expectation was
+  weakened to make the earlier failure pass.
+- The corrected native Windows packet passed all 20 controls with no skips,
+  including directory/file exclusion, release and failure cleanup, final
+  junction refusal and the weaker metadata-only differential. Wrong-kind and
+  junction refusals inspect the exact captured handle's closure before the
+  PowerShell process exits, not after OS exit cleanup. The hardened,
+  network-disconnected Linux packet passed its portable control with 19
+  explicit native skips. Independent publication review remains pending.
+  This does not close interpreter/source-closure admission,
+  canonical path and drive checks, signer verification, shell framing,
+  PowerShell Core parity, compiled-caller replacement or native desktop gates.
+  Phase 7 and the parent campaign remain Active.
+- #9181 merged as `8f6553d7733aa161fa5b5209543946c9504f126e` after
+  independent approval of exact head `e1b62491e6d7a5d7eeeb47925871f356e9e8a9f0`,
+  resolution of the same-process cleanup coverage gap and required green CI.
+  The final native packet passed all 20 controls; the portable packet passed
+  its control with 19 explicit native skips. Both owning effort READMEs were
+  re-read after merge; no aggregate Plan or Validation Plan item closes.
+  Existing stock trust and PowerShell Core bindings have metadata evidence
+  only, not callable or admission qualification. Continue the existing Python
+  prerequisite handoff; no compiled caller switched or installed runtime changed.
+
+### 2026-10-26 - Windows original-parent lifetime building block
+- The existing path resolver and signed-executable selector do not provide
+  complete prerequisite-to-helper admission. No interpreter installer or
+  compiled-bootstrap replacement was inferred from their presence.
+- Added a private shared Python startup primitive that transfers a strict
+  Job's continuing handle into the original, birth-pinned parent before
+  application work. Kernel parent loss, rather than a polling watchdog, owns
+  the sacrificial helper and its descendants. Existing atomic target-Job
+  execution remains the descendant-settlement owner.
+- The hardened, network-disconnected caller-owned regression packet passed
+  177 tests with 20 explicit platform skips; the final focused portable packet
+  passed 40 controls. Native Windows passed all 45 focused controls, including
+  both cycles of parent exit and explicit Job closure with helper, target and
+  grandchild pinned and confirmed gone before observer cleanup. The initial
+  native failure was an observer wire-string/raw-FILETIME mismatch, corrected
+  without weakening identity checks. Independent review and merge remain
+  gates. Complete source archives were regenerated normally; no existing
+  bootstrap caller switches.
+- Phase 7 and both owning efforts remain open. Next complete review of this
+  native transfer building block, then the existing machine-owned interpreter
+  handoff and bounded shell framing before removing compiled implementations.
+- #9170 merged as `cbbaffe972b7de4cf0119cf08591b5fd69515b29` after
+  independent approval of exact head `8f2d800c6fb7b65f1fa50e8189307f497d1f11ec`,
+  no review findings and required green CI. The final hardened owned-process
+  packet passed 182 tests with 20 explicit skips. Both effort READMEs were
+  re-read after merge; no aggregate Plan or Validation Plan item closes from
+  this unused primitive alone. Continue the machine-owned interpreter admission
+  and shell handoff, preserving all native desktop and consumer gates.
+
+### 2026-10-26 - Linux compiler-free slice merged
+- #9129 merged to `dev` as `1ad9ecc02cb99a1ceed9e03462033f6e2eddeb1d`
+  after current-head independent review, resolved findings and required green
+  CI. [The shared owner journal](../leased-daemon-instances/journal/2026/10.26%20compiler-free-amendment.md#linux-implementation-merged)
+  records the exact implementation and qualification boundary.
+- Phase 7 remains open. Next: qualify genuinely pre-Python Windows interpreter
+  admission/acquisition, then replace the existing process, context, lock and
+  update-driver helpers without a compiler or emitted interop types. No
+  installed runtime or automatic-maintenance enrollment was changed.
 
 ### 2026-10-11 - Audit and operator direction
 - Preserved the dependency audit as motivation and captured the operator's
@@ -682,3 +1685,352 @@ profile-record API or a competing admission constructor.
   that is not evidence of abandonment or permission to create a replacement.
   Native integration remains blocked on an accepted owner contract, with
   responsibility retained here and no completed transfer claimed.
+
+### 2026-10-23 - Consume merged admission and verify actual profile wheel bytes
+- #6707 merged as `7519c4113c84c00b7831d3fc146dab455013097f` on October 20.
+  Consumed its shared constructor through managed post-merge reconciliation;
+  the earlier open-draft coordination wait no longer applies. Its retained
+  source transaction, construction/health ownership and source identity remain
+  the implementation to compose, not a replacement target.
+- #7092 merged as `1028136fa616c3d81401b4e07ff1f89a60c90310` after a clean
+  reduced current-head review and successful CI `39001643452`, with all 45
+  actual contexts complete. Re-read the canonical Plan and default sub-plan;
+  only intent/review accounting closed. The earlier native timeout remains
+  tracked separately in #7020, not resolved by a different passing invocation.
+- Advanced the actual-byte prerequisite of the reviewed exact-profile
+  contract. The existing wheel validator now supplies inspected metadata and
+  unpacked size to a repository-only complete-set verifier. Exact archive
+  digests, actual Python/dependency/extra metadata, wheel identity/tags and
+  RECORD content must agree within explicit caller budgets; no extraction or
+  package execution occurs. First-party promotion keeps its generator check.
+- The source-only pure unit packet includes the actual-byte refusal and
+  boundary controls; it does not become a runtime integration test. This
+  precursor neither authenticates the profile nor proves a real permitted CPU
+  closure, target device, feed admission or reusable receipt. Those and native
+  application remain open. #6941 retains candidate-input ownership.
+- The operator renewed direction to continue driving this campaign as owner.
+  Keep the next authority/actual governed closure and native integration gates
+  here; no takeover, accepted transfer, model/corpus mutation or rollout is
+  inferred from the admission merge or byte verification.
+- Actual Windows packet validation exposed native operations in two existing
+  unit wrappers: FIFO creation skipped without `os.mkfifo`, and preservation
+  file access reached the native loader. Retained the original assertions with
+  synthetic FIFO metadata and ordinary synthetic file read/replace adapters.
+  Production adapters and original native library tests remain unchanged.
+  Keep the observer, zero-skip rule and whole-packet deadline intact (#1303).
+- Pre-publication code validation passed the complete admitted packet: 1,175 cases,
+  no skips or actor effects, 234.094 seconds including coverage recording
+  within the unchanged 300-second bound. The focused verifier/source-metadata
+  regression selection passed 135 cases; the earlier normal and optimized
+  Python selections each passed 121. Actual retained file handles exercise the
+  helper's consumer contract, not just in-memory asserted records.
+- Module ceilings and changed-code lint pass. The static source-metadata
+  validator moved unchanged into its existing source-admission component with
+  a public re-export; its function AST is identical. Broader mixed native
+  artifact cohorts exceeded their bounded invocation windows; their full
+  completion is not claimed. Initial Windows fixture-path failures were
+  diagnosed and avoided with a shorter private fixture root, without changing
+  Git configuration or filesystem policy.
+- Clean-room provisioning and live engine validation are not applicable to
+  this repository-only, non-enabled helper slice. Real governed acquisition,
+  first-use construction, approved CPU/accelerator closure and external native
+  acceptance remain explicit prerequisites of the later consumer integration.
+- Hosted Linux CI exposed an incidental native-loader import through the
+  builder's filename parser. Moved that pure grammar into the existing static
+  source-admission component and retained the builder's public delegation/error
+  type. Byte verification now has a regression that forbids builder/feed
+  imports; no effect-observer exception or preloading workaround is used.
+- Review also corrected runtime wheel compatibility for dotted distribution
+  aliases and SHA-384/SHA-512 RECORD entries. Archive/source identities remain
+  SHA-256, and first-party promotion keeps its existing generator, exact
+  version spelling and SHA-256 RECORD requirements. These corrections do not
+  add a feed, acquisition authority or construction mode.
+- Post-review controls passed 154 cases under both normal and optimized Python,
+  including the old builder parser API. All 187 changed byte-verifier and
+  portable-wrapper nodes also passed under the unchanged effect observer with
+  coverage in 49.734 seconds. The latest whole-Windows packet reached its
+  unchanged 300-second bound and is not counted as a completed packet; required
+  hosted full-packet validation remains independent. No deadline was widened
+  or partial result promoted to a full receipt.
+- Subsequent review caught a caller-side `packaging` dependency in that shared
+  token parser. Restored dependency-free structural parsing and the builder's
+  original numeric-version policy; PEP 440 comparison remains lazy in the
+  runtime inspection path. A real fresh `-I -S` caller with `packaging`
+  deliberately unavailable now exercises both the builder parser and
+  first-party inspector, preserving the locked-toolchain bootstrap boundary.
+- That clean-caller correction passed 156 focused cases under normal and
+  optimized Python, plus all 188 changed nodes under the original effect
+  observer in 71.281 seconds including coverage. The native child check stays
+  outside the no-actor packet. Upstream unit-inventory conflicts were
+  reconciled as this PR's exact delta, preserving other contributors' additions
+  and removals and rebinding merged source hashes without changing policy.
+- #8399 actually merged to `dev` as
+  `b4f1a24ea4b47a26ea8b7e866af97d08dfce1648` after current-head Copilot
+  approval with no open findings and successful required CI `40059533965`.
+  The hosted complete packet passed 1,274 cases in 18.115 seconds including
+  coverage. Re-read this parent Plan/Validation Plan and the default sub-plan:
+  only the repository-only byte-comparison prerequisite is delivered.
+- Managed post-merge reconciliation initially failed on the generated unit
+  inventory. Retained backups, proved the delivered files and all owned nodes
+  already existed on pinned upstream, and dropped only redundant merged
+  history. Managed reconciliation then reported up-to-date; no unmerged work
+  was discarded. The worktree remains bound to the open Phase 4 objective.
+- Next extend the actual installation-authority/source-policy seam and prove
+  a real permitted exact CPU closure through existing governed mechanisms.
+  Preserve #6941's original input-generator contribution rather than
+  duplicating it; its old cancelled CI run is not a green acceptance result.
+  Default enabling, immutable constructor application and native/service
+  acceptance remain open. No runtime/model/corpus mutation or rollout occurred.
+
+### 2026-10-23 - Existing-authority default-policy input
+
+- Traced the retained constructor and source-pin checks into the existing
+  installation-context source/mode/deployment owner. Source content pins are
+  not approval; the new reader resolves configuration intent at that actual
+  owner rather than inventing a profile directory or an approvals map.
+- `resolve_runtime_profile_policy` and its stdlib-only Python CLI action
+  provide a CPU-first, artifact-preferred, governed-source-permitted baseline
+  without a policy file. Optional overrides remain in the already owner-bound
+  `runtime-deployment.json`; they may disable fallback or explicitly select a
+  capability. Retained capability, deliberate changes and explicit unprofiled
+  migration stay distinct. Existing managed-publication holds remain intact.
+- The policy identity binds the resolved source/installation owner, effective
+  intent and managed flag. It is an invalidation input, not profile approval,
+  source-release verification, a feed/device permission or reusable admission.
+  The engine constructors do not yet consume this API.
+- Actual fresh-adopter and deployment regressions passed 88 combined cases,
+  including real project marketplace configuration and a fresh `-I -S` CLI
+  without profile/approval files. Native Python/PowerShell parsing passed
+  32 targeted new/existing controls. A long-path fixture failure was rerun
+  with the retained short fixture root; the same assertions then exposed and
+  corrected a real PowerShell optional-output property bug.
+- The existing release-metadata adapter is owned by #8367, not a competing
+  implementation here. The canonical installed wheel-input work remains
+  #8419, and #6941 retains candidate-input generation. Posted coordination
+  on the first two PRs, including the already merged #8399 prerequisites.
+  This policy-input slice does not close their gates or this parent effort.
+- #8494 carries this implementation. The initial hosted head passed the complete
+  1,421-unit packet in 34.177 seconds including coverage, and the opt-in native
+  reader lane passed on both Linux and Windows. Required guards caught two
+  newly registered SSH runtime-source copies introduced by the rebase target;
+  rerunning the canonical owner synchronized those copies. This correction
+  still requires current-head CI/review; the earlier passing jobs do not
+  authorize merging a failed guard.
+- Review found a real Bash parity defect: blank/newline profile property names
+  were discarded by line-oriented key enumeration. The canonical reader now
+  compares recognized fields with the declared object size, preserving a true
+  empty object while refusing blank keys. Synchronized all native copies and
+  added exact blank, newline-only and mixed-key parity cases. The corrected
+  focused cohorts passed 90 API/pure cases and 38 actual Python/PowerShell
+  reader cases. An earlier broader invocation exceeded its unchanged
+  300-second limit and is not counted as a full pass.
+- Required workflow validation also refused a dynamic matrix runner route.
+  The optional reader lane now uses explicit hosted Linux/Windows jobs with
+  the same shared steps; the trusted-CI contract passes locally. Current-head
+  hosted native acceptance, full required CI and a fresh review remain gates.
+- Follow-up review caught a known key plus a newline-suffixed alias that the
+  count-only correction still accepted. Removed line-oriented key enumeration:
+  Bash now queries only the two permitted literal properties and compares
+  their presence with the complete object size. Added prefix/suffix alias
+  parity controls; all 41 pure controls pass. The previous corrected head's
+  complete required CI and Linux/Windows reader acceptance passed, but its
+  review was not a passing verdict and is not reused as approval.
+- Self-review also closed a compatibility hazard: valid explicit profile
+  settings must not be parsed and then ignored by ordinary publication.
+  Such settings now retain a profile-aware-consumer-required hold, including
+  for a valid empty object. The no-file standalone baseline is unchanged;
+  policy identity also binds the publication hold. Those API and actual
+  Python/PowerShell controls passed 90 and 38 cases respectively before the
+  additional alias fixtures; current-head hosted acceptance remains required.
+- The next review found two actual boundary gaps. Explicit management leases
+  and borrowers could ignore valid profile settings, and mode readiness with
+  `reason: activation-required` incorrectly yielded a legacy-root CPU policy.
+  Real-path regressions reproduced both before the fix. Management now rejects
+  profile settings by presence before custody validation, including an empty
+  object and an already-live ticket; managed-only publication is unchanged.
+  Pending activation now returns blocked intent with no owner, selection or
+  policy identity. The optional Linux/Windows lane exercises both the new
+  regressions and existing custody controls. One broad local cohort reached
+  its unchanged 300-second limit without a full receipt; it is not a pass.
+  The focused real-path cohort then passed all 13 cases, and all 53 pure
+  controls passed under the actor-free observer with source coverage in
+  15.860 seconds. Sync, source hashes, lint, install/docs and trusted-CI
+  contracts also pass locally.
+  Current-head unit evidence, native acceptance and a fresh review remain gates.
+- Review of the management correction found an additional invalidation gap:
+  managed-only policy and managed policy with an empty profile object shared
+  an identity, despite different management-publication permission. Pure and
+  actual owner-bound regressions reproduced that collision. The policy digest
+  now also binds the profile-aware-publication requirement. The preceding
+  head passed all 1467 required units and hosted Linux/Windows reader/custody
+  acceptance; those results do not substitute for validation and review of
+  this correction.
+  The corrected local slice passes 53 actor-observed units with coverage in
+  22.047 seconds and all 20 actual owner-policy/isolated-CLI cases in
+  30.83 seconds; source closure and fatal lint also pass.
+
+### 2026-10-24 - Configuration input merged; continue authority composition
+- #8494 merged as `d1f60ea72fbf5023496269fe98795aff2f2cad2a`.
+  Genuine review approved exact head `2c3e3ca9e`; required CI `40081349938`
+  passed the complete 1467-unit packet and all required guards. Hosted native
+  acceptance `40081362042` passed actual Linux and stock Windows reader,
+  management-custody and compatibility checks on that same head.
+- Re-read the parent Plan and Validation Plan and the zero-configuration
+  sub-plan after merge. Close only configuration-intent input: no authentic
+  runtime closure, acquisition/admission receipt, offline reuse or native engine
+  construction is claimed. All aggregate Phase 4 and corresponding validation
+  items remain open; the parent worktree remains active.
+- Consume the separately merged bounded inspector (#8419,
+  `90663eab5b44d2d63032fa8a0ac95cf016ce8d6d`) and exact input snapshots
+  (#8523, `1c386200b`) rather than duplicating those primitives. Their contracts
+  explicitly leave authority, acquisition and reusable admission to the caller.
+  Continue the existing adopting-policy/source-adapter and actual governed
+  closure stretch, preserving #8367 release-authentication and #6941 candidate
+  input ownership. No production rollout, engine activation or model/corpus
+  mutation follows from these preparation components.
+
+### 2026-10-24 - Setup invocation is the dependency-operation authority
+- Clarified the existing authority boundary: a user or authorized agent
+  directly invokes trusted harness setup, which installs its selected
+  configurator and plugin suite. That operation authorizes their required
+  dependency closure; no separate package approver, per-package consent or
+  operator-authored exact-lock approval file is needed.
+- Preserve the distinction between operation authorization, authenticated
+  producer release metadata and admission of actual bytes. Source mode can
+  resolve and freeze its own complete lock under that invocation and its
+  selected configuration after source, constraints and acquisition checks.
+  Invocation does not waive integrity, seasoning, revocation or source policy,
+  nor authorize unrelated configuration, activation or model/corpus changes.
+- The retained UV path already preserves resolver configuration, source inputs
+  and stronger seasoning. Its settings projection is not an invocation grant;
+  the existing build-toolchain trust allowlist is not a runtime approval
+  authority. Compose the actual setup-to-component installation/custody
+  boundary instead of adding an unrelated approval mechanism.
+- This is an intent/contract clarification, not consumer implementation or a
+  permitted CPU-closure result. Parent Plan and Validation Plan remain open.
+  Next bind the invoked setup and selected configuration at the existing owner,
+  then prove real source resolution and exact retained-byte admission.
+- The clarification merged in #8658 as
+  `6f6e3343796d6ed92bb35d31743b6ae41e0cc9eb` after genuine current-head
+  approval, no open review threads and green required CI `40128173965`.
+  Re-read this Plan and Validation Plan after merge; no aggregate
+  implementation or acceptance item closes from a documentation clarification.
+- Consume the independently merged closed-wheel constructor composition
+  (#8534, `bd4c5539a`) alongside the inspector and snapshots. It binds
+  inspected wheel facts to existing immutable construction and offline install,
+  but deliberately leaves semantic profile, source/feed and target admission
+  with the actual setup/installation owner. Do not add another constructor.
+- The adopting harness's matching authority intent also cleared its own
+  required CI and review and merged. No runtime mechanics changed. The parent
+  Plan and Validation Plan were re-read again; the real closure, native consumer,
+  helper reuse and service-acceptance gates remain open.
+- Refreshed #4876 coordination after discovering the owner's subsequently merged
+  release adapter (#8568) and policy/release planner (#8586). Consume those
+  components, and requested confirmation of the existing source-lock/acquisition
+  continuation and its engine-consumer handoff. No response or accepted transfer
+  is assumed; #6941 retains its original candidate-input contributor.
+
+### 2026-10-24 - Reconcile the accepted helper-consumer residual
+- Re-read the reviewed #6767 decision, full compatibility/lifecycle boundary
+  and both parent acceptance plans. The accepted immutable-helper consumer
+  lane already composes with #4876's admission/consumer/retention work; it is
+  not a separate shared venv or broker implementation.
+- The artifact owner reported source-graph export merged in #8600 and
+  explicitly retained source identity/trigger/target lock binding, acquisition
+  and consumer realization. Do not duplicate that continuation or substitute
+  a build-cache preparation change for the accepted consumer/lifecycle result.
+- Requested explicit acceptance of the deferred helper-consumer requirements
+  into #4876, or one agreed non-overlapping implementation slice, in
+  [the coordination request](https://github.com/ThomasMichon/copilot-extensions/issues/4876#issuecomment-6390022767).
+  The request includes whole-closure/extras parity, standalone installation,
+  reference survival, matched allocation savings, installation-cell/trust
+  isolation, concurrency, failure recovery and rollback. #6697 is a completed
+  publication PR, not a named active delivery objective.
+- The request is not acceptance. Phase 5 implementation and its validation
+  items remain unchecked; source/default-profile and native/service gates
+  also remain open. No runtime, acquisition, activation or rollout changed.
+
+### 2026-10-24 - Direct source-profile construction continuation
+- The operator directed direct PR delivery instead of waiting for unreliable
+  agent acknowledgement. Resumed implementation in this campaign's existing
+  workspace; ordinary review, source integrity and acquisition policy remain
+  binding. The earlier request is not a completion or accepted transfer.
+- Consumed the merged source-lock binding and implemented complete source
+  profiles from its retained inputs: build required first-party/helper wheels,
+  require exact pinned third-party bytes, inspect the whole metadata/extras
+  closure, then use the existing offline immutable constructor. The owning
+  context supplies the root, interpreter and source generation; no alternate
+  slot allocator, activation or service owner is introduced.
+- Bound the retained source fingerprint across compilation, build and health,
+  with a final check before exposing a candidate. Construction receipts retain
+  the source trigger, exact profile, selected policy and locked build tools.
+  Existing build helpers now carry the caller's deadline to each child.
+- Final focused source validation passed all 57 cases, including real helper
+  builds and the actual constructor/isolated CLI. Earlier combined validation
+  passed 329 cases but exposed two twenty-second collection startup timeouts.
+  A bounded import profile showed pytest import dominating startup. The
+  collection control now runs all four real selectors in one child, sharing
+  imports only; all 69 CI-scope cases pass with every original inventory
+  assertion and the same twenty-second cap. No timeout increase or test
+  omission is accepted.
+- The source consumer remains repository-only. Permitted third-party
+  acquisition, production CPU/accelerator profiles, admitted persistent reuse,
+  native engine/application and remaining service/platform gates stay open.
+  Separate Linux/Windows/macOS source-profile qualification uses the existing
+  wheel-input opt-in; hosted proof, unit-packet admission and PR review/merge
+  remain publication gates. No production rollout is authorized or claimed.
+- Opened direct draft #8791 after preserving all upstream unit additions
+  during publication rebase (1587 existing plus eight new units). The eight
+  focused units pass the unchanged no-actor observer, and actual constructor
+  requalification passes with interpreter checks before construction and
+  after installed health. The full local packet exceeded its fixed budget;
+  no full local pass is claimed and required hosted qualification remains open.
+- Initial Linux required CI exposed eager `ctypes` loading through the
+  build-toolchain trust module. Deferred it to the actual native operations,
+  not a framework preload or an allowed-effect exception. A clean `-I -S -B`
+  caller now refuses native loading while importing the profile consumer;
+  native import/provenance controls pass along with the updated CI-scope
+  contracts. Hosted native lanes also include macOS without claiming
+  standalone-service supervision or engine rollout parity.
+
+### 2026-10-25 - Source closure qualification retained
+- The complete source/helper closure contribution #8791 merged as
+  `7d2ba9dd76f7e25166ac9e84be555c967f7eb2aa`. Its qualified head passed actual
+  required CI `40170736550` with 1,788 units and all seven selected native
+  Linux/Windows/macOS source-profile, compile and wheel jobs in
+  `40170954816`.
+- This closes that source-preparation slice, not production source
+  authentication, governed acquisition, admitted persistent reuse or engine
+  adoption. The aggregate Plan and Validation Plan remain open.
+
+### 2026-10-25 - Installation latency takes priority over preparation plumbing
+- The operator reported general installation timeouts and reprioritized
+  historical-log analysis plus targeted performance fixes. Central rollout
+  remains with its existing deployment owner; this campaign runs no updater.
+- Audited twenty retained Windows update histories. Successful runs took
+  roughly 28-53 minutes; runtime reconciliation and repeated package operations
+  accounted for large spans. Marketplace refresh also caused failures before
+  runtime construction. Preserve the distinction between observed log spans,
+  buffered presentation and controlled physical-phase measurements.
+- A disposable same-base signed-Python comparison completed unseeded copied
+  venv construction in 2.760 seconds. Its seeded control reached 45.059 seconds
+  inside `ensurepip`; copying the interpreter itself took under 0.2 seconds.
+  This is not a total-update speedup measurement.
+- Merged #8970 as `1f5d2f0a3686ff9e409beebed7a06392c20f49d9` after current-head
+  approval, resolved review findings and green required CI `40193754354`.
+  Exact qualified head `4fc3f4bf1f9d6b531c92f1bdeb0f0128559fca2b` passed all
+  six selected Linux/Windows native jobs in `40193814889`.
+- Known UV-owned signed-venv callers now omit unused pip seeding; the generic
+  seeded default and genuine pip fallback remain. Codespaces submits its eight
+  helper roots and plugin in one retained transaction, with explicit
+  non-editable normal mode and preserved editable selection. Tests cover
+  canonical editable mappings, cold/warm source edits, signatures, retries
+  and recovery. No production deadline or admission check was weakened.
+- Post-package Bridge and Dispatch spans include real warm-up, graceful
+  handoff, drain and supervisor reconciliation, not only file copying.
+  No healthy-lifetime or re-adoption safeguard was removed. Whole-update
+  cold/warm evidence and the broader parent acceptance remain open.
+- Next reduce Logger's repeated governed install transactions while retaining
+  its existing setuptools/PyYAML prerequisites, then measure the authorized
+  updater's actual changed and unchanged paths. Do not restart profile plumbing
+  or infer an installed speedup from the merged source fix.

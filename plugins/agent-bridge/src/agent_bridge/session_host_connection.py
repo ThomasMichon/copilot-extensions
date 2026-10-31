@@ -16,6 +16,7 @@ from .session_manager import Session, _AcpLaunchTiming, _default_cwd, log
 
 if TYPE_CHECKING:
     from .acp_client import AcpClient
+    from .local_launch_owner import LocalLaunchOwner
     from .local_launch_preparation import PreparedLocalLaunch
 from .transport import SpawnTarget
 from .session_preferences import client_preferences
@@ -48,6 +49,7 @@ class _SessionHostConnectionMixin:
         effort: str | None = None,
         parity_fault_result: dict[str, Any] | None = None,
         prepared_local_launch: PreparedLocalLaunch | None = None,
+        acquisition_launch: LocalLaunchOwner | None = None,
     ) -> tuple[AcpClient, str]:
         """Spawn a child inside a survivable Session Host and drive ACP over the
         reattachable loopback endpoint (Session-Host mode).
@@ -59,12 +61,13 @@ class _SessionHostConnectionMixin:
         can re-forward and reattach. Teardown DETACHES (host-mode
         ``AcpClient.shutdown``), never reaping the child inadvertently -- goal 1.
         """
-        from . import __version__
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
-        from .session_host.host_index import HostRecord
         from .session_host.spawner import LocalSpawner
         from .transport import resolve_local_launch
+        from .hosting_policy import require_path_hosting, require_target_hosting
+
+        await require_target_hosting(target)
 
         if spawner is None:
             spawner = LocalSpawner(
@@ -72,6 +75,10 @@ class _SessionHostConnectionMixin:
                 active_reap_seconds=self._session_host_active_reap_seconds,
                 ready_timeout=self._timeouts.session_host_ready,
             )
+        if acquisition_launch is not None:
+            if type(spawner) is not LocalSpawner or remote_child_argv is not None:
+                raise ValueError("Original acquisition requires the actual local Host spawner")
+            acquisition_launch.bind(self, self.get_session(session_id), target)
 
         timing = _AcpLaunchTiming(
             session_id=session_id,
@@ -93,6 +100,7 @@ class _SessionHostConnectionMixin:
                     target, tracker=tracker, session_id=session_id,
                 ))
             )
+            require_path_hosting(work_dir)
             if work_dir and not target.cwd:
                 target.cwd = work_dir
             # Final composition precedes publication; the owner reuses only
@@ -149,8 +157,13 @@ class _SessionHostConnectionMixin:
             # 127.0.0.1:<local_port>. spawn() blocks briefly on host readiness,
             # so it is already off-loop.
             step_started = time.monotonic()
+            if remote_child_argv is None:
+                require_path_hosting(work_dir)
+            else:
+                await require_target_hosting(target)
             spawned = await step("session-host-start", spawner.spawn(
                 args, cwd=work_dir, env=child_env, session_id=session_id,
+                **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
             ))
             timing.add("host_spawn", time.monotonic() - step_started)
             # Retain a remote-boundary forward so reattach can refresh it and
@@ -168,12 +181,16 @@ class _SessionHostConnectionMixin:
             sock = await step(
                 "session-host-connect", SessionHostClient.connect(port=spawned.local_port),
             )
+            if acquisition_launch is not None:
+                acquisition_launch._socket = sock
             timing.add("host_connect", time.monotonic() - step_started)
             step_started = time.monotonic()
             hello = await step("session-host-attach", sock.attach(0, nonce=spawned.nonce.encode()))
             timing.add("host_attach", time.monotonic() - step_started)
             step_started = time.monotonic()
             streams = await step("session-host-streams", open_acp_streams(sock))
+            if acquisition_launch is not None:
+                acquisition_launch._streams = streams
             timing.add("host_streams", time.monotonic() - step_started)
 
             async def _closer() -> None:
@@ -196,6 +213,8 @@ class _SessionHostConnectionMixin:
             # Retain the host control channel so the manager can push STATUS
             # (reapable) / DETACH (graceful) for host self-reap (#51).
             client.session_host_client = sock
+            if acquisition_launch is not None:
+                acquisition_launch.retain_client(client)
             if permission_callback:
                 client.auto_approve = False
             with capture_acp_parse_errors() as parse_errors:
@@ -219,6 +238,8 @@ class _SessionHostConnectionMixin:
                             f"(code={streams.child_exit_code})"
                         )
                     session_cwd = remote_cwd or target.cwd or _default_cwd(target)
+                    if acquisition_launch is not None:
+                        acquisition_launch.attach_transport(client, spawned)
                     if load_session_id:
                         step_started = time.monotonic()
                         await step("native-session-load", asyncio.wait_for(
@@ -227,6 +248,7 @@ class _SessionHostConnectionMixin:
                                 session_id=load_session_id,
                                 mcp_servers=mcp_servers,
                                 timing_callback=timing.add,
+                                **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
                             ),
                             timeout=self._timeouts.session_new,
                         ))
@@ -239,6 +261,7 @@ class _SessionHostConnectionMixin:
                                 cwd=session_cwd,
                                 mcp_servers=mcp_servers,
                                 timing_callback=timing.add,
+                                **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
                             ),
                             timeout=self._timeouts.session_new,
                         ))
@@ -258,6 +281,13 @@ class _SessionHostConnectionMixin:
                             "timing_ms": timing.step_map_ms(),
                         })
                     log.warning("ACP launch timing: result=timeout %s", timing.summary())
+                    if acquisition_launch is not None:
+                        acquisition_launch.retain_failed_start()
+                        raise ConnectError(
+                            ConnectStage.LAUNCH_ACP, "Original local startup timed out; "
+                            "Host and child custody remain held, do not retry",
+                            retryable=False, cause=exc,
+                        ) from exc
                     cleanup_confirmed = await self._rollback_failed_host_launch(
                         spawner,
                         spawned,
@@ -293,6 +323,9 @@ class _SessionHostConnectionMixin:
                         type(exc).__name__,
                         timing.summary(),
                     )
+                    if acquisition_launch is not None:
+                        acquisition_launch.retain_failed_start()
+                        raise
                     cleanup_confirmed = await self._rollback_failed_host_launch(
                         spawner,
                         spawned,
@@ -320,6 +353,30 @@ class _SessionHostConnectionMixin:
                         raise ConnectionError(f"{exc} -- {truncation_note}") from exc
                     raise
 
+        record = (
+            acquisition_launch._host_record if acquisition_launch is not None
+            else self._register_host_launch(spawned, session_id)
+        )
+        if record is not None:
+            from .privileged_plugins import remember_host_launch
+
+            remember_host_launch(self._db, target, client, record, acp_sid)
+        # #4272 bridge-lock: mark this bridge-owned session's liveness as a
+        # lattice file the picker reads cheaply, so a bare/bridge Copilot
+        # (cwd=home) still shows ACTIVE (#1416). LOCAL boundary only -- a remote
+        # child_pid is far-side, so its liveness isn't provable locally. Best-
+        # effort: never breaks a launch.
+        if getattr(spawned, "boundary", "local") == "local":
+            from . import bridge_lock
+            with contextlib.suppress(Exception):
+                await bridge_lock.write(
+                    session_id, target.worktree_id, spawned.child_pid)
+        return client, acp_sid
+
+    def _register_host_launch(self, spawned: Any, session_id: str) -> Any:
+        from . import __version__
+        from .session_host.host_index import HostRecord
+
         if self._host_index is not None:
             record = HostRecord(
                 session_id=session_id,
@@ -344,20 +401,8 @@ class _SessionHostConnectionMixin:
                 },
             )
             self._host_index.register(record)
-            from .privileged_plugins import remember_host_launch
-
-            remember_host_launch(self._db, target, client, record, acp_sid)
-        # #4272 bridge-lock: mark this bridge-owned session's liveness as a
-        # lattice file the picker reads cheaply, so a bare/bridge Copilot
-        # (cwd=home) still shows ACTIVE (#1416). LOCAL boundary only -- a remote
-        # child_pid is far-side, so its liveness isn't provable locally. Best-
-        # effort: never breaks a launch.
-        if getattr(spawned, "boundary", "local") == "local":
-            from . import bridge_lock
-            with contextlib.suppress(Exception):
-                await bridge_lock.write(
-                    session_id, target.worktree_id, spawned.child_pid)
-        return client, acp_sid
+            return record
+        return None
 
     async def _rollback_failed_host_launch(
         self,
@@ -510,7 +555,9 @@ class _SessionHostConnectionMixin:
         relays = relay_forwards_from_endpoint(
             endpoint,
             host_port_resolver=get_live_relay_port,
-            serving_probe_for_port=endpoint_serving_probe_factory(endpoint),
+            serving_probe_for_port=endpoint_serving_probe_factory(
+                endpoint, timeout=self._timeouts.session_host_ready,
+            ),
         )
         relay_ports = relay_ports_from_reverse_forwards(reverse_forwards)
         if require_ready and not relay_ports:
@@ -521,6 +568,7 @@ class _SessionHostConnectionMixin:
         strict_probe_for_port = endpoint_serving_probe_factory(
             endpoint,
             fail_open=False,
+            timeout=self._timeouts.session_host_ready,
         )
         started = []
         for relay, relay_port in zip(relays, relay_ports, strict=True):
@@ -530,7 +578,7 @@ class _SessionHostConnectionMixin:
                     try:
                         await wait_for_relay_serving(
                             strict_probe_for_port(relay_port),
-                            timeout=5.0,
+                            timeout=self._timeouts.session_host_ready,
                         )
                     except Exception as exc:
                         raise CredentialRelayReadinessError(
@@ -613,6 +661,9 @@ class _SessionHostConnectionMixin:
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
         from .session_host.endpoints import CredentialRelayReadinessError
+        from .acquisition_launch_owner import require_unassociated_session
+
+        require_unassociated_session(self, session, operation="Host reattachment")
 
         def _on_acp_event(event_type: str, data: dict[str, Any]) -> None:
             self._route_acp_event(session, event_type, data)

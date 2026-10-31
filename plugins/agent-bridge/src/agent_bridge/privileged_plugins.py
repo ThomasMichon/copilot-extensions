@@ -68,7 +68,9 @@ def capabilities() -> dict[str, Any]:
     """Only the actual privileged receiver advertises this preparation owner."""
     from . import elevated
 
-    return {"field_meta": {META_KEY: {"version": 1}}} if elevated.is_subdaemon() else {}
+    return {
+        "field_meta": {META_KEY: {"version": 1, "repository_hosting_version": 1}},
+    } if elevated.is_subdaemon() else {}
 
 
 async def start_client(client: Any, process: Any, session: Any) -> None:
@@ -117,6 +119,10 @@ def _require_capability(client: Any) -> None:
     if not isinstance(capability, dict) or type(capability.get("version")) is not int or capability["version"] != 1:
         raise PrivilegedLaunchRefused(
             "Privileged receiver lacks plugin preparation capability; no session was requested"
+        )
+    if type(capability.get("repository_hosting_version")) is not int or capability["repository_hosting_version"] != 1:
+        raise PrivilegedLaunchRefused(
+            "Privileged receiver lacks repository hosting enforcement; no session was requested"
         )
 
 

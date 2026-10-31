@@ -206,7 +206,12 @@ def test_actual_payload_cache_only_reader_preserves_two_database_scopes(tmp_path
     reason="opt-in native payload-launcher contract",
 )
 @pytest.mark.parametrize("mode", ["legacy", "namespaced"])
-def test_actual_first_touch_require_running_never_provisions(tmp_path, mode):
+@pytest.mark.parametrize("command", [
+    ("identity-key", "setup"),
+    ("ssh-key", "prepare", "--entry", "SSH/node-a"),
+    ("ssh-key", "install", "--entry", "SSH/node-a", "--directory", "unused"),
+])
+def test_actual_first_touch_require_running_never_provisions(tmp_path, mode, command):
     home, payload, runtime, _installation_id, context = prepare_payload(tmp_path, mode)
     env = {
         name: value for name, value in os.environ.items()
@@ -217,8 +222,7 @@ def test_actual_first_touch_require_running_never_provisions(tmp_path, mode):
                AGENT_VAULT_HOME=str(runtime))
     if context:
         env["COPILOT_EXTENSIONS_CONTEXT"] = context
-    result = invoke(payload, env, tmp_path,
-                    "identity-key", "setup", "--require-running", "--json")
+    result = invoke(payload, env, tmp_path, *command, "--require-running", "--json")
     assert result.returncode == 1, result.stderr
     assert json.loads(result.stdout)["error"] == "service_unavailable"
     assert not (runtime / ".provision-status").exists()

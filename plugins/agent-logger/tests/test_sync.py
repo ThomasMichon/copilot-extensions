@@ -58,6 +58,32 @@ def test_registry_names_and_classes() -> None:
     assert isinstance(build_target("ingest"), IngestTarget)
 
 
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_phase_timings_are_flushed_and_keep_failures(monkeypatch, capsys, interrupted):
+    from agent_logger.sync import timing
+
+    ticks = iter([10.0, 12.5])
+    monkeypatch.setattr(timing.time, "monotonic", lambda: next(ticks))
+
+    def capture(value, *, option):
+        assert value == 1 and option == 2
+        assert capsys.readouterr().err == "session-sync: phase=accounting started\n"
+        if interrupted:
+            raise RuntimeError("capture failed")
+        return "result"
+
+    try:
+        result = timing.timed_call("accounting", capture, 1, option=2)
+    except RuntimeError as exc:
+        assert interrupted and str(exc) == "capture failed"
+    else:
+        assert not interrupted and result == "result"
+    outcome = "interrupted" if interrupted else "finished"
+    assert capsys.readouterr().err == (
+        f"session-sync: phase=accounting {outcome} elapsed=2.500s\n"
+    )
+
+
 def test_build_target_unknown_raises() -> None:
     with pytest.raises(ValueError, match="unknown sync target"):
         build_target("nope")
@@ -465,6 +491,69 @@ def test_local_target_push_is_incremental(tmp_path: Path) -> None:
     second = target.push(src, "m1")
     assert second.ok
     assert second.file_count == 0
+
+
+@pytest.mark.parametrize("target_name", ["local", "onedrive"])
+@pytest.mark.parametrize("selection", [None, {"abc-123"}, set()])
+@pytest.mark.parametrize("protection_mode", ["none", "essential", "redact"])
+def test_filesystem_push_prunes_out_of_scope_walks(
+    tmp_path: Path, monkeypatch, target_name: str, selection: set[str] | None,
+    protection_mode: str,
+) -> None:
+    from agent_logger.sync.protection import ProtectionSettings
+    from agent_logger.sync.targets import filesystem
+
+    source = _make_source(tmp_path)
+    other = source / "session-state" / "other"
+    other.mkdir()
+    (other / "events.jsonl").write_text("{}\n")
+    provenance = source / "provenance"
+    provenance.mkdir()
+    (provenance / "abc-123.json").write_text("{}")
+    (provenance / "other.json").write_text("{}")
+    (provenance / "nested").mkdir()
+    foreign = source / "installed-plugins"
+    foreign.mkdir()
+    (foreign / "never-read").write_text("not session data")
+    (source / "session-store.db").write_bytes(b"index")
+    scanned: set[Path] = set()
+    real_scandir = filesystem.os.scandir
+
+    def scoped_scandir(path):
+        directory = Path(os.fsdecode(path).removeprefix("\\\\?\\"))
+        assert directory != foreign
+        assert directory != provenance / "nested"
+        if selection is not None:
+            assert directory != other
+        scanned.add(directory)
+        return real_scandir(path)
+
+    monkeypatch.setattr(filesystem.os, "scandir", scoped_scandir)
+    destination = tmp_path / "destination"
+    options = (
+        {"path": str(destination)} if target_name == "local"
+        else {"root": str(destination), "subfolder": "archive"}
+    )
+    target = build_target(target_name, options)
+    target.protection = ProtectionSettings(
+        redact_secrets=protection_mode == "redact",
+        session_files="essential" if protection_mode == "essential" else "all",
+    )
+    result = target.push(source, "machine", selection, batch_mode=True)
+    assert result.ok, result.detail
+    root = destination / ("archive" if target_name == "onedrive" else "") / "machine"
+    if protection_mode == "none":
+        assert (root / "session-store.db").read_bytes() == b"index"
+    else:
+        assert not (root / "session-store.db").exists()
+    for sid in ("abc-123", "other"):
+        included = selection is None or sid in selection
+        assert (root / "session-state" / sid / "events.jsonl").exists() == included
+        assert (root / "provenance" / f"{sid}.json").exists() == (
+            included and protection_mode != "essential"
+        )
+    assert source in scanned
+    assert not (root / "installed-plugins").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows sharing violation behavior")
@@ -2336,6 +2425,54 @@ def test_engine_run_sync_batches_full_reconciliation(tmp_path: Path) -> None:
         assert (
             machine_dir / "session-state" / f"sess-{i}" / "events.jsonl"
         ).is_file()
+
+
+def test_interrupted_full_reconciliation_retains_batches_and_retries_remaining_files(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from agent_logger.sync.change_tracker import ChangeTracker, resolve_db_path
+    from agent_logger.sync.targets import filesystem
+
+    source = tmp_path / "source"
+    for sid in ("first", "second", "third"):
+        session = source / "session-state" / sid
+        session.mkdir(parents=True)
+        (session / "events.jsonl").write_bytes(b"{}\n")
+    destination = tmp_path / "destination"
+    cfg = _cfg(tmp_path / "home", source, destination)
+    cfg._data["sync"]["change_tracking"] = {"batch_size": 1}
+    real_push = LocalTarget.push
+    calls = 0
+
+    def interrupted(target, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("interrupted before next batch")
+        return real_push(target, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(LocalTarget, "push", interrupted)
+        with pytest.raises(RuntimeError, match="interrupted before next batch"):
+            engine.run_sync(cfg)
+    tracker = ChangeTracker(resolve_db_path(cfg.sync_change_tracking["db_path"], cfg.home))
+    assert tracker.known_session_ids() == {"first"}
+    assert tracker.should_full_sync(24)
+    first = next(destination.iterdir()) / "session-state" / "first" / "events.jsonl"
+    first_revision = first.stat().st_mtime_ns
+    copies = []
+    real_copy = filesystem._copy_replace
+
+    def copied(src, dst):
+        copies.append(src.relative_to(source))
+        return real_copy(src, dst)
+
+    monkeypatch.setattr(filesystem, "_copy_replace", copied)
+    assert engine.run_sync(cfg) == 0
+    assert tracker.known_session_ids() == {"first", "second", "third"}
+    assert not tracker.should_full_sync(24)
+    assert first.stat().st_mtime_ns == first_revision
+    assert {path.parts[1] for path in copies if path.parts[0] == "session-state"} == {"second", "third"}
 
 
 def test_engine_run_sync_forgets_vanished_session_on_full_sync(

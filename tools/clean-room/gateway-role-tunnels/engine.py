@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import subprocess
 import time
 from collections.abc import Callable
@@ -39,6 +40,7 @@ class Engine:
         self.containers: list[str] = []
         self.pending: list[Path] = []
         self.ambiguous_network = False
+        self.runner_lifetime: tuple[Path, int, int, int] | None = None
         self.logs = root / "cr-logs"
         self.logs.mkdir(mode=0o700)
         (root / "docker-config").mkdir(mode=0o700)
@@ -48,6 +50,21 @@ class Engine:
         self.receipt["container_ids"] = list(self.containers)
         self.receipt["network_id"] = self.network
         save(self.root / "receipt.json", self.receipt)
+
+    def open_runner_lifetime(self) -> None:
+        """Keep one non-inherited writer; runner death becomes EOF across the mount."""
+        path = self.root / "proof" / "runner.pipe"
+        os.mkfifo(path, mode=0o600)
+        descriptor = None
+        try:
+            descriptor = os.open(path, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+            info = os.fstat(descriptor)
+            self.runner_lifetime = (path, descriptor, info.st_dev, info.st_ino)
+        except BaseException:
+            if descriptor is not None:
+                os.close(descriptor)
+            path.unlink()
+            raise
 
     @staticmethod
     def write_log(path: Path, data: bytes) -> None:
@@ -99,9 +116,14 @@ class Engine:
         self.receipt["engine"] = facts
 
     def build(self, sha: str, timeout: int) -> str:
+        uid = os.getuid()
+        if uid == 0:
+            raise ProofError("nonroot-host-required", "repo-config")
+        gid = os.getgid()
         iid = self.root / "image-id"
         self.call("build", "--pull", "--no-cache", "--platform", self.architecture.platform,
                   "--iidfile", str(iid), "--build-arg", "SOURCE_COMMIT=" + sha,
+                  "--build-arg", f"GATEWAY_UID={uid}", "--build-arg", f"GATEWAY_GID={gid}",
                   "-f", str(self.root / "context/fleet-manager/containers/gateway/Dockerfile"),
                   str(self.root / "context"), timeout=timeout, build=True)
         image = iid.read_text(encoding="ascii").strip()
@@ -212,6 +234,12 @@ class Engine:
 
     def cleanup(self) -> list[str]:
         errors = []
+        lifetime, self.runner_lifetime = self.runner_lifetime, None
+        if lifetime is not None:
+            try:
+                os.close(lifetime[1])
+            except OSError:
+                errors.append("runner-control-close-failed")
         for path in self.pending:
             if path.exists():
                 try:
@@ -242,6 +270,18 @@ class Engine:
                 errors.append("owned-network-cleanup-failed")
         if self.ambiguous_network:
             errors.append("network-create-outcome-unknown-no-id")
+        if lifetime is not None:
+            path, _, device, inode = lifetime
+            try:
+                info = path.lstat()
+                if stat.S_ISFIFO(info.st_mode) and (info.st_dev, info.st_ino) == (device, inode):
+                    path.unlink()
+                else:
+                    errors.append("runner-control-changed")
+            except FileNotFoundError:
+                pass
+            except OSError:
+                errors.append("runner-control-remove-failed")
         self.receipt["cleanup_errors"] = errors
         self.journal()
         return errors

@@ -10,17 +10,19 @@ import re
 import stat
 import zipfile
 
-from promotion_unit_contract import admit_manifest, decode_json, manifest_digest
+from promotion_unit_contract import (
+    MAX_PACKET_FILE_BYTES, MAX_UNIT_EVIDENCE_FILE_BYTES, admit_manifest, decode_json, manifest_digest,
+)
 
 SCHEMA = "copilot-extensions.candidate-qualification"
 UNIT_PROFILE = "source-units-v2"
+CANDIDATE_UNIT_PROFILE = "candidate-units-v3"
 LEGACY_PROFILE = "legacy-ci-v1"
 UNIT_JOB = "Eligible source units with coverage"
 UNIT_UPLOAD_STEP = "Upload promotion unit evidence"
 UNIT_ARTIFACT = "promotion-unit-evidence"
 WORKFLOW = ".github/workflows/validate-and-promote.yml"
 PACKET_FILES = ("unit-manifest.json", "unit-proof.json", "coverage.json")
-MAX_PACKET_FILE_BYTES = 16 * 1024 * 1024
 MAX_PACKET_BYTES = len(PACKET_FILES) * MAX_PACKET_FILE_BYTES
 MAX_ARCHIVE_BYTES = MAX_PACKET_BYTES + 64 * 1024
 _SHA = re.compile(r"[0-9a-f]{40}")
@@ -59,7 +61,7 @@ def owner_identity(
     return int(owner[1]), int(owner[2])
 
 
-def regular_bytes(root: Path, name: str) -> bytes:
+def regular_bytes(root: Path, name: str, *, max_bytes: int = MAX_PACKET_FILE_BYTES) -> bytes:
     if (
         not isinstance(name, str) or not name or "\\" in name or ":" in name
         or PurePosixPath(name).is_absolute()
@@ -75,9 +77,13 @@ def regular_bytes(root: Path, name: str) -> bytes:
             raise UnitQualificationError(f"indirect unit input refused: {name}")
     if not path.is_file() or not stat.S_ISREG(path.stat().st_mode):
         raise UnitQualificationError(f"required unit input is unavailable: {name}")
-    if path.stat().st_size > MAX_PACKET_FILE_BYTES:
+    if path.stat().st_size > max_bytes:
         raise UnitQualificationError(f"unit input exceeds its byte bound: {name}")
-    return path.read_bytes()
+    with path.open("rb") as stream:
+        raw = stream.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise UnitQualificationError(f"unit input exceeds its byte bound: {name}")
+    return raw
 
 
 def load_manifest(source_root: Path, name: str) -> tuple[dict, str]:
@@ -99,22 +105,34 @@ def input_equivalence(source_root: Path, candidate_root: Path, manifest: dict) -
     return canonical_digest(sources)
 
 
-def packet_binding(directory: Path, *, source_sha: str, manifest: dict, source_root: Path) -> dict:
+def packet_binding(
+    directory: Path, *, source_sha: str, manifest: dict, source_root: Path,
+    development_root: Path | None = None,
+) -> dict:
     try:
         from promotion_unit_packet import verify_packet
     except ModuleNotFoundError as exc:
         raise UnitQualificationError("the source-unit packet verifier is unavailable") from exc
-    before = {name: regular_bytes(directory, name) for name in PACKET_FILES}
-    verified = verify_packet(
-        directory, expected_source_sha=source_sha, expected_manifest=manifest, source_root=source_root,
+    before = {
+        name: regular_bytes(directory, name, max_bytes=MAX_UNIT_EVIDENCE_FILE_BYTES)
+        for name in PACKET_FILES
+    }
+    arguments = dict(
+        expected_source_sha=source_sha, expected_manifest=manifest, source_root=source_root,
     )
+    if development_root is not None:
+        arguments["development_root"] = development_root
+    verified = verify_packet(directory, **arguments)
     fields = {
         "profile", "source_sha", "manifest_sha256", "manifest_file_sha256",
         "proof_sha256", "coverage_sha256", "packet_sha256", "manifest", "proof",
     }
     if not isinstance(verified, dict) or set(verified) != fields:
         raise UnitQualificationError("the source-unit packet verifier returned no validated binding")
-    after = {name: regular_bytes(directory, name) for name in PACKET_FILES}
+    after = {
+        name: regular_bytes(directory, name, max_bytes=MAX_UNIT_EVIDENCE_FILE_BYTES)
+        for name in PACKET_FILES
+    }
     if before != after:
         raise UnitQualificationError("unit packet changed during verification")
     digests = {name: hashlib.sha256(raw).hexdigest() for name, raw in after.items()}
@@ -238,7 +256,7 @@ def verify_archive(raw: bytes, *, expected_digest: str, expected_size: int, pack
             if (
                 len(members) != len(PACKET_FILES) or {member.filename for member in members} != set(PACKET_FILES)
                 or sum(member.file_size for member in members) > MAX_PACKET_BYTES
-                or any(member.file_size > MAX_PACKET_FILE_BYTES or member.is_dir() or member.flag_bits & 1
+                or any(member.file_size > MAX_UNIT_EVIDENCE_FILE_BYTES or member.is_dir() or member.flag_bits & 1
                        or stat.S_ISLNK(member.external_attr >> 16) for member in members)
             ):
                 raise UnitQualificationError("unit artifact archive has an unexpected member inventory")

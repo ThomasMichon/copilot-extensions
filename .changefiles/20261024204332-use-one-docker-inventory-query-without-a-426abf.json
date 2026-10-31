@@ -1,0 +1,9 @@
+{
+  "comment": "Use one Docker inventory query without a redundant version preflight; retain explicit discovery failures.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

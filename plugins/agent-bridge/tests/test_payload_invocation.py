@@ -494,6 +494,7 @@ def test_payload_manifest_describes_agent_bridge_runtime() -> None:
         "noSelfProvisionEnv": "AGENT_BRIDGE_NO_SELFPROVISION",
         "purpose": "Communicate with persistent agent sessions",
         "installer": "install",
+        "installerLifecycle": True,
         "windowsCatalogShim": "powershell",
         "powershellPipelineInput": True,
         "provisionMode": "direct",
@@ -642,7 +643,7 @@ def test_list_command_docs_place_global_json_before_subcommand() -> None:
 
 
 @pytest.mark.asyncio
-async def test_session_host_strips_parent_payload_context(monkeypatch) -> None:
+async def test_session_host_strips_parent_payload_context(monkeypatch, tmp_path: Path) -> None:
     captured: dict[str, object] = {}
 
     async def fake_spawn(*args, **kwargs):
@@ -657,7 +658,7 @@ async def test_session_host_strips_parent_payload_context(monkeypatch) -> None:
 
     await launcher._spawn_child(
         ["copilot"],
-        None,
+        str(tmp_path),
         {"COPILOT_PLUGIN_ROOT": "/explicit/payload", "KEEP": "yes"},
     )
 

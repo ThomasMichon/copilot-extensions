@@ -9,6 +9,11 @@ _ENVIRONMENTS = {"win": "windows", "windows": "windows", "wsl": "wsl", "linux": 
 _LEGACY_ENVIRONMENT = re.compile(r"^(.*?)\s*(?:-(win|wsl)|\(\s*(windows|win|wsl)\s*\))$", re.I)
 
 
+def known_environment_label(value: object) -> str | None:
+    """Classify legacy metadata without validating or changing its raw value."""
+    return _ENVIRONMENTS.get(value.strip().casefold()) if isinstance(value, str) else None
+
+
 def normalize_environment(environment: str | None) -> str:
     label = (environment or "").strip().casefold()
     if label and label not in _ENVIRONMENTS:

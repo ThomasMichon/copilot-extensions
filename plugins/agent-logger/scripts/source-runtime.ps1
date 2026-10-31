@@ -7,7 +7,7 @@ function Get-SourceRuntimeIdentity {
         '--plugin', 'agent-logger', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
     $nativeError = ''
-    $result = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $result = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     if ($LASTEXITCODE -ne 0) {
         throw "Source runtime identity validation failed (exit ${LASTEXITCODE}): $result$nativeError"
     }
@@ -20,8 +20,12 @@ function Initialize-SourceRuntime {
     $script:SourceRuntimeSnapshot = $null
     $metadata = Join-Path $PluginDir 'runtime-source.json'
     try { [IO.File]::GetAttributes($metadata) | Out-Null }
-    catch [IO.FileNotFoundException] { return }
-    catch [IO.DirectoryNotFoundException] { return }
+    catch [IO.FileNotFoundException] {
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
+    }
+    catch [IO.DirectoryNotFoundException] {
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
+    }
     $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
     $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
     $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
@@ -61,7 +65,7 @@ function Publish-SourceSnapshot {
         '--expected-source-identity', $script:SourceRuntimeIdentity,
         '--snapshot-root', $InstallDir)
     $nativeError = ''
-    $snapshot = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $snapshot = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     if ($LASTEXITCODE -ne 0) {
         throw "Source snapshot publication failed (exit ${LASTEXITCODE}): $snapshot$nativeError"
     }

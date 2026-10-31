@@ -14,6 +14,7 @@ already-deployed, live mechanism.
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -112,7 +113,7 @@ def _task_command_parts(tier: str, *, home: Path | None = None) -> list[str]:
     # project-scoped tier; today's single "sweep" tier runs a global update.
     if tier not in TIER_SPECS:
         raise ValueError(f"unknown fleet-update tier: {tier}")
-    return [task_binstub_path(home), "update"]
+    return [task_binstub_path(home), "update", "--auto"]
 
 
 def task_description(tier: str) -> str:
@@ -142,6 +143,13 @@ def install_retry_command(tier: str) -> list[str]:
 
 def _normalize_windows_text(value: str | None) -> str:
     return (value or "").replace("/", "\\").casefold().strip()
+
+
+def _task_argument_key(argument: str) -> str:
+    value = argument.strip('"')
+    if value.startswith("--") or value.casefold() == "update":
+        return value
+    return _normalize_windows_text(value)
 
 
 def _ps_literal(value: str) -> str:
@@ -182,6 +190,11 @@ def task_definition_matches(
     # (it embeds cmd.exe's own "/c" flag) while the embedded binstub path is
     # checked separately with that normalization applied.
     literal_arguments = (snapshot.arguments or "").casefold().strip()
+    try:
+        arguments = shlex.split(snapshot.arguments or "", posix=False)
+        expected = shlex.split(task_action_arguments(tier, home=home), posix=False)
+    except ValueError:
+        return False
     normalized_arguments = _normalize_windows_text(snapshot.arguments)
     execute = Path(snapshot.execute or "").name.casefold()
     return (
@@ -191,6 +204,8 @@ def task_definition_matches(
         and "cmd.exe /c" in literal_arguments
         and _normalize_windows_text(task_binstub_path(home)) in normalized_arguments
         and "update" in literal_arguments
+        and tuple(_task_argument_key(arg) for arg in arguments)
+        == tuple(_task_argument_key(arg) for arg in expected)
         and _normalize_windows_text(snapshot.working_directory)
         == _normalize_windows_text(task_working_directory(home))
         and (snapshot.trigger_kind or "") == spec.schedule_kind

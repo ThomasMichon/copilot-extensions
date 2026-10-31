@@ -211,8 +211,11 @@ class TestPush:
         injected cross-account token."""
         monkeypatch.setattr(
             go, "_auth_config_args",
-            lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
+            lambda remote, *, cwd: go.GitAuthArgs(
+                ["-c", "http.extraheader=AUTHORIZATION: basic x"], allow_ambient_retry=True,
+            ),
         )
+        monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
         no_hooks_seen: list[bool] = []
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
@@ -345,8 +348,11 @@ class TestPushTimeout:
         import subprocess
         monkeypatch.setattr(
             go, "_auth_config_args",
-            lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
+            lambda remote, *, cwd: go.GitAuthArgs(
+                ["-c", "http.extraheader=AUTHORIZATION: basic x"], allow_ambient_retry=True,
+            ),
         )
+        monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
                      no_hooks=False, kill_tree=False, isolated_repository=False):
@@ -428,6 +434,28 @@ class TestPushTimeoutTreeKill:
         )
         cmd = [sys.executable, str(outer_script)]
 
+        original_spawn = push_timeout.spawn_sync_in_kill_on_close_job
+
+        def ready_spawn(*args, **kwargs):
+            proc, job = original_spawn(*args, **kwargs)
+            try:
+                # Qualify the fixture before the one-second timeout/cleanup assertion.
+                deadline = time.monotonic() + 10
+                while not (ready.exists() and pidfile.exists()) and proc.poll() is None:
+                    if time.monotonic() >= deadline:
+                        raise AssertionError("native grandchild fixture did not become ready")
+                    time.sleep(0.05)
+                assert ready.exists() and pidfile.exists(), "native fixture exited before readiness"
+                return proc, job
+            except BaseException:
+                if job is not None:
+                    job.close()
+                else:
+                    push_timeout._kill_tree(proc)
+                proc.wait(timeout=5)
+                raise
+
+        monkeypatch.setattr(push_timeout, "spawn_sync_in_kill_on_close_job", ready_spawn)
         grandchild_pid: int | None = None
         grandchild_start_time: str | None = None
         try:
@@ -702,10 +730,8 @@ class TestCrossAccountAuth:
         from agent_worktrees import repos as repos_mod
         monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "https://github.com/example-org/r.git")
         # Registry maps this owner's repo to a different account login.
-        monkeypatch.setattr(
-            repos_mod, "account_for_github_owner",
-            lambda owner: "host-acct" if owner == "example-org" else owner,
-        )
+        registry = repos_mod.ReposRegistry(account_map={"example-org": "host-acct"})
+        monkeypatch.setattr(repos_mod, "read_registry", lambda **kwargs: registry)
         monkeypatch.setattr(go, "_active_gh_account", lambda: "example-org")
         seen: list[str] = []
 
@@ -775,8 +801,11 @@ class TestCrossAccountAuth:
         override so the default credential helper can authenticate."""
         monkeypatch.setattr(
             go, "_auth_config_args",
-            lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
+            lambda remote, *, cwd: go.GitAuthArgs(
+                ["-c", "http.extraheader=AUTHORIZATION: basic x"], allow_ambient_retry=True,
+            ),
         )
+        monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
         calls: list[bool] = []
 
         def fake_git(*args, **kwargs):

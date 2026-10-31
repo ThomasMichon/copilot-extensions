@@ -52,7 +52,8 @@ not a mandatory response to native token pressure.
 2. Write a compact checkpoint using `session_artifacts` for the **current owner**,
    preserving its expected revision and host-required snapshot binding. Include
    the parent objective/completion gate, canonical effort pointer, current slice,
-   unresolved requests, settled evidence/decisions, live background/external
+   unresolved requests, settled evidence/decisions, original approval
+   evidence/limits and current holds/revocations, live background/external
    obligations and recovery references, and **exactly one next action**.
    Use bounded `session_history` reads only to repair missing evidence. Empty
    boilerplate is not a checkpoint. Do not mutate another agent's artifact.
@@ -101,6 +102,13 @@ that awareness as standing permission to work as thoroughly as a task
 deserves: you can always hand off instead of cutting corners.
 
 ## Continuity contract
+
+Capture upfront approvals and one-time answers in the existing current-owner
+checkpoint or canonical effort/charter when received. Every native checkpoint
+and both custom shapes retain **Authorization Evidence & Limits**; before
+composing or recovering approvals, use
+[the carrier procedure](references/authorization-continuity.md).
+Preserve original scope and current changes, not a blanket "yes."
 
 A handoff transfers **active responsibility for the original objective**. It is
 not a recap and it is not proof that the predecessor's latest phase completed

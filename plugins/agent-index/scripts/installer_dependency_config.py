@@ -1,18 +1,132 @@
 """Private UV settings-projection and configuration-retention primitives."""
 from __future__ import annotations
 
+import configparser
 import errno
+import hashlib
 import json
+import math
 import os
 import re
+import shutil
 import stat
+import subprocess
 import sys
 import tempfile
+import time as clock
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 _WINDOWS = os.name == "nt"
+
+
+def remaining_timeout(deadline, *, error_type, cap=None):
+    if deadline is None:
+        return cap
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
+        raise error_type("retained UV inputs require a finite monotonic deadline")
+    remaining = deadline - clock.monotonic()
+    if remaining <= 0:
+        raise error_type("retained UV input deadline exceeded")
+    return remaining if cap is None else min(remaining, cap)
+
+
+def copy_retained_file(source, destination, *, native_path, deadline, error_type, on_progress=None):
+    remaining_timeout(deadline, error_type=error_type)
+    if deadline is None:
+        result = shutil.copy2(native_path(source), native_path(destination))
+    else:
+        with open(native_path(source), "rb") as incoming, open(native_path(destination), "wb") as output:
+            while True:
+                remaining_timeout(deadline, error_type=error_type)
+                chunk = incoming.read(1 << 20)
+                if not chunk:
+                    break
+                output.write(chunk)
+        shutil.copystat(native_path(source), native_path(destination))
+        result = destination
+    remaining_timeout(deadline, error_type=error_type)
+    if on_progress is not None:
+        on_progress()
+    return result
+
+
+def verify_retained_sources(
+    projects, mirror, *, native_path, check_time, error_type, on_progress=None,
+):
+    source_hashes = {}
+    verified_pairs = set()
+    for project in projects:
+        destination = Path(native_path(mirror(project)))
+        for path in destination.rglob("*"):
+            check_time()
+            if path.is_file():
+                original_path = project / path.relative_to(destination)
+                # Preserve exact names even where Path equality folds case.
+                pair = (str(original_path), str(path))
+                if pair in verified_pairs:
+                    continue
+                retained_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+                if hashlib.sha256(Path(native_path(original_path)).read_bytes()).hexdigest() != retained_hash:
+                    raise error_type("source content changed while retaining UV inputs")
+                source_hashes[original_path] = retained_hash
+                verified_pairs.add(pair)
+                if on_progress is not None:
+                    on_progress()
+    return source_hashes
+
+
+def prepare_uv_install(
+    uv, arguments, *, environment, cwd, now, trusted_source_roots, projection,
+    operation, deadline, native_target, compile_inputs, source_inputs, select_uv,
+    cutoff, argument_pairs, balanced, error_type, settings_timeout, headless,
+):
+    remaining_timeout(deadline, error_type=error_type)
+    if native_target and environment.get("UV_PYTHON_PLATFORM"):
+        raise error_type("native source lock export cannot override its selected target")
+    if operation in ("compile", "source-compile"):
+        arguments = compile_inputs(arguments, environment, cwd, trusted_source_roots, operation)
+    source_inputs(
+        arguments, environment, cwd, trusted_source_roots,
+        **({"operation": operation} if operation != "install" else {}),
+    )
+    remaining_timeout(deadline, error_type=error_type)
+    uv = select_uv(uv)
+    probe_arguments = [arg for arg in arguments if arg != "--quiet" and not re.fullmatch(r"-q+", arg)]
+    native_operation = "compile" if operation == "source-compile" else operation
+    try:
+        result = subprocess.run(
+            [uv, "pip", native_operation, "--show-settings", *probe_arguments],
+            capture_output=True, text=True, env=environment, cwd=cwd,
+            timeout=remaining_timeout(deadline, error_type=error_type, cap=settings_timeout),
+            creationflags=headless,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise error_type("UV seasoning configuration probe failed or timed out") from exc
+    remaining_timeout(deadline, error_type=error_type)
+    if result.returncode:
+        raise error_type("UV seasoning configuration probe failed")
+    admitted = cutoff(result.stdout, now=now, _operation=native_operation)
+    if native_operation == "compile":
+        check_compile_projection(
+            result.stdout, arguments, argument_pairs=argument_pairs,
+            balanced=balanced, error_type=error_type,
+            source_graph=operation == "source-compile", native_target=native_target,
+        )
+    elif native_target:
+        raise error_type("native target binding requires a compile transaction")
+    if projection is not None:
+        projection.append(result.stdout)
+    cleaned = []
+    iterator = iter(arguments)
+    for argument in iterator:
+        if argument in ("--exclude-newer", "--exclude-newer-package"):
+            next(iterator, None)
+        elif (not argument.startswith(("--exclude-newer=", "--exclude-newer-package="))
+              and argument not in ("--reinstall", "--force-reinstall")):
+            cleaned.append(argument)
+    return [*cleaned, *admitted]
 
 # native-executable:begin
 def physical_executable(path: str) -> str | None:
@@ -114,6 +228,63 @@ def native_retained_path(path):
     return "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
 
 
+def file_uri(path):
+    """Keep extended Windows filesystem spelling out of file URI authorities."""
+    if isinstance(path, PureWindowsPath) and str(path).startswith("\\\\?\\"):
+        value = str(path)
+        path = PureWindowsPath("\\\\" + value[8:] if value[:8].lower() == "\\\\?\\unc\\" else value[4:])
+    return path.as_uri()
+
+
+@contextmanager
+def retain_closed_wheels(
+    uv, snapshot, *, python, env, captured_environment, select_uv,
+    transaction_type, error_type,
+):
+    """Retain the policy owner's fixed, closed wheel invocation projection."""
+    from installer_wheel_snapshot import WheelSnapshot
+
+    if not isinstance(snapshot, WheelSnapshot):
+        raise error_type("closed wheel installation requires retained wheel custody")
+    python = Path(python)
+    if not python.is_absolute():
+        raise error_type("closed wheel interpreter must be an absolute candidate path")
+    uv = select_uv(uv)
+    if not Path(uv).is_absolute():
+        if os.path.dirname(uv):
+            selected = uv
+        else:
+            import shutil
+
+            selected = shutil.which(uv)
+            if selected is None:
+                raise error_type("closed wheel UV executable is unavailable")
+        uv = select_uv(os.path.abspath(selected))
+    environment = {
+        key: value for key, value in captured_environment(env).items()
+        if not key.upper().startswith(("UV_", "PIP_", "PYTHON"))
+        and key.upper() not in ("VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__")
+    }
+    with temporary_inputs(None) as temporary:
+        root = private_retained_root(Path(temporary), error_type=error_type).resolve()
+        requirements = root / "wheels.txt"
+        requirements.write_text("".join(
+            f"{name.split('-', 1)[0]} @ "
+            f"{file_uri(path)}#sha256={snapshot.digests[name].removeprefix('sha256:')} "
+            f"--hash={snapshot.digests[name]}\n"
+            for name, path in sorted(snapshot.paths.items())
+        ), encoding="utf-8")
+        snapshot.verify()
+        yield transaction_type(
+            (uv, "pip", "install", "--no-config", "--no-cache", "--offline",
+             "--no-python-downloads", "--no-index", "--no-deps", "--no-build",
+             "--no-sources", "--require-hashes", "--link-mode", "copy",
+             "--python", str(python), "--requirements", str(requirements)),
+            environment, root, {}, {},
+        )
+        snapshot.verify()
+
+
 @contextmanager
 def temporary_inputs(parent):
     prefix = "uv-" if parent is not None else "seasoned-uv-"
@@ -133,6 +304,105 @@ def temporary_inputs(parent):
                 report_cleanup_error(exc)
             else:
                 raise RetainedInputCleanupError(str(exc)) from exc
+
+
+@contextmanager
+def retain_local_exclusions(retain, uv, arguments, *, excluded_local_packages, error_type, **options):
+    if not isinstance(excluded_local_packages, tuple) or any(
+        not isinstance(name, str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name) is None
+        for name in excluded_local_packages
+    ):
+        raise error_type("excluded local packages must be an immutable tuple of names")
+    names = tuple(re.sub(r"[-_.]+", "-", name).lower() for name in excluded_local_packages)
+    if len(set(names)) != len(names):
+        raise error_type("excluded local packages contain duplicate names")
+    if not names:
+        with retain(uv, arguments, **options) as transaction:
+            yield transaction
+        return
+    with temporary_inputs(None) as temporary:
+        constraint = (Path(temporary) / "excluded-local-packages.txt").resolve()
+        constraint.write_text(
+            "".join(f"{name}<0,>=0\n" for name in sorted(names)), encoding="utf-8",
+        )
+        option = "--constraints" if options.get("_operation") in ("compile", "source-compile") else "--constraint"
+        with retain(
+            uv, [*arguments, option, str(constraint)],
+            _generated_constraints=(constraint,), **options,
+        ) as transaction:
+            yield transaction
+
+
+def retained_source_layout(
+    root, projects, files, resources, base, arguments, environment, editables, *,
+    argument_pairs, file_options, toml, config_inputs, generated_constraints=(),
+):
+    context_project = dict(argument_pairs(arguments)).get("--project") or environment.get("UV_PROJECT")
+    pairs = list(argument_pairs(arguments))
+    operands = [value for option, value in pairs if not option]
+    layout_files = files - set(generated_constraints)
+    compact = (
+        projects and operands and not layout_files and not editables and not context_project
+        and not any(
+            option in file_options | {"--group"}
+            and (option == "--group" or (base / value).resolve() not in generated_constraints)
+            for option, value in pairs
+        )
+        and not any(environment.get(key) for key in (
+            "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE", "UV_EXCLUDE",
+        ))
+        and all(Path(value).is_absolute() for value in operands)
+        and not any(metadata_needs_caller_layout(toml(project / "pyproject.toml")) for project in projects)
+        and not any(metadata_needs_caller_layout(toml(path))
+                    for path, _ in config_inputs(arguments, environment, base))
+    )
+    # Generated absolute constraints must not widen the caller-relative source layout.
+    paths = [*projects, *layout_files, *resources]
+    if not compact:
+        paths.append(base)
+    if context_project:
+        paths.append((base / context_project).resolve())
+    anchors = {}
+    for path in paths:
+        anchor = path.anchor.lower()
+        members = [str(member) for member in paths if member.anchor.lower() == anchor]
+        common = Path(os.path.commonpath(members))
+        anchors[anchor] = common.parent if common.is_file() else common
+
+    def mirror(path):
+        path = Path(path).resolve()
+        if path in generated_constraints:
+            return root / "generated" / path.name
+        anchor = hashlib.sha256(path.anchor.encode()).hexdigest()[:12]
+        return root / anchor / path.relative_to(anchors[path.anchor.lower()])
+
+    return anchors, mirror
+
+
+def retained_source_remapper(paths, mirror):
+    replacements = {}
+    for path in sorted(paths, key=lambda item: len(str(item)), reverse=True):
+        retained_path = mirror(path)
+        for before, after in (
+            (path.as_uri(), retained_path.as_uri()),
+            (str(path), str(retained_path)),
+            (path.as_posix(), retained_path.as_posix()),
+            (json.dumps(str(path))[1:-1], json.dumps(str(retained_path))[1:-1]),
+        ):
+            replacements[before] = after
+    pattern = re.compile("|".join(re.escape(before) for before in replacements)) if replacements else None
+
+    def remap(value):
+        if isinstance(value, list):
+            return [remap(item) for item in value]
+        if isinstance(value, dict):
+            return {key: remap(item) for key, item in value.items()}
+        if not isinstance(value, str) or pattern is None:
+            return value
+        return pattern.sub(lambda match: replacements[match[0]], value)
+
+    return remap
 
 
 def config_inputs(arguments, environment, base, *, argument_pairs, toml, error_type):
@@ -182,6 +452,22 @@ def config_inputs(arguments, environment, base, *, argument_pairs, toml, error_t
                 break
         candidates.append((system, False))
     return [(path, project) for path, project in candidates if path.is_file()]
+
+
+def retain_editable_metadata(project, *, error_type):
+    configuration = Path(native_retained_path(project / "setup.cfg"))
+    config = configparser.ConfigParser(interpolation=None)
+    config.optionxform = str
+    try:
+        if configuration.exists():
+            config.read_string(configuration.read_text(encoding="utf-8"))
+        if not config.has_section("egg_info"):
+            config.add_section("egg_info")
+        config.set("egg_info", "egg_base", ".")
+        with configuration.open("w", encoding="utf-8") as stream:
+            config.write(stream)
+    except (OSError, configparser.Error) as error:
+        raise error_type("cannot retain editable build metadata") from error
 
 
 def metadata_needs_caller_layout(value):
@@ -321,7 +607,47 @@ def cutoff_arguments(settings, *, now, operation, min_age, balanced, remote_refe
     return [*result, "--reinstall"] if operation == "install" else result
 
 
-def compile_arguments(arguments, *, argument_pairs, error_type):
+def source_compile_packages(projects, *, toml, identity, error_type):
+    names = []
+    omissions = set()
+    for path in projects:
+        data = toml(path / "pyproject.toml")
+        project = data["project"]
+        names.append(identity(project["name"]))
+        required = {
+            identity(match[1])
+            for requirement in project.get("dependencies", [])
+            if isinstance(requirement, str) and ";" not in requirement and "@" not in requirement
+            and (match := re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", requirement))
+        }
+        for name, mapping in data.get("tool", {}).get("uv", {}).get("sources", {}).items():
+            if isinstance(mapping, dict) and "path" in mapping:
+                name = identity(name)
+                if name not in required:
+                    raise error_type("source lock export cannot omit a conditional or unselected local dependency")
+                omissions.add(name)
+    if not names or len(set(names)) != len(names):
+        raise error_type("source lock export needs an unambiguous owned project graph")
+    return tuple(sorted(omissions))
+
+
+def source_compile_arguments(
+    arguments, environment, cwd, roots, operation, *,
+    source_inputs, toml, identity, argument_pairs, error_type,
+):
+    packages = ()
+    if operation == "source-compile":
+        _, projects, _, _ = source_inputs(
+            arguments, environment, cwd, roots, operation=operation,
+        )
+        packages = source_compile_packages(projects, toml=toml, identity=identity, error_type=error_type)
+    return compile_arguments(
+        arguments, argument_pairs=argument_pairs, error_type=error_type, source_packages=packages,
+        source_graph=operation == "source-compile",
+    )
+
+
+def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=(), source_graph=False):
     """Bounded requirements export, never an implicit incremental lock update."""
     values = {
         "--constraints", "-c", "--overrides", "--excludes", "--build-constraints", "-b",
@@ -340,13 +666,19 @@ def compile_arguments(arguments, *, argument_pairs, error_type):
         "--no-annotate",
     }
     result = []
+    omissions = []
+    output_format = "requirements.txt"
     for option, value in argument_pairs(arguments):
         if not option:
             if value == "-" or not value:
                 raise error_type("lock export requires retained file inputs, not standard input")
             result.append(value)
-        elif option == "--format" and value != "requirements.txt":
-            raise error_type("lock export supports only hashed requirements.txt output")
+        elif option == "--no-emit-package":
+            omissions.append(value)
+        elif option == "--format":
+            if value not in (("requirements.txt", "pylock.toml") if source_graph else ("requirements.txt",)):
+                raise error_type("lock export format is unsupported for this transaction")
+            output_format = value
         elif option in ("--generate-hashes", "--upgrade", "-U", "--no-header", "--no-annotate") and value:
             raise error_type("lock export boolean options cannot carry values")
         elif option in ("--format", "--generate-hashes", "--upgrade", "-U", "--no-header", "--no-annotate"):
@@ -359,18 +691,50 @@ def compile_arguments(arguments, *, argument_pairs, error_type):
             result.append(option)
         else:
             raise error_type("unsupported lock export option")
-    return [*result, "--format", "requirements.txt", "--generate-hashes", "--upgrade", "--no-header", "--no-annotate"]
+    if omissions and tuple(omissions) != source_packages:
+        raise error_type("lock export omissions must match the retained source graph")
+    return [*result, "--format", output_format, "--generate-hashes", "--upgrade", "--no-header", "--no-annotate",
+            *[argument for name in source_packages for argument in ("--no-emit-package", name)]]
 
 
-def check_compile_projection(projection, arguments, *, argument_pairs, balanced, error_type):
+def check_compile_projection(
+    projection, arguments, *, argument_pairs, balanced, error_type, source_graph=False, native_target=False,
+):
     """Output policy is effective configuration, not merely a CLI intention."""
+    if dict(argument_pairs(arguments)).get("--format") == "pylock.toml" and (
+        not source_graph or not re.search(r"(?m)^\s*format:\s*Some\(\s*PylockToml,\s*\),\s*$", projection)
+    ):
+        raise error_type("UV source wheel-lock format differs from the selected output")
     for field, expected in (
         ("generate_hashes", "true"), ("no_header", "true"), ("no_annotate", "true"),
         ("emit_index_url", "false"), ("emit_find_links", "false"), ("emit_index_annotation", "false"),
-        ("no_emit_package", r"\[\]"),
     ):
         if not re.search(r"(?m)^\s*" + field + r":\s*" + expected + r",\s*$", projection):
             raise error_type("UV lock export output configuration is unsupported")
+    omissions = re.search(r"(?m)^\s*no_emit_package:\s*\[", projection)
+    if omissions is None:
+        raise error_type("UV lock export output omissions are unsupported")
+    body, _ = balanced(projection, omissions.end() - 1, "[", "]")
+    names = []
+    while body.strip():
+        match = re.match(r'\s*PackageName\(\s*("(?:[^"\\]|\\.)*")\s*,?\s*\)\s*,\s*', body)
+        if match is None:
+            raise error_type("UV lock export output omissions are unsupported")
+        try:
+            names.append(json.loads(match[1]))
+        except ValueError as exc:
+            raise error_type("UV lock export output omissions are unsupported") from exc
+        body = body[match.end():]
+    expected = [value for option, value in argument_pairs(arguments) if option == "--no-emit-package"]
+    if names != expected:
+        raise error_type("UV lock export output omissions differ from the retained source graph")
+    if source_graph and not re.search(r"(?m)^\s*sources:\s*None,\s*$", projection):
+        raise error_type("source lock export cannot disable its retained source mappings")
+    if native_target and (
+        not re.search(r"(?m)^\s*python_platform:\s*None,\s*$", projection)
+        or not re.search(r"(?m)^\s*universal:\s*false,\s*$", projection)
+    ):
+        raise error_type("native source lock export cannot override its selected target")
     outputs = [value for option, value in argument_pairs(arguments) if option in ("-o", "--output-file")]
     output = re.search(r"(?m)^\s*output_file:\s*(None,|Some\()", projection)
     if output is None:
@@ -384,6 +748,48 @@ def check_compile_projection(projection, arguments, *, argument_pairs, balanced,
             raise error_type("UV lock export output path is unsupported") from exc
     if selected != (outputs[-1] if outputs else None):
         raise error_type("UV lock export output must be selected explicitly by the caller")
+
+
+def check_requirements_sources(
+    path, seen, roots, base, projects, files, editables, *,
+    check_project, check_requirement, error_type,
+):
+    projects = set() if projects is None else projects
+    if path.suffix == ".toml":
+        if path.name != "pyproject.toml":
+            raise error_type("dependency TOML input lacks attributable project identity")
+        check_project(path.parent, roots, projects)
+        return
+    path = path.resolve()
+    if path in seen:
+        raise error_type("cyclic requirement includes cannot prove dependency sources")
+    seen = seen | {path}
+    if files is not None:
+        files.add(path)
+    try:
+        text = re.sub(r"\\\r?\n", " ", path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise error_type("dependency sources file could not be read") from exc
+    for line in text.splitlines():
+        line = re.split(r"\s+#", line, maxsplit=1)[0].strip()
+        if not line or line.startswith("#"):
+            continue
+        include = re.fullmatch(r"(?:-r|--requirements?|--constraints?|-c)\s+(.+)", line)
+        if include:
+            check_requirements_sources(
+                path.parent / include[1], seen, roots, base, projects, files, editables,
+                check_project=check_project, check_requirement=check_requirement, error_type=error_type,
+            )
+        elif line.startswith(("--index-url ", "--extra-index-url ", "--index-url=", "--extra-index-url=")):
+            continue
+        elif line.startswith(("-e ", "--editable ")):
+            source = check_requirement(line.split(maxsplit=1)[1], base, roots, projects)
+            if source is not None and editables is not None:
+                editables.add(source)
+        elif line.startswith("-"):
+            raise error_type("unsupported dependency sources option")
+        else:
+            check_requirement(re.sub(r"\s+--hash=\S+", "", line), base, roots, projects)
 
 
 def compile_requirement_includes(text, source, mirror, remap=None):

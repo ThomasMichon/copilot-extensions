@@ -1,0 +1,29 @@
+{
+  "template": {
+    "id": "chat.service",
+    "revision": "1",
+    "source": "agent-chat-service"
+  },
+  "target": "host-a",
+  "slots": {
+    "artifact_ref": "approved-chat-image",
+    "configuration_ref": "chat-service-config",
+    "storage_ref": "chat-conversation-volume",
+    "credential_ref": "chat-domain-identity",
+    "gateway_slot_ref": "chat-route",
+    "manager_ref": "core-a",
+    "resource_ref": "chat-stack",
+    "container": "container-support",
+    "gateway": "gateway-support",
+    "storage": "storage-support",
+    "credentials": "credential-support",
+    "manager": "manager-support",
+    "network": "network-support",
+    "cpu_millis": 1000,
+    "memory_bytes": 268435456,
+    "disk_bytes": 1073741824,
+    "limit_cpu_millis": 1000,
+    "limit_memory_bytes": 268435456,
+    "limit_disk_bytes": 1073741824
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Document current supervisor roles, allocation paths, startup preparation and diagnostic boundaries.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

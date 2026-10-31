@@ -128,6 +128,7 @@ class LocalBridgeRemoteClient:
         method: str = "GET",
         body: dict[str, Any] | None = None,
         timeout: float = 30.0,
+        _opener: Any = None,
     ) -> Any:
         data = json.dumps(body).encode("utf-8") if body is not None else None
         request = urllib.request.Request(  # noqa: S310 -- loopback Bridge URL
@@ -138,9 +139,8 @@ class LocalBridgeRemoteClient:
         if data is not None:
             request.add_header("Content-Type", "application/json")
         try:
-            return urllib.request.urlopen(  # noqa: S310 -- loopback Bridge URL
-                request, timeout=timeout
-            )
+            opener = _opener if _opener is not None else urllib.request.urlopen
+            return opener(request, timeout=timeout)
         except urllib.error.HTTPError as exc:
             try:
                 detail = json.loads(exc.read().decode("utf-8")).get(

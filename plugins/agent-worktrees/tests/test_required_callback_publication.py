@@ -38,6 +38,10 @@ def publication_transform(fault, shell, monkeypatch, asset):
         for source in (content / "scripts").glob("*"):
             if source.name in {
                 "default-setup.ps1", "default-setup.sh", "launch-command.ps1", "launch-command.sh",
+                "native-seed-boundary.ps1",
+                "native-seed-reply.sh",
+                "native-seed-boundary.sh",
+                "native-seed-setup.sh",
                 "reconcile-machine-settings.ps1", "reconcile-machine-settings.sh",
             } and source.name != name:
                 source.unlink()

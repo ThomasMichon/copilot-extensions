@@ -1,0 +1,9 @@
+{
+  "comment": "Add strict Gateway profiles, monotonic native login authorization and principal/host-pin-verified listener consumption; converge authenticated directory notifications through both existing writers under selected local policy. Qualify Linux native target fixtures only in an explicitly disposable account with safe StrictModes ancestry and runner host-state opt-in.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

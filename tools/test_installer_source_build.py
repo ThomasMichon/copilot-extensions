@@ -1,0 +1,888 @@
+"""Ordinary source candidates reuse locally built wheels across fresh retention."""
+from __future__ import annotations
+
+import hashlib
+from dataclasses import replace
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import threading
+import time
+from types import SimpleNamespace
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "versioned-runtime"))
+
+from test_installer_closed_wheels import engine as engine  # noqa: PLC0414
+from test_installer_wheel_acquisition import CERTIFICATE, feeds as feeds  # noqa: PLC0414
+from wheel_input_fixture import wheel_bytes
+
+import installer_source_build as builds
+
+
+def test_source_phase_allowances_are_independent_and_report_the_expired_phase(monkeypatch, capsys):
+    import installer_wheel_inputs as wheels
+
+    now = [100.0]
+    clock = SimpleNamespace(monotonic=lambda: now[0])
+    monkeypatch.setattr(builds, "time", clock)
+    monkeypatch.setattr(wheels, "time", clock)
+    elapsed = {}
+    with builds._source_phase("acquisition", 10, elapsed) as acquisition:
+        assert acquisition.deadline == 110
+        now[0] = 109
+    with pytest.raises(wheels.WheelDeadlineError, match="offline.*deadline") as failure:
+        with builds._source_phase("offline", 10, elapsed) as offline:
+            assert offline.deadline == 119
+            now[0] = 120
+            wheels._check_deadline(offline.deadline)
+    assert isinstance(failure.value.__cause__, wheels.WheelDeadlineError)
+    assert elapsed == {"acquisition": 9, "offline": 11}
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "phase=acquisition state=completed" in output.err
+    assert "phase=offline state=failed" in output.err
+
+
+def test_source_phase_integrity_failure_preserves_its_original_cause(capsys):
+    error = builds.WheelError("source or installed build tools changed")
+    elapsed = {}
+    with pytest.raises(builds.WheelError) as failure:
+        with builds._source_phase("offline", 10, elapsed):
+            raise error
+    assert failure.value is error
+    assert "offline" in elapsed
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "phase=offline state=failed" in output.err
+
+
+def test_source_phase_renews_from_verified_file_batches(monkeypatch, tmp_path, capsys):
+    import installer_wheel_inputs as wheels
+
+    now = [100.0]
+    clock = SimpleNamespace(monotonic=lambda: now[0])
+    monkeypatch.setattr(builds, "time", clock)
+    monkeypatch.setattr(wheels, "time", clock)
+    digest_file = builds._digest_file
+    lock = threading.Lock()
+
+    def measured_digest(*args, **kwargs):
+        result = digest_file(*args, **kwargs)
+        with lock:
+            now[0] += 1
+        return result
+
+    monkeypatch.setattr(builds, "_digest_file", measured_digest)
+    for index in range(16):
+        (tmp_path / f"source{index}.py").write_text(f"VALUE = {index}\n")
+    elapsed = {}
+    with builds._source_phase("offline", 10, elapsed) as progress:
+        result = builds._tree(tmp_path, progress)
+    assert len(result) == 16 and elapsed["offline"] == 16
+    assert "Source wheel progress: phase=offline" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("condition", ["progress", "silent", "mutation"])
+def test_initial_retention_renews_only_completed_work_and_preserves_source(
+    engine, monkeypatch, tmp_path, capsys, condition,
+):
+    import installer_wheel_inputs as wheels
+    from test_installer_dependency_policy import settings
+
+    now = [100.0]
+    clock = SimpleNamespace(monotonic=lambda: now[0])
+    monkeypatch.setattr(builds, "time", clock)
+    monkeypatch.setattr(wheels, "time", clock)
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "pyproject.toml").write_text(
+        '[project]\nname="example"\nversion="1.0.0"\n', encoding="utf-8",
+    )
+    for index in range(16):
+        (source / f"input{index}.py").write_text(f"VALUE = {index}\n", encoding="utf-8")
+    packages = engine._package_roots(source)
+    before = engine.runtime.fingerprint_source(engine._source_files(packages))
+    inputs = engine.FrozenInputs(source, packages, before)
+    policy = sys.modules[engine.retain_uv_install.__module__]
+    copy = policy._copy_retained_file
+    copies = []
+
+    def measured_copy(original, destination, **options):
+        copies.append(Path(destination))
+        if condition == "silent":
+            preparation = capsys.readouterr()
+            assert "phase=retention state=starting" in preparation.err
+            assert "Source wheel progress: phase=retention" in preparation.err
+        now[0] += 11 if condition == "silent" else 1
+        result = copy(original, destination, **options)
+        if condition == "mutation" and Path(original).name == "input0.py":
+            Path(original).write_text("VALUE = -1\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(policy, "_copy_retained_file", measured_copy)
+    monkeypatch.setattr(policy, "_select_uv_executable", lambda _value: sys.executable)
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **_options: subprocess.CompletedProcess(command, 0, settings(), ""),
+    )
+    uv = Path(sys.executable)
+    if condition == "progress":
+        with engine._retained_inputs(inputs, uv, uv, refresh=False, timeout=10) as retained:
+            assert now[0] - 100 > 10
+            assert retained.retained_hash == before
+            assert all(path.exists() for path in copies)
+        assert engine.runtime.fingerprint_source(engine._source_files(packages)) == before
+    else:
+        expected = wheels.WheelDeadlineError if condition == "silent" else policy.DependencyPolicyError
+        message = "retention.*deadline" if condition == "silent" else "source content changed"
+        with pytest.raises(expected, match=message):
+            with engine._retained_inputs(inputs, uv, uv, refresh=False, timeout=10):
+                pytest.fail("expired or changed source cannot reach construction")
+    assert copies and not any(path.exists() for path in copies)
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert f"phase=retention state={'completed' if condition == 'progress' else 'failed'}" in output.err
+    if condition == "silent":
+        assert "Source wheel progress: phase=retention" not in output.err
+    else:
+        assert "Source wheel progress: phase=retention" in output.err
+
+
+@pytest.fixture
+def ordinary(tmp_path, monkeypatch, feeds, engine):
+    source = tmp_path / "source"
+    source.mkdir()
+    fixture = Path(__file__).with_name("fixtures") / "source-runtime-backend.py"
+    backend = fixture.read_text()
+    filename = "setuptools-83.0.0-py3-none-any.whl"
+    data = wheel_bytes(
+        name="setuptools", prefix="setuptools-83.0.0.dist-info/",
+        metadata=b"Metadata-Version: 2.4\nName: setuptools\nVersion: 83.0.0\n\n",
+        extra={"setuptools/__init__.py": b"", "setuptools/build_meta.py": backend.encode()},
+    )
+    upload_time, cutoff = "2020-01-01T00:00:00Z", "2021-01-01T00:00:00Z"
+    if os.environ.get("TEST_SOURCE_WHEEL_REAL_BACKEND"):
+        filename = "setuptools-84.0.0-py3-none-any.whl"
+        data = Path(os.environ["TEST_SOURCE_WHEEL_REAL_BACKEND"]).read_bytes()
+        assert hashlib.sha256(data).hexdigest() == (
+            "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670"
+        )
+        upload_time, cutoff = "2026-08-08T18:27:56Z", "2026-10-01T00:00:00Z"
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    state["routes"]["/simple/setuptools/"] = (
+        200, {"Content-Type": "application/vnd.pypi.simple.v1+json"},
+        json.dumps({
+            "meta": {"api-version": "1.1"}, "name": "setuptools",
+            "files": [{
+                "filename": filename, "url": "/files/" + filename,
+                "hashes": {"sha256": hashlib.sha256(data).hexdigest()},
+                "upload-time": upload_time,
+            }],
+        }).encode(),
+    )
+    state["routes"]["/files/" + filename] = (200, {}, data)
+    config = tmp_path / "uv.toml"
+    config.write_text(
+        'exclude-newer=' + json.dumps(cutoff) + "\n"
+        '[[index]]\nname="fixture"\ndefault=true\nurl='
+        + json.dumps(state["origin"] + "/simple") + "\n",
+    )
+    for key in list(os.environ):
+        if key.upper().startswith(("UV_", "PIP_")):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("UV_CONFIG_FILE", str(config))
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv-cache"))
+    monkeypatch.setenv("SSL_CERT_FILE", str(CERTIFICATE))
+    monkeypatch.setenv("SOURCE_BUILD_COUNTER", str(tmp_path / "builds"))
+    child = engine._child
+
+    def trace(argv, **options):
+        if argv[1:2] == ["build"]:
+            with (tmp_path / "builds").open("a") as stream:
+                stream.write(str(argv[-1]) + "\n")
+        return child(argv, **options)
+
+    monkeypatch.setattr(engine, "_child", trace)
+    for directory, name, dependencies, code in (
+        ("app", "example-app", ["example-leaf", "agent-procutil"], "from example_leaf import VALUE\n"),
+        ("leaf", "example-leaf", [], "VALUE=1\n"),
+        ("procutil", "agent-procutil", [], None),
+    ):
+        package = source / directory
+        package.mkdir()
+        (package / "pyproject.toml").write_text(
+            '[build-system]\nrequires=["setuptools>=83"]\nbuild-backend="setuptools.build_meta"\n'
+            f'[project]\nname="{name}"\nversion="1.0.0"\ndependencies={json.dumps(dependencies)}\n'
+            + ('[tool.uv.sources]\nexample-leaf={path="../leaf"}\nagent-procutil={path="../procutil"}\n'
+               if directory == "app" else ""),
+        )
+        if code is None:
+            shutil.copytree(
+                Path(__file__).resolve().parents[1] / "libs" / "agent-procutil" / "src",
+                package / "src",
+            )
+        else:
+            (package / "src").mkdir()
+            (package / "src" / name.replace("-", "_")).mkdir()
+            (package / "src" / name.replace("-", "_") / "__init__.py").write_text(code)
+    return source / "app", Path(shutil.which("uv")), tmp_path / "builds", state
+
+
+def _candidate(engine, root, ordinary, version, **options):
+    plugin, uv, _counter, _state = ordinary
+    return engine.numbered_candidate(
+        root, version, plugin=plugin, uv=uv, base_python=Path(sys.executable),
+        health_module="example_app", child_timeout=120, **options,
+    )
+
+
+def _value(engine, ready):
+    python = engine.runtime.slot_python(ready.slot.parent.parent, ready.slot.name)
+    result = subprocess.run(
+        [str(python), "-I", "-B", "-c", "import example_app;print(example_app.VALUE)"],
+        capture_output=True, text=True, timeout=15, check=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    return int(result.stdout.strip())
+
+
+def test_normal_fresh_candidates_hit_per_project_and_body_edit_rebuilds_only_leaf(
+    engine, ordinary, tmp_path, monkeypatch,
+):
+    root = tmp_path / "installation"
+    plugin, _uv, counter, _state = ordinary
+    contexts = []
+    retain = engine._retained_inputs
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def trace(*args, **kwargs):
+        with retain(*args, **kwargs) as inputs:
+            contexts.append(inputs.plugin)
+            yield inputs
+
+    monkeypatch.setattr(engine, "_retained_inputs", trace)
+    compact = builds._compact
+    child = engine._child
+    build_scopes = []
+
+    def observe_build(argv, **options):
+        if argv[1:2] == ["build"]:
+            build_scopes.append(options["environment"].get("COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"))
+        return child(argv, **options)
+
+    monkeypatch.setattr(engine, "_child", observe_build)
+    installed_modules = []
+    origins = []
+    for index in range(2):
+        monkeypatch.setenv("UPDATE_DRIVER_WITNESS", f"synthetic-request-{index}")
+        scope = "Local\\ce-owned-job-" + f"{index + 1:032x}"
+        monkeypatch.setenv("COPILOT_EXTENSIONS_OWNED_JOB_SCOPES", scope)
+        if index:
+            monkeypatch.setattr(
+                builds, "_compact",
+                lambda *_args, **_kwargs: pytest.fail("warm wheel hit copied a source tree"),
+            )
+        with _candidate(engine, root, ordinary, f"1.0.0+fresh{index}") as ready:
+            assert not ready.reused and _value(engine, ready) == 1
+            receipt = json.loads((ready.slot / ".runtime-input-origins.json").read_text())
+            origins.append(receipt["packages"])
+            installed_modules.append(next(ready.slot.rglob("example_leaf/__init__.py")))
+            assert set(receipt["source_wheels"]) == {"example-app", "example-leaf", "agent-procutil"}
+            assert all("#sha256=" in value for value in receipt["packages"].values())
+            assert len(counter.read_text().splitlines()) == 3
+    assert build_scopes == ["Local\\ce-owned-job-" + f"{1:032x}"] * 3
+    monkeypatch.setattr(builds, "_compact", compact)
+    assert origins[0] == origins[1]
+    assert os.path.samefile(*installed_modules)
+    assert installed_modules[0].stat().st_nlink >= 3
+    assert len(set(contexts)) == 2 and all(not path.exists() for path in contexts)
+    (plugin.parent / "leaf" / "src" / "example_leaf" / "__init__.py").write_text("VALUE=42\n")
+    with _candidate(engine, root, ordinary, "1.0.0+changed") as changed:
+        assert _value(engine, changed) == 42
+        assert len(counter.read_text().splitlines()) == 4
+    cached_module = next(
+        path for path in (tmp_path / "uv-cache").rglob("__init__.py")
+        if os.path.samefile(path, installed_modules[0])
+    )
+    expected = installed_modules[0].read_bytes()
+    cached_module.unlink()
+    assert all(path.read_bytes() == expected for path in installed_modules)
+    assert engine.runtime.current_version(root) is None
+
+
+@pytest.mark.parametrize("variable,same_key", [
+    ("UPDATE_DRIVER_WITNESS", True),
+    ("COPILOT_EXTENSIONS_OWNED_JOB_SCOPES", True),
+    ("SOURCE_BUILD_DIAGNOSTIC_MODE", False),
+])
+def test_request_custody_is_not_a_build_input_but_build_environment_still_is(
+    engine, ordinary, tmp_path, monkeypatch, variable, same_key,
+):
+    root = tmp_path / "installation"
+    keys = []
+    bindings = []
+    environments = []
+    admitted_values = []
+    canonical = builds._canonical
+    child = engine._child
+
+    class ObservedKey(Exception):
+        pass
+
+    def observe(_root, binding, _output, **_options):
+        keys.append(hashlib.sha256(binding).hexdigest())
+        bindings.append(json.loads(binding))
+        raise ObservedKey
+
+    def observe_environment(value):
+        if isinstance(value, dict) and value.get("UV_OFFLINE") == "1":
+            environments.append(value.copy())
+        return canonical(value)
+
+    def observe_admission(argv, **options):
+        if argv[1:4] == ["-I", "-m", "venv"]:
+            admitted_values.append(options["environment"].get(variable))
+        return child(argv, **options)
+
+    monkeypatch.setattr(builds, "cached_source_wheel", observe)
+    monkeypatch.setattr(builds, "_canonical", observe_environment)
+    monkeypatch.setattr(engine, "_child", observe_admission)
+    values = [
+        "Local\\ce-owned-job-" + f"{index + 1:032x}"
+        if variable == "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES" else f"synthetic-value-{index}"
+        for index in range(2)
+    ]
+    for index, value in enumerate(values):
+        monkeypatch.setenv(variable, value)
+        with pytest.raises(ObservedKey):
+            with _candidate(engine, root, ordinary, f"1.0.0+request{index}"):
+                pytest.fail("cache-key observation must stop before building or publishing")
+        assert os.environ[variable] == value
+    assert len(keys) == 2
+    assert admitted_values == values
+    assert len(environments) == 2
+    assert {
+        key for key in environments[0].keys() | environments[1].keys()
+        if environments[0].get(key) != environments[1].get(key)
+    } == (set() if same_key else {variable})
+    assert {
+        key for key in bindings[0].keys() | bindings[1].keys()
+        if key != "environment" and bindings[0].get(key) != bindings[1].get(key)
+    } == set()
+    assert (keys[0] == keys[1]) is same_key
+    assert engine.runtime.current_version(root) is None
+
+
+def test_source_change_between_cache_key_and_build_refuses_publication(
+    engine, ordinary, tmp_path, monkeypatch,
+):
+    compact = builds._compact
+
+    def mutate(package, *args, **options):
+        path = next((package / "src").rglob("*.py"))
+        path.chmod(path.stat().st_mode | 0o200)
+        path.write_bytes(path.read_bytes() + b"\n# changed after source binding\n")
+        return compact(package, *args, **options)
+
+    monkeypatch.setattr(builds, "_compact", mutate)
+    root = tmp_path / "installation"
+    with pytest.raises(ValueError, match="source changed before its wheel build"):
+        with _candidate(engine, root, ordinary, "1.0.0"):
+            pytest.fail("changed inputs reached a completed candidate")
+    assert not ordinary[2].exists()
+    assert not engine.runtime.marker_path(root, "1.0.0").exists()
+    assert not list((root / ".source-wheel-cache" / "inputs").glob("*/wheel.json"))
+
+
+@pytest.mark.parametrize("cache_source", ["environment", "configuration"])
+def test_offline_builds_keep_native_cache_selection_and_caller_relative_interpreter(
+    engine, ordinary, tmp_path, monkeypatch, cache_source,
+):
+    child = engine._child
+    expected_python = Path(sys.executable).resolve()
+    selected_cache = tmp_path / "uv-cache"
+    if cache_source == "configuration":
+        monkeypatch.delenv("UV_CACHE_DIR")
+        config = Path(os.environ["UV_CONFIG_FILE"])
+        config.write_text('cache-dir=' + json.dumps(str(selected_cache)) + "\n" + config.read_text())
+    monkeypatch.chdir(expected_python.parent)
+    observed = []
+
+    def trace(argv, **options):
+        if argv[1:5] == ["-I", "-m", "venv", "--without-pip"]:
+            assert argv[0] == str(expected_python)
+        if argv[1:2] == ["build"]:
+            assert Path(options["environment"]["UV_CACHE_DIR"]).resolve() == selected_cache.resolve()
+            assert options["environment"]["UV_NO_CONFIG"] == "1"
+            assert options["environment"]["UV_OFFLINE"] == "1"
+            observed.append(argv[-1])
+        return child(argv, **options)
+
+    monkeypatch.setattr(engine, "_child", trace)
+    with engine.numbered_candidate(
+        tmp_path / "installation", "1.0.0", plugin=ordinary[0], uv=ordinary[1],
+        base_python=Path(expected_python.name), health_module="example_app", child_timeout=120,
+    ) as ready:
+        assert _value(engine, ready) == 1
+    assert len(observed) == 3
+
+
+@pytest.mark.parametrize("change", [
+    "dynamic", "custom-backend", "setup-script", "setup-extra-code", "build-settings", "script-files",
+])
+def test_unsupported_contract_explicitly_retains_original_transaction(
+    engine, ordinary, tmp_path, monkeypatch, change, capsys,
+):
+    plugin, uv, counter, _state = ordinary
+    for package in engine._package_roots(plugin):
+        if change == "setup-script":
+            (package / "setup.py").write_text("raise RuntimeError('must not execute')\n")
+            continue
+        if change == "setup-extra-code":
+            (package / "setup.py").write_text(
+                "from setuptools import setup\nsetup()\nraise RuntimeError('must not execute')\n",
+            )
+            continue
+        manifest = package / "pyproject.toml"
+        content = manifest.read_text()
+        if change == "dynamic":
+            content = content.replace('[project]\n', '[project]\ndynamic=["description"]\n')
+        elif change == "custom-backend":
+            content = content.replace('build-backend="setuptools.build_meta"', 'build-backend="another.backend"')
+        elif change == "script-files":
+            content += '\n[tool.setuptools]\nscript-files=["example-script"]\n'
+        else:
+            content += '\n[tool.uv.config-settings]\nexample="selected"\n'
+        manifest.write_text(content)
+    root = tmp_path / "installation"
+    packages = engine._package_roots(plugin)
+    inputs = engine.FrozenInputs(
+        plugin, packages, engine._construction_hash(engine._source_files(packages), ()),
+    )
+    with engine._retained_inputs(inputs, uv, tmp_path / "absent-python", refresh=False) as retained:
+        with builds.retained_source_wheels(
+            retained, root, uv, Path(sys.executable),
+            run=lambda *_args, **_kwargs: pytest.fail("unsupported contract executed a builder"),
+            timeout=30,
+        ) as admitted:
+            assert admitted is retained
+    assert not root.exists() and not counter.exists()
+    diagnostic = capsys.readouterr()
+    assert diagnostic.out == "" and "Source wheel cache miss:" in diagnostic.err
+
+
+def test_backend_reported_build_dependencies_retain_the_isolated_source_transaction(
+    engine, ordinary, tmp_path, monkeypatch, capsys,
+):
+    if os.environ.get("TEST_SOURCE_WHEEL_REAL_BACKEND"):
+        pytest.skip("Synthetic backend reports the older Setuptools wheel dependency")
+    monkeypatch.setenv("TEST_SOURCE_BACKEND_REQUIRES_WHEEL", "1")
+
+    def observe(inputs, *_args, **_kwargs):
+        assert inputs.source_wheels is None
+        assert str(inputs.plugin / "pyproject.toml") in inputs.transaction.argv
+        assert str(inputs.plugin) in inputs.transaction.argv
+        raise RuntimeError("isolated-source-fallback-observed")
+
+    monkeypatch.setattr(engine, "_construct", observe)
+    root = tmp_path / "installation"
+    with pytest.raises(RuntimeError, match="isolated-source-fallback-observed"):
+        with _candidate(engine, root, ordinary, "1.0.0"):
+            pytest.fail("unsupported backend requirements reached a completed candidate")
+    assert "backend-additional-build-requirements" in capsys.readouterr().err
+    assert not ordinary[2].exists()
+    assert not engine.runtime.marker_path(root, "1.0.0").exists()
+    assert not list((root / ".source-wheel-cache" / "inputs").glob("*/wheel.json"))
+
+
+def test_canonical_setuptools_setup_boilerplate_keeps_the_graph_cacheable(engine, ordinary, tmp_path):
+    plugin, _uv, counter, _state = ordinary
+    (plugin / "setup.py").write_text("from setuptools import setup\nsetup()\n")
+    root = tmp_path / "installation"
+    for index in range(2):
+        with _candidate(engine, root, ordinary, f"1.0.0+boilerplate{index}") as ready:
+            assert _value(engine, ready) == 1
+            receipt = json.loads((ready.slot / ".runtime-input-origins.json").read_text())
+            assert set(receipt["source_wheels"]) == {"example-app", "example-leaf", "agent-procutil"}
+            assert "#sha256=" in receipt["packages"]["example-app"]
+            assert "#sha256=" in receipt["packages"]["example-leaf"]
+            assert len(counter.read_text().splitlines()) == 3
+
+
+def test_unsupported_source_or_build_graph_preserves_the_held_transaction(
+    engine, ordinary, tmp_path, capsys,
+):
+    plugin, uv, counter, _state = ordinary
+    manifest = plugin / "pyproject.toml"
+    content = manifest.read_text()
+    content = content.replace('name="example-app"', 'name="copilot-extensions-worktree-manager"')
+    content += '\ndbus-next={path="vendor/dbus_next-0.2.3-py3-none-any.whl"}\n'
+    wheel = plugin / "vendor" / "dbus_next-0.2.3-py3-none-any.whl"
+    wheel.parent.mkdir()
+    shutil.copyfile(
+        Path(__file__).resolve().parents[1] / "worktree-manager" / "vendor" / wheel.name, wheel,
+    )
+    manifest.write_text(content)
+    packages = engine._package_roots(plugin)
+    inputs = engine.FrozenInputs(
+        plugin, packages, engine._construction_hash(engine._source_files(packages), ()),
+    )
+    root = tmp_path / "installation"
+    with engine._retained_inputs(inputs, uv, tmp_path / "absent-python", refresh=False) as retained:
+        arguments = retained.transaction.argv
+        import tomllib
+
+        mapping = tomllib.loads((retained.plugin / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
+        admitted_wheel = retained.plugin / mapping["dbus-next"]["path"]
+        assert admitted_wheel.read_bytes() == wheel.read_bytes()
+        with builds.retained_source_wheels(
+            retained, root, uv, Path(sys.executable),
+            run=lambda *_args, **_kwargs: pytest.fail("unsupported graph provisioned combined build tools"),
+            timeout=30,
+        ) as admitted:
+            assert admitted is retained
+            assert admitted.transaction.argv == arguments
+            assert str(retained.plugin / "pyproject.toml") in arguments
+            assert admitted.source_wheels is None
+    assert not root.exists() and not counter.exists()
+    assert "non-project-source-mapping" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("requirement_mode", ["lower-bounds", "different-pins"])
+def test_distinct_build_requirements_get_separate_tooling_and_cached_wheels(
+    engine, ordinary, tmp_path, monkeypatch, requirement_mode,
+):
+    plugin, _uv, counter, state = ordinary
+    requirements = ("setuptools>=83", "setuptools>=83.0.0")
+    if requirement_mode == "different-pins":
+        if os.environ.get("TEST_SOURCE_WHEEL_REAL_BACKEND"):
+            pytest.skip("Conflicting pins use two synthetic backend versions")
+        backend = Path(__file__).with_name("fixtures").joinpath("source-runtime-backend.py").read_text()
+        backend += """
+_original_requirements = get_requires_for_build_wheel
+def get_requires_for_build_wheel(config_settings=None):
+    import importlib.metadata
+    requires = tomllib.loads(Path("pyproject.toml").read_text())["build-system"]["requires"]
+    for requirement in requires:
+        if "==" in requirement:
+            assert importlib.metadata.version("setuptools") == requirement.split("==")[1]
+    return _original_requirements(config_settings)
+"""
+        files = []
+        for version in ("83.0.0", "84.0.0"):
+            filename = f"setuptools-{version}-py3-none-any.whl"
+            data = wheel_bytes(
+                name="setuptools", prefix=f"setuptools-{version}.dist-info/",
+                metadata=f"Metadata-Version: 2.4\nName: setuptools\nVersion: {version}\n\n".encode(),
+                extra={"setuptools/__init__.py": b"", "setuptools/build_meta.py": backend.encode()},
+            )
+            state["routes"]["/files/" + filename] = (200, {}, data)
+            files.append({
+                "filename": filename, "url": "/files/" + filename,
+                "hashes": {"sha256": hashlib.sha256(data).hexdigest()},
+                "upload-time": "2020-01-01T00:00:00Z",
+            })
+        state["routes"]["/simple/setuptools/"] = (
+            200, {"Content-Type": "application/vnd.pypi.simple.v1+json"},
+            json.dumps({"meta": {"api-version": "1.1"}, "name": "setuptools", "files": files}).encode(),
+        )
+        requirements = ("setuptools==83.0.0", "setuptools==84.0.0")
+    for package in engine._package_roots(plugin):
+        manifest = package / "pyproject.toml"
+        selected = requirements[1] if package.name == "leaf" else requirements[0]
+        manifest.write_text(manifest.read_text().replace("setuptools>=83", selected))
+    child = engine._child
+    admitted_tools = []
+
+    def trace(argv, **options):
+        if argv[1:3] == ["pip", "install"] and "--only-binary" in argv:
+            admitted_tools.append((
+                argv[argv.index("--python") + 1],
+                tuple(argument for argument in argv if argument.startswith("setuptools")),
+            ))
+        return child(argv, **options)
+
+    monkeypatch.setattr(engine, "_child", trace)
+    root = tmp_path / "installation"
+    for index in range(2):
+        with _candidate(engine, root, ordinary, f"1.0.0+groups{index}") as ready:
+            assert _value(engine, ready) == 1
+            receipt = json.loads((ready.slot / ".runtime-input-origins.json").read_text())
+            assert set(receipt["source_wheels"]) == {"example-app", "example-leaf", "agent-procutil"}
+            assert len(counter.read_text().splitlines()) == 3
+    assert len(admitted_tools) == 4
+    assert len({python for python, _requirements in admitted_tools}) == 4
+    assert {values for _python, values in admitted_tools} == {(value,) for value in requirements}
+
+
+def test_all_requirement_groups_are_acquired_before_the_feed_becomes_unavailable(
+    engine, ordinary, tmp_path, monkeypatch, capsys,
+):
+    plugin, _uv, counter, state = ordinary
+    requirements = ("setuptools>=83", "setuptools>=83.0.0")
+    for package in engine._package_roots(plugin):
+        manifest = package / "pyproject.toml"
+        selected = requirements[1] if package.name == "leaf" else requirements[0]
+        manifest.write_text(manifest.read_text().replace("setuptools>=83", selected))
+    child = engine._child
+    acquired = []
+    offline_requests = []
+
+    def trace(argv, **options):
+        if argv[1:3] == ["pip", "install"] and "--only-binary" in argv:
+            assert not offline_requests, "dependency acquisition ran after offline construction began"
+            acquired.append(tuple(value for value in argv if value.startswith("setuptools")))
+        if argv[1:2] == ["build"]:
+            assert set(acquired) == {(value,) for value in requirements}
+            assert "--offline" in argv and options["environment"]["UV_OFFLINE"] == "1"
+            if not offline_requests:
+                offline_requests.append(len(state["requests"]))
+                state["routes"].clear()
+        return child(argv, **options)
+
+    monkeypatch.setattr(engine, "_child", trace)
+    with _candidate(engine, tmp_path / "installation", ordinary, "1.0.0") as ready:
+        assert _value(engine, ready) == 1
+    assert len(acquired) == 2 and len(counter.read_text().splitlines()) == 3
+    assert offline_requests == [len(state["requests"])]
+    output = capsys.readouterr()
+    assert "phase=acquisition state=completed" in output.err
+    assert "phase=offline state=completed" in output.err
+
+
+@pytest.mark.parametrize("shared_executable", ["uv", "python", "helper"])
+def test_shared_executables_keep_the_original_transaction_before_cache_effects(
+    engine, ordinary, tmp_path, shared_executable, capsys, monkeypatch,
+):
+    plugin, uv, counter, _state = ordinary
+    executable = tmp_path / "shared-executable"
+    executable.write_bytes(b"fixture-executable")
+    os.link(executable, tmp_path / "other-executable-link")
+    if shared_executable == "helper":
+        monkeypatch.setattr(builds, "__file__", str(executable))
+    packages = engine._package_roots(plugin)
+    inputs = engine.FrozenInputs(
+        plugin, packages, engine._construction_hash(engine._source_files(packages), ()),
+    )
+    root = tmp_path / "installation"
+    with engine._retained_inputs(inputs, uv, tmp_path / "absent-python", refresh=False) as retained:
+        if shared_executable == "uv":
+            retained = replace(retained, transaction=retained.transaction._replace(
+                argv=(str(executable), *retained.transaction.argv[1:]),
+            ))
+        with builds.retained_source_wheels(
+            retained, root, uv,
+            executable if shared_executable == "python" else Path(sys.executable),
+            run=lambda *_args, **_kwargs: pytest.fail("shared executable entered cache construction"),
+            timeout=30,
+        ) as admitted:
+            assert admitted is retained
+    assert not root.exists() and not counter.exists()
+    assert "shared-build-identity" in capsys.readouterr().err
+
+
+def test_changed_retained_archive_refuses_before_complete_stamp(engine, ordinary, tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    retain = engine.retained_source_wheels
+
+    @contextmanager
+    def corrupt(*args, **options):
+        with retain(*args, **options) as inputs:
+            archive = inputs.source_wheels.archives[0]
+            archive.write_bytes(b"corrupt")
+            yield inputs
+
+    monkeypatch.setattr(engine, "retained_source_wheels", corrupt)
+    root = tmp_path / "installation"
+    with pytest.raises(ValueError, match="source wheel changed"):
+        with _candidate(engine, root, ordinary, "1.0.0"):
+            pytest.fail("changed wheel was admitted")
+    assert not engine.runtime.marker_path(root, "1.0.0").exists()
+
+
+def test_installed_missing_content_refuses_before_preparation_and_complete_stamp(
+    engine, ordinary, tmp_path, monkeypatch,
+):
+    construct = engine._construct
+
+    def missing(*args, **options):
+        python = construct(*args, **options)
+        slot = args[1]
+        for path in slot.rglob("example_leaf/__init__.py"):
+            path.unlink()
+        return python
+
+    monkeypatch.setattr(engine, "_construct", missing)
+    root = tmp_path / "installation"
+    with pytest.raises(subprocess.CalledProcessError):
+        with _candidate(
+            engine, root, ordinary, "1.0.0",
+            construction_callable="example_app:must_not_be_called",
+        ):
+            pytest.fail("missing installed file reached preparation")
+    assert not engine.runtime.marker_path(root, "1.0.0").exists()
+
+
+@pytest.mark.parametrize("mutation", ["source-body", "source-mode", "tool-body"])
+def test_backend_mutation_cannot_publish_cache_or_completion_and_retry_is_clean(
+    engine, ordinary, tmp_path, monkeypatch, mutation,
+):
+    if mutation == "source-mode" and os.name == "nt":
+        pytest.skip("actual executable-mode changes require POSIX")
+    child = engine._child
+    mutated = False
+
+    def mutate(argv, **options):
+        nonlocal mutated
+        result = child(argv, **options)
+        if argv[1:2] == ["build"] and not mutated:
+            mutated = True
+            if mutation == "tool-body":
+                python = Path(argv[argv.index("--python") + 1])
+                tooling = python.parent.parent
+                path = next(tooling.rglob("setuptools/build_meta.py"))
+                path.write_bytes(path.read_bytes() + b"\n# modified installed backend\n")
+            else:
+                path = next((Path(argv[-1]) / "src").rglob("*.py"))
+                if mutation == "source-body":
+                    path.write_bytes(path.read_bytes() + b"\nVALUE=999\n")
+                else:
+                    path.chmod(path.stat().st_mode ^ 0o100)
+        return result
+
+    monkeypatch.setattr(engine, "_child", mutate)
+    root = tmp_path / "installation"
+    with pytest.raises(ValueError, match="changed before wheel cache publication"):
+        with _candidate(engine, root, ordinary, "1.0.0"):
+            pytest.fail("mutated build inputs reached a completed candidate")
+    assert mutated and not engine.runtime.marker_path(root, "1.0.0").exists()
+    assert not list((root / ".source-wheel-cache" / "inputs").glob("*/wheel.json"))
+    with _candidate(engine, root, ordinary, "1.0.0") as retry:
+        assert _value(engine, retry) == 1
+    assert len(ordinary[2].read_text().splitlines()) == 4
+
+
+@pytest.mark.parametrize("project_name", ["example-app", "Example_App"])
+@pytest.mark.parametrize("script_files", [False, True])
+def test_completed_source_wheel_candidate_reuses_without_reentering_builder(
+    engine, ordinary, tmp_path, monkeypatch, project_name, script_files,
+):
+    plugin = ordinary[0]
+    manifest = plugin / "pyproject.toml"
+    content = manifest.read_text().replace('name="example-app"', f'name="{project_name}"')
+    if script_files:
+        content += '\n[tool.setuptools]\nscript-files=["example-script"]\n'
+        (plugin / "example-script").write_text("print('example')\n")
+    manifest.write_text(content)
+    root = tmp_path / "installation"
+    with _candidate(engine, root, ordinary, "1.0.0") as built:
+        assert not built.reused
+        receipt = json.loads((built.slot / ".runtime-input-origins.json").read_text())
+        assert ("source_wheels" in receipt) is not script_files
+        assert ("example-app" if not script_files else project_name) in receipt["packages"]
+    marker = engine.runtime.marker_path(root, "1.0.0").read_bytes()
+    monkeypatch.setattr(
+        engine, "retained_source_wheels",
+        lambda *_args, **_options: pytest.fail("completed generation entered source construction"),
+    )
+    with _candidate(engine, root, ordinary, "1.0.0") as reused:
+        assert reused.reused and _value(engine, reused) == 1
+    assert engine.runtime.marker_path(root, "1.0.0").read_bytes() == marker
+
+
+def test_source_wheel_verification_uses_a_fresh_bounded_io_budget(tmp_path, monkeypatch):
+    wheel = tmp_path / "demo_pkg-1.0-py3-none-any.whl"
+    wheel.write_bytes(wheel_bytes())
+    record = {
+        "demo-pkg": {"filename": wheel.name, "sha256": "sha256:" + hashlib.sha256(wheel.read_bytes()).hexdigest()},
+    }
+    inputs = builds.SourceWheelInputs(builds._canonical(record), (wheel,), 1)
+    for now in (1000, 2000):
+        monkeypatch.setattr(builds.time, "monotonic", lambda: now)
+        inputs.verify()
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_source_tree_overlaps_bounded_reads_and_joins_before_return(tmp_path, monkeypatch, fail):
+    for index in range(8):
+        (tmp_path / f"input-{index}.py").write_bytes(f"VALUE={index}\n".encode())
+    digest_file = builds._digest_file
+    walk = builds.os.walk
+
+    def descending(*args, **options):
+        for directory, children, names in walk(*args, **options):
+            yield directory, children, sorted(names, reverse=True)
+
+    monkeypatch.setattr(builds.os, "walk", descending)
+    barrier = threading.Barrier(4)
+    lock = threading.Lock()
+    active = peak = finished = 0
+
+    def observe(path, *args, **options):
+        nonlocal active, peak, finished
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        try:
+            index = barrier.wait(timeout=10)
+            if fail and index == 0:
+                raise builds.WheelError("synthetic read failure")
+            return digest_file(path, *args, **options)
+        finally:
+            with lock:
+                active -= 1
+                finished += 1
+
+    monkeypatch.setattr(builds, "_digest_file", observe)
+    if fail:
+        with pytest.raises(builds.WheelError, match="synthetic read failure"):
+            builds._tree(tmp_path, time.monotonic() + 30)
+        assert finished == 4
+    else:
+        result = builds._tree(tmp_path, time.monotonic() + 30)
+        assert result == {
+            path.name: (
+                "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+                path.stat().st_mode & 0o7777,
+            ) for path in tmp_path.iterdir()
+        }
+        assert finished == 8
+    assert peak == 4 and active == 0
+
+
+@pytest.mark.parametrize("budget", ["files", "bytes"])
+def test_source_tree_checks_aggregate_budget_before_dispatching_reads(tmp_path, monkeypatch, budget):
+    for index in range(2):
+        (tmp_path / f"input-{index}.py").write_bytes(b"abcd")
+    monkeypatch.setattr(
+        builds, "_MAX_SOURCE_FILES" if budget == "files" else "_MAX_SOURCE_BYTES",
+        1 if budget == "files" else 7,
+    )
+    monkeypatch.setattr(
+        builds, "_digest_file",
+        lambda *_args, **_options: pytest.fail("over-budget tree dispatched file I/O"),
+    )
+    with pytest.raises(builds.WheelError, match="byte or file budget"):
+        builds._tree(tmp_path, time.monotonic() + 30)
+
+
+def test_source_tree_retains_selected_metadata_until_held_read(tmp_path, monkeypatch):
+    path = tmp_path / "input.py"
+    path.write_bytes(b"original")
+    open_input = builds._open
+
+    def mutate(selected):
+        selected.write_bytes(b"replaced with different bytes")
+        return open_input(selected)
+
+    monkeypatch.setattr(builds, "_open", mutate)
+    with pytest.raises(builds.WheelError, match="input changed"):
+        builds._tree(tmp_path, time.monotonic() + 30)

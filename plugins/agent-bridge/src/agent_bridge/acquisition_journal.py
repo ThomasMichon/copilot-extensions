@@ -13,21 +13,9 @@ from .acquisition_contract import (
 )
 from .db import Database
 from .acquisition_policy import AcquisitionDecision, ConversationEvidence
-
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS acquisition_attempts (
-    delivery_id TEXT PRIMARY KEY,
-    target TEXT NOT NULL,
-    worktree_id TEXT NOT NULL,
-    request_digest TEXT NOT NULL,
-    token TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('pending', 'completed', 'refused')),
-    result_json TEXT,
-    refusal_code TEXT,
-    created_at REAL NOT NULL,
-    updated_at REAL NOT NULL
-)
-"""
+from .acquisition_custody import _AcquisitionCustodyMixin
+from .acquisition_custody_schema import INDEXES, validate_schema
+from .runtime_custody import RuntimeAdmission, RuntimeCustodyError, admission_document
 
 
 @dataclass(frozen=True)
@@ -46,7 +34,7 @@ def _digest(request: AcquisitionRequest) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-class AcquisitionJournal:
+class AcquisitionJournal(_AcquisitionCustodyMixin):
     """One durable delivery fence and one pending operation per target/worktree.
 
     This journal does not authorize launch. The lifecycle adapter must still
@@ -57,46 +45,44 @@ class AcquisitionJournal:
 
     def __init__(self, db: Database) -> None:
         self.db = db
-        db.execute_write(_SCHEMA)
-        db.execute_write(
-            "CREATE TABLE IF NOT EXISTS acquisition_effects ("
-            "delivery_id TEXT PRIMARY KEY, stage TEXT NOT NULL, data_json TEXT NOT NULL)"
-        )
-        db.execute_write(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_acquisition_pending "
-            "ON acquisition_attempts(target, worktree_id) WHERE state='pending'"
-        )
-        db.execute_write(
-            "CREATE INDEX IF NOT EXISTS idx_acquisition_history "
-            "ON acquisition_attempts(worktree_id, state)"
-        )
+        if not db.read_only:
+            for statement in INDEXES.values():
+                db.execute_write(statement)
+        validate_schema(db._get_conn())
 
-    def claim(self, request: AcquisitionRequest) -> AcquisitionClaim:
+    def claim(
+        self, request: AcquisitionRequest, *, runtime_admission: RuntimeAdmission | None = None,
+    ) -> AcquisitionClaim:
         token = uuid.uuid4().hex
         digest = _digest(request)
         now = time.time()
+        association = admission_document(runtime_admission)
         # Admission and the complete prepared recovery facts commit together.
         # No await or independently committed write can strand a digest-only claim.
-        with self.db._write_lock:
-            conn = self.db._get_conn()
-            conn.execute("BEGIN IMMEDIATE")
-            try:
+        with self.db._runtime_transaction(write=True, full_sync=runtime_admission is not None) as conn:
+            prior = conn.execute(
+                "SELECT * FROM acquisition_attempts WHERE delivery_id=?", (request.delivery_id,),
+            ).fetchone()
+            if prior is not None:
+                if association is not None and prior["runtime_custody_json"] != association:
+                    raise RuntimeCustodyError("Acquisition cannot replace its original admission")
+                inserted = False
+            else:
                 inserted = conn.execute(
                     "INSERT INTO acquisition_attempts "
                     "(delivery_id, target, worktree_id, request_digest, token, state, "
-                    "created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?) ON CONFLICT DO NOTHING",
-                    (request.delivery_id, request.target, request.worktree_id, digest, token, now, now),
+                    "created_at, updated_at, runtime_custody_json) "
+                    "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?) ON CONFLICT DO NOTHING",
+                    (request.delivery_id, request.target, request.worktree_id, digest, token,
+                     now, now, association),
                 ).rowcount == 1
                 if inserted:
                     conn.execute(
                         "INSERT INTO acquisition_effects VALUES (?, 'prepared', ?)",
-                        (request.delivery_id, json.dumps({"_request": request.model_dump(mode="json")})),
+                        (request.delivery_id, json.dumps(
+                            {"_request": request.model_dump(mode="json")}, sort_keys=True,
+                        )),
                     )
-                conn.commit()
-            except BaseException:
-                conn.rollback()
-                raise
         if inserted:
             return AcquisitionClaim(token)
         rows = self.db.execute_read(
@@ -137,10 +123,18 @@ class AcquisitionJournal:
             "conversation": asdict(decision.conversation)
             if decision and decision.retirement_recovered and decision.conversation else None,
         })
-        updated = self.db.execute_write(
+        admission = self.original_admission(request)
+        updated = self.db._execute_runtime_admitted_write(
             "UPDATE acquisition_attempts SET state='completed', result_json=?, updated_at=? "
-            "WHERE delivery_id=? AND request_digest=? AND token=? AND state='pending'",
-            (receipt, time.time(), request.delivery_id, _digest(request), token),
+            "WHERE delivery_id=? AND request_digest=? AND token=? AND state='pending' AND ("
+            "launch_handoff_json IS NULL OR (launch_result_json IS NOT NULL "
+            "AND json_extract(launch_handoff_json,'$.consumer.session_id')=? "
+            "AND json_extract(launch_result_json,'$.native_session_id')=? "
+            "AND CASE WHEN json_extract(launch_handoff_json,'$.consumer.native_session_id') IS NULL "
+            "THEN 'created' ELSE 'resumed' END=?))",
+            (receipt, time.time(), request.delivery_id, _digest(request), token,
+             result.session_id, result.native_session_id, result.acquired),
+            admission,
         )
         if updated.rowcount != 1:
             raise AcquisitionRefused("fence_lost", "acquisition completion did not own the fence")
@@ -149,10 +143,13 @@ class AcquisitionJournal:
         """Record a proven pre-effect refusal; not an ambiguous launch failure."""
         if not code:
             raise ValueError("refusal code must be non-empty")
-        updated = self.db.execute_write(
+        admission = self.original_admission(request)
+        updated = self.db._execute_runtime_admitted_write(
             "UPDATE acquisition_attempts SET state='refused', refusal_code=?, updated_at=? "
-            "WHERE delivery_id=? AND request_digest=? AND token=? AND state='pending'",
+            "WHERE delivery_id=? AND request_digest=? AND token=? AND state='pending' "
+            "AND launch_started_at IS NULL",
             (code, time.time(), request.delivery_id, _digest(request), token),
+            admission,
         )
         if updated.rowcount != 1:
             raise AcquisitionRefused("fence_lost", "acquisition refusal did not own the fence")

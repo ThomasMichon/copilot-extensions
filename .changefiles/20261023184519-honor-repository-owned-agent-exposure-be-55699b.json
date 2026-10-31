@@ -1,0 +1,9 @@
+{
+  "comment": "Honor repository-owned agent exposure before Manager preparation and launch; preserve explicit discovery opt-in",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

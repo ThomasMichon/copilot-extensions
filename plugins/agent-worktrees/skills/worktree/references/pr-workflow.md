@@ -541,6 +541,15 @@ Set `head_scheme` per repo to choose; the multi-machine system default is `refsp
 ### Step 1: `create-pr`
 
 Managed PR pushes retain a bounded deadline and run the real pre-push hook.
+The managed hook performs shell/ref policy only, without Python/runtime startup,
+validation, provisioning or claims-backend calls. Its existing installer resolves
+and embeds PR mode and protected branches; refresh hooks through that owner after
+policy changes. Foreign `.local` hooks still run with the original arguments/ref
+input and may be expensive. Preserved repository wrappers do not chain back
+into their own `.local` file. Move repository-owned validators into required CI;
+`validate_hook`, `validate_paths` and legacy core-validation scripts no longer run
+automatically during managed publication. Explicit review policies, source/ref
+custody, post-success bookkeeping and remote merge gates remain unchanged.
 If legitimate validation needs longer than the default 180 seconds, configure
 `pr.push_timeout_seconds: 300` in the repository's
 `.copilot-extensions/agent-worktrees/config.yaml` (or the machine-local
@@ -1079,6 +1088,26 @@ wait behind network I/O. The published source
 is pinned from the validated owning branch, never a later mutable `HEAD`.
 Review the rewritten diff and obtain current review before merging.
 
+PR observation reconciliation first attempts its ordinary record transaction.
+On publication-authority contention it releases the record lock, waits within
+the configured deadline-derived publication lock budget, then reloads and
+revalidates the exact PR association before persisting the observation. Provider
+reads happen outside this wait; best-effort background reconciliation skips a
+contended write rather than waiting. Fenced finalization also uses this
+nonwaiting mode: its outer record lock must never wait for publication
+authority. Foreground reconciliation refuses to wait while any outer record
+sidecar remains held. Unchanged observations need no authority wait.
+
+If the budget expires, `pr-status --json` returns a nonzero exit with
+`error_code: pr_authority_busy`, `retryable: true`, `retry_after_seconds: 2`
+and `reconciliation_pending: true`, retaining available tracked/live status.
+This is local bookkeeping contention, not evidence of a failed review or a
+stale lock. Agents should wait at least the indicated delay and retry the same
+status command in the same worktree without asking the operator. If contention
+persists, retain the obligation and defer a later retry instead of spinning.
+Do not repeat a push or merge to reconcile a completed effect, delete a lock,
+terminate its owner, or bypass ownership checks.
+
 Persisted provider-native `active` PR states remain live for selection and
 ownership refresh, as well as explicit rewrite admission; `completed` and
 `abandoned` remain terminal. Classification does not require rewriting a legacy
@@ -1111,13 +1140,21 @@ destination evidence still requires explicit reconciliation. An inconsistent
 PR identity or branch correction remains refused; a matching-looking suffix is
 never proof by itself.
 
-#### Routine backed publication reconciliation
+#### Routine publication reconciliation
 
-An intact backed-sync result already accepted by the provider/ref can be
-reconciled automatically by normal `push-changes` or `git sync`, with ordinary
-exclusive ownership and no override. See
+Normal `push-changes` or `git sync` reconciles a provider/ref-agreed head that is
+an ancestor of the pinned local source, with ordinary exclusive ownership and
+no override. An accepted backed-sync result or verified non-forcing
+`source-lineage` continuation does not require new operator approval. A stale
+saved head on an older lineage does not make the latter a history rewrite.
+Missing acknowledgement or a missing old replay checkpoint alone is not a
+reason to ask for "publication recovery" or "exact-head recovery" approval. See
 [routine publication reconciliation](../../../docs/cli-reference.md#routine-publication-reconciliation)
 for the admission, retention, non-forcing transport and refusal contract.
+For an intentional rebase or squash of the host's own private PR, the existing
+`push-changes --rewrite-pr` command is the host's intent confirmation under its
+normal delegated task, not a request for another operator approval. Its owning
+worktree, exact saved/live lease and exclusive-destination checks must still pass.
 
 #### Operator-confirmed break glass
 

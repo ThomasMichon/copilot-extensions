@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse a validated physical base Python after guarded Windows interpreter lookup failure without changing UV acquisition or mitigation policy.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

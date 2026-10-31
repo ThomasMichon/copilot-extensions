@@ -31,6 +31,51 @@ def test_path_family_lookup_is_literal_and_case_sensitive(tmp_path, family):
     assert set(paths.get_paths_by_prefix(family)) > set(expected)  # Legacy API stays compatible.
 
 
+@pytest.mark.parametrize("single_source_full", [False, True])
+def test_ordinary_run_reindex_defers_unfinished_backfill_gc(
+    queued_source, caplog, single_source_full,
+):
+    from agent_index.indexing.pending_crawl import PendingCrawls
+
+    repository, configure, run, config = queued_source
+    configure(repository("active"))
+    assert run(full=True)[1].status == "complete"
+    paths = PathIndex(config.data_dir / "path_index.db")
+    PendingCrawls(paths)
+    conn = paths._connect()
+    try:
+        conn.execute(
+            "INSERT INTO embedding_backfills VALUES (?, ?, ?)", ("git:alias", "retained intent", 0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    code, task = run(full=True, source="git:alias") if single_source_full else run()
+    assert code == 0 and task.status == "complete"
+    assert "GC deferred: unfinished embedding backfills: ['git:alias']" in caplog.text
+    assert PendingCrawls(paths).backfill_sources() == ["git:alias"]
+    assert initialize_source_store(config)._source_domain.receipt()["state"] == "clean"
+
+
+def test_backfill_deferral_does_not_hide_unfinished_acquisition(tmp_path):
+    from agent_index.indexing.manifest import CrawlManifest
+    from agent_index.indexing.pending_crawl import PendingCrawls
+
+    paths = PathIndex(tmp_path / "paths.db")
+    journal = PendingCrawls(paths)
+    journal.save(CrawlManifest(source="crawl", commit="target"), scope="accepted", full=False)
+    conn = paths._connect()
+    try:
+        conn.execute("INSERT INTO embedding_backfills VALUES ('backfill', '{}', 0)")
+        conn.commit()
+    finally:
+        conn.close()
+    decision = gc_configured_snapshot(
+        None, paths, IndexState(), configured_names=frozenset(), source_aware=True,
+    )
+    assert decision["pending_crawls"] == decision["deferred"] == ["crawl"]
+
+
 @pytest.mark.timeout(180)
 def test_queued_reconcile_changes_only_exact_canonical_family(queued_source):
     repository, configure, run, config = queued_source
@@ -86,7 +131,9 @@ def test_queued_alias_equal_old_family_retires_rows_not_active_cursor(queued_sou
     configure(old, name="git:old")
     assert run(full=True)[1].status == "complete"
     configure(repository("new"), name="git:old")
-    assert run()[1].status == "complete"
+    assert run()[1].status == "partial"
+    assert IndexState.load(config.state_file).stored_families == {"git:old": "git:old"}
+    assert run(full=True)[1].status == "complete"
     store = initialize_source_store(config)
     state = IndexState.load(config.state_file)
     assert state.stored_families == {"git:old": "git:new"}
@@ -131,6 +178,45 @@ def test_queued_removed_shared_alias_and_incremental_readd_restore_content(queue
     assert store.get_document("git:repo", "one.md") is not None
     assert len(store.get_vector_table("code").get_vectors(ids)) == len(ids)
     assert IndexState.load(config.state_file).sources["git:alias"].last_commit == cursor
+
+
+@pytest.mark.timeout(180)
+def test_retired_pending_alias_restores_without_losing_unchanged_files(queued_source, monkeypatch):
+    from agent_index.indexing import engine
+    from agent_index.indexing.pending_crawl import PendingCrawls
+
+    repository, configure, run, config = queued_source
+    repo, anchor = repository("repo"), repository("anchor")
+    (repo / "unchanged.md").write_text("Retained through source retirement\n", encoding="utf-8")
+    run_git(repo, "add", "unchanged.md")
+    run_git(repo, "commit", "--quiet", "-m", "fixture unchanged file")
+    configure(repo, extra=[("git:anchor", anchor)])
+    assert run(full=True)[1].status == "complete"
+    (repo / "one.md").write_text("Pending changed content\n", encoding="utf-8")
+    run_git(repo, "add", "one.md")
+    run_git(repo, "commit", "--quiet", "-m", "fixture acquired update")
+    with monkeypatch.context() as patch:
+        def interrupt(*args, **kwargs):
+            raise RuntimeError("fixture acquisition interrupted before apply")
+
+        patch.setattr(engine, "_apply_source_manifest", interrupt)
+        assert run(source="git:alias")[1].status == "partial"
+    paths = PathIndex(config.data_dir / "path_index.db")
+    assert PendingCrawls(paths).sources() == ["git:alias"]
+    configure(anchor, name="git:anchor")
+    code, task = run(full=True)
+    assert code == 0 and task.status == "partial"
+    assert task.result_stats["source_gc_deferred"] == ["git:alias"]
+    state = IndexState.load(config.state_file)
+    assert "git:alias" in state.sources
+    store = initialize_source_store(config)
+    assert store.get_document("git:repo", "unchanged.md") is not None
+    configure(repo, extra=[("git:anchor", anchor)])
+    assert run()[1].status == "complete"
+    assert PendingCrawls(paths).sources() == []
+    assert store.get_document("git:repo", "unchanged.md") is not None
+    assert any("Pending changed content" in row.content for row in
+               store.content_store.get_chunks_for_file("git:repo", "one.md"))
 
 
 @pytest.mark.parametrize(

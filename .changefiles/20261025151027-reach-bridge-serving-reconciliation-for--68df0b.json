@@ -1,0 +1,9 @@
+{
+  "comment": "Reach Bridge serving reconciliation for current builds and preserve failed update outcomes without install fallback.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

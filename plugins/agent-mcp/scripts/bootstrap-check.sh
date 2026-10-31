@@ -93,19 +93,50 @@ if [ -f "$pyproj" ]; then
   v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
   [ -n "$v" ] && current="$v"
 fi
-# "Provisioned" no longer implies a .venv: the marker runtime model (#581) publishes
-# the active slot via a current-version marker (POSIX keeps a .venv symlink, but a
-# marker+slot is authoritative). Treat a marker whose slot python exists as
-# provisioned too, so a current runtime is a clean no-op, not a needless rebuild.
+# --- selected completed runtime readiness (reference: agent-bridge) ---
 provisioned=0
-[ -e "$InstallDir/.venv" ] && provisioned=1
-if [ "$provisioned" = 0 ] && [ -f "$InstallDir/current-version" ]; then
-  cv="$(tr -d '[:space:]' < "$InstallDir/current-version")"
-  # ...and only when it names the CURRENT payload version (the marker is authoritative
-  # for the active slot; a stale marker must not suppress reconcile).
-  if [ -n "$cv" ] && [ "$cv" = "$current" ] && { [ -x "$InstallDir/versions/$cv/bin/python" ] || [ -f "$InstallDir/versions/$cv/Scripts/python.exe" ]; }; then provisioned=1; fi
+if [ "$deployed" = "$current" ]; then
+  expected_slot="$("$py" -I -B - "$ScriptDir" "$PluginDir" "$Manifest" "$current" "$name" <<'EXPECTED_SLOT'
+import json
+import pathlib
+import sys
+
+sys.path.insert(0, sys.argv[1])
+payload, manifest = pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+current, name = sys.argv[4:]
+deployment = json.loads(manifest.read_text(encoding="utf-8-sig"))
+from versioned_runtime_readiness import deployment_runtime_version
+print(deployment_runtime_version(payload, current, name, deployment))
+EXPECTED_SLOT
+)" || expected_slot=""
+  # Legacy installations have no selector. A link must not hide a broken or
+  # different selection in the marker-only layout.
+  if [ "$expected_slot" = "$current" ] &&
+     [ ! -e "$InstallDir/current-version" ] && [ ! -L "$InstallDir/current-version" ] &&
+     [ ! -e "$PluginDir/runtime-source.json" ] && [ ! -L "$PluginDir/runtime-source.json" ] &&
+     { [ -e "$InstallDir/.venv" ] || [ -e "$InstallDir/venv" ]; }; then
+    provisioned=1
+  elif [ -f "$InstallDir/current-version" ] && [ -f "$ScriptDir/resolve-runtime.sh" ]; then
+    selected="$(tr -d ' \t\r\n' < "$InstallDir/current-version")"
+    if [ -n "$expected_slot" ] && [ "$selected" = "$expected_slot" ]; then
+      # Subshell scopes resolver variables and read-only suppresses durable
+      # traces. A healthy fallback must never stand in for this exact selection.
+      resolved="$(
+        AGENT_RT_ROOT="$InstallDir"
+        AGENT_RT_RESOLVE_TRACE_MODE=read-only
+        . "$ScriptDir/resolve-runtime.sh"
+        printf '%s' "$AGENT_RT_PY"
+      )"
+      if [ -n "$resolved" ] &&
+         { [ "$resolved" = "$InstallDir/versions/$selected/bin/python" ] ||
+           [ "$resolved" = "$InstallDir/versions/$selected/Scripts/python.exe" ]; }; then
+        provisioned=1
+      fi
+    fi
+  fi
 fi
-if [ "$provisioned" = 1 ] && [ "$deployed" = "$current" ]; then exit 0; fi
+if [ "$provisioned" = 1 ]; then exit 0; fi
+# --- end selected completed runtime readiness ---
 
 if [ -f "$PluginDir/scripts/init.sh" ]; then
   target=("$PluginDir/scripts/init.sh")

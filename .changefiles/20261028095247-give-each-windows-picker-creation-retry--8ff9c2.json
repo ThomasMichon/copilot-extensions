@@ -1,0 +1,13 @@
+{
+  "comment": "Give each Windows Picker creation retry a fresh launch-owned setup startup handoff, preserving legacy commands and conservative cleanup.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

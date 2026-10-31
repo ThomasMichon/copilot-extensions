@@ -23,7 +23,7 @@ Initialization refuses an unmarked nonempty/legacy directory without creating
 a lock/receipt there. Repeated initialization of a complete selected domain
 does not rewrite its tables or layout receipt. Unknown layout/protocol, missing
 preparation or unselected access to a marked domain fails explicitly.
-Existing native behavior stays unchanged when no layout is selected.
+The native storage format and read guards stay unchanged when no layout is selected.
 
 The default durable receipt is `<IndexConfig.lance_dir>/.source-layout.json`,
 alongside the stable `.source-writer.lock`. It records a domain identity,
@@ -42,6 +42,21 @@ retrieval through hydration, and nested/lazy read helpers retain ownership.
 Concurrent participating processes refuse busy access; they do not use PID
 or an idle-status snapshot as authority. Marker replacement never replaces
 the lock file. A missing lock on an initialized domain fails closed.
+
+`SourceDomain.operation(db)` holds this existing exclusion across a sequence
+of independently committed reads/writes. Retirement uses it from its pending-
+work admission through canonical/vector/path removal and configured-identity
+cleanup, so backfill intent cannot enter between the GC check and deletion.
+Nested mutation methods retain their own dirty/effect/clean protocol; the
+operation itself is not a transaction and does not roll back or reclassify
+uncertain effects. A read/guard refusal before mutation remains clean, and a
+later retry retains already completed writes. Ordinary indexing is not fenced
+for a backfill job's lifetime.
+
+Ordinary shared-engine ingestion uses [prepared source application](prepared-application.md):
+embedding finishes outside exclusion, then one outer writer contains the
+manifest's content, vector and reconciliation mutations. This changes neither
+the dirty/effect recovery rules nor the layout protocol.
 
 HTTP `/status`, including `?sources=true`, holds that same read guard across
 table inventory, counts and the optional source histogram. A refused domain

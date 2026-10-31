@@ -55,7 +55,7 @@ def run_probes(root: Path, proof: dict, expected: dict) -> dict:
     """Run actual ASGI/owned-process probes through the existing bounded runner."""
     from agent_procutil.owned_process import run_caller_owned
 
-    parent = evidence.safe(root, ".test-venvs")
+    parent = evidence.safe(root, ".test-venvs", directory=True)
     parent.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="http47-capture-", dir=parent) as temporary:
         directory = Path(temporary)
@@ -135,6 +135,9 @@ def run_probes(root: Path, proof: dict, expected: dict) -> dict:
 
 
 def capture(root: Path, commit: str, *, write: bool = False) -> dict[str, bytes]:
+    if write:
+        from agent_bridge_contract_publication import recover_pending_links
+        recover_pending_links(root, commit)
     original = evidence.baseline(root, commit)
     before = evidence.source_snapshot(root, commit, original)
     expected = expected_input(root)
@@ -147,8 +150,6 @@ def capture(root: Path, commit: str, *, write: bool = False) -> dict[str, bytes]
         before,
         json.loads(canonical(expected["expected"])),
     )
-    if set(proposed) != evidence.output_paths(original):
-        raise ValueError("capture write plan escaped its declared ownership")
     evidence.validate_outputs(root, original, proposed)
     history = evidence.check_history(root, original, proposed)
     observed = run_probes(root, before, expected)
@@ -176,23 +177,13 @@ def capture(root: Path, commit: str, *, write: bool = False) -> dict[str, bytes]
             ) != evidence.digest(data):
                 raise ValueError(f"capture output drift: {path}")
         return outputs
-    # Prevalidate the entire plan before staging any public output. Replace
-    # complete files atomically; registry is deliberately published last.
-    staged = []
-    try:
-        for path, data in outputs.items():
-            target = evidence.safe(root, path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            fd, name = tempfile.mkstemp(prefix=".http47-", dir=target.parent)
-            staged.append((path, Path(name)))
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(data)
-        evidence.validate_outputs(root, original, outputs)
-        for path, temporary in staged:
-            os.replace(temporary, evidence.safe(root, path))
-    finally:
-        for _path, temporary in staged:
-            temporary.unlink(missing_ok=True)
+    from agent_bridge_contract_publication import publish
+
+    publish(
+        root, commit, outputs,
+        validate=lambda: evidence.validate_outputs(root, original, outputs),
+        input_hashes=history,
+    )
     return outputs
 
 

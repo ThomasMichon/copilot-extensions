@@ -42,11 +42,10 @@ import shutil
 import time
 from pathlib import Path
 
-from agent_procutil import no_window_flags, no_window_kwargs
+from agent_procutil import no_window_flags
 
 from . import (
     activity,
-    env_scrub,
     finalize_obligations,
     git_ops,
     hooks,
@@ -238,12 +237,16 @@ def push_changes(
     rewrite_pr: bool = False,
     break_glass_reason: str | None = None,
     confirm_break_glass: str | None = None,
+    publication_origin: str | None = None,
+    publication_labels: tuple[str, ...] = (),
 ) -> bool:
     """Publish through the configured PR/direct flow, preserving failed work.
 
     Explicit recovery validates source-bound operator confirmation first;
     ordinary publication never opts into recovery or unsquashed fallback.
     """
+    from . import pr_publication_labels
+    config = pr_publication_labels.activate(config, publication_origin, publication_labels)
     repo = config.default_repo
     anchor = repo.anchor
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
@@ -270,6 +273,8 @@ def push_changes(
             )
             return False
     branch = _worktree_branch(record, worktree_id)
+    if explicit_rewrite:
+        pr_publication_labels.validate_scope(repo.pr, record.active_pr() if record else None)
 
     from .pr_break_glass import publish_recovery
     recovery = publish_recovery(
@@ -466,81 +471,6 @@ def push_changes(
             if record:
                 tracking.update_status(record, "orphaned")
             return False
-
-        # 6. Validate core files
-        from . import validate as val
-        plat = cfg.detect_platform()
-        hook_cmd = repo.validate_hook.get(plat)
-
-        if hook_cmd:
-            print("Running configured validation hook...")
-            expanded = [
-                c.replace("{work_dir}", worktree_path)
-                 .replace("{default_branch}", upstream)
-                for c in hook_cmd
-            ]
-            import subprocess
-            result = subprocess.run(
-                expanded, capture_output=True, text=True,
-                env=env_scrub.scrub_python_runtime_env(os.environ.copy()),
-                **no_window_kwargs(),
-            )
-            if result.returncode != 0:
-                output.warn("Core validation failed. Worktree preserved for fixes.")
-                print(result.stdout)
-                if record:
-                    tracking.update_status(record, "active")
-                return False
-        elif repo.validate_paths:
-            print("Checking for core infrastructure changes...")
-            failures = val.validate_files(
-                worktree_path,
-                default_branch=upstream,
-                validate_paths=repo.validate_paths,
-            )
-            if failures:
-                output.warn("Core validation failed. Worktree preserved for fixes.")
-                if record:
-                    tracking.update_status(record, "active")
-                return False
-        else:
-            validate_script = Path(worktree_path) / "tools" / "worktree" / "validate-core.ps1"
-            if validate_script.exists():
-                print("Checking for core infrastructure changes (legacy)...")
-                import subprocess
-                result = subprocess.run(
-                    ["pwsh.exe", "-NoProfile", "-File", str(validate_script),
-                     "-WorktreePath", worktree_path, "-DefaultBranch", upstream],
-                    capture_output=True, text=True,
-                    env=env_scrub.scrub_python_runtime_env(os.environ.copy()), **no_window_kwargs())
-                if result.returncode != 0:
-                    output.warn("Core validation failed. Worktree preserved for fixes.")
-                    print(result.stdout)
-                    if record:
-                        tracking.update_status(record, "active")
-                    return False
-
-        # 7. Anchor hygiene
-        from . import anchor_hygiene
-        anchor_report = anchor_hygiene.check_anchor(anchor)
-        if anchor_report.has_dirty_files:
-            output.err(
-                f"Anchor repo has {len(anchor_report.dirty_files)} uncommitted "
-                f"file(s). Commit, stash, or discard them before pushing."
-            )
-            for f in anchor_report.dirty_files[:5]:
-                print(f"       {f}")
-            if len(anchor_report.dirty_files) > 5:
-                print(f"       ... and {len(anchor_report.dirty_files) - 5} more")
-            return False
-        if anchor_report.has_stash:
-            output.warn(
-                f"Anchor repo has {len(anchor_report.stash_entries)} stash "
-                f"entr{'y' if len(anchor_report.stash_entries) == 1 else 'ies'} "
-                f"-- consider rescuing this work."
-            )
-            for entry in anchor_report.stash_entries[:3]:
-                print(f"       {entry}")
 
         # 8. Update local default branch and merge
         print(f"Updating local {repo.default_branch}...")
@@ -781,6 +711,8 @@ def _push_changes_pr(
         return False
 
     if repo.pr.head_scheme == "refspec":
+        from .pr_publication_labels import validate_scope
+        validate_scope(repo.pr, record.active_pr() or record.pr)
         return _push_changes_pr_refspec(
             worktree_id, config, record, wt_branch, worktree_path, lock_path,
             dry_run=dry_run, reconciled_source=reconciled_source,
@@ -819,6 +751,8 @@ def _push_changes_pr(
         feature = head
         pushed_pr = next((p for p in record.prs if p.branch == feature), record.pr)
 
+    from .pr_publication_labels import validate_scope
+    validate_scope(repo.pr, pushed_pr)
     if not feature:
         output.err("PR mode: no tracked PR feature branch to update.")
         return False
@@ -1350,7 +1284,7 @@ def validate_and_finalize(
         from . import pr_ops as _pr_ops
 
         fresh = _authority_fenced_write(
-            yaml_path, config, lambda r: _pr_ops._reconcile_active_pr(r, config),
+            yaml_path, config, lambda r: _pr_ops._reconcile_active_pr(r, config, best_effort=True),
         )
         record = fresh if fresh is not None else record
 
@@ -1564,6 +1498,9 @@ def validate_and_finalize(
 
     cleanup_records = ExitStack()
     try:
+        from . import worktree_lifecycle
+
+        cleanup_records.enter_context(worktree_lifecycle.guard(yaml_path))
         # Cleanup -- remove worktree and branch
         if yaml_path.exists():
             cleanup_records.enter_context(tracking._RecordLock(yaml_path, require_sidecar=True))

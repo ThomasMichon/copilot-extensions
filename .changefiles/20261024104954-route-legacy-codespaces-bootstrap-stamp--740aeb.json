@@ -1,0 +1,9 @@
+{
+  "comment": "Route legacy CodeSpaces bootstrap stamp and drift through the caller-independent installation driver.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

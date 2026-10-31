@@ -1,6 +1,10 @@
 . (Join-Path $PSScriptRoot 'agent-worktrees-update-entry.ps1') @args
 if ($_awUpdateHandled) { exit $LASTEXITCODE }
 $env:PYTHONUTF8 = '1'
+$_awPayloadRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+if (Test-Path -LiteralPath (Join-Path $_awPayloadRoot 'plugin.json') -PathType Leaf) {
+    $env:AGENT_WORKTREES_PAYLOAD_ROOT = $_awPayloadRoot
+}
 # Sanitize inherited Python runtime variables before dispatching to the
 # resolved, architecture-correct runtime-slot interpreter (#2411). A stray
 # mismatched-architecture PYTHONHOME/PYTHONPATH -- set at Windows User scope,
@@ -48,6 +52,10 @@ function _resolve_aw_py {
 }
 $_py = _resolve_aw_py
 if ($_py) { & $_py -m agent_worktrees @args; exit $LASTEXITCODE }
+if ($_awUpdateDiagnostic) {
+    [Console]::Error.WriteLine('[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.')
+    exit 127
+}
 if ($env:AGENT_WORKTREES_NO_SELFPROVISION) { & python -m agent_worktrees @args; exit $LASTEXITCODE }
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}

@@ -12,10 +12,13 @@ import subprocess
 import sys
 from collections.abc import Callable
 
-from plugin_resolve.reflection import selection_spec
+from plugin_resolve.reflection import selection_spec, selection_json
 
 
 def add_plugin_selection_arguments(parser) -> None:
+    parser.add_argument(
+        "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json, default=[],
+    )
     parser.add_argument("--stage-plugin", dest="stage_plugins", action="append", default=[])
     parser.add_argument(
         "--stage-plugin-disabled", dest="stage_plugins", action="append",
@@ -186,6 +189,14 @@ def cmd_copilot(
     anchor_mode = not args.worktree_id
     identity = args.worktree_id or (
         f"anchor-{os.path.basename(target.workspace_folder.rstrip('/')) or args.name}"
+    )
+    from venue_copilot import live_session_for
+    from .hosting_policy import require_container_hosting
+
+    rejoining = (live_session_for(f"{identity}@{args.name}") or {}).get("status") == "live"
+    args.hosting_live_attachment = rejoining
+    require_container_hosting(
+        target, worktree_id=args.worktree_id, live_attachment=rejoining,
     )
 
     from ssh_manager import TargetBusyError, TargetLock

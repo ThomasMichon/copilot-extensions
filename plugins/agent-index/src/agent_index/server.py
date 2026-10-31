@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import contextlib
 import importlib.util
@@ -19,9 +21,10 @@ from threading import Condition, Lock
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from . import __version__
+from .indexing.change_hints_contract import intake_contract
 from .config import Config, data_dir, install_dir, load_config, routing_dir, run_dir
 from .query_surface import format_error, hit_to_dict, stored_cluster_to_dict
 from .rendezvous import clear_endpoint, write_endpoint
@@ -48,6 +51,8 @@ class ReindexRequest(BaseModel):
     ``full=False`` request within -- that same scope (see
     ``TaskStore.enqueue``).
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     full: bool = False
     source: str | None = None
@@ -149,7 +154,7 @@ async def _start_task_runner(app: FastAPI) -> None:
         store, runner = _create_task_runner()
         try:
             await runner.start()
-        except Exception:
+        except BaseException:
             with contextlib.suppress(Exception):
                 await runner.stop()
             raise
@@ -161,10 +166,12 @@ async def _stop_task_runner(app: FastAPI) -> None:
     runner = getattr(app.state, "task_runner", None)
     if runner is None:
         return
-    with contextlib.suppress(Exception):
-        await runner.stop()
-    app.state.task_runner = None
-    app.state.task_store = None
+    try:
+        with contextlib.suppress(Exception):
+            await runner.stop()
+    finally:
+        app.state.task_runner = None
+        app.state.task_store = None
 
 
 def _instance_receipt_path(app: FastAPI) -> Path | None:
@@ -243,6 +250,15 @@ def build_app(*, passive: bool = False) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        """Admit direct framework hosts before their startup work."""
+        from agent_procutil.daemon_instances import admit_daemon_instance
+
+        with admit_daemon_instance("agent-index", source=__file__, purpose="production"):
+            async with _lifespan(app):
+                yield
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
         data_dir().mkdir(parents=True, exist_ok=True)
         try:
             from .sources.providers import discover_and_register_providers
@@ -264,7 +280,11 @@ def build_app(*, passive: bool = False) -> FastAPI:
 
     app = FastAPI(title="agent-index", version=__version__, lifespan=lifespan)
     app.state.drain_gate = DrainGate()
-    app.state.installation_id = os.environ.get("AGENT_INDEX_INSTALLATION_ID", "")
+    app.state.cell_installation_id = os.environ.get("AGENT_INDEX_INSTALLATION_ID", "")
+    app.state.installation_id = (
+        app.state.cell_installation_id
+        or os.environ.get("AGENT_INDEX_NATIVE_INSTALLATION_ID", "")
+    )
     app.state.instance_token = (
         os.environ.get("AGENT_INDEX_INSTANCE_TOKEN") or uuid.uuid4().hex
     )
@@ -304,7 +324,7 @@ def build_app(*, passive: bool = False) -> FastAPI:
             raise HTTPException(status_code=409, detail="service instance mismatch")
 
     def authorize_transaction(request: Request) -> None:
-        if not request.app.state.installation_id:
+        if not request.app.state.cell_installation_id:
             return
         expected = request.app.state.transaction_token
         supplied = request.headers.get(TRANSACTION_HEADER, "")
@@ -403,6 +423,7 @@ def build_app(*, passive: bool = False) -> FastAPI:
             "version": request.app.state.runtime_version,
             "passive": request.app.state.passive,
             "promoted": request.app.state.promoted,
+            "indexing_contract": intake_contract(),
             **service_identity(request),
         }
 
@@ -423,6 +444,35 @@ def build_app(*, passive: bool = False) -> FastAPI:
         if runner is not None:
             payload["indexing"] = runner.status()
         return payload
+
+    @app.post("/source-credentials")
+    async def source_credentials(request: Request) -> dict[str, Any]:
+        with track_read(request):
+            identity = request.app.state.installation_id
+            if not identity or request.headers.get(INSTALLATION_HEADER) != identity:
+                raise HTTPException(status_code=409, detail="installation ownership mismatch")
+            async def read_body():
+                data = bytearray()
+                async for chunk in request.stream():
+                    if len(data) + len(chunk) > 16384:
+                        raise HTTPException(status_code=413, detail="source request too large")
+                    data.extend(chunk)
+                return data
+            try:
+                data = await asyncio.wait_for(read_body(), timeout=5)
+            except asyncio.TimeoutError:
+                raise HTTPException(status_code=408, detail="source request timed out") from None
+            from .source_account_relay import _pairs
+            from .sources.credentials import SourceCredentialError, http_source_credentials
+            try:
+                value = json.loads(data, object_pairs_hook=_pairs)
+                result = await asyncio.to_thread(http_source_credentials, value)
+            except SourceCredentialError as exc:
+                status = 403 if str(exc) == "source-capability-required" else 503
+                raise HTTPException(status_code=status, detail=str(exc)) from None
+            except (ValueError, UnicodeError, TypeError, RecursionError):
+                raise HTTPException(status_code=400, detail="source request invalid") from None
+            return {**result, "installationId": identity}
 
     @app.get("/search")
     def search(
@@ -529,6 +579,26 @@ def build_app(*, passive: bool = False) -> FastAPI:
             )
             runner.notify()
             return {"accepted": True, "task": task.to_dict()}
+
+    @app.post("/reindex/hints")
+    async def reindex_hints(request: Request) -> dict[str, Any]:
+        from .reindex_intake import enqueue_hinted_request, read_hinted_request
+
+        with track_read(request):
+            body = await read_hinted_request(request)
+            missing = _missing_indexing_dependencies()
+            if missing:
+                return {"accepted": False, "error": missing}
+            store = getattr(request.app.state, "task_store", None)
+            runner = getattr(request.app.state, "task_runner", None)
+            if store is None or runner is None or not request.app.state.promoted:
+                return {"accepted": False, "error": "indexing task runner unavailable"}
+            task = await enqueue_hinted_request(store, body, runner.notify)
+            return {
+                "accepted": True,
+                "task": task.to_dict(),
+                "indexing_contract": intake_contract(),
+            }
 
     @app.post("/drain")
     async def drain(request: Request, body: DrainRequest | None = None) -> dict[str, Any]:
@@ -727,6 +797,7 @@ def _clear_routing() -> None:
         log.debug("Routing-table clear-on-shutdown skipped", exc_info=True)
 
 
+@daemon_entrypoint("agent-index", source=__file__, purpose="production")
 def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     """Bind an OS-assigned local endpoint and run the service."""
     import uvicorn

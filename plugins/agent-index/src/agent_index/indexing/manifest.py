@@ -10,18 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from agent_index.sources.base import FileEntry
-
-
-@dataclass
-class DeletedFile:
-    """A file that was removed from a source and should be de-indexed.
-
-    Uses the exact ``(source, path)`` identity stored in the index —
-    no prefix matching, no ambiguity.
-    """
-
-    source: str
-    path: str
+from agent_index.sources.delta import DeletedFile as DeletedFile
 
 
 @dataclass
@@ -32,6 +21,15 @@ class CrawlStats:
     files_changed: int = 0
     files_deleted: int = 0
     files_unchanged: int = 0
+
+
+@dataclass
+class PollRefresh:
+    """Candidate generations retained by hints or covered by an ordinary poll."""
+
+    retain: bool
+    paths: dict[str, str]
+    history: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -51,6 +49,8 @@ class CrawlManifest:
     commit: str | None = None
     stats: CrawlStats = field(default_factory=CrawlStats)
     stored_family: str | None = None
+    accounting_family: str | None = None
+    poll_refresh: PollRefresh | None = None
 
     @property
     def is_empty(self) -> bool:

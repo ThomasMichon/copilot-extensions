@@ -14,6 +14,42 @@ container port, key, or SSH daemon is added. The CLI and binstub are owned by
 this plugin and work standalone; without agent-bridge only bridge addressing
 (`container:<name>`) is unavailable.
 
+## Legacy runtime removal
+
+Use `scripts/init.ps1 -Action uninstall -InstallDir <root>` or
+`scripts/init.sh uninstall --install-dir <root>` only for the selected legacy
+runtime. The finite removal action shares install's `.install.lock`, retains
+canonical command/generation/selector custody through removal, and removes the
+owned deploy manifest last. It never purges the root, coordination leases,
+`containers.yaml`, `leases.json`, auth/private data, logs, custom files or
+`AGENT_CONTAINERS_STATE_DIR`. Managed/cell/foreign roots, raw `..`, reparse
+ancestors, unproven runtime ownership and live processes refuse explicitly.
+An older installer-engine without the finite entry-name API refuses; there is
+no purge fallback.
+
+The adapter passes its trusted `scripts/uninstall-profile.json` to canonical
+`installer_engine_uninstall.py`; it does not own a second custody or cleanup
+orchestrator. The helper and native engine must be materialized in this payload's
+own `scripts/`; no ambient or sibling installation is searched.
+Structural `--check` grants no deletion authority. The canonical
+owner repeats ownership, inventory, live-consumer and read-only transport-guard
+checks under all custody immediately before `--remove-runtime` deletion.
+Unexpected outer-owner death is not qualified by that batch custody alone:
+noninherited .NET whole-transaction locks and PID receipts require a native
+lifetime/handle bridge. POSIX kernel-lock release is close-only, preserving any
+inherited finite guardian's open-file-description custody.
+
+SSH files alone are not a retained transport closure: Windows reconnect configs
+depend on the loopback broker's interpreter, imports and Docker children.
+Until that complete dependency closure has independent custody, any nonempty
+`ssh` directory under the addressed root or `AGENT_CONTAINERS_HOME` refuses
+uninstall before runtime removal. Preparation locks, live brokers and dormant
+reconnect configurations are all preserved without stopping a transport.
+Diagnostics distinguish a responsive broker endpoint from stale proxy records
+and unattributed reconnect artifacts. Stale artifacts are not called busy, but
+are not complete idle/dependency-closure proof either. Refusal is a safety
+negative control, never positive proof of a retained active transport closure.
+
 ## Usage path
 
 The [portable CI repair template](templates/ci-repair/README.md) ships an inert,
@@ -24,8 +60,9 @@ in. It does not enable a repair worker or supply inference/repository authority.
    already on PATH:
    - Windows: `pwsh -NoProfile -ExecutionPolicy Bypass -File <plugin>\scripts\init.ps1 stamp`
    - POSIX: `bash <plugin>/scripts/init.sh stamp`
-2. First use self-provisions the runtime under `~/.agent-containers/` (or
-   `%USERPROFILE%\.agent-containers\`) if the versioned venv is not built yet.
+2. First use self-provisions a standalone runtime under `~/.agent-containers/`
+   (or `%USERPROFILE%\.agent-containers\`) if the versioned venv is not built
+   yet and the selected installation admits plugin publication.
 3. Define a fleet in `containers.yaml`, run `agent-containers up <fleet>`, borrow
    with `agent-containers borrow <effort>`, and release when done.
 4. If agent-bridge is present, the session-start hook also drops a provider
@@ -33,6 +70,49 @@ in. It does not enable a repair worker or supply inference/repository authority.
    `container:<name>` on demand. The manifest carries provider provenance; a
    missing binstub/payload makes only that namespace inactive and is diagnosed
    by `agent-bridge doctor`.
+
+Payload commands and stamped global stubs check the selected installation's
+runtime-deployment policy before cold provisioning creates a root, lock, status
+or boot trace, and refresh that decision under the provisioning lock. Managed,
+malformed and unsupported policies refuse first-use publication with an explicit
+installation-management diagnostic. A healthy current/LKG runtime still starts
+without provisioning or runtime repair; existing ready-runtime boot tracing is
+unchanged. Standalone
+provisioning retains the exact selected root, context, installer exit code and
+stderr; `AGENT_CONTAINERS_NO_SELFPROVISION` remains an opt-out.
+
+On Windows, initial installation `status` and selected-context `validate`
+reads use the payload's canonical SDK in a fresh isolated, no-site Python
+process only after the [independent bootstrap selector](../../docs/install-contract.md#independent-windows-evaluator-bootstrap)
+admits a registered signed CPython base. PATH and the addressed runtime do not
+establish admission. Unavailable optional support selects native PowerShell
+before evaluation; selected interpreter/SDK failures are terminal. The file
+guard is released before ordinary package-site/runtime resolution. Publication
+and under-lock admission retain their ordering. Legacy PowerShell argument
+passing uses the same encoded-argv module entry as Codespaces, preserving empty,
+numeric and quoted arguments without disabling ordinary package-site loading.
+
+Global stubs retain the exact publisher, canonical install root and selected
+context rather than searching other marketplaces or ambient commands. Equivalent
+root spellings bind to the same installation. Fresh direct provisioning publishes
+its original publisher binding before emitting the command; no prior stamp is
+required. Stamping reads
+the shared installation decision; only a positively identified legacy binding
+can use the resolver-only fallback. A cell-bound command restores its retained
+context even in an ordinary shell and revalidates activation/generation through
+the gate. If its source pointer or retained gate is unavailable, it refuses
+rather than running that cell as legacy. A healthy known-legacy runtime can
+still use its co-deployed readiness resolver; cold provisioning and
+explicit-context fallback refuse.
+The POSIX installer's whole-action gate uses native `flock` or an existing
+Python's `fcntl.flock` on the same persistent install-lock descriptor, including
+legacy removal. Missing both refuses without provisioning. Old install PID or
+reaper receipts are retained and require explicit settlement, never automatic
+reclamation by the new gate.
+First-use provisioning's separate stale PID-link recovery serializes reapers
+and only cleans up its own mutex. An unknown/abandoned reaper mutex is not
+deleted: after 30 one-second retries the command refuses with exit 126 and an
+explicit repair diagnostic. Live provisioning owners retain their separate wait.
 
 The Windows installer declares its `init.ps1` human-output boundary for the
 existing updater's timed capture. Direct invocation retains its original
@@ -43,6 +123,22 @@ longer suppresses those diagnostics. On both platforms a failing Docker probe
 warns with its exit code but does not prevent CLI installation.
 
 ## Dispatch-only restricted workers
+
+Managed agent launch checks repository hosting eligibility inside the actual
+guest checkout, using the selected physical container instance. This includes
+ACP, trusted Session Host preparation, attached launch, and restricted task
+receivers. Guest ACP commands recheck at execution; an explicit prepared
+worktree is checked instead of its anchor. Required receivers must support
+`agent-worktrees agent-policy check --path <checkout> --operation launch --json`;
+unsupported receivers refuse without a weaker launch fallback.
+
+`dispatch-check-hosting <name> --expected-container-id <id>` is the read-only
+preflight for restricted supervisors, before binding or credential projection.
+Source allocation and inspection remain available. A genuine live attachment
+preserves custody; if a detached rejoin instead needs a replacement, the
+receiving Worktrees launch boundary checks fresh policy before creating it.
+The shared [repository-policy library](../../libs/repository-policy/README.md)
+owns configuration and precedence.
 
 An image-backed restricted fleet can opt into `dispatch_only: true`. This is a
 creation-time policy, not an advisory borrow: ordinary `exec`, provider SSH and
@@ -70,6 +166,9 @@ restricted posture and lifecycle hold without changing task ownership.
 Its `instance_pinned_exec` capability is backed by the expected physical-ID
 and birth-binding fences in the returned execution command; ordinary
 name-based wrappers do not advertise that guarantee.
+The separate internal [original creation prerequisites](docs/creation-custody.md)
+retain an explicit new birth and original association, with an exact-slot
+retention primitive; they do not enable retained launches or upgrade existing bindings.
 Use Bridge's protocol-36 `create <agent> --creation-key <key>
 --provider-instance` to establish a replay-safe native session without
 inventing a worktree or sending a first prompt. A missing binding or replaced
@@ -137,6 +236,45 @@ placement and supervisor renewal are not yet integrated.
 
 ## Concepts
 
+### Externally managed trusted members
+
+An external deployment manager may own a trusted fleet's lifecycle while
+agent-containers supplies sessions against its already running members:
+
+```yaml
+fleets:
+  pilot:
+    lifecycle_owner: external
+    security_profile: trusted
+    exec_user: vscode
+    workspace_folder: /workspaces/project
+```
+
+The manager supplies `agent-containers.fleet=pilot`,
+`agent-containers.security-profile=trusted` and
+`agent-containers.lifecycle-owner=external` on each member. Configuration and
+the live owner label must agree before trusted session use. Existing physical
+instance, repository, lease, authentication and session checks still apply.
+This mode does not enroll a manager, select a remote Docker endpoint, issue
+credentials or establish remote-generation/auth-renewal parity.
+
+`up` (including recreation), fleet start/down/removal, member start/stop/
+unpause/removal and implicit start refuse external ownership. Missing or
+stopped members require the selected deployment manager; no direct-Docker
+fallback is offered. A live external owner label independently prevents
+lifecycle mutation after configuration is changed or removed. Lifecycle
+commands inspect ownership immediately before their effect and address the
+observed full container ID, not a replacement sharing the same name.
+Unlabeled members inherit external ownership by the configured fleet-name
+prefix, including nonnumeric suffixes. An explicit managed fleet label still
+distinguishes overlapping prefixes; an external fleet's numeric slot remains
+protected even when labeled as another fleet.
+
+The default `lifecycle_owner: agent-containers` preserves managed fleets.
+Restricted fleets cannot select external lifecycle ownership. This is an
+ownership contract, not a new security boundary or permission to bypass a
+manager through a raw Docker command.
+
 ### Optional restricted SSH runtime
 
 New installations use the **base** dependency profile: trusted OpenSSH and direct
@@ -163,12 +301,21 @@ provider-exec when their selected runtime already contains Paramiko. Fresh
 installs do not infer dependencies from whichever repository/config happens to
 be the installer's working directory.
 
+Both profiles include the declared local repository-policy package in their
+explicit dependency targets, input fingerprint and installed-module health check.
+It resolves from the selected payload/source closure rather than relying on a
+package registry to provide that first-party library.
+
 Each package version/profile has its own immutable `versions/<version>+<profile>`
 slot. Switching with `-Profile base` / `--profile base` leaves older slots intact
 and reuses an already-completed matching slot. Even `--force` never rewrites a
 completed slot. A failed requested profile does **not** fall back silently: the
 old active runtime remains selected and the saved intent is retried next time.
 The deploy manifest records package version separately from runtime slot/profile.
+Prepared-source suite updates preserve that distinction through the
+[owned source-target planning contract](docs/runtime-source-target.md).
+The payload ships the canonical lifecycle helper through `installerLifecycle`;
+this does not change its existing dispatcher or publication policy.
 Profile changes start no service, SSH listener, Docker container or fleet.
 Helper packages are installed non-editably into that slot; health checks reject
 code resolved from a mutable source checkout outside it.
@@ -179,6 +326,27 @@ copies without pip/setuptools seeding; unrestricted pip fallback is unsupported.
 The staged profile coordinator runs in Python isolated mode and loads its
 runtime helper from the same payload directory explicitly, so safe-path
 settings and ambient Python modules cannot redirect that import.
+
+Newly constructed slots also publish a versioned `executionContract` inside the
+slot's own `runtime-profile.json`. The installer-owned
+[`runtime_profile.select_execution`](scripts/runtime_profile.py) is a read-only
+internal selection API: it uses the canonical completed-runtime selector, checks
+the slot/profile identity and completion hash, and returns that exact immutable
+interpreter with its declaration. It does not provision, activate, acquire a
+retention lease, start a provider, or inspect a guest. A later mutable payload
+shim is **not** that selected execution; final execution and continuing retention
+must use the actual runtime owners.
+
+Declaration schema `copilot-extensions.agent-containers.provider-execution`,
+version `1`, contains a strict boolean `retainedCreation`. Both dependency
+profiles currently publish `false`: Paramiko, readiness and instance-pinned
+execution do not implement Bridge creation custody. Missing, malformed,
+duplicate-key or unsupported declarations refuse this selection API without
+effects. Previously completed profiles without the declaration remain reusable
+for ordinary installation byte-for-byte; they are never retroactively stamped
+as supporting a new contract. Re-select after a runtime change or rollback.
+This is provider-first metadata, not an enabled retained-creation caller,
+provider/guest admission, launch-lifetime retention or native qualification.
 
 With an explicit installation-cell context, configuration loading validates the
 Containers owner before using config overrides. Its optional knowledge-repo
@@ -208,7 +376,9 @@ unchanged.
   `agent-containers` binstub implements `namespace-list`,
   `namespace-resolve`, `namespace-ensure-ready`, `namespace-recreate`, and
   `relay-profile`; bridge shells out to those commands rather than requiring
-  this package in the bridge venv. `namespace-recreate` is the destructive,
+  this package in the bridge venv. Inventory uses one `docker ps` query without
+  a separate version preflight; missing CLI, daemon and query failures remain
+  errors, not successful empty inventories. `namespace-recreate` is the destructive,
   target-scoped parity seam: it removes only the identity-checked Docker
   instance of one trusted configured member, recreates the same deterministic
   name, and reports the new instance identity without exposing launch data.
@@ -983,6 +1153,24 @@ Docker is required for fleet operations (`fleet`, `up`, `borrow`, `exec`, etc.),
 not for stamping the binstub.
 
 ## Runtime state
+
+Runtime-home and broker-endpoint paths are normalized lexically against the
+selecting process's cwd before instance reservation or admission. Broker child
+arguments remain absolute when its cwd changes to HOME. This does not resolve
+filesystem links: redirected runtime roots still fail custody checks.
+Keeper children inherit the home belonging to their selected store, even if
+the launcher's cwd or ambient home override changes afterward.
+
+The localhost SSH broker stops intake and settles accepted connections, its
+native Docker CLI children, and every control/stream worker before releasing
+daemon admission, including interrupted or failed startup. Windows children
+use a strict, retained Job that confirms descendant retirement even after the
+CLI leader exits. POSIX children retain the broker's existing process group
+and test/lease containment: cleanup reaps the exact direct child and waits for
+both pipe pumps. It does not adopt or signal a guessed descendant group; an
+inherited pipe held by a descendant keeps admission live until that pipe closes.
+Cleanup retries interrupted retirement rather than declaring unfinished work
+complete. Endpoint removal still preserves another process's replacement.
 
 - `~/.agent-containers/leases.json` — lease records, guarded by an exclusive
   lock file and kept backward-compatible across runtime versions;

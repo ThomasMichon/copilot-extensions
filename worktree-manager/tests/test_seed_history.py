@@ -8,6 +8,7 @@ import subprocess
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from textual.app import App
@@ -16,10 +17,45 @@ from agent_procutil import no_window_kwargs
 from worktree_manager import seed_history
 from worktree_manager.engine_client import EngineError, EngineFeatureUnavailable
 from worktree_manager.production_picker import context
-from worktree_manager.production_picker.picker_tui.engine_dialogs import ScopeDlgScreen
+from worktree_manager.production_picker.picker_tui.engine_dialogs import ScopeDlgScreen, SubMenuScreen
 from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
-from worktree_manager.production_picker.picker_tui.engine_prompt_dialog import PromptDlgScreen
 from worktree_manager.production_picker.picker_tui.seed_prompt_field import SeedPromptField
+
+
+def _resume_dialog(*, record=None, ahp=False, history=True):
+    record = record if record is not None else {"is_local": True, "raw": {"id": "wt-a"}}
+    engine = SimpleNamespace(
+        real_ops=True, src=SimpleNamespace(), _run_bg=lambda *args, **kwargs: None,
+        _resume_decision=lambda rec, **options: {
+            "action": "resume", "is_local": rec.get("is_local", True),
+            "worktree_id": rec["raw"]["id"], "options": options,
+        },
+    )
+    dialog = SubMenuScreen(record, ["Resume"], engine=engine)
+    dialog._ahp = ahp
+    if history:
+        field = dialog._prompt_rec["primary"]
+        field.seed_store = seed_history.SeedHistory(context.project())
+        field.seed_cursor = field.seed_store.cursor()
+    return dialog
+
+
+def _confirm(dialog):
+    if isinstance(dialog, SubMenuScreen):
+        dialog.on_option_list_option_selected(SimpleNamespace(option_index=0))
+    else:
+        dialog.on_focus_group_activated(
+            FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm"),
+        )
+
+
+async def _await_confirmation(pilot):
+    from worktree_manager.launch_confirmation import _SavingLaunch
+
+    async with asyncio.timeout(10):
+        while any(isinstance(screen, _SavingLaunch) for screen in pilot.app.screen_stack):
+            await pilot.pause(0.01)
+    await pilot.pause()
 
 
 def test_history_persists_exact_multiline_text_without_launch(tmp_path):
@@ -66,10 +102,11 @@ def test_actual_history_connection_ddl_does_not_start_implicit_transaction(
     history.remember("second")
     assert history.entries() == ["second", "first"]
     assert [row for row in observed if row[0] == "CREATE"] == [
-        ("CREATE", False, False, ""), ("CREATE", False, False, ""),
+        ("CREATE", True, True, ""), ("CREATE", True, True, ""),
     ]
     assert [row for row in observed if row[0] == "BEGIN"] == [
         ("BEGIN", False, True, ""), ("BEGIN", False, True, ""),
+        ("BEGIN", False, True, ""),
     ]
     assert [row for row in observed if row[0] == "INSERT"] == [
         ("INSERT", True, True, ""), ("INSERT", True, True, ""),
@@ -121,34 +158,70 @@ def test_acl_shell_selection_and_explicit_missing_shell_skip(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
-@pytest.mark.parametrize("legacy_only", [False, True])
-def test_windows_history_has_protected_owner_system_acl(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_only: bool,
-) -> None:
-    if legacy_only:
-        which = shutil.which
-        monkeypatch.setattr(shutil, "which", lambda name: which(name) if name != "pwsh" else None)
-    shell = _acl_powershell()
+def test_windows_history_has_protected_owner_system_acl(tmp_path: Path) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_security = advapi.GetFileSecurityW
+    get_security.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    get_security.restype = wintypes.BOOL
+    get_control = advapi.GetSecurityDescriptorControl
+    get_control.argtypes = [wintypes.LPVOID, ctypes.POINTER(wintypes.WORD), ctypes.POINTER(wintypes.DWORD)]
+    get_control.restype = wintypes.BOOL
+    get_dacl = advapi.GetSecurityDescriptorDacl
+    get_dacl.argtypes = [
+        wintypes.LPVOID, ctypes.POINTER(wintypes.BOOL), ctypes.POINTER(wintypes.LPVOID),
+        ctypes.POINTER(wintypes.BOOL),
+    ]
+    get_dacl.restype = wintypes.BOOL
+    get_ace = advapi.GetAce
+    get_ace.argtypes = [wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID)]
+    get_ace.restype = wintypes.BOOL
+    sid_text = advapi.ConvertSidToStringSidW
+    sid_text.argtypes = [wintypes.LPVOID, ctypes.POINTER(wintypes.LPWSTR)]
+    sid_text.restype = wintypes.BOOL
+    kernel.LocalFree.argtypes = [wintypes.LPVOID]
+    kernel.LocalFree.restype = wintypes.LPVOID
+
+    class ACL(ctypes.Structure):
+        _fields_ = [
+            ("revision", ctypes.c_byte), ("reserved", ctypes.c_byte),
+            ("size", wintypes.WORD), ("count", wintypes.WORD), ("reserved2", wintypes.WORD),
+        ]
+
     history = seed_history.SeedHistory("demo", tmp_path)
     history.remember("private")
     for path in (history.path.parent, history.path):
-        # An inherited PSModulePath can select another PowerShell edition's module.
-        script = (
-            "$ErrorActionPreference='Stop';"
-            "Import-Module (Join-Path $PSHOME "
-            "'Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1');"
-            "$acl=Get-Acl -LiteralPath '" + str(path).replace("'", "''") + "';"
-            "$acl.AreAccessRulesProtected;"
-            "$acl.Access | ForEach-Object {"
-            "$_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value}"
-        )
-        result = subprocess.run(
-            [shell, "-NoProfile", "-Command", script],
-            capture_output=True, text=True, timeout=20,
-            **no_window_kwargs(),
-        )
-        if result.returncode or set(result.stdout.split()) != {"True", "S-1-3-4", "S-1-5-18"}:
-            pytest.fail(f"ACL inspection with {shell} failed:\n{result.stderr}", pytrace=False)
+        needed = wintypes.DWORD()
+        get_security(str(path), 4, None, 0, ctypes.byref(needed))
+        assert needed.value
+        descriptor = ctypes.create_string_buffer(needed.value)
+        assert get_security(str(path), 4, descriptor, needed, ctypes.byref(needed))
+        control, revision = wintypes.WORD(), wintypes.DWORD()
+        assert get_control(descriptor, ctypes.byref(control), ctypes.byref(revision))
+        assert control.value & 0x1000  # SE_DACL_PROTECTED, independent of SDDL rendering.
+        present, defaulted, dacl = wintypes.BOOL(), wintypes.BOOL(), wintypes.LPVOID()
+        assert get_dacl(descriptor, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted))
+        assert present.value and dacl.value
+        assert ctypes.cast(dacl, ctypes.POINTER(ACL)).contents.count == 2
+        principals = set()
+        for index in range(2):
+            ace = wintypes.LPVOID()
+            assert get_ace(dacl, index, ctypes.byref(ace))
+            assert ctypes.c_byte.from_address(ace.value).value == 0  # ACCESS_ALLOWED_ACE_TYPE.
+            assert wintypes.DWORD.from_address(ace.value + 4).value == 0x1F01FF  # FILE_ALL_ACCESS.
+            text = wintypes.LPWSTR()
+            assert sid_text(ace.value + 8, ctypes.byref(text))
+            try:
+                principals.add(text.value)
+            finally:
+                kernel.LocalFree(text)
+        assert principals == {"S-1-3-4", "S-1-5-18"}
 
 
 def test_permission_failure_blocks_submission(tmp_path, monkeypatch):
@@ -230,7 +303,7 @@ async def _submitted_prompt_survives_failed_launch(tmp_path, monkeypatch, scope)
     history.remember("older seed")
     dialog = (
         ScopeDlgScreen({"opts": [], "section": 1}, show_prompt=True)
-        if scope else PromptDlgScreen("Resume", "Prompt")
+        if scope else _resume_dialog()
     )
     outcomes = []
     def refuse(*_args, **_kwargs):
@@ -243,7 +316,8 @@ async def _submitted_prompt_survives_failed_launch(tmp_path, monkeypatch, scope)
         outcomes.append(confirmed)
         assert entrypoint._run_launch(LaunchRequest(
             project="demo", mode="new" if scope else "resume",
-            worktree_id=None if scope else "wt-a", seed_prompt=dialog.seed_prompt,
+            worktree_id=None if scope else "wt-a",
+            seed_prompt=dialog.launch_decision["options"]["seed_prompt"],
         )) == 1
 
     app = App()
@@ -252,14 +326,13 @@ async def _submitted_prompt_survives_failed_launch(tmp_path, monkeypatch, scope)
         await pilot.pause()
         field = dialog.query_one(SeedPromptField)
         field.load_text("valuable\npaste")
-        dialog.on_focus_group_activated(
-            FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
-        )
-        await pilot.pause()
-        assert outcomes == [True]
-        retry = PromptDlgScreen("Retry", "Prompt")
+        _confirm(dialog)
+        await _await_confirmation(pilot)
+        assert outcomes == ([True] if scope else [("Resume", False, False, "valuable\npaste")])
+        retry = _resume_dialog()
         app.push_screen(retry)
         await pilot.pause()
+        retry.query_one(SeedPromptField).focus()
         await pilot.press("up")
         assert retry.query_one(SeedPromptField).text == "valuable\npaste"
         await pilot.press("up")
@@ -269,12 +342,12 @@ async def _submitted_prompt_survives_failed_launch(tmp_path, monkeypatch, scope)
 
 
 @pytest.mark.parametrize("option", ["Anchor repo", "Bare", "AHP", "Local model", "resume-ahp"])
-def test_unsupported_composer_keeps_text_without_recording(tmp_path, monkeypatch, option):
+def test_unsupported_composer_keeps_text_without_legacy_history_copy(tmp_path, monkeypatch, option):
     async def run():
         monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
         context.set_project("demo")
         dialog = (
-            PromptDlgScreen("Resume", "Prompt", seed_refusal="AHP prompt launch is unsupported")
+            _resume_dialog(ahp=True)
             if option == "resume-ahp" else ScopeDlgScreen(
                 {"opts": [{"label": option, "on": True}], "section": 1},
                 show_prompt=True,
@@ -287,31 +360,22 @@ def test_unsupported_composer_keeps_text_without_recording(tmp_path, monkeypatch
             await pilot.pause()
             field = dialog.query_one(SeedPromptField)
             field.load_text("unsubmitted draft")
-            dialog.on_focus_group_activated(
-                FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
-            )
-            await pilot.pause()
+            _confirm(dialog)
+            await _await_confirmation(pilot)
             assert app.screen is dialog
             assert field.text == "unsubmitted draft" and outcomes == []
             assert seed_history.SeedHistory("demo", tmp_path).entries() == []
     asyncio.run(run())
 
 
-def test_remote_resume_refuses_before_composer_or_history_opens(monkeypatch):
-    from types import SimpleNamespace
-    from worktree_manager.production_picker.picker_tui import resume_prompt_actions
-
-    monkeypatch.setattr(
-        resume_prompt_actions, "PromptDlgScreen",
-        lambda *args, **kwargs: pytest.fail("unsupported target opened prompt history"),
-    )
-    record = {"is_local": False, "raw": {"id": "wt-a"}}
-    screen = SimpleNamespace(
-        debug="", _find_internal_worktree=lambda *args: (record, None),
-        _session_action_verbs=lambda _: ["Resume prompt…"],
-    )
-    resume_prompt_actions.open_resume_prompt(screen, record)
-    assert "local native target" in screen.debug
+def test_remote_resume_has_no_local_history_composer(monkeypatch):
+    monkeypatch.setattr(seed_history.SeedHistory, "entries", lambda *_: pytest.fail("remote history read"))
+    monkeypatch.setattr(seed_history.SeedHistory, "cursor", lambda *_: pytest.fail("remote history read"))
+    record = {"is_local": False, "machine": "target", "env": "wsl", "raw": {"id": "wt-a"}}
+    dialog = _resume_dialog(record=record, history=False)
+    assert not dialog._can_prompt()
+    dialog._load_prompt_history()
+    assert not dialog._history_requested
 
 
 @pytest.mark.parametrize("leg,ahp,reason", [
@@ -323,34 +387,22 @@ def test_resume_refusal_reports_actual_transport_without_fake_option(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, leg: dict[str, str] | None,
     ahp: bool, reason: str,
 ) -> None:
-    from types import SimpleNamespace
-    from worktree_manager.production_picker.picker_tui.resume_prompt_actions import open_resume_prompt
-
     async def run() -> None:
         monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
         context.set_project("demo")
-        record = {"raw": {"id": "wt-a", "execution_leg": leg}, "title": "Demo"}
+        record = {"is_local": True, "raw": {"id": "wt-a", "execution_leg": leg}, "title": "Demo"}
         outcomes = []
         app = App()
-        screen = SimpleNamespace(
-            app=app, debug="",
-            _find_internal_worktree=lambda *args: (record, None),
-            _session_action_verbs=lambda _: ["Resume prompt…"],
-            _resume_decision=lambda *args, **kwargs: outcomes.append(kwargs),
-            _decide=lambda _: None,
-        )
+        dialog = _resume_dialog(record=record, ahp=ahp)
         async with app.run_test() as pilot:
-            open_resume_prompt(screen, record, ahp=ahp)
+            app.push_screen(dialog, outcomes.append)
             await pilot.pause()
-            dialog = app.screen
             field = dialog.query_one(SeedPromptField)
             notices = []
-            monkeypatch.setattr(field, "notify", lambda message, **kwargs: notices.append(message))
+            monkeypatch.setattr(dialog, "notify", lambda message, **kwargs: notices.append(message))
             field.load_text("retained draft")
-            dialog.on_focus_group_activated(
-                FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
-            )
-            await pilot.pause()
+            _confirm(dialog)
+            await _await_confirmation(pilot)
             assert app.screen is dialog and field.text == "retained draft"
             assert len(notices) == 1 and reason in notices[0]
             if not ahp:
@@ -358,11 +410,12 @@ def test_resume_refusal_reports_actual_transport_without_fake_option(
             assert outcomes == []
             assert seed_history.SeedHistory("demo", tmp_path).entries() == []
             field.load_text("")
-            dialog.on_focus_group_activated(
-                FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
-            )
-            await pilot.pause()
-            assert outcomes == [{"no_mux": False, "ahp": ahp, "seed_prompt": ""}]
+            _confirm(dialog)
+            await _await_confirmation(pilot)
+            assert len(outcomes) == 1
+            assert outcomes == [("Resume", False, ahp, "")]
+            assert dialog.launch_decision["options"] == {"no_mux": False, "ahp": ahp, "seed_prompt": ""}
+            assert dialog.launch_decision["attempt_id"]
     asyncio.run(run())
 
 
@@ -370,7 +423,6 @@ def test_resume_refusal_reports_actual_transport_without_fake_option(
     ({"mode": "base"}, None),
     ({"mode": "bare-resume"}, None),
     ({"mode": "new", "ahp": True}, None),
-    ({"mode": "resume", "machine": "remote"}, None),
     ({"mode": "resume", "environment": "WSL"}, None),
     ({"mode": "resume"}, {"provider": "ahp", "state": "active"}),
     ({"mode": "resume"}, {"provider": "ahp", "state": "unknown"}),
@@ -427,26 +479,15 @@ def test_missing_resume_id_seedless_guard_retains_existing_behavior(
 def test_missing_resume_id_ui_refuses_before_history_composer(
     monkeypatch: pytest.MonkeyPatch, target: str | None,
 ) -> None:
-    from types import SimpleNamespace
-    from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
-        PickerScreenWorktreeActionsMixin,
-    )
-    from worktree_manager.production_picker.picker_tui.resume_prompt_actions import open_resume_prompt
-
     def forbidden(*args, **kwargs):
         pytest.fail("missing resume target must not open or read/write a history composer")
     monkeypatch.setattr(seed_history.SeedHistory, "entries", forbidden)
+    monkeypatch.setattr(seed_history.SeedHistory, "cursor", forbidden)
     monkeypatch.setattr(seed_history.SeedHistory, "remember", forbidden)
-    record = {"raw": {"id": target}}
-    screen = SimpleNamespace(
-        data=[record], debug="", app=SimpleNamespace(push_screen=forbidden),
-        _session_action_verbs=forbidden,
-    )
-    screen._find_internal_worktree = (
-        lambda *args: PickerScreenWorktreeActionsMixin._find_internal_worktree(screen, *args)
-    )
-    open_resume_prompt(screen, record)
-    assert "cold-start-only" in screen.debug
+    dialog = _resume_dialog(record={"is_local": True, "raw": {"id": target}}, history=False)
+    dialog._engine._run_bg = forbidden
+    dialog._load_prompt_history()
+    assert not dialog._history_requested
 
 
 def test_new_no_mux_seed_keeps_raw_whitespace_and_requires_no_resume_id(
@@ -487,7 +528,7 @@ async def _failed_history_save_keeps_composer_open(tmp_path, monkeypatch):
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
     context.set_project("demo")
     app = App()
-    dialog = PromptDlgScreen("Resume", "Prompt")
+    dialog = _resume_dialog()
     outcomes = []
     async with app.run_test() as pilot:
         app.push_screen(dialog, outcomes.append)
@@ -497,10 +538,8 @@ async def _failed_history_save_keeps_composer_open(tmp_path, monkeypatch):
         def fail(_prompt):
             raise seed_history.SeedHistoryError("Cannot save history")
         monkeypatch.setattr(field.seed_store, "remember", fail)
-        dialog.on_focus_group_activated(
-            FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
-        )
-        await pilot.pause()
+        _confirm(dialog)
+        await _await_confirmation(pilot)
         assert app.screen is dialog
         assert field.text == "do not lose this"
         assert outcomes == []
@@ -516,11 +555,12 @@ async def _cancel_and_multiline_cursor(tmp_path, monkeypatch):
     history = seed_history.SeedHistory("demo", tmp_path)
     history.remember("previous")
     app = App()
-    dialog = PromptDlgScreen("Resume", "Prompt")
+    dialog = _resume_dialog()
     async with app.run_test() as pilot:
         app.push_screen(dialog)
         await pilot.pause()
         field = dialog.query_one(SeedPromptField)
+        field.focus()
         field.load_text("first\nsecond\nthird")
         field.move_cursor((1, 2))
         await pilot.press("up")
@@ -544,10 +584,11 @@ async def _recalled_multiline_seed(tmp_path, monkeypatch):
     context.set_project("demo")
     seed_history.SeedHistory("demo", tmp_path).remember("one\ntwo\nthree")
     app = App()
-    dialog = PromptDlgScreen("Resume", "Prompt")
+    dialog = _resume_dialog()
     async with app.run_test() as pilot:
         app.push_screen(dialog)
         await pilot.pause()
+        dialog.query_one(SeedPromptField).focus()
         await pilot.press("up")
         field = dialog.query_one(SeedPromptField)
         field.move_cursor((1, 1))

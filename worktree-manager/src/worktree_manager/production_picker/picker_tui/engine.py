@@ -73,7 +73,6 @@ from .inbox import Inbox
 from .engine_live_screens import MsgViewScreen, ProgressScreen, SessionsViewScreen
 from .engine_loading import PendingBindingScreen, PickerScreenLoadingMixin
 from .engine_maintenance_actions import PickerScreenMaintenanceActionsMixin
-from .engine_prompt_dialog import PromptDlgScreen
 from .engine_model import PickerScreenModelMixin
 from .engine_pivot_actions import PickerScreenPivotActionsMixin
 from .engine_pivots import PickerScreenPivotsMixin
@@ -97,6 +96,7 @@ from .engine_worktree_actions import PickerScreenWorktreeActionsMixin
 from .create_action_screen import CreateActionScreen  # noqa: F401 -- re-export for tests
 from .listview import ListView
 from .selection import ListSelection
+from ... import picker_review
 from .steering import (
     PivotCardScreen,
     PivotFormScreen,
@@ -137,7 +137,6 @@ __all__ = [
     "PivotFormScreen",
     "ProfConfirmScreen",
     "ProgressScreen",
-    "PromptDlgScreen",
     "QuitConfirmScreen",
     "ResetConfirmScreen",
     "ScopeDlgScreen",
@@ -202,6 +201,7 @@ class PickerScreen(
 ):
     can_focus = True
     BINDINGS = [
+        Binding("ctrl+shift+h", "launch_history", "launch history", show=False),
         Binding("ctrl+shift+r", "recover_forms", "retained responses", show=False),
         Binding("ctrl+shift+right", "pivot_next", "next pivot", show=False),
         Binding("ctrl+shift+left", "pivot_prev", "prev pivot", show=False),
@@ -209,6 +209,7 @@ class PickerScreen(
         Binding("ctrl+left", "machine_prev", "prev machine", show=False),
     ]
     BINDING_KEYS = frozenset({
+        "ctrl+shift+h",
         "ctrl+shift+r",
         "ctrl+shift+right", "ctrl+shift+left", "ctrl+right", "ctrl+left",
     })
@@ -390,7 +391,7 @@ class PickerScreen(
         # never triggered implicitly. See _resolve_mock_mode: entered via
         # `picker mock`, AGENT_WORKTREES_PICKER_MOCK=1, or the deprecated
         # AGENT_WORKTREES_PICKER_REAL_OPS=0.
-        self.mock_mode = _resolve_mock_mode(mock_mode)
+        self.mock_mode = picker_review.active() or _resolve_mock_mode(mock_mode)
         self.real_ops = not self.mock_mode
         self.last_pr = 0              # remembered Profiles grid row (Tab in/out)
         self.btn_idx = 0              # active button within the current group
@@ -579,7 +580,10 @@ class PickerApp(App):
     PickerScreen > OptionList#nf-body-data:focus {
         background-tint: $surface 0%;
     }
-    PickerScreen > OptionList#nf-body-data > .option-list--option-highlighted,
+    PickerScreen > OptionList#nf-body-data:blur
+        > .option-list--option-highlighted {
+        background: $surface; color: $foreground; text-style: none;
+    }
     PickerScreen > OptionList#nf-body-data:focus
         > .option-list--option-highlighted {
         background: #ffaf00; color: black; text-style: bold;
@@ -597,6 +601,7 @@ class PickerApp(App):
         after_first_refresh=None,
         prepare=None,
         project_label="project",
+        lifetime_cancelled=None,
     ):
         super().__init__()
         self._source = source
@@ -605,6 +610,7 @@ class PickerApp(App):
         self._after_first_refresh = after_first_refresh
         self._prepare = prepare
         self._project_label = project_label
+        self._lifetime_cancelled = lifetime_cancelled
         self.binding_error = None
         self.result = None            # set by the screen on a launch decision
         # Idle-liveness self-exit (copilot-extensions#2761 follow-up) -- see
@@ -625,6 +631,8 @@ class PickerApp(App):
         )
 
     def on_mount(self) -> None:
+        if self._lifetime_cancelled is not None:
+            self.set_interval(0.25, self._check_owner_lifetime)
         if IDLE_TIMEOUT_SECS > 0:
             # Check at 1/10th the timeout (bounded to a sane range) so the
             # actual exit lands within ~10% of the configured threshold
@@ -633,7 +641,13 @@ class PickerApp(App):
             self._idle_check_timer = self.set_interval(
                 check_interval, self._check_idle_timeout)
 
+    def _check_owner_lifetime(self):
+        if self._lifetime_cancelled():
+            self.result = None
+            self.exit()
+
     def install_binding(self, binding):
+        self._last_input_activity = time.monotonic()
         self._source, self._live = binding.source, binding.live
         self.query_one(PendingBindingScreen).remove()
         self.screen.mount(PickerScreen(

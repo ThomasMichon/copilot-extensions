@@ -17,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'stamp-binstub', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'cell-retire-legacy', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
+    [ValidateSet('install', 'init', 'uninstall', 'stamp', 'stamp-binstub', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'cell-retire-legacy', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [string]$Context,
@@ -38,7 +38,8 @@ param(
     [string]$SnapshotId,
     [string]$RuntimeVersion,
     [string]$MaintenanceToken,
-    [switch]$Force
+    [switch]$Force,
+    [Parameter(DontShow)][switch]$CellWatchdogChild
 )
 
 Set-StrictMode -Version 2.0
@@ -101,7 +102,7 @@ if ($Action -in @('cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cel
     if (-not $python) { throw 'Cell lifecycle management requires an existing Python 3.10+ interpreter' }
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
-    & $python.Source -I (Join-Path $PSScriptRoot 'cell_lifecycle.py') @lifecycleArgs
+    & $python.Source -I -B (Join-Path $PSScriptRoot 'cell_lifecycle.py') @lifecycleArgs
     exit $LASTEXITCODE
 }
 
@@ -129,9 +130,21 @@ function Set-CopilotPersistentEnvironmentVariable {
 # === end install-contract:test-persistent-environment ===
 $CellMode = $false
 
-if ($InstallDir) {
-    $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+. (Join-Path $PSScriptRoot 'legacy-transaction.ps1')
+if ($Action -in @('install', 'init', 'stamp', 'stamp-binstub', 'provision', 'uninstall')) {
+    if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE '.agent-machines' }
+    $InstallDir = Resolve-LegacyTransactionRoot $InstallDir
     $PSBoundParameters['InstallDir'] = $InstallDir
+} elseif ($InstallDir) {
+    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
+}
+if ($Action -eq 'uninstall') {
+    foreach ($key in $PSBoundParameters.Keys) {
+        if ($key -notin @('Action', 'InstallDir')) { throw "Unsupported legacy uninstall parameter: $key" }
+    }
+    & (Join-Path $PSScriptRoot 'legacy-uninstall.ps1') -InstallDir $InstallDir
+    exit $LASTEXITCODE
 }
 
 # Refuse every legacy mutation before self-staging creates or removes files.
@@ -177,10 +190,34 @@ $cellSlotAction = $Action -in @(
 if ($cellSlotAction) {
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
-}
-$cellSlotDirect = $cellSlotAction -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED
-if ($cellSlotDirect) {
-    $env:COPILOT_PLUGIN_INSTALL_STAGED = 'cell-slot-action'
+    if (-not $CellWatchdogChild) {
+        $deadline = 480
+        $deadlineText = $env:AGENT_MACHINES_INSTALL_DEADLINE_SEC
+        if (-not $deadlineText) { $deadlineText = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
+        if ($deadlineText -and (
+            -not [int]::TryParse($deadlineText, [ref]$deadline) -or $deadline -le 0
+        )) { throw 'Cell installer deadline must be a positive number of seconds.' }
+        $forward = @()
+        foreach ($key in $PSBoundParameters.Keys) {
+            $value = $PSBoundParameters[$key]
+            if ($value -is [Management.Automation.SwitchParameter]) {
+                if ($value.IsPresent) { $forward += "-$key" }
+            } else {
+                $forward += @("-$key", [string]$value)
+            }
+        }
+        $request = @{
+            argv = @($probeHost, '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                '-File', $PSCommandPath, '-CellWatchdogChild') + $forward
+            cwd = $env:USERPROFILE
+            payload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+            timeout = $deadline
+        }
+        & (Join-Path $PSScriptRoot 'installation-context/shell-caller-owned.ps1') `
+            -Worker (Join-Path $PSScriptRoot 'cell_installer.py') `
+            -Request $request -TimeoutSeconds $deadline
+        exit $LASTEXITCODE
+    }
 }
 
 # Review finding (round 10): `stamp-binstub` (#3303, full-harness-startup-
@@ -195,10 +232,10 @@ if ($cellSlotDirect) {
 # Invoke-StampBinstubOnly only ever reads/writes via $probePayload/
 # $InstallDir (never $PluginDir, since the round-7 fix), so it needs no
 # staged copy to run correctly.
-if ($Action -eq 'stamp-binstub' -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
-    $env:COPILOT_PLUGIN_INSTALL_STAGED = 'stamp-binstub-fast-path'
-}
+$skipLegacyStage = $cellSlotAction -or $Action -eq 'stamp-binstub'
 
+# The common guard deliberately distrusts inherited stage markers.
+if (-not $skipLegacyStage) {
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -330,7 +367,7 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
     }
 }
 # === end install-contract:v4 self-stage ===
-if ($cellSlotDirect) { Remove-Item Env:COPILOT_PLUGIN_INSTALL_STAGED }
+}
 
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
@@ -728,6 +765,13 @@ function Ensure-CellSnapshot {
         [void](Remove-OwnedCellSnapshot -Root $stage)
         throw 'Cannot copy the payload into the cell snapshot staging directory'
     }
+    try {
+        Assert-CellPayloadIdentity -Payload $stage
+        Assert-SourceRuntimeIdentity
+    } catch {
+        [void](Remove-OwnedCellSnapshot -Root $stage)
+        throw
+    }
     if (
         (Test-Path -LiteralPath $SnapshotRoot) -or
         $null -ne (Get-Item -LiteralPath $SnapshotRoot -Force -ErrorAction SilentlyContinue)
@@ -808,6 +852,14 @@ if (-not $InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-machines'
 }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$legacyTransaction = $null
+if (-not $cellSlotAction) {
+    $InstallDir = Resolve-LegacyTransactionRoot $InstallDir
+    $transactionArgs = @{ Root = $InstallDir }
+    if ($Action -eq 'stamp-binstub') { $transactionArgs.MaximumWaitSec = 1 }
+    $legacyTransaction = Enter-LegacyTransaction @transactionArgs
+}
+try {
 $DefaultInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-machines'))
 $VenvDir  = Join-Path $InstallDir '.venv'
 $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
@@ -862,7 +914,7 @@ function Get-SourceRuntimeIdentity {
         '--plugin', 'agent-machines', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
     $nativeError = ''
-    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     $code = $LASTEXITCODE
     if ($code -ne 0) { throw "Source runtime identity validation failed: $detail$nativeError" }
     return $detail.Trim()
@@ -873,9 +925,9 @@ function Initialize-SourceRuntime {
     try {
         [IO.File]::GetAttributes((Join-Path $PluginDir 'runtime-source.json')) | Out-Null
     } catch [IO.FileNotFoundException] {
-        return
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
     } catch [IO.DirectoryNotFoundException] {
-        return
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
     }
     $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
     $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
@@ -889,6 +941,7 @@ function Initialize-SourceRuntime {
 
 function Assert-SourceRuntimeIdentity {
     param([string]$Payload = $PluginDir)
+    Assert-CellPayloadIdentity -Payload $Payload
     $metadataPresent = $true
     try {
         [IO.File]::GetAttributes((Join-Path $Payload 'runtime-source.json')) | Out-Null
@@ -903,6 +956,27 @@ function Assert-SourceRuntimeIdentity {
             throw 'Source runtime identity changed after runtime selection; refusing publication'
         }
     }
+}
+
+function Assert-CellPayloadIdentity {
+    param([string]$Payload = $PluginDir)
+    if ($env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH) {
+        $identity = Get-CellPayloadIdentity -Payload $Payload
+        if ($identity -cne $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH) {
+            throw 'Payload content changed after selection; refusing publication'
+        }
+    }
+}
+
+function Get-CellPayloadIdentity {
+    param([string]$Payload = $PluginDir)
+    $python = @(Get-Command python -CommandType Application -ErrorAction Stop)[0]
+    $detail = Invoke-Hidden -FilePath $python.Path -ArgList @(
+        '-I', '-B', (Join-Path $PluginDir 'scripts/cell_installer.py'), 'identity',
+        '--payload', $Payload, '--version', $PackageVersion
+    )
+    if ($LASTEXITCODE -ne 0) { throw 'Selected cell payload identity validation failed.' }
+    return $detail.Trim()
 }
 
 function Get-GitInfo {
@@ -924,6 +998,14 @@ function Get-GitInfo {
 
 $PackageVersion = $SrcVersion
 Initialize-SourceRuntime
+if ($cellSlotAction) {
+    $script:SelectedPayloadHash = Get-CellPayloadIdentity
+    if ($env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH -and
+        $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH -cne $SelectedPayloadHash) {
+        throw 'Payload changed across the installation transaction'
+    }
+    $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH = $SelectedPayloadHash
+}
 $selectedSourceIdentity = if ($SourceRuntimeIdentity) { $SourceRuntimeIdentity } else { '{}' }
 if ($env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -and
     $env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -cne $selectedSourceIdentity) {
@@ -933,6 +1015,7 @@ $env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY = $selectedSourceIdentity
 # Source manifest inputs are captured before activation.
 if ($SourceRuntimeIdentity) {
     $sourceOwner = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+    $script:SourceManifestPath = $sourceOwner
     $script:SourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $sourceOwner))
 }
 if (
@@ -1350,6 +1433,8 @@ if ($Action -eq 'cell-provision') {
             Write-Fail "selected cell runtime $SrcVersion failed immutable cutover validation"
             exit 1
         }
+        . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
         Write-CellDeployManifest `
             -PluginRoot $pluginRoot `
             -SourcePluginDir $OriginPayloadRoot `
@@ -1857,7 +1942,7 @@ function Invoke-VersionedSlotClean {
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
         $nativeError = ''
         $helpers = (Invoke-Hidden -FilePath $py `
-            -ArgList @('-I', $vr, '--root', $InstallDir, 'construction-shell', '--shell', 'ps1') `
+            -ArgList @('-I', '-B', $vr, '--root', $InstallDir, 'construction-shell', '--shell', 'ps1') `
             -ErrorOutput ([ref]$nativeError) | Out-String)
         if ($nativeError) { [Console]::Error.Write($nativeError) }
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
@@ -1994,8 +2079,8 @@ goto :eof
 # Serializes full stamps and source-qualified fast stamps against concurrent
 # invocations -- e.g. two fresh
 # sessions launching their sessionStart hook at nearly the same instant --
-# under ONE named mutex keyed by the install dir. Legacy fast stamps remain
-# deliberately unlocked.
+# under ONE additional named mutex keyed by the install dir. Every legacy
+# action already holds the whole-action .install.lock, including fast stamps.
 function Enter-StampLock {
     $stampHash = [BitConverter]::ToString(
         [Security.Cryptography.SHA256]::Create().ComputeHash(
@@ -2053,23 +2138,15 @@ function Invoke-StampBinstubOnly {
         Write-Fail "stamp-binstub only supports the default install dir ($DefaultInstallDir) -- the generated launcher hardcodes that root and cannot read markers written to '$InstallDir'."
         exit 1
     }
-    # Source stamps share the full stamp's lock across selection and publication.
-    # Legacy stamps remain Python-free and deliberately unlocked.
+    # Source stamps additionally share the full stamp's selection mutex.
+    # Legacy stamps remain Python-free, under the whole-action transaction.
     $stampMutex = $null
     if ($SourceRuntimeIdentity) { $stampMutex = Enter-StampLock }
     try {
     Assert-SourceRuntimeIdentity
-    # Review finding (round 11): the legacy path used to take Enter-StampLock
-    # mutex Invoke-Stamp holds across its whole (multi-second) snapshot copy.
-    # A concurrent slow `stamp` already holding it made this "fast" path wait
-    # behind it for up to 20 seconds -- reintroducing the very hook-timeout
-    # race this two-stage split exists to prevent. Deliberately NOT taking
-    # any lock for legacy here: every operation below (Publish-FileAtomically's marker
-    # writes, Deploy-SelfProvisioningBinstub's stub/resolver writes) was
-    # already hardened in round 9 to be safe under UNLOCKED concurrent
-    # callers -- non-overwriting Move-Item with retry-through-Replace() on a
-    # destination race -- so this fast path no longer needs mutual exclusion
-    # to be correct, only to be genuinely fast.
+    # The fast legacy path does not need this second mutex. It still requires
+    # the shared whole-action transaction, with a one-second admission bound
+    # so a blocked session-start stamp refuses rather than outliving its hook.
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
@@ -2280,6 +2357,10 @@ function Invoke-Stamp {
 if ($Action -eq 'stamp-binstub') { Invoke-StampBinstubOnly; exit 0 }
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
+if ($Action -in @('install', 'init', 'provision', 'cell-provision')) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 # -- Preflight checks --------------------------------------------------
 
 Write-Step 'agent-machines init'
@@ -2434,9 +2515,9 @@ foreach ($lib in @(
     }
     if (Test-Path (Join-Path $libDir 'pyproject.toml')) {
         if ($haveUv) {
-            & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --reinstall-package $lib.Pkg "$libDir" --quiet 2>&1 | Out-Null
+            & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --reinstall-package $lib.Pkg "$libDir" --quiet 2>&1 | Out-Null
         } else {
-            & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$libDir" 2>&1 | Out-Null
+            & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$libDir" 2>&1 | Out-Null
         }
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "$($lib.Dir) library install failed"
@@ -2454,17 +2535,17 @@ $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 if (Get-Command uv -ErrorAction SilentlyContinue) {
     if ($CellMode) {
-        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 |
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 |
             ForEach-Object { Write-Host $_ }
     } else {
-        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
     }
 } else {
     if ($CellMode) {
-        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 |
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 |
             ForEach-Object { Write-Host $_ }
     } else {
-        & $VenvPython -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 | Out-Null
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$PluginDir" 2>&1 | Out-Null
     }
 }
 $pkgResult = $LASTEXITCODE
@@ -2489,7 +2570,7 @@ if ($VersionedRuntime) {
     $VrScript = Join-Path $PSScriptRoot 'versioned_runtime.py'
     # Health-gate: never swap the stable `.venv` link onto a slot whose package
     # does not import -- a broken build must not become the live runtime.
-    & $VenvPython -c 'import agent_machines' 2>$null
+    & $VenvPython -B -c 'import agent_machines' 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         exit 1
@@ -2578,7 +2659,9 @@ if (-not $CellMode) {
 # Unified schema_version 3 manifest (install-contract): records the source
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-$sourcePluginDir = if ($CellMode) { $OriginPayloadRoot } else { $PluginDir }
+$sourcePluginDir = if ($CellMode) { $OriginPayloadRoot } elseif ($SourceRuntimeIdentity) {
+    $script:SourceManifestPath
+} else { $PluginDir }
 $kind = Get-SourceKind -PluginPath $sourcePluginDir
 $ver = if ($SourceRuntimeIdentity) { $PackageVersion } else { '0.0.0' }
 $pyproj = Join-Path $PluginDir 'pyproject.toml'
@@ -2628,8 +2711,23 @@ if ($CellMode) {
             $manifest[$_.Name] = $_.Value
         }
     }
-    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
-    Move-Item -Force -Path $tmp -Destination $manifestPath
+    if ($env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN) {
+        $publicationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+            $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+        } else { (Get-Location).Path }
+        $result = Invoke-Hidden -FilePath $pythonCmd -ArgList @(
+            '-I', '-B', '-X', 'utf8', (Join-Path $sourcePluginDir 'scripts/command_binding.py'),
+            '--payload-root', $sourcePluginDir, '--source-payload-root', $sourcePluginDir,
+            '--plugin-id', 'agent-machines', '--legacy-root', $InstallDir,
+            '--project-root', $publicationProject, '--publish-legacy', '--write-manifest'
+        ) -InputText ($manifest | ConvertTo-Json -Depth 8 -ErrorAction Stop)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Command ownership validation refused Machines source manifest publication: $result"
+        }
+    } else {
+        $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
+        Move-Item -Force -Path $tmp -Destination $manifestPath
+    }
     Write-Ok "Deploy manifest written (source: $kind)"
 }
 
@@ -2639,7 +2737,7 @@ $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 $importOk = $false
 for ($i = 0; $i -lt 3; $i++) {
-    & $VenvPython -c 'import agent_machines' 2>$null
+    & $VenvPython -B -c 'import agent_machines' 2>$null
     if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
     Start-Sleep -Seconds 1
 }
@@ -2675,4 +2773,7 @@ exit 0
     if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
         Stop-RuntimeConstruction
     }
+}
+} finally {
+    if ($legacyTransaction) { $legacyTransaction.Dispose() }
 }

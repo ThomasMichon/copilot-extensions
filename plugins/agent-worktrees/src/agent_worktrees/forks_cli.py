@@ -292,7 +292,12 @@ def _dispatch_sub(sub: str, rest: list[str], fork_pr, _opt) -> int:
             # default covers the common account-mapping/ambient-auth case
             # only. Use --token-stdin instead for a repo using
             # pr.token_command/token_env.
-            _token, account = fork_pr._resolve_fork_credential(repo, bare_prcfg)
+            from .providers.base import ProviderError
+            try:
+                _token, account = fork_pr._resolve_fork_credential(repo, bare_prcfg)
+            except ProviderError as exc:
+                output.err(str(exc))
+                return 1
             # Unlike an EXPLICIT --account below, this resolved value is
             # not necessarily the exact login string the live provider API
             # would itself return (e.g. a differently-formatted active-

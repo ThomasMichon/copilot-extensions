@@ -101,6 +101,26 @@ function Copy-InstallerStageDirectory {
 
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
+if ($env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'update', 'provision', 'uninstall') -and
+    -not ($Action -eq 'uninstall' -and $DryRun)) {
+    $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
+        else { Join-Path $env:USERPROFILE '.agent-bridge' }
+    $driverOptions = @()
+    foreach ($name in @('RequireGracefulCutover', 'NonInteractive', 'ZeroDowntime', 'Purge', 'DryRun')) {
+        if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
+            $driverOptions += $name
+        }
+    }
+    $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
+        -Plugin 'agent-bridge' -Action $Action -Options $driverOptions
+    if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
+    $driverPython = $driverEntry.Python
+    $driverArguments = $driverEntry.Arguments
+}
+
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
     param(
@@ -514,6 +534,33 @@ function Invoke-VersionedActivate {
     return $true
 }
 
+function Invoke-RuntimeBrokerAdoption {
+    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
+        $script:RuntimeConstructionSession.Process.HasExited) {
+        throw 'Broker adoption requires attached complete-slot retention'
+    }
+    $diagnostic = ''
+    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
+        '--runtime-root', $InstallDir, '--slot', $VenvDir,
+        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
+        -ErrorOutput ([ref]$diagnostic)
+    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
+    $receipt = $result | ConvertFrom-Json
+    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
+}
+
+function Ensure-RuntimeBrokerAdoption {
+    param([string]$PayloadHash)
+    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    [void](Invoke-VersionedSlotClean -PayloadHash $PayloadHash)
+    if (-not $script:RuntimeConstructionReuse) {
+        throw 'Existing-runtime broker adoption requires a complete reusable slot'
+    }
+    if (-not (Invoke-VersionedMarkComplete -PayloadHash $PayloadHash)) { throw 'Versioned completion publication failed' }
+    Invoke-RuntimeBrokerAdoption
+}
+
 function Get-BootstrapPython {
     <# A python to run the stdlib-only versioned_runtime.py helper BEFORE the
        slot venv exists (e.g. the pre-build toss). Prefers a signed base python,
@@ -541,7 +588,7 @@ function Get-SourceRuntimeIdentity {
         '--plugin', 'agent-bridge', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
     $nativeError = ''
-    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     $code = $LASTEXITCODE
     if ($code -ne 0) { throw "${FailureContext} (exit ${code}): $detail$nativeError" }
     return $detail.Trim()
@@ -552,9 +599,9 @@ function Initialize-SourceRuntime {
     try {
         [System.IO.File]::GetAttributes($metadata) | Out-Null
     } catch [System.IO.FileNotFoundException] {
-        return
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
     } catch [System.IO.DirectoryNotFoundException] {
-        return
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
     }
     $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
     $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
@@ -919,7 +966,7 @@ function Invoke-VersionedMarkComplete {
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
     }
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
 }
 
@@ -1298,7 +1345,8 @@ function New-SignedVenv {
         -PythonVersion '3.10' `
         -UvCommand 'uv' `
         -RequireSignedBase ($env:OS -eq 'Windows_NT') `
-        -AllowExisting $true)
+        -AllowExisting $true `
+        -WithoutPip)
 }
 
 # #1643: venue providers (agent-codespaces / agent-containers) are PURE
@@ -1630,7 +1678,7 @@ function Stop-DaemonProcesses {
     }
 
     # Final verdict: both ports must be free.
-    return ((Get-PortListeners $Port).Count -eq 0 -and (Get-PortListeners $RelayPort).Count -eq 0)
+    return (@(Get-PortListeners $Port).Count -eq 0 -and @(Get-PortListeners $RelayPort).Count -eq 0)
 }
 
 function Invoke-Drain {
@@ -1732,9 +1780,6 @@ function Get-ScheduledTaskLastResult {
 }
 
 function Get-ScheduledTaskRepairScript {
-    if ($env:COPILOT_PLUGIN_STAGED_FROM) {
-        return (Join-Path $env:COPILOT_PLUGIN_STAGED_FROM 'scripts\repair-scheduled-task.ps1')
-    }
     return (Join-Path $PSScriptRoot 'repair-scheduled-task.ps1')
 }
 
@@ -2172,24 +2217,31 @@ function Write-Binstubs {
     $rootLit = $InstallDir -replace "'", "''"
     $sourceRoot = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
     $sourceLit = $sourceRoot -replace "'", "''"
+    $qualifiedSource = if ($SourceRuntimeIdentity) { '$true' } else { '$false' }
     $ps1 = @'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $env:PYTHONUTF8 = '1'
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $_root = '__ROOT__'
 # -File's redirected native stdin is not an object pipeline.
 $_pipelineInput = $MyInvocation.ExpectingInput -and $MyInvocation.Line
 $_source = '__SOURCE__'
+$_qualifiedSource = __QUALIFIED_SOURCE__
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
 $_payload = $_snap
 # Older ordinary snapshots have no source receipt. Prefer their exact publisher
 # while it exists; never discover a different marketplace through PATH or a glob.
-if (-not $_snap -or -not [IO.File]::Exists((Join-Path $_snap 'snapshot-provenance.json'))) {
+if (-not $_qualifiedSource -and
+    (-not $_snap -or -not [IO.File]::Exists((Join-Path $_snap 'snapshot-provenance.json')))) {
     $_payload = if ([IO.File]::Exists((Join-Path $_source 'scripts\runtime-gate.ps1'))) { $_source } else { '' }
 }
 $_gate = if ($_payload) { Join-Path $_payload 'scripts\runtime-gate.ps1' } else { '' }
-if (-not $_gate -or -not [IO.File]::Exists($_gate)) {
+if (-not $_gate -or -not [IO.File]::Exists($_gate) -or -not (
+    Select-String -LiteralPath $_gate -SimpleMatch '# Installation driver contract: bridge-first-use-v1' -Quiet
+)) {
     if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
         $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
         if ([IO.File]::Exists($_resolver) -and
@@ -2220,7 +2272,7 @@ if (-not $_gate -or -not [IO.File]::Exists($_gate)) {
             }
         }
     }
-    [Console]::Error.WriteLine('[agent-bridge] retained runtime gate is unavailable. Re-enable/update the owning plugin, then retry.')
+    [Console]::Error.WriteLine('[agent-bridge] retained runtime gate lacks the queued command contract. Re-enable/update the owning plugin, then retry.')
     exit 126
 }
 $env:AGENT_BRIDGE_INSTALL_DIR = $_root
@@ -2229,7 +2281,7 @@ $env:AGENT_BRIDGE_PAYLOAD_ROOT = $_payload
 if ($_pipelineInput) { (Get-Variable input -ValueOnly) | & $_gate @args } else { & $_gate @args }
 exit $LASTEXITCODE
 '@
-    $ps1 = $ps1.Replace('__ROOT__', $rootLit).Replace('__SOURCE__', $sourceLit)
+    $ps1 = $ps1.Replace('__ROOT__', $rootLit).Replace('__SOURCE__', $sourceLit).Replace('__QUALIFIED_SOURCE__', $qualifiedSource)
     [System.IO.File]::WriteAllText($BinstubPs1, $ps1, (New-Object System.Text.UTF8Encoding($true)))
 
     # cmd fallback: delegate entirely to the .ps1 binstub so resolution stays
@@ -2275,6 +2327,8 @@ function Materialize-SnapshotVendoredLibs {
         'machine-transport'    = (Resolve-VendoredLib -LibName 'machine-transport')
         'worktree-identity'    = (Resolve-VendoredLib -LibName 'worktree-identity')
         'process-telemetry'    = (Resolve-VendoredLib -LibName 'process-telemetry')
+        'repository-policy'    = (Resolve-VendoredLib -LibName 'repository-policy')
+        'update-driver'        = (Resolve-VendoredLib -LibName 'update-driver')
     }
     foreach ($entry in $sources.GetEnumerator()) {
         $source = $entry.Value
@@ -2306,6 +2360,8 @@ function Materialize-SnapshotVendoredLibs {
             'agent-machine-transport'    = 'machine-transport'
             'agent-worktree-identity'    = 'worktree-identity'
             'agent-process-telemetry'    = 'process-telemetry'
+            'agent-repository-policy'    = 'repository-policy'
+            'agent-update-driver'        = 'update-driver'
         }
         foreach ($entry in $rewrites.GetEnumerator()) {
             $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $entry.Value
@@ -2375,7 +2431,7 @@ function Invoke-Stamp {
             '--payload', $PluginDir, '--package-version', $PackageVersion, '--plugin', 'agent-bridge',
             '--expected-runtime-version', $SrcVersion, '--expected-source-identity', $SourceRuntimeIdentity,
             '--snapshot-root', $InstallDir
-        ) -ErrorOutput ([ref]$nativeError)
+        ) -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
         if ($LASTEXITCODE -ne 0) {
             throw "Source snapshot publication failed (exit ${LASTEXITCODE}): $snapshot$nativeError"
         }
@@ -2384,6 +2440,13 @@ function Invoke-Stamp {
         }
         $snapDir = $snapshot.Trim()
         [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
+        $sourceRoot = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+        $sourceProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+            $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+        } elseif ($env:COPILOT_PROJECT_DIR) { $env:COPILOT_PROJECT_DIR } else { (Get-Location).Path }
+        Publish-LegacySnapshotSource -SnapshotDir $snapDir -HelperDirectory $ScriptDir `
+            -PayloadRoot $sourceRoot -PluginId agent-bridge -RuntimeRoot $InstallDir `
+            -ProjectRoot $sourceProject -SnapshotId (Split-Path -Leaf $snapDir) -PayloadVersion $SrcVersion
         $nativeError = ''
         [void](Invoke-Hidden -FilePath $py -ArgList @(
             '-I', '-B', (Join-Path $ScriptDir 'versioned_runtime.py'), '--root', $InstallDir,
@@ -2400,7 +2463,12 @@ function Invoke-Stamp {
         New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
         $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
         Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+            $destination = Join-Path $snapTmp $_.Name
+            if ($_.PSIsContainer) {
+                Copy-InstallerStageDirectory $_.FullName $destination
+            } else {
+                Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
+            }
         }
         Materialize-SnapshotVendoredLibs -SnapshotDir $snapTmp
         Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
@@ -2547,7 +2615,7 @@ function Invoke-InstallSlotBuild {
     # else. uv's local-path build cache is keyed by source path, not source
     # content -- see the matching install.sh comment / #2863 for the
     # confirmed incident this class of gap caused.
-    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--reinstall-package', 'agent-process-telemetry', '--refresh-package', 'agent-process-telemetry', '--quiet')
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--reinstall-package', 'agent-process-telemetry', '--refresh-package', 'agent-process-telemetry', '--reinstall-package', 'agent-update-driver', '--refresh-package', 'agent-update-driver', '--quiet')
     $bridgeOut = $bridgeResult.Output
     $installResult = $bridgeResult.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -2583,6 +2651,7 @@ function Invoke-Install {
     $preLockHash = Get-PayloadHash
     if (-not (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -and
         (Test-SlotContentCurrent -PayloadHash $preLockHash)) {
+        Ensure-RuntimeBrokerAdoption -PayloadHash $preLockHash
         Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
         Write-DeployManifest -PayloadHash $preLockHash   # re-assert the manifest so version drift clears and this never re-triggers every session
         return
@@ -2604,6 +2673,7 @@ function Invoke-Install {
     # Re-check after acquiring: the install we waited on may have JUST landed this
     # exact content, so our rebuild would be redundant (and a live-slot stomp).
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
+        Ensure-RuntimeBrokerAdoption -PayloadHash $payloadHash
         Write-Ok "agent-bridge $SrcVersion already installed and healthy after lock wait -- no-op."
         Write-DeployManifest -PayloadHash $payloadHash
         Exit-InstallLock
@@ -2660,6 +2730,7 @@ function Invoke-Install {
         }
         [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
         if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
+        Invoke-RuntimeBrokerAdoption
         if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
     }
 
@@ -2729,6 +2800,8 @@ function Invoke-Provision {
         return
     }
 
+    Ensure-RuntimeBrokerAdoption -PayloadHash (Get-PayloadHash)
+
     # A never-ran S4U task cannot be flipped to the default interactive
     # principal from a normal shell. Route that exact recovery through the
     # existing self-elevating repair instead of rebuilding or restarting the
@@ -2747,7 +2820,11 @@ function Invoke-Provision {
 
         Write-Step 'Repairing never-ran S4U scheduled task as the default interactive AtLogOn task...'
         $pwsh = Get-PwshPath
-        & $pwsh -NoProfile -ExecutionPolicy Bypass -File $repair
+        $repairHostArguments = @()
+        if ([Environment]::GetCommandLineArgs() -icontains '-NonInteractive') {
+            $repairHostArguments += '-NonInteractive'
+        }
+        & $pwsh -NoProfile -ExecutionPolicy Bypass @repairHostArguments -File $repair
         $repairExit = $LASTEXITCODE
         if ($repairExit -ne 0) {
             Write-Fail "Scheduled-task repair failed (exit $repairExit)"
@@ -2767,13 +2844,110 @@ function Invoke-Uninstall {
     Write-Host '=== agent-bridge uninstall ===' -ForegroundColor Cyan
     if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
     Write-Host ''
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
 
+    function Get-BridgeUninstallProcesses {
+        Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir -Check
+        if ('..' -in ($InstallDir -split '[\\/]')) { throw 'Refusing traversal in uninstall root' }
+        $root = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\', '/')
+        if ($root -eq [IO.Path]::GetPathRoot($root).TrimEnd('\', '/') -or
+            $root -eq [IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\', '/')) {
+            throw 'Refusing uninstall of a filesystem or home root'
+        }
+        $ancestor = $root
+        while ($ancestor) {
+            $item = Get-Item -LiteralPath $ancestor -Force -ErrorAction Stop
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Refusing linked uninstall root: $ancestor"
+            }
+            $ancestor = Split-Path -Parent $ancestor
+        }
+        $manifest = Join-Path $root 'deploy-manifest.json'
+        if (Test-Path -LiteralPath $manifest) {
+            $item = Get-Item -LiteralPath $manifest -Force -ErrorAction Stop
+            if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+                throw 'Refusing linked or non-file Bridge deploy manifest'
+            }
+            $record = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json -ErrorAction Stop
+            if ($record.service -ne 'agent-bridge' -or $record.source.plugin -ne 'agent-bridge') {
+                throw 'Refusing foreign Bridge deploy manifest'
+            }
+        }
+        $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+        $owned = @()
+        foreach ($row in $rows) {
+            if (-not $row.ExecutablePath -or -not ([string]$row.ExecutablePath).StartsWith(
+                    $root + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
+            if ([string]$row.CommandLine -notmatch '(?i)(?:^|\s)-m\s+agent_bridge\s+(?:start|service\s+start\s+--direct)\s*$') {
+                throw "Runtime still in use by an unclassified process (pid=$($row.ProcessId))"
+            }
+            $owner = Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid -ErrorAction Stop
+            if ($owner.ReturnValue -ne 0 -or $owner.Sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+                throw 'Bridge daemon user ownership cannot be validated'
+            }
+            $owned += $row
+        }
+        $ownedIds = @($owned | ForEach-Object { [int]$_.ProcessId })
+        foreach ($row in $rows) {
+            if ([int]$row.ParentProcessId -in $ownedIds -and [int]$row.ProcessId -notin $ownedIds) {
+                throw "Bridge still owns a live child/transport (pid=$($row.ProcessId)); refusing uninstall"
+            }
+        }
+        if (Test-Path -LiteralPath $PidFile) {
+            $value = (Get-Content -LiteralPath $PidFile -Raw).Trim()
+            if ($value -notmatch '^[1-9][0-9]*$') { throw 'Refusing invalid Bridge PID receipt' }
+            if (@($rows | Where-Object { $_.ProcessId -eq [int]$value }).Count -and [int]$value -notin $ownedIds) {
+                throw 'Bridge PID receipt names a foreign process; refusing uninstall'
+            }
+        }
+        if ((Test-Path -LiteralPath (Join-Path $InstallDir 'active.json')) -and -not (Test-ActiveIsForward)) {
+            foreach ($portNumber in @((Get-ActiveEndpoint).Port, $RelayPort)) {
+                foreach ($listener in @(Get-NetTCPConnection -LocalPort $portNumber -ErrorAction SilentlyContinue |
+                        Where-Object { $_.State -eq 'Listen' })) {
+                    if ([int]$listener.OwningProcess -notin $ownedIds) {
+                        throw 'Bridge endpoint is owned by an unclassified process; refusing uninstall'
+                    }
+                }
+            }
+        }
+        return $owned
+    }
+
+    $ownedProcesses = @(Get-BridgeUninstallProcesses)
+    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($existing) {
+        if (@($existing.Actions).Count -ne 1) { throw 'Refusing ambiguous Bridge scheduled task actions' }
+        foreach ($taskAction in $existing.Actions) {
+            if ((Split-Path -Leaf ([string]$taskAction.Execute)) -notin @('conhost.exe', 'pwsh.exe', 'powershell.exe') -or
+                -not ([string]$taskAction.Arguments).Contains((Join-Path $InstallDir 'start-agent-bridge.ps1'))) {
+                throw "Refusing foreign scheduled task: $TaskName"
+            }
+        }
+    }
     if ($DryRun) {
-        $proc = Get-RunningProcess
-        if ($proc) { Write-Host "[dry-run] would stop agent-bridge (pid=$($proc.Id))" }
+        if ($ownedProcesses.Count) { Write-Host "[dry-run] would stop owned agent-bridge processes" }
         else { Write-Skip 'agent-bridge not running' }
     } else {
-        Invoke-Stop
+        foreach ($row in $ownedProcesses) {
+            $now = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
+            if ($now -and ($now.CreationDate -ne $row.CreationDate -or $now.CommandLine -cne $row.CommandLine)) {
+                throw 'Bridge process identity changed; refusing uninstall'
+            }
+            if ($now) {
+                Stop-Process -Id $row.ProcessId -ErrorAction Stop
+                Wait-Process -Id $row.ProcessId -Timeout 15 -ErrorAction SilentlyContinue
+                $remaining = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
+                if ($remaining -and $remaining.CreationDate -eq $row.CreationDate) {
+                    throw 'Owned Bridge daemon did not stop'
+                }
+            }
+        }
+    }
+
+    if (-not $DryRun -and $env:OS -eq 'Windows_NT' -and
+        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+        & $driverPython @driverArguments --remove-broker
+        if ($LASTEXITCODE -ne 0) { throw 'Owned broker removal failed; runtimes preserved' }
     }
 
     # Scheduled task
@@ -2789,30 +2963,45 @@ function Invoke-Uninstall {
         Write-Skip "Scheduled task not present: $TaskName"
     }
 
-    if ($publishGlobalBinstubs) {
-        foreach ($stub in @($BinstubPs1, $BinstubCmd)) {
-            if (Test-Path $stub) {
-                if ($DryRun) { Write-Host "[dry-run] would remove binstub: $stub" }
-                else { Remove-Item -Force $stub; Write-Ok "Binstub removed: $stub" }
-            }
-        }
-    } else {
-        Write-Ok 'Scoped install left the legacy global binstub unchanged'
-    }
-
     if (-not $DryRun) { Remove-SiblingBinstubs }
 
-    if (Test-Path $VenvDir) {
-        if ($DryRun) { Write-Host "[dry-run] would remove venv: $VenvDir" }
-        else { Remove-Item -Recurse -Force $VenvDir; Write-Ok 'Venv removed' }
-    } else {
-        Write-Skip "Venv not present: $VenvDir"
+    function Remove-BridgeRuntimeCode {
+        if ($DryRun) {
+            Write-Host "[dry-run] would remove owned runtime code at: $InstallDir"
+            return
+        }
+        Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
+    }
+
+    function Remove-BridgeHelperFiles {
+        param([string]$Directory, [string[]]$Names)
+        $item = Get-Item -LiteralPath $Directory -Force -ErrorAction Stop
+        if (-not $item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Refusing linked or non-directory runtime helpers'
+        }
+        foreach ($name in $Names) {
+            $path = Join-Path $Directory $name
+            if (-not (Test-Path -LiteralPath $path)) { continue }
+            $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+                throw "Refusing linked or non-file runtime helper: $path"
+            }
+        }
+        foreach ($name in $Names) {
+            $path = Join-Path $Directory $name
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+        }
     }
 
     if ($Purge -and (Test-Path $InstallDir)) {
         if ($DryRun) { Write-Host "[dry-run] would PURGE config/DB/auth at: $InstallDir" }
-        else { Write-Warn 'Purging config, DB, and auth'; Remove-Item -Recurse -Force $InstallDir }
+        else {
+            Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
+            Write-Warn 'Purging config, DB, and auth'
+            Remove-InstallRuntimeContent -InstallRoot $InstallDir
+        }
     } else {
+        Remove-BridgeRuntimeCode
         Write-Skip "Preserved config/DB at $InstallDir (use -Purge to remove)"
     }
 
@@ -2825,7 +3014,9 @@ function Get-PwshPath {
     $pwshPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'
     if (-not (Test-Path $pwshPath)) {
         $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
-        $pwshPath = if ($pwshCmd) { $pwshCmd.Source } else { 'powershell.exe' }
+        $pwshPath = if ($pwshCmd) { $pwshCmd.Source } else {
+            Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        }
     }
     return $pwshPath
 }
@@ -3253,7 +3444,7 @@ function Invoke-UpdateSlotBuild {
     }
     # --refresh-package agent-procutil: see the matching comment in the
     # initial-install path above.
-    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--reinstall-package', 'agent-process-telemetry', '--refresh-package', 'agent-process-telemetry', "$PluginDir", '--quiet')
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--reinstall-package', 'agent-process-telemetry', '--refresh-package', 'agent-process-telemetry', '--reinstall-package', 'agent-update-driver', '--refresh-package', 'agent-update-driver', "$PluginDir", '--quiet')
     $bridgeOut = $bridgeResult.Output
     $updateResult = $bridgeResult.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -3339,6 +3530,7 @@ function Invoke-Update {
     $payloadHash = Get-PayloadHash
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
         try {
+            Ensure-RuntimeBrokerAdoption -PayloadHash $payloadHash
             # Slot/import health proves reusable bytes, not the serving version.
             # This guarded seam never rebuilds, cold-starts or falls back to stop.
             Invoke-ServingRuntimeReconcile
@@ -3481,6 +3673,7 @@ function Invoke-Update {
         if ($VersionedRuntime) {
             [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
             if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
+            Invoke-RuntimeBrokerAdoption
         }
     }
     catch {
@@ -3642,6 +3835,10 @@ $script:InstallerLifecycleOutcome = 'fail'
 if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
 try {
     Initialize-SourceRuntime
+    if ($Action -in @('install', 'update', 'provision')) {
+        . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    }
     switch ($Action) {
         'install'   { Invoke-Install }
         'uninstall' { Invoke-Uninstall }

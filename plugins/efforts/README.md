@@ -17,7 +17,7 @@ outlives any single one.
 ## What this plugin ships
 
 This is a **payload-only plugin** — no runtime, virtualenv, service, installer,
-or binstub. Enabling the plugin is the whole install. It delivers three skills, an
+or binstub. Enabling the plugin is the whole install. It delivers four skills, an
 explicit repository-adoption contract, a minimal static completion-gate
 fallback, and cross-platform policy producers:
 
@@ -26,6 +26,12 @@ fallback, and cross-platform policy producers:
 | [**planning-efforts**](skills/planning-efforts/SKILL.md) | The workflow: start, plan, resume, and archive efforts. Governs the canonical effort pattern (folder layout, README schema, lifecycle, journal, the participants seam) and optionally binds a managed worktree to its declared active effort slice. Ships the reference guide and the effort README template as skill assets. |
 | [**efforts-setup**](skills/efforts-setup/SKILL.md) | Adoption: how a repo takes on the efforts system — create the `efforts/` tree and write a short repo **addendum** that specializes the bindings. |
 | [**driving-backlog-burndown**](skills/driving-backlog-burndown/SKILL.md) | Execution: charter a scoped backlog recovery, maintain the item/owner ledger, supervise original owners through verified outcomes, and preserve state across native rollover or explicit transfer. Ships charter, dashboard, checkpoint and handoff templates; no scheduler or runtime is started. |
+| [**driving-effort-agendas**](skills/driving-effort-agendas/SKILL.md) | Opt-in execution aide: coarse agenda nodes, explicit exits, a journal-local worktree cursor and bounded child-return stack. Supplies manual JSON examples, the continuous "what next?" procedure and an optional read-only Python next/check helper; no hook or service is required. |
+
+The optional agenda helper is invoked directly from the skill's payload path
+using an existing Python 3 interpreter and an explicit journal/state-home path.
+It reads and diagnoses; it never creates or mutates agenda state, executes tasks,
+starts services or proves source completion. Manual use needs no helper.
 
 An adopting repository commits
 `.copilot-extensions/efforts/config.json` with the exact version 1 policy:
@@ -97,6 +103,22 @@ portable core.
 
 ## How executor plugins build on efforts
 
+### Optional scope approvals
+
+The canonical effort can capture original upfront approvals and one-time answers
+in **Scope Approvals** or a linked record. Preserve the operator/charter source,
+operations/destinations/owners/effects and accepted blast radius, limits,
+repetition/revision policy and later holds or revocation. Reuse only within that
+scope; plan review and source revisions are not new operational grants.
+
+The [planning procedure](skills/planning-efforts/SKILL.md#capture-and-reuse-scope-approvals)
+and its [record seam](skills/planning-efforts/references/efforts.md#scope-approvals)
+own capture and reuse. Checkpoints and handoffs retain references, exclusions and
+current changes. This is optional, standalone guidance, not an approval runtime;
+deployment, personal-data/disclosure and external-owner effects remain gated.
+
+### Executor ownership
+
 The README's **participants seam** is where executor plugins can plug in. The
 efforts plugin is standalone: a repo can use the README contract with no
 agent-worktrees registration and no executor plugin at all. When executor
@@ -116,8 +138,10 @@ command as optional enrichment. The worktree record owns one
 repository-relative pointer plus declared participant/slice identity; an open
 binding derives the existing follow-up cleanup gate and contributes a bounded
 pointer through agent-worktrees' existing session-conduct hook. The efforts
-plugin still owns no worktree state file and registers no session-start hook;
-its Phase 1 policy producers remain staged and unregistered.
+plugin does not own or rewrite the worktree provider's tracking records.
+Its optional agenda format describes separate agent-local data beside the
+worktree journal; the read-only helper never writes either store. No session-start
+hook is registered; the policy producers remain staged and unregistered.
 
 ## Enable
 

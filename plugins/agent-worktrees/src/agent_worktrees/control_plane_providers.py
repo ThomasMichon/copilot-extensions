@@ -35,6 +35,8 @@ class _ControlPlaneProviderManifest:
     description: str = ""
     provider_root: str = ""
     source_path: str = ""
+    resident_picker_command: tuple[str, ...] = ()
+    resident_picker_session_root: str = ""
 
 
 def _parse_comparable_version(text: str) -> tuple[int, int, int, int] | None:
@@ -153,7 +155,28 @@ def _parse_control_plane_provider_manifest(
     provider_root = payload.get("provider_root", "")
     if not isinstance(provider_root, str):
         raise ValueError("`provider_root` must be a string when present")
-    leaked = _leaked_pytest_tmp_path_segment(source_path, *command, provider_root)
+    resident = payload.get("resident_picker")
+    resident_command: tuple[str, ...] = ()
+    session_root = ""
+    if resident is not None:
+        if (
+            not isinstance(resident, dict) or type(resident.get("version")) is not int
+            or resident["version"] != 1
+            or not isinstance(resident.get("command"), list) or not resident["command"]
+            or any(not isinstance(part, str) or not part for part in resident["command"])
+        ):
+            raise ValueError("`resident_picker` must declare version 1 and an exact command")
+        resident_command = tuple(resident["command"])
+        session = resident.get("session")
+        if session is not None:
+            if (
+                not isinstance(session, dict) or type(session.get("version")) is not int
+                or session["version"] != 1 or not isinstance(session.get("root"), str)
+                or "\0" in session["root"] or not Path(session["root"]).is_absolute()
+            ):
+                raise ValueError("resident session must declare version 1 and an absolute root")
+            session_root = session["root"]
+    leaked = _leaked_pytest_tmp_path_segment(source_path, *command, *resident_command, provider_root, session_root)
     if leaked:
         raise _LeakedTestTmpPathManifestError(
             f"path {leaked!r} looks like a leaked pytest tmp_path -- a test run "
@@ -168,6 +191,8 @@ def _parse_control_plane_provider_manifest(
         description=description,
         provider_root=provider_root,
         source_path=source_path,
+        resident_picker_command=resident_command,
+        resident_picker_session_root=session_root,
     )
 
 

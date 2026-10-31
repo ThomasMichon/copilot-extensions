@@ -15,6 +15,7 @@ import runtime_install as lifecycle
 import tomllib
 
 
+@lifecycle.install_driver.owned
 def run(
     root: Path,
     plugin: Path,
@@ -28,6 +29,7 @@ def run(
     child_timeout: float = 180,
     expected_source_identity: dict | None = None,
     frontend: dict | None = None,
+    recover_adopted_manager: bool = False,
 ) -> dict:
     """Bootstrap installed control code without selecting a replacement slot."""
     governance = lifecycle.Governance(root, payload)
@@ -112,9 +114,11 @@ def run(
                 content = admitted.plugin
                 argv.extend(["--frontend", json.dumps(frontend),
                              "--publication-source-root", str(content)])
+            if recover_adopted_manager:
+                argv.append("--recover-adopted-manager")
             if owner is not None:
                 argv.extend(["--owner", str(owner)])
-            environment = dict(os.environ)
+            environment = lifecycle.install_driver.child_environment()
             for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
                 environment.pop(name, None)
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -137,6 +141,7 @@ def run(
             return json.loads(result_path.read_text(encoding="utf-8"))
 
 
+@lifecycle.install_driver.owned
 def run_owned(
     root: Path,
     plugin: Path,
@@ -151,6 +156,7 @@ def run_owned(
     child_timeout: float = 180,
     frontend: dict | None = None,
     publication_source_root: Path | None = None,
+    recover_adopted_manager: bool = False,
 ) -> dict:
     if mode not in ("repair", "dev", "dev-release"):
         raise lifecycle.InstallationRefused(f"Unsupported whole-operation runtime mode: {mode}")
@@ -262,6 +268,7 @@ def run_owned(
                 if frontend is not None else None
             ),
             child_timeout=child_timeout, base_python=base_python, governance=governance,
+            recover_adopted_manager=recover_adopted_manager,
         )
         result["reused"] = candidate.reused
         return result

@@ -78,6 +78,14 @@ device, socket or published port. The production image uses the installed
 `fleet-manager ... --service-policy ... --tls-config ...` CLI; services import
 the installed SDK, not Gateway source via `PYTHONPATH`.
 
+The witness build selects the invoking user's nonzero UID/GID and prepares
+that account's passwd home and state directory. Fixture services run under
+separate lease supervisors, not their own renewal loops. Each supervisor
+observes a private FIFO whose only writer belongs to the host proof runner;
+runner loss ends renewal and stops the exact service child. The service also
+retains the unattended lease and hard lifetime bound. This does not require a
+shared PID namespace or a mounted Docker socket.
+
 Container IDs come only from per-creation cidfiles; the network ID comes only
 from its creation response. Receipts are written before starting containers.
 `finally` captures bounded owned-container logs, stops/removes only those exact

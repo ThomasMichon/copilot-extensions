@@ -19,6 +19,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import update_stage as us
+from agent_worktrees import status_updater_cli as updater
 
 
 @pytest.fixture(autouse=True)
@@ -434,12 +435,54 @@ def test_spawn_status_updater_noop_on_empty_id():
     assert m._spawn_status_updater("", "/w/x") is False
 
 
+@pytest.mark.parametrize("linked", (False, True))
+def test_parent_agent_home_reaches_real_reservation_before_spawn(tmp_path, monkeypatch, linked):
+    from dataclasses import replace
+    from agent_procutil.daemon_instances import cancel_instance_reservation, reserve_instance
+
+    launch = tmp_path / "launch"
+    home = tmp_path / "selected-home"
+    launch.mkdir()
+    root = home / ".agent-worktrees"
+    root.mkdir(parents=True)
+    selected = home
+    if linked:
+        selected = tmp_path / "linked-home"
+        try:
+            selected.symlink_to(home, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"native directory symlink unavailable: {error}")
+    monkeypatch.chdir(launch)
+    monkeypatch.setenv("AGENT_HOME", "../" + selected.name)
+    monkeypatch.setattr("shutil.which", lambda name: "/private/tmux" if name == "tmux" else None)
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "", ""),
+    )
+    reached = []
+
+    def before_spawn(command, **kwargs):
+        spec = replace(kwargs["instance"], purpose="production", registry_root=tmp_path / "registry")
+        receipt = reserve_instance(spec)
+        try:
+            assert receipt.record_path.is_file()
+            assert spec.runtime_root == selected / ".agent-worktrees"
+            assert kwargs["env"]["AGENT_HOME"] == str(selected)
+            reached.append(True)
+        finally:
+            cancel_instance_reservation(receipt, creation_refused=True)
+        return object()
+
+    monkeypatch.setattr(updater, "spawn_daemon", before_spawn)
+    assert updater._spawn_status_updater("private", None) is (not linked)
+    assert reached == ([] if linked else [True])
+
+
 def test_spawn_status_updater_noop_without_mux(monkeypatch):
     import shutil
 
     monkeypatch.setattr(shutil, "which", lambda _x: None)
     popped: list = []
-    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: popped.append(a))
+    monkeypatch.setattr(updater, "spawn_daemon", lambda *a, **k: popped.append(a))
 
     assert m._spawn_status_updater("x", "/w/x") is False
     assert popped == []
@@ -454,7 +497,7 @@ def test_spawn_status_updater_noop_when_no_live_session(monkeypatch):
         subprocess, "run",
         lambda *a, **k: subprocess.CompletedProcess(a, 1, "", ""))
     popped: list = []
-    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: popped.append(a))
+    monkeypatch.setattr(updater, "spawn_daemon", lambda *a, **k: popped.append(a))
 
     assert m._spawn_status_updater("x", "/w/x") is False
     assert popped == []  # never spawn a loop for a session that isn't under mux
@@ -475,11 +518,7 @@ def test_spawn_status_updater_spawns_detached_when_session_live(monkeypatch):
         captured["kw"] = kw
         return object()
 
-    monkeypatch.setattr(subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(
-        m, "windowless_daemon_kwargs",
-        lambda **_kw: {"windowless_daemon": True},
-    )
+    monkeypatch.setattr(updater, "spawn_daemon", fake_popen)
     monkeypatch.setenv("GH_TOKEN", "secret")
     monkeypatch.setenv("GITHUB_TOKEN", "other-secret")
     monkeypatch.setenv("AGENT_WORKTREES_AHP_AUTH_TOKEN", "handoff-secret")
@@ -492,9 +531,9 @@ def test_spawn_status_updater_spawns_detached_when_session_live(monkeypatch):
     assert argv[argv.index("--session") + 1] == "wt-x"
     assert argv[argv.index("--mux") + 1] == "psmux"
     assert argv[argv.index("--path") + 1] == "/w/x"
-    # Detached: stdio is silenced so the loop never blocks on the hook's pipes.
-    assert captured["kw"].get("stdin") is subprocess.DEVNULL
-    assert captured["kw"]["windowless_daemon"] is True
+    assert captured["kw"]["console_children"] is True
+    assert captured["kw"]["log_path"].name == "status-updater.log"
+    assert captured["kw"]["instance"].service == "agent-worktrees-status-updater"
     assert captured["kw"]["env"]["SAFE_VALUE"] == "kept"
     assert "GH_TOKEN" not in captured["kw"]["env"]
     assert "GITHUB_TOKEN" not in captured["kw"]["env"]
@@ -511,7 +550,7 @@ def test_spawn_status_updater_omits_path_when_absent(monkeypatch):
         lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
     captured: dict = {}
     monkeypatch.setattr(
-        subprocess, "Popen",
+        updater, "spawn_daemon",
         lambda argv, **kw: captured.update(argv=argv) or object())
 
     assert m._spawn_status_updater("x", None) is True
@@ -534,7 +573,7 @@ def test_spawn_status_updater_roots_child_at_home_not_payload(monkeypatch):
         lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
     captured: dict = {}
     monkeypatch.setattr(
-        subprocess, "Popen",
+        updater, "spawn_daemon",
         lambda argv, **kw: captured.update(kw=kw) or object())
 
     assert m._spawn_status_updater("x", "/w/x") is True

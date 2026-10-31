@@ -61,6 +61,7 @@ class HostConfig:
     indexer_nice: int = 10
     store_layout: str | None = None
     fleet_policy: Path | None = None
+    installation_id: str | None = None
 
     def core_environment(self) -> dict[str, str]:
         inline = {"role": "host", "corpus": {"sources": list(self.sources)}}
@@ -98,6 +99,8 @@ class HostConfig:
             result["AGENT_INDEX_STORE_LAYOUT"] = self.store_layout
         if self.fleet_policy is not None:
             result["AGENT_INDEX_FLEET_POLICY"] = str(self.fleet_policy)
+        if self.installation_id is not None:
+            result["AGENT_INDEX_NATIVE_INSTALLATION_ID"] = self.installation_id
         return result
 
 
@@ -122,13 +125,17 @@ def _source(value: Any, index: int) -> dict[str, Any]:
         if "path" in raw or "ref" in raw:
             raise ConfigurationError(f"{label}: path/ref are only supported for git")
     if "auth" in raw:
-        auth = _mapping(raw["auth"], f"{label}.auth", {"account", "gateway"})
+        auth = _mapping(raw["auth"], f"{label}.auth", {"account", "gateway", "relay"})
+        if "gateway" in auth and "relay" in auth:
+            raise ConfigurationError(f"{label}.auth: gateway and relay are mutually exclusive")
         result["auth"] = {"account": _text(auth.get("account"), f"{label}.auth.account")}
         if "gateway" in auth:
             result["auth"]["gateway"] = str(_path(auth["gateway"], f"{label}.auth.gateway"))
+        if "relay" in auth:
+            result["auth"]["relay"] = str(_path(auth["relay"], f"{label}.auth.relay"))
     if "remote" in raw:
-        if kind != "git" or "gateway" not in result.get("auth", {}):
-            raise ConfigurationError(f"{label}.remote requires Git Gateway credentials")
+        if kind != "git" or not ({"gateway", "relay"} & result.get("auth", {}).keys()):
+            raise ConfigurationError(f"{label}.remote requires explicit renewable Git credentials")
         from urllib.parse import urlsplit
 
         remote = _text(raw["remote"], f"{label}.remote")
@@ -140,8 +147,8 @@ def _source(value: Any, index: int) -> dict[str, Any]:
         ):
             raise ConfigurationError(f"{label}.remote must be a credential-free HTTPS URL")
         result["remote"] = remote
-    if kind == "git" and "gateway" in result.get("auth", {}) and "remote" not in result:
-        raise ConfigurationError(f"{label}: Git Gateway credentials require remote")
+    if kind == "git" and ({"gateway", "relay"} & result.get("auth", {}).keys()) and "remote" not in result:
+        raise ConfigurationError(f"{label}: renewable Git credentials require remote")
     if "trust_domain" in raw:
         result["trust_domain"] = _text(raw["trust_domain"], f"{label}.trust_domain")
     return result
@@ -151,7 +158,7 @@ def parse_config(value: Any, config_file: Path) -> HostConfig:
     raw = _mapping(
         value, "config",
         {"schema_version", "home", "data", "routing", "listener", "sources", "engine",
-         "limits", "store", "fleet"},
+         "limits", "store", "fleet", "installation_id"},
     )
     if type(raw.get("schema_version")) is not int or raw["schema_version"] != 1:
         raise ConfigurationError("schema_version must be 1")
@@ -189,6 +196,13 @@ def parse_config(value: Any, config_file: Path) -> HostConfig:
         layout = "source-aware-v1"
     if "fleet" in raw and layout is None:
         raise ConfigurationError("fleet requires explicit store.layout source-aware-v1")
+    installation_id = None
+    if "installation_id" in raw:
+        installation_id = _text(raw["installation_id"], "installation_id")
+        if len(installation_id) > 256 or any(
+            not 32 < ord(char) < 127 for char in installation_id
+        ):
+            raise ConfigurationError("installation_id must be bounded visible ASCII")
     return HostConfig(
         config_file=config_file.resolve(),
         home=home,
@@ -205,6 +219,7 @@ def parse_config(value: Any, config_file: Path) -> HostConfig:
         ),
         indexer_nice=_integer(limits.get("indexer_nice", 10), "limits.indexer_nice", 0, 19),
         store_layout=layout,
+        installation_id=installation_id,
         fleet_policy=(
             _path(_mapping(raw["fleet"], "fleet", {"policy"}).get("policy"), "fleet.policy")
             if "fleet" in raw else None

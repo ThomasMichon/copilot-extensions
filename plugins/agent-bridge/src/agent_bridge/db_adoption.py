@@ -6,6 +6,13 @@ import sqlite3
 
 from .db import Database, SCHEMA_VERSION
 from .runtime_custody import validate_schema
+from .inbox_custody import validate_schema as validate_inbox_schema
+from .inbox_consumer_schema import validate_schema as validate_consumer_schema
+from .turn_custody_schema import validate_schema as validate_turn_schema
+from .acquisition_custody_schema import validate_schema as validate_acquisition_schema
+from .creation_custody_schema import validate_schema as validate_creation_schema
+from .creation_launch_schema import validate_schema as validate_creation_launch_schema
+from .provider_creation_launch_schema import validate_schema as validate_provider_launch_schema
 
 
 def open_existing_writable(source: Database) -> Database:
@@ -43,6 +50,13 @@ def open_existing_writable(source: Database) -> Database:
                 "supported writable preparation or migration is needed"
             )
         validate_schema(conn)
+        validate_inbox_schema(conn)
+        validate_consumer_schema(conn)
+        validate_turn_schema(conn)
+        validate_acquisition_schema(conn)
+        validate_creation_schema(conn)
+        validate_creation_launch_schema(conn)
+        validate_provider_launch_schema(conn)
         if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
             raise ValueError("Writable adoption requires an existing WAL database")
         conn.rollback()

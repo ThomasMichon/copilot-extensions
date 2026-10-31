@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve noneditable installed-environment admission while accepting ordinary immutable wheel-cache hardlinks and safe cache retirement; retain symlink, reparse, editable-origin and external-path-hook refusals.",
+  "changes": [
+    {
+      "plugin": "libs/versioned-runtime",
+      "type": "patch"
+    }
+  ]
+}

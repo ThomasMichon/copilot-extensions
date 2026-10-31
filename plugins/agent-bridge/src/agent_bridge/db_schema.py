@@ -24,6 +24,20 @@ class _SchemaMixin:
     def _init_schema(self) -> None:
         """Create tables if they don't exist, run migrations."""
         from .runtime_custody import ensure_schema, validate_schema
+        from .inbox_custody import ensure_schema as ensure_inbox_schema
+        from .inbox_custody import validate_schema as validate_inbox_schema
+        from .inbox_consumer_schema import ensure_schema as ensure_consumer_schema
+        from .inbox_consumer_schema import validate_schema as validate_consumer_schema
+        from .turn_custody_schema import ensure_schema as ensure_turn_schema
+        from .turn_custody_schema import validate_schema as validate_turn_schema
+        from .acquisition_custody_schema import ensure_schema as ensure_acquisition_schema
+        from .acquisition_custody_schema import validate_schema as validate_acquisition_schema
+        from .creation_custody_schema import ensure_schema as ensure_creation_schema
+        from .creation_custody_schema import validate_schema as validate_creation_schema
+        from .creation_launch_schema import ensure_schema as ensure_creation_launch_schema
+        from .creation_launch_schema import validate_schema as validate_creation_launch_schema
+        from .provider_creation_launch_schema import ensure_schema as ensure_provider_launch_schema
+        from .provider_creation_launch_schema import validate_schema as validate_provider_launch_schema
 
         conn = self._get_conn()
         with self._write_lock:
@@ -33,13 +47,44 @@ class _SchemaMixin:
                 recorded = conn.execute("SELECT version FROM schema_version").fetchone()
                 if recorded is not None and recorded["version"] >= 28:
                     validate_schema(conn)
+                if recorded is not None and recorded["version"] >= 30:
+                    validate_inbox_schema(conn)
+                if recorded is not None and recorded["version"] >= 31:
+                    validate_consumer_schema(
+                        conn, require_history_indexes=recorded["version"] >= 32,
+                        require_recovery_index=recorded["version"] >= 33,
+                    )
+                if recorded is not None and recorded["version"] >= 34:
+                    validate_turn_schema(conn)
+                if recorded is not None and recorded["version"] >= 35:
+                    validate_acquisition_schema(conn)
+                if recorded is not None and recorded["version"] >= 36:
+                    validate_creation_schema(conn)
+                if recorded is not None and recorded["version"] >= 37:
+                    validate_creation_launch_schema(conn)
+                if recorded is not None and recorded["version"] >= 38:
+                    validate_provider_launch_schema(conn)
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
             if row is None:
                 self._ensure_current_columns(conn)
                 ensure_schema(conn)
+                ensure_inbox_schema(conn)
+                ensure_consumer_schema(conn)
+                ensure_turn_schema(conn)
+                ensure_acquisition_schema(conn)
+                ensure_creation_schema(conn)
+                ensure_creation_launch_schema(conn)
+                ensure_provider_launch_schema(conn)
                 validate_schema(conn)
+                validate_inbox_schema(conn)
+                validate_consumer_schema(conn)
+                validate_turn_schema(conn)
+                validate_acquisition_schema(conn)
+                validate_creation_schema(conn)
+                validate_creation_launch_schema(conn)
+                validate_provider_launch_schema(conn)
                 conn.execute(
                     "INSERT INTO schema_version (version) VALUES (?)",
                     (SCHEMA_VERSION,),
@@ -51,6 +96,13 @@ class _SchemaMixin:
                     self._migrate(conn, current)
             self._ensure_current_columns(conn)
             validate_schema(conn)
+            validate_inbox_schema(conn)
+            validate_consumer_schema(conn)
+            validate_turn_schema(conn)
+            validate_acquisition_schema(conn)
+            validate_creation_schema(conn)
+            validate_creation_launch_schema(conn)
+            validate_provider_launch_schema(conn)
             conn.commit()
 
     def _ensure_current_columns(self, conn: sqlite3.Connection) -> None:
@@ -707,3 +759,84 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (29,))
             conn.commit()
             log.info("Schema migrated to version 29: durable cold-recovery stop gate")
+
+        if from_version < 30:
+            from .inbox_custody import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (30,))
+            conn.commit()
+            log.info("Schema migrated to version 30: retained inbox handoff storage")
+
+        if from_version < 31:
+            from .inbox_consumer_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (31,))
+            conn.commit()
+            log.info("Schema migrated to version 31: durable current inbox consumer")
+
+        if from_version < 32:
+            from .inbox_consumer_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (32,))
+            conn.commit()
+            log.info("Schema migrated to version 32: indexed retained inbox admission history")
+
+        if from_version < 33:
+            from .inbox_consumer_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (33,))
+            conn.commit()
+            log.info("Schema migrated to version 33: indexed pending inbox handoff recovery")
+
+        if from_version < 34:
+            from .turn_custody_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (34,))
+            conn.commit()
+            log.info("Schema migrated to version 34: retained original native turn handoffs")
+
+        if from_version < 35:
+            from .acquisition_custody_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (35,))
+            conn.commit()
+            log.info("Schema migrated to version 35: retained original acquisition launch custody")
+
+        if from_version < 36:
+            from .creation_custody_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (36,))
+            conn.commit()
+            log.info("Schema migrated to version 36: retained original keyed creation custody")
+
+        if from_version < 37:
+            from .creation_launch_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (37,))
+            conn.commit()
+            log.info("Schema migrated to version 37: retained original creation native observations")
+
+        if from_version < 38:
+            from .provider_creation_launch_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (38,))
+            conn.commit()
+            log.info("Schema migrated to version 38: retained original provider native observations")

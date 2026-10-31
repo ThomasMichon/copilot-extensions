@@ -1,6 +1,6 @@
 {
   "name": "efforts",
-  "description": "Efforts planning system for Copilot CLI -- comprehensive planning folders that represent a stretch of work (premise + plan + validation plan + journal + participant coordination), with explicit repository adoption, a read-only target capability probe, a README-as-shared-contract, a static completion-gate fallback, and a staged session policy producer. Ships planning-efforts, efforts-setup and a charter-driven backlog burndown skill with tracking and continuity templates.",
+  "description": "Efforts planning and continuity for Copilot CLI: canonical effort contracts, explicit adoption, completion gates, backlog recovery and an optional agenda companion with exit criteria and bounded detour/return guidance.",
   "version": "0.1.0-dev22",
   "author": {
     "name": "Thomas Michon"

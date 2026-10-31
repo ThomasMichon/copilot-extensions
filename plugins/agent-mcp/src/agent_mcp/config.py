@@ -28,6 +28,7 @@ import yaml
 
 from ._predicate import validate_predicate
 from .config_routing import RoutingSpec as RoutingSpec, _deep_merge, _parse_routing
+from .home import default_home_dir
 
 # Transport kinds (mirror MCP server-launch ``type`` values, plus ``cli`` --
 # the local CLI->MCP responder that has no upstream MCP at all).
@@ -72,7 +73,7 @@ PARSE_MODES = ("keyvalue", "raw")
 DECORATOR_TYPES = ("filter", "rename", "defer", "code-mode", "storage", "transform",
                     "gate", "input_gate")
 
-BRIDGES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "bridges"
+BRIDGES_DIR = default_home_dir() / "bridges"
 
 
 def _marketplace_roots() -> list[Path]:
@@ -131,15 +132,11 @@ def _live_marketplace_roots() -> list[Path]:
         return found
     return []
 
-# Machine-local config overlays. A bridge config keyed ``id`` (or, absent that,
-# its filename stem with a trailing ``.mcp`` stripped) may be overridden per-host
-# by a file ``~/.agent-mcp/overrides/<id>.{yaml,yml,json}`` that is deep-merged
-# over the committed config at load time. This is the *by-convention*,
-# **env-free** way to vary any field (a local endpoint URL, a token/vault-entry
-# name, headers) on one machine without editing the shared config or exporting
-# an environment variable. Mappings merge recursively; scalars and lists in the
-# overlay replace the base.
-OVERRIDES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "overrides"
+# Machine-local overlays use <home>/overrides/<id>.{yaml,yml,json}.
+# The key is the explicit id or filename stem without its trailing ".mcp".
+# Loading deep-merges mappings; overlay scalars and lists replace the base.
+# This varies local endpoints, auth and headers without editing shared configs.
+OVERRIDES_DIR = default_home_dir() / "overrides"
 
 
 class ConfigError(ValueError):

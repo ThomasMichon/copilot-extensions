@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve completed launch-admission replay after optional machine naming changes, with original receipt and receiving-namespace proof",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

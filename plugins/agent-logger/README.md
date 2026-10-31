@@ -54,8 +54,8 @@ session-to-log pipeline out of any single bespoke service:
   hard-coded. The plugin ships **no persona** — a repository opts into styling
   through manifest fields in its organization config.
 - **Standalone runtime.** The plugin does not require a repo to be registered
-  as an agent-worktrees harness. A session-start hook cheaply stamps a
-  self-provisioning `agent-logger` binstub when hooks are available, and the
+  as an agent-worktrees harness. A session-start hook submits a background
+  `stamp` request for the self-provisioning binstub when hooks are available, and the
   operational skills include the same readiness path for hosts that only load
   skills.
 - **Local state stays local.** The runtime home (`~/.agent-logger/`, or
@@ -64,12 +64,58 @@ session-to-log pipeline out of any single bespoke service:
 - **Three deployment topologies** from one plugin — see
   [`docs/deployment-topologies.md`](docs/deployment-topologies.md).
 
+`install.ps1 uninstall` / `install.sh uninstall` removes the owned sync task or
+timer, compatibility commands, runtime generations, payload snapshots and
+generated dispatchers. Digests, configuration, session state, databases and
+unrecognized root content remain for reinstall. `-DryRun` / `--dry-run`
+previews removal without deleting those artifacts. The installer transaction
+lock remains in place; uninstall does not purge the runtime home.
+Removal requires the deployment manifest to identify Logger, or a Logger
+project snapshot addressed inside that runtime home's snapshot directory.
+Missing, malformed, foreign or externally redirected ownership refuses removal
+before changing the task or commands.
+Legacy removal also rejects installation-cell/managed metadata and a different
+command source or lifecycle owner. It disables new scheduled starts, refuses
+an active sync task/service or runtime process, and removes generations under
+construction/retention custody. Persistent snapshot coordination inodes remain.
+Validated stamped-only ownership is recorded in the existing deployment
+manifest before destructive cleanup; ownership metadata is removed last so a
+partial removal can be retried without requiring the deleted snapshot.
+Uninstall helpers/interpreters must be outside removable content (the retained
+installer staging area is allowed). Linux checks full current-user command
+lines and refuses ambiguously attributed Logger processes, including PATH
+launches through symlinked virtualenv interpreters; unavailable native process
+inspection refuses removal.
+Uninstall roots cannot contain `..` components. Relative selections are bound
+before installer staging (and against PowerShell's provider location on Windows).
+POSIX removal children use the shared finite-process supervisor so timeout
+settlement completes before the caller releases its install/generation custody.
+
 ## Source-qualified runtimes
+
+The legacy/default-root session bootstrap uses its packaged installation Driver
+foundation, without requiring Python, `uv`, or Manager on the caller PATH.
+First use submits `stamp`; deployed-runtime drift submits `install`, retaining
+the canonical four-hour sync/prune task or timer reconciliation. `provision`
+remains service-less and is not the bootstrap drift action. Healthy runtimes,
+selected installation contexts and the shared bootstrap killswitch remain
+non-publication no-ops. No-self-provision and pinned-context controls defer
+publication; missing/skewed helpers, unsupported publication scopes and managed
+deployment report explicit readiness failures without a direct installer fallback.
+
+The 15-second hook returns one `{}`. Its launch acknowledgement names the
+Driver diagnostic log, not a durable receipt or installation success. The same
+ordinary queue/result records acceptance and the eventual outcome after the
+caller exits; no separate bootstrap lock or age-based process reaper remains.
+Cold-store provider registration (10 seconds) and exact-session guidance
+(45 seconds) retain independent hook ownership and exact payload command identity.
 
 Native `stamp`, `provision`, `install` and `update` admit publication before
 creating or reclaiming staging directories. An available bootstrap Python uses
 the [shared source-qualified lifecycle](../../libs/payload-invocation/README.md#source-qualified-command-binding),
 including live management-purpose custody and revalidation by the staged child.
+POSIX legacy deploy-manifest refreshes also use its canonical manifest writer,
+preserving and completing the original source's command reservation and binding.
 PowerShell accepts `-BootstrapPython` to select an existing absolute interpreter.
 Absent Python, the canonical native deployment probe preserves missing-policy
 and explicit standalone stamping and refuses managed or invalid policy without
@@ -102,16 +148,36 @@ Legacy snapshots retain
 for fresh-process policy admission, including stamps made without Python.
 The live deployment policy is never cached as permission in that evidence.
 Generated compatibility wrappers and payload-local commands resolve a healthy
-runtime before considering publication. Cold misses defer durable resolver
-tracing until the live canonical deployment decision admits publication, before
-any provision status or orchestration-lock write. Payload-local commands check
-the validated selected installation root, including namespaced cells; they do
-not substitute legacy-root policy. Healthy managed runtimes remain callable
-without invoking an installer, and retain their normal resolution trace.
-An older deployed resolver without the deferred-trace contract, or a cold
-snapshot without the admission helper, returns an explicit readiness error
-without writing runtime state; update/re-enable the plugin or use explicit
-installation management rather than falling back to unguarded provisioning.
+runtime before considering publication. Cold legacy commands submit the same
+caller-independent Driver `provision` request and wait as observers; no outer
+provisioning lock, status writer or foreground installer remains. The primary
+and five auxiliary wrappers retain the exact selected snapshot, never an
+arbitrary installed-payload fallback. The snapshot dispatcher and packaged
+client must declare their queued-command support before cold invocation.
+Publication and exact source/root/project are revalidated by the existing
+canonical admission/execution owners.
+Fresh legacy deploy-manifest publication uses the canonical command-binding
+writer on both native paths, preserving the active lifecycle reservation
+without an intermediate unbound manifest.
+
+Healthy managed and installation-cell runtimes remain callable without
+installer work, preserving the command's module arguments and exit status.
+An auxiliary wrapper selecting an older dispatcher requires its existing
+no-self-provision control and delegates in that explicit mode: the dispatcher
+resolves its effective context/root, not the wrapper's global compatibility
+root. A healthy cell remains usable
+when the global runtime is absent; a healthy global runtime never authorizes
+construction at a cold custom root.
+Cold custom-root/cell construction remains explicitly unsupported through
+this Driver recipe rather than silently using legacy-root policy. An older
+resolver without the read-only contract or cold dispatcher/client without
+queued-command support returns an explicit readiness error before state
+writes; update/re-enable the plugin or use explicit installation management.
+The bootstrap's drift `install` still reconciles task/timer registration;
+command-side service-less `provision` does not register or start periodic
+session processing. The manual `logger-commands` Windows/Ubuntu portfolio
+qualifies actual emitted wrappers, caller loss, source independence and safe
+installed consumers separately from host rollout.
 Identical inputs reuse snapshots and completion evidence. Recovery requires an
 exact current or last-known-good selector rather than ordering source hashes.
 `agent-logger version` reports the selected source generation without changing
@@ -308,6 +374,18 @@ identity, or credential is ever repo-configurable. Invalid or unsafe
 configuration fails explicitly instead of silently falling back.
 
 ### Discovering a fleet config repo for the scheduled sync
+
+The Windows task uses a GUI Python launcher and `CREATE_NO_WINDOW` so
+interactive-logon maintenance does not allocate a visible terminal. The task
+reports the sync command's exit code and retains the latest run's output in
+`<install-root>/logs/session-sync.log`. Accounting enumeration ignores dot-prefixed internal
+metadata directories under `session-state`; invalid session identities still
+fail explicitly.
+
+Accounting capture reads at most 32 sessions per batch and splits batches that
+exceed the existing per-read row budget. Large corpora therefore retain complete
+per-session evidence without increasing read limits. A single session exceeding
+that budget still fails explicitly; healthy sibling batches continue.
 
 The scheduled sync (a systemd user timer on POSIX, a Scheduled Task on
 Windows) runs with no meaningful working directory of its own, so it can't

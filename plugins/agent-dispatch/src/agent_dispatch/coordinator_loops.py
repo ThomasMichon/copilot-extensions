@@ -18,7 +18,7 @@ from .config import DEFAULT_HANDOFF_FALLBACK_GRACE, DEFAULT_ORPHAN_GRACE
 from .events import EventBus
 from .loop_governance import LoopGovernance
 from .procutil import run_agent_worktrees_capture
-from .queue import Status, Task, TaskQueue, machine_matches
+from .queue import Status, Task, TaskError, TaskQueue, machine_matches
 from .worktree_status_relay import WorktreeStatusRelayStore
 
 log = logging.getLogger("agent-dispatch.coordinator")
@@ -198,6 +198,7 @@ def _spawn_self_deploy(python_path: Any) -> None:
     # so it must not pin whatever checkout was current when the check fired.
     spawn_dispatch_daemon(
         cmd,
+        finite_worker=True,
         log_name="logs/self-deploy.log",
         env={**os.environ, **windowless_python_env(python_path)},
         console_children=False,
@@ -422,7 +423,10 @@ async def _gc_loop(
     run_supervised_cycle: Callable[..., Any] = _run_supervised_cycle,
     governance_backoff: Callable[..., Any] = _governance_backoff,
 ) -> None:
-    """Periodically garbage-collect tasks by **liveness**."""
+    """Maintain diagnostics; garbage-collect tasks only when interval is enabled."""
+    from .diagnostic_logs import MAINTENANCE_SECONDS, maintain_file_logging
+
+    gc_enabled = bool(interval and interval > 0)
     # The reviewer-deadline reconcile below is a second, independent unit of
     # work piggybacked onto this same loop iteration. It must NOT share
     # ``health`` (the publicly reported ``liveness_gc`` entry): reusing one
@@ -437,7 +441,10 @@ async def _gc_loop(
         name="liveness_gc.reviewer_deadline", base_interval=health.base_interval
     )
     while True:
-        await asyncio.sleep(health.current_interval)
+        await asyncio.sleep(health.current_interval if gc_enabled else MAINTENANCE_SECONDS)
+        await asyncio.to_thread(maintain_file_logging)
+        if not gc_enabled:
+            continue
         if await governance_backoff(
             governance,
             "iteration-boundary:liveness-gc",
@@ -750,8 +757,12 @@ def _attempt_handoff_fallback(
     spawn_fn: Callable[..., Any] | None = None,
 ) -> str:
     """Attempt exactly one fallback launch for ``task``."""
-    if not queue.claim_handoff_fallback(task.id):
-        return "skipped"
+    try:
+        if not queue.claim_handoff_fallback(task.id):
+            return "skipped"
+    except TaskError as exc:
+        log.info("handoff fallback inhibited for task %s: %s", task.id, exc)
+        return "inhibited"
     from . import bridge
     from .handoff_fallback_seed import build_fallback_seed
 

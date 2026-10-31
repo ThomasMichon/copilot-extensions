@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -18,11 +19,32 @@ from promotion_python_artifacts import (
 )
 from verify_promotion_workflows import VerificationError
 from standalone_python_artifacts import artifact_label
+from release_controller_contract import required_mode_arguments
+
+CONTROLLER_REQUIRED_ARGUMENTS = (
+    (("publish",), (), ("--merged-commit", "--candidate-commit", "--dev-head")),
+    (("prepare",), (), ("--candidate-commit", "--dev-head")),
+    (("publish-candidate",), (), (
+        "--candidate-commit", "--dev-head", "--main-before", "--promotion-run",
+        "--candidate-root", "--qualification-receipt",
+    )),
+    (("publish-candidate",), ("source-units-v2", "candidate-units-v3"), (
+        "--unit-packet-dir", "--unit-manifest", "--dev-root",
+    )),
+)
+SOURCE_CANDIDATE_REQUIRED_ARGUMENTS = (
+    (("publish-candidate",), ("source-units-v2", "candidate-units-v3"), ("--complete-source-dir",)),
+)
+_ATTESTATION_TIMEOUT = 120
+_PUBLIC_GOOD_INIT_ERROR = (
+    "Error: failed to choose verifier based on provided bundle issuer: "
+    "public good verifier is not available (initialization may have failed)"
+)
 
 
 def _gh(
     argv: list[str], *, verification: bool = False, binary: bool = False,
-    timeout: int = 120,
+    timeout: float = _ATTESTATION_TIMEOUT,
 ) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     if verification and "ARTIFACT_VERIFY_TOKEN" in env:
@@ -63,12 +85,26 @@ def verify_attestation_subject(
         raise PromotionArtifactError("invalid expected attestation identity")
     if path.is_symlink() or not path.is_file():
         raise PromotionArtifactError(f"{path.name}: unsafe attestation subject")
-    _check(_gh([
+    argv = [
         "attestation", "verify", str(path), "--repo", repository,
         "--signer-workflow", f"{repository}/.github/workflows/validate-and-promote.yml",
         "--signer-digest", signer_digest, "--source-digest", source_digest,
         "--source-ref", source_ref, "--deny-self-hosted-runners",
-    ], verification=True))
+    ]
+    deadline = time.monotonic() + _ATTESTATION_TIMEOUT
+    result = _gh(argv, verification=True)
+    if result.returncode == 1 and result.stderr.strip().splitlines()[-1:] == [
+        _PUBLIC_GOOD_INIT_ERROR,
+    ]:
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            print(
+                "gh attestation: Public Good verifier initialization unavailable; "
+                "retrying once with unchanged policy and remaining deadline",
+                file=sys.stderr,
+            )
+            result = _gh(argv, verification=True, timeout=remaining)
+    _check(result)
 
 
 def verify_attestations(
@@ -390,27 +426,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--candidate-root", type=Path)
     parser.add_argument("--qualification-receipt", type=Path)
     parser.add_argument(
-        "--qualification-profile", choices=("legacy-ci-v1", "source-units-v2"), default="legacy-ci-v1",
+        "--qualification-profile", choices=("legacy-ci-v1", "source-units-v2", "candidate-units-v3"), default="legacy-ci-v1",
     )
     parser.add_argument("--unit-packet-dir", type=Path)
+    parser.add_argument("--complete-source-dir", type=Path)
     parser.add_argument("--unit-manifest")
     parser.add_argument("--dev-root", type=Path)
     parser.add_argument("--github-output", type=Path)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args(argv)
-    if args.operation == "publish" and (
-        not args.merged_commit or not args.candidate_commit or not args.dev_head
-    ):
-        parser.error("publish requires --merged-commit, --candidate-commit and --dev-head")
-    if args.operation == "prepare" and (not args.candidate_commit or not args.dev_head):
-        parser.error("prepare requires --candidate-commit and --dev-head")
-    if args.operation == "publish-candidate" and not all((
-        args.candidate_commit, args.dev_head, args.main_before, args.promotion_run,
-        args.candidate_root, args.qualification_receipt,
-    )):
-        parser.error("publish-candidate requires candidate, source, base and qualification identities")
+    missing = sorted(
+        flag for flag in required_mode_arguments(
+            args.operation, args.qualification_profile, CONTROLLER_REQUIRED_ARGUMENTS,
+        ) if not getattr(args, flag.removeprefix("--").replace("-", "_"))
+    )
+    if missing:
+        parser.error(f"{args.operation} requires " + ", ".join(missing))
     unit_inputs = (args.unit_packet_dir, args.unit_manifest, args.dev_root)
-    if args.qualification_profile == "source-units-v2":
+    if args.qualification_profile in ("source-units-v2", "candidate-units-v3"):
         if args.operation != "publish-candidate" or any(value is None for value in unit_inputs):
             parser.error("source-units-v2 publication requires candidate publication, unit packet, manifest and Dev checkout")
     elif any(value is not None for value in unit_inputs):
@@ -422,14 +455,14 @@ def main(argv: list[str] | None = None) -> int:
                 raise PromotionArtifactError("candidate publication requires independent consumer read authority")
             from qualify_promotion_candidate import verify_receipt
 
-            if args.qualification_profile == "source-units-v2":
+            if args.qualification_profile in ("source-units-v2", "candidate-units-v3"):
                 from promotion_unit_contract import decode_json
 
                 receipt = decode_json(args.qualification_receipt.read_bytes())
             else:
                 receipt = json.loads(args.qualification_receipt.read_text(encoding="utf-8"))
             unit_arguments = {}
-            if args.qualification_profile == "source-units-v2":
+            if args.qualification_profile in ("source-units-v2", "candidate-units-v3"):
                 unit_arguments = {
                     "dev_root": args.dev_root, "unit_packet_dir": args.unit_packet_dir,
                     "unit_manifest": args.unit_manifest,
@@ -450,6 +483,11 @@ def main(argv: list[str] | None = None) -> int:
             args.operation == "publish-candidate" and signed_index["schema_version"] == 2
         )
         if source_candidate:
+            if any(not getattr(args, flag.removeprefix("--").replace("-", "_"))
+                   for flag in required_mode_arguments(
+                       args.operation, args.qualification_profile, SOURCE_CANDIDATE_REQUIRED_ARGUMENTS,
+                   )):
+                raise PromotionArtifactError("source candidate publication requires complete source subjects")
             from promotion_artifact_readiness import verify_ready_artifact_set
 
             tag, index = verify_ready_artifact_set(
@@ -492,6 +530,24 @@ def main(argv: list[str] | None = None) -> int:
                 "index_digest": hashlib.sha256((args.directory / INDEX_NAME).read_bytes()).hexdigest(),
                 "artifacts": index["artifacts"],
             }
+            if source_candidate and args.qualification_profile in ("source-units-v2", "candidate-units-v3"):
+                from promotion_release_evidence import publish_evidence
+
+                publication["unit_evidence"] = publish_evidence(
+                    args.directory, packet_directory=args.unit_packet_dir,
+                    repository=args.repository, tag=tag, dev_sha=args.dev_head,
+                    candidate_sha=args.candidate_commit, index=index, receipt=receipt,
+                    qualification_digest=qualification_digest,
+                )
+                print(f"unit-evidence-published: {tag}/{publication['unit_evidence']['filename']}")
+                from promotion_release_evidence import publish_complete_source
+
+                publication["complete_source"] = publish_complete_source(
+                    args.directory, source_directory=args.complete_source_dir,
+                    repository=args.repository, tag=tag, index=index, receipt=receipt,
+                    qualification_digest=qualification_digest,
+                )
+                print(f"complete-source-published: {tag}/{args.candidate_commit}")
             digest = hashlib.sha256(json.dumps(publication, sort_keys=True).encode()).hexdigest()
             if args.github_output is not None:
                 with args.github_output.open("a", encoding="utf-8") as output:

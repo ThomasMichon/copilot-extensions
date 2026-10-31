@@ -6,9 +6,116 @@ cap (pivot-streaming-transport Phase 3b, mirroring Phase 3a's own
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 
 log = logging.getLogger("agent-bridge")
+
+
+class _RosterHosting:
+    """Keep the cache's original discovery operations beyond cancelled joiners."""
+
+    def __init__(self, cache):
+        self.cache = cache
+        self.discoveries = set()
+        self.stopping = None
+        prior = cache._discovery_task
+        self.unknown_discovery = (
+            cache._discovery_generation > 1
+            or (prior is None and cache._discovery_started_at is not None)
+        )
+        if self.unknown_discovery:
+            log.warning("Late roster attachment lacks discovery history; retaining unknown completion")
+        if prior is not None:
+            if (
+                not prior.done()
+                and inspect.getcoroutinestate(prior.get_coro()) == inspect.CORO_CREATED
+            ):
+                prior.cancel()
+                self._retain(prior, lambda: False)
+            else:
+                self._retain(prior, lambda: True)
+                if not prior.done():
+                    async def join_prior():
+                        await asyncio.shield(prior)
+
+                    cache._discovery_task = asyncio.create_task(join_prior())
+        original = cache._do_scan_discovery
+
+        async def discover(generation):
+            dispatched = False
+
+            async def operation():
+                nonlocal dispatched
+                if cache._stopping or generation != cache._discovery_generation:
+                    return
+                dispatched = True
+                await original(generation)
+
+            owner = asyncio.create_task(operation())
+            self._retain(owner, lambda: dispatched)
+            return await asyncio.shield(owner)
+
+        cache._do_scan_discovery = discover
+
+    def _retain(self, owner, dispatched):
+        self.discoveries.add(owner)
+
+        def completed(task):
+            if task.cancelled() and dispatched():
+                log.warning("Discovery owner cancelled; retaining unknown native completion")
+                return
+            self.discoveries.discard(task)
+            if not task.cancelled():
+                task.exception()
+
+        owner.add_done_callback(completed)
+
+    async def _stop(self):
+        # Retained native results must still pass the cache's original token
+        # check; a stopped generation must never publish a belated report.
+        if not self.cache._stopping:
+            self.cache._discovery_generation += 1
+        await self.cache.stop()
+
+    async def stop(self, *, settle):
+        if self.stopping is None:
+            self.stopping = asyncio.create_task(self._stop())
+        cancellation = None
+        failure = None
+        while True:
+            try:
+                await asyncio.shield(self.stopping)
+                break
+            except asyncio.CancelledError as error:
+                cancellation = error
+                if self.stopping.cancelled():
+                    self.stopping = asyncio.create_task(self._stop())
+            except Exception as error:
+                failure = error
+                break
+        if settle:
+            while self.pending:
+                try:
+                    await asyncio.sleep(.02)
+                except asyncio.CancelledError as error:
+                    cancellation = error
+        if cancellation is not None:
+            raise cancellation
+        if failure is not None:
+            raise failure
+
+    @property
+    def pending(self):
+        native = self.cache._provider_work
+        return (
+            self.unknown_discovery
+            or any(task.cancelled() or not task.done() for task in self.discoveries)
+            or any(not task.done() for task in self.cache._owned_scans)
+            or any(not task.done() for task in native.reads)
+            or any(not future.done() for future in native.samples)
+        )
 
 
 async def start_agent_roster_cache(app, resolver, cfg) -> None:
@@ -31,10 +138,11 @@ async def start_agent_roster_cache(app, resolver, cfg) -> None:
 
     if not isinstance(resolver, AgentResolver):
         return
-    await stop_agent_roster_cache(app)
+    await stop_agent_roster_cache(app, settle=False)
     roster_cache = AgentRosterCache(
         resolver, refresh_interval=cfg.agent_roster_cache_interval,
     )
+    roster_cache._hosting_custody = _RosterHosting(roster_cache)
     app.state.agent_roster_cache = roster_cache
     roster_cache.start()
     warmed = await roster_cache.wait_until_warm(timeout=30.0)
@@ -64,7 +172,31 @@ async def start_agent_roster_cache(app, resolver, cfg) -> None:
             )
 
 
-async def stop_agent_roster_cache(app) -> None:
+async def stop_agent_roster_cache(app, *, settle=True) -> None:
     roster_cache = getattr(app.state, "agent_roster_cache", None)
     if roster_cache is not None:
-        await roster_cache.stop()
+        custody = getattr(roster_cache, "_hosting_custody", None)
+        if custody is None:
+            custody = roster_cache._hosting_custody = _RosterHosting(roster_cache)
+        retired = getattr(app.state, "retiring_agent_rosters", None)
+        if retired is None:
+            retired = app.state.retiring_agent_rosters = []
+        if custody not in retired:
+            retired.append(custody)
+    retired = getattr(app.state, "retiring_agent_rosters", [])
+    cancellation = None
+    failure = None
+    try:
+        for custody in tuple(retired):
+            try:
+                await custody.stop(settle=settle)
+            except asyncio.CancelledError as error:
+                cancellation = error
+            except Exception as error:
+                failure = error
+    finally:
+        retired[:] = [custody for custody in retired if custody.pending]
+    if cancellation is not None:
+        raise cancellation
+    if failure is not None:
+        raise failure

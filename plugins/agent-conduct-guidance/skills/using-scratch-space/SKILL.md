@@ -1,7 +1,7 @@
 ---
 name: using-scratch-space
 description: >
-  Resolves a portable scratch root and a per-task, timestamped subfolder
+  Resolves a portable scratch root and a per-task, owner-stamped dated subfolder
   convention before an agent writes an ad hoc working file outside a
   repository checkout -- a downloaded artifact, an intermediate log, a draft
   PR/issue body, a one-off JSON/text dump, captured command output. Use
@@ -125,15 +125,22 @@ to write one scratch file; only escalate if even the operating system's
 temporary-folder system isn't writable, or (for sensitive content) its
 privacy can't be verified or established.
 
-## One timestamped subfolder per task
+## One owner-stamped, timestamped subfolder per task
 
 Within the resolved root, create a single subfolder per distinct task before
 writing anything into it:
 
 ```text
-<root>/<task-slug>-<YYYYMMDD-HHMMSS>/
+<root>/<owner-stamp>-<task-slug>-<YYYYMMDD-HHMMSS>/
 ```
 
+- `<owner-stamp>` -- a short, recognizable token for the **owning worktree**,
+  optionally prefixed by its repository token. Use the existing identity, not
+  the name of a checkout merely being inspected. When no worktree identity
+  exists, use a known session token; if neither exists, label it `standalone`
+  and record that ownership is unavailable rather than inventing an identity.
+  Apply the same portable grammar as the task slug, keep the stamp short
+  (around 24 characters), and keep the full identity in the breadcrumb below.
 - `<task-slug>` -- short, human-recognizable (`pr-review`, `cargo-debug`,
   `issue-21042`), not a generic name like `tmp` or `out` that collides
   across tasks. Keep it to a **portable, platform-safe grammar**: lowercase
@@ -172,6 +179,27 @@ Write every file for that task inside its own subfolder -- never back out to
 the shared scratch root for individual files, which just recreates the exact
 problem (loose, unstructured, undated content) one level down.
 
+### Leave an ownership breadcrumb
+
+Before creating other artifacts, write `scratch-owner.json` inside the fresh
+folder with its UTC creation time, existing owner/worktree/session references,
+purpose, and retention explanation (for example, active work or evidence held
+for an unresolved objective). Populate references from the authoritative facts
+already available; use `null` for a genuinely unavailable reference. Do not put
+credentials or copied transcripts in the breadcrumb. Preserve the full identity
+there even when the folder name uses an abbreviated stamp.
+
+The breadcrumb is a discovery pointer, **not a lease, permission grant or
+parallel cleanup registry**. It cannot prove release or transfer custody.
+On an accepted handoff, keep it current through the existing owner's workflow;
+do not reset a resource deadline or infer ownership from a name or timestamp.
+
+Keep downloaded artifacts, captured output and disposable child-tool files
+inside this folder. Where the tool supports it, use a per-invocation temporary
+directory or child-process `TMPDIR` / `TMP` / `TEMP` setting pointing inside
+the owned folder. Do not change global settings, relocate framework-owned
+artifacts, or override a tool's containment/lifecycle owner to do so.
+
 ## Reuse within one task, not across tasks
 
 A single task may write several files into its own subfolder across
@@ -203,6 +231,14 @@ environment already defines for that (an effort, a tracked issue, a
 committed doc), or by asking the operator on demand when no such mechanism
 is established; it does not get left behind in a scratch subfolder because
 the session ended.
+
+A folder name, breadcrumb, merged PR, completed worktree or absence of an open
+process is not by itself deletion approval. Reconcile retained evidence and
+live claims through their existing owners, then follow the operator's required
+itemized deletion-confirmation policy. If custody is unknown, leave the folder
+in the review list instead of treating it as abandoned. Once removal is
+authorized, keep it scoped to the exact owned paths; never sweep the shared
+scratch root or another owner's siblings.
 
 ## Never stage checkouts, builds, or sensitive data in session state
 

@@ -187,18 +187,28 @@ copilot-extensions finalize          # clean up the worktree
 - **Update an open PR** with `copilot-extensions push-changes` (it re-pushes the
   `pr/<slug>` head; it will NOT land on `main`).
 - Managed publication has a 30-second `pr.push_timeout_seconds` deadline.
-  Pre-push reads every non-deletion ref update from Git, validates its pushed
-  tree, and uses the published tip as the incremental base. First publication
-  or rewritten refs select a related contribution/release base; unavailable
-  objects or an unrelated base refuse publication instead of skipping checks.
-  This keeps main-based bootstrap branches independent of unrelated `dev`
-  history without weakening identifier or blob-size checks.
-  Pre-push retains identifier-leak and pushed-blob size checks; repository
-  contract, architecture, version, documentation, and whole-tree guards run
-  in required CI instead of delaying transport. Staged Python lint, skill
-  validity, effort/vision structure, and staged file size checks already run
+  Pre-push performs only cheap branch/ref policy: ordinary protected-branch
+  updates, protected-branch deletion and publishing `worktree/*` are refused.
+  Managed publication retains its existing `AGENT_WORKTREES_PR_PUSH=1` marker.
+  Identifier-leak and final-diff size checks run in the existing required trusted
+  `workflow-lockdown-guard` job, never in the transport path. See the migration
+  and exact validator-to-CI mapping in `docs/pipelines.md`.
+  Repository contract, architecture, version, documentation and whole-tree
+  guards remain in CI. Staged Python lint, skill
+  validity and effort/vision structure already run
   at pre-commit. No hook automatically rewrites or restages partially staged
   files; run the suggested lint autofix explicitly before committing.
+  No runtime/Python startup, live identifier sweep, ancestor scan or validator
+  runs merely to authorize a push. Required review and provider branch rules
+  remain independent gates. Foreign chained hooks still run and can be costly;
+  their owners must migrate repository-specific validation to CI separately.
+  Explicit manual identifier audits retain the standard-library finite-process
+  owner, descendant cleanup within ten seconds, no self-provisioning, and
+  32 MiB/1 MiB stdout/stderr caps. Unsafe cleanup, decoding, output-budget or
+  malformed-response failures remain blocking; ordinary unavailable/timeout
+  results retain the existing optional-source policy.
+  Manual capture code must come from this repository. Missing helper code
+  refuses the audit, and unconfirmed cleanup preserves exact process/Job custody.
 - **Merge is deliberately manual.** No auto-merge label is bound (the repo's
   `pr-self-merge` profile authorizes the submitter to merge directly): once
   the wait-for-a-verdict loop below is satisfied, squash-merge with
@@ -598,6 +608,32 @@ including bug fixes, compatibility repairs, and below-altitude work.
 Reviewers confirm that the statement and documentation match the final diff.
 Treat a missing assessment or inaccurate affected documentation as unfinished
 work.
+
+### Contract impact (required for CLI and service-boundary changes)
+
+Commands, arguments, defaults, exit codes and JSON exchanges are service
+contracts, even when the caller and receiver ship from this repository.
+For a new or changed independently deployed boundary, include a **Contract
+impact** statement in the PR description and follow
+[`service-contract-evolution`](docs/patterns/service-contract-evolution.md):
+
+1. Name the boundary and old/new semantics, contract identity/version and
+   supported peer range or capabilities. State whether the change can instead
+   stay inside the existing owning operation with backward-compatible config.
+2. Identify how the caller discovers support from the selected executable
+   runtime or running peer, not the latest payload or package-version equality.
+   Preserve strict rejection of unknown CLI syntax and required policy semantics.
+3. State the provider-first **expand, migrate, contract** sequence, including
+   missing legacy metadata, deprecation and supported upgrade/rollback behavior.
+   A single PR or release does not establish lockstep deployment.
+4. Name focused parser/process or transport tests for both mixed-version
+   directions, new/new behavior, rollback and truthful incompatibility errors.
+   Do not add exhaustive matrices to required PR CI.
+
+Reviewers treat an unsupported mandatory new invocation, a silent downgrade of
+required behavior, or an omitted/inaccurate assessment as unfinished work.
+This requirement governs changed boundaries; a guidance-only PR must distinguish
+its policy changes from still-unimplemented runtime support.
 
 ### Graceful cutover impact (required for resident-daemon changes)
 
@@ -1091,13 +1127,16 @@ binstub in `~/.local/bin/`.
   - **`.map`, `.diff`, and `.patch` files are never checked in, regardless
     of size** — a source map and a raw diff/patch are generated-or-derived
     build/workflow byproducts, not source a reviewer should see in a PR.
-  - Like `check-module-size.py`, this only checks files a diff actually
-    adds or modifies (staged files for pre-commit; the push/PR range for
-    pre-push/CI) — a pre-existing large file you didn't touch never blocks
-    an unrelated change. `--all` additionally runs an unconditional
-    full-tree sweep in CI (`guards-full-sweep` on `dev`, and on any non-PR
-    `ci.yml` trigger), so organic drift on trunk is still caught outside any
-    single diff.
+  - CI checks **resulting file blobs in the final diff** between the PR base
+    and head, or the push event's before/head snapshots. Contributions are
+    squash-merged: an oversized intermediate file that is removed or shrunk
+    before the final head is outside that contribution.
+  - Renames and copies are checked at their destination names; unchanged files
+    are not rescanned. Metadata for selected blobs is batched, with no complete
+    object-history enumeration. Size caps and generated-byproduct rules remain
+    unchanged.
+  - Local commit/push hooks do not run file-size enforcement. `--all` remains an
+    explicit manual full-tree audit, including manually requested CI.
 
 ### Git Hooks
 
@@ -1109,25 +1148,13 @@ The repo ships git hooks under `tools/hooks/`:
   rules, and the **1024-char `description` limit** the Copilot CLI enforces —
   over it, the loader silently drops the skill),
   `tools/check-effort-vision-structure.py` on any staged effort/vision
-  `README.md`, and `tools/check-large-files.py` on every staged file (see
-  below).
-- **`pre-push`** — runs the repo-wide guards: `tools/check-install-contract.py`
-  (the [install contract](docs/install-contract.md)),
-  `tools/check-no-internal-identifiers.py`, `tools/check-vendored-libs-sync.py`,
-  `tools/check-headless-launch.py`, `tools/check-picker-inbox-discipline.py`
-  (the Picker's Textual UI may only marshal a background producer's result
-  back to the render thread through `Inbox.post()` — never a raw
-  `app.call_from_thread(...)`), `tools/check-skills.py`,
-  `tools/check-docs-consistency.py`, `tools/check-runbook-references.py`,
-  `tools/check-version-consistency.py` (every plugin's version identical across
-  `plugin.json` / `pyproject.toml` / its `marketplace.json` entry — a one-file
-  bump wedges the Picker's update indicator), `tools/check-feed-neutrality.py`
-  (no config/Dockerfile/install-script/CI-workflow file may hardcode a public
-  package-feed URL as the only usable endpoint — this repo runs on machines
-  whose default feed is network-blocked and replaced with an internal mirror),
-  `tools/check-module-size.py` (the 1,000-line-per-module cap and
-  shrink-only baseline described above), and `tools/check-large-files.py`
-  (the oversized-file cap described below).
+  `README.md`.
+- **`pre-push`** — branch/ref policy only, with no runtime, validator or
+  repository discovery. Protected branches and private worktree refs remain
+  guarded; foreign chained hooks retain their own behavior.
+- **CI** — retains file-size enforcement on the final contribution diff and
+  the repository-wide contract, structure, consistency, and source guards.
+  Neither local hook runs file-size or history enforcement.
 
 CI also runs `tools/check-marketplace-isolation.py` in report-only mode. It
 inventories legacy unqualified runtime roots, generic global plugin commands,

@@ -23,12 +23,13 @@ from .client_spawn_reservations import SpawnReservationClientMixin
 from .client_spawn_terminal import SpawnTerminalClientMixin
 from .client_steering import SteeringClientMixin
 from .client_suspend import SuspendClientMixin
+from .client_task_recovery import TaskRecoveryClientMixin
 from .client_transport import make_http_client
 from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 
 
-class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
+class DispatchClient(TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -663,6 +664,7 @@ class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleCl
         session_info: dict | None = None,
         startup_complete: bool | None = None,
         startup_revision: int | None = None,
+        ordinary_redrive: dict | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
@@ -670,6 +672,7 @@ class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleCl
                 json={"session_handle": session_handle, "worktree": worktree,
                       **({"startup_complete": startup_complete} if startup_complete is not None else {}),
                       **({"startup_revision": startup_revision} if startup_revision is not None else {}),
+                      **({"ordinary_redrive": ordinary_redrive} if ordinary_redrive is not None else {}),
                       **({"session_info": session_info} if session_info is not None else {})},
             )
         )

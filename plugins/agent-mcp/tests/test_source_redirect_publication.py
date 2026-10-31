@@ -59,7 +59,9 @@ function Write-ServiceHeader($value) {{ }}
 function Write-ServiceOk($value) {{ }}
 function Write-Ok($value) {{ }}
 function Deploy-SelfProvisioningBinstub {{
-    if (-not ${str(locked or succeeds).lower()}) {{ throw 'Unexpected binstub publication' }}
+    if (-not ${str(locked or succeeds or plugin == 'agent-codespaces').lower()}) {{
+        throw 'Unexpected binstub publication'
+    }}
 }}
 function Materialize-SnapshotDependencies {{ throw 'Source snapshot was rematerialized' }}
 {native._function(plugin, 'Invoke-Stamp', language)}
@@ -242,8 +244,9 @@ def test_native_adopters_wire_source_redirects_without_replacing_legacy(
     shell = (
         scripts / ("source-runtime.sh" if plugin in native.PLUGINS else f"{entry}.sh")
     ).read_text(encoding="utf-8")
-    assert 'publish-redirects --payload-dir "' in shell
-    assert '--version "$SRC_VERSION"' in shell
+    assert re.search(r'publish-redirects\s+--payload-dir "', shell)
+    version = "SOURCE_RUNTIME_VERSION" if plugin == "agent-mcp" else "SRC_VERSION"
+    assert f'--version "${version}"' in shell
     assert '--expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || ' in shell
     if plugin == "agent-machines":
         assert "'--version', $SrcVersion, '--payload-origin', $probePayload" in powershell
@@ -316,6 +319,7 @@ function Get-SourceRuntimeIdentity {{
 function Get-BootstrapPython {{ return {q(sys.executable)} }}
 function Write-Fail($value) {{ throw $value }}
 function Write-Ok($value) {{ }}
+function Write-Step($value) {{ }}
 function Deploy-SelfProvisioningBinstub {{ }}
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 {_function('agent-machines', 'Enter-StampLock')}

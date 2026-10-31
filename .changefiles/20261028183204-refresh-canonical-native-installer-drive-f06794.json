@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh canonical native installer driver with Dispatch supervisor-preservation option support",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

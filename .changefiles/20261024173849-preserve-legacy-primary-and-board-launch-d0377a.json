@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve legacy primary and board launchers when stamping a scoped Dispatch installation.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

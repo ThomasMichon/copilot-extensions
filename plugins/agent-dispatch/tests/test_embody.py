@@ -10,6 +10,7 @@ import types
 import pytest
 
 from agent_dispatch import embody, procutil
+from tests._hosting_owner import admission_owner as admission_owner
 
 
 def _completed(stdout: str, *, returncode: int = 0, stderr: str = ""):
@@ -346,7 +347,7 @@ def test_launch_prefix_none_when_unresolvable(monkeypatch, tmp_path):
     assert embody._agent_worktrees_launch_prefix() is None
 
 
-def test_spawn_embodied_worker_builds_embody_new_command(monkeypatch):
+def test_spawn_embodied_worker_builds_embody_new_command(monkeypatch, admission_owner):
     captured = {}
 
     def fake_run(cmd, **kwargs):
@@ -376,7 +377,7 @@ def test_spawn_embodied_worker_builds_embody_new_command(monkeypatch):
     assert "--verify-timeout" not in cmd
 
 
-def test_spawn_embodied_worker_can_target_existing_worktree(monkeypatch):
+def test_spawn_embodied_worker_can_target_existing_worktree(monkeypatch, admission_owner):
     captured = {}
 
     def fake_run(cmd, **kwargs):
@@ -402,7 +403,7 @@ def test_spawn_embodied_worker_can_target_existing_worktree(monkeypatch):
     assert "--resume-head" not in cmd
 
 
-def test_spawn_embodied_worker_resume_head_opts_into_resuming(monkeypatch):
+def test_spawn_embodied_worker_resume_head_opts_into_resuming(monkeypatch, admission_owner):
     captured = {}
 
     def fake_run(cmd, **kwargs):
@@ -423,7 +424,7 @@ def test_spawn_embodied_worker_resume_head_opts_into_resuming(monkeypatch):
     assert "--resume-head" in cmd
 
 
-def test_spawn_embodied_worker_resume_head_ignored_without_worktree_id(monkeypatch):
+def test_spawn_embodied_worker_resume_head_ignored_without_worktree_id(monkeypatch, admission_owner):
     captured = {}
 
     def fake_run(cmd, **kwargs):
@@ -846,7 +847,7 @@ def test_prepare_reusable_worktree_preserves_finalized_checkout(monkeypatch):
         )
 
 
-def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch):
+def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch, admission_owner):
     captured = {}
     monkeypatch.setattr(
         embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
@@ -863,7 +864,7 @@ def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch):
     assert cmd[cmd.index("--verify-timeout") + 1] == "30"
 
 
-def test_spawn_embodied_worker_threads_project_as_global(monkeypatch):
+def test_spawn_embodied_worker_threads_project_as_global(monkeypatch, admission_owner):
     """--project is an agent-worktrees GLOBAL option, so it must precede the
     `embody` subcommand -- letting a CWD-neutral caller name the project."""
     captured = {}
@@ -886,7 +887,7 @@ def test_spawn_embodied_worker_threads_project_as_global(monkeypatch):
     assert cmd.index("--project") < cmd.index("embody")
 
 
-def test_spawn_embodied_worker_omits_project_when_none(monkeypatch):
+def test_spawn_embodied_worker_omits_project_when_none(monkeypatch, admission_owner):
     """No --project (back-compat): the command is unchanged from CWD-discovery."""
     captured = {}
     monkeypatch.setattr(
@@ -1158,7 +1159,7 @@ def test_remote_registered_agent_record_uses_hidden_lookup_flag(monkeypatch):
     assert bridge._AGENT_NOT_FOUND is not record
 
 
-def test_spawn_embodied_worker_scrubs_env(monkeypatch):
+def test_spawn_embodied_worker_scrubs_env(monkeypatch, admission_owner):
     """Every direct agent-worktrees spawn must pass an explicitly scrubbed
     environment, not inherit agent-dispatch's ambient one verbatim (the class
     of leak already fixed for peer-plugin delegation in peer_launch.py)."""

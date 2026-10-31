@@ -19,7 +19,10 @@ from agent_dispatch.worker_instances import (
     ACTIVATION_CONSENT, OWNER, POINTER, active_dir, digest, instance_dir,
     read_records, save_instance, templates,
 )
-from agent_dispatch.workers_catalog import catalog, _observation as real_observation
+from agent_dispatch.workers_catalog import (
+    TEMPLATE_DESCRIPTIONS, TEMPLATE_METADATA, catalog, _observation as real_observation,
+)
+from tests.test_worker_templates import repository_map
 
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch, tmp_path):
@@ -32,7 +35,7 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr("agent_dispatch.workers_catalog._observation", lambda: {"known": False})
     monkeypatch.setattr(
         "agent_dispatch.worker_templates.run_agent_worktrees_capture",
-        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout='{"inventory_authority":"complete","repos":[]}', stderr=""),
+        lambda *args, **kwargs: repository_map(),
     )
 
 
@@ -65,7 +68,13 @@ def test_empty_catalog_is_read_only_and_lists_fragments():
     before = templates().copy()
     data = catalog()
     assert data["summary"]["configured"] == 0
-    assert {r["title"] for r in data["entries"]} == set(templates())
+    assert {r["name"] for r in data["entries"]} == set(templates()) == set(TEMPLATE_METADATA)
+    assert TEMPLATE_DESCRIPTIONS == {
+        row["name"]: row["description"] for row in data["entries"]
+    }
+    assert all(row["title"] != row["name"] for row in data["entries"])
+    assert all(row["description"].endswith(".") for row in data["entries"])
+    assert all(row["card"]["title"] == row["title"] for row in data["entries"])
     assert all(r["activity"] == "not-applicable" for r in data["entries"])
     assert all(r["fields"][1]["default"] for r in data["entries"])
     assert not rd.registrar_dir().exists()
@@ -79,7 +88,7 @@ def test_catalog_version_template_kinds_and_read_time_do_not_claim_activity():
     assert before <= data["fetched_at"] <= time.time()
     assert data["summary"]["activity_updated_at"] is None
     for row in data["entries"]:
-        assert row["kind"] == templates()[row["title"]]["kind"]
+        assert row["kind"] == templates()[row["name"]]["kind"]
         assert row["components"] == [] and row["components_basis"] == "template"
         assert row["activity"] == "not-applicable"
 
@@ -112,6 +121,52 @@ def test_source_component_metadata_is_attributable_without_executable_fields(tmp
     assert "command" not in component and "env" not in component and "spec" not in component
     assert "Components (source)" in row["card"]["body"]
     assert document.read_bytes() == original
+
+
+def test_source_display_metadata_preserves_identity_toggle_target_and_source_bytes(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    document = source / "pool.json"
+    document.write_text(json.dumps({
+        "name": "stable-pool", "title": "General task workers",
+        "description": "Run general tasks with two workers.",
+        "labels": ["work"], "concurrency": 2,
+    }), encoding="utf-8")
+    original = document.read_bytes()
+    rd.add_pointer("source", source, owner="repo:source")
+    row = next(row for row in catalog()["entries"] if row.get("name") == "stable-pool")
+    assert row["title"] == row["card"]["title"] == "General task workers"
+    assert row["description"] == "Run general tasks with two workers."
+    assert row["id"] == "source:declared:repo:source:stable-pool"
+    assert row["pool_name"] == "stable-pool" and row["pool_toggleable"] == "true"
+    assert row["components"][0]["name"] == "stable-pool"
+    assert "Declaration name: stable-pool" in row["card"]["body"]
+    assert row["editable"] == "false"
+    assert document.read_bytes() == original
+
+
+def test_save_only_display_metadata_does_not_relabel_published_instance():
+    receipt = create(
+        activate=True, title="Published workers", description="Published task description.",
+    )
+    edit(receipt, title="Draft workers", description="Draft task description.")
+    row = next(row for row in catalog()["entries"] if row["id"] == receipt["id"])
+    assert row["name"] == row["pool_name"] == "local-pool"
+    assert row["title"] == "Published workers"
+    assert row["description"] == "Published task description."
+    assert row["draft_state"] == "modified" and row["components_basis"] == "published"
+    assert "Instance name: local-pool" in row["card"]["body"]
+    assert read_records()[0]["configuration"]["declaration"]["title"] == "Draft workers"
+
+
+def test_unpublished_display_metadata_uses_draft_and_legacy_title_uses_name():
+    legacy = create("legacy")
+    friendly = create("friendly", title="Friendly workers", description="Run selected tasks.")
+    entries = {row["id"]: row for row in catalog()["entries"]}
+    assert entries[legacy["id"]]["title"] == "legacy"
+    assert entries[friendly["id"]]["title"] == "Friendly workers"
+    assert entries[friendly["id"]]["name"] == "friendly"
+    assert entries[friendly["id"]]["enabled"] == "not-published"
 
 
 def test_multiple_components_remain_composite_when_their_kinds_match():
@@ -990,20 +1045,20 @@ def test_cli_and_form_contract(capsys):
     assert manifest["placement"] == "config" and manifest["scope"] == "global"
     forms = [action for action in manifest["actions"] if action.get("kind") == "form"]
     assert len(forms) == 4 and all(action["confirm"] for action in forms)
-    assert all(action["fields_from"] == "fields" for action in forms)
+    assert all(action["fields_from"] == "operator_fields" and "--operator-inputs" in action["run"] for action in forms)
     assert "config_sections" not in json.loads((root / "pivots" / "agent-dispatch.json").read_text(encoding="utf-8"))
 
 
 def test_real_observation_requires_fresh_receipt(monkeypatch):
     monkeypatch.setattr("agent_dispatch.remote_dispatch.local_machine", lambda: "fixture-host")
     monkeypatch.setattr(
-        "agent_dispatch.supervise_cli._read_supervisor_runtime_status",
-        lambda scope: ({"updated_at": time.time() - 1000, "running": []}, None),
+        "agent_dispatch.supervisor_status_io.read_status",
+        lambda path: ({"updated_at": time.time() - 1000, "running": []}, None),
     )
     assert not real_observation()["known"]
     monkeypatch.setattr(
-        "agent_dispatch.supervise_cli._read_supervisor_runtime_status",
-        lambda scope: ({"updated_at": time.time(), "running": []}, None),
+        "agent_dispatch.supervisor_status_io.read_status",
+        lambda path: ({"updated_at": time.time(), "running": []}, None),
     )
     assert real_observation()["known"]
 
@@ -1029,6 +1084,24 @@ def test_existing_daemon_reconciles_saved_activation_without_duplicate_work():
     daemon.shutdown()
 
 
+def test_title_only_publication_does_not_restart_existing_worker():
+    from tests.test_supervisor_daemon import FakeClient, FakeLauncher, _daemon
+
+    launcher = FakeLauncher()
+    daemon = _daemon(FakeClient([]), launcher, declared_source=rd.discover)
+    try:
+        receipt = create(activate=True, title="Original task workers")
+        first = daemon.reconcile_once()
+        assert len(first.running) == len(launcher.launched) == 1
+        edit(receipt, activate=True, title="Renamed task workers")
+        assert daemon.reconcile_once().running == first.running
+        assert len(launcher.launched) == 1
+        row = next(row for row in catalog()["entries"] if row["id"] == receipt["id"])
+        assert row["title"] == "Renamed task workers" and row["name"] == "local-pool"
+    finally:
+        daemon.shutdown()
+
+
 @pytest.mark.parametrize("stage", ["catalog", "save", "activate", "retry", "published", "degraded"])
 def test_real_cli_first_touch_save_catalog_and_activation(tmp_path, capsys, stage):
     from agent_dispatch.__main__ import build_parser
@@ -1041,7 +1114,7 @@ def test_real_cli_first_touch_save_catalog_and_activation(tmp_path, capsys, stag
     def invoke(*args):
         result = subprocess.run(
             [sys.executable, "-m", "agent_dispatch", "workers", *args],
-            capture_output=True, text=True, timeout=20,
+            capture_output=True, text=True, timeout=40 if os.name == "nt" else 20,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             env={**os.environ, "AGENT_DISPATCH_NO_AUTOSTART": "1"},
         )
@@ -1056,7 +1129,8 @@ def test_real_cli_first_touch_save_catalog_and_activation(tmp_path, capsys, stag
     row = next(r for r in initial["entries"] if r["id"] == "template:worker-pool")
     arguments = [
         "save", row["id"], "--revision", row["revision"],
-        "--field", "name=cli-fixture", "--field", 'declaration={"labels":["work"]}',
+        "--field", "name=cli-fixture", "--field",
+        'declaration={"labels":["work"],"title":"CLI task workers","description":"Run selected queued tasks."}',
     ]
     saved = invoke(*arguments) if stage == "save" else seed(*arguments)
     assert saved["persisted"] and saved["activation"] == "not-requested"
@@ -1074,6 +1148,9 @@ def test_real_cli_first_touch_save_catalog_and_activation(tmp_path, capsys, stag
         return
     current = invoke("catalog") if stage == "published" else catalog()
     published = next(row for row in current["entries"] if row["id"] == saved["id"])
+    assert published["title"] == published["card"]["title"] == "CLI task workers"
+    assert published["description"] == "Run selected queued tasks."
+    assert published["name"] == published["pool_name"] == "cli-fixture"
     assert published["kind"] == "supervised-lane" and published["components_basis"] == "published"
     assert [component["id"] for component in published["components"]] == published["registration_ids"]
     if stage == "published":

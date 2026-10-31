@@ -45,6 +45,7 @@ from .coordinator_task_models import (
 )
 from .coordinator_verification import register_verification_routes
 from .events import EventBus
+from .queue_records import WorkerAdmissionInhibited
 from .lease import FencingGuard
 from .queue import (
     CompletionOutcome,
@@ -138,6 +139,8 @@ def register_task_routes(
     fencing_guard: FencingGuard | None = None,
 ) -> None:
     register_task_grant_route(app, queue, control_token, fencing_guard, bus)
+    from .coordinator_task_recovery import register_task_recovery_routes
+    register_task_recovery_routes(app, queue, bus, control_token=control_token)
     from .acquisition_receipts import register_routes
     register_routes(app, queue)
     register_category_routes(app, queue, control_token=control_token,
@@ -297,6 +300,8 @@ def register_task_routes(
                 status_code=status, detail=exc.detail(operation="create")
             ) from exc
         except DedupConflictError as exc:
+            raise HTTPException(status_code=409, detail=exc.detail()) from exc
+        except WorkerAdmissionInhibited as exc:
             raise HTTPException(status_code=409, detail=exc.detail()) from exc
         except TaskError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -480,16 +485,21 @@ def register_task_routes(
         with gate.track_claim():
             if gate.draining:
                 return None
-            outcome = queue.claim_outcome(
-                owner,
-                body.capabilities,
-                repo=None if body.all_repos else body.repo,
-                machine=body.machine,
-                worktree=body.worktree,
-                task_id=body.task_id,
-                lease_seconds=body.lease_seconds,
-                evaluation=body.evaluation,
-            )
+            try:
+                outcome = queue.claim_outcome(
+                    owner,
+                    body.capabilities,
+                    repo=None if body.all_repos else body.repo,
+                    machine=body.machine,
+                    worktree=body.worktree,
+                    task_id=body.task_id,
+                    lease_seconds=body.lease_seconds,
+                    evaluation=body.evaluation,
+                )
+            except WorkerAdmissionInhibited as exc:
+                raise HTTPException(status_code=409, detail=exc.detail()) from exc
+            except TaskError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         for rejection in outcome.producer_rejections:
             _emit_producer_event("producer.claim_rejected", rejection)
         task = outcome.task

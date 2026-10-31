@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve Chat versions from package metadata without rewriting admitted Python inputs during promotion.",
+  "changes": [
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

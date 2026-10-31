@@ -103,3 +103,26 @@ await emit("session.usage_info", pressure);
 const afterGeneration = session.prompts.length;
 await emit("session.idle");
 assert.equal(session.prompts.length, afterGeneration + 1);
+session.rpc.tools.getCurrentMetadata = async () => ({
+  tools: ["get_context_remaining", "session_artifacts", "session_history", "new_context"]
+    .map((name) => ({ name })),
+});
+const evidence = "Original source: canonical Scope Approvals; excludes personal content; current hold applies";
+assert.ok(generate.parameters.properties.authorization_evidence);
+const captured = await generate.handler({ authorization_evidence: evidence }, {});
+assert.ok(captured.textResultForLlm.includes(evidence));
+await emit("session.context_cleared", { messagesCleared: 8 });
+assert.ok((await generate.handler({}, {})).textResultForLlm.includes(evidence));
+await assert.rejects(generate.handler({ authorization_evidence: false }, {}), /must be a string/);
+assert.ok((await generate.handler({}, {})).textResultForLlm.includes(evidence));
+const cleared = await generate.handler({ authorization_evidence: "" }, {});
+assert.match(cleared.textResultForLlm, /Not captured -- recover the original/);
+await generate.handler({ authorization_evidence: evidence }, {});
+await import(`${pathToFileURL(process.argv[2]).href}?authorization-reimport`);
+const reimported = globalThis.nativeTestSession.config.tools.find(
+  (tool) => tool.name === "generate_handoff_prompt",
+);
+const afterReimport = await reimported.handler({}, {});
+assert.ok(!afterReimport.textResultForLlm.includes(evidence));
+assert.match(afterReimport.textResultForLlm, /Not captured -- recover the original/);
+assert.match(afterReimport.textResultForLlm, /Do not infer permission or ask for blanket reapproval/);

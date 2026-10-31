@@ -22,11 +22,9 @@ from time import monotonic as _file_clock
 
 import yaml
 from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exported)
-from machine_transport import normalize_machine_entries
 from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
-from machine_transport import parse_machines_yaml as _mt_parse_machines_yaml
 
-from .. import engine_client, harness_state, terminal_fragment
+from .. import engine_client, harness_state, machine_roster, terminal_fragment
 from . import context, engine_group_a
 
 class _ScalarCache:
@@ -36,6 +34,7 @@ class _ScalarCache:
         self.fallbacks: dict[tuple[str, str], str] = {}
         self.failures: dict[tuple[str, str], int] = {}
         self.epoch = 0
+        self.machine_bindings: dict[str, str | None] = {}
 
 
 _scalar_cache = _ScalarCache()
@@ -56,8 +55,16 @@ def bind_bootstrap(project: str, values: object) -> None:
     global _scalar_cache
     cache = _ScalarCache()
     if isinstance(values, dict):
+        if "configured_machine" in values:
+            binding = values["configured_machine"]
+            if binding is not None and (
+                not isinstance(binding, str) or not binding.strip()
+            ):
+                raise ValueError("configured machine binding must be a nonempty string")
+            cache.machine_bindings[project] = binding
         for field, key in (
-            ("config_dir", "config-dir"), ("repo_dir", "repo-dir"), ("machine", "machine")
+            ("config_dir", "config-dir"), ("repo_dir", "repo-dir"), ("machine", "machine"),
+            ("install_dir", "install-dir"),
         ):
             value = values.get(field)
             if not isinstance(value, str) or not value.strip():
@@ -117,6 +124,8 @@ class ProjectConfig:
     repo_name: str
     machine: str
     default_repo: RepoConfig
+    configured_machine: str | None = None
+    machine_binding_known: bool = False
 
 
 def _on_event_loop() -> bool:
@@ -367,6 +376,9 @@ def _cached_machine_name(cache: _ScalarCache, epoch: int, project: str) -> str:
 
 @lru_cache(maxsize=None)
 def _install_dir(project: str) -> Path:
+    bound = _scalar_cache.values.get((project, "install-dir"))
+    if bound is not None:
+        return Path(bound)
     payload = engine_group_a.picker_paths(project)
     return Path(str(payload.get("install_dir") or ""))
 
@@ -510,26 +522,14 @@ def _load_machines_yaml(repo_dir: str) -> dict[str, MachineEntry]:
     except RuntimeError:
         project = None
     with _file_scope() as files:
-        def parse(snapshot):
-            if not isinstance(snapshot.value.get("machines"), dict):
-                raise ValueError("Machine registry requires an explicit machines mapping")
-            return _mt_parse_machines_yaml(deepcopy(snapshot.value), require_alias=False)
-
         def read():
-            root = Path(repo_dir)
-            canonical = _yaml_snapshot(root / ".agent-worktrees" / "machines.yaml")
-            legacy = _yaml_snapshot(root / "machines.yaml")
-            if canonical.content is None and legacy.content is None:
-                path = machines_yaml_path(repo_dir)
-                supplier = _yaml_snapshot(path)
-                if supplier.content is None:
-                    raise FileNotFoundError(f"Machine registry not found at {path}")
-                return normalize_machine_entries(parse(supplier))
-            entries = {}
-            for snapshot in (legacy, canonical):
-                if snapshot.content is not None:
-                    entries.update(parse(snapshot))
-            return normalize_machine_entries(entries)
+            def document(path):
+                snapshot = _yaml_snapshot(path)
+                return deepcopy(snapshot.value) if snapshot.content is not None else None
+
+            return machine_roster.read_entries(
+                Path(repo_dir), read=document, supplier=lambda: machines_yaml_path(repo_dir),
+            )
 
         return deepcopy(files.get(("machines", project, repo_dir), read))
 
@@ -559,6 +559,8 @@ def load_config() -> ProjectConfig:
             return ProjectConfig(
                 repo_name=repo_name, machine=machine,
                 default_repo=RepoConfig(anchor=repo_dir, default_branch=default_branch),
+                configured_machine=files.binding.machine_bindings.get(project),
+                machine_binding_known=project in files.binding.machine_bindings,
             )
         return files.get(("config", project), read)
 
@@ -576,7 +578,9 @@ def machines_yaml_path(repo_dir: str | Path) -> Path:
                 return candidate
         knowledge_repo = str(_load_project_yaml(project).get("knowledge_repo") or "").strip()
         if knowledge_repo:
-            selection = harness_state.project_anchor_selection(knowledge_repo, reader=_read_yaml)
+            selection = harness_state.project_anchor_selection(
+                knowledge_repo, reader=_read_yaml, require_project=False,
+            )
             overlay_root = Path(selection.anchor) if selection.anchor else None
         else:
             overlay_root = None

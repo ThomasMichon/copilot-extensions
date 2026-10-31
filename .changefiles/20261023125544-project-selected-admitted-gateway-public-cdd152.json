@@ -1,0 +1,9 @@
+{
+  "comment": "Project admitted Gateway SSH public bindings and add authenticated service-directory enrollment, bounded notifications and reconnect catch-up through the existing service caller; retain transient challenge-stage statuses for recoverable notification outages, and share native owner-private state creation/validation with standalone hosts.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

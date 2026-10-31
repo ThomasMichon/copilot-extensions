@@ -24,6 +24,11 @@ manifests into `~/.agent-bridge/providers.d/`; the bridge then exposes
 `codespace:` / `container:` agents and folds in their credential-relay profiles.
 If a sibling is missing, only that namespace/relay feature is unavailable.
 
+Discovery is not launch permission. Repository `expose_agent: false` vetoes
+managed authoring; provider/relay protocols without a fresh enforcing receiver
+refuse launch. See [repository hosting eligibility](repository-hosting.md) for
+the current boundary and preserved source-only/live operations.
+
 ## 2. Bootstrap the Service
 
 `copilot plugin install` only vendors the plugin **payload** into
@@ -39,12 +44,28 @@ registers the always-on service.
 standalone `uv` into `~/.agent-bridge/tool` when it is absent; the Windows
 installer fails loudly with the install URL if `uv` is not on PATH.
 
-The session-start hook (`hooks.json` -> `scripts/bootstrap-check.*`) also keeps
-the runtime reconciled with the payload. On a fresh install it performs a cheap
-`stamp` (snapshot + binstub) and lets the first `agent-bridge` invocation run
-`provision` to build the venv. On later payload drift it launches the installer
-in the background and records progress in `~/.agent-bridge/reconcile-status.json`
-and `reconcile.log`.
+Serving-runtime reconciliation recognizes both `python -m agent_bridge start`
+and the installed `agent-bridge start` console entrypoint. A name appearing
+only in another program's arguments is not daemon ownership. Endpoint health,
+the routed slot, version and native process-generation checks still have to
+agree; changing the launch spelling does not require restarting a healthy daemon.
+
+The legacy/default session-start hook (`hooks.json` -> `scripts/bootstrap-check.*`)
+submits fixed `stamp` (snapshot + binstub) or drift `install` actions through the
+packaged installation foundation and ordinary installation queue. Cold admission
+does not require Python, UV or Worktree Manager on the caller's PATH. Drift uses
+`install`, not Windows' prepared task-only `provision`; Windows preserves the
+existing unattended S4U/AtStartup choice. A healthy selected/completed runtime
+short-circuits without writes. Namespaced contexts keep their separate owner.
+
+The 15-second hook emits only `{}` on stdout. Its stderr includes the attributable
+first-use log under `~/.copilot-extensions/update-driver`; a launch acknowledgement
+is **not** durable acceptance, installation completion or service readiness.
+Ordinary queue receipts/results own progress and completion. The hook no longer
+writes or reaps from `reconcile-status.json`/`reconcile.log`; existing files remain
+historical data. Publication policy, disabled/pinned provisioning and unsupported
+payload/driver contexts retain explicit refusal/defer diagnostics. Session guidance
+remains a separate hook with its own deadline.
 
 Start a Copilot CLI session and say:
 
@@ -220,8 +241,8 @@ agent-bridge send my-agent "Hello, are you there?"
 
 ### Normal update flow
 
-After the marketplace payload updates, the session-start reconcile hook detects
-version drift and runs the installer in the background. To force a runtime
+After the marketplace payload updates, the legacy session-start hook detects
+version drift and submits its fixed `install` through the shared queue. To force a runtime
 repair/update from the plugin directory:
 
 ```bash

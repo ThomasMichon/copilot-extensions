@@ -33,7 +33,10 @@ import urllib.parse
 from contextlib import contextmanager
 from pathlib import Path
 
-import ctypes
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
+from installer_feed_policy import (  # noqa: F401 -- shared public-feed rejection policy
+    _PUBLIC_PYPI_HOSTS, _is_public_pypi_url, _normalize_hostname,
+)
 
 try:
     import fcntl
@@ -76,6 +79,7 @@ def _system_directory() -> Path:
     redirect.
 
     Raises `ArtifactBuildError` if the OS API call itself fails."""
+    import ctypes
     buf = ctypes.create_unicode_buffer(260)
     length = ctypes.windll.kernel32.GetSystemDirectoryW(buf, len(buf))
     if not length:
@@ -184,6 +188,7 @@ def _well_known_sid_display_name(sid_string: str) -> str:
     wrongly rejecting a correctly hardened ACL there.
 
     Raises `ArtifactBuildError` if either OS API call fails."""
+    import ctypes
     advapi32 = ctypes.windll.advapi32
     kernel32 = ctypes.windll.kernel32
     psid = ctypes.c_void_p()
@@ -258,21 +263,13 @@ def _restrict_file_to_owner(path: Path) -> None:
         return
     account_name, sid = _current_token_identity()
     icacls = _trusted_system32_tool("icacls")
+    grant = "(OI)(CI)F" if path.is_dir() else "F"
     result = subprocess.run(
         [
             icacls, str(path),
             "/inheritance:r",
-            # `(OI)(CI)` (object-inherit, container-inherit) are applied
-            # explicitly: combining `/inheritance:r` and `/grant:r` in a
-            # SINGLE `icacls` invocation (as here, rather than as two
-            # separate calls) does not reliably add an inheritable ACE
-            # for the explicitly granted principal on a DIRECTORY
-            # target: a file later created inside it (e.g. `uv venv`
-            # populating a hardened staging directory) could then be
-            # denied access despite the directory's own grant. Both
-            # flags are harmless no-ops on a FILE target (nothing to
-            # inherit to).
-            "/grant:r", f"*{sid}:(OI)(CI)F", f"*{_SYSTEM_ACCOUNT_SID}:(OI)(CI)F",
+            # Files need direct grants; only directories need inheritable ACEs.
+            "/grant:r", f"*{sid}:{grant}", f"*{_SYSTEM_ACCOUNT_SID}:{grant}",
         ],
         capture_output=True, text=True,
     )
@@ -395,7 +392,6 @@ _BROAD_WINDOWS_PRINCIPAL_SIDS = (
 )
 
 _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS = ("UV_DEFAULT_INDEX", "UV_INDEX_URL")
-_PUBLIC_PYPI_HOSTS = {"pypi.org", "pypi.python.org", "test.pypi.org"}
 #: Affirmative trust policy for `resolve_toolchain_lock`'s governed-feed
 #: gate (see `_governed_feed_configured`'s own docstring): a comma-
 #: separated allowlist of hostnames the MACHINE explicitly asserts are its
@@ -503,6 +499,7 @@ def _provenance_key_lock():
 
     Bounded by `_PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS`; raises
     `ArtifactBuildError` if the lock cannot be acquired within it."""
+    import ctypes
     lock_path = _provenance_key_dir() / "provenance-key.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     if hasattr(ctypes, "windll"):
@@ -705,27 +702,6 @@ def _opaque_index_identity(url: str) -> str:
     to a credential rotation -- routing it to a fresh alternate slot, the
     correct, more conservative direction for a fail-closed contract)."""
     return hmac.new(_provenance_key(), url.encode("utf-8"), hashlib.sha256).hexdigest()
-
-
-def _normalize_hostname(host: str) -> str:
-    """Lowercases ``host`` and strips a single trailing root dot -- a
-    fully-qualified hostname may legally end in `.` (e.g. `pypi.org.`),
-    which DNS treats as identical to `pypi.org`, but a raw string/set
-    comparison would not -- letting that spelling bypass both the public-
-    PyPI denylist and the trust allowlist."""
-    host = host.lower()
-    return host[:-1] if host.endswith(".") else host
-
-
-def _is_public_pypi_url(url: str) -> bool:
-    """Whether ``url`` resolves to a public PyPI-family index (production
-    or Test PyPI) -- a feed configuration that NAMES one of these hosts,
-    even explicitly, is never a governed feed."""
-    try:
-        host = urllib.parse.urlsplit(url).hostname
-    except ValueError:
-        return False
-    return _normalize_hostname(host or "") in _PUBLIC_PYPI_HOSTS
 
 
 def _url_host(url: str) -> str | None:

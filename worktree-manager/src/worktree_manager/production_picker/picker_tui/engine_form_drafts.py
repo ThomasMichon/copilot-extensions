@@ -4,6 +4,7 @@ from worktree_manager.form_drafts import draft_ack, read_path, update_draft_cont
 
 from .steering import SubmitErrorScreen
 from .engine_form_requests import PivotFormRequestActionsMixin
+from .registered_scopes import read_scope
 
 
 class PivotFormDraftActionsMixin(PivotFormRequestActionsMixin):
@@ -12,7 +13,7 @@ class PivotFormDraftActionsMixin(PivotFormRequestActionsMixin):
 
         spec = action.form["draft"]
         rt = self._pivot_runtime(reg)
-        scope = self._pivot_scope_key()
+        scope = read_scope(reg, ctx.get("machine", ""))
         label = "Reset" if clear else "Save"
         argv = pivots.format_form_template(spec["clear" if clear else "save"], ctx, values)
 
@@ -26,7 +27,7 @@ class PivotFormDraftActionsMixin(PivotFormRequestActionsMixin):
             except Exception as exc:
                 return False, f"{type(exc).__name__}: {exc}", None
             finally:
-                rt.invalidate()
+                rt.invalidate(scope)
 
         def done(outcome):
             ok, message, result = outcome

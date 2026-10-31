@@ -91,6 +91,8 @@ Config (JSON), all keys optional::
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import hashlib
 import hmac
@@ -580,6 +582,7 @@ def build_app(
     return app
 
 
+@daemon_entrypoint("agent-dispatch-webhook", source=__file__, purpose="production")
 def serve(
     config: dict[str, Any] | None = None,
     *,

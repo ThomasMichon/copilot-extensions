@@ -55,6 +55,8 @@ an error and skipped (tasks are always lane-scoped).
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import json
 import math
 import subprocess
@@ -285,6 +287,7 @@ def _parse_tick_process_output(completed: Any) -> dict[str, Any]:
     }
 
 
+@daemon_entrypoint("agent-dispatch-schedule", source=__file__, purpose="production")
 def serve(
     spec_path: str | Path,
     *,
@@ -354,6 +357,7 @@ def serve(
             return
 
 
+@daemon_entrypoint("agent-dispatch-schedule", source=__file__, purpose="production")
 def serve_registry(
     *,
     url: str | None = None,

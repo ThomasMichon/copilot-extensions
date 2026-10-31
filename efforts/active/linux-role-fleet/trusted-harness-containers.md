@@ -1,10 +1,10 @@
 # Trusted harness containers
 
 Parent: [Linux role fleet](README.md), #6030.
-Initial image slice: #8352. **Status: proposed plan; no image or runtime delivered.**
-The campaign owner retains integration and publication. Implementation starts
-only after this plan clears review and merges, followed by explicit execution
-authorization. A merged plan does not authorize live provisioning or rollout.
+Initial image slice: #8352. **Status: image source delivered; adapter/integration open.**
+The plan merged in #8358 and execution was explicitly authorized. The campaign
+owner retains integration and publication. Source and offline tests do not prove
+a built image, native readiness, live provisioning or rollout.
 
 ## Guiding intent and request
 
@@ -26,13 +26,23 @@ Generalized request:
 > work stops without destroying state. Do not introduce an unattended identity,
 > new issuer, or build-time authentication.
 
+These containers exist for operational tidiness, control and scale-out. They
+are not a host-security product. They scope per-cluster agent-* services and
+state that would otherwise be host-global. Clusters still federate through the
+Gateway. The physical machine is the security boundary. Persist selected
+directories with ordinary named volumes. Treat in-container systemd as
+disposable image PID 1 with tmpfs `/run`. Do not expand host LSM/AppArmor
+policy, mount pins or kernel-control work as part of this slice.
+
 This slice supports coding and planning without selecting a model or changing
 routing configuration. It closes part of
-[`full-harness-projection-trusted`](../../../visions/plugins/agent-containers/README.md#full-harness-projection-trusted),
+[`full-harness-projection-trusted`](../../../visions/plugins/agent-containers/README.md#full-harness-projection-trusted)
+and [`cluster-scoped-agent-globals`](../../../visions/machine-fleet/README.md#cluster-scoped-agent-globals),
 including persistent home/workspace and real self-maintenance, and the
 [machine-fleet vision](../../../visions/machine-fleet/README.md)'s existing
 role/service-authority separation. Implementation gaps stay in this effort;
-this plan does not revise vision intent.
+this plan records the posture extension above rather than treating trusted
+containers as a new security product.
 
 ## Existing coverage and ownership
 
@@ -128,11 +138,19 @@ and the repository's dependency-age audit for declarations; the audit alone
 does not prove subsequent installation admission or cover every image layer.
 
 The existing CI-repair recipe accepts `COPILOT_VERSION` but does not establish
-the complete locked, seasoned image contract. No concrete Copilot/npm, OS
-snapshot or full-image lock is selected by this plan. Implementation must locate
-admissible existing pins/helpers and prove their exact artifact age/integrity,
-or report missing release evidence as a blocker before installation. Do not
-invent a lock or weaken seasoning to make the build pass.
+the complete locked, seasoned image contract. The implementation candidate's
+[image documentation](../../../.devcontainer/trusted-harness-base/README.md)
+and `dependencies.lock.json` now select exact artifact pins and source evidence.
+The candidate deliberately fixes Linux amd64, `vscode` UID/GID 1000,
+`/home/vscode`, `/workspaces` and a local OCI archive instead of implementing
+arbitrary layout/platform choices. Do not weaken seasoning to make a build pass.
+
+The build owner must separately admit a running, single-node, resource-bounded
+Buildx worker. The wrapper verifies actual CPU/memory/swap bounds and selects
+that exact builder, never the default daemon worker. It neither provisions a
+builder nor changes existing service containers. Bounded CLI cancellation
+preserves uncertain remote outcomes for owner reconciliation; cleanup stays
+limited to owned artifacts/resources.
 
 No interactive login, auth pump, secret build argument, token-bearing build
 secret or copied credential cache enters a build. Approved source/dependency
@@ -165,17 +183,23 @@ not just switching the image digest.
 Real timer/service capability requires a supported container init, cgroup and
 supervision contract. Document host requirements and explicit unsupported
 capabilities; do not claim systemd works in every container, expose the manager
-socket, or add blanket privilege as a shortcut. Trusted is not unrestricted host
-filesystem or lifecycle authority.
+socket, or add blanket privilege as a shortcut. Trusted here means a full
+harness node versus restricted test isolation, not a new security boundary.
+Keep existing launch flags only as ordinary systemd-in-Docker needs. Do not
+author further host-policy or mount-pin work in this slice.
+
+Persist selected folders with named volumes at the declared home and workspace
+paths. Recreate the container; keep those volume names. `/run` stays tmpfs.
+Systemd runtime is disposable with the image.
 
 ## Phased plan and gates
 
 1. **Reviewed contract — image participant; campaign owner integrates.**
-   - [ ] Merge this bounded plan and confirm explicit implementation authorization.
+   - [x] Merge this bounded plan and confirm explicit implementation authorization.
    - [ ] Agree build inputs/outputs and exact image reservation with adjacent
      source owners; disagreements remain blocking for the affected seam only.
 2. **Standalone image — #8352 image participant.**
-   - [ ] Implement only the reserved recipe/schema/build adapter/docs/tests.
+   - [x] Implement only the reserved recipe/schema/build adapter/docs/tests.
    - [ ] Prove secret-free build, dependency admissibility, fresh-home startup,
      existing-home preservation, real tooling and supported init/SSH/tmux behavior.
    - [ ] Record missing release or platform evidence explicitly. An offline
@@ -220,6 +244,43 @@ work; this plan does not record such acceptance. #8352 completion is the tested
 base-image deliverable, not closure of #6030 or the other dependency issues.
 Integration remains open until the actual journey and dependent proofs pass.
 
+## External lifecycle adapter slice — #8787
+
+The campaign owner takes this bounded follow-up to the image slice. It closes
+the "no competing lifecycle writer" prerequisite of Phase 4; it does not claim
+remote transport, manager execution or credential continuity is complete.
+
+**Agent-recommended realization:** add an explicit `lifecycle_owner: external`
+selection for trusted fleets. The default retains agent-containers ownership.
+An external manager declares the same ownership on each created member through
+an agent-containers label. The adapter observes existing members; it does not
+adopt, create, relabel, start or repair a stopped/missing member. A live external
+label independently prevents lifecycle mutations if configuration is missing,
+changed or no longer maps that member. Restricted fleets cannot select this
+mode.
+
+Reserve the agent-containers configuration and lifecycle/fleet boundaries,
+their directly dependent resolver handling, focused tests and documentation,
+and one plugin changefile. Existing roster/auth, credential-relay and
+Gateway/SSH onboarding files remain outside this appointment. No Komodo API,
+manager bootstrap, remote Docker endpoint or new polling process is introduced.
+
+1. Reject invalid ownership selections and restricted/external combinations.
+   Preserve existing trusted/restricted defaults and all credential decisions.
+2. Refuse `up`/reconcile/rebuild, fleet shutdown/removal and explicit or implicit
+   member start/stop/removal before their first lifecycle effect. Configured
+   external ownership and an observed external label each suffice to refuse.
+3. Keep observation and execution against an already running, admitted external
+   trusted member. Do not start stopped members during namespace resolution.
+   Existing physical-instance, repository, lease and session checks still apply.
+4. Test every affected lifecycle front door and the implicit-start path,
+   including removed/changed configuration, missing members, observed external
+   labels, normal managed members and running external execution.
+5. Document the manager-owned label/configuration contract and explicit
+   limitations. Run the plugin's governed tests and existing publication gates;
+   distinguish offline tests from available real-container proof. Remote
+   endpoint/generation and auth delivery qualification remain later work.
+
 ## Validation plan
 
 The following implementation details are **agent-recommended**:
@@ -252,7 +313,7 @@ The following implementation details are **agent-recommended**:
 
 ### Documentation validation
 
-For this plan-only delta, from repository root:
+For effort documentation changes, from repository root:
 
 ```text
 python tools/check-effort-vision-structure.py efforts/active/linux-role-fleet/README.md
@@ -260,14 +321,72 @@ git diff --check
 ```
 
 Also check all relative Markdown links in this child and its parent integration
-anchors. No build, package installation or live provider test belongs to this
-planning stage. No behavior/as-is docs or visions require changes yet.
-Future implementation uses focused offline tests first; dependency declarations
+anchors. The initial plan stage performed no build, package installation or live
+provider test. Implementation uses focused offline tests first; dependency declarations
 also run `python tools/check-dependency-age.py`. Image builds, clean-room/native
 and live validations run only after the execution and venue gates above.
 
 ## Journal
 
+- 2026-10-25: Image slice merged in #8385. Exact merged base and consuming
+  source revisions built successfully on the qualified Gateway builder.
+  All 42 base contracts pass; this does not close runtime/auth/manager gates.
+  External lifecycle ownership plan #8788 merged after approval. The #8787
+  implementation preserves running trusted-session use while refusing direct,
+  fleet and implicit lifecycle mutations against externally owned members.
+  Native Docker qualification refuses all eight start/stop/unpause/remove
+  attempts across declared and removed configuration; an independent managed
+  fixture still stops, starts and removes normally. Both fixtures are retired
+  and pre-existing services preserved. These are lifecycle-ownership proofs,
+  not remote transport, deployed services or credential-renewal qualification.
+
 - 2026-10-23: Drafted the #8352 bounded image plan within #6030. Source
   reservations and build interface are proposed; no implementation, build,
   deployment, new credential producer or adjacent-owner transfer is claimed.
+- 2026-10-23: After #8358 merged and execution authorization, authored the
+  reserved image candidate and its standalone builder/schema, fixed-layout
+  runtime contract, artifact lock and focused offline tests. Public metadata
+  identifies the immutable base, official Node/Copilot/uv checksums and frozen
+  Debian Release/package-index hashes; no authentication or package installation
+  was used to obtain that evidence. Native image build, runtime preservation,
+  admitted worker preparation, adapter/auth and Picker/tmux integration remain
+  open. No adjacent owner, publisher or deployment authority was transferred.
+- 2026-10-23: Candidate validation: 16 focused offline tests pass, including
+  actual CLI/subprocess boundaries, timeout termination, bounded-builder
+  admission/refusal and OCI layer integrity. Ruff F/E9, native Bash syntax,
+  JSON/AST/link checks and effort structure pass. Official Node, Copilot and
+  uv archives were read in memory; complete byte hashes and extraction layouts
+  match the lock. No image was built here. The separately qualified native
+  builder lane still requires its owner to prepare an admitted resource-bounded
+  worker and run the published candidate without changing unrelated services.
+- 2026-10-23: Corrected the candidate's machine-ID projection, persistent-state
+  admission, same-daemon builder binding and pre-launch recovery receipt.
+  Canonical identity remains in home; `/etc/machine-id` is a public-readable
+  regular projection for DBus/user-systemd even with a 0700 home. Foreign,
+  linked or partial persistent identity is refused rather than adopted or
+  rotated. A bounded read-only native preflight independently confirmed the
+  selected base's `vscode` UID/GID 1000, home, Bash, Python 3.12.11 and Git 2.50.1.
+  That evidence proves base assumptions only; derived-image SSH/systemd and
+  unprivileged machine-ID readback remain native validation gates.
+  The corrected candidate passes 26 focused tests, Ruff F/E9, both Bash syntax
+  checks and AST/JSON/link/public-source checks; no native build or rollout is
+  claimed by those offline results.
+- 2026-10-24: The published #8385 candidate passed an actual bounded native
+  OCI build. Manifest:
+  `sha256:1ef40cdd019db10d972897d650cbd6bf150f130ef82383c171904a14bf341dcb`;
+  config:
+  `sha256:a14166084c93fd2672af7e2528c0776d0df29e0bfb6c5a2c514603a630936fca`.
+  Native import verified the descriptor, configuration and rootfs; Docker's
+  containerd store addressed the manifest rather than the config ID.
+  The fixed tools ran successfully, and two disposable containers preserved
+  identity bytes with a 0700 home while both `vscode` and `messagebus` read the
+  public projected ID. A thin consumer built from the verified local OCI layout
+  without a registry, credentials or deployment action.
+- 2026-10-24: Native systemd boot remains blocked on the tested Docker 29.1.3
+  cgroup-v2/default-AppArmor/seccomp host profile: cgroup remount and fresh mount
+  were refused under the declared trusted capabilities. No privileged mode,
+  unconfined profile or host cgroup bind was added. Carry this as a deployment
+  profile admission/qualification gate, not a synthetic service-ready result.
+  The standalone suite now has 27 cases; 24 eligible cases are registered with
+  the existing required-CI runner. Native CI caught CRLF-versus-LF source
+  admission hashes; regenerate those bindings against committed LF bytes.

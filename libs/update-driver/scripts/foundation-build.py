@@ -12,6 +12,7 @@ SCRIPTS = SOURCE / "scripts"
 sys.path[:0] = [
     str(SCRIPTS), str(SOURCE / "src"), str(SOURCE.parent / "agent-procutil" / "src"),
     str(SOURCE.parent / "single-instance-lease" / "src"),
+    str(SOURCE.parent / "zdd" / "src"),
 ]
 
 from update_driver import borrowed_custody  # noqa: E402

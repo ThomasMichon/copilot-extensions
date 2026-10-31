@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 import venv
 
@@ -76,6 +77,33 @@ def test_guardian_reaps_only_after_group_settlement(guardian, monkeypatch, code,
     assert events == ["settled", ("closed", 17)]
 
 
+@pytest.mark.parametrize("live_member", [False, True])
+def test_zombie_only_group_eperm_settles_via_process_observation(guardian, monkeypatch, live_member):
+    waits = []
+    process = SimpleNamespace(pid=123, returncode=None, wait=lambda timeout: waits.append(timeout))
+
+    def killpg(pgid, sig):
+        raise PermissionError(1, "Operation not permitted")
+
+    rows = "  123   123 Z\n" + ("  124   123 S\n" if live_member else "")
+    clock = iter([0.0, 0.0, 11.0])
+    monkeypatch.setattr(guardian, "os", SimpleNamespace(killpg=killpg))
+    monkeypatch.setattr(guardian, "signal", SimpleNamespace(SIGKILL=9))
+    monkeypatch.setattr(guardian, "subprocess", SimpleNamespace(
+        run=lambda *a, **k: SimpleNamespace(stdout=rows), DEVNULL=subprocess.DEVNULL,
+    ))
+    monkeypatch.setattr(guardian, "time", SimpleNamespace(
+        monotonic=lambda: next(clock), sleep=lambda seconds: None,
+    ))
+    if live_member:
+        with pytest.raises(TimeoutError, match="live writers"):
+            guardian._terminate_group(process)
+        assert waits == []
+    else:
+        guardian._terminate_group(process)
+        assert waits == [10]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX ps/process-group guardian")
 def test_real_guardian_without_waitid_preserves_child_exit(guardian, tmp_path):
     script = (
@@ -95,7 +123,7 @@ def test_real_guardian_without_waitid_preserves_child_exit(guardian, tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows retained Job guardian")
-@pytest.mark.parametrize("outcome", ["success", "exit", "timeout", "launch"])
+@pytest.mark.parametrize("outcome", ["success", "exit", "timeout", "absolute-timeout", "launch"])
 @pytest.mark.timeout(30)
 def test_retained_windows_child_preserves_outcome_and_releases_custody(
     guardian, tmp_path, outcome,
@@ -112,11 +140,13 @@ def test_retained_windows_child_preserves_outcome_and_releases_custody(
         "success": [sys.executable, "-I", "-c", "print('owned')"],
         "exit": [sys.executable, "-I", "-c", "raise SystemExit(23)"],
         "timeout": [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
+        "absolute-timeout": [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
         "launch": [str(tmp_path / "missing-child.exe")],
     }
     errors = {
         "exit": subprocess.CalledProcessError,
         "timeout": guardian.ChildTimeoutExpired,
+        "absolute-timeout": guardian.ChildTimeoutExpired,
         "launch": guardian.ChildLaunchError,
     }
     with runtime.construction_lease(root, "probe") as descriptor:
@@ -125,6 +155,7 @@ def test_retained_windows_child_preserves_outcome_and_releases_custody(
                 commands[outcome], cwd=slot, env=dict(os.environ),
                 timeout=3, procutil=agent_procutil, construction_fd=descriptor,
                 runtime_root=root, runtime_version="probe", runtime_path=runtime_path,
+                **({"deadline": time.monotonic() + 3} if outcome == "absolute-timeout" else {}),
             )
 
         if outcome == "success":

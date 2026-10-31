@@ -1,0 +1,9 @@
+{
+  "comment": "Add read-only journal-local agenda inspection and record paired-spike and qualification outcomes.",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}

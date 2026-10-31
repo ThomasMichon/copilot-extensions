@@ -1,0 +1,9 @@
+{
+  "comment": "Package canonical frozen-input helpers and qualify fixed legacy lifecycle recipes without adopting ordinary SSH publishers",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

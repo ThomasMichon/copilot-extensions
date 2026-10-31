@@ -107,6 +107,34 @@ Invariants are **must-always-hold contracts between a vision and the code** — 
 narrow set of properties a change may never quietly break. They are the enforceable
 core of the principles above; a reviewer checks a change against these.
 
+- **Circumstantial hooks preserve event-time responsibility.** Instruction
+  injection is a circumstance-based skill, not a replacement startup snapshot.
+  Acquire reusable input-bound facts, evaluate the current trigger cheaply and
+  intervene contextually. Each hook names its purpose, exposure/freshness,
+  scoped acknowledgement and invalidation, violation versus dependency outcomes,
+  agent-readable recovery, bounded retry cost and inner/outer deadline plus
+  owned cleanup. Default to fail open when absent/broken backing suite prevents
+  ordinary evaluation, retaining inspection and recovery. Exceptions require a
+  documented protected action/prerequisite, positive applicability from available
+  trusted inputs independent of missing helpers, bounded errors and reachable
+  recovery; suite absence is not applicability proof. Preserve confirmed policy
+  violations and unknown lifecycle outcomes
+  and one active implementation per event through any transition. See
+  [circumstantial hook contracts](circumstantial-hook-contracts.md). (Serves
+  *Vision harness-guidance* `circumstance-based-intervention`,
+  `reusable-facts-current-decisions`, `bounded-actionable-hook-failures` and
+  *Vision agent-worktrees* cooperative write-guard responsibility.)
+
+- **CLI and service contracts tolerate declared version skew.** A changed
+  independently deployed boundary declares contract support separately from
+  package versions against the executable runtime or running peer. Preserve
+  strict CLI parsing; expand receiver support before migrating callers and
+  retire old forms only after the supported upgrade/rollback window. Prefer
+  owner-internal config enforcement over unnecessary new prerequisite RPCs.
+  See [service-contract-evolution](service-contract-evolution.md). (Serves
+  *Vision plugin-services* `version-skew-tolerant-contracts` and
+  `interoperate-across-version-skew`.)
+
 - **Communication silence and process lifetime are separate clocks.** Services,
   CLIs and tools use a short communication deadline renewed by every received
   target update, including events a consumer does not semantically handle, and
@@ -122,6 +150,11 @@ core of the principles above; a reviewer checks a change against these.
   with embodiment or accepts an existing sessionless workspace. Queue lanes
   and code targets do not replace its selected execution repository. Logical
   creation identity survives retries separately from prompt-delivery identity.
+  Owned remote allocation is coordinated from the originating worktree;
+  allocation requires the receiving workspace and durable originating
+  responsibility. Exact claim linkage is asynchronous, not an agent-startup gate.
+  SSH and adopted Gateway routes share this owner boundary, without mandatory
+  reverse connectivity or a second Bridge/Dispatch allocator.
   See [workspace allocation and session acquisition](workspace-allocation-and-session-acquisition.md).
 
 - **No shared-infrastructure dependency by default.** A plugin service is
@@ -198,23 +231,19 @@ core of the principles above; a reviewer checks a change against these.
   same PR (see `docs/pipelines.md`); the promotion pipeline applies the actual
   version bump when it consumes that changefile. An un-changefiled plugin
   change is silently ignored by the marketplace.
-- **Enabling a runtime provisions it.** A runtime plugin that a repo/session
-  **enables** is installed, started, and kept **version-matched to its enabled
-  payload automatically at session start** — idempotent, version-keyed, throttled,
-  and **gated to the machines it belongs on** — with **no manual install step**.
-  A user's only action is enabling; provisioning and version reconciliation are the
-  model's job and must never require hand-running an installer, nor depend on one
-  *particular* sibling being the session launcher. (Serves *Vision plugin-services
-  §Features/self-provisioning-runtime*; the convenience realization is `runtimeScope` +
-  `agent-worktrees reconcile-plugins`, see
-  [`../install-contract.md`](../install-contract.md) § "Automatic reconciliation at
-  launch" — but that path must not be a *dependency*: the sibling-independent,
-  confined-env realization (self-provisioning binstub + `stamp` + skill readiness
-  self-check) is [`runtime-self-provisioning.md`](runtime-self-provisioning.md).)
+- **Runtime installation is independent of plugin loading.** Explicit
+  installation/maintenance selects and prepares the runtime; session-start,
+  first-use and skill readiness paths discover compatible installed capability
+  or report its absence, not install or stamp it. Components remain independently
+  installable without a mandatory Manager. (Serves *Vision plugin-services
+  §Features/self-provisioning-runtime*.) The old
+  [`runtime-self-provisioning`](runtime-self-provisioning.md) realization remains
+  documented as legacy transition until the independent installer is qualified;
+  this revised invariant does not claim current code has already migrated.
   An explicitly configured optional
-  [`managed-companion-runtime`](managed-companion-runtime.md) is the narrow
-  exception: enabling the lightweight plugin does not provision that heavyweight
-  capability, and only its already-running trusted supervisor may do so.
+  [`managed-companion-runtime`](managed-companion-runtime.md) retains its
+  delegated installation authority: enabling the lightweight connector does
+  not provision the capability, and only its trusted owning supervisor may do so.
 - **Every runtime command is payload-attributable.** Every runtime-bearing
   marketplace plugin declares all agent-facing commands in
   `payload-invocation.json`, commits the generated POSIX/PowerShell/CMD shims,
@@ -330,11 +359,11 @@ core of the principles above; a reviewer checks a change against these.
   §Features/self-auditing-drop-in-composition* and
   §Behaviors/stale-drop-ins-are-inert-and-legible*; see
   [`drop-in-registry-hygiene.md`](drop-in-registry-hygiene.md).)
-- **Depended-on guidance never relies solely on `sessionStart`
+- **Depended-on ambient session guidance never relies solely on `sessionStart`
   `additionalContext` composition.** Multi-hook `additionalContext` aggregation
   is empirically unreliable -- sessions have been observed where no
   contributor's output reached the model at all, not just a last-writer-wins
-  loss. Guidance a harness genuinely depends on must be delivered through a
+  loss. Ambient session guidance a harness depends on must be delivered through a
   checked-in static pointer projection plus an output-free `sessionStart` hook
   side effect that writes session-scoped content to
   `~/.copilot/session-state/<sessionId>/instructions/<plugin>/<topic>.instructions.md`,
@@ -378,13 +407,16 @@ the exemplars, and the vision it serves):
 
 | Pattern | Concern |
 |---------|---------|
+| [in-picker-device-authorization](in-picker-device-authorization.md) | Existing provider-owned device authentication through summary-conditioned actions and the shared nonblocking Manager modal; safety boundaries, SSH use and bounded candidate consumers |
 | [runtime-agent-plugin](runtime-agent-plugin.md) | The complete “add an `agent-*` plugin” path: choose the smallest runtime shape, implement the cross-platform install contract, generate payload-local commands, wire attributable bootstrap/glossary hooks, write skills against logical commands, and add service/provider ownership without dynamic initial-context snapshots |
+| [circumstantial-hook-contracts](circumstantial-hook-contracts.md) | Binding hook responsibilities and the plugin-delivered practical contract: fact exposure, event-time intervention, acknowledgement, failure/retry behavior and whole-path cleanup budgets |
 | [session-scoped-dynamic-guidance](session-scoped-dynamic-guidance.md) | The primary delivery path for guidance a harness depends on: a checked-in static pointer projection plus a `sessionStart` hook side effect that writes per-session dynamic content to `~/.copilot/session-state/<sessionId>/instructions/<plugin>/<topic>.instructions.md`, avoiding unreliable `additionalContext` aggregation entirely |
-| [worktree-scoped-dynamic-guidance](worktree-scoped-dynamic-guidance.md) | Local-first stable guidance: enabled-payload-authenticated gitignored caches, concise checked-in selectors, lock-owned non-auto-loaded reviewed fallbacks, explicit inline decision kernels, and per-source completeness receipts; the inline catch-all recovers late/unpaired bodies without mistaking file existence for model admission |
+| [worktree-scoped-dynamic-guidance](worktree-scoped-dynamic-guidance.md) | Startup copies deliver current declared bodies without content admission; periodic maintenance keeps thin selectors and non-discovered offline fallbacks, including former inline kernels, with provider-first upgrade and rollback controls |
 | [context-handoff-lifecycle](context-handoff-lifecycle.md) | How a stored continuation becomes a successor-owned session without losing prompt fidelity, moving the head early, trusting a reused PID, depending on effort/knowledge state, or crossing an ambient/lossy command boundary |
 | [telemetry-qos-engagement](telemetry-qos-engagement.md) | Proposed QoS/Engagement measurement semantics, OTel span/event/metric mapping, failure buckets and the source-owned event catalog; no runtime adoption claim |
 | [local-endpoint-discovery](local-endpoint-discovery.md) | How a service exposes a discoverable, collision-free, local-first endpoint — the anti-static-port pattern, incl. the rendezvous / port-mapping file |
 | [service-transport](service-transport.md) | Which channel a service exposes — the transport ladder (stdio → OS-native socket/pipe → OS-assigned loopback → tunnel) and the named-pipe/UDS reality |
+| [service-contract-evolution](service-contract-evolution.md) | Strict CLI syntax and versioned process/transport contracts: active-runtime support metadata, provider-first expand/migrate/contract rollout, additive config semantics and focused upgrade/rollback coverage |
 | [service-lifecycle-supervision](service-lifecycle-supervision.md) | Least-privilege lifecycle tiers (user-mode ensure → scheduled activation → system service → container), stable register-once launchers, and cutover-safe updates |
 | [versioned-singleton-manager](versioned-singleton-manager.md) | How a host's native service manager's own view of "is this service running" stays coherent across a spawn-new-retire-old cutover — a thin process the service manager tracks permanently, which claims every descendant (Linux subreaper / Windows Job Object), distinguishes a planned cutover handoff from a real crash via the daemon's own `active.json`, and updates itself in place (`execve` on Linux; a Task-Scheduler restart relayed through a short-lived bridge process on Windows) |
 | [ephemeral-process-reaping](ephemeral-process-reaping.md) | Why detaching a process to survive its parent (SSH drop, env-var scoping, terminal close) removes the parent's own ability to clean it up, and how to pair it with a liveness-polling reaper (not just a graceful-shutdown hook) that fires on every death path |

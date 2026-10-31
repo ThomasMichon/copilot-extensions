@@ -1,16 +1,21 @@
 """Main-derived versions are independent of unlanded plugin-version aliases."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tomllib
 
 import pytest
 
 import accumulate_bumps
 import promote_release as promotion
 from promotion_python_artifacts import PromotionArtifactError, validate_source_binding
+from candidate_qualification_receipt import UnitQualificationError, input_equivalence
 from test_promote_release import (
     _commit, _git, no_ambient_git_identity as _identity_fixture,
     repo as _repo_fixture,
@@ -38,6 +43,71 @@ def _runtime(repo):
     source = plugin / "src/demo"
     source.mkdir(parents=True)
     (source / "__init__.py").write_text('VALUE = "initial"\n', encoding="utf-8")
+
+
+@pytest.mark.parametrize(("main_version", "expected"), [
+    ("0.1.0-dev1", "0.1.1-dev1"),
+    ("0.1.19-dev1", "0.1.20-dev1"),
+])
+def test_standalone_version_allocation_preserves_enrolled_python_source(
+    repo, main_version, expected,
+):
+    source = Path(__file__).resolve().parents[1]
+    project = source / "services/chat"
+    component = repo / "services/chat"
+    version = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]["version"]
+
+    def copy_source(value):
+        shutil.copytree(
+            project / "src", component / "src", dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        (component / "pyproject.toml").write_text(
+            f'[project]\nname = "agent-chat-service"\nversion = "{value}"\n',
+            encoding="utf-8",
+        )
+
+    copy_source(main_version)
+    accumulate_bumps._write_source_fallbacks(component, version, main_version)
+    _commit(repo, "land initial standalone package")
+    _git(["branch", "-f", "dev"], repo)
+    _git(["checkout", "-q", "dev"], repo)
+    copy_source(version)
+    changes = repo / ".changefiles"
+    changes.mkdir()
+    (changes / "chat.json").write_text(json.dumps({
+        "comment": "standalone source change",
+        "changes": [{"plugin": "services/chat", "type": "patch"}],
+    }), encoding="utf-8")
+    _commit(repo, "prepare standalone source")
+    manifest = json.loads((source / "tools/promotion-unit-manifest.json").read_text())
+    inputs = {
+        name: hashlib.sha256((repo / name).read_bytes()).hexdigest()
+        for name in manifest["sources"]
+        if name.startswith("services/chat/src/")
+    }
+    initializer = "services/chat/src/agent_chat_service/__init__.py"
+    assert initializer in inputs
+    report = promotion.promote(
+        repo=repo, dev_ref="dev", main_ref="main", promotion_time="2026-10-24T02:00:00Z",
+    )
+    candidate = promotion.add_scratch_worktree(report["commit"], repo=repo)
+    try:
+        assert report["bumps"]["services/chat"][1] == expected
+        assert tomllib.loads((candidate / "services/chat/pyproject.toml").read_text())[
+            "project"
+        ]["version"] == expected
+        input_equivalence(repo, candidate, {"sources": inputs})
+        assert (candidate / initializer).read_bytes() == (repo / initializer).read_bytes()
+        with (candidate / initializer).open("a", encoding="utf-8") as stream:
+            stream.write("\nSOURCE_CHANGED = True\n")
+        with pytest.raises(UnitQualificationError, match="candidate unit source differs"):
+            input_equivalence(repo, candidate, {"sources": inputs})
+    finally:
+        promotion.remove_scratch_worktree(candidate, repo=repo)
+    assert tomllib.loads((component / "pyproject.toml").read_text())["project"]["version"] == version
 
 
 def test_unlanded_alias_does_not_change_main_derived_dependency_versions(repo):
@@ -212,3 +282,94 @@ def test_landed_main_advances_the_next_changed_plugin_version(repo):
     assert (old, new) == ("0.1.1-dev1", "0.1.2-dev1")
     assert accumulate_bumps.version_key(new) > accumulate_bumps.version_key(old)
     assert _git(["rev-parse", "main"], repo) == first["commit"]
+
+
+def test_native_index_five_project_release_closure_uses_library_changefile(repo):
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+    from packaging.version import Version
+
+    _git(["config", "core.longpaths", "true"], repo)
+    source = Path(__file__).resolve().parents[1]
+    projects = (
+        "plugins/native-index", "services/index", "libs/agent-procutil",
+        "libs/zdd", "libs/dropin-registry",
+    )
+    for relative in projects:
+        target = repo / relative
+        target.mkdir(parents=True, exist_ok=True)
+        original = "plugins/agent-index" if relative == "plugins/native-index" else relative
+        shutil.copy(source / original / "pyproject.toml", target / "pyproject.toml")
+        if relative.startswith("libs/"):
+            shutil.copytree(source / original / "src", target / "src", ignore=shutil.ignore_patterns(
+                "__pycache__", "*.pyc",
+            ))
+    plugin = repo / "plugins/native-index"
+    (plugin / "plugin.json").write_text(json.dumps({
+        "name": "native-index", "version": "0.10.76-dev1",
+    }), encoding="utf-8")
+    accumulate_bumps._write_project_version(plugin / "pyproject.toml", "0.10.76-dev1")
+    accumulate_bumps._write_project_version(
+        repo / "libs/agent-procutil/pyproject.toml", "0.1.0-dev7",
+    )
+    service = tomllib.loads((repo / "services/index/pyproject.toml").read_text())["project"]
+    required = next(
+        Requirement(value) for value in service["dependencies"]
+        if Requirement(value).name == "agent-procutil"
+    )
+    assert not required.specifier.contains(Version("0.1.0.dev7"), prereleases=True)
+    for relative in (
+        "plugins/native-index/src/agent_index/http_auth.py",
+    ):
+        target = repo / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(source / relative.replace("native-index", "agent-index"), target)
+    _commit(repo, "published native index projects with missing library bump")
+    _git(["branch", "-f", "dev"], repo)
+    _git(["checkout", "-q", "dev"], repo)
+    changes = repo / ".changefiles"
+    changes.mkdir()
+    (changes / "library.json").write_text(json.dumps({
+        "comment": "release shared process helpers",
+        "changes": [{"plugin": "libs/agent-procutil", "type": "dev"}],
+    }), encoding="utf-8")
+    _commit(repo, "request canonical library release")
+    result = promotion.promote(repo=repo, dev_ref="dev", main_ref="main")
+    candidate = promotion.add_scratch_worktree(result["commit"], repo=repo)
+    try:
+        metadata = [
+            tomllib.loads((candidate / relative / "pyproject.toml").read_text())["project"]
+            for relative in projects
+        ]
+        versions = {canonicalize_name(p["name"]): Version(p["version"]) for p in metadata}
+        assert versions["agent-procutil"] == Version("0.1.0.dev8")
+        checked = []
+        for project in metadata:
+            for dependency in project.get("dependencies", []):
+                requirement = Requirement(dependency)
+                name = canonicalize_name(requirement.name)
+                if name in versions:
+                    assert requirement.specifier.contains(versions[name], prereleases=True)
+                    checked.append(name)
+        assert set(checked) == {
+            "agent-index", "agent-procutil", "agent-zdd", "agent-dropin-registry",
+        }
+        canonical = candidate / "libs/agent-procutil"
+        embedded = candidate / "plugins/native-index/libs/agent-procutil"
+        assert (embedded / "pyproject.toml").read_bytes() == (canonical / "pyproject.toml").read_bytes()
+        assert (embedded / "src/agent_procutil/owned_process.py").read_bytes() == (
+            canonical / "src/agent_procutil/owned_process.py"
+        ).read_bytes()
+        assert (candidate / "plugins/native-index/src/agent_index/http_auth.py").read_bytes() == (
+            source / "plugins/agent-index/src/agent_index/http_auth.py"
+        ).read_bytes()
+    finally:
+        promotion.remove_scratch_worktree(candidate, repo=repo)
+    _git(["update-ref", "refs/heads/main", result["commit"]], repo)
+    (repo / "README.md").write_text("unrelated later source\n", encoding="utf-8")
+    _commit(repo, "later source without another library changefile")
+    later = promotion.promote(repo=repo, dev_ref="dev", main_ref="main")
+    assert later["bumps"] == {}
+    assert tomllib.loads(_git([
+        "show", f"{later['commit']}:libs/agent-procutil/pyproject.toml",
+    ], repo))["project"]["version"] == "0.1.0-dev8"

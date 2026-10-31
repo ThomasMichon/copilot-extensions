@@ -691,15 +691,18 @@ def build_coordinator_mcp(
                     "message": "claim requires X-Agent-Repo, repo, or explicit all_repos=true",
                 }
             }
-        outcome = queue.claim_outcome(
-            worker_id_for(machine, worktree),
-            capabilities or [],
-            repo=lane,
-            machine=machine,
-            worktree=worktree,
-            task_id=task_id,
-            lease_seconds=lease_seconds,
-        )
+        try:
+            outcome = queue.claim_outcome(
+                worker_id_for(machine, worktree),
+                capabilities or [],
+                repo=lane,
+                machine=machine,
+                worktree=worktree,
+                task_id=task_id,
+                lease_seconds=lease_seconds,
+            )
+        except TaskError as exc:
+            return {"error": str(exc)}
         for rejection in outcome.producer_rejections:
             _emit_producer_event("producer.claim_rejected", rejection)
         task = outcome.task
@@ -851,6 +854,14 @@ def build_coordinator_mcp(
         bus.publish({"type": "spawn.rearmed", "rearm": result})
         return result
 
+    from .mcp_task_recovery_http import register_task_recovery_tools
+
+    register_task_recovery_tools(
+        mcp, queue, bus, control_error=_control_error,
+        legacy_reset=lambda task_id, **fields: _mutate(
+            lambda: queue.reset(task_id, **fields), "task.reset",
+        ),
+    )
     return mcp
 
 

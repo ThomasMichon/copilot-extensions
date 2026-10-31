@@ -21,10 +21,18 @@ For everything else, resolve a scratch root -- an explicit override, an
 operator-configured default, or otherwise the operating system's own
 preferred temporary-folder system (see the paired skill for the exact,
 portable resolution order -- never hardcode one) -- and create one
-freshly-timestamped subfolder per task there before writing anything;
-never add loose files beside siblings from unrelated tasks. Clean up that
+freshly-timestamped, worktree-stamped subfolder per task there before writing
+anything. Use a session stamp when no worktree exists; record unavailable
+ownership explicitly rather than inventing it. Add a `scratch-owner.json`
+breadcrumb with the existing owner references, creation time, purpose and
+retention reason; it is a pointer, not a lease or deletion permission. Keep
+ad hoc outputs and supported per-invocation temporary files in that folder,
+without changing global settings or redirecting framework-owned artifacts.
+Never add loose files beside siblings from unrelated tasks. Clean up that
 subfolder once its content is no longer needed, and file anything meant to
 last (a plan, a decision, a finding) through the operator's normal durable
-channels instead of leaving it in scratch. Invoke the
+channels instead of leaving it in scratch. Age, a merged PR or no open process
+does not prove release: preserve retained evidence and existing custody, and
+follow the operator's deletion-confirmation policy for exact paths. Invoke the
 `using-scratch-space` skill before creating such a file outside a
 repository.

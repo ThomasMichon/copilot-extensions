@@ -39,7 +39,8 @@ from typing import Any, Protocol, runtime_checkable
 from agent_procutil import no_window_flags
 from remote_login_shell import wrap_login_shell
 
-from .launcher import launch_session_host
+from .launcher import launch_session_host as launch_session_host
+from .local_spawner import LocalSpawner as LocalSpawner
 
 log = logging.getLogger("agent-bridge.session-host.spawner")
 
@@ -180,65 +181,6 @@ def _safe_session_id(session_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", session_id or "session")[:48]
 
 
-class LocalSpawner:
-    """Spawn a survivable Session Host on **this** machine (the shipped path).
-
-    Wraps :func:`launch_session_host` (run off the event loop) and mints a
-    per-Host connect nonce so a stray same-user process cannot drive the child
-    by dialing the loopback port. The endpoint is a direct loopback port, so
-    ``refresh_endpoint`` is a no-op.
-    """
-
-    boundary = "local"
-
-    def __init__(self, *, unexpected_reap_seconds: float = 60.0,
-                 active_reap_seconds: float = 0.0,
-                 ready_timeout: float = 90.0) -> None:
-        # Bound on how long an idle, front-less child lingers after an unexpected
-        # disconnect before the host self-reaps it (#48). Handed to the launched
-        # host process. 0 disables the unexpected-grace self-reap.
-        self._unexpected_reap_seconds = unexpected_reap_seconds
-        # Bound on how long an ACTIVE (mid-turn) front-less child is held after
-        # an unexpected disconnect before the host lets it go (#145). 0 disables.
-        self._active_reap_seconds = active_reap_seconds
-        # Bound on how long we wait for the launched host process to bind its
-        # loopback port + write its state file (its own cold start), NOT the
-        # ACP handshake that follows. Wired from timeouts.session_host_ready so a
-        # heavy/elevated singleton launch does not spuriously fail LAUNCH_ACP on
-        # a tight 30s budget.
-        self._ready_timeout = ready_timeout
-
-    async def spawn(
-        self,
-        child_argv: list[str],
-        *,
-        cwd: str | None = None,
-        env: dict[str, str] | None = None,
-        session_id: str = "",
-    ) -> SpawnedHost:
-        from .. import __version__
-
-        nonce = new_nonce()
-        handle = await asyncio.to_thread(
-            launch_session_host, child_argv, cwd=cwd, env=env, nonce=nonce,
-            session_id=session_id, host_version=__version__,
-            ready_timeout=self._ready_timeout,
-            unexpected_reap_seconds=self._unexpected_reap_seconds,
-            active_reap_seconds=self._active_reap_seconds,
-        )
-        return SpawnedHost(
-            local_port=handle.port,
-            host_pid=handle.host_pid,
-            child_pid=handle.child_pid,
-            protocol_version=handle.protocol_version,
-            boundary=self.boundary,
-            nonce=nonce,
-            state_file=handle.state_file,
-            proc=handle.proc,
-            _refresh=None,
-        )
-
-
 # Env var carrying the connect-auth nonce to the remote host process (kept off
 # the command line so it does not leak to ``ps``). Mirrors launcher._NONCE_ENV.
 _NONCE_ENV = "AGENT_BRIDGE_SESSION_HOST_NONCE"
@@ -370,7 +312,7 @@ class CodeSpaceSpawner:
         unexpected_reap_seconds: float = 60.0,
         active_reap_seconds: float = 0.0,
         require_relay_ready: bool = False,
-        relay_ready_timeout: float = 5.0,
+        relay_ready_timeout: float | None = None,
         provision_prelude: str = "",
     ) -> None:
         self._transport = transport
@@ -382,7 +324,9 @@ class CodeSpaceSpawner:
         self._unexpected_reap_seconds = unexpected_reap_seconds
         self._active_reap_seconds = active_reap_seconds
         self._require_relay_ready = require_relay_ready
-        self._relay_ready_timeout = relay_ready_timeout
+        self._relay_ready_timeout = (
+            ready_timeout if relay_ready_timeout is None else relay_ready_timeout
+        )
         self.prepare_child: Callable[[list[str]], Awaitable[list[str]]] | None = None
         self.provision_prelude = provision_prelude
 
@@ -976,7 +920,10 @@ print("__REAPED__")
         fail_open: bool = True,
     ) -> Callable[[], Awaitable[bool]]:
         from .endpoints import transport_serving_probe
-        return transport_serving_probe(self._transport, relay_port, fail_open=fail_open)
+        return transport_serving_probe(
+            self._transport, relay_port, fail_open=fail_open,
+            timeout=max(self._ready_timeout, self._relay_ready_timeout),
+        )
 
     async def _poll_state(
         self,

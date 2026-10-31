@@ -72,6 +72,18 @@ def _patch_registry_path(monkeypatch, tmp_path: Path) -> Path:
     return target
 
 
+def _registered_execution_repo(monkeypatch, tmp_path: Path, project: str, *, agent=True) -> Path:
+    repo = tmp_path / project
+    repo.mkdir()
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: tmp_path / "repos.yaml")
+    entry = repos.RepoEntry(
+        name=project, repo_class="worktree" if agent else "reference", agent=agent,
+        paths={repos._current_platform(): str(repo)},
+    )
+    repos.write_registry(repos.ReposRegistry(repos={project: entry}))
+    return repo
+
+
 @pytest.mark.guard
 @pytest.mark.parametrize("edited", [False, True])
 @pytest.mark.parametrize("source_only", [False, True])
@@ -135,8 +147,9 @@ def test_last_registry_entries_roundtrip_to_command_and_profile_reconciliation(
 
 def test_register_project_writes_lean(monkeypatch, tmp_path: Path):
     target = _patch_registry_path(monkeypatch, tmp_path)
+    repo = _registered_execution_repo(monkeypatch, tmp_path, "myproj")
     installer.register_project(
-        "myproj", repo_dir="D:/Src/myproj", expose_agent=True,
+        "myproj", repo_dir=str(repo), expose_agent=True,
     )
     text = target.read_text(encoding="utf-8")
     assert "schema_version: 2" in text
@@ -156,6 +169,7 @@ def test_register_project_preserves_existing_on_contextless_reregister(
     monkeypatch, tmp_path: Path
 ):
     target = _patch_registry_path(monkeypatch, tmp_path)
+    _registered_execution_repo(monkeypatch, tmp_path, "myproj")
     # A pre-migration FAT entry with adoption-runtime facts set.
     target.write_text(
         "schema_version: 1\n"
@@ -190,7 +204,8 @@ def test_register_project_preserves_existing_on_contextless_reregister(
 
 def test_register_project_records_display_name(monkeypatch, tmp_path: Path):
     target = _patch_registry_path(monkeypatch, tmp_path)
-    installer.register_project("spo-core", display_name="SPO.Core")
+    repo = _registered_execution_repo(monkeypatch, tmp_path, "spo-core")
+    installer.register_project("spo-core", repo_dir=str(repo), display_name="SPO.Core")
     data = yaml.safe_load(target.read_text(encoding="utf-8"))
     assert data["projects"]["spo-core"]["display_name"] == "SPO.Core"
 
@@ -223,15 +238,8 @@ def test_subcommand_uses_positional_project_not_flag():
 
 def test_subcommand_resolves_expose_agent_from_repos(monkeypatch, tmp_path: Path):
     target = _patch_registry_path(monkeypatch, tmp_path)
-
-    class _Entry:
-        agent = False
-
+    _registered_execution_repo(monkeypatch, tmp_path, "myproj", agent=False)
     monkeypatch.setattr(m, "inst", installer)
-    monkeypatch.setattr(
-        "agent_worktrees.repos.find_repo",
-        lambda name: _Entry() if name == "myproj" else None,
-    )
     rc = m.cmd_register_project_entry(_entry_args())
     assert rc == 0
     data = yaml.safe_load(target.read_text(encoding="utf-8"))
@@ -242,7 +250,8 @@ def test_subcommand_resolves_expose_agent_from_repos(monkeypatch, tmp_path: Path
 def test_subcommand_force_no_expose_agent(monkeypatch, tmp_path: Path):
     target = _patch_registry_path(monkeypatch, tmp_path)
     monkeypatch.setattr(m, "inst", installer)
-    # Explicit override wins and repos lookup is not consulted.
+    _registered_execution_repo(monkeypatch, tmp_path, "myproj", agent=True)
+    # Exposure override wins; hosting admission still resolves the registered path.
     rc = m.cmd_register_project_entry(_entry_args(expose_agent=False))
     assert rc == 0
     data = yaml.safe_load(target.read_text(encoding="utf-8"))
@@ -352,6 +361,7 @@ def test_subcommand_skips_local_presence_without_repo_dir(monkeypatch, tmp_path:
     """No repo_dir (a context-less re-registration) -- there's no cwd to
     resolve a knowledge-repo-relative state root from, so this is a no-op
     rather than guessing a machine/cwd."""
+    _registered_execution_repo(monkeypatch, tmp_path, "myproj")
     monkeypatch.setattr(installer, "register_project", lambda *a, **k: None)
     called = []
     monkeypatch.setattr(
@@ -401,13 +411,14 @@ def test_windows_register_rejects_casefolded_project_collision(
 ):
     monkeypatch.setattr(installer.platform, "system", lambda: "Windows")
     target = _patch_registry_path(monkeypatch, tmp_path)
-    installer.register_project("demo", expose_agent=True)
+    repo = _registered_execution_repo(monkeypatch, tmp_path, "demo")
+    installer.register_project("demo", repo_dir=str(repo), expose_agent=True)
 
     with pytest.raises(
         installer.BinstubOwnershipError,
         match="collides with 'demo'",
     ):
-        installer.register_project("Demo", expose_agent=True)
+        installer.register_project("Demo", repo_dir=str(repo), expose_agent=True)
 
     data = yaml.safe_load(target.read_text(encoding="utf-8"))
     assert set(data["projects"]) == {"demo"}

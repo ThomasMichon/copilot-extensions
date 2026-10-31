@@ -31,6 +31,28 @@ spawn is reconciled, never silently double-run or lost).
 
 ## Coordinator, supervisor daemon and worker lanes
 
+Managed local startup checks the selected **execution harness**, not the task's
+repository lane. A known actual local checkout is checked directly through the
+fresh shared library, without requiring a Worktrees runtime. Read-only Worktrees
+resolution is needed only for Worktrees-owned worktree/project metadata; remote
+Worktrees receivers use `agent-policy check --path <checkout> --operation
+dispatch --json`. Admission precedes creation, resume or seed effects.
+Source-only `create_worktree` allocation remains independent.
+The shared [repository-policy library](../../../libs/repository-policy/README.md)
+owns policy precedence and denial semantics.
+Direct library admission uses the marketplace identity from Dispatch's existing
+validated installation receipt. An explicit invalid context refuses before any
+workspace lookup; it is never treated as an absent marketplace. Same-cell peer
+checks and guest checks retain the receiving Worktrees installation's validated
+marketplace rather than taking identity from task metadata.
+
+Restricted provider startup additionally requires `dispatch-check-hosting
+<name> --expected-container-id <id>` before task claiming, binding preparation
+and credential projection. Unsupported admission receivers refuse visibly;
+there is no permissive fallback. Remote/provider receivers remain responsible
+for a fresh check on their actual guest checkout immediately before launch.
+Existing live-session custody and receipt reconciliation are not launch grants.
+
 These are roles within `agent-dispatch`, not three independent task authorities:
 
 | Role | Current responsibility |
@@ -56,6 +78,101 @@ remote-pool and central-authority options are not proof of a container-local
 coordinator or coordinator-to-coordinator federation. Container composition,
 authenticated supervisor execution enrollment and running adoption must be
 qualified separately; this description does not install or activate them.
+
+### Allocation progress, pool selection and diagnostics
+
+The supervisor daemon derives desired registrations from the coordinator and
+registrar declarations, then applies operator overrides. A discovered declaration
+is not necessarily enabled, and a running lane process is not proof of an
+available execution destination. Producers enqueue work; they do not allocate
+its agent. Each worker-lane `Supervisor.poll_once()` reconciles existing
+reservations, recovery and redelivery before considering new eligible tasks.
+A blocked reconciliation or backend call can delay later allocations in that
+lane while its process remains alive.
+
+Lane selection applies repository scope, labels, task selectors, holds and
+concurrency. There is no single universal discovery of all execution pools.
+For the explicit remote fleet backend, `FleetSpawner` probes its configured
+ordered host list for reachability and the required command, caches that result
+briefly, and selects the first available candidate. This is not a load-aware
+capacity guarantee. No-capacity deferral happens before reservation; reserved
+attempts are recorded before nontransactional workspace/session creation.
+
+The [local acquisition guide](session-acquisition.md) distinguishes ordinary
+Bridge create/store/send from prepared-workspace acquisition and CLI/fleet
+embodiment. In particular, the ordinary Bridge call can include worktree
+resolution and preparation before a native session is ready. Launch preparation
+is not necessarily just an executable start: the selected Worktrees launcher,
+repository setup hooks and plugin preparation can perform additional work.
+Bridge's local ACP arguments disable Copilot self-update with
+`--no-auto-update`; this does not disable separate runtime reconciliation or
+missing-plugin installation. The
+[reconciler](../../agent-worktrees/src/agent_worktrees/reconcile.py)
+and [Bridge local launch owner](../../agent-bridge/src/agent_bridge/transport.py)
+define those separate behaviors.
+
+Task events, spawn reservations and Bridge creation/acquisition journals retain
+different parts of the sequence. They are not a complete diagnostic transcript
+of every scheduling decision, child process or failed allocation. Default
+worker-lane [application diagnostics](diagnostic-logs.md#spawn-causal-records)
+record cycle/stage entry before reconciliation, selection, reservation,
+preparation, backend and bookkeeping calls, followed by returned/error records
+with elapsed time. Existing task/generation/reservation identities correlate
+ordinary Bridge caller outcomes; missing completion remains unknown. These
+records do not capture Bridge-internal startup or native child streams. Ordinary
+Bridge subprocess tracing is implemented by
+[`launch_debug`](../src/agent_dispatch/launch_debug.py): it is opt-in through
+`AGENT_DISPATCH_BRIDGE_CLI_TRACE` or the installation's `launch-debug.json`
+(`bridge_cli_trace`). It records started/finished JSONL files under
+`logs/bridge-cli`, with elapsed time, exit/timeout classification and bounded
+diagnostics. It intentionally omits input content and scrubs sensitive values;
+an unavailable trace sink warns but does not abort launch. Consequently, absence
+of a trace does not prove no call occurred. Source support for these records
+does not establish their availability in a particular deployed runtime.
+
+## Assignment lifecycle: current versus target
+
+The [pool-owned startup vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup)
+changes the intended meaning of supervised `CLAIMED`. It is not the behavior
+of the current reservation and worker-claim operations:
+
+| Boundary | Current implementation | Target, not yet implemented |
+|----------|------------------------|-----------------------------|
+| Pool selection | Each lane sweeps its own candidates and capacity; no universal ordered all-pool sweep | The allocator selects the first priority-ordered matching machine/environment instance with capacity, or waits for the task's retained instance |
+| Spawn reservation | `reserve_spawn` reserves a queued, unowned task separately from its execution claim | `QUEUED -> CLAIMED` commits pool binding, reservation creation/reuse and occupied capacity atomically |
+| Worker identity | `claim_one` requires a worker identity; the embodied worker claims later | Initial placement needs no worktree/native identity; startup attaches the actual identities afterward |
+| `STARTED` | A later worker-owned transition | Startup has succeeded and the worker has explicitly accepted and begun the assignment |
+| Retry eligibility | Supervisor selection, transactional `claim_one` and fresh queued `reserve_spawn` admission check task `not_before` | Every new selection/reservation/claim enforces the applicable retry decision, including any future scoped policy |
+
+These are source-level statements, not evidence about a particular installed
+runtime. The relevant owners are `Supervisor._eligible`,
+`QueueClaimQueriesMixin.claim_one` and
+`SpawnReservationMixin.reserve_spawn`. Existing startup revisions,
+workspace allocation identity and effect-custody checks remain separate
+correctness constraints; the target must compose them, not replace them.
+
+Fresh queued reservations refuse with `TaskError` (HTTP 409) before the stored
+`not_before`, admit exactly at that deadline, and never change the scheduled
+timestamp. Existing active/exclusive reservations still return `reserved=false`
+as custody evidence without admitting another spawn. Suspended re-embodiment
+retains its existing owned-workspace path; it is not new queued admission.
+
+The [assignment/startup repair amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md)
+owns the target transition ordering, decline closeout, retry-policy choices,
+compatibility sequence and validation matrix. It retains bounded startup
+attempts under the selected pool, periodic decision nudges through existing
+supervision, and return to `QUEUED` on exhaustion without prematurely freeing
+capacity or replaying unresolved effects. Its selected startup/decision budgets,
+task-wide cooldown sequence and successful-`STARTED` counter resets are
+**implementation-pending policy**, not current provider behavior. There is no new retry
+timer or pool-owned `CLAIMED` transition in the due-time admission fix, and
+source support does not establish installed adoption.
+The amendment's [pool scope and ordering](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md#selected-pool-scope-and-ordering)
+also remain implementation-pending: the current raw registration view does not
+carry the complete effective pool definitions required by atomic placement.
+The registrar's [pool-instance definitions](pool-instances.md) preserve priority
+and effective filters in-process; they do not yet publish or enforce that
+placement contract.
 
 ## Retained startup and process capacity
 
@@ -479,15 +596,13 @@ actionable summary when its blocked task set changes, rather than repeating one
 warning per task on every cycle.
 
 **Where that log (and every other `agent-dispatch.*` log call) actually goes.**
-Both the coordinator and the supervisor normally run headless (`pythonw.exe`,
-no console), and neither configured a logging handler until
-copilot-extensions#4990 — every `log.info`/`log.warning`/`log.exception` call
-across the whole package, including this dead-letter summary and every
-recovery-path message above, was silently dropped. `configure_file_logging`
-(`logging_setup.py`) now wires a rotating file handler into both daemon
-entrypoints at startup: `<install_dir>/logs/coordinator.log` and
-`<install_dir>/logs/supervisor.log` (`<install_dir>` is normally
-`~/.agent-dispatch`; see `install_paths.install_dir()`). Read these first when
+The coordinator, supervisor daemon and its separately launched worker lanes
+configure the existing application handler at their own entrypoints.
+`configure_file_logging` (`logging_setup.py`) writes the retained JSONL namespace
+`<install_dir>/logs/diagnostics/{coordinator,supervisor}.jsonl`; old text files
+remain discoverable and untouched. Resolve actual locations with
+`agent-dispatch logs` rather than assuming the legacy default root
+(`install_paths.install_dir()` owns it). Read the application records first when
 diagnosing a stalled lane instead of guessing from `list`/`show`/`doctor`
 output alone — see `troubleshooting-agent-dispatch`.
 
@@ -837,9 +952,14 @@ ignored.
 `agent_dispatch.script_worker.ScriptTaskRuntime` is the small helper contract
 for those bodies. It reads the supervisor-injected task/coordinator context from
 environment variables, wraps claim/start/heartbeat/progress/complete/abandon,
-and treats a return without an explicit terminal call as a protocol violation:
-an orderly exit auto-abandons in the helper, and a confirmed-gone process is
-abandoned by supervisor recovery.
+and treats a claimed worker's return without an explicit terminal call as a
+protocol violation: an orderly exit auto-abandons in the helper, and a
+confirmed-gone claimed process is abandoned by supervisor recovery.
+An unclaimed worker instead waits through a structured
+[worker-admission inhibition](action-controls.md#worker-admission) and retries
+in the same process after clear. Cancellation does not abandon its queued task.
+Recovery retains a gone unclaimed body's reservation while inhibited; after
+clear, normal failed-spawn retry retains its task and logical creation identity.
 
 The local supervisor and every worker use the ordinary `agent-dispatch` client
 discovery path. The supervisor resolves a fresh client for every coordinator
@@ -864,8 +984,13 @@ worktrees and legacy records without exact ownership are never treated as
 dispatch-owned.
 
 The older `--disposable-cli-label LABEL` path remains for explicitly declared
-CLI worker classes whose worktrees predate allocation provenance. A registrar
-may supply the equivalent `body.disposable_cli_labels`.
+disposable worker classes whose worktrees predate allocation provenance. Its
+name is historical: CLI/ACP tracking metadata is not ownership authority. A
+registrar may supply the equivalent `body.disposable_cli_labels`.
+For a local Bridge body, Dispatch checkpoints the native session identity and
+asks Bridge to end the exact idle/stopped worker before ground conclusion.
+Bridge's `end --if-idle` is terminal shutdown, not a resumable host detach; busy
+turns, queued prompts and active background work retain their existing checks.
 
 ### Idle-confirm nudge exemption
 
@@ -926,7 +1051,7 @@ agent-worktrees conclude-disposable \
     --json
 ```
 
-The legacy label-scoped CLI path instead invokes:
+The legacy label-scoped worker path instead invokes the existing wire form:
 
 ```bash
 agent-worktrees conclude-disposable \
@@ -942,6 +1067,10 @@ The ground layer preserves any live mux/bound session, follow-up or resource
 obligation, open pull request, branch drift, arbitrary dirty path, or local
 commit. It also preserves a different or unresolved asserted lifecycle head
 rather than making a clean checkout GC-eligible around a resumable session.
+The historical `disposable-cli` policy no longer refuses ACP metadata or
+converts it to CLI. Older Worktrees receivers can still return
+`not-cli-worktree`; Dispatch records that as held cleanup, not success, and
+never changes interfaces or retries another policy to bypass it.
 Dirty generated overlays are preserved under the same rule as other dirty work;
 a clean branch with zero commits ahead of the configured upstream may remain
 behind without being rewritten. A safe result concludes the exact recorded
@@ -999,13 +1128,74 @@ The supervisor now has the positive-death signal the earlier design deferred to:
 
 For a confirmed-gone body, the supervisor yields the task on the dead owner's
 behalf when it is still leased (preserving `goal` and `progress_log`), marks the
-reservation failed, and the next cycle can reserve a fresh attempt. `live` bodies
+reservation failed, and the next cycle can reserve a fresh attempt. This legacy
+replacement rule does not apply to `ordinary-bridge` or `restricted-bridge`
+reservations: process absence does not retire their native conversation. Ordinary
+started owners are suspended with their owner, native identity and reservation
+intact; unfinished claims remain held for reconciliation, including a claim
+before spawn publication or while the original reservation is releasing.
+Restricted owners retain
+their existing immutable binding. Stranded-cold cleanup likewise does not release
+either driver's conversation to make a replacement. `live` bodies
 are heartbeated; `unknown` bodies are left untouched. A confirmed-alive but quiet
 worktree body can also be nudged once per stall window (`nudge_stalled`) instead
 of being recovered. The remaining unsupported recovery path is **CLI/mux fleet**
 auto-recovery: without a headless bridge session handle, a synthetic-owner fleet
 body is still not auto-joined to the origin's live-session registry; use
 headless fleet for recoverable remote sweeps.
+
+**Queued ordinary continuation.** When a previously attached ordinary native
+owner's task is queued and unowned, `redrive_unclaimed_spawns` can address that
+same conversation from its retained `spawned` reservation. Queued `cold`
+reservations remain held: redrive does not bypass cold-resume capacity admission. The existing
+reservation read exposes version-2 `ordinary_redrive` facts and an `ordinary_redrive_error`
+when unavailable. Missing support on an older coordinator is a hold, not a CLI
+fallback; unsupported fact versions likewise hold before transport. Older readers
+ignore the additive fields without changing their existing reservation semantics.
+The snapshot checks the latest real task attachment, native/history,
+worktree, allocation, host and reservation custody. A hold, release, retirement,
+cooling, conflicting reservation, active waiter or unresolved owner/waiter wake
+prevents the send; failed or superseded attempted wakes are not absence proof.
+Qualified execution scopes remain held until supervisor send enrollment is
+implemented, even if the owner-wake list is empty.
+
+Before transport, the existing `record_spawn` operation atomically rechecks the
+snapshot and records a pending startup revision together with the frozen
+continuation invocation in reservation metadata. Terminal cleanup and capacity
+release remain blocked while that startup is incomplete. An UNKNOWN return
+retains the revision; a restarted supervisor can retry only that operation,
+after fresh queued-task/native/custody admission. An unrelated pending startup
+cannot use this path. Successful transport closes only the matching revision
+and invocation, preserving any concurrent release state and intent. Generic
+startup completion cannot close a retained continuation's pending revision.
+Its historical marker does not own a later normal cold-resume startup revision;
+that caller can complete normally without discarding the frozen redrive bytes.
+
+The supervisor uses standard Bridge `send` with the captured native target,
+one reservation-bound `:redrive` idempotency key and an explicit operation-bound
+caller. The caller and frozen continuation prompt stay identical across retries,
+supervisor launch contexts, restarts and later task-claim generations;
+this is not a replay of the accepted startup invocation. No `--queue`, force,
+replacement session or supervisor-side task claim is used. The original worker
+must claim normally and start with its captured `--owner-session-id`; later
+claims require matching original-native attachment history. A successful send
+does not itself establish that the worker reclaimed or completed the task.
+
+Version 2 negotiates the pending-startup request through the existing reservation
+read before sending the additive `ordinary_redrive` field to `record_spawn`.
+Version-1, missing and unknown declarations hold before publication or transport;
+older callers keep their existing `record_spawn` syntax.
+The supervisor also verifies that the startup-publication response contains its
+exact pending revision and frozen operation before transport. A coordinator
+rollback between discovery and publication cannot silently drop the new field
+and still trigger a send. A lost publication response retains startup custody;
+a later supported retry reconciles the stored operation, never infers absence.
+An unavailable delivery identity/runtime is logged per candidate and retains
+its pending startup; it does not abort processing the remaining reservations.
+Native owner/waiter wake
+commands also use an explicit key-bound caller. A receipt previously bound to a
+different implicit caller is not permission to change its key or replay accepted
+work: a conflict stays unresolved for reconciliation.
 
 **Retiring an unleased worktree-only reservation.** A `release_requested`
 reservation whose task never reached a captured `owner_session_id` (the normal
@@ -1143,7 +1333,7 @@ local Bridge carrier (`embody.fleet_body_verdict`, with bounded direct SSH only
 when the command capability is absent)
 for the same tri-state verdict: a **confirmed-live** body is heartbeated
 (`hold_live_leases`) so a quiet-but-alive sweep isn't wrongly recovered, and a
-**confirmed-gone** body (its ACP session terminal or absent) has its reservation
+**confirmed-gone** legacy body (its ACP session terminal or absent) has its reservation
 released (`recover_gone`) so the next cycle re-embodies it — resuming from the
 task's `progress_log`. As always, an `unknown` probe (ssh/bridge unreachable,
 lagging reconcile) is never treated as death, so recovery cannot double-spawn a
@@ -1157,7 +1347,8 @@ Session Host release capacity while the ACP session record, task owner,
 worktree, and reservation remain durable. A later steer or Resume sends the
 next turn to that same session id, starts a fresh child, and returns the cold
 reservation to `spawned`; it does not release the task for a new embodiment.
-Confirmed session loss still follows the ordinary liveness recovery path.
+Ordinary and restricted native reservations retain their conversations on process
+loss; only the legacy drivers follow replacement-based liveness recovery.
 
 If retry preparation retains a worktree but the bridge recovery handle was
 never captured, the headless factory resolves that worktree's existing

@@ -1,0 +1,9 @@
+{
+  "comment": "Add read-only original inbox handoff recovery and bounded polling without changing legacy defaults",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

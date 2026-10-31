@@ -61,6 +61,22 @@ The acquisition-specific proof and receipt rules below govern the CLI and
 legacy acquisition path, not ordinary ACP create/store/send. No legacy
 acquisition marker implicitly grants ordinary-send authority.
 
+Bridge also exposes venue-backed `create --cli --detach` for an observable
+muxed session. That command delegates to the venue's CLI launcher; it is not
+the keyed local workspace-creation contract. The current Bridge CLI explicitly
+rejects combining `--cli` with `--creation-key`. Keyed local workspace creation
+can retain an initial prompt as part of its original request, but Dispatch's
+ordinary path above deliberately sends only after storing the created-agent
+facts. Neither capability alone proves retry-safe first-prompt delivery for
+detached CLI creation. A convergence change must qualify that combination,
+including pending creation and response loss, before replacing these paths.
+It must also distinguish process/mux startup from native session birth:
+waiting for first-prompt-dependent session or extension registration before
+submitting the seed would create a circular readiness dependency. Missing
+registration after submission does not establish nonacceptance.
+See [Bridge's creation contracts](../../agent-bridge/docs/session-acquisition.md)
+and the [spawn diagnostic boundaries](spawn-supervisor.md#allocation-progress-pool-selection-and-diagnostics).
+
 Allocation, reservation recording, task claim/adoption, evaluation, pending
 steers and terminal cleanup keep their original owners. Dispatch conveys
 current generation/reservation, recorded worktree provenance, explicit
@@ -88,6 +104,14 @@ Request version 2 carries that same project/path; bridge checks both the
 reservation and exact owner record. ACP selects its registered worker project;
 the default CLI worker needs no ACP registration. The queue lane still owns
 claim authority and does not qualify the execution workspace.
+
+The `dispatch:` namespace also publishes that execution identity as the
+worktree reference's `project`, but only from a current active reservation bound
+to the same worktree. It never substitutes the producing lane or borrows a
+historical/released allocation. A malformed non-null project refuses the
+provider response. Bridge validates and preserves the identity, then queries
+the actual workspace owner for fresh hosting admission before readiness or
+plugin staging; the provider does not supply an authoritative launch directory.
 
 Retries retain the recorded allocation even without an exclusive key, including
 its native handle and retirement marker. Routing changes do not change that
@@ -220,14 +244,22 @@ agent-dispatch reservations authorize-fresh <task-id> \
 
 The client uses its configured control identity, not the worker credential.
 The coordinator atomically requires the exact generation, queued/unowned/
-unheld task, a handle-less latest deferred/failed created-or-reused allocation,
-and an exclusive-key carry chain whose latest allocation is that exact row,
+unheld task, a handle-less latest deferred/failed created, reused or targeted
+allocation, and an exclusive-key carry chain whose latest allocation is that exact row,
 no pending cleanup, no active same-task reservation and no other task's active
 reservation on that worktree. It advances task generation and marks the exact
 latest allocation's conversation retirement authorization, retaining original
 reservation details, receipts and transcripts and writing a task audit event.
 Stale/replayed authorization refuses. This only grants fresh intent; it neither
 starts a worker nor proves historical absence.
+
+For a targeted allocation, the task's current worktree affinity and any explicit
+worktree target must still name the exact retained worktree. Authorization
+preserves the original targeted ownership and allocation project/path; it does
+not turn an externally supplied worktree into a dispatch-created resource or
+grant teardown permission. The next ordinary reservation reuses that same
+allocation and carries the fresh-conversation authorization. Do not replace the
+task, change its target or manufacture an initial-launch receipt to recover it.
 
 The next reservation carries this retirement authorization through the existing
 owner-verified acquisition boundary. Bridge still independently refuses live

@@ -54,17 +54,22 @@ def cohort(
             message="continue", sender="recovery",
         )
         [wake] = queue.list_run_waiter_wakes(task.id)
-    queue.handoff_producer_scope(REPO, SOURCE, producer_id="producer-a", expected_generation=0)
+    binding = _qualify(queue, queue.get(task.id), monkeypatch)
+    return queue, wake, binding
+
+
+def _qualify(queue: TaskQueue, task, monkeypatch: pytest.MonkeyPatch) -> ExecutionScopeBinding:
+    queue.handoff_producer_scope(task.repo, task.source, producer_id="producer-a", expected_generation=0)
     binding = queue.bind_execution_scope(
         resolve_execution_installation(_governance()),
-        repo=REPO, source=SOURCE, expected_producer_generation=1,
+        repo=task.repo, source=task.source, expected_producer_generation=1,
     )
     monkeypatch.setattr(sender, "LoopGovernance", _governance)
     monkeypatch.setattr(
         sender.runtime, "_own_process",
         lambda incarnation: CoordinatorExecutionRuntime(incarnation, 1234, "coordinator-start"),
     )
-    return queue, wake, binding
+    return binding
 
 
 def _claim(queue: TaskQueue, wake: Wake, **kwargs: Any) -> Wake | None:

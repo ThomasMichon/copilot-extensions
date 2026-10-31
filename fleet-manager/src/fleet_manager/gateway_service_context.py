@@ -1,7 +1,7 @@
 """Immutable service-profile validation; selected source custody is external.
 
 This is the auth adapter's schema boundary, not provider/key discovery. The
-existing identity verifier alone owns the jwt-pop-v1 trust/signature profile.
+common crypto engine owns both explicitly selected authentication profiles.
 """
 
 from __future__ import annotations
@@ -12,10 +12,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from . import planning
+from .enrolled_identity import (
+    EnrolledBinding, EnrolledIdentityVerifier, KINDS, MAX_AUDIENCES, MAX_ENROLLMENTS,
+    PROFILE as ENROLLED_PROFILE,
+)
 from .gateway_contract import GatewayError, public_key
 from .gateway_identity_provider import IdentityProvider, IdentityProviderError, prepare_identity
 from .gateway_manifest import GatewayManifest, ManifestError, ServiceSlot
-from .runtime_identity import IdentityError, IdentityVerifier
+from .runtime_identity import IdentityError, IdentityVerifier, _text, _time
+from .machine_identity import MachineBinding, MachineIdentityVerifier, PROFILE as MACHINE_PROFILE
+
+ServiceVerifier = IdentityVerifier | MachineIdentityVerifier
 
 SCHEMA = "fleet-manager.gateway-service-policy"
 MAX_BINDINGS = 128
@@ -152,18 +159,77 @@ class ServiceContext:
                      if caller == principal), None)
 
 
+def _enrollment(value: object, keys: tuple[ResolvedKey, ...], manifest: GatewayManifest,
+                callers: list[CallerPolicy], audience: str
+                ) -> tuple[dict[str, object], tuple[EnrolledBinding, ...]]:
+    envelope = fields(value, {"allowed_audiences", "mappings"})
+    audiences: list[str] = []
+    for item in items(envelope["allowed_audiences"], MAX_AUDIENCES, minimum=1):
+        if not isinstance(item, str) or not _text(item, 512):
+            raise ServicePolicyError("invalid-enrollment")
+        audiences.append(item)
+    require(len(set(audiences)) == len(audiences) and audience in audiences,
+            "invalid-enrollment")
+    resolved = {key.name: key for key in keys}
+    enrollments, normalized = [], []
+    for value in items(envelope["mappings"], MAX_ENROLLMENTS):
+        item = fields(value, {
+            "subject", "client_id", "principal", "kind", "resource", "key_source", "expires_at",
+        })
+        subject, client, kind = item["subject"], item["client_id"], item["kind"]
+        resource, expires = item["resource"], item["expires_at"]
+        if (not isinstance(subject, str) or not _text(subject)
+                or not isinstance(client, str) or not _text(client)
+                or not isinstance(kind, str) or kind not in KINDS
+                or not isinstance(resource, str) or resource != audience
+                or type(expires) is not int or not _time(expires)):
+            raise ServicePolicyError("invalid-enrollment")
+        principal, source = identifier(item["principal"]), identifier(item["key_source"])
+        require(source in resolved, "unresolved-key-source")
+        if kind == "service":
+            require(any(slot.principal == principal and slot.key_source == source
+                        for slot in manifest.slots), "invalid-enrollment")
+        else:
+            require(any(caller.principal == principal and caller.key_source == source
+                        for caller in callers), "invalid-enrollment")
+        key = resolved[source]
+        enrollments.append(EnrolledBinding(
+            subject, client, principal, kind, resource, source, key.thumbprint, expires))
+        normalized.append(dict(item, resolved_key={
+            "provider": key.provider, "reference": key.reference, "thumbprint": key.thumbprint,
+        }))
+    return {
+        "allowed_audiences": sorted(audiences),
+        "mappings": sorted(normalized, key=planning.canonical),
+    }, tuple(enrollments)
+
+
 def parse_context(raw: bytes, clock: Callable[[], int], *,
                   identity_provider: IdentityProvider | None = None,
-                  ) -> tuple[ServiceContext, IdentityVerifier]:
+                  ) -> tuple[ServiceContext, ServiceVerifier]:
     """Validate a complete bounded candidate, including real keys, off-lock."""
     try:
-        root = fields(planning.decode(raw), {
+        decoded = planning.decode(raw)
+        names = {
             "schema", "version", "manifest", "identity", "bindings", "callers",
-        })
+        }
+        if isinstance(decoded, dict) and type(decoded.get("version")) is int \
+                and decoded["version"] in (3, 4):
+            names.add("enrollment")
+        root = fields(decoded, names)
         require(root["schema"] == SCHEMA and type(root["version"]) is int
-                and root["version"] in (1, 2), "unsupported-schema")
+                and root["version"] in (1, 2, 3, 4), "unsupported-schema")
         manifest = GatewayManifest.load(root["manifest"])
-        if root["version"] == 1:
+        if root["version"] == 4:
+            normalized_identity = fields(
+                root["identity"], {"profile", "audience", "trust_valid_until"})
+            require(normalized_identity["profile"] == MACHINE_PROFILE, "unsupported-profile")
+            trust_valid_until = normalized_identity["trust_valid_until"]
+            require(type(trust_valid_until) is int, "invalid-trust")
+            verifier = MachineIdentityVerifier(
+                audience=normalized_identity["audience"], bindings=(),
+                trust_valid_until=trust_valid_until, clock=clock)
+        elif root["version"] == 1:
             identity = fields(root["identity"], {"issuer", "audience", "jwks", "trust_valid_until"})
             jwks = fields(identity["jwks"], {"keys"})
             signing_keys = items(jwks["keys"], 16, minimum=1)
@@ -175,7 +241,8 @@ def parse_context(raw: bytes, clock: Callable[[], int], *,
             assert type(trust_valid_until) is int
         else:
             normalized_identity, verifier, trust_valid_until = prepare_identity(
-                root["identity"], identity_provider, clock)
+                root["identity"], identity_provider, clock,
+                profile=ENROLLED_PROFILE if root["version"] == 3 else "jwt-pop-v1")
         mappings: dict[tuple[str, str], tuple[str, dict[str, object]]] = {}
         declared = {(item.provider, item.reference) for item in manifest.key_sources}
         for item in items(root["bindings"], MAX_BINDINGS):
@@ -217,6 +284,57 @@ def parse_context(raw: bytes, clock: Callable[[], int], *,
             "bindings": [{"provider": provider, "reference": reference, "jwk": value[1]}
                          for (provider, reference), value in sorted(mappings.items())],
         }
+        trust_epoch = normalized_identity
+        if root["version"] == 4:
+            enrollment = fields(root["enrollment"], {"mappings"})
+            machine_bindings = []
+            seen = set()
+            for value in items(enrollment["mappings"], MAX_ENROLLMENTS):
+                item = fields(value, {"principal", "kind", "resource", "key_source", "expires_at"})
+                principal, source = identifier(item["principal"]), identifier(item["key_source"])
+                resource, kind = identifier(item["resource"]), item["kind"]
+                require(kind in ("caller", "service"), "invalid-enrollment")
+                require(resource in slot_names, "invalid-enrollment")
+                require((principal, kind, resource) not in seen, "ambiguous-enrollment")
+                seen.add((principal, kind, resource))
+                if kind == "caller":
+                    require(any(c.principal == principal and c.key_source == source
+                                and resource in c.slots for c in callers), "invalid-enrollment")
+                else:
+                    require(any(s.name == resource and s.principal == principal
+                                and s.key_source == source for s in manifest.slots),
+                            "invalid-enrollment")
+                key = next((key for key in keys if key.name == source), None)
+                require(key is not None, "unresolved-key-source")
+                assert key is not None
+                machine_bindings.append(MachineBinding(
+                    principal, kind, resource,
+                    planning.canonical(mappings[key.provider, key.reference][1]),
+                    item["expires_at"]))
+            verifier = MachineIdentityVerifier(
+                audience=normalized_identity["audience"], bindings=tuple(machine_bindings),
+                trust_valid_until=trust_valid_until, clock=clock)
+            normalized["enrollment"] = {
+                "mappings": sorted(enrollment["mappings"], key=planning.canonical)}
+            trust_epoch = {
+                "identity": normalized_identity, "enrollment": normalized["enrollment"],
+                "bindings": normalized["bindings"],
+            }
+        if root["version"] == 3:
+            trust = normalized_identity["trust"]
+            assert isinstance(trust, dict)
+            issuer, audience, expires = trust["issuer"], trust["audience"], trust["trust_valid_until"]
+            assert isinstance(issuer, str) and isinstance(audience, str) and type(expires) is int
+            enrollment, enrollments = _enrollment(
+                root["enrollment"], keys, manifest, callers, audience)
+            normalized["enrollment"] = enrollment
+            audiences = enrollment["allowed_audiences"]
+            assert isinstance(audiences, list)
+            verifier = EnrolledIdentityVerifier(
+                issuer=issuer, audience=audience, jwks=trust["jwks"],
+                trust_valid_until=expires, clock=clock, allowed_audiences=tuple(audiences),
+                enrollments=enrollments)
+            trust_epoch = {"identity": normalized_identity, "enrollment": enrollment}
         key_by_name = {key.name: key for key in keys}
 
         def key_content(name: str) -> dict[str, str]:
@@ -231,7 +349,7 @@ def parse_context(raw: bytes, clock: Callable[[], int], *,
             "caller": value, "key": key_content(caller.key_source),
         })) for caller, value in zip(callers, normalized_callers))
         return ServiceContext(manifest, planning.digest(normalized),
-                              planning.digest(normalized_identity),
+                              planning.digest(trust_epoch),
                               trust_valid_until, keys, tuple(callers),
                               slots, scopes), verifier
     except planning.PlanError:

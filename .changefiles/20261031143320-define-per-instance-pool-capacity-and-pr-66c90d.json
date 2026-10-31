@@ -1,0 +1,9 @@
+{
+  "comment": "Define per-instance pool capacity and priority before atomic placement",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

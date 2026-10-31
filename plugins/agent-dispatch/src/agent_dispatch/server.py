@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import logging
 import os
 import socket
@@ -12,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import __version__, telemetry
+from .action_controls import require_worker_admission
 from .config import (
     Config,
     has_live_local_coordinator,
@@ -80,8 +83,8 @@ def check_bind_safety(cfg: Config) -> None:
         )
 
 
-def build_app(cfg: Config | None = None):
-    """Construct the coordinator app, ensuring the queue DB directory exists."""
+def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
+    """Construct the coordinator; only a trusted embedding selects replay."""
     cfg = cfg or replace(load_config(), control_token=resolve_control_token())
     # Install a telemetry sink if one is configured (generic open hook; a no-op
     # unless a consumer wired a sink). Prefer a convention-located config file
@@ -90,7 +93,9 @@ def build_app(cfg: Config | None = None):
     if not telemetry.load_sink_from_config():
         telemetry.load_sink_from_env()
     Path(cfg.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
-    queue = TaskQueue(Path(cfg.db_path).expanduser())
+    queue = TaskQueue(
+        Path(cfg.db_path).expanduser(), worker_admission=require_worker_admission,
+    )
     return create_app(
         queue, token=cfg.token, control_token=cfg.control_token,
         sweep_interval=cfg.sweep_interval,
@@ -98,6 +103,7 @@ def build_app(cfg: Config | None = None):
         handoff_fallback_enabled=cfg.handoff_fallback_enabled,
         handoff_fallback_grace=cfg.handoff_fallback_grace,
         wake_is_active=_owns_active_route,
+        replay_consumer_factory=replay_consumer_factory,
     )
 
 
@@ -272,6 +278,7 @@ def _clear_routing() -> None:
         log.debug("zdd routing clear-on-shutdown skipped", exc_info=True)
 
 
+@daemon_entrypoint("agent-dispatch-coordinator", source=__file__, purpose="production")
 def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = False) -> None:
     """Bind and serve the coordinator (blocking).
 
@@ -465,14 +472,38 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
         # Always release even on an early raise/SystemExit above -- the
         # readiness-gated release path above already cleared this to None on
         # its own success, so this is a no-op there.
-        if start_lock is not None:
-            start_lock.release()
-        if fed_runner is not None:
-            fed_runner.stop()
-        _clear_routing()
-        clear_endpoint(run_dir(), owner_pid=os.getpid())
-        if sock is not None:
-            sock.close()
+        try:
+            if start_lock is not None:
+                start_lock.release()
+        finally:
+            try:
+                if fed_runner is not None:
+                    _settle_federation(fed_runner, interrupted=sys.exc_info()[1])
+            finally:
+                _clear_routing()
+                clear_endpoint(run_dir(), owner_pid=os.getpid())
+                if sock is not None:
+                    sock.close()
+
+
+def _settle_federation(runner, *, interrupted=None) -> None:
+    """Keep the hosting admission until bounded local retirement confirms success."""
+    retry = False
+    while True:
+        try:
+            if retry:
+                time.sleep(0.05)
+            if runner.stop(resign=not retry) is True:
+                break
+            if not retry:
+                log.warning("federation cleanup pending; hosting admission retained")
+        except BaseException as exc:
+            if interrupted is None:
+                interrupted = exc
+                log.warning("federation cleanup interrupted; hosting admission retained")
+        retry = True
+    if interrupted is not None:
+        raise interrupted
 
 
 def _maybe_start_federation(*, drain_gate=None):
@@ -489,6 +520,7 @@ def _maybe_start_federation(*, drain_gate=None):
 
     if not _cfg.federation_enabled():
         return None
+    runner = None
     try:
         from .federation_runner import runner_from_config
 
@@ -502,7 +534,13 @@ def _maybe_start_federation(*, drain_gate=None):
             _cfg.federation_instance(),
         )
         return runner
-    except Exception as exc:
+    except BaseException as exc:
+        if runner is not None:
+            _settle_federation(
+                runner, interrupted=exc if not isinstance(exc, Exception) else None,
+            )
+        if not isinstance(exc, Exception):
+            raise
         log.warning("federation runner not started (serving without it): %s", exc)
         return None
 

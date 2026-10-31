@@ -4,6 +4,69 @@ This directory freezes observed bridge contracts so compatibility changes are
 reviewed against independent evidence rather than producer-generated snapshots.
 The registry is repository-side evidence; no runtime component reads it.
 
+## Lossless provenance layout
+
+The shared reader in `tools/agent_bridge_contract_registry.py` accepts the
+legacy version-1 registry and the version-2 provenance layout. Version 2 retains
+each contract's ordered historical prefix in immutable JSON chunks under
+`provenance/<contract-id>/<sha256>.json`; `provenance_chunks` pins their contract,
+path, byte hash and record count. Inline `provenance` follows that prefix.
+Chunk offsets preserve order and repeated records across chunk boundaries.
+Reading materializes the complete legacy-shaped history without writing.
+The checker still owns semantic source, fixture and capture validation.
+
+The existing capture owners plan conversion explicitly on their write path
+when the registry would exceed its unchanged 1 MiB cap. Each chunk is bounded
+to 256 KiB and the reader limits the complete inventory to 256 chunks. The
+registry and every artifact remain subject to the original per-file guard.
+Neither conversion nor a no-write capture may discard old provenance, rewrite
+an archived prefix, modify historical packets or raise the cap. Version-1
+inputs remain valid; older tools without version-2 support cannot validate a
+converted registry and must not be used to rewrite it.
+
+Capture publication uses one stable kernel lock and an ignored
+`.capture-publication/` journal containing the original and planned bytes.
+Immutable chunks publish without replacing an existing path; the registry
+publishes last. Each target is checked before publication, and the complete
+input history is rechecked immediately before the registry commit. A failed
+publication retains its journal rather than claiming success. Every preceding
+output must match its planned bytes exactly before the index can publish;
+restoring an old fixture or removing a new one is not an acceptable final state.
+Journal files are flushed at temporary names before atomic publication, so an
+interrupted staging write cannot masquerade as a completed recovery artifact.
+Repeating the
+identical source/byte plan may resume after the capture's own validation;
+changed inputs or another plan refuse and require explicit recovery. Reading
+and no-write validation never perform that recovery or retire old chunks.
+Explicit capture writes recover an interrupted chunk hardlink under the same
+lock before planning: only the exact two-link, content-addressed pair named by
+the source-bound journal may lose its staging link. Foreign or extra aliases
+remain errors. Source-closure fallback uses the captured metadata prefix, not
+chunks that publication appended afterward. Git metadata text is decoded as
+UTF-8 independently of the host's default code page.
+When the checkpoint is unavailable, that fallback retains the checker's
+existing reviewed packet/fixture-hash trust boundary; recomputing a closure
+digest alone does not authenticate historical inventory.
+This source-evidence mechanism grants no runtime or deployment authority.
+
+### Retaining capture-time source objects
+
+Squash merges need not retain intermediate PR commits or their unique blobs.
+`source-blobs/http48/<git-blob>.txt` therefore preserves the exact capture-time
+probe and writer bytes that changed before the HTTP-49 merge. These are inert
+historical source artifacts, not executable copies or refreshed observations.
+Their Git blob identities and SHA-256 values must match the unchanged HTTP-48
+primary execution closure. The directory disables text conversion to retain
+those bytes on every checkout.
+
+Committing these files makes the original objects available through ordinary
+canonical history. The existing validator can then prove the frozen closure
+without a private object store, deleted PR branch or missing capture commit.
+Neither the historical packets, inputs and provenance nor the validator's
+missing-object and content-hash checks are relaxed. Validate in a fresh
+canonical-history-only clone, not only a long-lived source checkout that may
+still contain orphaned PR objects.
+
 ## Updating a contract
 
 Classify the change before touching a golden packet:
@@ -27,6 +90,13 @@ add a second, stricter rule that every capture matches today's implementation.
 The checker still rejects unrefreshed source hashes, unjustified non-semantic
 classification, uncovered semantic changes and corrupt historical provenance.
 Never bulk-rebaseline goldens to make an implementation-only update pass.
+
+When a duplicate source is removed, its source record may retain the historical
+`path` with `current_path` pointing to an independently registered, byte-identical
+canonical source. The historical path must be absent; chained or unregistered
+relocations and mismatched bytes are refused. Captured packets and provenance
+keep their original paths, commits and blob identities. This repository-only
+mapping does not restore an executable shadow or change a wire contract.
 
 Local Git observations are batched by object and by each commit's requested
 paths, with the same per-command deadline and no lazy fetch. Hash normalization,
@@ -53,6 +123,216 @@ When a wire contract does change:
    python tools/check-agent-bridge-contracts.py
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
+
+## HTTP-51 standard native-send evidence
+
+HTTP generation 51 adds `NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION` for ordinary
+`send` with an exact native identity and idempotency key. Bridge owns admission
+and original-receipt recovery through its existing turn journal; callers do not
+construct a startup invocation. A changed intent conflicts, a busy target
+refuses without queuing, and ambiguous post-commit responses remain unknown
+until the same key recovers its receipt. No represented inbox is used.
+
+Independent expectations live in `inputs/http51/standard-native-send.json`.
+The parser, authenticated ASGI routes and actual journal execute in both fixture
+installation modes. HTTP-50 refusal, malformed receipts and lost post-commit
+responses are explicit cases. The required portfolio also overlaps two stopped
+retries through the actual resume lifecycle owner and recovers the first
+operation's receipt after the losing resume's state refusal. An unsuccessful
+resume without a matching receipt remains a failure. The ACP boundary is mocked:
+these observations do not qualify an installed receiver or retained native
+conversation.
+
+Commit matching source and declarations, then use the existing bounded
+capture owner:
+
+```text
+python tools/capture_bridge_http51.py --source-commit <full-source-commit> --write
+python tools/capture_bridge_http51.py --source-commit <full-source-commit>
+python tools/check-agent-bridge-contracts.py --base <reviewed-base>
+```
+
+HTTP-50 and earlier packets, inputs and provenance remain immutable. Ordinary
+HTTP-50 behavioral replay accepts a later advertisement, but an explicit HTTP-50
+capture still requires its genuine matching source and may never publish
+HTTP-51 observations as historical evidence.
+
+### HTTP-51 ordinary receipt-only capability
+
+The running receiver additionally advertises
+`capabilities.native_send_receipt: 1` on `/health`, independently of the HTTP-51
+generation and package version. The current HTTP-51 portfolio retains its
+original admission/retry/refusal observations and adds the actual ordinary
+receipt-only parser command and authenticated route. It observes found and
+missing history, pre-POST refusal by an HTTP-51 receiver without the capability,
+stopped/busy preservation, identity conflicts, corrupt history, authentication
+and unchanged journal/session/inbox state. `accepted` proves admission only;
+a missing receipt never proves no effects.
+
+The independent command, route and expected observations are in the same
+`inputs/http51/standard-native-send.json` vector. The capture probe executes
+them through `http51_receipt_probes.py` in both fixture installation modes.
+Its successful health discovery and receipt POSTs reach the actual ASGI app;
+the old-capability case masks only that capability in the health response.
+The CLI cases execute the real `_get_client` factory, require its explicit
+`ensure=False` argument, and place fail-fast spies on daemon ensure/start.
+Both ordinary and keyed receipt-only commands also exercise a synthetic
+missing provider with no POSTs and zero ensure/start calls. The ordinary
+reader retains an unproven outcome (exit 70); the existing keyed CLI retains
+its unavailable-error exit rather than inventing JSON success or no-effect
+evidence. Configuration and transport are fixture-bound, not live discovery.
+It does not qualify an installed daemon, SDK or native conversation.
+
+Before a new capture, prepare the explicit semantic-owner declarations against
+the full real commit containing the provider implementation:
+
+```text
+python tools/capture_bridge_http51.py --source-commit <provider-source-commit> --prepare
+```
+
+Preparation changes only registered semantic source fingerprints and the owning
+deferred documentation reference. It registers `native_send_receipt.py` and does
+not add provenance, observations or fixture hashes, classify the new wire
+behavior as non-semantic, or make the contract guard pass without a capture.
+It refuses dirty/uncommitted provider bytes, unrelated source drift and changed
+historical packets. It uses the existing locked registry-publication owner.
+
+Commit those declarations together with the capture policy, writer, helper,
+probe, independent input and owning documentation. Then run the `--write`
+capture and no-write verification above with **that new full source commit**,
+not the earlier provider-only commit. The broad execution closure requires every
+new/modified helper and input to be committed before execution. Only genuine
+successful source-bound probes may publish `captured_from` commit/blob identities.
+Include the no-ensure provider fix in that checkpoint: the real-factory
+observations intentionally fail a receipt command that uses the default
+daemon-ensuring factory, even if its route alone is read-only.
+The mutable current HTTP-51 packets may refresh through their existing owner;
+ordered provenance and all HTTP-50/earlier packets remain unchanged.
+
+Run all capture/test commands under the invoking harness's bounded test
+supervisor and its isolated source runner where applicable. A prepared registry
+or unit-test pass is not captured capability evidence.
+
+## HTTP-50 original-handoff recovery evidence
+
+HTTP generation 50 adds the distinct
+`RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION` floor for bounded original-handoff
+metadata reads and optional bounded polling. Earlier transport/producer floors
+and the supported minimum remain unchanged. The
+[recovery contract](../docs/runtime-custody-foundation.md#original-handoff-recovery)
+owns request, response and unsupported-case semantics.
+
+Independent expectations are in `inputs/http50/retained-recovery.json`.
+`test_http50_capture_probes.py` exercises both installation fixture modes,
+ordinary producer admission, one-message handoff retention, consumer replacement,
+closure and passive recovery without SDK invocation or new send authority.
+It preserves the legacy receipt shape and distinguishes acceptance, consumption
+and unknown outcome. This is source-bound ASGI/SQLite evidence, not actual SDK,
+native-platform, installed-runtime or restoration qualification.
+
+Commit matching source and declarations before running:
+
+```text
+python tools/capture_bridge_http50.py --source-commit <full-source-commit> --write
+python tools/capture_bridge_http50.py --source-commit <full-source-commit>
+python tools/check-agent-bridge-contracts.py --base <reviewed-base>
+```
+
+The existing shared capture/validation/publication owners enforce source and
+interpreter binding. HTTP-50 packets cannot replace HTTP-49 or older inputs,
+captures or provenance. Historical drivers require their own source generation;
+the current driver must execute both installation cases without skips.
+
+## Historical HTTP-49 ordinary retained-producer evidence
+
+HTTP generation 49 advertises ordinary keyed producer association and original
+admission recovery through `RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION`.
+`RETAINED_INBOX_PROTOCOL_VERSION` remains 48 for the transport itself; that
+earlier floor does not promise retained ordinary ingress. Producers depending on
+the guarantee require 49 from the daemon's health advertisement. Unversioned and
+HTTP-48 receivers are unsupported for that guarantee, not legacy fallback.
+Never-enrolled targets remain a separate, intentionally legacy cohort.
+
+Independent current expectations live in `inputs/http49/retained-producer.json`;
+the model-free ASGI driver is `test_http49_capture_probes.py`. After committing
+matching source and declarations, use the bounded capture path:
+
+```text
+python tools/capture_bridge_http49.py --source-commit <full-source-commit> --write
+python tools/capture_bridge_http49.py --source-commit <full-source-commit>
+python tools/check-agent-bridge-contracts.py --base <reviewed-base>
+```
+
+Generation-specific policy facades share source/publication/validation mechanics,
+not mutable global generation overrides or copied writers. HTTP-49 output paths
+cannot replace HTTP-48 or older packets, inputs or provenance. Historical
+validation uses each captured tree and primary/child bindings, not future source
+hashes or newly registered owners. Both writer policies retain dirty-source,
+foreign-owner, complete-installation-helper and actual interpreter guards.
+The selected HTTP-49 ASGI portfolio must execute both fixture installation modes;
+older execution drivers require their matching source and are not relabelled as
+current observations. SDK/native and installed qualification remain separate.
+
+## Historical HTTP-48 local retained-inbox evidence
+
+HTTP generation 48 introduces explicit local retained-inbox negotiation,
+enrollment, poll, final-admission and original-outcome routes. The
+`RETAINED_INBOX_PROTOCOL_VERSION` floor is 48; the supported HTTP minimum and
+every prior capability floor remain unchanged. See the
+[local adapter contract](../docs/runtime-custody-foundation.md#explicit-local-transport-adapter).
+An ordinary registration does not opt into retained custody, and an unsupported
+receiver cannot be used through legacy delivery as a fallback.
+
+Independent expectations live in `inputs/http48/retained-inbox.json`.
+`test_http48_capture_probes.py` executes the actual serving app, ordinary auth
+middleware, installation owner and SQLite handoffs in both legacy and namespaced
+fixture installations. It observes repeated poll/final-admission responses,
+ordinary keyed producer admission and recovery, interrupt/wrong-epoch refusal
+and original outcomes after closure and registration cleanup. It does not run
+an extension SDK, native session or deployed receiver.
+
+Some source-pinned prerelease HTTP-48 packets contain ordinary producer
+observations. Those qualify only their exact captured source, not an arbitrary
+receiver advertising 48; the distinct producer capability starts at 49.
+
+The historical writer requires matching genuine HTTP-48 source and declarations,
+not the current HTTP-49 checkout:
+
+```text
+python tools/capture_bridge_http48.py --source-commit <full-source-commit> --write
+python tools/capture_bridge_http48.py --source-commit <full-source-commit>
+python tools/check-agent-bridge-contracts.py --base <reviewed-base>
+```
+
+The writer uses the existing bounded runner and source/entrypoint instrumentation
+with an explicitly observer-only portfolio. Its historical `HTTP47` request and
+bootstrap names are instrumentation reuse, not a generation-47 capture or native
+qualification. The default generation-47 child portfolio still requires its
+worker, host and peer. The new writer accepts only genuine HTTP-48 source with
+the retained-inbox floor of 48, checks the full committed dependency closure
+before and after execution, and publishes only its generation-48 packets plus
+lossless registry metadata. A later source checkpoint may refresh those exact
+registered current-generation paths, retaining every prior provenance record.
+Foreign owners, dirty packets and concurrent registry edits refuse before
+execution or publication; no older generation is refreshable. Unchanged semantic
+families link exact prior packets instead of copying or relabelling them.
+
+The closure also includes the actual payload installation owner under
+`plugins/agent-bridge/scripts/installation-context/`, not only its separately
+packaged `src` copy. The captured entrypoint's `_FRAGMENT_FILES` declaration
+determines required execution coverage. Every declared fragment must be present
+in the committed closure and observed executing under the guard; non-`src`
+location does not exempt it. Dirty entrypoint/fragment bytes, foreign helper
+origins and forged executable code refuse before helper effects. Historical
+inventory is checked against the captured tree, and required fragment identities
+are derived from captured entrypoint bytes rather than a producer-supplied list.
+
+All generation-47 packets remain immutable. The checker validates their original
+tree and exact primary/child bindings, not equality to a later generation's
+current source hashes. If the historical tree is unavailable, the reviewed
+packet/fixture-hash trust boundary still applies, with fixed owner/input
+requirements and content-addressed identities; newer files cannot retroactively
+become historical execution inputs. A recomputed digest alone is not provenance.
 
 HTTP generation 47 adds explicitly negotiated incompatible-preservation cold
 drain. Confirmed disjoint ranges select cold by default; graceful-only control
@@ -140,6 +420,43 @@ runs the bounded model-free replay before writing, and writes only new
 generation-46 fixture paths plus the registry. It does not edit old captures,
 production source, capability floors or the checker. Stage its new outputs
 before the final snapshot-based replay. Missing history is never fetched.
+
+### Qualifying the historical capture owner
+
+The current checkout advertises a later generation and must not be rewritten as HTTP-46
+to exercise this older writer. On Linux, explicitly qualify it with a locally
+available, genuine HTTP-46 source commit:
+
+```text
+python plugins/agent-bridge/tests/qualify_http46_capture.py --historical-source <full-local-http46-commit>
+```
+
+Run under the caller's bounded test supervisor. The launcher archives the
+complete historical source/dependency cohort locally, overlays only current
+metadata owners and qualification tests, and uses that cohort's existing
+devcontainer wrapper. Dependency preparation precedes network disconnection.
+The wrapper's supported `-k` selector avoids combining an explicit file selector
+with historical dependency preparation. No history is fetched. A private
+OS-temp scratch directory is used by default; an explicit `AGENT_SCRATCH_ROOT`
+must be a real, current-user-owned mode-0700 directory.
+
+The opt-in T3 probe owns another disposable source fixture and a separate copy
+of its prepared environment, avoiding nested use of a leased environment.
+Actual `--write` and no-write entrypoints run the real contained startup replay
+against both inline history and losslessly converted, real immutable chunks.
+Replay imports are hash-bound to the historical cohort. Conversion lowers only
+a test-local planning threshold, restored before either actual capture; the
+production 1 MiB guard is unchanged. The probe checks retained history, chunk
+bytes/references, foreign/pre-46 packets, capability floors, and no-write byte
+stability including the publication journal. Default-tier controls cover archive
+escapes/aliases, full commit input and incomplete receipts; the actual probe is
+not added to required unit-only CI.
+
+A positive `HTTP46_CAPTURE_QUALIFIED` receipt must name both completed cases.
+Its source commits are genuine **composed test-fixture commits**, not the
+original historical capture commit. This qualifies the updated writer with a
+retained source cohort; it does not reproduce unavailable history, publish
+fixture packets into this corpus, or qualify an installed/native receiver.
 
 The client and CLI keyed-send vectors reference that shared new-operation
 evidence explicitly; they are not independent captures or legacy re-attestations.

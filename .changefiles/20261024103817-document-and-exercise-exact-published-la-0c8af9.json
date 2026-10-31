@@ -1,0 +1,9 @@
+{
+  "comment": "Document and exercise exact published launcher recognition at fresh update admission.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

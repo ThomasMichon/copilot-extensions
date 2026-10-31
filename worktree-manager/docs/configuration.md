@@ -6,6 +6,82 @@ provider settings that must not be committed to a project. The existing
 `[source]` update-source, AHP provider and restart-recovery tables coexist in this file;
 `worktree-manager source set/reset` preserves all non-source tables.
 
+## Installation and Updates
+
+Configuration includes a standing **Installation & Updates** list. It combines
+Manager's catalog and the locally available canonical marketplace catalog with
+the selected engine's installation inventory; it never copies a plugin roster
+into the UI. Each row has contextual details and, where supported, **Update
+selected component only**. The confirmation names the component and local
+machine scope. Browsing and refreshing are read-only and run off the UI thread:
+they do not install prerequisites, start services/workers, request credentials
+or enroll automatic maintenance.
+
+The table distinguishes delivered **Payload**, **Selected runtime**, **Observed
+running**, enablement and durable update activity. A deployment marker is not
+running-service proof. Manager's running version describes the querying process,
+not its independently running mux daemon. Unknown, missing, payload-only and
+machine-policy outcomes remain explicit in details. Unavailable catalog or
+engine metadata is a finding, not an empty healthy installation.
+
+Updating submits a durable request through the existing installation driver.
+Acceptance is not completion: return to the list and refresh to see queued,
+running, succeeded, failed, blocked or interrupted owner state, attributable
+progress and the actual resulting versions. Closing the result or Manager
+does not cancel service-owned work. A failed worker launch may leave an
+accepted request; inspect its receipt before retrying. The same queue retains
+exclusive execution, deduplication and recovery; the page adds no queue or
+scheduler. A busy owner queues through that same driver.
+
+Plugin requests enter the selected engine's backend and retain its installation
+identity, even through the Manager CLI; Manager self-update uses the separate
+Manager backend. The workspace transports the selected engine's validated
+installation-cell receipt as well as its exact command. Contributed-command
+environment isolation therefore cannot silently redirect these reads or updates
+to legacy registries. Catalog failures appear in the standing warning banner
+while available rows remain inspectable.
+
+The public update seam is `worktree-manager update --target <plugin>` or
+`--target worktree-manager` for Manager alone. Add `--detach --json` for an
+acceptance receipt and use `update --request-status <id> --json` for owner state.
+Normal untargeted `update` retains its complete suite behavior. Component scope
+cannot be combined with force/reinstallation, repair or module-selection flags.
+The suite-only engine bootstrap acquisition budget is likewise inapplicable:
+component targeting never bootstraps or repairs a missing engine.
+Plugin scope does not bootstrap/repair the engine, update Manager, sync anchors,
+prune unrelated contributions or run the suite's finishing integration.
+
+The selected engine advertises targeted-update contract generation 1 through
+`update --inventory --json`. Older owners leave plugin actions unavailable;
+upgrade through the existing suite command, then refresh. A legacy engine
+installer without scoped finishing support similarly requires a suite update
+before targeting the engine itself. Missing/disabled prerequisites use explicit
+setup/enablement, not implicit broad installation. Configured runtime source
+policies that the current executor cannot realize remain blocked, never silently
+reset to marketplace delivery. Manager self-update retains its independent
+configured source, versioned publication and mux cutover owner.
+
+## Pane boundary ownership
+
+Tracked launches copy their OS pane shells into the engine's launch-owned state,
+not the Manager's version directory. Each boundary selects the current completed
+generation within the originally selected Manager root, with a finite child
+deadline and no provisioning or service-start fallback. The internal
+`worktree_manager.pane_lifecycle` contract uses that root, platform and configured
+source/ref to distinguish its installation identity from its replaceable version.
+Changing source selection mid-session therefore leaves a previous end notification
+unconfirmed rather than applying it under a different selection.
+
+The registry owner synchronously fences native session plus CLI-pane identity
+and retains an affirmative observed child exit. A handoff retains both live CLI
+panes until their individual exits; one failed pane cannot retire the other.
+Corrupt starts refuse without replacing state, and exit fences protect tombstones
+as well as live entries. Admitted changes notify an existing status monitor
+through bounded local IPC without starting it. The shell's successful process
+spawn alone is not that admission. Missing handlers remain quiet and uncertain.
+See [the engine's lifecycle architecture](../../plugins/agent-worktrees/docs/architecture.md#launch-owned-pane-assets-and-current-boundary-handlers)
+for storage, compatibility and the remaining setup-waiter limitations.
+
 ## Restart recovery requests
 
 Both new behaviors default off. Existing bounded, report-only evidence sampling
@@ -99,6 +175,44 @@ The internal `legacy_key` marker allows an owner-derived legacy projection to
 follow the known local platform; an explicitly declared logical selector on
 the wrong platform fails closed rather than selecting its sibling.
 Standalone native Windows/Linux entries continue to work without a sibling.
+
+With [binding provenance from the selected engine bootstrap](../../plugins/agent-worktrees/docs/engine-picker-contract.md),
+the local source uses the observed OS hostname and actual Windows/WSL/Linux
+environment, plus the existing explicit machine binding when one is configured.
+Absent, empty, unrelated-only and sibling-only maps do not require enrollment:
+there is exactly one ready local source, with no SSH argv. Matching customization
+retains its canonical source key. The source, Profiles local host and per-row
+local routing use the same context; named foreign-platform/profile targets,
+ambiguity and malformed declarations still refuse. This does not rewrite
+historical record owners or bypass the engine's project/record checks.
+Local-only mode uses the same source key for its tab, list and per-row refresh,
+rather than stamping raw hostname metadata onto differently named local rows.
+Supported legacy registry keys remain the Profiles/source keys even when the
+compact execution name differs; validated legacy target spellings normalize
+to that same local execution space when no customization entry exists.
+Setup, New/AHP, maintenance and worktree-detail routing consume the selected
+`local_source_key()` contract when available; legacy sources still expose
+`LOCAL`. The raw local observation remains separate for first-paint chrome
+and compatibility. Known-provenance resolution preserves the full OS hostname,
+preferring full-hostname customization before a matching historical short-name
+customization. No map leaves that full observation intact.
+Worker setup/reload publishes the selected tuple for synchronous UI consumers;
+New, task embodiment and maintenance initiation never resolve configuration on
+the event loop. Expired or invalidated configuration is refreshed only on a
+worker. Action routing keeps the published tuple while actual engine
+project/record admission remains authoritative at execution.
+Older bootstrap responses without provenance retain their historical strict
+roster behavior; their detected `machine` scalar is not promoted to a new
+configured binding.
+
+Live setup reloads retain rows for sources still in the resolved roster while
+their replacement loader is pending or streaming an incomplete prefix. New
+rows update matching identities in place; only a complete source listing
+removes absent rows, including an explicitly empty listing. Sources removed
+from configuration lose their retained rows immediately. Retaining a row does
+not mark its source ready or skip the Actions menu's current liveness check.
+The `r` footer acknowledges a reload request rather than reporting successful
+completion; an immediate setup admission failure retains its actual diagnostic.
 
 This is a read-only compatibility projection, not a persisted-state migration:
 historical rows are not rewritten, existing canonical-over-legacy merge

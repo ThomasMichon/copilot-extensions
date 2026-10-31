@@ -13,7 +13,11 @@ import ...`` call sites and tests are unaffected by the split.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_instance
+from pathlib import Path
+
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -528,16 +532,21 @@ class Launcher(Protocol):
 
 
 class SubprocessLauncher:
-    """Default launcher -- runs the built argv as a real, window-less child."""
+    """Run argv as a windowless child, lexically pinning its supplied cwd."""
 
     def __init__(self, *, cwd: str | None = None):
         self.cwd = cwd
 
     def launch(self, reg: dict, cmd: list[str]) -> ProcHandle:
-        return subprocess.Popen(  # noqa: S603
+        root = Path(os.path.abspath(self.cwd or Path(__file__).parent))
+        return spawn_instance(
             cmd,
+            instance=DaemonInstanceSpec(
+                "agent-dispatch-registration", root,
+                Path(__file__).resolve(),
+            ),
             stdin=subprocess.DEVNULL,
-            cwd=self.cwd,
+            cwd=str(root) if self.cwd else self.cwd,
             **no_window_kwargs(),
         )
 

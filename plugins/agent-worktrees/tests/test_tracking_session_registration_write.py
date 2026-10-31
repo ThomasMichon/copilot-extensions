@@ -42,7 +42,7 @@ def _clean_verb_registry():
 
 
 @pytest.fixture
-def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
+def record_path(tmp_tracking_dir: Path, monkeypatch, monkeypatch_config) -> Path:
     config = cfg.Config(
         srcroot=str(tmp_tracking_dir), machine="test", platform=cfg.detect_platform(), repo_name="test-repo",
         repos={"test-repo": cfg.RepoConfig(
@@ -69,6 +69,88 @@ def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
 
 def test_importing_the_module_registers_the_verb():
     assert "session_register" in tracking_write.registered_verbs()
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("binding", ["project", "global", "dropin", "detected"])
+@pytest.mark.parametrize("tuple_record", [False, True])
+def test_registration_preserves_explicit_key_among_shared_hostname_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+    binding: str, tuple_record: bool,
+) -> None:
+    from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
+
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    (anchor / "machines.yaml").write_text(
+        "machines:\n"
+        "  selected-space:\n    hostname: raw-host\n    physical_host: desk\n"
+        f"    execution_platform: {platform}\n"
+        "  other-space:\n    hostname: raw-host\n    physical_host: desk\n"
+        f"    execution_platform: {platform}\n",
+    )
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    machine_config: dict[str, object] = {
+        "repos": {"project": {"anchor": str(anchor)}},
+    }
+    if binding == "project":
+        machine_config["machine"] = "selected-space"
+    (project_root / "config.yaml").write_text(cfg.yaml.safe_dump(machine_config))
+    global_path = tmp_path / "global.yaml"
+    if binding == "global":
+        global_path.write_text("machine: selected-space\n")
+    if binding == "dropin":
+        (project_root / "config.d").mkdir()
+        (project_root / "config.d" / "identity.yaml").write_text(
+            "machine: selected-space\n",
+        )
+    monkeypatch.setattr(cfg, "global_config_path", lambda: global_path)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: project_root)
+    monkeypatch.setattr(
+        config_authority, "_load_state_root_authority",
+        lambda *_args: ({}, ""),
+    )
+    identity = (
+        WorktreeMachineIdentity("desk", platform, "selected-space")
+        if tuple_record else None
+    )
+    record = tracking.create_new_record(
+        "local", "worktree/local", str(tmp_path / "local"), "project",
+        identity.machine if identity else "selected-space",
+        platform, cfg.tracking_dir("project"), machine_identity=identity,
+    )
+    before = record.yaml_path.read_bytes()
+    result = tracking_session_registration_write.apply_session_register({
+        "worktree_id": "local", "yaml_path": str(record.yaml_path),
+        "session_id": "session",
+    })
+    if binding == "detected":
+        assert result["error"] == "execution_space"
+        assert record.yaml_path.read_bytes() == before
+    else:
+        assert result == {"ok": True, "linked_handoff": None}
+        assert tracking.load_record(record.yaml_path).session_entry("session") is not None
+        authority = config_authority.load_project_authority_config("project")
+        assert authority.machine == authority.configured_machine == "selected-space"
+        foreign_identity = (
+            WorktreeMachineIdentity("desk", platform, "other-space")
+            if tuple_record else None
+        )
+        foreign = tracking.create_new_record(
+            "foreign", "worktree/foreign", str(tmp_path / "foreign"), "project",
+            foreign_identity.machine if foreign_identity else "other-space",
+            platform, cfg.tracking_dir("project"), machine_identity=foreign_identity,
+        )
+        before = foreign.yaml_path.read_bytes()
+        rejected = tracking_session_registration_write.apply_session_register({
+            "worktree_id": "foreign", "yaml_path": str(foreign.yaml_path),
+            "session_id": "foreign-session",
+        })
+        assert rejected["error"] == "execution_space"
+        assert foreign.yaml_path.read_bytes() == before
 
 
 def test_apply_session_register_creates_a_new_session_entry(record_path):
@@ -476,7 +558,7 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
     import agent_worktrees.config as cfg
 
     config = cfg.Config(
-        srcroot=str(tmp_tracking_dir), machine="test", platform="wsl", repo_name="test-repo",
+        srcroot=str(tmp_tracking_dir), machine="test", platform=cfg.detect_platform(), repo_name="test-repo",
         repos={"test-repo": cfg.RepoConfig(
             anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
         )},
@@ -489,7 +571,7 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
     rec = WorktreeRecord(
         worktree_id="wt-terminal", branch="worktree/wt-terminal",
         worktree_path="/tmp/wt-terminal", repo="test-repo", machine="test",
-        platform="wsl", started_at="2026-06-01T10:00:00",
+        platform=config.platform, started_at="2026-06-01T10:00:00",
         last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
         status="finalized", completed_at=None, sessions=[], kind="bridge",
     )

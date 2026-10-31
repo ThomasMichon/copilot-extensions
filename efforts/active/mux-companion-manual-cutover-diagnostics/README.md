@@ -32,6 +32,15 @@ button.
 
 ## Coordination
 
+The complete direct retained #4369 acceptance below continues through this SAME Active
+ROOT's Plan, own and actual global Validation, and Journal under every incumbent source,
+integration, native and resource custodian. Administrative supersession retires
+duplicate tracking only; historical closed sources cannot serve as live coordination
+tokens. If current custody requires the original live token, retain it. No owner, claim,
+hold, completed row, accepted alternative or evidence tier is removed, and no
+implementation, runtime, credentials, process action, rollout or new blanket approval is
+authorized.
+
 The direct #2696 app-input/dismissal lane continues under the SAME Companion source/UI
 custodian through this existing Plan, Validation and Journal plus eligible open
 bounded-source coordination. The Mux-bind Relay ROOT independently owns its direct
@@ -78,6 +87,17 @@ Companion-side post-cutover head-verification (a refreshable session-lineage
 view highlighting whether resolved head matches the just-resumed session).
 
 ## Request
+
+**2026-10-24 continuation:** prioritize purpose-first Summary and Claims over
+handoff session selection; add a switchable work-topology summary pane,
+attention indicators, a permanent claims status line and clickable view tabs.
+The 2026-10-25 operator revision replaces required clickable view tabs with
+visible mode-switching hotkey guides; the two-row and same-window requirements
+remain.
+The public-safe request capture, sequencing and acceptance details are in
+[purpose-first.md](purpose-first.md). This expands the same Companion effort;
+it does not retire the retained manual-cutover, expected-head or app-input
+acceptance below.
 
 > My intent with the Handoff helper in the Companion is that when the agent in
 > a worktree says it's made the handoff or called trigger_handoff, I should be
@@ -230,7 +250,184 @@ full popup qualification.
 No app launch, native input, popup, handoff, process, runtime, service or configuration
 action is authorized by this intake.
 
+<!-- backlog-reconciliation:7556:transfer:4369:to:efforts/active/mux-companion-manual-cutover-diagnostics/README.md -->
+
+### Direct retained #4369 manual diagnostic and independent expected-head acceptance
+
+APPEND without removing/revising ANY incumbent ROOT Plan, completed work, own global
+Validation Plan, Participants/custody expressed in Coordination, full historical
+Journal, related claims or direct #2696 app-input/dismissal lane. Preserve that lane's
+complementary Mux-bind Relay ownership and BOTH-root review/readback condition
+independently. This is tracker intake, NOT runtime/head qualification,
+source/UI/provider/native ownership transfer or rollout. Original and complete
+refinements: https://github.com/ThomasMichon/copilot-extensions/issues/4369 ;
+https://github.com/ThomasMichon/copilot-extensions/issues/4369#issuecomment-6083439434 ;
+https://github.com/ThomasMichon/copilot-extensions/issues/4369#issuecomment-6321372187 .
+
+#### Direct unchecked Plan
+
+- [ ] P1. Retain all original four steps and earned source delivery: scoped vision,
+  explicit one-call context-handoff force option, one-worktree on-demand existing
+  claim/spawn/retire invocation, Companion human Cut over and refreshable previous/new
+  lineage. Preserve actual retired-predecessor and quiesce/background/schedule evidence
+  at its stated scope. Old unchecked prose does not erase merged delivery; old
+  build-complete/quiesce wording does not settle the later acknowledged expected-session
+  comparison.
+- [ ] P2. Keep diagnostic trigger DIRECT-HUMAN ONLY, for an existing pending baton and
+  exactly one selected worktree, through the SAME admitted host machinery. Explicit
+  mode-force bypass is one call, not automatic arming, config persistence, a second
+  cutover implementation, process-force permission or evidence of current operator
+  approval. Ordinary manual-only/MCP/non-force paths must retain their existing
+  non-arming safety.
+- [ ] P3. Independently resolve the expected session most recently actually cut over to
+  OR manually resumed and compare it to the durable authoritative Picker-resolved head.
+  An is_head dot or immediate returned head_before/head_after alone cannot compare head
+  against a separately admitted expected identity. Preserve exact worktree,
+  session/incarnation/lineage, pending baton and current owner context; do not compare
+  head to the same head-labelled observation and call that verification.
+- [ ] P4. Cover BOTH direct Cut over and classic manual clear/paste-seed resume,
+  including refresh AND reopening. Show previous/new lineage and a truthful
+  match/mismatch/unknown/unavailable comparison to the expected identity; a missing
+  expected/owner observation cannot be fabricated into a pass. Use the existing owning
+  identity/receipt/read path, not a new persistent Companion state/head authority;
+  preserve the incumbent no-persistent-Companion-state app lane.
+- [ ] P5. Detection/display ONLY: no automatic repair, report filing, raw head override,
+  session switching, baton consumption or session retirement merely from a mismatch.
+  Existing separate raw-override and selected-prior-resume work keeps its own
+  owner/authority. The operator may direct its existing current session under the normal
+  procedure; this feature grants none of that authority to a researcher or observer.
+- [ ] P6. Preserve ENTIRE root/manual/native/background-work/provider and source holds
+  plus direct #2696 choices, Exit/Cut over/Refresh/dismissal, popup/focus and
+  complementary relay ownership. Dismissing/reopening a popup must never trigger
+  cutover. Those separate app/relay validation and source-retirement gates remain
+  intact; unrelated popup or whole-Manager completion is not a new gate on this finite
+  independent-head feature.
+- [ ] P7. Preserve current admission, exact
+  predecessor/successor/candidate/consumer/native/manual/reservation custody,
+  quiesce-before-trigger ordering and existing schedules/background-work rules. Unknown
+  identity or process/operation state is a hold, not age/TTL/silence/local-task-based
+  expiry, replacement or forced repair permission. Keep source, containing release,
+  selected serving and native/manual validation explicit at their original tiers.
+- [ ] P8. Journal actual finite progress and the acknowledged comparison residual while
+  preserving full prior history. Deliver this COMPLETE direct intake and actual
+  own-global Validation entry below through a NEW normal reviewed PR, obtain ACTUAL
+  merge, then read back the WHOLE current ROOT before source supersession. Old
+  creation/vision, Step4 checkbox, title/link/child/Draft/proposal or quiesce receipt is
+  not intake delivery; retain source if any original clause/owner/evidence tier is
+  absent or current custody needs its live token.
+
+#### Direct unchecked Validation
+
+- [ ] V1. Preserve the actually delivered original vision/force/one-worktree
+  host/Companion action contract and source/recorded native proofs without counting them
+  as independent expected-head verification. Credit existing real retire/quiesce tests
+  exactly at their scope.
+- [ ] V2. Verify direct-human, existing-baton, selected-one-worktree and one-call
+  mode-force boundaries; ordinary manual-only/non-force/MCP/automatic sweeps cannot arm
+  or invoke cutover from observation alone. No persistent repo config change, second
+  mechanism or process-force authority.
+- [ ] V3. Through the actual expected-session source and authoritative head read, verify
+  separate identities are compared correctly: actual most-recent resumed/cut-over
+  session versus Picker-resolved head. Include matching and mismatched
+  lineage/current-incarnation cases, not a duplicated is_head marker or same returned
+  head used twice.
+- [ ] V4. Verify BOTH explicit Cut over and manual clear/paste resume, refresh and
+  reopen. Previous/new lineage, retained expected identity and truthful
+  missing/stale/unavailable/unknown outcomes remain visible without a new persistent
+  Companion registry/state owner. Qualification uses the original
+  supported/manual/native lanes when separately authorized, not a new all-host program.
+- [ ] V5. Verify mismatch display never writes head repair, files a bug, invokes raw
+  override/switch/resume, consumes/creates a baton or retires a process/session.
+  Existing popup dismissal and explicit action separation remains; read evidence is not
+  mutation permission.
+- [ ] V6. Preserve current source/UI/native/host/provider/claims/reservations and full
+  direct #2696 app/relay choices/receipt conditions under their owners. Completed
+  narrower source or live quiesce scope is not whole independent-comparison acceptance;
+  no adjacent feature token is closed by this validation.
+- [ ] V7. Keep original appropriate manual/native evidence,
+  source/containing-release/selected-serving attribution and
+  quiesce/schedule/background-work boundaries. Unknown live state cannot be
+  guessed/repaired/expired, and no extra universal native/whole-parent/blanket-ACK gate
+  is created for administrative intake or finite source work.
+- [ ] V8. After NEW normal reviewed ACTUAL merge, read the WHOLE current ROOT and verify
+  P1-P8, V1-V8, C1-C4 and actual own-global Validation entry, together with every
+  incumbent Plan/Validation/Journal/owner/claim/hold. Missing any unique
+  original/refinement/choice/native tier or current required live source custody means
+  retain #4369. Product/head comparison remains unchecked until its own actual finite
+  qualification.
+
+#### Continuing Coordination
+
+- C1. SAME existing Companion source/UI custodian and manual-diagnostics integration
+  owner retain stewardship. Existing admitted host/handoff/process/native/provider
+  owners keep physical claim/spawn/retire and identity custody; the Companion remains a
+  caller/observer. No source, implementation, current resource or operational ownership
+  is handed off by this tracking text.
+- C2. Preserve the entire incumbent original and direct #2696 app-input/dismissal
+  Plan/Validation/Journal, its explicit choices and complementary Mux-bind Relay
+  lane/conditions. Preserve every current pending baton, predecessor/candidate/consumer,
+  native/manual/source/runtime/background-work/provider claim and completed finite
+  evidence. Separate raw-head-override/prior-session recovery scopes stay separate.
+- C3. Existing driver journals next finite work under this SAME Active ROOT and
+  repository's eligible open bounded-source coordination policy; historical closed
+  source numbers are provenance, not usable live claims. Recheck
+  creator/state/lock/assignee and textual/native/resource holds before
+  publication/effects. No age, silence, TTL, empty assignee or missing local task
+  settles current custody; if a current holder needs the live #4369 token, KEEP it OPEN
+  rather than administratively releasing anything.
+- C4. Coordinator alone obtains NEW normal reviewed ACTUAL ROOT intake merge and WHOLE
+  current readback before source supersession. The actual own-global Validation entry is
+  mandatory. A proposal, old4371/5409/5517 receipt, title/link or partial app subsection
+  cannot substitute. No new blanket ACK, original owner-condition weakening,
+  implementation, mode change, cutover/head write, SDK/session/native/probe or rollout
+  authority is granted.
+
+Public delivery foundations:
+https://github.com/ThomasMichon/copilot-extensions/pull/4371 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/5409 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
+
+### Step 6 - Purpose-first Summary and Claims continuation (#8811)
+
+- [x] Land reviewed [purpose-first intent and sequence](purpose-first.md)
+      and the revised `visions/mux-companion` before implementation.
+- [x] Reuse existing authoritative purpose, summary and claims sources in
+      the default Textual dialog; retain recovery as a secondary view.
+      Source merged in #8822; installed/native rollout remains separate.
+- [ ] Implement a compact topology presentation for phases, sub-agents,
+      bridges, downstream worktrees, open PRs and accumulated tool-call stats,
+      using the same sources as other companion clients.
+- [x] Implement explicit CLI/summary pane switching with attention indicators
+      that preserve the live CLI and its answer boundary.
+      Source merged in #8881 and #8941; installed/native-client attention
+      acceptance remains separately unchecked in Validation.
+- [ ] Deliver a permanent second claims status line and actionable mode-switch
+      hotkey guides
+      through the Mux-bind owner, with tmux/psmux qualification.
+
 ## Validation Plan
+
+- [x] Purpose-first: confirm the captured continuation preserves the request
+      and distinguishes requested intent from agent-recommended sequencing.
+- [x] Purpose-first: unit and real Textual consumer tests for Summary/Claims,
+      long values, missing/stale/error sources and secondary recovery actions.
+      The 156-test packet includes real process shutdown and target-cwd isolation.
+- [ ] Purpose-first: contract tests for graph identities, reported phases,
+      agent/bridge/worktree/PR relationships and authoritative tool totals.
+- [ ] Purpose-first: prove actual CLI/summary switches preserve the original
+      session/process/pane and surface question/idle attention without answers.
+- [ ] Purpose-first: qualify two-line status and real mode-switch key dispatch on
+      tmux and psmux, including narrow terminals and unrelated sessions.
+- [ ] Purpose-first: record source, clean-room, installed/native and rollout
+      evidence separately; no passed source test substitutes for a live lane.
+
+- [ ] Complete EVERY directly retained #4369 P1-P8, V1-V8 and C1-C4 clause above at the
+  original finite source/manual/native bounds, preserving the entire incumbent Plan, own
+  Validation, Participants/Coordination, full historical Journal,
+  direct2696/complementary relay conditions, all current owners/claims/holds and
+  partial-delivery credit. Administrative tracking is not independent head-comparison or
+  runtime acceptance; NEW normal reviewed ACTUAL merge plus WHOLE current ROOT readback
+  precede source supersession.
 
 - [ ] Complete every direct #2696 Plan/Validation clause above at its original supported evidence tier. Preserve the complementary root's separate lane and all original owners/holds; administrative consolidation is not implemented popup acceptance.
 
@@ -277,6 +474,301 @@ action is authorized by this intake.
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-10-25 - Operator selected keyboard guides instead of click tabs
+
+- The operator revised the purpose-first chrome request: "We can instead
+  show some hotkey guides to switch modes." Update standing intent and this
+  continuation through normal review before implementing the revised chrome.
+- The second permanent Claims row and same-window CLI/Summary panes remain
+  required. Guides must describe actual registered, context-appropriate
+  actions, retaining the distinction between Ctrl+K's popup and persistent
+  pane navigation. Do not advertise an unimplemented direct-toggle shortcut.
+- This withdraws the new clickable-mode-tab requirement, not the relay
+  root's historical accepted click deferral or any existing app-input,
+  manual/head, source/provider, native or resource hold. No unreleased mux,
+  live rebinding, runtime installation or rollout was selected.
+
+### 2026-10-25 - Optional attention consumer merged; native chrome boundary
+
+- #8941 merged after current-head Copilot approval, resolution of its
+  reviewed refresh single-flight race and required CI. Re-read this entire
+  root. Close only the Step 6 switching/attention source row; preserve the
+  actual native-client, rollout, topology and every retained manual/head,
+  app-input, relay and resource acceptance item under its existing owner.
+- Final source `5ec8862bc112ee71e5f14b0edfdc69a0dc5ac23b` passed 117
+  graph/attention/native tests plus 43 provider tests on Ubuntu 24.04 / tmux
+  3.4, and 41 attention/native tests on Windows / disposable PSMux 3.3.6 in
+  run `40183515001`. Neither platform packet skipped tests. The focused
+  post-review local packet passed 80 tests; the blocked-replacement
+  regression failed before the fix and passed after it. The earlier
+  integrated Windows packet passed 237 tests with one POSIX-only skip.
+- The optional indicator is explicitly last-reported and continuity-unknown.
+  Its independent worker revalidates one displayed head, uses bounded pulse
+  reads, failure backoff and stale-selection fencing, and cancels its owned
+  child on exit. Changed heads require Refresh. Hidden/unknown observer
+  visibility does not poll the engine. Nudges navigate only, never answer
+  or approve input.
+- Native qualification found that PSMux 3.3.6 can synthesize a client listing
+  while detached; the new visibility reader uses exact-pane
+  `session_attached` evidence instead. PSMux 3.3.5 setup/CLI/directory
+  instability remains separately unqualified under #8811; clean controls
+  did not establish causality. Pinned 3.3.6 results do not qualify the older
+  build, and no installed compatibility floor or runtime was changed.
+- Further isolated native research proved two stored status rows on PSMux
+  3.3.6 through its own state dump with options targeted to that disposable
+  session's server; a separate control retained one row. Indexed option
+  getters were not authoritative. This is stored-state/isolation evidence,
+  not rendered status or real-client mouse dispatch.
+- Released PSMux 3.4.0 still treats custom tmux mouse key names as unmodelled
+  and only routes status-format ranges to native windows. Its unreleased
+  development branch has a mouse-key routing implementation, but that is
+  not a released/qualified runtime. Native windows are not the selected
+  same-window pane design. Keep the withheld mouse-bind safety boundary;
+  do not silently enable it, substitute a layout or declare click delivery.
+- Continue native chrome through the existing Mux-bind owner after selecting
+  the supported-backend path. No live bindings, user mux, runtime update,
+  manual cutover or rollout was exercised. The interrupted keyed workspace
+  allocation remains separately owned and pending.
+
+### 2026-10-25 - Root-attention provider merged; optional UI consumer next
+
+- #8928 merged after current-head Copilot approval and required CI. Re-read
+  this entire root; retain every direct manual/head, app-input, relay,
+  source/provider and native hold. The combined switching/attention row
+  stays unchecked until the optional indicator and its consumer tests land.
+- Added the versioned read-only `session-attention` provider over one bounded
+  root live-pulse register. It exposes only last-reported busy, idle or
+  awaiting-operator state and transition time. Runtime continuity remains
+  unknown; initial busy may lack a transition timestamp. No intent,
+  question, transcript, event-tail, TTL or legacy-idle inference is used.
+- Final staged Windows packet: 145 passed, Ruff clean, install-contract
+  clean for 13 plugins. All 197 admitted source hashes matched after the
+  one reviewed additive routing hash change; inventory and budgets stayed
+  unchanged. Actual fresh-home CLI tests retained source-hosting denial and
+  whole-fixture byte/no-write controls.
+- Exact source `9a173d0ebead8d8a85c9ee063274fcc770a92018` passed 43 attention
+  provider/process tests and 77 graph/native tests, zero skips in either
+  packet, on Ubuntu 24.04 / tmux 3.4 in run `40179632871`.
+  This is isolated source/native evidence, not human input, status rendering
+  or a production deployment. No live repair or rollout was performed.
+- Continue with one optional cancellable attention consumer, selected-head
+  fencing and explicit uncertainty, then the outstanding native chrome and
+  broader status work. Unsupported providers must preserve all existing
+  views; the indicator may nudge a return to CLI but never send an answer.
+  The interrupted keyed workspace allocation remains separately owned and
+  pending; this merge does not settle it or grant manual state repair.
+
+### 2026-10-25 - Graph consumer merged; attention is the next source slice
+
+- #8916 merged after current-head Copilot approval and required CI. Re-read
+  this entire root and retain its complete manual/head, app-input and
+  complementary relay acceptance. The current task worktree was pulled
+  forward onto the confirmed merged source for continued work, not finalized.
+- Final graph/legacy consumer packet: 111 passed. Exact source
+  `1709949607a213d97f992d495ea2b86dcf7b22af` passed 77 tests with zero skips
+  on Ubuntu 24.04 / actual tmux 3.4 in workflow run `40177027971`, including
+  native pane navigation, graph contracts and real Textual consumers.
+  The earlier standalone combined Windows packet passed 343 tests with
+  three platform skips. These are source/isolated-native tiers, not rollout.
+- Fixed the reviewed missing-snapshot-key crash while retaining explicit
+  null for unavailable history. The PR description now records contract,
+  performance and documentation impact; production cold/warm latency is
+  unmeasured, not inferred from test duration.
+- Graph remains evidence-scoped: reported lifecycle is not allocation,
+  retained records are not lifetime totals, and a PR claim is not current
+  open/closed evidence. The broader topology row remains open for its
+  remaining source/status qualification; no narrower merge completes it.
+- Continue with lightweight, versioned root attention observations and a
+  cancellable single-session UI indicator, without rescanning history or
+  guessing questions from transcripts. Then qualify native two-line/click
+  chrome under the relay's existing safety boundary. No installation or
+  live configuration change is authorized by these source milestones.
+- A separate next-workspace allocation was interrupted before a tracking
+  record existed. Keyed replay correctly remains pending and targeted
+  creation repair reports the missing record, so no duplicate allocation or
+  manual state edit was attempted. Its creating session retains that
+  outstanding allocation; continuing in this existing task worktree does
+  not claim it settled.
+
+### 2026-10-25 - Same-window observer merged; native evidence retained
+
+- #8881 merged after current-head Copilot approval, required CI and native
+  qualification. Re-read this entire root before continuing. The combined
+  switching/attention row stays unchecked because question/idle attention is
+  not implemented; no historical manual/head or app-input hold is closed.
+- Final local packet: 270 passed, three platform skips, including actual
+  PSMux switching, original CLI PID retention, observer cleanup, fresh CLI
+  relaunch and pane-aware relaunch registration. Reconnect and detached
+  creation callbacks use snapshot/native-owner fences; unavailable metadata
+  cannot revive a successor or indefinitely orphan a bound observer.
+- Exact source `98a60ab111ab2a5c9aa3ec4dc6757be0a16b8b8c` passed the isolated
+  Ubuntu workflow run `40175168608`: actual tmux 3.4, one native test passed,
+  zero skips. This is not proof of rendered production chrome, real-client
+  mouse dispatch, first installation or rollout.
+- A separate disposable PSMux 3.3.5 option probe round-tripped `status=2`.
+  Indexed `status-format[0]` and `[1]` setters returned success but their
+  indexed reads were empty; scalar `status-format` did persist a value.
+  This is an unresolved rendering/capability qualification, not proof that
+  two-line chrome works or that every possible format is unsupported. Both
+  uniquely named probe sessions were cleaned up. The existing withheld
+  click-binding safety boundary and all native chrome acceptance remain.
+- The observer worktree was finalized through its owner. Continue with the
+  Graph consumer on top of the merged source, then attention and native chrome.
+
+### 2026-10-24 - Observer review fixes and lifecycle qualification
+
+- Addressed the four findings on #8881: native session-ID option targeting
+  for POSIX tmux, visible translation of Windows Job failures, a
+  cross-process guard around observer lookup/creation/publication, and
+  termination of the observer after its original CLI is confirmed ended.
+- The observer pins its original native incarnation before its first poll,
+  never adopts a successor, and treats unavailable evidence as unknown.
+  Its one-second check reads only the registered CLI's native inventory
+  off the UI loop, with no engine or transcript scan.
+- The local focused/native packet passed 136 tests with three platform
+  skips. It includes two overlapping processes and actual PSMux CLI exit,
+  observer termination and subsequent clean CLI relaunch.
+- Added the opt-in `mux-companion` Ubuntu portfolio for actual tmux option
+  targeting, same-window navigation and CLI-exit cleanup. Its result must
+  be recorded before claiming POSIX native qualification; Windows skips
+  do not prove that platform. No production rollout is authorized here.
+
+### 2026-10-24 - Same-window observer source and native controller proof
+
+- Added explicit Show Summary / Return to CLI navigation while preserving the
+  existing Ctrl+K popup. The installed-runtime observer reuses one pane in the
+  same native window; CLI identity comes from launcher registration, never
+  an assumed pane index. Stale, missing or ambiguous identities refuse.
+- The combined UI, registration, runtime-consumer and explicit native packet
+  passed (90 tests, two platform skips). The disposable native PSMux check passed three
+  view round trips with one observer, one window, the original CLI pane ID
+  and its unchanged process ID, including closing and reopening the observer.
+  The observer invocation reached its selected
+  synthetic installed prefix through the real bootstrap, including paths
+  with spaces and apostrophes. This is not an installed production rollout
+  or proof of rendered status chrome or mouse dispatch.
+- Native tests rejected two plausible but incorrect assumptions: pane-only
+  targets do not select PSMux's per-session server, and pane-scoped user
+  options are accepted without persisting. Actions now qualify native pane
+  targets with the session and retain the observer reference in a
+  session-scoped option; CLI identity remains in the Manager registry.
+- Session-level directories can differ from the exact CLI pane's worktree
+  directory. Navigation verifies that registered pane's actual directory
+  and native incarnation rather than relying on the session directory.
+  This does not repair the independent older discovery path.
+- The combined switching/attention and native chrome validation rows remain
+  open. Continue with authoritative topology and attention observations,
+  then two-line chrome/click acceptance; retain all earlier handoff holds.
+
+### 2026-10-24 - Summary/Claims merged; same-window observer next
+
+- #8822 merged after current-head Copilot approval, green required CI and
+  resolution of both shutdown and target-cwd findings. Source milestone only:
+  the full effort remains Active and installed rollout is not asserted.
+- Re-read Step 6, the Validation Plan and continuing Journal. Closed only the
+  Summary/Claims source and focused consumer-test rows. Topology, attention,
+  same-window view integration and two-line/click acceptance remain open.
+- A disposable native psmux 3.3.5 probe repeatedly split, selected and zoomed
+  two inert panes inside one window, retaining the original CLI pane ID and
+  PID. `status=2` and `status-format[1]` were accepted, with `status 2` read
+  back. This proves pane/option state, not rendered status or mouse dispatch.
+  Every probe session was cleaned up; no live session or installed slot changed.
+- The next source slice is an explicit same-window Summary observer and
+  return-to-CLI action, preserving Ctrl+K's existing popup and using the
+  Manager's installation-owned invocation path. Never assume pane index zero
+  or repurpose session-lineage succession as allocated-sub-agent topology.
+### 2026-10-25 - Bounded graph consumer source validation
+
+- Added a secondary Graph view for reported disposition history, typed
+  directed resource references and optional retained-session observations.
+  Inbound owners, outbound claims and reported subagents remain distinct;
+  claims alone do not establish whether a PR is open.
+- The graph uses the versioned #8905 provider only for one unambiguous
+  selected head session. Reads are on demand, off the UI loop, cancel on
+  shutdown and cannot replace a refreshed snapshot with an older result.
+  Unsupported or partial evidence cannot disable Summary, Claims or Recovery.
+- The focused packet passed 108 tests: literal/narrow/long graph rendering,
+  bounded fan-out and duplicates, schema/uncertainty handling, actual JSON
+  subprocesses with target-cwd isolation, and real Textual activation,
+  refresh, optional-source failure and blocked-read dismissal. Ruff and the
+  13-plugin install-contract gate passed.
+- After integrating the merged observer, the standalone combined packet
+  passed 343 tests with three platform skips and a clean host-state audit.
+  An earlier concurrent-provisioning run had the same passing assertions but
+  failed its machine-PATH drift audit; no shared environment was rolled back
+  and the drift's source was not established. A further actual Textual
+  late-result/refresh regression passed in the five-test UI packet.
+- This is source validation only. Question/idle attention, native mux view
+  tabs, two-line claims chrome, real mux-client dispatch and installed/rollout
+  evidence remain separate, unchecked acceptance. The parent stays Active.
+
+### 2026-10-25 - Retained session metadata provider merged
+
+- #8905 merged after current-head Copilot approval and required CI. Re-read
+  this entire parent effort; the topology, attention, mux chrome and retained
+  manual/native acceptance remain open. The earlier #8822 Summary/Claims
+  source delivery and its 156-test consumer packet now close only their
+  corresponding Step 6 and source-validation rows.
+- Added the optional, versioned `session-observations` engine command, with
+  streamed retained-file tool-event counts and reported subagent lifecycle.
+  Counts are not lifetime totals; incomplete history, missing producer fields
+  and unavailable evidence remain explicit. Reported completion does not mean
+  allocation release, retirement or resource custody.
+- The final focused provider packet passed 74 tests, including real CLI
+  subprocesses over fresh synthetic state, interrupted-read byte coverage,
+  launching-task metadata and unchanged source-hosting denial. Ruff and the
+  13-plugin install-contract gate passed. CI executed the unchanged admitted
+  unit inventory after its project-routing source hash was refreshed.
+- This is provider-first source delivery, not UI integration or deployment.
+  No runtime was installed. The next slice consumes the optional contract in
+  the bounded graph presenter; unsupported providers retain existing views.
+
+### 2026-10-24 - Reviewed intent merged; Summary/Claims source slice
+
+- #8815 merged after Copilot approval and required CI. Re-read the parent
+  Step 6 and Validation Plan; the entire effort remains Active.
+- Extended the existing Companion with Summary as initial view, actual Claims
+  and secondary Recovery. The process-boundary engine client consumes the
+  existing independently marked `worktree-status-bundle` contract and rejects
+  wrong-worktree/malformed envelopes. No new ledger or phase inference.
+- Startup and refresh reads run off the Textual event loop; unavailable facts
+  and lineage failures remain visible. The existing human-gated cutover
+  action is preserved. These are application tabs, not the requested mux tabs.
+- Initial focused source validation: 144 tests passed, including actual
+  Textual tab/cutover interaction, partial failures, literal claim labels and
+  blocked-producer responsiveness. Further process-boundary and native
+  acceptance is retained; no installed runtime or live mux change is claimed.
+- Review identified that a default executor thread could keep the popup
+  process alive after Escape. Read cancellation now uses the Manager's
+  existing owned process/job boundary; startup, refresh and handoff-state
+  reads share that cancellation. The expanded packet passed 155 tests,
+  including a real Companion process exiting while its producer stays
+  blocked, and native Windows renderer/grandchild timeout cleanup. The latter
+  fixture now answers the current hosting-policy probe before its intentional
+  blocking resolve. No production admission check was weakened.
+- Native relay constraint from existing source: the current psmux click bind
+  is deliberately withheld because it corrupts the supported root table.
+  Do not silently enable it to satisfy view-tab presentation.
+- The operator selected `same-window` for the CLI/Summary layout; captured
+  verbatim in the linked continuation and reflected in standing intent.
+  Native windows are not a substitute. A further review found target-cwd
+  loss in the new runner; it now binds every observation read to the selected
+  worktree without changing legacy two-argument runner callbacks. A real
+  different-process-cwd versus selected-worktree handoff test passes;
+  the final focused packet is 156 passed.
+
+### 2026-10-24 - Purpose-first continuation proposed
+
+- Resumed the existing Companion effort and preserved the separate Mux-bind
+  relay's ownership. Coordination token: #8811.
+- Proposed expanded standing intent and the linked purpose-first sequence.
+  Summary and Claims now lead; handoff/session recovery is lower priority,
+  not removed. Implementation waits for the normal reviewed intent gate.
+- No live bindings, mux servers, runtime installations, claims or sessions
+  were changed by this proposal.
+
+- [2026-10-24 - Direct retained acceptance from #4369](<journal/2026/10.24 backlog-intake-90.md>)
 
 ### 2026-10-22 - Direct retained #2696 acceptance
 

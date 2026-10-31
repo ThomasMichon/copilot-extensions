@@ -14,7 +14,66 @@ The command is a foreground service. The selected external deployment manager
 owns its supervision, storage and eventual lifecycle; CLI invocation does not
 install dependencies, enroll machines or open provider policies.
 
+The separate opt-in [machine-key and delegated continuity
+profile](continuity-bootstrap.md) adds same-owner first-touch caller enrollment
+and a normal setup consumer. It does not broaden the token profiles below.
+
+## In-process deployment owners
+
+An SDK embedding may explicitly supply `local_handlers=(LocalHandlerBinding(...),)`
+to `build_app` or `start`. These owners run **inside the same Gateway process**,
+not a second controller or a policy-selected module/executable. Each binding
+names one complete immutable `ServiceSlot`; every request must still match that
+exact current desired slot, route and original authenticated caller. Changed
+identity, configuration reference or route refuses until the deployment owner
+registers the new binding through its controlled runtime lifecycle.
+
+Local slots support bounded buffered HTTP only, with one active request per
+slot and the existing global admission/body/deadline limits. They cannot also
+accept an outbound connector. Caller JWT/proof verification, enrollment/key/
+method policy, TLS and canonical target checks are unchanged. Existing
+unregistered slots retain their original outbound-channel behavior.
+Registering Python code is not installed/healthy/ready evidence for its backend.
+Embedding diagnostics report an exact matching binding as `registered-local`,
+without a service-grant generation; they do not label backend readiness.
+The foreground CLI does not discover these handlers or activate a deployment
+module merely because policy declares a slot.
+
+The handler receives `LocalServiceRequest`, containing the normal filtered
+`ServiceRequest` plus **process-local** authority custody. It must check lifetime
+at each effect checkpoint, settle bounded native workers before cancellation
+returns and report uncertain outcomes without replay. Cancellation closes its
+lifetime before cancelling the handler, and retains the slot until that handler
+has settled. A write whose handler was invoked but failed returns
+`outcome-unknown`, never automatic retry or fabricated success.
+Gateway shutdown closes admission and local lifetimes before cancellation and
+joins every accepted local handler, including its finite native settlement,
+before returning. Process replacement and physical backend fences remain with
+the existing deployment/lifecycle owner, not a second controller.
+
+`local.authorize_operation(intent, admission, authority=..., role=..., installation=...)`
+passes the **original authority-retained cryptographically verified identity**
+to an independently configured `AdmissionAuthority`. It never reconstructs
+identity from `CallerContext`, accepts a caller-supplied policy or serializes a
+Permit. The fleet must match the Gateway, and the authority must match the
+explicitly registered backend owner. Gateway routing identity and operation
+authority are separate namespaces. The original intent's actor,
+account, command, target, generation and applicable full content grant are
+checked before journal lookup or effects. Gateway caller/route/trust/lifetime
+checks remain bound to every permit revalidation/completion; a later revocation
+cannot reuse an earlier allow. These remain local checkpoints, not an atomic
+fence against a later external effect.
+
+The [fixed ARC owner](arc-owner.md#in-process-gateway-binding) provides one such
+named operation. Actual selected artifact/support/provider custody and adoption
+of an existing pool remain separate requirements. No Gateway handler
+registration retires an agent lease or authorizes replacing an incumbent release.
+
 ## Bootstrap and coherent live policy
+
+CLI and embedded startup bind the policy to its lexical absolute selection.
+Initial loading, later reloads and instance admission use that same path;
+normalizing parent components cannot make the reader follow a different tree.
 
 Listener configuration is strict bounded JSON with schema
 `fleet-manager.gateway-service-listener`, version `1`, stable `fleet`/`gateway`
@@ -35,6 +94,12 @@ private-origin restrictions and the separate application-authentication boundary
 
 SDK tests may call `await start(Listener(...), policy_path)` with port zero;
 the returned handle supplies the actual origin, app and asynchronous `close()`.
+Embedded and app-runner startup acquire instance attribution before background
+reload or listener work. Production has no lease expiry; explicit test-owner
+contexts retain their test lease. Await `close()` to join complete cleanup:
+concurrent callers share one shielded cleanup task, and cancelling a waiter
+does not release admission while cleanup is still running. Nested CLI/app
+admission borrows the existing process record rather than creating a duplicate.
 Foreground CLI serving requires an explicitly selected nonzero port.
 Changing bootstrap/listener settings requires a controlled runtime change;
 ordinary service policy reload does not.
@@ -76,9 +141,13 @@ its channel across unrelated updates; changed slots or caller grants lose their
 old handles. Changed issuer trust replaces its nonce epoch and invalidates
 previous handles/proofs rather than resetting replay state under old authority.
 
-Revision custody remains process-local. The source/lifecycle owner must retain
+Without the enrollment envelope, revision custody remains process-local.
+The source/lifecycle owner must retain
 accepted revision authority across restart; this implementation does not claim
 a durable publication fence or automatic accepted-operation recovery.
+The opt-in [enrollment envelope](continuity-bootstrap.md#same-owner-enrollment-producer)
+instead retains its accepted floors and exact public bindings in the existing
+operation journal.
 
 ### Code-registered identity-provider trust adapter
 
@@ -136,6 +205,16 @@ implementation or interoperability claim. A vendor's token lacking the required
 audience/proof binding still refuses. Vendor adapters and private selection stay
 downstream; no claim rewriting, alternate issuer, re-signing or bearer fallback
 is supplied.
+
+### Explicit enrolled-key profile
+
+Complete service-policy version `3` explicitly selects
+[`enrolled-pop-v1`](gateway-enrolled-identity.md). It verifies original signed
+application tokens with exact client/subject mapping and independently enrolled
+keys, using the same common signature/proof/replay engine and actual serving
+paths. Its separate bounded `enrollment` envelope does not broaden versions
+`1` or `2`, let providers return enrollment, or change `jwt-pop-v1` defaults.
+Source authentication and durable enrollment/revision custody remain external.
 
 ## Authentication and attachment
 

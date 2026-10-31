@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+from collections.abc import Callable
 from typing import Any
 
 from ..preference_attestation import prepare_launch, read_frame, verify_frame
@@ -11,6 +12,7 @@ from ..preference_attestation import prepare_launch, read_frame, verify_frame
 
 async def spawn_attested(
     argv: list[str], cwd: str | None, env: dict[str, str] | None, spawn: Any,
+    *, before_exec: Callable[[], None] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     args, child_env, expected, reader, writer = prepare_launch(argv, env, cwd)
     child = None
@@ -20,6 +22,8 @@ async def spawn_attested(
         writer.close()
         frame = await asyncio.to_thread(read_frame, reader)
         receipt = verify_frame(frame, expected, child.pid)
+        if before_exec is not None:
+            before_exec()
         reader.sendall(b"\x01")
         return child, receipt
     except BaseException:

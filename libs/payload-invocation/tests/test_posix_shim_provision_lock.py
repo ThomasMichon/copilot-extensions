@@ -25,7 +25,6 @@ assert _spec and _spec.loader
 _spec.loader.exec_module(generator)
 
 LOCK_START = '_lock_link=""\n'
-LOCK_END = "trap '_unlock_provision' EXIT INT TERM\n"
 
 # ``rm`` records a VIOLATION whenever the lock link is removed while it names
 # a live owner -- i.e. whenever a contender deletes a lock it does not own.
@@ -76,7 +75,17 @@ def _posix(path: Path) -> str:
     return str(path).replace("\\", "/")
 
 
-def _rendered_lock_section(tmp_path: Path) -> str:
+def _rendered_lock_section(tmp_path: Path, entry: str) -> str:
+    if entry in {"bridge", "containers"}:
+        dispatcher = SCRIPT.parents[2] / f"plugins/agent-{entry}/scripts/runtime-gate.sh"
+        text = dispatcher.read_text(encoding="utf-8")
+        start = text.index(LOCK_START)
+        return 'RUNTIME_ROOT="$_runtime_root"\n' + text[start:text.index("\nresolve_runtime\n", start)]
+    if entry == "dispatch":
+        dispatcher = SCRIPT.parents[2] / "plugins/agent-dispatch/scripts/runtime-gate.sh"
+        text = dispatcher.read_text(encoding="utf-8")
+        start = text.index('LOCK_LINK=""\n')
+        return 'RUNTIME_ROOT="$_runtime_root"\n' + text[start:text.index("\nresolve_runtime\n", start)]
     plugin = tmp_path / "plugin"
     scripts = plugin / "scripts"
     scripts.mkdir(parents=True)
@@ -107,27 +116,55 @@ def _rendered_lock_section(tmp_path: Path) -> str:
     }
     shim = rendered["agent-example"]
     start = shim.index(LOCK_START)
-    return shim[start : shim.index(LOCK_END, start)]
+    return shim[start : shim.index("\n_resolve_runtime\n", start)]
 
 
-def test_posix_shim_reaper_never_unlinks_a_newer_holder_released_mid_check(
-    tmp_path: Path,
-) -> None:
-    """The owner is dead at the first check, but by the under-mutex re-read
-    another reaper has removed it and a live holder P has taken the lock. P
-    then releases and Q re-creates the lock before the reaper's liveness
-    probe. The reaper may only remove the owner it judged stale itself, so
-    Q's live lock must survive."""
-    bash = _bash()
-    if bash is None:
-        pytest.skip("bash not available")
-    section = _rendered_lock_section(tmp_path)
+def _lock_harness(tmp_path: Path, entry: str, hooks: str) -> tuple[Path, Path, Path]:
+    section = _rendered_lock_section(tmp_path, entry)
     root = tmp_path / "rt"
     root.mkdir()
     state = tmp_path / "state"
     state.mkdir()
     (root / ".provision.lock.pid").write_bytes(b"6161")
     (state / "live").write_bytes(b"")
+    script = (
+        "set -eu\n_command=agent-example\n"
+        f"_runtime_root='{_posix(root)}'\nSTATE='{_posix(state)}'\n"
+        + _SHIM + hooks + section
+        + '\necho "acquired $$ $(cat "$LINK")"\n'
+    )
+    harness = tmp_path / "harness.sh"
+    harness.write_bytes(script.encode())
+    return harness, root, state
+
+
+def _run_harness(harness: Path) -> subprocess.CompletedProcess[str]:
+    bash = _bash()
+    if bash is None:
+        pytest.skip("bash not available")
+    return subprocess.run(
+        [bash, _posix(harness)], capture_output=True, text=True, timeout=10,
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+
+def _assert_lock_scenario(tmp_path: Path, entry: str, hooks: str) -> None:
+    harness, _, state = _lock_harness(tmp_path, entry, hooks)
+    result = _run_harness(harness)
+    assert result.returncode == 0, result.stderr
+    violations = state / "violations"
+    assert not violations.exists(), violations.read_text()
+    status, pid, holder = result.stdout.split()
+    assert status == "acquired" and holder == pid
+
+
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge", "containers"])
+def test_posix_shim_reaper_never_unlinks_a_newer_holder_released_mid_check(
+    tmp_path: Path, entry: str,
+) -> None:
+    """Only remove the owner originally judged stale, even if a live holder
+    releases and another holder recreates the link during revalidation."""
     hooks = (
         'before_read() {\n'
         '    case "$1" in\n'
@@ -139,19 +176,126 @@ def test_posix_shim_reaper_never_unlinks_a_newer_holder_released_mid_check(
         '    if [[ "$1" == 2 ]]; then echo 8181 > "$STATE/live"; printf 8181 > "$LINK"; fi\n'
         '}\n'
     )
-    script = (
-        f"_runtime_root='{_posix(root)}'\nSTATE='{_posix(state)}'\n"
-        + _SHIM + hooks + section
-        + 'echo "acquired $$ $(cat "$LINK")"\n'
+    _assert_lock_scenario(tmp_path, entry, hooks)
+
+
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge", "containers"])
+@pytest.mark.parametrize(("signal", "exit_code"), [("TERM", 143), ("INT", 130)])
+def test_interrupted_reaper_releases_only_its_mutex(
+    tmp_path: Path, entry: str, signal: str, exit_code: int,
+) -> None:
+    interrupt = f'command kill -s {signal} "$$"'
+    hooks = (
+        'before_read() { :; }\n'
+        'after_read() {\n'
+        f'    if [[ "$1" == 2 ]]; then {interrupt}; fi\n'
+        '}\n'
     )
-    harness = tmp_path / "harness.sh"
-    harness.write_bytes(script.encode())
-    result = subprocess.run(
-        [bash, _posix(harness)], capture_output=True, text=True, timeout=60,
-        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    harness, root, state = _lock_harness(tmp_path, entry, hooks)
+    result = _run_harness(harness)
+    assert result.returncode == exit_code, result.stderr
+    assert not (root / ".provision.reap.mutex").exists()
+    assert (root / ".provision.lock.pid").read_bytes() == b"6161"
+    assert "acquired" not in result.stdout
+    assert not (state / "violations").exists()
+    harness.write_text(harness.read_text().replace(interrupt, ":"), encoding="utf-8")
+    retry = _run_harness(harness)
+    assert retry.returncode == 0, retry.stderr
+    assert retry.stdout.startswith("acquired ")
+    assert not (root / ".provision.reap.mutex").exists()
+
+
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge", "containers"])
+@pytest.mark.parametrize("peer", [False, True], ids=["abandoned", "live-peer"])
+def test_unowned_reaper_mutex_refuses_within_bounded_attempts(
+    tmp_path: Path, entry: str, peer: bool,
+) -> None:
+    harness, root, state = _lock_harness(
+        tmp_path, entry,
+        'before_read() { :; }\nafter_read() { :; }\n'
+        'sleep() {\n'
+        '    if [[ "$(_count waits)" -gt 40 ]]; then\n'
+        '        echo "test watchdog: unbounded mutex wait" >&2; exit 97\n'
+        '    fi\n'
+        '}\n',
     )
+    mutex = root / ".provision.reap.mutex"
+    mutex.mkdir()
+    if peer:
+        (mutex / "owner").write_bytes(b"live-peer")
+    result = _run_harness(harness)
+    assert result.returncode == 126, result.stderr
+    assert "reaper mutex" in result.stderr
+    assert 1 <= int((state / "waits").read_text()) <= 30
+    assert (root / ".provision.lock.pid").read_bytes() == b"6161"
+    assert mutex.is_dir()
+    assert sorted(p.name for p in mutex.iterdir()) == (["owner"] if peer else [])
+    if peer:
+        assert (mutex / "owner").read_bytes() == b"live-peer"
+    assert not (state / "violations").exists()
+    assert "acquired" not in result.stdout
+
+
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge", "containers"])
+@pytest.mark.parametrize(("signal", "exit_code"), [("TERM", 143), ("INT", 130)])
+def test_reaper_release_signal_preserves_reacquired_peer_mutex(
+    tmp_path: Path, entry: str, signal: str, exit_code: int,
+) -> None:
+    hooks = (
+        'before_read() { :; }\nafter_read() { :; }\n'
+        'rmdir() {\n'
+        '    _count releases >/dev/null\n'
+        '    command rmdir "$@" || return\n'
+        '    if [[ ! -e "$STATE/peer" ]]; then\n'
+        '        : > "$STATE/peer"\n'
+        '        command mkdir "$1"\n'
+        '        printf 7171 > "$LINK"; echo 7171 > "$STATE/live"\n'
+        f'        command kill -s {signal} "$$"\n'
+        '    fi\n'
+        '}\n'
+    )
+    harness, root, state = _lock_harness(tmp_path, entry, hooks)
+    result = _run_harness(harness)
+    assert result.returncode == exit_code, result.stderr
+    assert (root / ".provision.reap.mutex").is_dir()
+    assert (root / ".provision.lock.pid").read_bytes() == b"7171"
+    assert (state / "releases").read_text().strip() == "1"
+    assert not (state / "violations").exists()
+    assert "acquired" not in result.stdout
+
+
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge", "containers"])
+def test_live_provision_holder_wait_is_not_reaper_timeout(
+    tmp_path: Path, entry: str,
+) -> None:
+    hooks = (
+        'before_read() { :; }\nafter_read() { :; }\n'
+        'sleep() {\n'
+        '    if [[ "$(_count waits)" == 35 ]]; then\n'
+        '        command rm -f "$LINK"; : > "$STATE/live"\n'
+        '    fi\n'
+        '}\n'
+        'echo 6161 > "$STATE/live"\n'
+    )
+    harness, root, state = _lock_harness(tmp_path, entry, hooks)
+    result = _run_harness(harness)
     assert result.returncode == 0, result.stderr
-    violations = state / "violations"
-    assert not violations.exists(), violations.read_text()
-    status, pid, holder = result.stdout.split()
-    assert status == "acquired" and holder == pid
+    assert result.stdout.startswith("acquired ")
+    assert int((state / "waits").read_text()) == 35
+    assert not (root / ".provision.reap.mutex").exists()
+    assert not (state / "violations").exists()
+
+
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge", "containers"])
+def test_posix_reaper_serializes_another_reaper_after_final_read(
+    tmp_path: Path, entry: str,
+) -> None:
+    hooks = (
+        'before_read() { :; }\n'
+        'after_read() {\n'
+        '    if [[ "$1" == 2 && ! -d "$_runtime_root/.provision.reap.mutex" ]]; then\n'
+        '        echo 8181 > "$STATE/live"; printf 8181 > "$LINK"\n'
+        '    fi\n'
+        '}\n'
+    )
+    _assert_lock_scenario(tmp_path, entry, hooks)

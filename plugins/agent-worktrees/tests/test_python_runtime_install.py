@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
@@ -41,6 +42,31 @@ def test_driver_governance_uses_current_scripts(driver):
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     assert Path(governance.__file__).resolve().parent == scripts
     assert governance.SCRIPTS == scripts
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows installation ownership")
+@pytest.mark.parametrize("entry", ["install", "settle_candidate"])
+def test_direct_installation_refuses_before_governance_or_construction(
+    driver, tmp_path, monkeypatch, entry,
+):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.delenv("UPDATE_DRIVER_WITNESS", raising=False)
+    monkeypatch.setattr(driver.install_driver, "bootstrap", lambda payload: None)
+    monkeypatch.setattr(
+        driver, "Governance", lambda *args: pytest.fail("installation entered without driver custody"),
+    )
+    root = tmp_path / "absent"
+    arguments = (
+        ((root, driver.SCRIPTS.parent), {
+            "payload": driver.SCRIPTS.parent, "uv": tmp_path / "uv", "base_python": Path(sys.executable),
+        }) if entry == "install" else
+        ((root, "1.2.3"), {
+            "payload": driver.SCRIPTS.parent, "payload_hash": "a" * 64, "expected_governance": {},
+        })
+    )
+    with pytest.raises(RuntimeError, match="live driver custody"):
+        getattr(driver, entry)(*arguments[0], **arguments[1])
+    assert not root.exists()
 
 
 @pytest.mark.parametrize(("section", "field"), [
@@ -96,7 +122,8 @@ def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[
     environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
     options = [
         git, "-C", str(root), "-c", f"core.hooksPath={hooks}",
-        "-c", "core.autocrlf=false", "-c", "commit.gpgsign=false",
+        "-c", "core.autocrlf=false", "-c", "core.longpaths=true",
+        "-c", "commit.gpgsign=false",
         "-c", "user.name=Runtime test", "-c", "user.email=runtime-test@example.invalid",
     ]
 
@@ -193,6 +220,63 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
         assert not root.exists()
 
 
+@pytest.mark.parametrize("source_backed", [False, True])
+@pytest.mark.parametrize("recover_manager", [False, True])
+def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody(
+    driver, tmp_path, monkeypatch, source_backed, recover_manager,
+):
+    from types import SimpleNamespace
+
+    root, plugin, owner = (tmp_path / name for name in ("runtime", "payload", "owner"))
+    plugin.mkdir()
+    (plugin / "pyproject.toml").write_text('[project]\nname="agent-worktrees"\nversion="1.0.0"\n')
+    source = driver.runtime_source
+    identity = source.SourceIdentity(
+        "agent-worktrees", "1.0.0", "a" * 40, "b" * 40, "c" * 64,
+        source.runtime_version("1.0.0", "a" * 40, "c" * 64),
+    ) if source_backed else None
+    calls = []
+
+    @contextmanager
+    def held(**kwargs):
+        calls.append("held")
+        try:
+            yield
+        finally:
+            calls.append("released")
+
+    monkeypatch.setattr(driver, "Governance", lambda *a: SimpleNamespace(
+        root=root, payload=owner, held=held,
+    ))
+    monkeypatch.setattr(source, "read_source_identity", lambda *a, **k: identity)
+    monkeypatch.setattr(source, "publish_source_snapshot", lambda *a: plugin)
+    monkeypatch.setattr(driver, "_source_provenance", lambda *a: {})
+    monkeypatch.setattr(driver, "_selected", lambda *a: None)
+
+    def construct(*args, **kwargs):
+        raise driver.engine.HealthRepairRequired("controlled installed-health failure")
+
+    def repair(requested, selected, **kwargs):
+        assert calls == ["held", "released"]
+        assert requested == root and selected == plugin
+        assert kwargs["payload"] == owner and kwargs["mode"] == "repair"
+        assert kwargs["expected_source_identity"] == source.manifest_fields(identity)
+        assert kwargs["recover_adopted_manager"] is recover_manager
+        return {"runtime_version": "distinct-repair"}
+
+    monkeypatch.setattr(driver.engine, "numbered_candidate", construct)
+    monkeypatch.setitem(sys.modules, "runtime_install_modes", SimpleNamespace(run=repair))
+    arguments = dict(
+        payload=owner, uv=tmp_path / "uv", base_python=Path(sys.executable),
+        recover_adopted_manager=recover_manager,
+    )
+    if source_backed:
+        assert driver.install(root, plugin, **arguments) == {"runtime_version": "distinct-repair"}
+    else:
+        with pytest.raises(driver.engine.HealthRepairRequired):
+            driver.install(root, plugin, **arguments)
+
+
 @pytest.mark.parametrize("rollback,interrupted", [
     (False, False), (True, False), (False, True), (True, True),
 ])
@@ -221,6 +305,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     class Governance:
         def __init__(self, requested, payload):
             self.root, self.payload = requested, payload
+            self.manifest_publication = nullcontext
 
         def signature(self):
             return {}
@@ -290,9 +375,16 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     monkeypatch.setattr(
         driver.engine, "_retained_inputs", lambda inputs, *_args, **_kwargs: nullcontext(inputs),
     )
+    monkeypatch.setattr(
+        driver.engine, "retained_source_wheels", lambda inputs, *_args, **_kwargs: nullcontext(inputs),
+    )
     monkeypatch.setattr(driver.engine, "_prepare_installed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(driver.engine, "_verify_installed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(driver, "_load_installed", lambda _slot: None)
+    def adopt(requested, slot):
+        pytest.fail("normal construction must not adopt a Task")
+
+    monkeypatch.setattr(driver.install_driver, "adopt_broker", adopt)
     monkeypatch.setattr(driver, "_monitor_identity", lambda _root: None)
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
     monkeypatch.setattr(cfg, "install_dir", lambda: root)
@@ -356,6 +448,7 @@ def test_publication_failure_retains_custody_through_observed_outcome(
     class Governance:
         def __init__(self, requested, payload):
             self.root, self.payload = requested, payload
+            self.manifest_publication = nullcontext
 
         def signature(self):
             return {}
@@ -848,7 +941,12 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     from agent_worktrees import update_stage
 
     monkeypatch.setattr(update_stage, "fingerprint", lambda _path: "frozen-fingerprint")
+    cached_info = tmp_path / "cached-build-info.py"
+    cached_info.write_text("unchanged cached build provenance\n", encoding="utf-8")
+    os.link(cached_info, package / "_build_info.py")
     installer.prepare_runtime_candidate(provenance)
+    assert cached_info.read_text(encoding="utf-8") == "unchanged cached build provenance\n"
+    assert not os.path.samefile(cached_info, package / "_build_info.py")
     content = (package / "_build_info.py").read_text(encoding="utf-8")
     info = ast.literal_eval(ast.parse(content).body[-1].value)
     assert all(info[key] == value for key, value in provenance.items()
@@ -867,6 +965,48 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     with pytest.raises(RuntimeError, match="Frozen package version"):
         installer.prepare_runtime_candidate({**provenance, "version": "1.0.0"})
     assert (package / "_build_info.py").read_text(encoding="utf-8") == content
+
+
+@pytest.mark.parametrize("missing", [None, "installer_wheel_snapshot.py", "installer_wheel_inputs.py"])
+def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path, monkeypatch, missing):
+    import agent_worktrees
+    from agent_worktrees import runtime_candidate as installer, update_stage
+
+    plugin = Path(__file__).resolve().parents[1]
+    frozen = tmp_path / "frozen-plugin"
+    shutil.copytree(plugin / "scripts", frozen / "scripts")
+    package = tmp_path / "site-packages" / "agent_worktrees"
+    package.mkdir(parents=True)
+    bootstrap = tmp_path / ".runtime-bootstrap"
+    bootstrap.mkdir()
+    for name in (
+        "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_publication.py",
+    ):
+        shutil.copyfile(frozen / "scripts" / name, bootstrap / name)
+    monkeypatch.setattr(agent_worktrees, "__file__", str(package / "__init__.py"))
+    monkeypatch.setattr(installer.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(installer, "distribution_version", lambda _name: "2.0.0.dev1")
+    monkeypatch.setattr(update_stage, "fingerprint", lambda _path: "frozen-fingerprint")
+    installer.prepare_runtime_candidate({
+        "version": "2.0.0-dev1", "commit": "abc", "branch": "test",
+        "source": str(frozen), "deployment_source": json.dumps({"path": str(frozen)}),
+        "frozen_plugin": str(frozen),
+    })
+    shutil.rmtree(frozen)
+    if missing is not None:
+        (bootstrap / missing).unlink(missing_ok=True)
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", str(bootstrap / "runtime_install.py"), "--help"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    if missing is not None:
+        assert result.returncode != 0
+        assert f"No module named '{Path(missing).stem}'" in result.stderr
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "--settle-slot" in result.stdout
 
 
 def test_bash_bootstrap_skips_unusable_alias_and_searches_all_candidates(tmp_path):
@@ -925,6 +1065,7 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
 
     def run(command, label, timeout):
         log = tmp_path / f"{label}.log"
+        started = time.monotonic()
         with log.open("w", encoding="utf-8") as stream:
             try:
                 completed = subprocess.run(
@@ -936,6 +1077,7 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
                     f"Lifecycle did not settle ({label}): {command}\n"
                     + log.read_text(encoding="utf-8", errors="replace")
                 )
+        elapsed = time.monotonic() - started
         changed = [
             str(path) for path, digest in source_hashes.items()
             if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest
@@ -943,12 +1085,21 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
         assert not changed, f"{label} modified source inputs: {changed}"
         assert driver.engine._source_files(driver.engine._package_roots(plugin)) == source_files
         assert completed.returncode == 0, log.read_text(encoding="utf-8", errors="replace")
+        diagnostics = log.read_text(encoding="utf-8", errors="replace")
+        print(f"{label}: {elapsed:.3f}s", flush=True)
+        for line in diagnostics.splitlines():
+            if line.startswith("Source wheel assembly:"):
+                print(line, flush=True)
+        return diagnostics
 
     run(argv, "construct", 300)
     installed = json.loads(result.read_text(encoding="utf-8"))
     assert installed["reused"] is False
     assert (root / "current-version").read_text().strip() == installed["runtime_version"]
     python = Path(installed["runtime_python"])
+    origins = json.loads((python.parent.parent / ".runtime-input-origins.json").read_text())
+    assert set(origins["source_wheels"]) == set(origins["packages"])
+    assert all("#sha256=" in value for value in origins["packages"].values())
     info_probe = [
         str(python), "-I", "-B", "-c",
         "import json; from agent_worktrees._build_info import BUILD_INFO; print(json.dumps(BUILD_INFO))",
@@ -962,6 +1113,23 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
     assert info["commit"] == expected_commit
     if os.name == "nt":
         assert not list(python.parent.glob("agent-*.exe"))
+    fresh_version = installed["package_version"] + ".repair." + "c" * 32
+    fresh = [
+        sys.executable, "-I", "-B", "-c",
+        "import os,sys;from pathlib import Path;"
+        "plugin,root,uv,version=Path(sys.argv[1]),Path(sys.argv[2]),Path(sys.argv[3]),sys.argv[4];"
+        "sys.path.insert(0,str(plugin/'scripts'));"
+        "os.environ['AGENT_WORKTREES_PAYLOAD_ROOT']=str(plugin);"
+        "import installer_engine as engine;"
+        "\nwith engine.numbered_candidate(root,version,plugin=plugin,uv=uv,"
+        "base_python=Path(sys.executable),health_module='agent_worktrees') as candidate:"
+        "\n assert not candidate.reused"
+        "\n assert engine.runtime.is_complete(root,version,expect_hash=candidate.payload_hash)",
+        str(plugin), str(root), uv, fresh_version,
+    ]
+    diagnostics = run(fresh, "fresh-venv-from-cached-source", 180)
+    assert "Source wheel assembly: built=0 reused=" in diagnostics
+    assert (root / "current-version").read_text().strip() == installed["runtime_version"]
     argv[-1] = str(tmp_path / "uv-must-not-run")
     run(argv, "reuse-without-uv", 180)
     reused = json.loads(result.read_text(encoding="utf-8"))

@@ -27,10 +27,12 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
 import worktree_manager
+from .source_config import default_root as default_root
 
 MARKER = "current-version"
 VERSIONS_DIR = "versions"
@@ -122,15 +124,6 @@ def fetch_remote_version(
         return None
     m = _VERSION_RE.search(text)
     return m.group(1) if m else None
-
-
-def default_root() -> Path:
-    """Install root, mirroring ``~/.agent-worktrees`` for the core installer."""
-    env = os.environ.get("WORKTREE_MANAGER_ROOT")
-    if env:
-        return Path(env)
-    home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
-    return home / ".worktree-manager"
 
 
 def local_bin() -> Path:
@@ -250,6 +243,10 @@ def _expected_control_plane_provider_manifest(
         _provider_manifest_template_path(payload_dir).read_text(encoding="utf-8")
     )
     template["command"] = [str((local_bin() / _primary_binstub_name()).resolve())]
+    template["resident_picker"] = {
+        "version": 1, "command": [*template["command"], "--resident-picker"],
+        "session": {"version": 1, "root": str((root or default_root()).resolve())},
+    }
     template["provider_root"] = str((root or default_root()).resolve())
     return template
 
@@ -536,7 +533,7 @@ def _write_marker(root: Path, version: str) -> None:
 # _swap_in_staged_slot) have no other caller in this module and are not
 # re-exported here -- reach them via `self_install_payload` directly if ever
 # needed.
-from .self_install_payload import _copy_payload
+from .self_install_payload import _copy_payload, _safe_extract
 
 
 class _CutoverLockBusy(Exception):
@@ -748,19 +745,29 @@ def _complete_candidate(
 ) -> SelfInstallResult:
     slot = ready.slot
     version = payload_version(payload)
+    cleaned: tuple[str, ...] = ()
+    stubs: list[Path] = []
+
+    def publish_frontdoors() -> None:
+        nonlocal cleaned, stubs
+        publication = installer.runtime._runtime_component("versioned_runtime_publication")
+        targets = [*(local_bin() / name for name in _binstub_files()),
+                   _control_plane_provider_manifest_path(payload, root=root)]
+        with publication.target_leases(root, targets):
+            if before_publish is not None:
+                before_publish()
+            cleaned = tuple(clean_legacy_artifacts(root))
+            stubs = _deploy_binstubs()
+            _write_control_plane_provider_manifest(payload, root=root)
+
+    installer = _runtime_installer()
     if before_publish is not None:
         before_publish()
-    cleaned = tuple(clean_legacy_artifacts(root))
-    stubs = _deploy_binstubs()
-    _write_control_plane_provider_manifest(payload, root=root)
-    installer = _runtime_installer()
-    if transactional_activation:
-        installer.activate(
-            root, slot.name, expected=previous,
-            after_publish=(lambda: after_activate(slot)) if after_activate is not None else None,
-        )
-    else:
-        installer.activate(root, slot.name, expected=previous)
+    installer.activate(
+        root, slot.name, expected=previous, before_publish=publish_frontdoors,
+        after_publish=(lambda: after_activate(slot))
+        if transactional_activation and after_activate is not None else None,
+    )
     if after_activate is not None and not transactional_activation:
         after_activate(slot)
     return SelfInstallResult(
@@ -776,9 +783,10 @@ def self_install(
     *,
     root: Path | None = None,
     dry_run: bool = True,
-    _after_activate=None,
-    _before_publish=None,
-    _transactional_activation: bool = False,
+    _after_activate=None, _before_publish=None,
+    _transactional_activation: bool = False, _reconcile_instances: bool = True,
+    _wheel_inputs=None, _local_packages: tuple[str, ...] | None = None, _validate_candidate=None,
+    _raise_candidate_errors: bool = False, _base_python: Path | None = None, _uv: Path | None = None,
 ) -> SelfInstallResult:
     """Construct and health-gate with the canonical engine before selection."""
     r = (root or default_root()).resolve()
@@ -788,25 +796,46 @@ def self_install(
         return SelfInstallResult(version=None, action="error", root=str(r),
                                  reason="could not read payload __version__")
     slot = version_slot(version, r)
-    if dry_run:
-        would_clean = tuple(plan_legacy_cleanup(r))
-        if not needs_install(version, r):
-            return SelfInstallResult(version=version, action="already-current", root=str(r),
-                                     slot=str(slot), marker=version, cleaned=would_clean)
-        return SelfInstallResult(version=version, action="planned", root=str(r),
-                                 slot=str(slot), reason="dry-run", cleaned=would_clean)
-    previous = current_version(r)
-    was_current = not needs_install(version, r)
     try:
         installer = _runtime_installer()
-        with installer.candidate(pd, r, assemble=_copy_payload) as ready:
+        if dry_run:
+            selected = _selected_runtime_slot(r)
+            generation, source_matches = installer.source_install_selection(pd, version, selected)
+            slot = version_slot(generation, r)
+            would_clean = tuple(plan_legacy_cleanup(r))
+            if source_matches and selected is not None and not needs_install(version, r):
+                return SelfInstallResult(version=version, action="already-current", root=str(r),
+                                         slot=str(selected), marker=selected.name, cleaned=would_clean)
+            return SelfInstallResult(version=version, action="planned", root=str(r),
+                                     slot=str(slot), reason="dry-run", cleaned=would_clean)
+        previous = current_version(r)
+        was_current = not needs_install(version, r)
+        if _reconcile_instances and not (
+            os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
+            or os.environ.get("PYTEST_CURRENT_TEST")
+        ):
+            from installer_instance_reconcile import reconcile_installer_instances
+
+            reconcile_installer_instances(running_payload_dir() / "scripts")
+        candidate_options = {key: value for key, value in (
+            ("python", _base_python), ("uv", _uv), ("wheel_inputs", _wheel_inputs),
+            ("local_packages", _local_packages), ("validate_candidate", _validate_candidate),
+        ) if value is not None}
+        with ExitStack() as custody:
+            if os.name == "nt" and os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":
+                if custody.enter_context(installer._installation_custody()) is None:
+                    raise RuntimeError("Manager construction requires live installation custody")
+            ready = custody.enter_context(installer.candidate(pd, r, assemble=_copy_payload, **candidate_options))
             slot = ready.slot
             return _complete_candidate(
-                ready, pd, r, previous=previous, was_current=was_current,
+                ready, pd, r, previous=previous,
+                was_current=was_current or (_wheel_inputs is not None and previous == slot.name),
                 before_publish=_before_publish, after_activate=_after_activate,
                 transactional_activation=_transactional_activation,
             )
     except (OSError, ImportError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        if _raise_candidate_errors:
+            raise
         return SelfInstallResult(
             version=version, action="error", root=str(r), slot=str(slot), reason=str(error),
         )
@@ -833,69 +862,6 @@ def _clear_dir(d: Path) -> None:
                 child.unlink()
             except OSError:
                 pass
-
-
-def _safe_extract(tf, dest: Path) -> None:
-    """Extract a tar into ``dest``, refusing anything that would escape it.
-
-    A hand-rolled path-only pre-check computed against ``getmembers()``
-    BEFORE any extraction happens cannot catch a classic tar symlink
-    attack -- a symlink member (``evil -> /tmp/outside``) followed by a
-    second member using it as a path prefix (``evil/payload.py``) --
-    because at pre-check time neither path exists on disk yet, so a
-    lexical ``.resolve()`` sees no symlink to follow and both members
-    pass; only DURING a batch extractall's own sequential write does the
-    second member actually traverse through the just-created symlink and
-    land outside ``dest`` entirely.
-
-    Fixed by extracting ONE member at a time, validating each immediately
-    before extracting it (not the whole batch up front): by the time a
-    later member (``evil/payload.py``) is checked, an earlier symlink
-    member (``evil``) has ALREADY been written to disk in a prior
-    iteration of this same loop, so ``.resolve()`` follows the REAL
-    symlink now sitting there and correctly detects the escape --
-    reproducing the safety property of stdlib's ``filter="data"``
-    (available only since Python 3.12, backported to some but not all
-    supported-version patch releases) without depending on it, since this
-    project declares ``requires-python = \">=3.10\"`` and a raw
-    ``filter=\"data\"`` call would raise ``TypeError`` on an
-    unpatched 3.10/3.11 host, breaking the documented git-optional
-    tarball fallback instead of updating."""
-    import warnings
-
-    dest = dest.resolve()
-    for member in tf.getmembers():
-        target = (dest / member.name).resolve()
-        if target != dest and dest not in target.parents:
-            raise OSError(f"unsafe path in tarball: {member.name}")
-        # Hardlinks, device files, fifos, etc. are refused outright by the
-        # member-type check below -- only a symlink's own target needs
-        # validating here.
-        if member.issym():
-            if os.path.isabs(member.linkname):
-                raise OSError(f"{member.name} is a link to an absolute path")
-            # Resolve the link's OWN target relative to where it will
-            # live (target.parent), the same way the filesystem would --
-            # this is what actually catches the sequential-traversal
-            # attack: a later member's own target path (checked above)
-            # only escapes visibly once THIS check has forced the
-            # symlink's resolved destination to be validated too.
-            link_dest = (target.parent / member.linkname).resolve()
-            if link_dest != dest and dest not in link_dest.parents:
-                raise OSError(f"{member.name} is a link escaping the destination")
-        if not (member.isreg() or member.isdir() or member.issym()):
-            raise OSError(
-                f"refusing to extract {member.name}: unsupported member type "
-                "(only regular files, directories, and symlinks are allowed)"
-            )
-        with warnings.catch_warnings():
-            # Every member here is already validated by hand above,
-            # independent of Python's own filter= mechanism (unavailable
-            # on this project's older supported Python versions) --
-            # silence the resulting "no filter given" DeprecationWarning
-            # rather than leaving noise in every real self-update run.
-            warnings.simplefilter("ignore", DeprecationWarning)
-            tf.extract(member, dest)  # noqa: S202 - each member validated immediately above
 
 
 def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
@@ -983,11 +949,10 @@ def self_update(
 ) -> SelfUpdateResult:
     """Fetch and version-install the Manager through its existing source authority.
 
-    A newer payload publishes a new slot and marker; a matching version is a no-op.
-    Fetch uses Git when available, enabling a lightweight in-place refetch; otherwise it falls
-    back to a GitHub codeload tarball (:func:`manager_tarball_url`), so a bare machine can still
-    update. The tarball fallback needs a GitHub source; a non-GitHub remote (local
-    path / enterprise) still requires git and returns ``skipped``.
+    Dev uses clean, merged Git acquisition and the running Manager's preparer.
+    Other refs use Git or GitHub codeload; non-GitHub sources without Git are skipped.
+    Prepared source payloads select their exact immutable generation, not merely
+    an equal package version. A healthy matching selection can be reused.
 
     Deliberately **best-effort and non-fatal**: git/uv missing, offline, or a
     fetch error return an ``error``/``skipped`` result rather than raising, so a
@@ -1002,15 +967,26 @@ def self_update(
     previous = current_version(r)
 
     staging = r / STAGING_DIR
+    payload = staging / "worktree-manager"
     use_git = shutil.which("git") is not None
     try:
         from . import engine_client, source_config, update_auth
 
         repo = source_config.absolute_local_source(repo)
-        staging.mkdir(parents=True, exist_ok=True)
-        auth_env = update_auth.environment(repo, cwd=staging) if use_git else None
+        if ref == "dev" and not use_git:
+            return SelfUpdateResult(
+                action="skipped", previous=previous,
+                reason="Manager merged-Dev acquisition requires git; no unqualified tarball fallback",
+            )
+        fetch_root = r / "manager-source" if ref == "dev" else staging
+        fetch_root.mkdir(parents=True, exist_ok=True)
+        auth_env = update_auth.environment(repo, cwd=fetch_root) if use_git else None
         environment = {"env": auth_env} if auth_env is not None else {}
-        if use_git:
+        if ref == "dev":
+            from .runtime_source_self_update import fetch
+
+            payload = fetch(repo, r, environment=auth_env)
+        elif use_git:
             if (staging / ".git").is_dir():
                 subprocess.run(["git", "-C", str(staging), "fetch", "--depth", "1",
                                 repo, ref], check=True, capture_output=True,
@@ -1035,11 +1011,10 @@ def self_update(
             _fetch_via_tarball(staging, url)
     except update_auth.AuthRequired as e:
         return SelfUpdateResult(action="auth_required", previous=previous, reason=str(e))
-    except (OSError, subprocess.SubprocessError, engine_client.EngineError) as e:
+    except (OSError, ValueError, subprocess.SubprocessError, engine_client.EngineError) as e:
         return SelfUpdateResult(action="error", previous=previous,
                                 reason=f"fetch failed: {e}")
 
-    payload = staging / "worktree-manager"
     if not (payload / "pyproject.toml").is_file():
         return SelfUpdateResult(action="error", previous=previous,
                                 reason=f"fetched payload not found at {payload}")

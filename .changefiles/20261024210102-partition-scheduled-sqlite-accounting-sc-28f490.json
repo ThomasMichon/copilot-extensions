@@ -1,0 +1,9 @@
+{
+  "comment": "Partition scheduled SQLite accounting scopes on typed wall-budget exhaustion without raising reader limits or suppressing individual failures",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

@@ -14,11 +14,15 @@ import subprocess
 import sys
 import tempfile
 import uuid
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, Iterator
 
 _runtime_spec = importlib.util.spec_from_file_location(
-    "containers_profile_runtime", Path(__file__).with_name("versioned_runtime.py"),
+    "containers_profile_runtime", Path(__file__).with_name(
+        "_versioned_runtime.py" if __package__ == "agent_containers" else "versioned_runtime.py"
+    ),
 )
 if _runtime_spec is None or _runtime_spec.loader is None:
     raise RuntimeError("The owning Containers runtime helper is unavailable")
@@ -37,6 +41,9 @@ _source_spec.loader.exec_module(source)
 
 PROFILE_SCHEMA = "copilot-extensions.agent-containers.runtime-profile"
 PROFILE_FILE = "runtime-profile.json"
+TARGET_SCHEMA = "copilot-extensions.runtime-source-target"
+TARGET_ENV = "COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET"
+EXECUTION_SCHEMA = "copilot-extensions.agent-containers.provider-execution"
 PROFILES = ("base", "provider-exec")
 LIBRARIES = (
     "agent-procutil",
@@ -47,6 +54,7 @@ LIBRARIES = (
     "venue-copilot",
     "session-liveness-probe",
     "plugin-resolve",
+    "repository-policy",
 )
 
 
@@ -82,6 +90,110 @@ def _write_json(path: Path, value: dict) -> None:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _execution_contract() -> dict:
+    return {"schema": EXECUTION_SCHEMA, "version": 1, "retainedCreation": False}
+
+
+def _validate_execution_contract(value: object) -> bool:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema", "version", "retainedCreation"}
+        or value["schema"] != EXECUTION_SCHEMA
+        or type(value["version"]) is not int
+        or value["version"] != 1
+        or type(value["retainedCreation"]) is not bool
+    ):
+        raise RuntimeError("Invalid Containers provider execution declaration")
+    return value["retainedCreation"]
+
+
+@dataclass(frozen=True)
+class ExecutionSelection:
+    """Read-only slot identity, not admission, retention or native custody."""
+
+    python: Path
+    runtime_version: str
+    payload_hash: str
+    profile: str
+    contract_version: int
+    retained_creation: bool
+
+
+def select_execution(root: Path) -> ExecutionSelection:
+    """Read the declaration of the canonical selected slot without provisioning.
+
+    Keep this result with its exact interpreter; invoking a mutable payload shim
+    later does not execute this selection. Callers still need the canonical
+    retention owner and final provider/native admission before any launch.
+    """
+    root = Path(os.path.abspath(root.expanduser()))
+    python = runtime.resolve_python(root)
+    if python is None:
+        raise RuntimeError("No completed Containers execution runtime is selected")
+    return _read_execution(root, python)
+
+
+def _read_execution(root: Path, python: Path) -> ExecutionSelection:
+    slot = python.parent.parent
+    if slot.parent != root / "versions" or slot.name.casefold() == runtime.DEV_VERSION:
+        raise RuntimeError("Containers execution declaration requires an immutable slot")
+    if python != runtime.slot_python(root, slot.name):
+        raise RuntimeError("Containers execution interpreter conflicts with its slot")
+    admission = runtime.check_admission(root, slot.name, payload_hash=None)
+    if admission not in (runtime.ADMIT_REUSE, runtime.ADMIT_CONTENT_CONFLICT):
+        raise RuntimeError(f"Selected Containers execution runtime is not complete: {admission}")
+    value = _read_json(slot / PROFILE_FILE)
+    required = {"packageVersion", "profile", "payloadHash", "executionContract"}
+    if "executionContract" not in value:
+        raise RuntimeError("Selected Containers runtime has no provider execution declaration")
+    if (
+        not required.issubset(value)
+        or set(value) - required - {"runtimeSource"}
+        or not isinstance(value["packageVersion"], str)
+        or not value["packageVersion"]
+        or value["profile"] not in PROFILES
+        or not isinstance(value["payloadHash"], str)
+        or re.fullmatch(r"[0-9a-f]{64}", value["payloadHash"]) is None
+    ):
+        raise RuntimeError("Invalid selected Containers slot profile")
+    version = value["packageVersion"]
+    profile_version = f"{version}{'.' if '+' in version else '+'}{value['profile']}"
+    if source.package_version(slot.name) != profile_version:
+        raise RuntimeError("Selected Containers slot identity conflicts with its profile")
+    retained = _validate_execution_contract(value["executionContract"])
+    admission = runtime.check_admission(
+        root, slot.name, payload_hash=value["payloadHash"],
+    )
+    if admission != runtime.ADMIT_REUSE:
+        raise RuntimeError(f"Selected Containers execution runtime is not reusable: {admission}")
+    return ExecutionSelection(
+        python=python, runtime_version=slot.name, payload_hash=value["payloadHash"],
+        profile=value["profile"], contract_version=1, retained_creation=retained,
+    )
+
+
+@contextmanager
+def retain_execution(
+    root: Path, selection: ExecutionSelection, *, timeout: float = 60.0,
+) -> Iterator[tuple[ExecutionSelection, int]]:
+    """Retain and revalidate one previously selected execution slot.
+
+    The descriptor is borrowed from the canonical retention owner, not a launch
+    grant. Never close it. POSIX children may inherit it deliberately; Windows
+    custody remains in this process. This context does not start any child or
+    establish provider/guest/native responsibility.
+    """
+    root = Path(os.path.abspath(root.expanduser()))
+    if selection.python.parent.parent != root / "versions" / selection.runtime_version:
+        raise RuntimeError("Containers execution selection belongs to a different slot")
+    with runtime.retention_custody(
+        root, selection.runtime_version, payload_hash=selection.payload_hash, timeout=timeout,
+    ) as (_, descriptor):
+        if _read_execution(root, selection.python) != selection:
+            raise RuntimeError("Containers execution declaration changed after selection")
+        yield selection, descriptor
 
 
 def selected_profile(root: Path, requested: str | None = None) -> str:
@@ -134,6 +246,10 @@ def _fingerprint(payload: Path, libraries: list[Path]) -> str:
     paths = []
     for root in [payload, *libraries]:
         paths.append(root / "pyproject.toml")
+        for name in ("setup.py", "setup.cfg", "MANIFEST.in", "_standalone_runtime_build.py"):
+            path = root / name
+            if path.exists() or path.is_symlink():
+                paths.append(path)
         paths.extend(root.glob("README*"))
         for directory in ("src", "scripts"):
             for path in (root / directory).rglob("*"):
@@ -195,8 +311,10 @@ def _package_version(payload: Path) -> str:
     return match.group(1)
 
 
-def _check_source(payload: Path, version: str, identity) -> None:
-    if source.read_source_identity(payload, version, plugin="agent-containers") != identity:
+def _check_source(payload: Path, version: str, identity, *, on_progress=None) -> None:
+    if source.read_source_identity(
+        payload, version, plugin="agent-containers", on_progress=on_progress,
+    ) != identity:
         raise RuntimeError("Containers source identity changed after runtime selection")
 
 
@@ -208,27 +326,86 @@ def _check_selected_source(identity, expected_identity: str | None) -> None:
         raise RuntimeError("Containers source identity changed after runtime selection")
 
 
+@dataclass(frozen=True)
+class RuntimeTarget:
+    package_version: str
+    identity: source.SourceIdentity | None
+    profile: str
+    runtime_version: str
+
+    def document(self, root: Path) -> dict:
+        if self.identity is None:
+            raise RuntimeError("Source target planning requires a prepared source identity")
+        return {
+            "schema": TARGET_SCHEMA, "version": 1, "plugin": "agent-containers",
+            "runtime_root": str(root.resolve()), "source": source.manifest_fields(self.identity),
+            "profile": self.profile, "runtime_version": self.runtime_version,
+        }
+
+
+def _select_target(
+    root: Path, payload: Path, requested: str | None,
+    expected_source_version: str | None, expected_source_identity: str | None,
+) -> RuntimeTarget:
+    version = _package_version(payload)
+    identity = source.read_source_identity(payload, version, plugin="agent-containers")
+    selected_version = identity.runtime_version if identity else version
+    if expected_source_version is not None and expected_source_version != selected_version:
+        raise RuntimeError("Containers source identity changed after runtime selection")
+    _check_selected_source(identity, expected_source_identity)
+    profile = selected_profile(root, requested)
+    profile_version = f"{version}{'.' if '+' in version else '+'}{profile}"
+    runtime_version = (
+        source.runtime_version(profile_version, identity.source_commit, identity.assembly_hash)
+        if identity else profile_version
+    )
+    return RuntimeTarget(version, identity, profile, runtime_version)
+
+
+def plan_source(
+    root: Path, payload: Path, *, expected_source_version: str,
+    expected_source_identity: str,
+) -> dict:
+    """Read installed profile policy and bind its target without provisioning."""
+    root = Path(os.path.abspath(root.expanduser()))
+    payload = Path(os.path.abspath(payload.expanduser()))
+    return _select_target(
+        root, payload, None, expected_source_version, expected_source_identity,
+    ).document(root)
+
+
 def stamp_source(
     root: Path, payload: Path, expected_version: str, *, expected_identity: str | None = None,
+    on_progress: Callable[[], None] | None = None,
 ) -> Path:
     """Preserve the exact prepared closure for deferred first-use provisioning."""
     version = _package_version(payload)
-    identity = source.read_source_identity(payload, version, plugin="agent-containers")
+    identity = source.read_source_identity(
+        payload, version, plugin="agent-containers", on_progress=on_progress,
+    )
     if identity is None or identity.runtime_version != expected_version:
         raise RuntimeError("Containers stamped source changed after runtime selection")
     _check_selected_source(identity, expected_identity)
     snapshots = root / "snapshots"
     snapshot = snapshots / expected_version
     if snapshot.exists():
-        _check_source(snapshot, version, identity)
-        _check_source(payload, version, identity)
+        _check_source(snapshot, version, identity, on_progress=on_progress)
+        _check_source(payload, version, identity, on_progress=on_progress)
         return snapshot
     snapshots.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".source-", dir=snapshots) as temporary:
         candidate = Path(temporary) / "payload"
-        shutil.copytree(payload, candidate)
-        _check_source(candidate, version, identity)
-        _check_source(payload, version, identity)
+        def copy(origin, destination):
+            result = shutil.copy2(origin, destination)
+            if on_progress is not None:
+                on_progress()
+            return result
+
+        shutil.copytree(
+            payload, candidate, **({"copy_function": copy} if on_progress is not None else {}),
+        )
+        _check_source(candidate, version, identity, on_progress=on_progress)
+        _check_source(payload, version, identity, on_progress=on_progress)
         candidate.rename(snapshot)
     return snapshot
 
@@ -248,18 +425,20 @@ def provision(
         raise RuntimeError("uv is required; unrestricted pip fallback is not supported")
     root = Path(os.path.abspath(root.expanduser()))
     payload = Path(os.path.abspath(payload.expanduser()))
-    version = _package_version(payload)
-    identity = source.read_source_identity(payload, version, plugin="agent-containers")
-    selected_version = identity.runtime_version if identity else version
-    if expected_source_version is not None and expected_source_version != selected_version:
-        raise RuntimeError("Containers source identity changed after runtime selection")
-    _check_selected_source(identity, expected_source_identity)
-    profile = selected_profile(root, requested)
-    profile_version = f"{version}{'.' if '+' in version else '+'}{profile}"
-    runtime_version = (
-        source.runtime_version(profile_version, identity.source_commit, identity.assembly_hash)
-        if identity else profile_version
+    target = _select_target(
+        root, payload, requested, expected_source_version, expected_source_identity,
     )
+    version, identity = target.package_version, target.identity
+    profile, runtime_version = target.profile, target.runtime_version
+    if identity is not None and source.SOURCE_PIN_ENV in os.environ and TARGET_ENV not in os.environ:
+        raise RuntimeError(
+            "Prepared-source transaction requires a frozen source target; "
+            "upgrade the update engine before profile construction"
+        )
+    if TARGET_ENV in os.environ:
+        expected_target = json.loads(os.environ[TARGET_ENV], object_pairs_hook=_unique_object)
+        if json.dumps(expected_target, sort_keys=True) != json.dumps(target.document(root), sort_keys=True):
+            raise RuntimeError("Containers source target changed after runtime selection")
     libraries = _library_roots(payload, prepared=identity is not None)
     fingerprint = _fingerprint(payload, libraries)
     root.mkdir(parents=True, exist_ok=True)
@@ -280,7 +459,13 @@ def provision(
             venv_python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
             reused = admission == runtime.ADMIT_REUSE
             if reused:
-                if _read_json(slot / PROFILE_FILE) != expected:
+                recorded = _read_json(slot / PROFILE_FILE)
+                if "executionContract" in recorded:
+                    declaration = recorded.pop("executionContract")
+                    _validate_execution_contract(declaration)
+                    if declaration != _execution_contract():
+                        raise RuntimeError("Completed Containers slot has a conflicting declaration")
+                if recorded != expected:
                     raise RuntimeError("Completed Containers slot has a conflicting profile")
             elif admission == runtime.ADMIT_CONSTRUCT:
                 completed = False
@@ -328,7 +513,10 @@ def provision(
                     _check_source(payload, version, identity)
                     if _fingerprint(payload, libraries) != fingerprint:
                         raise RuntimeError("Containers source changed during runtime construction")
-                    _write_json(slot / PROFILE_FILE, expected)
+                    _write_json(
+                        slot / PROFILE_FILE,
+                        {**expected, "executionContract": _execution_contract()},
+                    )
                     runtime.mark_complete(root, runtime_version, payload_hash=fingerprint)
                     completed = True
                 finally:
@@ -370,15 +558,31 @@ def main() -> int:
     parser.add_argument("--tsv", action="store_true")
     parser.add_argument("--expected-source-version")
     parser.add_argument("--expected-source-identity")
-    parser.add_argument("--stamp-source", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--stamp-source", action="store_true")
+    mode.add_argument("--plan-source", action="store_true")
     args = parser.parse_args()
     try:
+        if args.plan_source:
+            if (
+                not args.expected_source_version or not args.expected_source_identity
+                or args.python or args.uv or args.profile or args.tsv
+            ):
+                raise RuntimeError("Source target planning requires only the exact source selection")
+            print(json.dumps(plan_source(
+                args.root, args.payload, expected_source_version=args.expected_source_version,
+                expected_source_identity=args.expected_source_identity,
+            ), sort_keys=True))
+            return 0
         if args.stamp_source:
             if not args.expected_source_version:
                 raise RuntimeError("Source stamping requires an exact selected source version")
             print(stamp_source(
                 args.root, args.payload, args.expected_source_version,
                 expected_identity=args.expected_source_identity,
+                on_progress=lambda: print(
+                    "source-runtime: completed source work", file=sys.stderr, flush=True,
+                ),
             ))
             return 0
         if not args.python:

@@ -38,9 +38,9 @@ PROCESS_RESOURCES = {
 }
 
 
-def run(argv, *, cwd=None, env=None):
+def run(argv, *, cwd=None, env=None, timeout=30):
     return subprocess.run(
-        argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=30, check=False, **FLAGS,
+        argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, check=False, **FLAGS,
     )
 
 
@@ -84,6 +84,7 @@ def build(project, output, operation="build_wheel"):
         [sys.executable, "-I", "-c",
          f"from setuptools.build_meta import {operation}; {operation}({build_path(output)!r})"],
         cwd=build_path(project),
+        timeout=60 if operation == "build_wheel" else 30,
     )
 
 
@@ -138,7 +139,8 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
                    and not requirement.marker.evaluate({"extra": ""})
                    and any(requirement.marker.evaluate({"extra": extra})
                            for extra in ("dev", "release-verification", "construction", "auth", "server",
-                                         "service-gateway",
+                                         "service-gateway", "ssh-client",
+                                         "komodo-host",
                                          "runtime-authentication"))
                    for requirement in requirements)
         verification = [requirement for requirement in requirements
@@ -154,7 +156,10 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         for extra in ("auth", "server"):
             enabled = {canonicalize_name(requirement.name) for requirement in requirements
                        if requirement.marker.evaluate({"extra": extra})}
-            assert enabled == {"pyjwt", "cryptography", "jwcrypto", "joserfc"}
+            expected = {"pyjwt", "cryptography", "jwcrypto", "joserfc"}
+            if extra == "server":
+                expected.add("agent-procutil")
+            assert enabled == expected
         identity = [requirement for requirement in requirements
                     if requirement.marker.evaluate({"extra": "runtime-authentication"})]
         assert len(identity) == 1
@@ -434,7 +439,10 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
                 allow = pattern.startswith("!")
                 if fnmatch.fnmatchcase(name, pattern.removeprefix("!").rstrip("/")):
                     included = allow
-        if name not in copied or not included:
+        supplied = name in copied or any(
+            source.endswith("/") and name.startswith(source) for source in copied
+        )
+        if not supplied or not included:
             resource.unlink()
 
     output = tmp_path / "artifacts"

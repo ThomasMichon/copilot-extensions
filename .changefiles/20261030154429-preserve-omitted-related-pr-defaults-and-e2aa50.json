@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve omitted related PR defaults and read native ADO vote/build evidence without weakening explicit overrides.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

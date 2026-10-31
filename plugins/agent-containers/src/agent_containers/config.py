@@ -42,9 +42,9 @@ log = logging.getLogger("agent-containers")
 def _runtime_home() -> Path:
     override = os.environ.get("AGENT_CONTAINERS_HOME", "").strip()
     if override:
-        return Path(override).expanduser()
+        return Path(os.path.abspath(Path(override).expanduser()))
     _legacy = ".agent-containers"  # marketplace-isolation: allow legacy compatibility root
-    return Path.home() / _legacy
+    return Path(os.path.abspath(Path.home() / _legacy))
 
 
 # Canonical runtime paths.
@@ -71,6 +71,9 @@ CANONICAL_INREPO_CONFIG_DIR = Path(".copilot-extensions") / "agent-containers"
 # containers that were not created by the VS Code devcontainer flow (which
 # would otherwise carry `devcontainer.local_folder`).
 FLEET_LABEL = "agent-containers.fleet"
+LIFECYCLE_OWNER_LABEL = "agent-containers.lifecycle-owner"
+INTERNAL_LIFECYCLE_OWNER = "agent-containers"
+EXTERNAL_LIFECYCLE_OWNER = "external"
 SECURITY_PROFILE_LABEL = "agent-containers.security-profile"
 SECURITY_POLICY_LABEL = "agent-containers.security-policy"
 SECURITY_HOME_LABEL = "agent-containers.security-home"
@@ -236,6 +239,7 @@ class FleetConfig:
     # Trusted development venues preserve the historical host-integrated
     # behavior. Restricted venues are a fail-closed transport boundary.
     security_profile: str = TRUSTED_PROFILE
+    lifecycle_owner: str = INTERNAL_LIFECYCLE_OWNER
     dispatch_only: bool = False
     # Docker network name/mode. Restricted fleets default to "none"; trusted
     # fleets retain Docker's default network when this is unset.
@@ -345,6 +349,12 @@ class FleetConfig:
         configuration that would silently no-op or leave a mount half-wired,
         not just a restricted-containment violation.
         """
+        if self.lifecycle_owner not in (
+            INTERNAL_LIFECYCLE_OWNER, EXTERNAL_LIFECYCLE_OWNER,
+        ):
+            raise RuntimeError("lifecycle_owner must be agent-containers or external")
+        if self.lifecycle_owner == EXTERNAL_LIFECYCLE_OWNER and self.restricted:
+            raise RuntimeError("external lifecycle ownership requires a trusted fleet")
         if self.devcontainer_path and (
             self.host_workspace_path or self.host_home_path or self.systemd_capable
         ):
@@ -581,6 +591,8 @@ def _installation_owner() -> dict[str, Any] | None:
     """Admit an explicit cell before config precedence can bypass peer lookup."""
     raw = os.environ.get(_peer_launch.CONTEXT_ENV, "")
     if not raw:
+        if RUNTIME_DIR.parent.name == "plugins" and RUNTIME_DIR.parent.parent.parent.name == "marketplaces":
+            raise _peer_launch.ContextRefused("Containers namespaced installation context is missing")
         return None
     try:
         return _peer_launch.validate_owner("agent-containers", RUNTIME_DIR, raw)
@@ -845,6 +857,7 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
             exec_user=raw.get("exec_user"),
             acp_command=raw.get("acp_command"),
             security_profile=security_profile,
+            lifecycle_owner=raw.get("lifecycle_owner", INTERNAL_LIFECYCLE_OWNER),
             dispatch_only=_strict_bool(
                 raw.get("dispatch_only", False), f"Fleet '{name}' dispatch_only"
             ),

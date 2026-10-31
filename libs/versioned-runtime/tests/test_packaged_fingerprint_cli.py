@@ -74,6 +74,16 @@ def test_fingerprint_cli_preserves_missing_input_refusal(primitive: Path, tmp_pa
     assert str(missing) in result.stderr
 
 
+def test_fingerprint_cli_refuses_missing_shipped_component(primitive: Path, tmp_path: Path) -> None:
+    source = tmp_path / "source.py"
+    source.write_bytes(b"source\n")
+    (primitive.parent / "versioned_runtime_source.py").unlink()
+    result = invoke(primitive, tmp_path / "runtime", ["fingerprint", str(source)])
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "versioned_runtime_source.py" in result.stderr
+
+
 @pytest.mark.parametrize("json_output", [False, True])
 def test_redirect_cli_from_shipped_layout(
     primitive: Path, tmp_path: Path, json_output: bool,

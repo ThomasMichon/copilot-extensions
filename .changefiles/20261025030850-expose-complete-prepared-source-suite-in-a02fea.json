@@ -1,0 +1,9 @@
+{
+  "comment": "Expose complete prepared-source suite inputs through the existing durable update boundary while retaining installed owners and ordinary defaults.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

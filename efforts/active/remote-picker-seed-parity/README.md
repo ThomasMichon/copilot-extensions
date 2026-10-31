@@ -100,6 +100,12 @@ The operator confirmed the slug `remote-picker-seed-parity`.
 
 ### Phase 3 -- Validation, release and closure
 
+- [ ] Reconcile the current native-seed transport fences: #6176 subsequently
+  made remote composers and `--require-native-seed` unsupported. Restore the
+  requested target-owned SSH contract through negotiated capability, not by
+  removing safety checks; prove this against current installed sources.
+- [ ] Integrate the separately tracked #8375 attempt journal so a failed New
+  or Resume retains private prompt/options and correlated outcome evidence.
 - [ ] Complete the Validation Plan, fixing failures in the changed contract.
 - [ ] Obtain passing current-head review and CI, merge implementation and
   confirm promotion and installed source identity on validation targets.
@@ -138,6 +144,17 @@ equivalent-flow contract, not additional product features.
 - [ ] Confirm unchanged local New/Resume and live Open behavior; retire owned
   test sessions/worktrees and leave no untracked background work.
 
+## Current blockers
+
+The containing release is blocked by the already-owned #8983 artifact-build
+compatibility repair. Installed validation also retains the #6859 / #7833
+broker/runtime qualification owner and the unreplayed uncertain updater
+outcome. #8375's source inspection is available after #9013 / #9017, but neither
+those source merges nor #8961's binding-free Bridge startup prove installed
+New/cold Resume/Open behavior. Preserve authorized rollout, same-conversation,
+exactly-once and cleanup gates; do not take over the existing repair or waive
+its evidence.
+
 ## Proposal
 
 Use a pre-launch, non-interactive structured invocation of the remote engine to
@@ -152,8 +169,121 @@ target-owned execution and persistence, not to requiring a second UI runtime.
 An old or unavailable target reports why it cannot accept intent instead of
 hiding the problem or silently dropping text.
 
+The operator's October 23 follow-up reports continuing crash-associated New
+prompt loss and restates target-owned SSH creation with the seed. The linked
+`worktree-launch-attempt-journal` effort (#8375) owns the newly requested
+private 90-day attempt/outcome audit, not replacement execution authority.
+Earlier checked implementation items remain historical source evidence; they
+do not establish that later transport fences preserve installed parity.
+
 ## Journal
 
+- **2026-10-25** -- #9017 merged exact selected-machine detail with explicit
+  protected-input retrieval after current-head approval, required CI and no
+  findings. Both parent plans were re-read; this completes #8375's source
+  inspection path, not installed parity. Preserve accepted-turn correlation,
+  containing release, authorized rollout and installed local/SSH New/cold
+  Resume conversation, exactly-once and cleanup gates. Both efforts stay Active.
+
+- **2026-10-25** -- #9013 merged per-owner launch observations after genuine
+  current-head approval, required CI and a fixed receipt-result/final-wrapper
+  distinction. Windows and frozen-source POSIX packets each pass 76 cases,
+  including the actual execution owner's earlier-write-failure path. Both
+  parent plans were re-read. Continue #8375's selected-machine protected detail;
+  accepted-turn correlation, containing release, authorized rollout and the
+  original installed local/SSH conversation, exactly-once and cleanup gates
+  remain open. This source merge does not make either effort Done.
+
+- **2026-10-25** -- #9008 merged explicit configured-SSH metadata inspection
+  after current-head review, required CI and resolution of all four concrete
+  findings. Windows and frozen-source POSIX packets each pass 225 cases.
+  Both parent plans were re-read; metadata source progress does not prove
+  installed target compatibility or prompt delivery. Continue per-owner
+  terminal observations and selected-machine protected detail, then containing
+  release, authorized rollout and the original installed conversation /
+  exactly-once / cleanup gates. Neither effort is Done.
+- **2026-10-25** -- Prepared explicit configured-SSH metadata inspection under
+  #8375, using existing transport and target Manager reader ownership without
+  setup or replay. A selected live SSH target returned incompatible non-JSON
+  reader output, preserved as a sanitized per-source failure rather than empty
+  success. This is not a rollout or proof of target-owned prompt delivery.
+  Original installed New/cold Resume, exact conversation, exactly-once,
+  containing-release and cleanup gates all remain open.
+- **2026-10-25** -- #9004 merged the bounded local positive-evidence summary
+  after genuine current-head approval, required CI and no review findings.
+  Both parent plans were re-read. Proceed to explicitly selected-machine
+  inspection through existing owners; complete terminal outcomes, containing
+  release, authorized rollout and installed local/SSH exact-conversation
+  acceptance remain open. No source summary or native-session observation is
+  proof that Copilot accepted a prompt.
+- **2026-10-25** -- Prepared an opt-in bounded local Manager evidence summary
+  using the existing engine v1 reader, with no launch/SSH protocol change.
+  Completed New allocation, launcher/backend spawn and qualified original
+  native-session evidence remain distinct; absent receipts and prompt
+  acceptance stay unknown. Four actual Manager/engine read cases on Windows
+  and frozen-source POSIX
+  preserve fixture state, including later-page native evidence. This is source
+  inspection, not selected-machine sweeping, rollout or installed parity.
+  All original conversation, exactly-once and cleanup gates remain open.
+- **2026-10-25** -- #9001 merged scoped Manager-boundary outcome filtering
+  after genuine current-head approval, no open findings and required CI.
+  Zero launcher return remains distinct from successful Copilot launch or
+  accepted prompt; missing evidence stays unknown. Whole-attempt qualified
+  evidence, selected-machine sweeps, containing release, authorized rollout,
+  installed local/SSH conversation proof and cleanup remain open.
+- **2026-10-25** -- #8999 merged 90-day private-input retention and legacy
+  prompt-history migration after current-head approval, resolved findings and
+  required CI. Final frozen POSIX checks include actual WAL/restart and
+  composer-cache expiry. Pending daemon seeds remain untouched. This closes
+  the bounded retention source slice, not target-owned SSH acceptance or
+  rollout. Outcome classification/filtering, selected-machine sweeps,
+  containing release, installed same-conversation New/cold Resume and owned
+  resource cleanup remain open.
+- **2026-10-25** -- #8994 merged interactive local launch-history inspection
+  after current-head approval and required CI. Both Pickers expose protected
+  metadata/detail without replay or inferred acceptance. Journal retention,
+  selected-machine inspection, containing release, authorized rollout and
+  installed New/cold Resume conversation evidence remain open.
+- **2026-10-25** -- #8990 merged bounded local Manager/engine attempt inspection
+  with current-head approval and required CI. Saved intent and qualified
+  receipts can be inspected without replaying prompts; acceptance remains
+  unknown. Interactive history, remote inspection, retention, release and
+  installed same-conversation New/cold Resume proof remain open.
+- **2026-10-25** -- #8961 merged binding-free Bridge startup after current-head
+  approval and required CI. Discovery no longer requires source-project
+  machine binding; explicit selectors and effect-side ownership remain.
+  This removes a source readiness prerequisite only. Containing release,
+  authorized rollout, actual local/SSH conversation evidence and every
+  remaining Phase 3 gate stay open.
+- **2026-10-24** -- #8641 merged original native-session observations with
+  current-head approval, no open findings and required CI. Qualified
+  Linux/WSL source witnesses can join exact execution/incarnation/epoch and
+  backend PID/birth evidence; prompt acceptance remains explicitly unknown.
+  Native positive and unavailable-registration/observation controls passed.
+  Re-read both canonical efforts after merge. Joined inspection, retention,
+  containing release, authorized rollout, installed local/SSH same-conversation
+  proof and cleanup remain open; no Phase 3 completion is claimed.
+- **2026-10-24** -- #8627 merged prompt-free deferred execution receipts with
+  current-head approval and required CI. Attempt/resolution/parent IDs now
+  reach the cooperative backend boundary; OS spawn, seed claim and observed
+  return remain distinct from native conversation/accepted-turn evidence.
+  Review fixes preserve settlement and waits through interruption and avoid
+  repeated boot waits on proven live incompatible owners. Re-read both plans
+  after merge. Native association, containing release, authorized rollout,
+  installed local/SSH same-conversation proof and cleanup remain open; the
+  source process checks do not close those acceptance gates.
+- **2026-10-24** -- #8615 merged local/seedless resolution receipts and saved
+  attempt propagation through both launch hops, with current-head approval,
+  no findings and required CI passing. Target prompted admission retains its
+  own durable version-2 receipt; seedless SSH planning remains forwarding only.
+  Re-read this plan and the journal effort after merge. Native process,
+  conversation/handoff evidence, containing release, authorized rollout,
+  installed same-conversation local/SSH acceptance and cleanup remain open.
+- **2026-10-24** -- Linked attempt-journal proposal #8380 merged with current-head
+  approval and required CI. The reviewed plan preserves target-owned execution,
+  protected 90-day prompt retention and original installed acceptance gates.
+  Begin the journal entry-surface/receipt inventory; no runtime repair or SSH
+  acceptance is implied by the documentation merge.
 - **2026-10-10** -- Operator requested remote New/Resume prompt parity and
   confirmed the effort slug. Searched open remote-prompt issues and PRs; none
   covers this Worktrees flow. Created #6057 and verified compatible target
@@ -683,3 +813,68 @@ hiding the problem or silently dropping text.
   cases pass on Windows and native POSIX, including the native first-touch CLI
   contract. Add the corrected probe to fast guards and retain the ordinary
   review, full release, immutable publication and installed Picker proof gates.
+- **2026-10-15** -- Repository-probe guard repair #6785 merged as
+  `4f7b62facbe44df61f159dcde9b1afb11d34b3ea` after its exact head received
+  Approved with zero findings and full required CI, workflow and attribution
+  gates passed. Continue the normal release lane and inspect the remaining
+  not-yet-cleared Worktrees groups locally under the unchanged containment
+  budgets, rather than waiting to discover each later fixture mismatch in a
+  separate full-release cycle. Local tail evidence is supplementary, not a
+  replacement for a containing hosted release or immutable publication.
+- **2026-10-24** -- Attempt-journal storage foundation #8505 merged after
+  current-head approval with no findings and required CI. The protected store
+  is independent of launch authority and is not yet wired to confirmation or
+  target receipts. Continue the linked journal's responsive pre-effect
+  integration; negotiated native SSH transport and all original installed
+  conversation/exactly-once/cleanup gates remain open. No runtime rollout or
+  delivered prompt-loss repair is implied by this source merge.
+- **2026-10-24** -- Attempt-journal confirmation #8542 merged with current-head
+  approval, resolved feedback and required CI. Known-target New/cold Resume
+  intent now persists before dismissal/effects; explicit mock actions remain
+  outside persistence. Unresolved-locality refusal recording is the next
+  linked-journal item, followed by outcomes and target receipt correlation.
+  The linked journal and this parent remain Active. No promotion/rollout,
+  restored SSH native-seed transport, installed prompt-loss repair or original
+  conversation/exactly-once acceptance is claimed by this source milestone.
+- **2026-10-24** -- Prepared the linked journal's unknown-locality refusal slice:
+  explicit unknown metadata, backward read compatibility and atomic validated
+  upgrade; confirmed refusals preserve selection/options without launch or
+  replacement intent. Focused action/storage checks and native Windows upgrade
+  crash checks pass. This is pending review, not a release or installed proof.
+  Continue outcome/target receipt correlation and negotiated target-owned SSH;
+  both efforts and all original delivered acceptance gates remain Active.
+- **2026-10-24** -- Linked-journal unknown-locality refusal slice #8574 merged
+  after final-head approval and green required CI. Confirmed refusals now retain
+  truthful unknown locality, target and options without launch or new replay
+  authority. Continue Phase 3 outcome correlation through existing owners and
+  restore the negotiated target-owned SSH native fence. No containing release,
+  authorized rollout or installed conversation acceptance is implied.
+- **2026-10-24** -- Linked-journal Manager observation slice #8588 merged after
+  final-head approval, resolved AHP/Unicode findings and green required CI.
+  Manager observations now retain resolution, launch, Restore, embodiment
+  and provider handoff boundaries, without asserting allocation, Copilot start
+  or prompt acceptance. Engine/target/native correlation and the negotiated
+  SSH native-seed fence remain the next executable work. Both efforts stay
+  Active; release/authorized rollout and original delivered conversation,
+  exactly-once and cleanup gates remain open.
+- **2026-10-24** -- Prepared negotiated target-native SSH admission: version-2
+  envelopes require the matching native capability flag before configuration,
+  bind the saved Manager attempt ID in the existing target receipt, and retain
+  native fencing on the identity-only launch hop. Structured mutation handlers
+  advance to protocol 8 rather than allowing an older daemon to drop the new
+  metadata. Version-1 reads remain compatible. Remote New/cold Resume composers
+  are restored through this contract, without host-local remote-leg lookup.
+  Target daemon replay/provider checks, encoded Windows transport, Manager
+  client/observation and UI checks pass; adjacent hosting fixtures now create
+  the real workspace and pass mandatory project/hosting identity. Current-head
+  review/CI, native POSIX transport qualification and containing-release/
+  authorized installed conversation acceptance remain open. This is source
+  progress, not a delivered repair or completion of either parent effort.
+- **2026-10-24** -- Negotiated native SSH slice #8605 merged after current-head
+  approval with no findings and green required CI. Source now restores remote
+  New/cold Resume prompts and binds the linked journal's saved attempt to target
+  admission without weakening native-provider or duplicate-delivery fences.
+  Both canonical plans were re-read: installed-source qualification, full
+  engine/native outcome evidence, original conversation/exactly-once delivery,
+  release/authorized rollout and owned-resource cleanup remain open. Continue
+  the linked journal's local/seedless and native-owner correlation next.

@@ -14,6 +14,9 @@
 # the only machine-local config it needs is the project marker (repo_name +
 # headless). Read by agent-worktrees >= v1.5.3-dev34.
 
+# Source contributions use an external harness; this repository hosts no agent.
+expose_agent: false
+
 default_branch: dev
 remote: origin
 

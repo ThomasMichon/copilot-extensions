@@ -10,6 +10,74 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import config as cfg
+from agent_worktrees.repos import read_registry as _knowledge_read_registry
+
+
+@pytest.mark.parametrize("body", ["repos: [\n", "- not-a-mapping\n"])
+def test_config_acquisition_report_retains_yaml_failure(tmp_path, body):
+    from dropin_registry import ScanAuthority
+
+    path = tmp_path / "config.yaml"
+    path.write_text(body, encoding="utf-8")
+    assert cfg._load_yaml_safe(path) == {}
+    report = cfg._load_yaml_safe_report(path)
+    assert report.value == {}
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.entry == str(path) for f in report.findings)
+    assert report.reusable is False
+
+
+def test_config_acquisition_report_retains_dropin_findings_and_positive_config(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_dropins
+
+    directory = tmp_path / "config.d"
+    directory.mkdir()
+    (directory / "a-invalid.yaml").write_text("repos: [\n", encoding="utf-8")
+    (directory / "b-valid.yaml").write_text(
+        "repos:\n  sample:\n    remote: upstream\n", encoding="utf-8",
+    )
+    owner_report = config_dropins.scan_config_dropin_registry(directory, previous={})
+    assert owner_report.findings
+    monkeypatch.setattr(config_dropins, "scan_config_dropin_registry", lambda *a, **k: owner_report)
+    legacy = cfg._load_config_d(directory)
+    assert legacy == {"repos": {"sample": {"remote": "upstream"}}}
+    report = cfg._load_config_d_report(directory)
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert {(f.entry, f.reason, f.status) for f in report.findings} == {
+        (f.entry, f.reason, f.status) for f in owner_report.findings
+    }
+    assert all(f.detail is None for f in report.findings)
+    assert report.reusable is False
+
+
+def test_config_acquisition_report_required_knowledge_unavailable_keeps_base(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources, machine_config, state_root
+
+    base = str(tmp_path / "base")
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="example", platform="windows", repo_name="sample",
+        repos={"sample": cfg.RepoConfig(
+            anchor=base, worktree_root=str(tmp_path / "trees"), stateless=True,
+        )},
+    )
+    unresolved = state_root.StateRoot(
+        path=None, source="knowledge_repo", repo="knowledge", stateless=True,
+        requires_external=True, bound=False, error="synthetic required binding unavailable",
+    )
+    monkeypatch.setattr(machine_config, "machine_config_root", lambda *a, **k: None)
+    monkeypatch.setattr(state_root, "resolve_state_root", lambda *a, **k: unresolved)
+    legacy = config_sources.config_source_anchors(config, base_anchor=base)
+    assert [(source.anchor, source.origin) for source in legacy] == [(base, "harness")]
+    report = config_sources.config_source_anchors_report(config, base_anchor=base)
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "knowledge-unavailable" for f in report.findings)
+    assert "synthetic required binding unavailable" not in repr(report.observations)
+    assert report.reusable is False
+    assert report.reuse_blockers
 
 
 @pytest.fixture(autouse=True)
@@ -1107,10 +1175,11 @@ class TestCachedLoadConfigScope:
         with cfg.cached_load_config_scope():
             cfg.load_config(cfgfile)
             cfg.load_config(cfgfile, include_control_plane_related_pr=False)
+            cfg.load_config(cfgfile, include_knowledge_preferences=False)
             cfg.load_config(cfgfile, project="other")
-        # Three distinct signatures -> three real loads, none reused across
+        # Four distinct signatures -> four real loads, none reused across
         # differently-parameterized calls.
-        assert len(calls) == 3
+        assert len(calls) == 4
 
     def test_scope_does_not_leak_across_scopes(self, tmp_path, monkeypatch):
         anchor = tmp_path / "ext"
@@ -1575,6 +1644,11 @@ class TestInRepoConfigCommittedRefResolution:
     happens to have checked out (a stale/wrong local branch on the anchor
     must never shadow it -- the anchor is a read-only mirror by design)."""
 
+    @pytest.fixture
+    def legacy_reads(self, monkeypatch):
+        from agent_worktrees import inrepo_config_source
+        monkeypatch.setattr(inrepo_config_source, "_read_committed_batch", lambda *_a, **_k: None)
+
     @staticmethod
     def _resolve(anchor: Path) -> dict:
         from agent_worktrees import inrepo_config_source
@@ -1681,7 +1755,7 @@ class TestInRepoConfigCommittedRefResolution:
         self._git("update-ref", "refs/remotes/origin/main", "HEAD", cwd=anchor)
         self._git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main", cwd=anchor)
 
-    def test_absent_candidates_use_one_fresh_presence_probe(self, tmp_path, monkeypatch):
+    def test_absent_candidates_use_one_fresh_batch_probe(self, tmp_path, monkeypatch):
         from agent_worktrees import git_ops
 
         self._empty_committed_anchor(tmp_path)
@@ -1694,7 +1768,7 @@ class TestInRepoConfigCommittedRefResolution:
         monkeypatch.setattr(git_ops, "git", observed)
         assert self._resolve(tmp_path) == {}
         assert len(calls) == 2
-        assert calls[1][:4] == ("--literal-pathspecs", "ls-tree", "-z", "--full-tree")
+        assert calls[1] == ("cat-file", "--batch")
         path = cfg.inrepo_config_path(tmp_path)
         path.parent.mkdir(parents=True)
         path.write_text("marker: newly-committed\n", encoding="utf-8")
@@ -1716,6 +1790,12 @@ class TestInRepoConfigCommittedRefResolution:
             reads.append(args)
             if args[0] == "symbolic-ref":
                 text = "refs/remotes/origin/main\n"
+            elif args[0] == "cat-file":
+                data = f"marker: {marker[0]}\nnested: {{value: original}}\n".encode()
+                specs = kwargs["input_data"].splitlines()
+                packet = b"0" * 40 + b" blob " + str(len(data)).encode() + b"\n" + data + b"\n"
+                packet += b"".join(spec + b" missing\n" for spec in specs[1:])
+                return SimpleNamespace(returncode=0, stdout=packet)
             elif "ls-tree" in args:
                 text = f"100644 blob {'0' * 40}\t{args[args.index('--') + 1]}\0"
             else:
@@ -1730,14 +1810,14 @@ class TestInRepoConfigCommittedRefResolution:
             assert self._resolve(tmp_path) == {
                 "marker": "first", "nested": {"value": "original"},
             }
-            assert len(reads) == 3
+            assert len(reads) == 2
         assert self._resolve(tmp_path)["marker"] == "changed"
-        assert len(reads) == 6
+        assert len(reads) == 4
         with src.resolution_budget():
             assert self._resolve(tmp_path)["marker"] == "changed"
             marker[0] = "latest"
             assert self._resolve(tmp_path)["marker"] == "latest"
-        assert len(reads) == 12
+        assert len(reads) == 8
 
     @pytest.mark.parametrize("difference", ["anchor", "candidates", "remote", "parser"])
     def test_resolution_snapshot_does_not_mix_sources_or_custom_parsers(
@@ -1753,6 +1833,10 @@ class TestInRepoConfigCommittedRefResolution:
             reads.append(args)
             if args[0] == "symbolic-ref":
                 text = args[-1].removesuffix("HEAD") + "main\n"
+            elif args[0] == "cat-file":
+                data = b"marker: source\n"
+                packet = b"0" * 40 + b" blob " + str(len(data)).encode() + b"\n" + data + b"\n"
+                return SimpleNamespace(returncode=0, stdout=packet)
             elif "ls-tree" in args:
                 text = f"100644 blob {'0' * 40}\t{args[args.index('--') + 1]}\0"
             else:
@@ -1770,15 +1854,15 @@ class TestInRepoConfigCommittedRefResolution:
             src.load_inrepo_config_from_committed_ref(
                 anchor, paths, remote, parser=parser,
             )
-        assert len(reads) == 6
+        assert len(reads) == 4
 
     @pytest.mark.parametrize("text,expected", [
         ("", {}),
         ("[malformed", {}),
         ("marker: first\n", {"marker": "first"}),
     ])
-    def test_presence_probe_retains_first_match_and_never_reads_lower_priority_blob(
-        self, tmp_path, monkeypatch, text, expected,
+    def test_legacy_presence_probe_retains_first_match_and_never_reads_lower_priority_blob(
+        self, tmp_path, monkeypatch, text, expected, legacy_reads,
     ):
         from agent_worktrees import git_ops
 
@@ -1806,8 +1890,8 @@ class TestInRepoConfigCommittedRefResolution:
         "failure",
         ["exit", "timeout", "non-text", "os-error", "git-error", "unterminated", "malformed"],
     )
-    def test_presence_probe_unavailability_retains_bounded_blob_reads_and_warns(
-        self, tmp_path, monkeypatch, caplog, failure,
+    def test_legacy_presence_probe_unavailability_retains_bounded_blob_reads_and_warns(
+        self, tmp_path, monkeypatch, caplog, failure, legacy_reads,
     ):
         import subprocess
         import types
@@ -1845,7 +1929,9 @@ class TestInRepoConfigCommittedRefResolution:
         assert reads == [f"origin/main:{path.relative_to(tmp_path).as_posix()}"]
         assert "presence probe" in caplog.text and "bounded ordered reads" in caplog.text
 
-    def test_presence_probe_skips_absent_higher_priority_candidates(self, tmp_path, monkeypatch):
+    def test_legacy_presence_probe_skips_absent_higher_priority_candidates(
+        self, tmp_path, monkeypatch, legacy_reads,
+    ):
         from agent_worktrees import git_ops
 
         self._empty_committed_anchor(tmp_path)
@@ -1907,7 +1993,7 @@ class TestInRepoConfigCommittedRefResolution:
             assert self._resolve(tmp_path) == {}
             assert self._resolve(tmp_path) == {}
         assert [timeout for _, timeout in calls] == [15, 15]
-        assert "ls-tree" in calls[1][0]
+        assert "cat-file" in calls[1][0]
         assert "bounded ordered reads" in caplog.text
 
     def _make_remote_with_branch_configs(
@@ -2232,6 +2318,124 @@ class TestKnowledgeConfigOverlay:
         assert policy.name == "portable-policy"
         assert policy.profiles == ("p1", "p2")
 
+    @pytest.mark.parametrize("narrow_first", [False, True])
+    def test_preference_opt_out_preserves_binding_and_policy(
+        self, tmp_path, monkeypatch, narrow_first
+    ):
+        h = self._mk_harness(tmp_path, stateless=True)
+        k = self._mk_knowledge(
+            tmp_path,
+            "headless: true\nauto_fast_forward: false\n"
+            "copilot_profiles:\n  - name: portable\n",
+        )
+        self._registry(monkeypatch, harness=h, knowledge=k)
+        mfile = tmp_path / "machine.yaml"
+        mfile.write_text(
+            "repo_name: harness\nmachine: m\nplatform: wsl\n"
+            "knowledge_repo: knowledge\n"
+            f"repos:\n  harness:\n    anchor: {h}\n    worktree_root: /tmp/wt\n",
+            encoding="utf-8",
+        )
+        reads = []
+        original = cfg._load_inrepo_config
+
+        def read(anchor, **kwargs):
+            reads.append(str(anchor))
+            return original(anchor, **kwargs)
+
+        monkeypatch.setattr(cfg, "_load_inrepo_config", read)
+        configs = {}
+        with cfg.cached_load_config_scope():
+            for include in (not narrow_first, narrow_first):
+                reads.clear()
+                configs[include] = cfg.load_config(
+                    mfile,
+                    include_control_plane_related_pr=False,
+                    include_knowledge_preferences=include,
+                )
+                assert str(h) in reads
+                assert (str(k) in reads) is include
+            assert cfg.load_config(
+                mfile, include_control_plane_related_pr=False
+            ) is configs[True]
+            assert cfg.load_config(
+                mfile,
+                include_control_plane_related_pr=False,
+                include_knowledge_preferences=False,
+            ) is configs[False]
+        full, narrow = configs[True], configs[False]
+        assert full.knowledge_repo == narrow.knowledge_repo == "knowledge"
+        assert full.repos == narrow.repos
+        assert narrow.default_repo.stateless is True
+        assert narrow.default_repo.pr.enabled is True
+        assert full.headless is True
+        assert narrow.headless is False
+        assert full.auto_fast_forward is False
+        assert narrow.auto_fast_forward is True
+        assert [profile.name for profile in full.copilot_profiles] == ["portable"]
+        assert narrow.copilot_profiles == []
+
+    @pytest.mark.parametrize(
+        "scenario",
+        [
+            "bound", "unbound", "unregistered", "explicit", "explicit-missing",
+            "self-hosted", "no-machine-config",
+        ],
+    )
+    @pytest.mark.parametrize("json_out", [False, True], ids=["plain", "json"])
+    def test_state_root_full_and_narrow_config_have_identical_results(
+        self, tmp_path, monkeypatch, capsys, scenario, json_out
+    ):
+        import json
+
+        from agent_worktrees import context_cli, repos, state_root
+
+        h = self._mk_harness(tmp_path, stateless=scenario != "self-hosted")
+        k = self._mk_knowledge(tmp_path, "headless: true\n")
+        registered = {"harness": h}
+        if scenario != "unregistered":
+            registered["knowledge"] = k
+        self._registry(monkeypatch, **registered)
+        monkeypatch.setattr(repos, "get_srcroot", lambda plat=None: str(tmp_path / "absent"))
+        monkeypatch.setattr(state_root, "_git_toplevel", lambda cwd: str(h))
+        mfile = tmp_path / "machine.yaml"
+        if scenario != "no-machine-config":
+            binding = "" if scenario == "unbound" else "knowledge_repo: knowledge\n"
+            mfile.write_text(
+                "repo_name: harness\nmachine: m\nplatform: wsl\n"
+                f"{binding}repos:\n  harness:\n    anchor: {h}\n",
+                encoding="utf-8",
+            )
+        monkeypatch.setattr(cfg, "default_config_path", lambda: mfile)
+        monkeypatch.setattr(cfg, "_project_name_safe", lambda: "harness")
+        override = {
+            "explicit": "knowledge", "explicit-missing": "missing",
+        }.get(scenario)
+        full = cfg.load_config(mfile, include_control_plane_related_pr=False)
+        narrow = cfg.load_config(
+            mfile,
+            include_control_plane_related_pr=False,
+            include_knowledge_preferences=False,
+        )
+        expected = state_root.resolve_state_root(full, repo_override=override)
+        assert state_root.resolve_state_root(
+            narrow, repo_override=override
+        ).as_dict() == expected.as_dict()
+        assert bool(expected.path) is (
+            scenario in {"bound", "explicit", "self-hosted"}
+        )
+        args = ["--json"] if json_out else []
+        if override:
+            args.extend(["--repo", override])
+        assert context_cli.cmd_state_root_dispatch(args) == (0 if expected.path else 3)
+        output = capsys.readouterr()
+        if json_out:
+            assert json.loads(output.out) == expected.as_dict()
+            assert output.err == ""
+        else:
+            assert output.out == (expected.path + "\n" if expected.path else "")
+            assert output.err == (expected.error + "\n" if expected.error else "")
+
     def test_machine_local_wins_over_overlay(self, tmp_path, monkeypatch):
         h = self._mk_harness(tmp_path, stateless=True)
         k = self._mk_knowledge(tmp_path, "headless: true\n")
@@ -2554,3 +2758,1428 @@ def test_own_checked_in_config_resolves_strategy_keep_alive():
     config_path = Path(__file__).resolve().parents[3] / ".agent-worktrees" / "config.yaml"
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert data["pr"]["strategy"] == "keep-alive"
+
+
+@pytest.mark.parametrize("entry_observed", [True, False], ids=["entry-uncertain", "registry-unavailable"])
+def test_config_acquisition_report_retains_owner_verdict_for_last_known_data(tmp_path, monkeypatch, entry_observed):
+    from dropin_registry import EntryDecision, EntryStatus, Finding, ScanAuthority, ScanSnapshot
+    from agent_worktrees import config_dropins
+
+    entry = tmp_path / "config.d" / "managed.json"
+    target = tmp_path / "plugin" / "config.yaml"
+    finding = Finding(registry="config.d", entry=str(entry), status="indeterminate", reason="unreadable-source")
+    contribution = config_dropins.ConfigDropin(
+        entry=entry, target=target, entry_class="managed-plugin", owner="sample@example-market",
+        raw_config={"repos": {"sample": {"remote": "retained-upstream"}}},
+    )
+    owner = config_dropins.ConfigDropinRegistryReport(
+        snapshot=ScanSnapshot(
+            registry="config.d", authority=ScanAuthority.COMPLETE if entry_observed else ScanAuthority.INDETERMINATE,
+            decisions={str(entry): EntryDecision.indeterminate(finding)} if entry_observed else {},
+            findings=(finding,),
+        ), active_entries={str(entry): contribution},
+    )
+    calls = []
+
+    def scan(*args, **kwargs):
+        calls.append("scan")
+        return owner
+
+    monkeypatch.setattr(config_dropins, "scan_config_dropin_registry", scan)
+    report = cfg._load_config_d_report(entry.parent)
+    assert calls == ["scan"]
+    assert report.value == contribution.raw_config
+    assert report.authority is ScanAuthority.INDETERMINATE
+    observation = next(o for o in report.observations if o.source == str(entry))
+    assert observation.retained is True
+    assert observation.status is (EntryStatus.INDETERMINATE if entry_observed else None)
+    assert observation.owner == contribution.owner
+    assert observation.target == str(target)
+    assert "retained-upstream" not in repr(report.observations)
+    assert report.findings == (finding,)
+    assert report.reusable is False
+
+
+def _machine_overlay_report_config(base: Path, tmp_path: Path):
+    return cfg.Config(
+        srcroot=str(tmp_path), machine="example", platform="windows", repo_name="sample",
+        repos={"sample": cfg.RepoConfig(anchor=str(base), worktree_root=str(tmp_path / "trees"))},
+    )
+
+
+def test_config_source_report_retains_suppressed_project_root_failure(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources
+
+    base = tmp_path / "base"
+    base.mkdir()
+    config = _machine_overlay_report_config(base, tmp_path)
+
+    def unavailable(project=None):
+        raise ValueError("synthetic project root resolution failure")
+
+    monkeypatch.setattr(cfg, "project_dir", unavailable)
+    legacy = config_sources.config_source_anchors(config, base_anchor=str(base))
+    assert [(source.anchor, source.origin) for source in legacy] == [(str(base), "harness")]
+    report = config_sources.config_source_anchors_report(config, base_anchor=str(base))
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.findings
+    assert "synthetic project root resolution failure" not in repr(report.observations)
+    assert report.reusable is False
+
+
+@pytest.mark.parametrize("later_marker_present", [False, True], ids=["no-positive-marker", "later-positive-marker"])
+def test_config_source_report_retains_suppressed_marker_stat_failure(tmp_path, monkeypatch, later_marker_present):
+    import os
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources, machine_config
+
+    base, overlay = tmp_path / "base", tmp_path / "overlay"
+    base.mkdir()
+    overlay.mkdir()
+    denied = overlay / ".agent-worktrees"
+    if later_marker_present:
+        (overlay / ".copilot-extensions" / "agent-worktrees").mkdir(parents=True)
+    config = _machine_overlay_report_config(base, tmp_path)
+    monkeypatch.setattr(cfg, "project_dir", lambda project=None: overlay)
+    original_stat = machine_config.os.stat
+
+    def stat(path, *args, **kwargs):
+        if isinstance(path, (str, os.PathLike)) and os.path.normcase(os.fspath(path)) == os.path.normcase(str(denied)):
+            raise PermissionError("synthetic private marker failure")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(machine_config.os, "stat", stat)
+    legacy = config_sources.config_source_anchors(config, base_anchor=str(base))
+    expected = [(str(base), "harness")]
+    if later_marker_present:
+        expected.append((str(overlay), "machine"))
+    assert [(source.anchor, source.origin) for source in legacy] == expected
+    report = config_sources.config_source_anchors_report(config, base_anchor=str(base))
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.findings
+    assert "synthetic private marker failure" not in repr(report.observations)
+    assert report.reusable is False
+
+
+def test_config_yaml_report_retains_bool_suppressed_source_lookup_error(tmp_path, monkeypatch):
+    import errno
+    import os
+    from dropin_registry import ScanAuthority
+
+    path = tmp_path / "config.yaml"
+    path.write_text("repos: {sample: {remote: upstream}}\n", encoding="utf-8")
+    original = os.stat
+
+    def loop(candidate, *args, **kwargs):
+        if isinstance(candidate, (str, os.PathLike)) and os.path.normcase(os.fspath(candidate)) == os.path.normcase(str(path)):
+            raise OSError(errno.ELOOP, "synthetic source lookup loop")
+        return original(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", loop)
+    assert path.exists() is False
+    assert cfg._load_yaml_safe(path) == {}
+    report = cfg._load_yaml_safe_report(path)
+    assert report.value == {}
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(o.source == str(path) and o.authority is ScanAuthority.INDETERMINATE for o in report.observations)
+
+
+@pytest.mark.parametrize("outcome", ["timeout", "os-error", "not-repo-nonzero", "other-nonzero", "empty-success"])
+def test_config_source_report_retains_default_root_lookup_uncertainty(tmp_path, monkeypatch, outcome):
+    import subprocess
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources, machine_config, state_root
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    fallback, cwd = tmp_path / "fallback", tmp_path / "caller"
+    config = _machine_overlay_report_config(fallback, tmp_path)
+    monkeypatch.setattr(machine_config, "machine_config_root", lambda *a, **k: None)
+    monkeypatch.setattr(machine_config, "machine_config_root_report", lambda *a, **k: AcquisitionReport("machine", None, ()))
+    calls = []
+
+    def lookup(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output="private Git output", stderr="private Git error")
+        if outcome == "os-error":
+            raise OSError("private Git lookup failure")
+        if outcome == "not-repo-nonzero":
+            return SimpleNamespace(returncode=128, stdout="", stderr="fatal: not a git repository")
+        if outcome == "other-nonzero":
+            return SimpleNamespace(returncode=128, stdout="private Git output", stderr="private Git error")
+        return SimpleNamespace(returncode=0, stdout="  ", stderr="")
+
+    monkeypatch.setattr(state_root.subprocess, "run", lookup)
+    legacy = config_sources.config_source_anchors(config, cwd=str(cwd))
+    assert [(source.anchor, source.origin) for source in legacy] == [(str(fallback), "harness")]
+    assert len(calls) == 1
+    calls.clear()
+    report = config_sources.config_source_anchors_report(config, cwd=str(cwd))
+    assert report.value == legacy
+    assert len(calls) == 1
+    argv, options = calls[0]
+    assert argv == ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"]
+    assert options["timeout"] == 10
+    assert options["capture_output"] is True and options["text"] is True
+    assert options["stdin"] is subprocess.DEVNULL
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert report.findings
+    assert "private Git" not in repr(report.observations)
+    assert "not a git repository" not in repr(report.observations)
+    assert report.reusable is False
+
+
+@pytest.mark.parametrize("selection", ["explicit-base", "git-success", "missing-default"])
+def test_config_source_report_default_selection_preserves_bypass_and_fallback_controls(tmp_path, monkeypatch, selection):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_sources, machine_config, state_root
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    fallback, current = tmp_path / "fallback", tmp_path / "current"
+    config = _machine_overlay_report_config(fallback, tmp_path)
+    if selection == "missing-default":
+        from dataclasses import replace
+        config = replace(config, repos={})
+    monkeypatch.setattr(machine_config, "machine_config_root", lambda *a, **k: None)
+    monkeypatch.setattr(machine_config, "machine_config_root_report", lambda *a, **k: AcquisitionReport("machine", None, ()))
+    calls = []
+
+    def lookup(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if selection == "explicit-base":
+            raise AssertionError("explicit positive base must skip Git lookup")
+        return SimpleNamespace(returncode=0, stdout=str(current) if selection == "git-success" else "", stderr="")
+
+    monkeypatch.setattr(state_root.subprocess, "run", lookup)
+    explicit = str(current) if selection == "explicit-base" else None
+    legacy = config_sources.config_source_anchors(config, base_anchor=explicit)
+    assert len(calls) == (0 if selection == "explicit-base" else 1)
+    calls.clear()
+    report = config_sources.config_source_anchors_report(config, base_anchor=explicit)
+    assert report.value == legacy
+    assert len(calls) == (0 if selection == "explicit-base" else 1)
+    if selection == "missing-default":
+        assert report.value == []
+        assert report.authority is ScanAuthority.INDETERMINATE
+    else:
+        assert [(source.anchor, source.origin) for source in report.value] == [(str(current), "harness")]
+        assert report.authority is ScanAuthority.COMPLETE
+
+
+def test_full_config_report_preserves_partial_layers_and_precedence(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    machine = tmp_path / "config.yaml"
+    machine.write_text(
+        f"repo_name: sample\nplatform: windows\nmachine: fixture\n"
+        f"repos:\n  sample:\n    anchor: '{anchor}'\n    remote: machine\n",
+        encoding="utf-8",
+    )
+    global_path = tmp_path / "global.yaml"
+    global_path.write_text("profiles: [\n", encoding="utf-8")
+    monkeypatch.setattr(cfg, "global_config_path", lambda: global_path)
+    monkeypatch.setattr(cfg, "_resolve_adoption_defaults_from_registry", lambda *a: {})
+    monkeypatch.setattr(cfg.registry_paths, "installation_context", lambda: {})
+    monkeypatch.setattr(cfg.inrepo_config_source, "_offline_remote_head_branch", lambda *a: None)
+    directory = tmp_path / "config.d"
+    directory.mkdir()
+    (directory / "a-invalid.yaml").write_text("repos: [\n", encoding="utf-8")
+    (directory / "b-valid.yaml").write_text(
+        "repos:\n  sample:\n    remote: dropin\n    default_branch: dev\n", encoding="utf-8",
+    )
+    options = dict(include_control_plane_related_pr=False, include_knowledge_preferences=False)
+    legacy = cfg.load_config(machine, **options)
+    assert legacy.repos["sample"].remote == "machine"
+    assert legacy.repos["sample"].default_branch == "dev"
+    report = cfg.load_config_report(machine, **options)
+    assert report.value == legacy
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert {str(global_path), str(directory / "a-invalid.yaml")} <= {
+        f.entry for f in report.findings
+    }
+    assert report.reusable is False
+    assert "stable-owner-input-frontier" in report.missing_coverage
+
+
+def test_full_config_report_cache_hit_without_provenance_never_reacquires(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees.config_cache import cached_load_config_scope
+
+    value = cfg.Config(srcroot="", machine="fixture", platform="windows", repo_name="sample")
+    calls = []
+
+    def acquire(*args, **kwargs):
+        calls.append((args, kwargs))
+        return value
+
+    monkeypatch.setattr(cfg, "_load_config_uncached", acquire)
+    options = dict(include_control_plane_related_pr=False, include_knowledge_preferences=False)
+    with cached_load_config_scope():
+        assert cfg.load_config(tmp_path / "config.yaml", **options) is value
+        report = cfg.load_config_report(tmp_path / "config.yaml", **options)
+    assert len(calls) == 1
+    assert report.value is value
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "cached-config-unattributed" for f in report.findings)
+    assert report.reusable is False
+
+
+def test_full_config_report_preserves_fatal_no_repo_exception(tmp_path):
+    options = dict(project="sample", include_control_plane_related_pr=False,
+                   include_knowledge_preferences=False)
+    path = tmp_path / "missing.yaml"
+    with pytest.raises(cfg.ProjectNotRegisteredError) as legacy:
+        cfg.load_config(path, **options)
+    with pytest.raises(cfg.ProjectNotRegisteredError) as diagnostic:
+        cfg.load_config_report(path, **options)
+    assert str(diagnostic.value) == str(legacy.value)
+
+
+
+def test_config_report_nested_requests_and_exceptions_restore_collection(tmp_path, monkeypatch):
+    from agent_worktrees import config_acquisition as acquisition
+
+    paths = {name: tmp_path / (name + ".yaml") for name in ("outer", "inner", "failed", "later")}
+    for path in paths.values():
+        path.write_text("marker: fixture\n", encoding="utf-8")
+    value = cfg.Config(srcroot="", machine="fixture", platform="windows", repo_name="sample")
+    failure = ValueError("synthetic failure")
+    nested = []
+
+    def load(path, **kwargs):
+        acquisition.full_load_started()
+        cfg._load_yaml_safe(path)
+        if path == paths["failed"]:
+            raise failure
+        if path == paths["outer"]:
+            outer_collector = acquisition.current_observations()
+            nested.append(cfg.load_config_report(paths["inner"]))
+            assert acquisition.current_observations() is outer_collector
+            with pytest.raises(ValueError) as caught:
+                cfg.load_config_report(paths["failed"])
+            assert caught.value is failure
+            assert acquisition.current_observations() is outer_collector
+        return value
+
+    monkeypatch.setattr(cfg, "load_config", load)
+    outer = cfg.load_config_report(paths["outer"])
+    assert acquisition.current_observations() is None
+    later = cfg.load_config_report(paths["later"])
+    assert acquisition.current_observations() is None
+    for report, name in ((outer, "outer"), (nested[0], "inner"), (later, "later")):
+        assert {o.source for o in report.observations if o.stage == "config-yaml"} == {str(paths[name])}
+        assert report.reusable is False
+
+
+def test_config_report_copied_context_does_not_share_collectors_between_threads(tmp_path, monkeypatch):
+    import contextvars
+    from concurrent.futures import ThreadPoolExecutor
+    from agent_worktrees import config_acquisition as acquisition
+
+    path = tmp_path / "worker.yaml"
+    path.write_text("marker: worker\n", encoding="utf-8")
+    value = cfg.Config(srcroot="", machine="fixture", platform="windows", repo_name="sample")
+
+    def load(*args, **kwargs):
+        acquisition.full_load_started()
+        cfg._load_yaml_safe(path)
+        return value
+
+    monkeypatch.setattr(cfg, "load_config", load)
+
+    def worker():
+        assert acquisition.current_observations() is None
+        cfg._load_yaml_safe(path)
+        report = cfg.load_config_report(path)
+        assert acquisition.current_observations() is None
+        return report
+
+    with acquisition.capture_config_observations() as outer:
+        context = contextvars.copy_context()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            report = pool.submit(context.run, worker).result(timeout=5)
+        assert outer == []
+        assert acquisition.current_observations() is outer
+    assert acquisition.current_observations() is None
+    assert {o.source for o in report.observations if o.stage == "config-yaml"} == {str(path)}
+
+
+@pytest.mark.parametrize("mode", ["owner", "failure", "replacement", "projects-failure"])
+def test_registered_config_helpers_preserve_owner_calls_and_independent_defaults(tmp_path, monkeypatch, mode):
+    from agent_worktrees import config_acquisition as acquisition, installer, repos as repos_mod, repos_registry_reader
+
+    path = tmp_path / "repos.yaml"
+    path.write_text("repos:\n  sample:\n    default_branch: main\n    linux: /synthetic/anchor\n", encoding="utf-8")
+    calls = []
+
+    def registered():
+        calls.append("registry")
+        if mode == "failure":
+            raise PermissionError("synthetic private registry failure")
+        if mode == "replacement":
+            return repos_mod.ReposRegistry(repos={"sample": repos_mod.RepoEntry(
+                name="sample", default_branch="main", paths={"linux": "/synthetic/anchor"},
+            )})
+        return repos_registry_reader.read_registry(path)
+
+    def projects():
+        calls.append("projects")
+        if mode == "projects-failure":
+            raise ValueError("synthetic private projects failure")
+        return {"projects": {"sample": {"default_branch": "fallback", "base_repo": True}}}
+
+    monkeypatch.setattr(repos_mod, "read_registry", registered)
+    monkeypatch.setattr(installer, "read_projects_registry", projects)
+    with acquisition.capture_config_observations() as observations:
+        anchor = cfg._resolve_anchor_from_registry("sample", "linux")
+        defaults = cfg._resolve_adoption_defaults_from_registry("sample", "linux")
+    assert calls == ["registry", "registry", "projects"]
+    assert anchor == (None if mode == "failure" else "/synthetic/anchor")
+    assert defaults == ({"default_branch": "main"} if mode == "projects-failure" else {
+        "default_branch": "fallback" if mode == "failure" else "main", "base_repo": True,
+    })
+    assert any(o.stage == "repository-registry" for o in observations) == (mode in ("owner", "projects-failure"))
+    assert any(o.source == "repository-anchor-registry" for o in observations) == (mode in ("failure", "replacement"))
+    assert any(o.source == "adoption-projects-registry" for o in observations)
+    assert not any(o.source == "adoption-default-registries" for o in observations)
+    if mode in ("failure", "projects-failure"):
+        assert any(o.stage == "registry-consumer" and o.findings for o in observations)
+    assert "synthetic private" not in repr(observations)
+
+
+@pytest.fixture
+def projects_acquisition_sources(tmp_path, monkeypatch):
+    from agent_worktrees import installer, repos as repos_mod, repos_registry_reader
+
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    machine = tmp_path / "config.yaml"
+    machine.write_text(
+        "repo_name: sample\nplatform: windows\nmachine: fixture\n"
+        f"repos:\n  sample:\n    anchor: '{anchor}'\n"
+        "    default_branch: machine\n    base_repo: false\n",
+        encoding="utf-8",
+    )
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        "repos:\n  sample:\n    default_branch: registry\n", encoding="utf-8",
+    )
+    projects = tmp_path / "projects.yaml"
+    calls = []
+
+    def registered():
+        calls.append("repos")
+        return repos_registry_reader.read_registry(registry)
+
+    monkeypatch.setattr(repos_mod, "read_registry", registered)
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: projects)
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {
+        "default_branch": "inrepo", "base_repo": True,
+    })
+    options = dict(project="sample", include_control_plane_related_pr=False,
+                   include_knowledge_preferences=False)
+    return machine, projects, calls, options
+
+
+@pytest.mark.parametrize("presence", ["native", "direct-os"])
+@pytest.mark.parametrize("mode,body", [
+    ("missing", None),
+    ("disappeared", "projects: {}\n"),
+    ("denied", "projects: {}\n"),
+    ("empty-document", ""),
+    ("empty-mapping", "{}\n"),
+    ("populated", "schema_version: 2\nprojects: {sample: {base_repo: true}}\n"),
+    ("malformed", "projects: [\n"),
+    ("document-shape", "- not-a-mapping\n"),
+    ("projects-shape", "projects: []\n"),
+    ("duplicate", "projects: {}\nprojects: {}\n"),
+])
+def test_projects_acquisition_original_outcomes_reach_full_config_report(
+    monkeypatch, projects_acquisition_sources, mode, body, presence,
+):
+    import os
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_migrations, strict_yaml
+
+    machine, projects, calls, options = projects_acquisition_sources
+    native_exists, native_stat, native_read = Path.exists, Path.stat, Path.read_text
+    native_parse = strict_yaml._StrictLoader.get_single_data
+    native_migrate = config_migrations.migrate_doc
+
+    def exists(path):
+        if path == projects:
+            calls.append("exists")
+            if presence == "direct-os":
+                return os.path.exists(path)
+        return native_exists(path)
+
+    def stat(path, *args, **kwargs):
+        if path == projects:
+            calls.append("stat")
+        return native_stat(path, *args, **kwargs)
+
+    def read(path, *args, **kwargs):
+        if path == projects:
+            calls.append("read")
+            if mode == "disappeared":
+                path.unlink()
+            elif mode == "denied":
+                raise PermissionError("synthetic private projects bytes")
+        return native_read(path, *args, **kwargs)
+
+    def parse(loader):
+        calls.append("parse")
+        return native_parse(loader)
+
+    def migrate(doc, schema, *args, **kwargs):
+        if schema == config_migrations.SCHEMA_PROJECTS:
+            calls.append("migrate")
+        return native_migrate(doc, schema, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    monkeypatch.setattr(Path, "stat", stat)
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(strict_yaml._StrictLoader, "get_single_data", parse)
+    monkeypatch.setattr(config_migrations, "migrate_doc", migrate)
+    results, call_records = [], []
+    for loader in (cfg.load_config, cfg.load_config_report):
+        if body is not None:
+            projects.write_text(body, encoding="utf-8")
+        calls.clear()
+        results.append(loader(machine, **options))
+        expected = ["repos", "exists"]
+        if mode != "missing":
+            expected.append("read")
+        if mode not in ("missing", "disappeared", "denied"):
+            expected.append("parse")
+        if mode in ("empty-mapping", "populated", "projects-shape"):
+            expected.append("migrate")
+        assert calls.count("stat") <= 1
+        assert [call for call in calls if call != "stat"] == expected
+        call_records.append(tuple(calls))
+    assert call_records[0] == call_records[1]
+    legacy, report = results
+    assert report.value == legacy
+    assert report.value.repos["sample"].default_branch == "machine"
+    assert report.value.repos["sample"].base_repo is False
+    assert report.reusable is False
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert "synthetic private" not in repr(report.observations)
+    owned = [o for o in report.observations if o.source == str(projects)]
+    assert owned, "original projects acquisition outcomes are missing from load_config_report"
+    if mode.startswith("empty-") or mode == "populated":
+        assert any(o.authority is ScanAuthority.COMPLETE for o in owned)
+        assert not any(o.authority is ScanAuthority.INDETERMINATE for o in owned)
+        assert not any(o.source == "adoption-default-registries" for o in report.observations)
+    else:
+        assert any(o.authority is ScanAuthority.INDETERMINATE and o.findings for o in owned)
+        assert not any(o.authority is ScanAuthority.ABSENT for o in owned)
+
+
+@pytest.mark.parametrize("replacement", ["parser", "reader", "parser-wrapper", "reader-wrapper"])
+def test_projects_acquisition_replacements_keep_value_identity_but_not_coverage(
+    monkeypatch, projects_acquisition_sources, replacement,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import installer, projects_registry
+
+    machine, projects, calls, options = projects_acquisition_sources
+    value = {"projects": {"sample": {"default_branch": "fallback", "base_repo": True}}}
+    projects.write_text("schema_version: 2\nprojects: {}\n", encoding="utf-8")
+    original = projects_registry.parse_projects_registry if replacement.startswith("parser") else installer.read_projects_registry
+
+    def provider(*args, **kwargs):
+        calls.append("projects-replacement")
+        if replacement.endswith("wrapper"):
+            original(*args, **kwargs)
+        return value
+
+    if replacement.startswith("parser"):
+        monkeypatch.setattr(projects_registry, "parse_projects_registry", provider)
+    else:
+        monkeypatch.setattr(installer, "read_projects_registry", provider)
+    assert installer.read_projects_registry() is value
+    calls.clear()
+    defaults = cfg._resolve_adoption_defaults_from_registry("sample", "windows")
+    assert defaults == {"default_branch": "registry", "base_repo": True}
+    assert calls == ["repos", "projects-replacement"]
+    calls.clear()
+    report = cfg.load_config_report(machine, **options)
+    assert calls == ["repos", "projects-replacement"]
+    assert report.value.repos["sample"].default_branch == "machine"
+    assert report.value.repos["sample"].base_repo is False
+    assert report.reusable is False
+    assert any(
+        o.source in (str(projects), "adoption-projects-registry")
+        and o.authority is ScanAuthority.INDETERMINATE and o.findings
+        for o in report.observations
+    ), "a completed repository owner cannot certify its opaque projects peer"
+
+
+def test_projects_acquisition_legacy_exception_identity_and_permissive_fallback(tmp_path, monkeypatch):
+    from agent_worktrees import installer, projects_registry
+
+    projects = tmp_path / "projects.yaml"
+    projects.write_text("projects: {}\n", encoding="utf-8")
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: projects)
+    error = PermissionError("synthetic private original read")
+    calls = []
+    native_read = Path.read_text
+
+    def read(path, *args, **kwargs):
+        if path == projects:
+            calls.append(path)
+            raise error
+        return native_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    with pytest.raises(PermissionError) as direct:
+        projects_registry.parse_projects_registry(projects)
+    with pytest.raises(PermissionError) as strict:
+        installer.read_projects_registry(strict=True)
+    assert direct.value is strict.value is error
+    assert installer.read_projects_registry() == {"projects": {}}
+    assert calls == [projects, projects, projects]
+
+
+@pytest.mark.parametrize("repository_branch", ["registry", ""])
+def test_projects_acquisition_populated_defaults_preserve_missing_key_fallback(
+    monkeypatch, projects_acquisition_sources, repository_branch,
+):
+    from dropin_registry import ScanAuthority
+
+    machine, projects, calls, options = projects_acquisition_sources
+    machine.write_text(
+        f"repo_name: sample\nplatform: windows\nmachine: fixture\n"
+        f"repos: {{sample: {{anchor: '{machine.parent / 'anchor'}'}}}}\n", encoding="utf-8",
+    )
+    (machine.parent / "repos.yaml").write_text(
+        f"repos: {{sample: {{default_branch: '{repository_branch}'}}}}\n", encoding="utf-8",
+    )
+    projects.write_text(
+        "schema_version: 2\nprojects: {sample: {default_branch: 42, base_repo: true}}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {})
+    report = cfg.load_config_report(machine, **options)
+    assert calls == ["repos"]
+    assert report.value.repos["sample"].default_branch == (repository_branch or "42")
+    assert report.value.repos["sample"].base_repo is True
+    owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.COMPLETE
+    assert report.reusable is False
+
+
+@pytest.mark.parametrize("mode", ["unavailable", "failure"])
+def test_projects_acquisition_original_migration_fallback_retains_input_identity(
+    monkeypatch, projects_acquisition_sources, mode,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition, config_migrations, projects_registry, strict_yaml
+
+    machine, projects, calls, options = projects_acquisition_sources
+    projects.write_text("schema_version: 2\nprojects: {sample: {base_repo: true}}\n", encoding="utf-8")
+    decoded = []
+    native_parse = strict_yaml._StrictLoader.get_single_data
+    native_migrate = config_migrations.migrate_doc
+
+    def parse(loader):
+        value = native_parse(loader)
+        decoded.append(value)
+        return value
+
+    def migrate(doc, schema, *args, **kwargs):
+        if schema == config_migrations.SCHEMA_PROJECTS:
+            raise ValueError("synthetic private migration body")
+        return native_migrate(doc, schema, *args, **kwargs)
+
+    monkeypatch.setattr(strict_yaml._StrictLoader, "get_single_data", parse)
+    if mode == "unavailable":
+        monkeypatch.setattr(config_migrations, "_AVAILABLE", False)
+    else:
+        monkeypatch.setattr(config_migrations, "migrate_doc", migrate)
+    with acquisition.capture_config_observations():
+        value = projects_registry.parse_projects_registry(projects)
+    assert value is decoded[0]
+    report = cfg.load_config_report(machine, **options)
+    reason = "migration-unavailable" if mode == "unavailable" else "migration-failed"
+    assert any(f.entry == config_migrations.SCHEMA_PROJECTS and f.reason == reason for f in report.findings)
+    owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.INDETERMINATE
+    assert report.value.repos["sample"].base_repo is False
+    assert "synthetic private" not in repr(report.observations)
+    assert report.reusable is False
+
+
+@pytest.mark.parametrize("replacement", ["loader", "partial-loader", "migration-wrapper"])
+def test_projects_acquisition_partial_callbacks_cannot_borrow_original_completion(
+    monkeypatch, projects_acquisition_sources, replacement,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_migrations, projects_registry
+
+    machine, projects, calls, options = projects_acquisition_sources
+    projects.write_text("schema_version: 2\nprojects: {}\n", encoding="utf-8")
+    value = {"schema_version": 2, "projects": {"sample": {"base_repo": True}}}
+    native_loader = projects_registry.load_projects_document
+    native_migrate = config_migrations.migrate_loaded
+
+    def loader(content):
+        if replacement == "partial-loader":
+            native_loader(content)
+        return value
+
+    def migrate(doc, schema):
+        original = native_migrate(doc, schema)
+        return value if schema == config_migrations.SCHEMA_PROJECTS else original
+
+    if replacement == "migration-wrapper":
+        monkeypatch.setattr(config_migrations, "migrate_loaded", migrate)
+    else:
+        monkeypatch.setattr(projects_registry, "load_projects_document", loader)
+    legacy = cfg.load_config(machine, **options)
+    report = cfg.load_config_report(machine, **options)
+    assert report.value == legacy
+    assert calls == ["repos", "repos"]
+    owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.INDETERMINATE
+    assert owned[0].findings and report.reusable is False
+
+
+def test_projects_acquisition_same_globals_migration_wrapper_cannot_borrow_completion(
+    monkeypatch, projects_acquisition_sources,
+):
+    from types import FunctionType
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_migrations
+
+    machine, projects, calls, options = projects_acquisition_sources
+    projects.write_text("schema_version: 2\nprojects: {}\n", encoding="utf-8")
+    machine.write_text(machine.read_text(encoding="utf-8").replace("    base_repo: false\n", ""), encoding="utf-8")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {})
+    value = {"schema_version": 2, "projects": {"sample": {"base_repo": True}}}
+    discarded = []
+    monkeypatch.setattr(config_migrations, "_test_replacement_value", value, raising=False)
+    monkeypatch.setattr(config_migrations, "_test_discarded_results", discarded, raising=False)
+    namespace = {}
+    exec(
+        "def replacement(doc, schema):\n"
+        "    original = _ORIGINAL_MIGRATE_LOADED(doc, schema)\n"
+        "    if schema == SCHEMA_PROJECTS:\n"
+        "        _test_discarded_results.append(original)\n"
+        "        return _test_replacement_value\n"
+        "    return original\n",
+        namespace,
+    )
+    wrapper = FunctionType(namespace["replacement"].__code__, vars(config_migrations))
+    monkeypatch.setattr(config_migrations, "migrate_loaded", wrapper)
+    report = cfg.load_config_report(machine, **options)
+    assert len(discarded) == 1 and discarded[0] is not value
+    assert calls == ["repos"]
+    assert report.value.repos["sample"].base_repo is True
+    assert any(o.source == config_migrations.SCHEMA_PROJECTS and o.stage == "config-migration"
+               and o.authority is ScanAuthority.COMPLETE for o in report.observations)
+    owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.INDETERMINATE
+    assert report.reusable is False
+
+
+def test_projects_acquisition_self_restoring_loader_cannot_borrow_completion(
+    monkeypatch, projects_acquisition_sources,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import projects_registry
+
+    machine, projects, calls, options = projects_acquisition_sources
+    projects.write_text("schema_version: 2\nprojects: {}\n", encoding="utf-8")
+    machine.write_text(machine.read_text(encoding="utf-8").replace("    base_repo: false\n", ""), encoding="utf-8")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {})
+    original = projects_registry.load_projects_document
+    value = {"schema_version": 2, "projects": {"sample": {"base_repo": True}}}
+    discarded = []
+
+    def replacement(content):
+        discarded.append(original(content))
+        monkeypatch.setattr(projects_registry, "load_projects_document", original)
+        return value
+
+    monkeypatch.setattr(projects_registry, "load_projects_document", replacement)
+    report = cfg.load_config_report(machine, **options)
+    assert len(discarded) == 1 and discarded[0] is not value
+    assert calls == ["repos"]
+    assert projects_registry.load_projects_document is original
+    assert report.value.repos["sample"].base_repo is True
+    assert any(o.stage == "projects-parser" and o.authority is ScanAuthority.COMPLETE
+               for o in report.observations)
+    owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.INDETERMINATE
+    assert report.reusable is False
+
+
+def test_projects_acquisition_read_time_loader_swap_preserves_original_evaluation_order(
+    monkeypatch, projects_acquisition_sources,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import projects_registry, strict_yaml
+
+    machine, projects, calls, options = projects_acquisition_sources
+    projects.write_text("schema_version: 2\nprojects: {sample: {base_repo: true}}\n", encoding="utf-8")
+    machine.write_text(machine.read_text(encoding="utf-8").replace("    base_repo: false\n", ""), encoding="utf-8")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {})
+    native_read = Path.read_text
+    native_parse = strict_yaml._StrictLoader.get_single_data
+
+    def replacement(content):
+        calls.append("replacement")
+        return {"schema_version": 2, "projects": {"sample": {"base_repo": False}}}
+
+    def read(path, *args, **kwargs):
+        content = native_read(path, *args, **kwargs)
+        if path == projects:
+            calls.append("read")
+            monkeypatch.setattr(projects_registry, "load_projects_document", replacement)
+        return content
+
+    def parse(loader):
+        calls.append("parse")
+        return native_parse(loader)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(strict_yaml._StrictLoader, "get_single_data", parse)
+    report = cfg.load_config_report(machine, **options)
+    assert projects_registry.load_projects_document is replacement
+    assert calls == ["repos", "read", "parse"]
+    assert report.value.repos["sample"].base_repo is True
+    owned = [o for o in report.observations if o.source == str(projects) and o.stage == "projects-registry"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.COMPLETE
+    assert report.reusable is False
+
+
+@pytest.fixture
+def knowledge_acquisition_sources(tmp_path, monkeypatch):
+    from agent_worktrees import git_ops, registry_paths, repos
+
+    launch, knowledge = tmp_path / "launch", tmp_path / "knowledge"
+    paths = []
+    for anchor, body in ((launch, "stateless: true\n"), (knowledge, "headless: true\n")):
+        path = anchor / cfg.INREPO_CONFIG_DIRNAME / "config.yaml"
+        path.parent.mkdir(parents=True)
+        path.write_text(body, encoding="utf-8")
+        paths.append(path)
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        f"repos:\n  knowledge:\n    class: worktree\n    windows: '{knowledge}'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(repos, "read_registry", _knowledge_read_registry)
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: registry)
+    monkeypatch.setattr(registry_paths, "installation_context", lambda: {})
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k: SimpleNamespace(
+        returncode=128, stdout="", stderr="",
+    ))
+    machine = {"knowledge_repo": "knowledge", "repos": {"launch": {"anchor": str(launch)}}}
+    return machine, paths[0], paths[1], registry
+
+
+@pytest.mark.parametrize("mode", ["unbound", "invalid-binding", "stateful", "unregistered"])
+def test_knowledge_acquisition_original_gate_outcomes(
+    monkeypatch, knowledge_acquisition_sources, mode,
+):
+    import builtins
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    machine, launch, knowledge, registry = knowledge_acquisition_sources
+    if mode == "unbound":
+        machine["knowledge_repo"] = ""
+    elif mode == "invalid-binding":
+        machine["knowledge_repo"] = object()
+    elif mode == "stateful":
+        launch.write_text("stateless: false\n", encoding="utf-8")
+    else:
+        registry.write_text("repos: {}\n", encoding="utf-8")
+    opened = []
+    native_open = builtins.open
+
+    def open_source(path, *args, **kwargs):
+        if Path(path) in (launch, knowledge):
+            opened.append(Path(path))
+        return native_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", open_source)
+    with acquisition.capture_config_observations() as observations:
+        value = cfg._load_knowledge_overlay_config(machine, {}, "launch", "windows")
+    report = AcquisitionReport("knowledge-preferences", value, tuple(observations))
+    assert value == {}
+    assert opened == ([] if mode in ("unbound", "invalid-binding") else [launch])
+    assert report.reusable is False
+    owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
+    assert owned, "the original knowledge owner did not report its terminal outcome"
+    expected = ScanAuthority.INDETERMINATE if mode == "invalid-binding" else ScanAuthority.COMPLETE
+    assert owned[-1].authority is expected
+    if mode == "invalid-binding":
+        assert any(f.detail == "AttributeError" for f in report.findings)
+
+
+@pytest.mark.parametrize("mode", ["populated", "malformed", "missing", "denied"])
+def test_knowledge_acquisition_original_data_and_uncertainty(
+    monkeypatch, knowledge_acquisition_sources, mode,
+):
+    import builtins
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    machine, launch, knowledge, _ = knowledge_acquisition_sources
+    knowledge.write_text(
+        "headless: true\ncopilot_profiles: [{name: portable}]\nsrcroot: excluded\n"
+        if mode != "malformed" else "copilot_profiles: [\n",
+        encoding="utf-8",
+    )
+    if mode == "missing":
+        knowledge.unlink()
+    events, parsed = [], {}
+    native_open, native_load = builtins.open, cfg.yaml.load
+
+    def open_source(path, *args, **kwargs):
+        if Path(path) in (launch, knowledge):
+            events.append(("read", Path(path)))
+            if Path(path) == knowledge and mode == "denied":
+                raise PermissionError("synthetic private preference bytes")
+        return native_open(path, *args, **kwargs)
+
+    def parse(stream, *args, **kwargs):
+        name = getattr(stream, "name", None)
+        path = Path(name) if name is not None else None
+        if path in (launch, knowledge):
+            events.append(("parse", path))
+            assert kwargs["Loader"] is cfg._YamlSafeLoader
+        result = native_load(stream, *args, **kwargs)
+        if path in (launch, knowledge):
+            parsed[path] = result
+        return result
+
+    monkeypatch.setattr(builtins, "open", open_source)
+    monkeypatch.setattr(cfg.yaml, "load", parse)
+    with acquisition.capture_config_observations() as observations:
+        value = cfg._load_knowledge_overlay_config(machine, {}, "launch", "windows")
+    report = AcquisitionReport("knowledge-preferences", value, tuple(observations))
+    expected = [("read", launch), ("parse", launch)]
+    if mode != "missing":
+        expected.append(("read", knowledge))
+    if mode not in ("missing", "denied"):
+        expected.append(("parse", knowledge))
+    assert events == expected
+    assert report.reusable is False
+    assert "synthetic private" not in repr(report.observations)
+    if mode == "populated":
+        assert value["headless"] is True and "srcroot" not in value
+        assert value["copilot_profiles"] is parsed[knowledge]["copilot_profiles"]
+    else:
+        assert value == {}
+        failures = [o for o in report.observations if o.source == str(knowledge)]
+        assert any(o.authority is ScanAuthority.INDETERMINATE for o in failures)
+        assert not any(o.authority is ScanAuthority.ABSENT for o in failures)
+    owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
+    assert owned, "acquired preference data has no original owner outcome"
+    assert owned[-1].authority is ScanAuthority.COMPLETE
+
+
+def test_knowledge_acquisition_late_callable_selection_keeps_identity_and_uncertainty(monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    calls = []
+    profiles = [{"name": "replacement"}]
+
+    def resolve(name, platform):
+        calls.append(("resolve", name, platform))
+        return "knowledge-anchor"
+
+    def read(anchor):
+        calls.append(("read", anchor))
+        if anchor == "launch-anchor":
+            monkeypatch.setattr(cfg, "_resolve_anchor_from_registry", resolve)
+            return {"stateless": True}
+        return {"copilot_profiles": profiles}
+
+    monkeypatch.setattr(cfg, "_load_inrepo_config", read)
+    machine = {"knowledge_repo": "knowledge", "repos": {"launch": {"anchor": "launch-anchor"}}}
+    with acquisition.capture_config_observations() as observations:
+        value = cfg._load_knowledge_overlay_config(machine, {}, "launch", "windows")
+    report = AcquisitionReport("knowledge-preferences", value, tuple(observations))
+    assert calls == [("read", "launch-anchor"), ("resolve", "knowledge", "windows"),
+                     ("read", "knowledge-anchor")]
+    assert cfg._resolve_anchor_from_registry is resolve
+    assert value["copilot_profiles"] is profiles
+    assert report.reusable is False
+    owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
+    assert owned and owned[-1].authority is ScanAuthority.INDETERMINATE
+
+
+@pytest.mark.parametrize("callback_name", [
+    "_load_knowledge_overlay_config", "_load_inrepo_config", "_resolve_anchor_from_registry",
+])
+@pytest.mark.parametrize("self_restoring", [False, True], ids=["same-globals", "self-restoring"])
+def test_knowledge_acquisition_wrappers_cannot_borrow_original_completion(
+    tmp_path, monkeypatch, knowledge_acquisition_sources, callback_name, self_restoring,
+):
+    from types import FunctionType
+
+    from dropin_registry import ScanAuthority
+
+    machine, _, _, _ = knowledge_acquisition_sources
+    original = getattr(cfg, callback_name)
+    module = cfg
+    selected = []
+
+    def wrapper(*args, **kwargs):
+        selected.append(args)
+        if self_restoring:
+            monkeypatch.setattr(module, callback_name, original)
+        return original(*args, **kwargs)
+
+    replacement = FunctionType(wrapper.__code__, original.__globals__, closure=wrapper.__closure__)
+    assert replacement.__globals__ is original.__globals__
+    monkeypatch.setattr(cfg, callback_name, replacement)
+    machine.update(repo_name="launch", platform="windows", machine="fixture")
+    machine_path = tmp_path / "machine.yaml"
+    machine_path.write_text(cfg.yaml.safe_dump(machine), encoding="utf-8")
+
+    report = cfg.load_config_report(machine_path, include_control_plane_related_pr=False)
+
+    assert selected
+    assert report.value.headless is True
+    assert report.reusable is False
+    assert report.authority is ScanAuthority.INDETERMINATE
+    owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
+    assert owned and owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for o in owned for f in o.findings)
+    if self_restoring:
+        assert getattr(cfg, callback_name) is original
+
+
+def test_installation_acquisition_original_unselected_outcome_has_no_child_effects(monkeypatch):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "  ")
+    calls = []
+
+    def forbidden():
+        calls.append("helper")
+        pytest.fail("an unselected context must not load a helper")
+
+    monkeypatch.setattr(registry_paths, "_helper", forbidden)
+    with acquisition.capture_config_observations() as observations:
+        value = registry_paths.installation_context()
+    assert value is None
+    assert calls == []
+    owned = [o for o in observations if o.stage == "installation-context"]
+    assert len(owned) == 1, "the original installation-context decision has no outcome"
+    assert owned[0].authority is ScanAuthority.COMPLETE
+
+
+def test_installation_acquisition_original_selected_keeps_identity_and_no_result_cache(tmp_path, monkeypatch):
+    import os
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition, registry_paths
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
+    result = {"marketplaceId": "example", "pluginRoot": str(tmp_path / "cell")}
+    calls = []
+
+    def resolve(**kwargs):
+        assert kwargs == {"payload_root": tmp_path, "environment": os.environ}
+        assert kwargs["environment"] is os.environ
+        calls.append("resolve")
+        return result
+
+    helper = SimpleNamespace(resolve_registry_context=resolve)
+    monkeypatch.setattr(registry_paths, "_helper", lambda: calls.append("helper") or helper)
+    monkeypatch.setattr(registry_paths, "_payload_root", lambda: calls.append("payload") or tmp_path)
+    with acquisition.capture_config_observations() as observations:
+        assert registry_paths.installation_context() is result
+        assert registry_paths.installation_context() is result
+    assert calls == ["helper", "payload", "resolve"] * 2
+    report = AcquisitionReport("installation-context", result, tuple(observations))
+    assert report.reusable is False
+    owned = [o for o in observations if o.stage == "installation-context"]
+    assert len(owned) == 2, "selected original decisions have no per-call provenance"
+    assert all(o.authority is ScanAuthority.COMPLETE for o in owned)
+    assert any(o.stage != "installation-context" and o.authority is ScanAuthority.INDETERMINATE
+               for o in observations), "a selected opaque helper must not become complete child coverage"
+    assert report.authority is ScanAuthority.INDETERMINATE
+
+
+@pytest.mark.parametrize("failure_at", ["helper", "resolve"])
+def test_installation_acquisition_original_errors_keep_exception_identity(tmp_path, monkeypatch, failure_at):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
+    error = ValueError("synthetic private context failure")
+    calls = []
+
+    def resolve(**kwargs):
+        calls.append("resolve")
+        raise error
+
+    def helper():
+        calls.append("helper")
+        if failure_at == "helper":
+            raise error
+        return SimpleNamespace(resolve_registry_context=resolve)
+
+    monkeypatch.setattr(registry_paths, "_helper", helper)
+    monkeypatch.setattr(registry_paths, "_payload_root", lambda: calls.append("payload") or tmp_path)
+    with acquisition.capture_config_observations() as observations:
+        with pytest.raises(ValueError) as caught:
+            registry_paths.installation_context()
+    assert caught.value is error
+    assert calls == (["helper"] if failure_at == "helper" else ["helper", "payload", "resolve"])
+    assert "synthetic private" not in repr(observations)
+    owned = [o for o in observations if o.stage == "installation-context"]
+    assert owned, "the original fatal installation-context outcome was not recorded"
+    assert owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.detail == "ValueError" for o in owned for f in o.findings)
+
+
+def test_installation_acquisition_late_selection_preserves_overlay_read_parse_order(tmp_path, monkeypatch):
+    import builtins
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "")
+    overlay = tmp_path / cfg.MARKETPLACE_OVERLAYS_DIR / "example" / "config.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("headless: true\n", encoding="utf-8")
+    calls = []
+    native_exists, native_open, native_load = Path.exists, builtins.open, cfg.yaml.load
+
+    def resolve(**kwargs):
+        calls.append("resolve")
+        return {"marketplaceId": " example "}
+
+    helper = SimpleNamespace(resolve_registry_context=resolve)
+
+    def base(*args, **kwargs):
+        calls.append("base")
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
+        monkeypatch.setattr(registry_paths, "_helper", lambda: calls.append("helper") or helper)
+        return {"headless": False, "default_branch": "dev"}
+
+    def exists(path):
+        if path == overlay:
+            calls.append("exists")
+        return native_exists(path)
+
+    def read(path, *args, **kwargs):
+        if Path(path) == overlay:
+            calls.append("read")
+        return native_open(path, *args, **kwargs)
+
+    def parse(stream, *args, **kwargs):
+        calls.append("parse")
+        assert kwargs["Loader"] is cfg._YamlSafeLoader
+        return native_load(stream, *args, **kwargs)
+
+    monkeypatch.setattr(cfg.inrepo_config_source, "load_config_base", base)
+    monkeypatch.setattr(registry_paths, "_helper", lambda: pytest.fail("helper selected before base acquisition"))
+    monkeypatch.setattr(registry_paths, "_payload_root", lambda: calls.append("payload") or tmp_path)
+    monkeypatch.setattr(Path, "exists", exists)
+    monkeypatch.setattr(builtins, "open", read)
+    monkeypatch.setattr(cfg.yaml, "load", parse)
+    with acquisition.capture_config_observations() as observations:
+        value = cfg._load_inrepo_config(str(tmp_path))
+    assert value == {"headless": True, "default_branch": "dev"}
+    assert calls == ["base", "helper", "payload", "resolve", "exists", "read", "parse"]
+    owned = [o for o in observations if o.stage == "installation-context"]
+    assert owned and owned[-1].authority is ScanAuthority.COMPLETE
+
+
+def test_installation_acquisition_self_restoring_callback_cannot_borrow_original_completion(tmp_path, monkeypatch):
+    from types import FunctionType
+
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "")
+    original = registry_paths.installation_context
+    calls, base = [], {"headless": True}
+
+    def wrapper():
+        calls.append("replacement")
+        monkeypatch.setattr(registry_paths, "installation_context", original)
+        return original()
+
+    replacement = FunctionType(wrapper.__code__, original.__globals__, closure=wrapper.__closure__)
+    assert replacement.__globals__ is original.__globals__
+    monkeypatch.setattr(registry_paths, "installation_context", replacement)
+    monkeypatch.setattr(cfg.inrepo_config_source, "load_config_base", lambda *a, **k: base)
+    with acquisition.capture_config_observations() as observations:
+        value = cfg._load_inrepo_config(str(tmp_path))
+    assert value is base
+    assert calls == ["replacement"]
+    assert registry_paths.installation_context is original
+    owned = [o for o in observations if o.stage == "installation-context"]
+    assert owned and owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for o in owned for f in o.findings)
+
+
+def test_installation_acquisition_method_binding_precedes_payload_callback(tmp_path, monkeypatch):
+    from agent_worktrees import registry_paths
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
+    calls, result = [], {"marketplaceId": "example"}
+
+    def original(**kwargs):
+        calls.append("original")
+        assert kwargs["payload_root"] is tmp_path
+        return result
+
+    def replacement(**kwargs):
+        pytest.fail("the resolver method was rebound after argument evaluation")
+
+    helper = SimpleNamespace(resolve_registry_context=original)
+
+    def payload():
+        calls.append("payload")
+        helper.resolve_registry_context = replacement
+        return tmp_path
+
+    monkeypatch.setattr(registry_paths, "_helper", lambda: calls.append("helper") or helper)
+    monkeypatch.setattr(registry_paths, "_payload_root", payload)
+    assert registry_paths.installation_context() is result
+    assert calls == ["helper", "payload", "original"]
+    assert helper.resolve_registry_context is replacement
+
+
+@pytest.fixture
+def control_plane_acquisition_sources(monkeypatch):
+    from agent_worktrees import related, repos, state_root
+
+    calls, pr, project = [], {"enabled": True, "required": True}, object()
+    state = SimpleNamespace(anchor="control-anchor", plugins=["plugin-anchor"], failure_at=None, rebind=False)
+
+    def discover():
+        calls.append("discover")
+        return state.anchor
+
+    def plugins():
+        calls.append("plugins")
+        return state.plugins
+
+    def local_path():
+        calls.append("local-path")
+        return "control-anchor"
+
+    def anchor_key(anchor):
+        calls.append(("key", anchor))
+        return anchor
+
+    def registry():
+        calls.append("registry")
+        return [SimpleNamespace(name="control", local_path=local_path)]
+
+    def rebound(*args, **kwargs):
+        pytest.fail("config-source callback rebound after nested project argument evaluation")
+
+    def load_project(name, **kwargs):
+        calls.append(("project", name, kwargs))
+        if state.rebind:
+            monkeypatch.setattr(state_root, "config_source_anchors", rebound)
+        return project
+
+    def sources(config, *, base_anchor):
+        if config is not project:
+            calls.append("execution-sources")
+            return []
+        calls.append(("sources", base_anchor))
+        assert base_anchor == "control-anchor"
+        if state.failure_at == "sources":
+            raise PermissionError("private control-plane source body")
+        return [SimpleNamespace(anchor="control-anchor", origin="harness"),
+                SimpleNamespace(anchor="knowledge-anchor", origin="knowledge")]
+
+    def contribution(anchor, origin):
+        calls.append(("contribution", anchor, origin))
+        return f"{origin}:{anchor}"
+
+    def graft(anchors):
+        calls.append(("graft", tuple(anchors)))
+        if state.failure_at == "graft":
+            raise ValueError("private control-plane graft body")
+        return SimpleNamespace(related={
+            "target": SimpleNamespace(pr=pr), "empty": SimpleNamespace(pr={}), "missing": SimpleNamespace(),
+        })
+
+    monkeypatch.setattr(related, "find_control_plane_anchor", discover)
+    monkeypatch.setattr(related, "installed_plugin_related_anchors", plugins)
+    monkeypatch.setattr(related, "_anchor_key", anchor_key)
+    monkeypatch.setattr(repos, "list_repos", registry)
+    monkeypatch.setattr(cfg, "load_project_config", load_project)
+    monkeypatch.setattr(state_root, "config_source_anchors", sources)
+    monkeypatch.setattr(related, "config_contribution_anchor", contribution)
+    monkeypatch.setattr(related, "read_related_grafted", graft)
+    return SimpleNamespace(state=state, calls=calls, pr=pr, sources=sources, state_root=state_root)
+
+
+@pytest.mark.parametrize("selected", [False, True], ids=["no-control-plane", "selected-bound-callee"])
+def test_control_plane_acquisition_original_decision_preserves_order_and_values(
+    control_plane_acquisition_sources, selected,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    source = control_plane_acquisition_sources
+    if selected:
+        source.state.rebind = True
+    else:
+        source.state.anchor, source.state.plugins = None, []
+    with acquisition.capture_config_observations() as observations:
+        value = cfg._control_plane_related_pr_map()
+    if selected:
+        assert value == {"target": source.pr} and value["target"] is source.pr
+        assert source.calls == [
+            "discover", "plugins", ("key", "control-anchor"), "registry", "local-path", "local-path",
+            ("key", "control-anchor"), ("project", "control", {"include_control_plane_related_pr": False}),
+            ("sources", "control-anchor"), ("contribution", "control-anchor", "harness"),
+            ("contribution", "knowledge-anchor", "knowledge"),
+            ("graft", ("plugin-anchor", "harness:control-anchor", "knowledge:knowledge-anchor")),
+        ]
+        assert source.state_root.config_source_anchors is not source.sources
+    else:
+        assert value == {} and source.calls == ["discover", "plugins"]
+    report = AcquisitionReport("control-plane-related-pr", value, tuple(observations))
+    owned = [o for o in observations if o.stage == "control-plane-related-pr"]
+    assert len(owned) == 1 and owned[0].authority is ScanAuthority.COMPLETE
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    assert any(o.stage == "config-owner" and o.source == "control-plane-related-pr"
+               and o.authority is ScanAuthority.INDETERMINATE for o in observations)
+    assert acquisition.current_observations() is None
+
+
+@pytest.mark.parametrize("failure_at", ["sources", "graft"], ids=["inner-fallback", "outer-caught"])
+def test_control_plane_acquisition_caught_errors_keep_fallback_and_type_only_outcome(
+    control_plane_acquisition_sources, failure_at,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees.acquisition_report import AcquisitionReport
+
+    source = control_plane_acquisition_sources
+    source.state.failure_at = failure_at
+    with acquisition.capture_config_observations() as observations:
+        value = cfg._control_plane_related_pr_map()
+    assert source.calls[:9] == [
+        "discover", "plugins", ("key", "control-anchor"), "registry", "local-path", "local-path",
+        ("key", "control-anchor"), ("project", "control", {"include_control_plane_related_pr": False}),
+        ("sources", "control-anchor"),
+    ]
+    if failure_at == "sources":
+        assert value == {"target": source.pr} and value["target"] is source.pr
+        assert source.calls[9:] == [
+            ("contribution", "control-anchor", "harness"),
+            ("graft", ("plugin-anchor", "harness:control-anchor")),
+        ]
+    else:
+        assert value == {}
+        assert source.calls[9:] == [
+            ("contribution", "control-anchor", "harness"),
+            ("contribution", "knowledge-anchor", "knowledge"),
+            ("graft", ("plugin-anchor", "harness:control-anchor", "knowledge:knowledge-anchor")),
+        ]
+    report = AcquisitionReport("control-plane-related-pr", value, tuple(observations))
+    owned = [o for o in observations if o.stage == "control-plane-related-pr"]
+    assert owned and owned[-1].authority is ScanAuthority.INDETERMINATE
+    expected_type = "PermissionError" if failure_at == "sources" else "ValueError"
+    assert any(f.detail == expected_type for o in owned for f in o.findings)
+    assert "private control-plane" not in repr(observations)
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    assert acquisition.current_observations() is None
+
+
+@pytest.mark.parametrize("mode", ["same-globals", "self-restoring", "nested-original"])
+def test_control_plane_acquisition_selected_wrapper_cannot_borrow_original_completion(
+    monkeypatch, control_plane_acquisition_sources, mode,
+):
+    from types import FunctionType
+
+    from dropin_registry import ScanAuthority
+
+    source = control_plane_acquisition_sources
+    owner = cfg
+    original = cfg._control_plane_related_pr_map
+    replacement_pr = {"enabled": False}
+    selected, reads = [], []
+    machine, global_path = Path("synthetic-machine.yaml"), Path("synthetic-global.yaml")
+
+    def wrapper():
+        selected.append(mode)
+        if mode == "self-restoring":
+            monkeypatch.setattr(owner, "_control_plane_related_pr_map", original)
+        assert original()["target"] is source.pr
+        if mode == "nested-original":
+            assert original()["target"] is source.pr
+        return {"target": replacement_pr}
+
+    replacement = FunctionType(wrapper.__code__, original.__globals__, closure=wrapper.__closure__)
+    assert replacement.__globals__ is original.__globals__
+
+    def read(path):
+        reads.append(path)
+        if path == global_path:
+            return {}
+        assert path == machine
+        monkeypatch.setattr(cfg, "_control_plane_related_pr_map", replacement)
+        return {"repo_name": "target", "platform": "windows", "machine": "fixture",
+                "repos": {"target": {"anchor": "target-anchor"}}}
+
+    def premature():
+        pytest.fail("control-plane callback selected before original config acquisition")
+
+    monkeypatch.setattr(cfg, "_control_plane_related_pr_map", premature)
+    monkeypatch.setattr(cfg, "global_config_path", lambda: global_path)
+    monkeypatch.setattr(cfg, "_load_yaml_safe", read)
+    monkeypatch.setattr(cfg, "_load_config_d", lambda *a, **k: {})
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {})
+    monkeypatch.setattr(cfg, "_resolve_adoption_defaults_from_registry", lambda *a: {})
+    monkeypatch.setattr(cfg, "derive_worktree_root", lambda anchor: "target-worktrees")
+    monkeypatch.setattr(cfg, "detect_machine", lambda value=None: value or "fixture")
+    report = cfg.load_config_report(machine, include_knowledge_preferences=False)
+    assert reads == [global_path, machine] and selected == [mode]
+    assert report.value.repos["target"].pr.enabled is False
+    original_calls = 2 if mode == "nested-original" else 1
+    assert source.calls.count("discover") == original_calls
+    assert source.calls.count("plugins") == original_calls
+    assert source.calls.count("registry") == original_calls
+    assert source.calls.count("local-path") == original_calls * 2
+    assert source.calls.count(("sources", "control-anchor")) == original_calls
+    assert source.calls.count(("graft", (
+        "plugin-anchor", "harness:control-anchor", "knowledge:knowledge-anchor",
+    ))) == original_calls
+    assert source.calls[-1] == "execution-sources"
+    if mode == "self-restoring":
+        assert cfg._control_plane_related_pr_map is original
+    owned = [o for o in report.observations if o.stage == "control-plane-related-pr"]
+    assert sum(o.authority is ScanAuthority.COMPLETE for o in owned) == original_calls
+    assert owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for f in owned[-1].findings)
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    assert cfg.config_acquisition.current_observations() is None

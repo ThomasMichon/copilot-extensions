@@ -11,7 +11,8 @@ path's existing keys and exit 0:
   original message's, and nothing new was enqueued.
 - ``accepted``: a keyed live message taken by an older daemon whose response
   has no ``duplicate`` field, so it can't say whether it matched an earlier
-  request (``duplicate: null``).
+  request (``duplicate: null``); or an ordinary native ``--receipt-only`` read
+  proving historical admission only, without new delivery or completion.
 - ``admitted`` / ``sdk_accepted`` / ``consumed``: current live receipt evidence,
   independent of requested urgency or whether a bounded reply wait settled.
 
@@ -154,12 +155,18 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
     except StartupObservationError as exc:
         print(f"[UNKNOWN] {exc}", file=sys.stderr, flush=True)
         if as_json:
-            emit({
+            payload = {
                 "outcome": "unknown", "target": target, "retryable": False,
                 "clock": exc.clock,
                 "reason": exc.reason or f"startup_{exc.clock}_timeout", "phase": exc.phase,
                 "elapsed_s": round(exc.elapsed, 3),
-            })
+            }
+            if (
+                getattr(args, "expected_native_session_id", None) is not None
+                and getattr(args, "idempotency_key", None) is not None
+            ):
+                payload["idempotency_key"] = args.idempotency_key
+            emit(payload)
         sys.exit(70)
     except SendRefused as refused:
         refused.target = refused.target or target

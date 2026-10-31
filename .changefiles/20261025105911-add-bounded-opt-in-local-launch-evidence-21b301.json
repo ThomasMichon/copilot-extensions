@@ -1,0 +1,9 @@
+{
+  "comment": "Add bounded opt-in local launch evidence summaries without inferring prompt acceptance",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

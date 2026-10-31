@@ -1,0 +1,13 @@
+{
+  "comment": "Add protected owner-read embedding without credential export and explicit effective ADO identity semantics",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

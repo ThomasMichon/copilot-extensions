@@ -10,10 +10,11 @@ Copilot; :func:`execute` runs a harmless argv.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
-from worktree_manager import launcher
+from worktree_manager import engine_client, launcher
 from worktree_manager.engine_client import LaunchPlan
 
 
@@ -117,15 +118,35 @@ def test_remote_action_without_target_is_invalid():
     assert launcher.execute(le) == 1
 
 
-def test_execute_runs_argv_and_returns_code():
+@pytest.fixture
+def owner_workspace(tmp_path: Path, monkeypatch):
+    calls = []
+
+    def query(project, args):
+        assert project is None
+        assert args == [
+            "agent-policy", "check", "--path", str(tmp_path), "--operation", "launch", "--json",
+        ]
+        calls.append(args)
+        return {
+            "version": 1, "repository": str(tmp_path), "expose_agent": None,
+            "sources": [], "denied_by": [], "allowed": True,
+        }
+
+    monkeypatch.setattr(engine_client, "run_json", query)
+    yield tmp_path
+    assert len(calls) == 1
+
+
+def test_execute_runs_argv_and_returns_code(owner_workspace):
     plan = _exec_plan(cmd=[sys.executable, "-c", "import sys; sys.exit(3)"],
-                      work_dir=None, no_mux=True, env={})
+                      work_dir=str(owner_workspace), status_path=str(owner_workspace), no_mux=True, env={})
     assert launcher.launch(plan) == 3
 
 
-def test_execute_success_path():
+def test_execute_success_path(owner_workspace):
     plan = _exec_plan(cmd=[sys.executable, "-c", "print('ok')"],
-                      work_dir=None, env={})
+                      work_dir=str(owner_workspace), status_path=str(owner_workspace), env={})
     assert launcher.launch(plan) == 0
 
 

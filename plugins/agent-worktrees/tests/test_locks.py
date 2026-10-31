@@ -88,20 +88,20 @@ def test_pid_alive_is_public_alias():
 # module's own guard is the ``pid <= 0`` short-circuit and the delegation itself.
 
 def test_pid_alive_non_positive_short_circuits_without_delegating():
-    with patch.object(locks.single_instance_lease, "pid_alive") as mocked:
+    with patch("single_instance_lease.pid_alive") as mocked:
         assert locks._pid_alive(0) is False
         assert locks._pid_alive(-1) is False
         mocked.assert_not_called()
 
 
 def test_pid_alive_delegates_to_single_instance_lease():
-    with patch.object(
-        locks.single_instance_lease, "pid_alive", return_value=True
+    with patch(
+        "single_instance_lease.pid_alive", return_value=True
     ) as mocked:
         assert locks._pid_alive(4242) is True
         mocked.assert_called_once_with(4242)
-    with patch.object(
-        locks.single_instance_lease, "pid_alive", return_value=False
+    with patch(
+        "single_instance_lease.pid_alive", return_value=False
     ) as mocked:
         assert locks._pid_alive(4242) is False
         mocked.assert_called_once_with(4242)

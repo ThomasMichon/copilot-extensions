@@ -6,9 +6,11 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tarfile
+import time
 
 import pytest
 
@@ -18,6 +20,52 @@ sys.path.insert(0, str(TOOLS))
 import prepare_runtime_source as source_runtime
 
 PLUGIN = "agent-fixture"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows transient rename locks")
+@pytest.mark.parametrize("failures", [1, 3, 4])
+def test_prepared_publication_retries_only_bounded_transient_locks(tmp_path, monkeypatch, failures):
+    payload, destination = tmp_path / "payload", tmp_path / "published"
+    payload.mkdir()
+    (payload / "selected.txt").write_text("selected")
+    actual = Path.rename
+    attempts, sleeps = [], []
+
+    def locked(path, target):
+        attempts.append((path, target))
+        if len(attempts) <= failures:
+            raise PermissionError("synthetic transient sharing lock")
+        return actual(path, target)
+
+    monkeypatch.setattr(Path, "rename", locked)
+    monkeypatch.setattr(source_runtime.time, "sleep", sleeps.append)
+    if failures < 4:
+        source_runtime._rename_prepared(payload, destination, deadline=time.monotonic() + 10)
+        assert (destination / "selected.txt").read_text() == "selected"
+        assert len(attempts) == failures + 1
+    else:
+        with pytest.raises(PermissionError):
+            source_runtime._rename_prepared(payload, destination, deadline=time.monotonic() + 10)
+        assert not destination.exists() and (payload / "selected.txt").is_file()
+        assert len(attempts) == 4
+    assert len(sleeps) == min(failures, 3)
+
+
+def test_prepared_publication_never_retries_permanent_or_expired_errors(tmp_path, monkeypatch):
+    attempts = []
+
+    def refuse(path, target):
+        attempts.append(path)
+        raise FileExistsError("foreign destination")
+
+    monkeypatch.setattr(Path, "rename", refuse)
+    monkeypatch.setattr(source_runtime.time, "sleep", lambda *args: pytest.fail("permanent error retried"))
+    with pytest.raises(FileExistsError):
+        source_runtime._rename_prepared(tmp_path / "input", tmp_path / "output", deadline=time.monotonic() + 10)
+    assert len(attempts) == 1
+    with pytest.raises(source_runtime.SourcePreparationError, match="deadline"):
+        source_runtime._rename_prepared(tmp_path / "input", tmp_path / "output", deadline=time.monotonic() - 1)
+    assert len(attempts) == 1
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -90,6 +138,69 @@ def test_prepare_is_noneditable_relocatable_and_reuses_exact_bytes(
     assert (first.payload / "pyproject.toml").read_bytes() == (
         root / "plugins" / PLUGIN / "pyproject.toml"
     ).read_bytes()
+
+
+@pytest.mark.parametrize("archive_mask", ["0000", "0002", "0077"])
+def test_prepare_retains_safe_executable_modes_independent_of_git_config(
+    repository, tmp_path, monkeypatch, archive_mask,
+):
+    root, _commit = repository
+    script = root / "plugins" / PLUGIN / "scripts" / "install.sh"
+    script.chmod(0o755)
+    _git(root, "update-index", "--chmod=+x", "--", str(script.relative_to(root)))
+    commit = _merged_commit(root)
+    _git(root, "config", "tar.umask", archive_mask)
+    extract = source_runtime._extract_archive
+    archived_modes = {}
+
+    def observe_archive(archive, destination, **options):
+        with tarfile.open(archive, "r:") as incoming:
+            archived_modes.update(
+                (member.name, member.mode) for member in incoming if member.isfile()
+            )
+        return extract(archive, destination, **options)
+
+    monkeypatch.setattr(source_runtime, "_extract_archive", observe_archive)
+    prepared = source_runtime.prepare(root, commit, PLUGIN, tmp_path / "prepared")
+    assert archived_modes[f"plugins/{PLUGIN}/scripts/install.sh"] == 0o755
+    assert archived_modes[f"plugins/{PLUGIN}/pyproject.toml"] == 0o644
+    assert (prepared.payload / "scripts/install.sh").read_bytes() == script.read_bytes()
+    if os.name != "nt":
+        assert (prepared.payload / "scripts/install.sh").stat().st_mode & 0o777 == 0o755
+
+
+@pytest.mark.parametrize("deadline", [True, 0, float("nan"), float("inf")])
+def test_preparation_deadline_refuses_before_git_or_output(
+    repository, tmp_path, monkeypatch, deadline,
+):
+    monkeypatch.setattr(
+        source_runtime, "_git", lambda *args, **options: pytest.fail("invalid deadline ran Git"),
+    )
+    with pytest.raises(source_runtime.SourcePreparationError, match="deadline"):
+        source_runtime.prepare(*repository, PLUGIN, tmp_path / "prepared", deadline=deadline)
+    assert not (tmp_path / "prepared").exists()
+
+
+def test_preparation_git_child_preserves_original_deadline(repository, monkeypatch):
+    actual = source_runtime.subprocess.run
+    timeouts = []
+
+    def run(command, **options):
+        timeouts.append(options["timeout"])
+        return actual(command, **options)
+
+    monkeypatch.setattr(source_runtime.subprocess, "run", run)
+    assert source_runtime._git(repository[0], "rev-parse", "HEAD", deadline=time.monotonic() + 5) == repository[1]
+    assert len(timeouts) == 1 and 0 < timeouts[0] <= 5
+
+
+def test_deadline_is_checked_between_archive_copy_chunks(monkeypatch):
+    clock = iter((1.0, 3.0))
+    monkeypatch.setattr(source_runtime.time, "monotonic", lambda: next(clock))
+    copied = io.BytesIO()
+    with pytest.raises(source_runtime.SourcePreparationError, match="deadline"):
+        source_runtime._copy(io.BytesIO(b"x" * ((1 << 20) + 1)), copied, deadline=2.0)
+    assert len(copied.getvalue()) == 1 << 20
 
 
 def test_same_package_version_new_commit_gets_another_generation(
@@ -194,6 +305,111 @@ def test_prepare_materializes_canonical_vendor_content(
     assert "../../libs/example" not in materialized
     assert "editable" not in materialized
     assert not _git(root, "status", "--porcelain", "--ignored")
+
+
+def _manager_source(root: Path) -> Path:
+    manager = root / "worktree-manager"
+    (manager / "src" / "worktree_manager").mkdir(parents=True)
+    (manager / "src" / "worktree_manager" / "__init__.py").write_text("VALUE = 3\n")
+    (manager / "pyproject.toml").write_text(
+        '[project]\nname="copilot-extensions-worktree-manager"\nversion="0.1.0-dev97"\n'
+        '[tool.uv.sources]\nagent-example={path="../libs/example", editable=true}\n',
+        encoding="utf-8",
+    )
+    library = root / "libs" / "example"
+    (library / "src" / "example").mkdir(parents=True)
+    (library / "src" / "example" / "__init__.py").write_text("VALUE = 7\n")
+    (library / "pyproject.toml").write_text(
+        '[project]\nname="agent-example"\nversion="1.0.0"\n', encoding="utf-8",
+    )
+    shutil.copyfile(
+        REPOSITORY / "worktree-manager" / "packaged-assets.json",
+        manager / "packaged-assets.json",
+    )
+    tools = root / "tools"
+    tools.mkdir()
+    manifest = json.loads((manager / "packaged-assets.json").read_text())
+    for name in manifest["files"]:
+        (tools / name).write_text("raise RuntimeError('fetched tool must not execute')\n")
+    return manager
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_shipped_trusted_toolkit_prepares_manager_without_executing_fetched_tools(
+    repository: tuple[Path, str], tmp_path: Path, retained: bool,
+) -> None:
+    root, _ = repository
+    manager = _manager_source(root)
+    if retained:
+        report = source_runtime.materializer.materialize_launch_wrapper_assets_into(
+            source_consumer_dir=manager, dest_consumer_dir=manager, canonical_root=root,
+        )
+        assert report and all(line.startswith("OK") for line in report)
+    commit = _merged_commit(root)
+    installed = tmp_path / "installed-manager"
+    installed.mkdir()
+    shutil.copyfile(manager / "packaged-assets.json", installed / "packaged-assets.json")
+    report = source_runtime.materializer.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=installed, dest_consumer_dir=installed, canonical_root=REPOSITORY,
+    )
+    assert report and all(line.startswith("OK") for line in report)
+    scripts = installed / "scripts"
+    for helper in (REPOSITORY / "libs" / "versioned-runtime").glob("versioned_runtime*.py"):
+        shutil.copyfile(helper, scripts / helper.name)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    (unrelated / "materialize_main.py").write_text("raise RuntimeError('cwd import')\n")
+    command = [
+        sys.executable, "-I", "-B",
+        str(scripts / "runtime-source-tools" / "prepare_runtime_source.py"),
+        "--source", str(root), "--commit", commit, "--plugin", "worktree-manager",
+        "--output", str(tmp_path / "prepared"),
+    ]
+    documents = []
+    for _ in range(2):
+        result = subprocess.run(
+            command, cwd=unrelated, capture_output=True, text=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        assert result.returncode == 0, result.stderr
+        documents.append(json.loads(result.stdout))
+    assert [document["reused"] for document in documents] == [False, True]
+    assert documents[0]["identity"] == documents[1]["identity"]
+    payload = Path(documents[0]["payload"])
+    identity = source_runtime.read_source_identity(
+        payload, "0.1.0-dev97", plugin="worktree-manager",
+    )
+    assert identity is not None and identity.source_commit == commit
+    assert not (payload / "plugin.json").exists()
+    assert (payload / "libs" / "example" / "src" / "example" / "__init__.py").is_file()
+    assert "editable" not in (payload / "pyproject.toml").read_text()
+    assert (payload / "scripts" / "runtime-source-tools" / "prepare_runtime_source.py").read_bytes() == (
+        root / "tools" / "prepare_runtime_source.py"
+    ).read_bytes()
+    assert not _git(root, "status", "--porcelain", "--ignored")
+
+
+@pytest.mark.parametrize("kind", ["project-name", "retained-asset"])
+def test_prepare_manager_refuses_mismatched_identity_or_retained_asset(
+    repository: tuple[Path, str], tmp_path: Path, kind: str,
+) -> None:
+    root, _ = repository
+    manager = _manager_source(root)
+    if kind == "project-name":
+        project = manager / "pyproject.toml"
+        project.write_text(project.read_text().replace(
+            "copilot-extensions-worktree-manager", "unrelated-project",
+        ))
+        message = "project identity"
+    else:
+        toolkit = manager / "scripts" / "runtime-source-tools"
+        toolkit.mkdir(parents=True)
+        (toolkit / "prepare_runtime_source.py").write_text("different assembly\n")
+        message = "already exists"
+    commit = _merged_commit(root)
+    with pytest.raises(source_runtime.SourcePreparationError, match=message):
+        source_runtime.prepare(root, commit, "worktree-manager", tmp_path / "prepared")
+    assert not list((tmp_path / "prepared").rglob("runtime-source.json"))
 
 
 def test_prepared_generation_refuses_changed_content(

@@ -1,0 +1,9 @@
+{
+  "comment": "Bind Windows bootstrap Python acquisition to one physical UV executable before guarded traversal.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

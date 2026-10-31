@@ -1,0 +1,5 @@
+{
+  "schema": "copilot-extensions.runtime-source-target-provider",
+  "version": 1,
+  "planner": "scripts/runtime_profile.py"
+}

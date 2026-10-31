@@ -1,0 +1,9 @@
+{
+  "comment": "Add the Gateway-registered SSH enrollment/public-directory service, bounded connected-machine notifications and an optional owned forward-only native Linux relay with distinct generation-bound relay keys. Retain foreground writer/native custody through unconfirmed retirement and repeated cancellation; atomically bind Windows directories, database and lease files to the selected account, preserve closed-ACL SQLite recovery, and retry validated lease-only startup without displacing a live writer.",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

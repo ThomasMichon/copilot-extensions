@@ -86,7 +86,9 @@ def test_source_selection_works_with_only_real_py_launcher(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.splitlines() == [f"selected:{cycle}:{selected}" for cycle in range(2)]
-    assert not result.stderr
+    assert result.stderr and all(
+        line == "source-runtime: completed source work" for line in result.stderr.splitlines()
+    )
 
 
 @pytest.mark.parametrize("plugin", ["agent-mcp", "agent-codespaces"])
@@ -156,6 +158,8 @@ def test_source_selection_stays_windowless_from_pythonw_for_two_cycles(
     assert recorded["stdout"].splitlines() == [
         f"selected:{cycle}:{selected}" for cycle in range(2)
     ]
-    assert not recorded["stderr"]
+    assert recorded["stderr"] and all(
+        line == "source-runtime: completed source work" for line in recorded["stderr"].splitlines()
+    )
     assert not surfaced, f"Visible console windows: {surfaced}"
     assert not focus_changes, f"Console foreground transitions: {focus_changes}"

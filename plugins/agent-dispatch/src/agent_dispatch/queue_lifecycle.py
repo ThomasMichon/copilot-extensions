@@ -32,6 +32,7 @@ from .queue_common import (
 from .queue_progress import QueueProgressMixin
 from .queue_execution_handoff import require_execution_admission
 from .queue_records import SpawnState, Status, TaskError
+from .queue_task_recovery import RESET_FIELDS, require_task_recovery_safe
 
 # marketplace-isolation: allow release-verb (a business verb, "release from
 # suspension" -- coincidentally matches the guard's lease/mutex keyword scan
@@ -553,18 +554,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
             require_owner=False,
             now=now,
             note=f"reset: {reason}" if reason else "reset",
-            extra={
-                "owner": None,
-                "owner_session_id": None,
-                "lease_expires_at": None,
-                "claimed_at": None,
-                "started_at": None,
-                "last_liveness": None,
-                "card": None,
-                "card_draft": None,
-                "awaiting_steer": 0,
-                "resume_requested": 0,
-            },
+            extra=RESET_FIELDS,
             expected_generation=expected_generation,
             expected_owner_session_id=expected_owner_session_id,
             expected_status=expected_status,
@@ -805,6 +795,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if expected_updated_at is not None and task.updated_at != expected_updated_at:
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} changed while the transition was in flight")
+            if release_spawn_detail == _RESET_TO_PROPOSED:
+                require_task_recovery_safe(self, conn, task_id)
             if (release_spawn or to == Status.STARTED) and conn.execute(
                 "SELECT 1 FROM spawn_reservations WHERE task_id=? AND cooling_token IS NOT NULL",
                 (task_id,),

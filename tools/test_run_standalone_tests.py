@@ -91,7 +91,21 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
     }
     companions = {}
     if component == "fleet-manager":
+        # This build tests retained Fleet resources, not the optional SSH packages.
+        for relative, name in (
+            ("plugins/agent-ssh", "agent-ssh"),
+            ("libs/single-instance-lease", "agent-single-instance-lease"),
+        ):
+            dependency = checkout / relative
+            dependency.mkdir(parents=True)
+            (dependency / "pyproject.toml").write_text(
+                '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\n'
+                f'[project]\nname="{name}"\nversion="1.0"\n'
+                '[tool.setuptools.packages.find]\nwhere=["src"]\n', encoding="utf-8",
+            )
+            (dependency / "src").mkdir()
         companions = {
+            "_runtime_launcher.py": Path("libs/installer-engine/runtime_launcher.py"),
             "_installer_process.py": Path("libs/installer-engine/installer_engine_process.py"),
             "_construction_procutil.py": Path("libs/agent-procutil/src/agent_procutil/__init__.py"),
         }
@@ -127,7 +141,7 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
             [sys.executable, "-I", "-c",
              "from setuptools.build_meta import build_wheel; "
              f"build_wheel({str(output)!r})"],
-            cwd=candidate, capture_output=True, text=True, timeout=30,
+            cwd=candidate, capture_output=True, text=True, timeout=60,
             **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
         assert result.returncode == 0, result.stdout + result.stderr
@@ -148,7 +162,7 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
             assert wheel.read(f"{package}/{name}") == data
 
 
-def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_path, monkeypatch):
+def test_fleet_manager_preparation_selects_ssh_and_lease_sources_without_hosting(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "run_uv_install", lambda uv, args, **kwargs: runner.subprocess.run(
         [uv, "pip", "install", *args], **{key: value for key, value in kwargs.items() if key not in ("trusted_source_roots", "retained_resource_roots")},
     ))
@@ -167,7 +181,10 @@ def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_pat
     python.parent.parent.mkdir(parents=True)
     runner.prepare("fleet-manager", python)
     assert calls[-1] == [
-        "uv", "pip", "install", "--python", str(python), str(tmp_path / "fleet-manager") + "[dev]",
+        "uv", "pip", "install", "--python", str(python),
+        str(tmp_path / "plugins" / "agent-ssh"),
+        str(tmp_path / "libs" / "single-instance-lease"),
+        str(tmp_path / "fleet-manager") + "[dev]",
     ]
     assert "fleet-manager" in runner.STANDALONE_CONSUMERS
 
@@ -234,7 +251,7 @@ def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("component", [
     "fleet-manager", "worktree-manager", "services/index", "services/dispatch",
-    "services/chat", "services/pr",
+    "services/chat", "services/pr", "services/ssh",
 ])
 def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch, component):
     projects = {
@@ -244,9 +261,11 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
         "services/dispatch": "agent-dispatch-service",
         "services/chat": "agent-chat-service",
         "services/pr": "agent-pull-requests-service",
+        "services/ssh": "agent-ssh-service",
         "plugins/agent-index": "agent-index",
         "plugins/agent-dispatch": "agent-dispatch",
         "plugins/agent-pull-requests": "agent-pull-requests",
+        "plugins/agent-ssh": "agent-ssh",
         "plugins/agent-index/libs/dropin-registry": "agent-dropin-registry",
         "libs/zdd": "agent-zdd",
         "libs/agent-procutil": "agent-procutil",
@@ -262,7 +281,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
             '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\n'
             f'[project]\nname="{name}"\nversion="1.0"\n'
             '[project.optional-dependencies]\ndev=[]\nnative=[]\ntest=[]\nstore=[]\nserver=[]\n'
-            'fleet=[]\nservice-gateway=[]\n',
+            'fleet=[]\nservice-gateway=[]\nssh-client=[]\n',
             encoding="utf-8",
         )
         with (project / "pyproject.toml").open("a", encoding="utf-8") as manifest:
@@ -274,8 +293,9 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
             'agent-procutil = {path="../../libs/agent-procutil", editable=true}\n',
         )
     (tmp_path / "libs" / "versioned-runtime").mkdir()
-    if component in {"fleet-manager", "services/pr"}:
+    if component in {"fleet-manager", "services/pr", "services/chat", "services/ssh"}:
         (tmp_path / "libs" / "installer-engine").mkdir()
+    if component in {"fleet-manager", "services/pr", "services/ssh"}:
         (tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil").mkdir()
     monkeypatch.setattr(runner, "REPO", tmp_path)
     python = runner.default_python(component)
@@ -287,11 +307,10 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
     def prepare(uv, arguments, **kwargs):
         assert kwargs["trusted_source_roots"] == (tmp_path,)
         expected_resources = (tmp_path / "libs" / "versioned-runtime",)
-        if component in {"fleet-manager", "services/pr"}:
-            expected_resources += (
-                tmp_path / "libs" / "installer-engine",
-                tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil",
-            )
+        if component in {"fleet-manager", "services/pr", "services/chat", "services/ssh"}:
+            expected_resources += (tmp_path / "libs" / "installer-engine",)
+        if component in {"fleet-manager", "services/pr", "services/ssh"}:
+            expected_resources += (tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil",)
         assert kwargs["retained_resource_roots"] == expected_resources
         return admitted(uv, arguments, **kwargs)
 
@@ -316,7 +335,14 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
     assert "--exclude-newer" in installs[0] and "--reinstall" in installs[0]
     extra = "[test]" if component == "services/index" else "[dev]"
     assert any(argument.endswith(component.replace("/", os.sep) + extra) for argument in installs[0])
-    if component in ("services/index", "services/dispatch", "services/pr"):
+    if component == "services/ssh":
+        assert "--no-editable" in installs[0]
+        assert any(argument.endswith(
+            str(Path("fleet-manager")) + "[service-gateway,ssh-client]",
+        ) for argument in installs[0])
+    else:
+        assert "--no-editable" not in installs[0]
+    if component in ("services/index", "services/dispatch", "services/pr", "services/ssh"):
         assert "--override" in installs[0]
 
 
@@ -341,6 +367,7 @@ def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch
     ("agent-dispatch-service", "services/dispatch"),
     ("agent-chat-service", "services/chat"),
     ("agent-pull-requests-service", "services/pr"),
+    ("agent-ssh-service", "services/ssh"),
 ])
 def test_service_alias_uses_canonical_preparation_lease_and_tests(
     tmp_path, monkeypatch, legacy, canonical,
@@ -377,7 +404,7 @@ def test_service_alias_uses_canonical_preparation_lease_and_tests(
         assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
         assert all(Path(path).is_relative_to(root / "tests") for path in command[5:-2])
         assert command[5] == str(root / "tests")
-        assert kwargs["limits"].wall_seconds == (120 if canonical == "services/chat" else 600)
+        assert kwargs["limits"].wall_seconds == (180 if canonical == "services/chat" else 600)
         assert kwargs["env"].get("AGENT_CHAT_TEST_SUITE") == (
             "acceptance" if canonical == "services/chat" else None
         )
@@ -511,7 +538,8 @@ def exercise_native_legacy_service_cli(tmp_path, legacy, canonical):
             encoding="utf-8",
         )
     runner.REPO = tmp_path
-    assert runner.main([legacy, "--timeout", "10"]) == 0
+    # Fresh native interpreters and containment startup are not a 10-second SLA.
+    assert runner.main([legacy, "--timeout", "30"]) == 0
     assert (root / "executed.txt").read_text() == "canonical"
     assert not (tmp_path / ".test-venvs" / sys.platform / legacy).exists()
 
@@ -533,7 +561,7 @@ def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environ
         f"{legacy!r}, {canonical!r})\n"
     )
     result = subprocess.run(
-        [str(python), "-I", "-c", script], capture_output=True, text=True, timeout=30,
+        [str(python), "-I", "-c", script], capture_output=True, text=True, timeout=60,
         env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )

@@ -75,9 +75,22 @@ def session_manager(tmp_db: Database) -> SessionManager:
 
 
 @pytest.fixture
-def spawn_target() -> SpawnTarget:
+def permitted_provider_hosting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """A fake provider's policy answer for this permitted temporary workspace."""
+    from repository_policy import require_agent_hosting
+
+    result = {"allowed": True, **require_agent_hosting(tmp_path).to_dict()}
+    query = AsyncMock(return_value=result)
+    monkeypatch.setattr("agent_bridge.provider_hosting.query_provider_policy", query)
+    return query
+
+
+@pytest.fixture
+def spawn_target(tmp_path: Path) -> SpawnTarget:
     """A local SpawnTarget for testing."""
-    return SpawnTarget(type="local", cwd="/tmp/test-dir")
+    cwd = tmp_path / "test-dir"
+    cwd.mkdir()
+    return SpawnTarget(type="local", cwd=str(cwd))
 
 
 @pytest.fixture

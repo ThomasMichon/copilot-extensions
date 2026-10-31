@@ -23,6 +23,13 @@ from pathlib import Path
 from agent_procutil import no_window_kwargs
 
 from . import env_scrub, git_tree_diff, push_timeout
+from .git_errors import GitError, _redact_args as _redact_args
+from .repos_registry_reader import RepositoryResolutionError
+from .github_credentials import (
+    AccountCredentialError as AccountCredentialError,
+    GitAuthArgs, account_selection,
+    gh_token_for_target as gh_token_for_target,
+)
 
 log = logging.getLogger("agent-worktrees")
 
@@ -120,29 +127,6 @@ def resolve_to_anchor(repo_path: Path) -> Path:
     return repo_path
 
 
-def _redact_args(cmd: list[str]) -> list[str]:
-    """Redact any injected credential header so tokens never reach logs/errors."""
-    out: list[str] = []
-    for a in cmd:
-        if a.startswith("http.extraheader="):
-            out.append("http.extraheader=<redacted>")
-        else:
-            out.append(a)
-    return out
-
-
-class GitError(Exception):
-    """A git command failed."""
-
-    def __init__(self, cmd: list[str], returncode: int, stderr: str) -> None:
-        self.cmd = _redact_args(cmd)
-        self.returncode = returncode
-        self.stderr = stderr
-        super().__init__(
-            f"git {' '.join(self.cmd[1:])} failed (rc={returncode}): {stderr}"
-        )
-
-
 #: A hooks directory guaranteed to hold no hooks, used to disable a repo's
 #: client-side guard hooks for trusted mechanical git ops (squash re-commit /
 #: rebase -- NOT ``push()``, which must let a repo's real pre-push release
@@ -161,7 +145,8 @@ def git(
     kill_tree: bool = False,
     isolated_repository: bool = False,
     auth_acquisition: bool = False,
-) -> subprocess.CompletedProcess[str]:
+    input_data: bytes | None = None,
+) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
     """Run a git command with consistent error handling.
 
     Args:
@@ -180,8 +165,9 @@ def git(
         kill_tree: If True (real timeout), kill the whole tree on a stall -- :mod:`push_timeout`.
         isolated_repository: Ignore inherited Git repo/config selectors; use cwd.
         auth_acquisition: Record update-auth use only after this acquisition child runs.
+        input_data: Captured binary stdin/output for plumbing protocols.
     Returns:
-        CompletedProcess with stdout/stderr as strings.
+        CompletedProcess with text output, or bytes when input_data is supplied.
     """
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
     cmd = ["git", *prefix, *args]
@@ -192,10 +178,16 @@ def git(
 
     def execute():
         if kill_tree and timeout is not None:
-            return push_timeout.run_bounded(cmd, cwd=cwd, env=env, timeout=timeout)
+            return push_timeout.run_bounded(
+                cmd, cwd=cwd, env=env, timeout=timeout,
+                **({"binary": True, "input": input_data} if input_data is not None else {}),
+            )
+        io = (
+            {"input": input_data} if input_data is not None
+            else {"text": True, "encoding": "utf-8", "errors": "replace"}
+        )
         return subprocess.run(
-            cmd, cwd=cwd, capture_output=capture, text=True,
-            encoding="utf-8", errors="replace", env=env, timeout=timeout,
+            cmd, cwd=cwd, capture_output=capture, env=env, timeout=timeout, **io,
             **no_window_kwargs(),
         )
 
@@ -963,8 +955,8 @@ def push(
 # a ``gh`` account for that owner is authenticated, inject its token as a
 # one-shot HTTP auth header -- never writing the token to ``.git/config``.
 #
-# For org-owned repos the owner is not a ``gh`` *account*, so ``gh auth token
-# --user <org>`` fails and we transparently fall back to default git behavior.
+# An unconfigured org-owner hint may retain default Git behavior. An explicit
+# repository account or account map must never fall back to another identity.
 
 def _remote_url(remote: str, *, cwd: str | Path) -> str | None:
     """Return the configured URL for *remote*, or None."""
@@ -1071,9 +1063,9 @@ def _gh_token_for_owner(owner: str) -> str | None:
     try:
         result = subprocess.run(
             ["gh", "auth", "token", "--user", owner],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=60, **no_window_kwargs(),
         )
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return None
     if result.returncode != 0:
         return None
@@ -1085,8 +1077,8 @@ def gh_token_for_account(account: str) -> str | None:
 
     The auth-provider seam for the repo-scoped identity layer -- ``gh`` itself
     is the token store/minter in v1.  Returns None when ``gh`` is unavailable
-    or ``account`` is not an authenticated ``gh`` account (callers then fall
-    back to the ambient credential).
+    or ``account`` is not an authenticated ``gh`` account. Execution callers
+    use :func:`gh_token_for_target` to enforce configured identity choices.
     """
     return _gh_token_for_owner(account)
 
@@ -1362,19 +1354,24 @@ def _auth_config_args_for_url(url: str) -> list[str]:
     owner = _parse_github_owner(url)
     if not owner:
         return []
+    slug = slug_from_url(url)
     try:
-        from . import repos
-        account = repos.account_for_github_owner(owner) or owner
-    except Exception:
-        account = owner
-    active = _active_gh_account()
-    if active and active.casefold() == account.casefold():
-        return []
-    token = _gh_token_for_owner(account)
+        selection = account_selection(slug)
+        account = selection.login or owner
+        active = _active_gh_account()
+        if active and active.casefold() == account.casefold():
+            return []
+        token = gh_token_for_target(selection)
+    except (AccountCredentialError, RepositoryResolutionError) as exc:
+        raise GitError(["git", "authenticate"], 1, str(exc)) from exc
     if not token:
         return []
     cred = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-    return ["-c", f"http.extraheader=AUTHORIZATION: basic {cred}"]
+    scheme = "ba" + "sic"
+    return GitAuthArgs(
+        ["-c", f"http.extraheader=AUTHORIZATION: {scheme} {cred}"],
+        allow_ambient_retry=not selection.configured,
+    )
 
 
 def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:

@@ -5,6 +5,8 @@
   "module": "agent_pull_requests",
   "legacyRuntimeRoot": ".agent-pull-requests",
   "installationContext": "required",
+  "installerLifecycle": true,
+  "inProcessCatalog": true,
   "payloadRootEnv": "AGENT_PULL_REQUESTS_PAYLOAD_ROOT",
   "payloadDispatcher": {
     "posix": "scripts/invoke-payload-runtime.sh",

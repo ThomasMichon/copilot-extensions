@@ -720,7 +720,7 @@ async def post_live_message(
     expected_session_id = body.expected_session_id
     if body.plugin_readiness is not None:
         message_kind, expected_session_id = await live_startup_controls.startup_message(
-            db, body, target, target_session_id,
+            db, body, target, session_id,
             existing_kind=_existing_startup_kind, wait_readiness=wait_plugin_readiness,
         )
         now = time.time()
@@ -741,17 +741,11 @@ async def post_live_message(
         existing_log = _store(request).get(target_session_id)
         after = existing_log.latest_id if existing_log is not None else 0
 
-    message_id, reason = db.enqueue_live_message_if_fresh(
-        target_session_id,
-        sender=body.sender,
-        body=body.body,
-        now=now,
-        reply_to=body.reply_to,
-        kind=message_kind,
-        delivery=body.delivery,
-        expected_session_id=expected_session_id,
-        idempotency_key=body.idempotency_key,
-        report_duplicate=True,
+    from .live_inbox import enqueue_message
+
+    message_id, reason = enqueue_message(
+        request, db, session_id, body, kind=message_kind,
+        expected_session_id=expected_session_id, now=now,
     )
     duplicate = reason == "duplicate"
     if duplicate:
@@ -796,7 +790,7 @@ async def post_live_message(
     if message_id is None:  # defensive: unreachable when reason is None
         raise HTTPException(status_code=500, detail="enqueue produced no id")
     admitted_receipt, receipt_current = admission_evidence(
-        db, target_session_id, message_id, now, duplicate
+        db, session_id, message_id, now, duplicate
     )
     if admitted_receipt:
         target_session_id = admitted_receipt.session_id

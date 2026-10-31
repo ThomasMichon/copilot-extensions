@@ -91,6 +91,8 @@ def repo(tmp_path: Path) -> Path:
     _git(["config", "user.name", "Test"], root)
     _git(["config", "user.email", "test@example.com"], root)
     _git(["config", "core.autocrlf", "false"], root)
+    if os.name == "nt":
+        _git(["config", "core.longpaths", "true"], root)
     (root / "tools").mkdir()
     for name in _REQUIRED_TOOLS:
         shutil.copy(_TOOLS / name, root / "tools" / name)
@@ -243,6 +245,24 @@ def test_promote_refuses_when_a_uv_editable_reference_does_not_resolve(repo: Pat
     assert _git(["rev-parse", "main"], repo) == main_before
     worktrees = _git(["worktree", "list"], repo)
     assert worktrees.count("\n") == 0 or len(worktrees.splitlines()) == 1
+
+
+def test_promote_refuses_missing_already_local_dependency(repo: Path):
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "pyproject.toml").write_text(
+        '[project]\nname = "demo-plugin"\nversion = "0.1.0-dev1"\n'
+        '[tool.uv.sources]\nagent-missing = { path = "libs/missing" }\n',
+        encoding="utf-8",
+    )
+    _commit(repo, "declare missing local dependency")
+    _git(["checkout", "-q", "main"], repo)
+    main_before = _git(["rev-parse", "main"], repo)
+
+    with pytest.raises(pr.PromotionError, match="local source"):
+        pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+    assert _git(["rev-parse", "main"], repo) == main_before
+    assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
 def test_promote_push_moves_main_and_pushes_tag(tmp_path: Path, repo: Path):
@@ -873,6 +893,8 @@ def test_promote_refuses_to_repromote_a_rolled_back_dev_state(repo: Path):
                 "reverted_dev_head": dev_head,
                 "reason": "broke something",
             },
+            "schema": "copilot-extensions.release-pipeline-state",
+            "version": 1,
         }),
         encoding="utf-8",
     )
@@ -931,6 +953,8 @@ def test_promote_allows_a_genuine_forward_advancement_after_a_promotion(repo: Pa
         json.dumps({
             "paused": False,
             "last_promotion": {"dev_head": first_dev_head, "tag": "promote-x"},
+            "schema": "copilot-extensions.release-pipeline-state",
+            "version": 1,
         }),
         encoding="utf-8",
     )

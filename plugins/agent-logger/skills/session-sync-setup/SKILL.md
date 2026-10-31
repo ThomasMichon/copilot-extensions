@@ -308,6 +308,39 @@ yet wired to `sync.retention_days`.
 
 ## Compaction (cold-session archival)
 
+Scheduled runs preserve source-qualified usage evidence before transfer or
+compaction. SQLite collection partitions multi-session scopes that exceed the
+reader's 20,000-row or five-second budget; neither per-read limit is raised.
+An individual session that still exceeds either budget remains an explicit
+failure, retaining its last good ledger. Unsafe/schema/corruption errors do not
+trigger partition retries.
+
+Transcript accounting reads at most 64 MiB / 200,000 events per
+session per pass, and at most 256 MiB across the pass. Large finite histories
+converge over subsequent runs instead of failing solely because of total size.
+The existing 4 MiB individual-line and bounded accounting-artifact limits remain.
+The collector durably rotates its starting session after actual work, including
+failed reads, so repeatedly failing or changing early histories cannot starve
+later stable ones. It reserves a next position before work to survive interruption.
+Keyed observation aggregation keeps replay processing linear rather than merging
+an entire full checkpoint for every repeated event.
+
+`<home>/transcript-progress/` is a disposable, content-free checkpoint cache:
+only validated accounting scalars, source revision, byte offsets and counts.
+Unchanged completed sources need no transcript reads. A changed revision,
+including append, restarts validation from zero rather than assuming the old
+prefix was not rewritten. An actively changing large source can remain deferred
+until a stable generation is available; no partial result is called complete.
+Corrupt checkpoints are visibly rebuilt, and deleting this cache loses only
+collection progress, never the published evidence ledger.
+
+`accounting deferred` is distinct from a failed capture: raw transfer continues,
+the last good ledger remains intact, and cold compaction stays blocked until
+coverage is complete. Malformed records, conflicting observations and unsafe or
+oversized individual evidence still fail explicitly. One-shot transcript
+analysis readers retain their original whole-read bounds; resumable collection
+does not silently widen those APIs.
+
 Very old, inactive sessions are compressed into per-session `<id>.tar.gz`
 bundles to reclaim space (`events.jsonl` is ~95% of the bytes and compresses
 ~5x). Opt in under `sync.compact` (see [`references/config.yaml`](references/config.yaml)):
@@ -420,6 +453,15 @@ per-tenant `sync-state-<tenant_id>.db`) remembers each session's last-synced
 content signature, so a routine run only pushes sessions that actually
 changed -- and skips the push entirely when nothing did.
 
+Filesystem pushes prune traversal before entering unrelated source directories
+or sessions outside the selected batch. They do not walk installed plugins or
+other non-session trees merely to discard their files afterward.
+
+Each actual run flushes content-free phase start/end timings to stderr, including
+accounting, session transfer and retention. A finished phase is a timing marker,
+not proof of a successful result; keep the final exit and partial/deferred
+diagnostics when assessing scheduled runs.
+
 ```yaml
 sync:
   change_tracking:
@@ -508,6 +550,19 @@ catalogs do not replace it in this phase.
   (Scheduled Task).
 - **Linux/WSL:** `bash plugins/agent-logger/scripts/install.sh install`
   (systemd user timer).
+
+The Windows GUI-root launcher loads process support from the selected installed
+runtime through the canonical installed resolver on each run, rather than pinning
+a collectible registration-time slot. It starts the shell suspended inside a required kill-on-close Job, and
+prohibits descendant breakaway. Cancellation closes that Job; ordinary completion
+also reaps remaining descendants. A 25-minute launcher guard reports exit 124 and
+retains diagnostics before the unchanged 30-minute Scheduler limit. It does not
+turn timeout into successful sync. Linux/WSL retain systemd's existing lifecycle.
+
+Completed filesystem files and batch signatures survive an interrupted pass;
+the next reconciliation retries remaining differences without re-copying landed
+files or claiming a full-sync marker before completion. Transfer retry does not
+change accounting completeness or permit compaction of deferred evidence.
 
 Set `AGENT_LOGGER_SYNC_DISABLED=1` to make a run a no-op (e.g. in automation
 contexts).

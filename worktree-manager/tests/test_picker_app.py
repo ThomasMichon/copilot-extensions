@@ -14,6 +14,7 @@ import json
 import threading
 from contextlib import redirect_stdout
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +26,19 @@ from worktree_manager import __main__ as entrypoint
 from worktree_manager.engine_client import EngineError, Worktree
 from worktree_manager.pivot_runtime import PivotLoadError, PivotPayload
 from worktree_manager.plugin_contracts import parse_manifest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_launch_journal(tmp_path, monkeypatch):
+    root = tmp_path / "manager"
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    return root
+
+
+async def _wait_for_confirmation(pilot):
+    async with asyncio.timeout(10):
+        while getattr(pilot.app, "_launch_confirmation_pending", False):
+            await pilot.pause(0.01)
 
 
 @pytest.fixture(autouse=True)
@@ -117,10 +131,8 @@ def test_internal_worktrees_surface_is_declarative():
     assert [column.key for column in pivot.columns] == [
         "id4", "machine", "repo", "state_display", "sync_tag", "title"
     ]
-    assert [action.internal for action in pivot.actions] == [
-        "resume", "bare-resume"
-    ]
-    assert [action.shortcut for action in pivot.actions] == ["l", "b"]
+    assert [action.internal for action in pivot.actions] == ["resume"]
+    assert [action.shortcut for action in pivot.actions] == ["l"]
     assert [action.internal for action in pivot.view_actions] == ["new"]
     assert [action.shortcut for action in pivot.view_actions] == ["n"]
 
@@ -146,7 +158,7 @@ def test_worktrees_ready_status_comes_from_contract():
             return app._last_status
 
     assert asyncio.run(_run()) == (
-        "r · 2 worktree(s) · l: Launch/Resume · b: Bare resume · "
+        "r · 2 worktree(s) · l: Launch/Resume · "
         "n: New worktree · r: refresh · q: quit"
     )
 
@@ -342,6 +354,7 @@ def test_injected_worktree_entity_uses_generic_rows_and_typed_launch():
         async with app.run_test(size=(100, 24)) as pilot:
             await app.workers.wait_for_complete()
             await pilot.press("l")
+            await _wait_for_confirmation(pilot)
             from textual.widgets import DataTable
             return (
                 app.pending_launch,
@@ -582,9 +595,23 @@ def _drive(keys: list[str]):
             await app.workers.wait_for_complete()
             for k in keys:
                 await pilot.press(k)
+                await _wait_for_confirmation(pilot)
         return app.pending_launch
 
     return asyncio.run(_run())
+
+
+def test_compact_confirmation_uses_only_the_per_test_private_root(_isolate_launch_journal: Path):
+    from worktree_manager.launch_attempts import LaunchAttempts
+
+    request = _drive(["n"])
+    assert request is not None and request.attempt_id
+    store = LaunchAttempts()
+    assert store.path.is_relative_to(_isolate_launch_journal)
+    assert [row["attempt_id"] for row in store.entries()] == [request.attempt_id]
+    detail = store.detail(request.attempt_id, include_input=True)
+    assert detail["surface"] == "compact-picker" and detail["action"] == "new"
+    assert detail["input"]["prompt"] == ""
 
 
 def test_launch_key_requests_resume_of_selected_row():
@@ -600,9 +627,8 @@ def test_cursor_move_then_launch_targets_that_row():
     assert req is not None and req.worktree_id == "bbbb2222"
 
 
-def test_bare_resume_key():
-    req = _drive(["b"])
-    assert req is not None and req.mode == "bare-resume"
+def test_bare_resume_key_is_retired():
+    assert _drive(["b", "q"]) is None
 
 
 def test_new_worktree_key_needs_no_selection():

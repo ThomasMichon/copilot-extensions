@@ -41,7 +41,11 @@ def _extract_function_block(name: str) -> str:
             depth -= 1
             if depth == 0:
                 source = _PLUGIN_ROOT / "scripts" / "source-runtime.ps1"
-                return f". '{source}'\n" + text[func_start : i + 1]
+                admission = (
+                    _extract_function_block("Assert-DispatchActions")
+                    if name == "Invoke-Stamp" else ""
+                )
+                return admission + f". '{source}'\n" + text[func_start : i + 1]
         i += 1
     raise AssertionError(f"unbalanced braces extracting function {name!r}")
 
@@ -150,6 +154,7 @@ def _run_stamp_harness(
         "function Write-Warn { param($m) Write-Host \"WARN: $m\" }\n"
         "function Write-Skip { param($m) Write-Host \"SKIP: $m\" }\n"
         "function Write-Fail { param($m) Write-Host \"FAIL: $m\" }\n"
+        "function Write-Step { param($m) Write-Host \"STEP: $m\" }\n"
         # Stubbed: irrelevant to the version-ordering guard under test.
         "function New-PluginBuildSnapshot { param($PluginDir, $InstallDir, $Version) return Join-Path $InstallDir \"snapshots/$Version\" }\n"
         f'function Deploy-SelfProvisioningBinstub {{ Set-Content -Path "{deployed_marker}" -Value "deployed" }}\n'
@@ -176,8 +181,9 @@ def _run_stamp_harness(
         text=True,
         env=os.environ,
         timeout=30,
-        check=True,
+        check=False,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
     return result, install_dir / "stamped-version", deployed_marker
 
 

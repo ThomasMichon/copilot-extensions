@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from .install_paths import effective_config_dir, legacy_install_dir, normalized_path
 from .models import RepoBridgeConfig, ServiceConfig
+from .config_write import atomic_write_config, config_file_lock
 
 log = logging.getLogger("agent-bridge")
 
@@ -126,7 +127,7 @@ def _repo_config_layers(repo_root: Path) -> list[Path]:
     return layers
 
 
-def load_config() -> ServiceConfig:
+def load_config(*, strict: bool = False) -> ServiceConfig:
     """Load config from YAML, falling back to defaults."""
     root = config_dir()
     cfg_path = root / "config.yaml"
@@ -145,13 +146,19 @@ def load_config() -> ServiceConfig:
             data = config_migrations.migrate_loaded(data)
             if isinstance(data, dict):
                 data = _normalize_service_config(data, root=root)
-            return ServiceConfig(**data)
+            return _remember_session_modes(ServiceConfig(**data))
         except (OSError, yaml.YAMLError) as exc:
             raise ValueError(
                 "Cannot establish preference authority from configuration; "
                 "refusing caller-settings fallback"
             ) from exc
         except Exception as exc:
+            if strict:
+                raise ValueError("Invalid service configuration; refusing preference fallback") from exc
+            if isinstance(data, dict) and "session_modes" in data:
+                raise ValueError(
+                    "Invalid session_modes configuration; refusing preference fallback"
+                ) from exc
             if isinstance(exc, ValidationError) and any(
                 error["loc"] and str(error["loc"][0]).startswith("remote_acp")
                 for error in exc.errors()
@@ -181,9 +188,14 @@ def load_config() -> ServiceConfig:
                     "Invalid explicit preference policy; refusing caller-settings fallback"
                 ) from exc
             log.warning("Failed to parse %s, using defaults", cfg_path)
-    return ServiceConfig(
+    return _remember_session_modes(ServiceConfig(
         db_path=str(default_db_path(root)),
-    )
+    ))
+
+
+def _remember_session_modes(cfg: ServiceConfig) -> ServiceConfig:
+    cfg._session_modes_at_load = cfg.session_modes.model_copy(deep=True)
+    return cfg
 
 
 def load_repo_bridge_config(repo_root: Path) -> RepoBridgeConfig | None:
@@ -251,20 +263,31 @@ def load_or_create_auth_token() -> str:
 def write_default_config(cfg: ServiceConfig) -> Path:
     """Write a default config.yaml if none exists. Returns the path."""
     cfg_path = config_dir() / "config.yaml"
-    if not cfg_path.exists():
-        data = cfg.model_dump(exclude_defaults=False)
-        cfg_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
-        log.info("Wrote default config to %s", cfg_path)
+    with config_file_lock(cfg_path):
+        if not cfg_path.exists():
+            atomic_write_config(cfg_path, cfg.model_dump(exclude_defaults=False), expected=None)
+            log.info("Wrote default config to %s", cfg_path)
     return cfg_path
 
 
 def save_config(cfg: ServiceConfig) -> Path:
-    """Write config.yaml atomically (via tmp + rename)."""
+    """Serialize a native save without overwriting a concurrent mode preference."""
     cfg_path = config_dir() / "config.yaml"
-    tmp_path = cfg_path.with_suffix(".yaml.tmp")
-    data = cfg.model_dump(exclude_defaults=False)
-    tmp_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
-    tmp_path.replace(cfg_path)
+    with config_file_lock(cfg_path):
+        before = cfg_path.read_bytes() if cfg_path.exists() else None
+        baseline = getattr(cfg, "_session_modes_at_load", None)
+        if before is not None and (
+            baseline is not None or "session_modes" not in cfg.model_fields_set
+        ):
+            latest = load_config(strict=True).session_modes
+            if baseline is None:
+                cfg.session_modes = latest
+            elif latest != baseline:
+                if cfg.session_modes != baseline:
+                    raise ValueError("session_modes changed concurrently; reload before saving")
+                cfg.session_modes = latest
+        atomic_write_config(cfg_path, cfg.model_dump(exclude_defaults=False), expected=before)
+        _remember_session_modes(cfg)
     return cfg_path
 
 
@@ -507,23 +530,25 @@ def adopt_topology(
     if agents_config:
         agents_config = str(Path(agents_config).resolve()).replace("\\", "/")
 
-    cfg = load_config()
-    cfg.topologies[profile_name] = TopologyProfile(
-        machines_yaml=machines_yaml,
-        agents_config=agents_config,
-        source_repo=str(repo),
-    )
-    save_config(cfg)
+    with config_file_lock(config_dir() / CONFIG_FILENAME):
+        cfg = load_config()
+        cfg.topologies[profile_name] = TopologyProfile(
+            machines_yaml=machines_yaml,
+            agents_config=agents_config,
+            source_repo=str(repo),
+        )
+        save_config(cfg)
     return cfg
 
 
 def remove_topology(profile_name: str) -> ServiceConfig:
     """Remove a topology profile. Raises KeyError if not found."""
-    cfg = load_config()
-    if profile_name not in cfg.topologies:
-        raise KeyError(f"Topology profile '{profile_name}' not found")
-    del cfg.topologies[profile_name]
-    save_config(cfg)
+    with config_file_lock(config_dir() / CONFIG_FILENAME):
+        cfg = load_config()
+        if profile_name not in cfg.topologies:
+            raise KeyError(f"Topology profile '{profile_name}' not found")
+        del cfg.topologies[profile_name]
+        save_config(cfg)
     return cfg
 
 

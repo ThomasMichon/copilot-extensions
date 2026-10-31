@@ -7,7 +7,8 @@ import importlib.util
 import json
 import os
 import sys
-from contextlib import nullcontext
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping, Protocol
@@ -36,6 +37,8 @@ class InstallationPrimitive(Protocol):
     def _atomic_write_json(self, path: Path, value: Any, **arguments: Any) -> None: ...
     def _pid_is_live(self, pid: int) -> bool: ...
     def probe_legacy_entrypoint(self, **arguments: Any) -> dict[str, Any]: ...
+    def normalize_source(self, *args: Any, **arguments: Any) -> Any: ...
+    def source_identity(self, *args: Any, **arguments: Any) -> dict[str, Any]: ...
 
 
 def _identity(value: Mapping[str, Any]) -> str:
@@ -69,28 +72,9 @@ def publish_legacy_binding(
     primitive: InstallationPrimitive, **arguments: Any
 ) -> dict[str, Any]:
     """Build ownership metadata only inside an authorized legacy lifecycle."""
-    manifest_path = Path(arguments["legacy_root"]) / "deploy-manifest.json"
-    previous = None
-    reservation = None
-    if os.path.lexists(manifest_path):
-        if manifest_path.is_symlink() or not manifest_path.is_file():
-            raise CommandOwnershipConflict("The legacy deploy manifest is not an owned file.")
-        try:
-            incumbent = getattr(
-                primitive, "read_deployment_manifest", primitive.read_json,
-            )(manifest_path)
-        except (primitive.InstallationContextError, OSError, ValueError) as error:
-            raise CommandOwnershipConflict(
-                f"Cannot validate incumbent command ownership: {error}"
-            ) from error
-        if (
-            not isinstance(incumbent, dict)
-            or incumbent.get("schema_version") != 3
-            or incumbent.get("service") != arguments["plugin_id"]
-        ):
-            raise CommandOwnershipConflict("The legacy deploy manifest is not owned by this plugin.")
-        previous = incumbent.get("commandBinding")
-        reservation = incumbent.get("commandLifecycle")
+    incumbent = _load_lifecycle().incumbent_manifest(_rules(), primitive, arguments)
+    previous = incumbent.get("commandBinding")
+    reservation = incumbent.get("commandLifecycle")
     source_arguments = {
         "payload_root": arguments["payload_root"],
         "plugin_id": arguments["plugin_id"],
@@ -143,13 +127,16 @@ def publish_legacy_binding(
                 "Legacy command ownership belongs to another source, installation, "
                 "or environment; explicit transfer is required."
             )
+    if previous is None and reservation is None:
+        _load_lifecycle()._recovery_commands(_rules(), primitive, arguments)
     return receipt
 
 
-def write_legacy_manifest(
+@contextmanager
+def legacy_manifest_publication(
     primitive: InstallationPrimitive, manifest: dict[str, Any], **arguments: Any
-) -> dict[str, Any]:
-    """Serialize validation and atomic publication at the existing lifecycle."""
+) -> Iterator[tuple[dict[str, Any], dict[str, str], Any]]:
+    """Retain validated command ownership through the caller's manifest commit."""
     root = Path(arguments["legacy_root"])
     if not root.is_absolute() or not root.is_dir():
         raise ValueError("Legacy manifest publication requires an existing absolute runtime root.")
@@ -165,7 +152,7 @@ def write_legacy_manifest(
     lifecycle._publication(_rules(), primitive, arguments, purpose)
     if lease is None:
         lifecycle._reservation(
-            _rules(), primitive, root, lifecycle._owner(_rules(), primitive, arguments),
+            _rules(), primitive, arguments, lifecycle._owner(_rules(), primitive, arguments),
         )
     with (nullcontext(lease) if lease is not None else lifecycle._lock(primitive, arguments)) as lock:
         lifecycle._publication(_rules(), primitive, arguments, purpose)
@@ -173,12 +160,10 @@ def write_legacy_manifest(
             receipt = publish_legacy_binding(primitive, **arguments)
         except SourceProvenanceUnavailable as error:
             if lease is None and (root / "deploy-manifest.json").exists():
-                incumbent = getattr(
-                    primitive, "read_deployment_manifest", primitive.read_json,
-                )(root / "deploy-manifest.json")
+                incumbent = lifecycle.incumbent_manifest(_rules(), primitive, arguments)
                 if "commandLifecycle" in incumbent:
                     owner = lifecycle._owner(_rules(), primitive, arguments)
-                    lifecycle._reservation(_rules(), primitive, root, owner)
+                    lifecycle._reservation(_rules(), primitive, arguments, owner)
                     manifest["commandLifecycle"] = incumbent["commandLifecycle"]
             # A successful unattributed lifecycle has no normalized owner to
             # persist. Only an unfinished operation retains its reservation.
@@ -190,13 +175,108 @@ def write_legacy_manifest(
                     "version": 1, "state": "complete", "owner": lease.owner,
                 }
             elif (root / "deploy-manifest.json").exists():
-                incumbent = getattr(
-                    primitive, "read_deployment_manifest", primitive.read_json,
-                )(root / "deploy-manifest.json")
+                incumbent = lifecycle.incumbent_manifest(_rules(), primitive, arguments)
                 if "commandLifecycle" in incumbent:
                     manifest["commandLifecycle"] = incumbent["commandLifecycle"]
             result = {"status": "published", "reason": "ownership-validated"}
-        primitive._atomic_write_json(root / "deploy-manifest.json", manifest, lock=lock)
+        lock.assert_owned()
+        yield manifest, result, lock
+        lock.assert_owned()
+
+
+def retained_legacy_binding(
+    primitive: InstallationPrimitive, lock: Any, **arguments: Any,
+) -> dict[str, Any]:
+    """Validate an incumbent owner for restoration, without claiming new source."""
+    root = Path(arguments["legacy_root"])
+    lifecycle = _load_lifecycle()
+    if (
+        not root.is_absolute()
+        or not root.is_dir()
+        or lock.path != lifecycle._lock(primitive, arguments).path
+    ):
+        raise CommandOwnershipConflict("Retained restoration requires this runtime's publication lock.")
+    lock.assert_owned()
+    lifecycle._publication(_rules(), primitive, arguments, lifecycle._purpose(_rules(), {}))
+    state = primitive.probe_legacy_entrypoint(
+        **{key: arguments[key] for key in (
+            "payload_root", "plugin_id", "legacy_root", "project_root", "environment",
+        ) if key in arguments},
+        **dict(arguments.get("mode_arguments") or {}),
+    )
+    if (
+        state.get("allowMutation") is not True
+        or state.get("desiredMode") == "namespaced"
+        or state["legacy"]["tombstone"] is not None
+    ):
+        raise CommandOwnershipConflict("Retained restoration requires an admitted legacy runtime.")
+    path = root / "deploy-manifest.json"
+    if path.is_symlink() or not path.is_file():
+        raise CommandOwnershipConflict("Retained command ownership requires an owned manifest file.")
+    try:
+        incumbent = getattr(
+            primitive, "read_deployment_manifest", primitive.read_json,
+        )(path)
+    except (primitive.InstallationContextError, OSError, ValueError) as error:
+        raise CommandOwnershipConflict(f"Cannot validate retained command ownership: {error}") from error
+    if (
+        not isinstance(incumbent, dict)
+        or incumbent.get("schema_version") != 3
+        or incumbent.get("service") != arguments["plugin_id"]
+    ):
+        raise CommandOwnershipConflict("Retained deploy manifest belongs to another plugin.")
+    receipt = incumbent.get("commandBinding")
+    if (
+        not isinstance(receipt, dict)
+        or type(receipt.get("version")) is not int
+        or not isinstance(receipt.get("source"), dict)
+        or not isinstance(receipt.get("payloadRoot"), str)
+        or not Path(receipt["payloadRoot"]).is_absolute()
+    ):
+        raise CommandOwnershipConflict("Retained command ownership receipt is invalid.")
+    source = receipt["source"]
+    if any(not isinstance(source.get(key), str) for key in ("kind", "canonical", "ref")):
+        raise CommandOwnershipConflict("Retained command source identity is invalid.")
+    try:
+        identity = primitive.source_identity(
+            primitive.normalize_source(
+                {key: source[key] for key in ("kind", "canonical", "ref")}, from_receipt=True,
+            ), "retained",
+        )
+    except primitive.InstallationContextError as error:
+        raise CommandOwnershipConflict(f"Retained command source identity is invalid: {error}") from error
+    expected = _legacy_receipt({
+        "sourceFingerprint": identity["fingerprint"],
+        "pluginId": arguments["plugin_id"],
+        "source": {key: identity[key] for key in ("kind", "canonical", "ref", "record")},
+        "payloadRoot": receipt["payloadRoot"],
+    }, {"runtimeRoot": state["legacy"]["root"], "environment": state["environment"]})
+    if receipt != expected:
+        raise CommandOwnershipConflict("Retained command ownership names another source, root, or environment.")
+    reservation = incumbent.get("commandLifecycle")
+    if "commandLifecycle" in incumbent and (
+        not isinstance(reservation, dict)
+        or type(reservation.get("version")) is not int
+        or reservation != {
+            "version": 1, "state": "complete",
+            "owner": {key: value for key, value in receipt.items() if key != "payloadRoot"},
+        }
+    ):
+        raise CommandOwnershipConflict("Retained command lifecycle is not complete for this owner.")
+    lock.assert_owned()
+    return {
+        key: incumbent[key] for key in ("commandBinding", "commandLifecycle") if key in incumbent
+    }
+
+
+def write_legacy_manifest(
+    primitive: InstallationPrimitive, manifest: dict[str, Any], **arguments: Any
+) -> dict[str, Any]:
+    """Serialize validation and atomic publication at the existing lifecycle."""
+    with legacy_manifest_publication(primitive, manifest, **arguments) as (bound, result, lock):
+        primitive._atomic_write_json(
+            Path(arguments["legacy_root"]) / "deploy-manifest.json", bound, lock=lock,
+        )
         return result
 
 
@@ -298,7 +378,6 @@ def resolve_command_binding(
             )(manifest_path)
             if (
                 not isinstance(manifest, dict)
-                or manifest.get("schema_version") != 3
                 or manifest.get("service") != provenance["pluginId"]
             ):
                 result.update(status="blocked", reason="legacy-manifest-invalid")
@@ -317,6 +396,9 @@ def resolve_command_binding(
                 or set(lifecycle) != {"version", "state", "owner"}
             ):
                 result.update(status="blocked", reason="legacy-lifecycle-incomplete")
+                return result
+            if manifest.get("schema_version") != 3:
+                result.update(status="blocked", reason="legacy-manifest-invalid")
                 return result
             if receipt is None:
                 result["reason"] = "legacy-ownership-missing"

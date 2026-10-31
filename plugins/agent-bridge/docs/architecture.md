@@ -9,6 +9,11 @@ through its routing table (`active.json`), so nothing well-known is reserved
 manages agent conversations across multiple Copilot CLI sessions,
 spawning agent subprocesses locally or via SSH.
 
+Managed authoring launch and cold resume honor
+[repository-owned hosting eligibility](repository-hosting.md). Fresh caller and
+receiver checks are independent of discovery, existing custody and source-only
+access; opaque provider/relay protocols currently refuse before launch.
+
 ```
 Copilot CLI sessions (multiple)
   |
@@ -187,6 +192,23 @@ config (`elevated.py` -> `_seed_config`), so it never re-binds -- and thus never
 evicts -- the primary's relay; local elevated agents reuse the primary's relay on
 the same host. The `enable_credential_relay` config flag (default `true`) gates
 relay startup in the `app.py` lifespan.
+
+## HTTP contract compatibility
+
+The HTTP client selects the highest shared contract from its own supported range
+and the running daemon's `/health` advertisement, then checks the operation's
+feature floor. Package-release equality is not required. Negative, inverted or
+disjoint numeric ranges cannot authorize a versioned operation.
+
+The existing per-attempt request fence rechecks both range endpoints and required
+capabilities before sending, including after a definite connection refusal or
+peer replacement. A disjoint range produces a 426 response naming both ranges
+without sending that attempt; an ambiguous prior mutation is never replayed.
+Unversioned peers retain the documented legacy baseline, not assumed support for
+versioned features. This implements the existing
+[version-skew-safe contract pattern](../../../docs/patterns/service-contract-evolution.md)
+without adding a handshake, changing wire generations or completing the separate
+durable/session-pinning programme.
 
 ## Persistent SSH Carrier Foundation
 
@@ -666,6 +688,14 @@ a reattachable loopback protocol (`session_host/`). On Windows the host breaks
 away from the daemon's job; on POSIX it runs in its own session, so a daemon
 restart does not inherently close the child's pipes.
 
+The legacy version-1 Session Host connection reads and validates the complete
+`ATTACH` cursor and configured connect nonce before displacing its current
+frontend or changing reap timers, detach state or the acknowledgement cursor.
+An incomplete connection leaves the current frontend serving; a refused
+connection closes only itself. A validated replacement still takes over the
+single frontend and receives replay after its supplied cursor. This ordering
+does not change the separate private-ticket attachment protocol.
+
 - **Idle / stopped sessions survive transparently.** Session metadata, turns,
   events, and host connection data are persisted to SQLite/host state. On startup
   the daemon reattaches to compatible surviving Session Hosts; otherwise it can
@@ -1006,6 +1036,32 @@ Older clients using unkeyed send do not gain keyed-replay guarantees merely
 because the receiver was updated. Source publication and rollout remain separate.
 
 ## Persistence
+
+The ASGI admission lifecycle retains its instance through event-writer and
+database-close settlement, including startup failure and shutdown cancellation.
+A bounded writer-stop timeout keeps admission live until the actual writer
+thread retires and close is retried; cancellation of an asyncio facade is not
+native completion evidence. An already-retired writer's historical write error
+is logged once without creating a permanent admission hold.
+
+Hosted roster shutdown also retains the original discovery operation behind
+its cancellable joiners, plus provider-native reads and sample futures. The
+cache's own bounded stop API is unchanged. Readiness replacement transfers
+retiring cache holders to the app; final hosting shutdown waits for every
+retained operation before releasing admission, including cancellation or a
+startup failure. Late discovery results still pass the original generation
+fence. Separately admitted Session Hosts are not absorbed into this custody.
+Cancelling the bounded stop attempt itself permits a new stop attempt, not a
+busy retry of its cancelled facade. Cancelling an already-dispatched discovery
+owner destroys its completion proof; hosting retains an unknown admission hold.
+Whole-loop cancel-all is therefore not graceful settlement of those holders:
+it remains responsive but requires an external process-exit boundary rather
+than claiming that daemon threads or cancelled Tasks have retired.
+Late hosting attachment protects the original live discovery Task before
+bounded stop cancels its joiner; it does not replay discovery. A never-started
+coroutine can be cancelled without native work. Already-lost discovery receipts
+or discarded attempt history instead retain an explicit unknown hold through
+the external process-exit boundary, never a false compatibility/finished claim.
 
 - **Sessions:** SQLite database at `~/.agent-bridge/sessions.db` (WAL mode)
 - **Config:** YAML at `~/.agent-bridge/config.yaml`

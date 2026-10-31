@@ -67,6 +67,31 @@ def test_spawn_service_is_the_shared_primitive():
     assert launch.spawn_daemon is agent_procutil.spawn_daemon
 
 
+@pytest.mark.parametrize("linked", ["home", "parent"])
+def test_linked_home_refuses_before_any_launch_artifact(tmp_path, monkeypatch, linked):
+    from agent_procutil import _daemon_instance_store as store
+
+    target = tmp_path / "selected-target"
+    target.mkdir()
+    alias = tmp_path / "vault-home"
+    try:
+        alias.symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"native directory symlink unavailable: {error}")
+    selected = alias if linked == "home" else alias / "runtime"
+    monkeypatch.setenv(config.HOME_ENV, str(selected))
+    monkeypatch.setenv(store.REGISTRY_ENV, str(tmp_path / "registry"))
+    monkeypatch.delenv(store.INSTANCE_ENV, raising=False)
+    monkeypatch.delenv(store.TEST_CONTEXT_ENV, raising=False)
+    monkeypatch.setattr(
+        subprocess, "Popen", lambda *_a, **_k: pytest.fail("redirected home reached process creation"),
+    )
+    with pytest.raises(OSError, match="redirected"):
+        launch.spawn_service(["--foreground"])
+    assert config.home_dir() == selected
+    assert not list(target.iterdir())
+
+
 @pytest.mark.parametrize("shadowed", [False, True])
 def test_vendored_service_imports_its_own_package_from_runtime_cwd(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, shadowed: bool,

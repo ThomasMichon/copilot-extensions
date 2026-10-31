@@ -1,5 +1,66 @@
 # Agent Worktrees -- Architecture
 
+## Related/config acquisition reports
+
+The existing value APIs retain their signatures, return shapes and fallback
+behavior. Optional in-process report siblings share the same acquisition path:
+`related.read_related_report`, `related.read_related_grafted_report`,
+`related.installed_plugin_related_anchors_report`,
+`related_cli._related_config_source_anchors_report`,
+`config_sources.config_source_anchors_report`, `config._load_yaml_safe_report`
+and `config._load_config_d_report`. They add no CLI syntax or JSON fields.
+Machine-overlay reports borrow the machine-config owner's failure-aware lookup
+and link-following marker classification; lookup/stat errors are not absence.
+Report-mode related entry conversion failures retain healthy peers and surface
+uncertainty. Legacy entry conversion exceptions still propagate unchanged.
+Related/config source reports use one purpose-owned, link-following stat
+classifier rather than inferring absence from error-suppressing boolean probes.
+Missing candidates, confirmed incorrect kinds and failed lookups remain distinct.
+Manifest layout/identity and path-resolution fallbacks retain encountered
+uncertainty alongside available values; fallback keys are not stable witnesses.
+Default-base reports also borrow the existing state-root owner's single Git
+lookup result: lookup exceptions, ambiguous nonzero exits and empty successful
+output retain uncertainty even when a default anchor remains available. A
+positive explicit base bypasses that lookup; no Git execution policy changes.
+
+Each `AcquisitionReport[T]` contains the legacy available value, a named
+operation scope, ordered source observations and `ScanAuthority`/`Finding`
+diagnostics. Authority describes logical coverage of that operation only:
+a complete empty result and confirmed absence differ from an unreadable,
+malformed or partially acquired result. Valid peers remain available alongside
+uncertainty. Activation and drop-in entry statuses are retained even when the
+owner's overall scan is complete. A drop-in's last-known contribution remains
+available data, explicitly marked retained, not a fresh confirmed positive.
+Observations project only status/provenance metadata, not configuration bodies;
+new YAML parse diagnostics name the error class rather than quoting contents.
+Owner findings retain their reason/status/provenance fields; unstructured
+detail is omitted because owner parse exceptions can contain private bodies.
+
+The report siblings do not re-read inputs after calling a legacy API, hash
+inputs, introduce a cache, or decide policy. Related overlays retain ordered
+whole-entry replacement for relationship metadata and ignore plugin-provided
+primary markers. An omitted `pr` field retains lower PR defaults; explicit PR
+blocks, including empty blocks, replace them. Explicit
+filesystem plugin discovery retains its compatibility glob; its report exposes
+unobserved directory-membership authority rather than claiming that a successful
+glob establishes completeness.
+
+These operations select config sources, not checkout paths, so their path tag
+is `not-resolved`. CLI consumers still use registered `local_path` only; the
+resident's existing `resolve_path`/srcroot fallback is separate and unchanged.
+Any future root-fact consumer must bind its actual resolution mode.
+
+Every report keeps `reusable = false`, explicit `missing_coverage` and
+`reuse_blockers`. Full `load_config` and committed/default-branch in-repo
+acquisition closure and the stable owner-produced input frontier are not yet
+available through these reports. A COMPLETE operation is not global discovery
+completeness, stability, authorization or permission to reuse facts. No hook or
+protected-write consumer is migrated by this provider-first expansion.
+
+This realizes the harness-guidance vision's reusable-facts/current-decisions
+separation at the acquisition boundary and follows the circumstantial-hook and
+resilient-registry patterns without claiming their full frontier qualification.
+
 ## Concurrent PR publication
 
 ### Unpublished creation retries
@@ -18,11 +79,11 @@ checks; this is not authority to rewrite an existing remote head.
 Different requested branches retain separate entries. Published or partially
 published attempts retain the existing lease and ambiguity guards. If an older
 version already left a duplicate, inspect `pr-status --all --no-live --json`
-before correction. `set-pr --select-branch <branch> --state closed` selects the
-first matching entry: use it only after confirming that entry is the empty,
-unnumbered failed attempt, then verify the numbered PR remains open. It closes
-tracking for the failed attempt, not the provider PR. Never edit the ledger or
-close a numbered association merely to satisfy publication ownership.
+before correction. Empty fields alone do not prove an attempt never published.
+The [local creation cancellation owner](pr-creation-cancellation.md) admits only
+an exact, durably qualified reservation and retains ambiguous legacy attempts.
+Never edit the ledger or close a numbered association merely to satisfy
+publication ownership.
 
 ### Transport boundaries
 
@@ -468,7 +529,7 @@ modeled on `tools/check-headless-launch.py`) scans every `picker_tui/*.py`
 file (except `inbox.py` itself, which IS the primitive) for a raw
 `call_from_thread(` call and fails the build if one is found, with an inline
 `# inbox-guard: allow <why>` escape hatch for a genuinely-intentional
-exception. It runs in CI and in the local pre-push hook alongside
+exception. It runs in CI alongside
 `check-headless-launch.py`.
 
 **Known remaining gap.** `engine_pivot_actions.py`'s
@@ -517,6 +578,479 @@ destination before invoking the hook. This is an enforceable cooperative
 boundary, not universal filesystem interception: custom launch commands and
 legacy setup scripts remain responsible for entering through
 `agent-worktrees config-root` before writing concrete setup configuration.
+
+### Launch-owned pane assets and current boundary handlers
+
+Windows Picker and `sessions.mux_new_session` creators coordinate through
+`~/.psmux/launch-locks/<sha256-session-name>.lock`. The kernel lease uses the
+shared singleton library's sparse lock byte; it is not the seed-admission lock.
+Both paths recheck after acquisition and while contended. Discovery releases
+the lease even when the native creation client has not returned yet; neither
+pane argument receipts, attach nor the backend lifetime retain it. Different
+session names use different leases. Query failure/timeout refuses creation.
+Lock files remain in place; process death releases kernel ownership without
+PID-based stale-lock deletion. A failed discovery query or nonzero client exit
+after dispatch leaves the engine's pane argument handoffs intact as uncertain;
+it is not proof that no pane exists. If Picker's client fails after publication,
+it preserves argument, receipt and token handoffs and offers no automatic
+retry. Its failure result requires inspecting the existing session first.
+
+A late detached join reports `created: false` without creating pane arguments
+or claiming/typing a seed. Typed Bridge acquisition still refuses a live mux,
+and exact-restart receipts never credit another creator's session as their own.
+The Picker cleans only its unused handoff before following its existing join
+path and cold-seed refusal. This Windows primitive does not replace the
+engine's broader tracked-worktree lifecycle fence, the separate `pane_create`
+new-session fallback or POSIX parity;
+older installed creators do not participate in this gate.
+
+For a tracked worktree, a constructed Manager launch and the engine's
+new-session/new-window builders copy the selected canonical pane assets before
+creating the pane. The authoritative `record_path` comes from the launch plan.
+`session_shell.prepare` places each execution's copy under that record's
+existing `launch-attempts` state, outside both declared installation roots.
+The executing engine advertises `pane_shell_version: 1`; Manager migration
+requires that capability, and direct pane builders check the selected wrapper's
+version-1 control marker before adding its new arguments. Older peers keep
+their existing construction without receiving unsupported control syntax.
+Windows copies its one-shot file launcher too; child argv and native interactive
+prompt receipts retain their existing transport. Creating these assets does
+not admit a launch, claim a seed or prove that Copilot started.
+
+For prepared Windows panes, both builders place the one-shot argv manifest and
+its optional consumption receipt in the copied shell's `pane-args` directory,
+not either removable runtime. The launcher consumes and deletes the manifest
+before invoking the wrapper. Rejected-launch cleanup is scoped to the matching
+launcher. Producers expire only their own directory; the machine-wide monitor
+uses the existing registered-project inventory and explicit tracking roots to
+find every registered project's UUID-scoped shell directories, without changing
+or relying on an ambient active project. An unavailable project does not prevent
+expiry in other projects; inventory failure still permits legacy expiry.
+Expiry removes only
+unconsumed manifests older than 24 hours, never the copied scripts or their
+execution state. Legacy peers retain their runtime-local transport and expiry.
+
+The copied shell passes bounded start/end requests to the then-current completed
+Manager generation in the originally selected root. It captures native mux
+session and pane identity before executing the child. The Manager's synchronous
+`pane_lifecycle` owner requires `--contract-version 1` before effects and records
+into the existing mapping registry without
+provisioning a runtime or starting a service. An end request must match the
+original installation/source-selection identity and a registered live CLI pane;
+it retires only that pane. Concurrent handoff panes keep their own live mapping
+until exit, so an unsuccessful successor does not erase its predecessor.
+Identity fences also apply to tombstones; duplicate observed exits are read-only,
+and registry loss or corruption never acknowledges an unrecorded exit.
+Successful end admission persists `observed_end` with the actual child exit
+code, distinct from an unobserved loss. Admitted changes publish a bounded
+observation to an existing status monitor without starting one; unavailable
+monitor delivery is reported separately from durable registry admission.
+Logical-owner checks resolve worktree path aliases using native real-path and
+case semantics; snapshot-CAS fences still compare the exact stored bytes.
+Same-owner reconnect preserves native-discovery identity and the latest observed exit, and companions select
+their pinned pane rather than assuming a single CLI entry. Dead CLI entries
+remain fenced across reconnects; delayed creation and CAS retries cannot revive
+them or a same-incarnation tombstone. A pane exit cannot revive an explicitly
+retired whole mapping. On end, both copied
+shells provide runtime and launch correlation for a bounded `pane_exited` write
+through the current installed engine command, never captured argv or PATH.
+This optional diagnostic cannot change registry admission or Copilot's exit,
+and an uncertain write is not replayed by a duplicate end.
+A start replacing another incarnation's tombstone must obtain fresh native
+CLI/pane/path proof through the same discovery owner as creation registration.
+It rechecks that proof after snapshot-CAS contention rather than treating a
+different incarnation or later timestamp as authority to erase recorded exit.
+Creation registration always confirms the current native CLI pane, incarnation,
+live state and worktree path. The version-1 boundary's fenced `cancel` retires
+its pane if transport validation or provisional receipt publication fails
+before child dispatch, without claiming an observed child exit. Start remains
+before the provisional receipt so its grace interval cannot mistake a pending
+start callback for child readiness. Windows command-invocation failure reports
+a nonzero result rather than retaining a stale successful native exit code.
+Missing/incompatible handlers and
+unconfirmed responses close quietly without claiming notification delivery.
+
+These are shell-storage and callback boundaries, not complete installation
+survival: unsupported seed/setup paths can still retain runtime-Python waiters.
+Untracked/anchor, older-owner and MSYS/Cygwin launcher paths retain legacy construction. Copied assets
+are retained in launch-owned state; no age-based sweep may delete a live or
+unconfirmed execution. Remaining launch/admission and reclamation integration is
+tracked by [installation-independent-sessions](../../../efforts/active/installation-independent-sessions/README.md).
+
+`launch_seed_exec._prepare` separates finite policy, literal argv/environment
+preparation and seed claim from the unchanged legacy spawn/wait path.
+The internal `launch_seed_native` backend provider reuses that preparation and
+the existing prompt-free execution receipts. Its finite callbacks reconstruct
+the original record incarnation, correlation, phase and claimed seed; a native
+owner must retain its actual child handle across the PID/birth observation.
+Only definite spawn failure restores a claim. Actual spawn finishes it, while
+terminal or unknown outcomes never authorize automatic replay. Return records
+the actual child code separately from uncertain bookkeeping.
+
+The provider's read-only `--describe-contract` reports
+`agent-worktrees.native-seed` version 1 and its supported preparation output
+formats from the executing runtime. JSON remains the default, with unchanged
+fields and effects. The additive `--output-format nul` is available only for
+`prepare` and `setup`; callback phases reject it before runtime selection or
+receipt mutation. Copied canonical POSIX setup conditionally consumes this form
+after discovering support from the selected current runtime. Unsupported or
+unknown providers retain the legacy launch plan; a changed/incompatible runtime
+at copied setup entry refuses before admission rather than replaying effects.
+Existing JSON callers need no capability probe or migration.
+The optional preparation-only `--environment-reply execution-hint` returns only
+the new execution hint, advertised separately in `preparation_environment_modes`.
+Copied POSIX setup requires it before using the option: unused inherited values,
+including non-UTF-8 POSIX environment bytes, never enter its NUL preparation
+reply. The shell still inherits those bytes unchanged. The default `full` mode
+and existing JSON/NUL callers retain their complete reply semantics.
+Both preparation forms reject an empty executable before any seed claim or
+process query; the NUL encoder and reader retain the same nonempty-executable
+rule. Empty subsequent arguments remain supported.
+
+For `setup` only, an omitted `--process-start-time` asks that same preparation
+owner to obtain the supplied PID's birth token through `locks.process_start_time`.
+The token is verified before effects and again after preparation, before
+recording the existing setup owner. Missing/unreadable birth, an invalid PID,
+or an explicitly empty/mismatched token refuses; a changed incarnation after
+preparation records `unknown`, not a confirmed spawn or automatic replay.
+The read-only descriptor advertises this additive behavior in
+`setup_process_start_time_sources: ["caller", "provider"]`. Existing callers
+continue supplying their token unchanged, and the JSON/NUL preparation replies
+are unchanged. Copied POSIX setup establishes this capability on its selected
+runtime before omitting the token and never retries an uncertain preparation.
+Backend
+`spawned` callbacks still require the native child's captured birth token;
+this setup-only query is neither a retained child handle nor backend
+exec/terminal/signal qualification. No Bash-specific process ABI, separate
+identity command, subprocess preflight or lifetime helper is introduced.
+
+The POSIX `exec` phase is a separate, optional backend execution mode,
+advertised in `backend_execution_modes` as `posix-exec-v1` and the additive
+`posix-exec-env-v1` by that same selected POSIX runtime (the Windows list is
+empty). It takes the original prepared
+correlation/operation, literal backend command and an empty
+`.native-seed-exec.*` status file in the launch-owned
+`.shell` directory. It does not prepare or claim a second prompt. The helper
+exec-replaces the native shell's foreground child, preserving its PID, canonical
+birth, streams and process group; Python never waits for the backend's lifetime.
+A double-forked observer uses a close-on-exec error pipe, following the POSIX
+subprocess spawn convention, then calls the existing spawn or definite-failure
+owner. The intermediary is reaped before exec, so the backend inherits no
+observer child or zombie. The observer remains in caller containment, ignores
+only terminal interrupt/quit, and is bounded to ten seconds plus a one-second
+hard termination grace. It writes only `0` or `3`, never prompt/argv/environment
+bytes, to the private completion file.
+Immediately before exec, the child closes unrelated descriptors discovered
+through the native descriptor directory, retaining only stdio and its
+close-on-exec observer writer. This matches the legacy `Popen(close_fds=True)`
+backend boundary, including inherited descriptors above a subsequently lowered
+file-descriptor limit. The environment pipe has already been consumed and
+closed; the finite observer keeps its own protocol and runtime custody.
+
+`posix-exec-env-v1` additionally accepts an inherited
+`--backend-environment-fd` greater than 2. Copied setup requires this capability:
+it preserves its inherited environment, applies only the new backend execution hint
+from the preparation reply, and never puts environment values in external argv.
+The exec interpreter starts with Python overrides removed. A finite, private
+NUL pipe carries the original export-presence/value pairs for `PYTHONPATH`,
+`PYTHONHOME`, `VIRTUAL_ENV` and `__PYVENV_LAUNCHER__`, including empty or unset
+values. The last variable can be consumed by macOS Python before application
+code runs. The provider reads a versioned frame with a ten-second/16-MiB bound,
+closes the descriptor before observer creation, and restores those four entries
+only in the environment passed to the actual backend exec. It does not evaluate
+shell text, import the finite provider's sanitized environment, or add a resident
+environment helper. Existing exec callers without the descriptor are unchanged;
+other phases reject it before runtime selection or receipt effects.
+
+The exec pipe is not backend readiness or application acknowledgement. A fast
+exit before the live PID/birth check, observer loss, or incomplete observation
+retains an unknown handoff rather than restoring a successfully executed
+prompt. Catchable interruption or encoding failure emits an unknown marker before
+closing the pipe, not success-shaped EOF. As with the POSIX subprocess
+error-pipe convention, uncatchable death at the exec boundary cannot be
+distinguished from exec followed immediately by death; PID/birth is identity
+evidence, not a separate kernel exec attestation.
+Before exec, the helper restores `SIGPIPE` and the available `SIGXFZ` /
+`SIGXFSZ` dispositions to default, matching the prior subprocess boundary.
+If exec unwinds, it restores the helper's original handlers before reporting
+failure or uncertainty; CPython's ignored dispositions do not reach a
+non-Python backend.
+During the exec attempt, caught `SIGINT` immediately enters interrupted cleanup
+and refuses exec, including an interrupt inside Python's PATH search. Only
+cleanup-time interrupts are deferred until the non-success marker is published,
+the pipe is closed and the helper's handlers are restored. Successful exec
+resets the caught handler in the kernel. An already ignored `SIGINT` remains
+ignored. Cleanup-time interruption cannot turn a failed exec into success-shaped
+EOF.
+Only the explicit exec-error path permits restoration. The copied
+`native-seed-setup.sh` consumer discovers this capability before invoking the
+phase. Bash retains the actual foreground wait, original stdin/terminal and
+exit code; the backend's direct child exec-replaces Python instead of retaining
+a Python lifetime waiter. Bash catches its own terminal interrupt while the
+backend receives and handles the original signal. After the child returns,
+Bash settles the bounded status-only observer receipt and resolves the return
+handler afresh. Every unconfirmed observer result, including status 3, warns
+without changing the actual backend exit code; an already settled status 3
+does not trigger a second mutation. Exec never runs through the finite provider timeout.
+Return callbacks first discover the then-current version-1 handler read-only.
+Missing or incompatible handlers close quietly without claiming receipt
+delivery. A compatible callback failure warns unless a fresh read-only probe
+confirms removal or incompatibility; a timeout, producer or validator error
+remains indeterminate and warns. An existing but non-executable interpreter
+also remains indeterminate, rather than being classified as absent.
+No effectful callback is replayed.
+Ordinary provider syntax/default replies and Windows child-handle ownership
+are unchanged. Real Copilot/mux and supported installation-removal acceptance
+remain separate from the copied native consumer controls.
+
+The planner queries the descriptor through the exact current completed
+runtime's retention bootstrap before selecting native setup. The copied
+consumer checks again at entry and before backend preparation, without a
+capability cache. Each query, its preparation and its exec use the same selected
+interpreter array; a selector change cannot substitute another provider between
+discovery and seed effects. Descriptor output streams directly into a separately
+bounded validator using that interpreter's stdlib, with a 64-KiB input cap and
+ten-second deadline. Both producer and validator must succeed; an escaped
+stdout holder cannot extend collection indefinitely. Control utilities use the
+shell's standard utility search to resolve an absolute executable independently
+of the backend's unchanged PATH, without applying that search PATH to the child.
+Lookup removes a matching inherited shell function only in its subshell and
+uses `getconf PATH`; stock macOS Bash's `command -p -v` does not reliably locate
+utilities under a restricted caller PATH.
+Validation uses neither shell evaluation nor a second identity RPC. Effect-side current-runtime
+validation remains authoritative across a selector race. Admission-only launches,
+including native resume, retain the legacy owner and its launch fence: finite
+copied setup does not supply equivalent exclusion through child startup.
+Copy-only relocation
+does not query capabilities or add admission flags: cold `embody` retains its
+existing prompt owner. Custom setup and unsupported runtimes keep their
+legacy path; no effectful invocation is retried in another mode.
+After setup admission, the copied shell clears an inherited backend execution
+hint. The actual seeded backend receives only its own new hint. POSIX
+`env_script` launches and a nonempty effective `BASH_ENV` retain the legacy owner before capability discovery or
+asset copying: arbitrary sourced early exits and replacement EXIT traps cannot
+share the native setup's sole EXIT callback without changing shell semantics.
+The planner uses the selected session/profile environment over inherited
+values, including an explicit empty override. Direct/stale native setup also
+refuses a pre-existing EXIT trap before admission instead of replacing it.
+Mux plans require an explicit `BASH_ENV` override before selecting this owner:
+the server/session environment can differ from the planning client. An empty
+override permits native selection through both Manager's corrected literal
+forwarding and the Python pane builder; a nonempty or unknown initializer
+retains legacy ownership. Direct/no-mux plans use their actual inherited and
+selected environment. There is no separate renderer-admission flag or
+renderer-capability handshake, and these rules do not depend on marketplace
+cells. Full Manager launch and installation-survival acceptance remain open.
+An explicit empty initializer is applied by an absolute POSIX `env`, resolved
+through the standard utility path without changing the backend's `PATH`, before Bash starts,
+including when an older environment renderer passes literal quotation marks.
+This preserves inherited Python-sensitive variables without initializing a
+Python interpreter. Manager refreshes only the legacy Python seed envelope,
+not native shell hosts or their `env` prefix. Manager versions that overwrite
+every seeded command's executable must receive that launcher correction;
+there is no renderer-capability handshake or conservative planner fence.
+JSON resume plans use direct/no-mux eligibility as their emitted plan specifies.
+Plans containing non-UTF-8 POSIX command or record-path bytes also retain that
+owner before discovery or copying; the literal reply remains strict UTF-8.
+Direct NUL preparation with such arguments refuses before runtime selection or
+seed claim rather than admitting an unencodable handoff.
+The existing outer owner records the actual final setup status. A stale/direct
+native envelope with an environment script refuses before admission or sourcing.
+This unsupported path remains an installation-survival gap, not native closure.
+
+The NUL reply is one fully encoded UTF-8 byte sequence, with a NUL after every
+field, in this order:
+
+1. `agent-worktrees.native-seed-reply.v1`.
+2. Attempt, resolution and operation IDs, then parent ID and setup seed ID;
+   each absent optional ID is an empty field.
+3. Decimal environment-entry count, or `-1` for inherited environment. Zero
+   means an explicitly empty replacement environment. Each entry contributes
+   its literal name followed by its literal value, not shell assignment syntax.
+4. Positive decimal argument count, followed by that many literal arguments.
+5. `complete`, then EOF.
+
+Empty fields, quotes, metacharacters, Unicode and embedded/trailing newlines
+remain literal. Unrepresentable NUL/UTF-8 values are refused without partial
+output; a seed already claimed during preparation remains held and the
+execution becomes unknown, never automatically restored or replayed. A reader
+must validate the complete frame and successful finite producer exit before
+dispatch. It must not pass reply fields through command substitution (which drops NULs), `eval`,
+word splitting, or source the fields as shell code. The provider does not
+spawn a backend or retain a parser to wait for one; prompt-bearing reply bytes
+remain on the private preparation pipe, outside execution receipts and logs.
+
+`scripts/native-seed-reply.sh` is the Bash reader for this frame.
+Dot-sourcing it only defines functions. `aw_native_seed_read_reply` consumes
+stdin through EOF, clears previous output, validates framing and correlation,
+and then publishes literal `AW_NATIVE_SEED_ARGV` / `AW_NATIVE_SEED_ENV` arrays
+and the correlation fields. It neither exports environment entries nor executes
+arguments; an environment count of `-1` stays distinct from empty replacement.
+Invalid or truncated input returns 3 with a prompt-free diagnostic and no
+partially published reply. Counts use canonical decimal with at most nine
+digits, never provider text evaluated as arithmetic.
+The final read must report EOF specifically; an interrupted or otherwise failed
+empty read is not proof of stream completion. Bash also returns status 1 for
+nonblocking-pipe and bad-descriptor errors. One finite Bash subshell probes EOF,
+requiring status 1, no trailing bytes and no read diagnostics. Only diagnostics
+pass through command substitution; reply fields stay in the original shell.
+This adds no external executable or resident helper.
+Closed stdin is refused before that subshell can reuse descriptor 0 for its
+capture pipe. Internal parser diagnostics are suppressed; every input refusal
+uses the same generic diagnostic.
+Parsing uses ASCII collation and case-sensitive matching independently of
+caller settings, restoring the caller's locale and `nocasematch` option on
+success and refusal.
+The reader suppresses caller xtrace while private fields are in use and restores
+the original tracing setting afterward; it never traces reply data itself.
+The existing installers, publication inventory and uninstall profile own this
+asset; `session_shell.prepare` can copy it with the POSIX normalized setup,
+launch-command and reconciliation scripts outside the removable roots.
+The copied `scripts/native-seed-boundary.sh` adds a finite transport.
+`aw_native_seed_phase <root> <provider-arguments...>` reselects that root's
+current completed numbered runtime on every call, invoking its retention
+bootstrap and version-1 backend provider with closed stdin. It neither searches
+PATH for an engine nor falls through to another installation. An absent,
+incomplete or incompatible provider returns 3. Python-specific environment
+overrides are removed only in the finite child.
+The copied shell owns a separate provider job group, one ten-second deadline and
+group cleanup; its 50-millisecond sleep children exist only during the call.
+It streams stdout without prompt-bearing temporary files. Nonzero provider
+exit, timeout or inherited-group descendants retaining the pipe are unconfirmed, not successful
+preparation. `aw_native_seed_prepare` takes the same arguments and consumes the
+NUL frame with the sibling reader. Bash 3.2 cannot wait for process substitutions,
+so the finite supervisor appends a per-call completion field only after its
+actual provider wait and group cleanup succeed. The reader's optional expected
+completion field must match before EOF; ordinary reader calls still require
+the unchanged provider frame followed immediately by EOF. The completion value
+stays out of provider arguments/environment, including with caller `allexport`.
+Missing, mismatched or trailing completion data clears all reply fields,
+including a complete frame followed by a failed producer. Every field and EOF
+read shares the original deadline; a late EOF cannot authorize dispatch.
+At invocation, `mktemp` creates a private status-only file beside the copied
+helper in the existing launch-owned directory. The supervisor writes only
+`0` or `3` after its provider wait/group cleanup; the collector waits for that
+receipt, not arbitrary stdout EOF, after malformed input. Settlement has at
+most one second of additional grace. The call removes that exact control file;
+its write uses `>|` only on this invocation-owned file so caller `noclobber`
+remains unchanged. Control-path failures use the generic refusal diagnostic.
+If the caller is lost, the existing launch-directory owner retains custody.
+No reply, argument or environment data is written there. Creating/removing the
+receipt adds two short-lived utility invocations; dot-sourcing creates nothing.
+As with the existing POSIX process owner, descendants must retain their inherited
+group. A deliberate session/group escape is outside that custody contract:
+retained stdout still causes bounded, unconfirmed refusal, not late success or
+a claim that the escaped process was retired.
+The transport does
+not apply the reply environment or execute backend arguments.
+Caller stdin, descriptors and tracing settings remain owned by the caller.
+
+No production POSIX caller selects that setup path yet. Capability discovery
+and upgrade/rollback selection, canonical process-birth capture, backend
+custody, foreground terminal/signal behavior and removal of both runtime-Python
+waiters remain separate integration gates. This finite transport does not
+authorize replay of an uncertain preparation or qualify installation survival.
+
+On Windows, a current engine recognizes its canonical normalized setup's
+`native-setup-owner-v1` marker, a PowerShell 7 host and the selected canonical
+pane wrapper's `native-console-owner-v1` capability. It copies setup, the
+existing command wrapper, native adapter and machine-settings helper into the existing launch-attempt
+namespace outside both installation roots, then returns that setup command
+directly instead of a deferred Python waiter. Preview plans create no assets.
+The normal outer `launch-command.ps1` prefix is retained and relocated with its
+sibling setup, preserving that owner's existing same-host dot-source fast path
+and its fallback semantics rather than introducing another forwarding layer.
+Resolution inserts the same typed attempt/resolution correlation before the
+native argument envelope. Old scripts, Windows PowerShell, custom launchers and
+POSIX retain their previous path rather than silently accepting new syntax.
+An older pane provider also keeps the legacy command. A new prepared Windows
+pane receives a copy of the engine-owned native helper beside the canonical
+wrapper. Both waiting shell owners suppress only their own Ctrl+C/Break
+cancellation while the backend decides whether to continue or exit; this
+preserves outer post-child callbacks as well as child survival. Close/logoff
+handling and the pane's kill-on-close Job remain intact. Older engines do not
+copy this helper, so a newer wrapper without it retains its previous behavior.
+The copied setup performs finite admission/preparation before hooks or backend
+dispatch. It records its existing host PID/birth as the launcher owner, leaves
+the prompt unclaimed, and passes its operation ID as the backend's parent.
+Admission-only preparation takes the existing worktree lease only for its
+preflight; seeded preparation uses the seed authority's own guards. Neither
+holds a seed-admission lease through the child lifetime. This does not yet
+qualify the separate concurrent mux check/create/join contract.
+Admission-only setup protects its direct backend wait with the same native
+console-control helper, including same-host PowerShell-script execution.
+The outer pane's handler does not substitute for this setup-host protection.
+
+Cold `embody` uses the same canonical Windows setup selector to copy those four
+assets before mux creation for seed-free and terminal-fallback launches, without
+adding finite seed/admission flags or claiming a prompt. Qualified startup
+prompts retain their existing deferred preparation; already-prepared commands
+are left unchanged. Resume arguments and the native argument envelope remain unchanged;
+copy-only preparation does not probe Manager because it adds no provider flags.
+The existing pane-construction owner still selects and health-checks Manager;
+finite native activation retains its separate peer-capability check.
+Copy failure refuses before spawn. Existing live-mux joins and previews do not
+copy assets. This closes an actual consumer's installed-script dependency, not
+the generic uninstaller's conservative rooted-argument refusal or live removal
+qualification. Setup-time runtime arguments remain attributable startup data,
+not evidence that uninstall admission has accepted a running session.
+
+At the engine's final Windows mux command boundary, copied canonical PowerShell 7
+setup commands with the fixed `-NoProfile -NoLogo` host options move their
+startup argv into a second one-shot manifest beside their copied command
+wrapper. Seed selection and resolution correlation still inspect the typed
+command before serialization. The child process command line contains only
+the copied wrapper and manifest paths, not setup's runtime-Python/root values.
+The wrapper validates the version, its own identity and string argv, deletes
+the opened manifest before setup, and preserves pane-appended prompt arguments.
+Its same-host setup optimization, native console handling and outer Job owner
+are unchanged. When adding a wrapper around direct setup, its own
+reconciliation is bypassed so setup retains both normal and recovery policy.
+Rejected outer publication/launch removes the matching nested
+handoff; abandoned startup handoffs share the existing 24-hour expiry.
+Uncopied/custom commands, older copied wrappers and other host options retain
+their previous invocation. This transport does not exempt any process from
+uninstall consumer checks or establish real installed-removal survival.
+Manager's separate Picker/retry producer applies the same copied-reader marker
+gate in its shipped PowerShell helper, without starting another Python process.
+Every retry gets a fresh startup handoff. Known creation failures, unused
+concurrent joins and failed outer receipts clean up that attempt's inner file;
+publication uncertainty retains it alongside the outer handoff. Creation
+leases, seed correlation and native process custody remain with their existing
+owners.
+
+The Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
+into that existing setup owner. It retains the actual child handle and wait, selecting
+the current completed runtime from the original root for each finite callback.
+Each native setup/seed/execution phase allows ten seconds for the current
+runtime call, then kills its child tree and retains unconfirmed state without
+retry. This does not change the separate pane lifecycle or mux-query deadlines.
+Finite receipt and seed direct fallbacks import their canonical registered
+writer, retaining the shared authority checks rather than loading unrelated
+mutation owners. Monitor-path compatibility uses an already-loaded CLI module,
+never a full command-surface import just to find the receipt lock.
+Consoleless redirected output uses asynchronous byte forwarding with inherited
+stdin; a real terminal retains direct unredirected streams. Kernel child/task
+waits recover a failed output destination by draining its remaining pipe,
+without polling or suppressing the actual exit callback. Finite helpers and
+the backend use PowerShell's explicit filesystem location rather than inheriting
+a potentially different process directory. Direct executables and normalized
+PowerShell backend scripts use these finite phases, removing the final Python
+waiter too. Batch backend launchers retain the legacy invocation to preserve
+their shell semantics; they are not installation-survival qualified.
+Normal setup return records its real backend result; an interrupted setup
+records an unknown outcome rather than inventing a child exit. Missing end
+handlers remain quiet and do not change the result. Native terminal/Ctrl+C,
+actual installation-removal, mixed-generation and POSIX acceptance remain
+separate gates; copying assets or passing fixture tests does not close them.
+
+Ordinary cold `embody` now composes with that same staged final-invocation
+boundary for direct Copilot and recognized setup, rather than launching a blank
+client and scraping its input rails. The outer mux response is explicitly
+native-startup-pending, not prompt consumption; only the existing invocation
+owner claims/settles the seed. Custom/unrecognized launch shapes keep their
+terminal fallback, selected before effects. Deferred Bridge acquisition and
+already-live delivery retain their existing owners.
 
 ### Current session, conclusion, and succession (the head pointer)
 
@@ -804,7 +1338,7 @@ token through `bind-session`; `link-succession` remains the explicit form for a
 caller that already holds both ids.
 
 **Safe terminal worker interface — `conclude-disposable`.** A higher layer that
-explicitly owns a disposable CLI worker class can conclude the exact recorded
+explicitly owns a disposable worker class can conclude the exact recorded
 allocation and optionally request exact-id managed teardown:
 
 ```bash
@@ -817,8 +1351,11 @@ agent-worktrees conclude-disposable \
     --json
 ```
 
-The command accepts only an exact worktree id and the explicit
-`disposable-cli` policy. It first preserves any live mux or bound Copilot
+The command accepts only an exact worktree id and an explicit policy.
+`disposable-cli` retains its historical wire spelling but is interface-neutral:
+CLI/ACP metadata neither grants nor vetoes conclusion. The distinct
+`dispatch-attempt` policy requires exact allocation provenance. The operation
+first preserves any live mux or bound Copilot
 session. Once the worker is gone, it requires the supplied session to match the
 worktree's asserted lifecycle head when one exists. Preservation gates run
 before that exact session is concluded, so a skipped worktree remains fully
@@ -835,7 +1372,9 @@ unknown repository is held. If the checkout directory is
 already absent, any surviving local branch is still compared with its configured
 upstream and preserved when it contains unique commits.
 
-A successful conclusion converts the record to a managed, final CLI worker.
+A successful conclusion converts the record to a managed, final worker while
+preserving its effective interface. An unstamped legacy record retains its
+previously derived interface through an explicit stamp before its kind changes.
 Without `--remove`, it returns for a later managed-GC pass. With `--remove`, it
 invokes that same managed-worktree sweep for only the exact id with zero idle
 grace. The sweep independently re-checks final/unused state, live
@@ -1428,6 +1967,11 @@ unconditionally.
 For the installer handover's exact admission, lock, busy-oracle and rollback
 sequence, and its bounded structural logs, see the
 [status-monitor drain audit](status-monitor-drain.md).
+
+The explicit `status-monitor-restart` command returns nonzero when its spawn
+attempt fails. Disabled and already-current cases still return zero, as does a
+successful spawn; this exit status does not prove acquired monitor ownership or
+serving readiness. The installer's separate cutover result handling is unchanged.
 
 A version bump publishes a fresh `~/.agent-worktrees/versions/<v>` slot and
 calls `status-monitor-restart` (`_restart_status_monitor`) from that new
@@ -2506,3 +3050,153 @@ the Picker moved to `worktree-manager/`.
 > and the bundled `plugins/agent-worktrees/src/agent_worktrees/picker_tui/`
 > package was deleted after parity landed. agent-worktrees now owns only the
 > engine boundary and the non-UI support primitives.
+
+### Native Windows pre-tool entry
+
+`hooks.json` dispatches through `scripts/pre-tool-hook.ps1` (or its installed
+`bin` copy). A partial installation without that file retains the previous
+standalone Python entry. Existing sessions that cached the old command keep
+using `hook_client.py`; a payload refresh is not proof their command changed.
+
+For the default installation, `view`, `rg` and `glob` can return without Python,
+IPC, repository discovery or runtime selection. `hook-read-policy.json` binds
+that exemption to the exact normalized sources of all four guards. Missing,
+changed, linked or unrecognized guard/contract files retain Python policy;
+installation-context admission is never skipped. Regenerate the contract with
+`python tools/render-hook-read-policy.py` after guard changes. The deployment
+contract tests also exercise each real guard's read decision, not just hashes.
+A hot active pre-tool stop can return natively; invalid/unsupported flag state
+keeps the normal guard path and its diagnostic.
+
+The native read contract currently hashes four bounded source files per read
+(at most 128 KiB each); it is not a daemon-published worktree-policy cache and
+does not claim zero filesystem cost. Exact fingerprints deliberately prevent a
+partial helper upgrade from reusing a stale exemption. A future lifecycle- or
+daemon-published generation may replace this repeated check after its own
+freshness/admission contract is qualified; no parallel runtime selector is added.
+
+Other input retains the existing selected-runtime resolver in read-only mode
+for default installations, with the old ambient Python compatibility path when
+no slot is available. Explicit installation contexts retain the existing Python
+validator, not a legacy-root substitute. Python receives UTF-8 input explicitly
+without a CLI/binstub or self-provisioning invocation. Required policy failure
+is reported as a deny, never silently presented as a successful no-op. The
+service-unavailable Python guard fallbacks are unchanged in this slice.
+
+Native JSON readers reject non-object roots before PowerShell can enumerate
+a singleton array. Non-exempt native fallback uses the strict entry and checks
+a bounded, typed object response before forwarding diagnostics. Empty,
+malformed and down-level unknown-entry responses deny. Child UTF-8 settings
+override inherited standard-I/O encodings, including during native fallback.
+Strict hot-stop responses explicitly acknowledge `{}` without loading guards;
+legacy command-hook stop/no-op responses retain their empty-output behavior.
+Stop overrides must be fully qualified drive/UNC paths, and contract identifiers
+must be strings; relative overrides or array-valued identifiers retain policy.
+
+Native fallback uses the same existing caller-owned SDK worker as the resident
+adapter. The event-local wrapper keeps its stdin lifetime channel open, reads
+both outputs asynchronously, and bounds input transfer, process completion and
+output completion within one 28-second deadline. Its optional base64 frame
+preserves raw multiline JSON bytes. Closing the channel on caller death or
+failure cancels the real worker behind a virtual-environment launcher; the SDK
+owns the policy's descendants under its 25-second budget. The shared installer
+native runner is unchanged; no generic installer lifetime behavior is widened.
+
+Explicit installation cells are validated through the existing native
+installation-context helper before the read-only runtime resolver selects the
+owning slot. A missing/invalid cell or unavailable owning interpreter denies
+without falling back to an ambient Python lacking the owned-process SDK.
+
+### Opt-in resident pre-tool pilot
+
+`AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION` is a launch-time choice shared by
+the extension and command entries. Unset, empty or `command` keeps the command
+implementation and registers no SDK callback. Setting only
+`AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON` no longer activates a second hook.
+An invalid selection retains command mode and reports a bounded diagnostic.
+
+Exact `resident` selects the SDK implementation. Both platform command wrappers,
+the direct native entry and cached Python command entry return before input,
+policy, discovery or IPC work. The internal strict Python policy entry remains
+available to the selected resident implementation; it is not a second hook.
+The same mode must be inherited by the host and its extension/command children.
+Changing one child environment or hot-editing a running session is unsupported.
+No hook settings, registrations, services or installed runtimes are rewritten.
+Enable resident only after the extension and every actually invoked command
+helper support this mode contract. Older helpers ignore the ENV selection and
+can still evaluate policy; keep command mode throughout mixed-version upgrades
+and rollback. Payload availability alone does not prove cached helper currency.
+
+Resident mode needs `AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON` to name an absolute
+existing interpreter from the owning installation's already-resolved runtime.
+If policy construction fails, the selected SDK hook returns an explicit denial;
+it never enables the command policy as a second implementation. Selection uses
+no discovery RPC, helper process, timer, file marker or second runtime selector.
+Native hook discovery is configuration inventory, not proof of live dispatch,
+and is deliberately not used to arbitrate implementations.
+
+The callback retains its verified read-policy generation in memory and checks
+source metadata before reuse. Partial upgrades, malformed policy and changed
+generations retain policy evaluation. Bounded reads retry once for metadata
+that settles during first access. The shared pre-tool stop remains a hot read,
+not a startup-cached boolean. Explicit installation contexts never use the
+default-installation read exemption.
+
+Non-exempt operations enter `hook_policy_process.py`, which uses the existing
+owning runtime's `agent_procutil.owned_process.run_caller_owned` API to run only
+the standalone `hook_client.py`. SDK `workingDirectory` is passed as
+command-policy `cwd`. The pilot uses
+`preToolUseStrict` (the internal `--require-policy` entry): missing or failing
+fallback guards deny instead of silently
+allowing. This mode evaluates the current standalone policy directly, without
+reusing an older daemon's decision or its legacy fail-open response handling.
+Process, decoding and response failures likewise produce an explicit
+deny with a deduplicated diagnostic. Existing command-hook callers retain their
+compatibility behavior. An older client does not recognize this distinct entry
+and emits no decision, which the resident adapter rejects instead of silently
+falling back to the older client's non-strict behavior.
+
+A successful strict policy evaluation always serializes its JSON object,
+including an empty no-op decision. Legacy command-hook no-ops remain silent.
+The adapter never interprets unexplained silence as approval. Its bounded,
+deduplicated error categories distinguish empty or malformed responses and
+process failures without reflecting arbitrary exception or response text.
+
+The resident adapter keeps its stdin lifetime writer open until completion or
+cancellation. EOF terminates the actual worker behind a Windows venv launcher;
+the existing SDK retires the policy's owned child scope on timeout, normal
+completion and caller death. This is finite child-process custody, not a new
+daemon, runtime selector or host command-hook handback. An unavailable owning
+SDK denies explicitly without installation or provisioning. The policy budget
+remains 25 seconds within the existing 28-second resident boundary.
+
+Each strict guard must return either no objection or a well-formed supported
+decision; malformed lists, statuses, field types and unknown responses deny
+before merging. Raw stderr is forwarded only after successful, valid policy
+responses, preserving successful warnings without repeating failing tracebacks.
+
+Guard-chain evaluation lives in the standalone `hook_pre_policy.py` helper.
+Every installer declares it in the helper closure. A missing helper returns
+an explicit denial from either standalone entry, never a silent no-op.
+
+Installation-owned shim currency includes the client, both policy helpers,
+native entry, read contract and native runner. An already-current runtime must
+therefore repair missing or changed bin companions rather than skipping them.
+
+SDK hooks are awaited decisions, not passive event listeners. The host must
+approve registration before a resident-mode session may perform work. A callback
+connection's disappearance does not restore command mode: automatic hot handback
+is not supplied by an environment variable. Use command mode until the host's
+registration/failure/unload lifecycle is separately qualified; never select
+resident in a retained session as a workaround for missing handback support.
+The selector does not claim atomic reconfiguration or measured speedups. Transition
+only after matched complete dispatch/cleanup measurements demonstrate a gain
+without policy or lifecycle regression. This opt-in remains a pilot, not automatic
+fleet migration. It closes the staged-convergence seam in
+`visions/native-convergence/README.md` without weakening existing policy.
+
+ACP and other hosts without a qualified extension registration/lifecycle keep
+`command` mode. Do not export `resident` as a machine-wide default: the ENV value
+selects a qualified session launch, not a feature-detection or failover mechanism.
+ACP command-hook compatibility and measured whole-path gains remain transition
+gates, not inferred benefits of moving code into an extension.

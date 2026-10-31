@@ -31,7 +31,7 @@ time instead.
 | Shape | Default |
 |-------|---------|
 | One-shot command whose output you need (`git status`, a build, a lint run) | Short-lived captured child -- see the table below |
-| Long-lived background process (dev server, watcher, daemon) the current turn does not wait on | Detached/background launch -- still headless, plus explicit stdio redirection so nothing pipes to a vanished console |
+| Long-lived background process (dev server, watcher, daemon) the current turn does not wait on | Owning attributed launch/startup boundary, still headless with redirected stdio; test instances need a finite lease |
 | A process that must be genuinely interactive (the user is meant to see and type into it) | Do not headless it; that is the reviewable exception -- state why |
 | Same-machine work reachable via an existing local API, module import, or running service | Skip the process spawn entirely; call the API/module/service instead |
 
@@ -47,10 +47,32 @@ parent exit and still die when the caller closes its kill-on-close Job.
 `Start-Process`, `conhost --headless`, `CREATE_NO_WINDOW`, and a detached/new
 session flag alone are not proof of escape from that cleanup boundary.
 
+Prefer ordinary native process creation for a daemon, with the appropriate
+headless/detached flags, explicit stdio and the owner's launch/startup custody.
+On Windows, use Job breakaway only for the process whose lifetime deliberately
+outlives the caller. Configure Jobs owned by that launch path accordingly;
+do not make bounded tools or test descendants escape their cleanup scope.
+
+Check the actual launcher-owned cleanup Jobs using retained native identities
+and handles. Membership in **some** Job is not proof of dependence on the
+launcher; absence from its immediate Job is not proof of independence from a
+shared outer cleanup Job. A `QueryInformationJobObject(NULL)` result describes
+only one Job, not the complete ownership chain. Close every fixture-owned caller
+Job when proving survival, and retain the restrictive shared-outer negative
+control. Do not remove Job limits or accept an inherited cleanup lifetime merely
+to report a successful durable launch.
+
+Do not introduce COM/shell activation, Scheduled Tasks (S4U included), a Windows
+service or UAC merely because a normal spawn encountered a Job. First repair
+the owning direct-spawn/Job boundary and prove it. If an external restriction
+cannot be satisfied, report that exact unsupported boundary; an alternative
+activation or privilege model requires a separate explicit decision.
+
 Keep one-turn helpers and their descendants caller-owned. Only a daemon that
 must outlive the installer/request should opt out, through the repository's
-canonical primitive (for example
-`agent_procutil.windowless_daemon_kwargs(breakaway=True)`). Preserve bounded-task
+canonical attributed primitive (`agent_procutil.spawn_daemon` with its
+`DaemonInstanceSpec`, or the corresponding native startup admission).
+`windowless_daemon_kwargs` supplies flags, not instance custody. Preserve bounded-task
 containment and contained-test suppression; do not remove the caller Job or
 silently fall back to inherited lifetime when escape is rejected. Prefer the
 service's shared user-mode ensure path to another ad hoc launcher.
@@ -58,6 +80,23 @@ service's shared user-mode ensure path to another ad hoc launcher.
 For durable work, validate both successful parent exit and closure of the
 caller's containment boundary, then independently probe the same daemon.
 Use isolated, identity-pinned fixtures for that production-lifetime check.
+
+For host-side tests of this suite, use
+`agent_procutil.daemon_instances.daemon_test_lifecycle`
+and pass its context to the daemon launch and body. The test runner renews the
+lease independently of agent turns. Unattended tests default to a 10-minute
+renewable lease and 4-hour maximum; interactive tests that may wait for
+`ask_user` must declare an explicit pause-tolerant policy. Keep receipts and
+settle exact owned processes/artifacts; do not turn missing ownership into an
+age-based sweep. Prefer clean-room containers for ordinary tests.
+
+The source API and native equivalents are documented in
+`libs/agent-procutil/README.md` in the resolved owning repository. Other projects
+use their existing equivalent, not a hidden dependency on this suite. When no
+admitted test lifecycle exists, keep the test caller-contained or
+container-managed instead of substituting an untracked detached process.
+The language-specific mechanisms below select visibility; they do not replace
+the daemon's launch, admission or cleanup owner.
 
 ## Per-language, per-OS routes
 
@@ -197,9 +236,11 @@ trusting the flag alone:
 3. Force the timeout/cancellation path and confirm the whole process tree
    exits -- a headless child is easy to leak silently since there is no
    visible window to notice still running.
-4. For a durable daemon, close the launching caller's cleanup boundary after a
-   successful invocation and confirm it survives. A bounded-child control must
-   still be reaped; do not mistake test containment for production durability.
+4. For a durable daemon, close every fixture-owned launching-caller cleanup Job
+   after a successful invocation and confirm the same native process survives.
+   Include a bounded child that dies with its owner and a different-inner/
+   shared-outer negative that cannot claim independence. Do not mistake parent
+   exit, arbitrary Job membership or test containment for production durability.
 
 ## Boundaries
 

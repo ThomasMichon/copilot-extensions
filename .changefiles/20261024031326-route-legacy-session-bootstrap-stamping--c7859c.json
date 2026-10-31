@@ -1,0 +1,9 @@
+{
+  "comment": "Route legacy session bootstrap stamping and drift provisioning through the canonical standalone installation driver.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

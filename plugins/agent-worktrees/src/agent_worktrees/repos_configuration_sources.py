@@ -10,7 +10,11 @@ import re
 
 import yaml
 
+from dropin_registry import ScanAuthority
+
 from . import config as cfg
+from . import config_acquisition as acquisition
+from .acquisition_report import AcquisitionReport, failed, observe
 from .config_dropins import scan_config_dropin_registry
 from .repos_registry_reader import _UniqueRegistryLoader
 from .repos_registry_transaction import read_bytes, revision
@@ -80,14 +84,47 @@ def parse_mapping(text: str) -> dict:
 
 
 def mapping(path: Path) -> dict:
+    observations = acquisition.current_observations()
+    start = len(observations) if observations is not None else 0
     content = read_bytes(path)
+    if observations is not None and not any(
+        o.source == str(path) and o.stage == "config-source-bytes"
+        for o in observations[start:]
+    ):
+        acquisition.opaque_source("strict-config-bytes")
     if content is None:
         return {}
     try:
         text = content.decode("utf-8")
     except UnicodeError as exc:
+        failed(observations, str(path), "strict-config-mapping", "invalid-composition", type(exc).__name__)
         raise ConfigurationError("invalid-composition", "A configuration source is invalid.") from exc
-    return parse_mapping(text)
+    try:
+        value = parse_mapping(text)
+    except Exception as exc:
+        failed(observations, str(path), "strict-config-mapping", "invalid-composition", type(exc).__name__)
+        raise
+    observe(observations, str(path), "strict-config-mapping", ScanAuthority.COMPLETE)
+    return value
+
+
+def _mapping_observed(path: Path, observations) -> bool:
+    """Use original read-time absence or the original byte/parser pair."""
+    outcomes = {(o.stage, o.authority) for o in observations if o.source == str(path)}
+    return (
+        ("config-source-bytes", ScanAuthority.ABSENT) in outcomes
+        or {("config-source-bytes", ScanAuthority.COMPLETE),
+            ("strict-config-mapping", ScanAuthority.COMPLETE)} <= outcomes
+    )
+
+
+def mapping_report(path: Path) -> AcquisitionReport[dict]:
+    """Report the original strict read and parse without repeating acquisition."""
+    with acquisition.capture_config_observations() as observations:
+        value = mapping(path)
+        if not _mapping_observed(path, observations):
+            acquisition.opaque_source("strict-config-file")
+    return AcquisitionReport("strict-config-mapping", value, tuple(observations))
 
 
 def fingerprint(paths: list[Path]) -> str:

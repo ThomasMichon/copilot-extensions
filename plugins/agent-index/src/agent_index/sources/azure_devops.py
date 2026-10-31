@@ -18,7 +18,7 @@ from urllib.parse import quote
 import httpx
 
 from agent_index.config import install_dir
-from agent_index.sources.base import FileEntry
+from agent_index.sources.base import FileEntry, nonsecret_target
 from agent_index.sources.good_citizen_http import GoodCitizenSession
 
 _DEFAULT_API_BASE = "https://dev.azure.com"
@@ -99,6 +99,16 @@ class AzureDevOpsConnector:
     def source_name(self) -> str:
         """Canonical source family name for this Azure DevOps project."""
         return f"ado:{self.org}/{self.project}"
+
+    @property
+    def recovery_identity(self) -> tuple[str, ...]:
+        """Fence replay by effective endpoint, authenticated account and query scope."""
+        return (
+            nonsecret_target(str(self._http.client.base_url).rstrip("/")), self.org, self.project,
+            self._get_authenticated_user_id(),
+            json.dumps(self._work_item_queries, sort_keys=True),
+            json.dumps(self._pull_request_queries, sort_keys=True),
+        )
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         """Discover work items and pull requests from operator-supplied query specs."""

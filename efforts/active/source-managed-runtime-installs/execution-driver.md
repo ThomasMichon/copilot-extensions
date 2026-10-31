@@ -123,6 +123,97 @@ This amendment clears its own review gate before foundation implementation.
 
 ## Normal and force/repair operation
 
+### Explicit calls and automatic-update inhibition
+
+The automatic-update hold applies only to automatic work, not an explicit
+`<repo> update` invocation. Public-safe capture, with only the repository
+command name generalized:
+
+> that update hold should only block *auto*-updates, not calls to `<repo> update`
+
+> We should probably update the other call flows to pass `--auto` to make it clear, and have *those* no-op
+
+The portable boundary is explicit/manual update by default, with `--auto` on
+all automatic/background producers, including Manager launch/resume maintenance
+and unattended fleet/self-update sweeps. A schedule's independent opt-in remains
+required but does not exempt its updates from the automatic hold. This
+supersedes the narrower Manager-only interpretation in #9679 / #9680.
+An active automatic hold makes marked
+automatic requests visibly no-op without executing installers. It does not
+silently convert a manual update into a force rebuild or require the operator
+to remove the automatic hold.
+
+**Agent-recommended implementation and validation:**
+
+1. Review this amendment, then carry explicit automatic intent through the
+   existing repository-command parser, Manager bootstrap, request adapter and
+   durable execution owner. Preserve strict parsing, existing force/repair
+   options and declared version-skew compatibility. Reuse existing request
+   authority rather than adding a second queue or a parallel inhibition flag.
+2. Inventory and mark all automatic/background update producers `--auto`,
+   including unattended schedules. Preserve their opt-ins, selected source,
+   publication and authentication policy. An explicit project update with no
+   flag remains ordinary manual update.
+3. Qualify manual update under an active hold, automatic no-op under that
+   same hold, automatic execution without the hold, and mode propagation
+   through bootstrap and engine requests. Manual and automatic requests
+   must not coalesce into an outcome with the wrong inhibition semantics.
+4. Preserve interrupted-transaction recovery and exclusive live-installer
+   custody independently of the automatic hold. Manual intent does not
+   fabricate successful settlement, bypass artifact/dependency admission,
+   steal a live writer or grant unrelated administrative actions.
+5. Exercise the real supported command/adapter boundary and native platform
+   controls, then publish through review, CI and promotion. Source tests or
+   clearing a hold are not successful fleet installation; actual update,
+   selected/serving health, preservation and full timing remain required.
+
+### Reliable completion and renewable inactivity
+
+The [Installer vision](../../../visions/installer/README.md#reliable-working-footprint)
+requires a verified working footprint before speed optimization. Progressing
+installation is not failed merely for exceeding a total-time estimate.
+Lower-level stdio activity can renew a shorter inactivity window; each layer
+must report or relay progress, and its window must exceed its expected
+non-reporting atomic unit. Genuine hangs and inoperable installation state,
+not elapsed duration alone, are the functional failure concerns.
+
+**Agent-recommended implementation and validation:**
+
+1. Inventory existing observer, constructor, phase and child-process deadlines.
+   Separate caller observation limits from the admitted installer's lifetime
+   and reuse the existing execution/cleanup owners.
+2. Renew a monotonic inactivity window from actual stdout/stderr activity,
+   including output arriving before a newline. Forward progress through nested
+   boundaries without polluting machine-readable results or introducing a
+   parallel watchdog.
+3. Give quiet in-process work real progress reports and each atomic operation
+   a suitable quiet allowance. Do not mask a stalled child with timer-generated
+   supervisor keepalives.
+4. On genuine stalls or cancellation, settle the owned native process tree
+   and retain or restore verified operability through the current lifecycle.
+   Preserve failed-candidate truth, exclusive installation custody, source
+   policy and rollback; do not terminate unrelated processes.
+5. Qualify work that completes beyond old total limits while emitting progress,
+   quiet atomic work inside its allowance, real silent deadlock, both stdio
+   channels, cancellation and recovery with and without a healthy incumbent.
+   Verify usable commands/services rather than treating a no-error return as
+   a working footprint.
+6. Exercise the corrected ordinary path in admitted native environments and
+   record duration separately from functional acceptance. Existing unattended
+   holds and explicit/manual admission keep their independent meaning.
+
+Review this amendment before implementation. Existing watchdog and diagnostic
+contributors retain their implementation scopes; reuse and coordinate with
+those owners rather than creating a second installer or competing patch.
+This plan does not itself execute a host repair or relax integrity checks.
+
+The [fresh-default revision](fresh-default-installation.md) governs construction
+and replacement selection. Ordinary updates already select mostly fresh
+installation when incremental/ZDD recognition fails; that fallback is not an
+implicit request for the distinct force/repair mode. Reuse receipts qualify
+incremental compatibility, not permission to install. The existing driver
+remains the exclusive transaction owner in either path.
+
 **Operator requirement summary:** exclusivity means one active installer for
 the addressed installation, not a persistent dead-letter veto. Locks and owner
 markers are collaboration requests tied to the live installer process or
@@ -133,8 +224,10 @@ cleanly roll back failed preparation without cutover. ZDD is best effort:
 handoff incompatibility permits bounded retirement of the old service rather
 than abandoning the new selected version.
 
-Force/repair is a distinct, explicitly requested mode available to any intact
-authorized installer. Agents obtain operator approval for a concrete run. It
+Force/repair remains a distinct, explicitly requested recovery or target
+selection available to any intact authorized installer, not a prerequisite
+for fresh fallback. Agents obtain operator approval for a concrete disruptive
+host run. It
 may briefly cooperate, then takes over from previous installers, invalidates
 their stale installation-control state and retires older managed daemons so
 only selected code remains active on success. It does not guarantee ZDD.
@@ -231,8 +324,10 @@ existing installation execution implementer:
 3. Provide an explicit supported path for existing interrupted records,
    including records whose older producer lacks the new admission evidence.
    Automatic settlement must not assume a free lock, process-name/PID absence,
-   elapsed time or a reboot proves cleanup. Refuse insufficient automatic
-   evidence with an actionable outcome. Explicit operator repair uses its
+   elapsed time or a reboot proves cleanup. Missing historical evidence does
+   not veto the newly selected fresh-install path: settle known scoped effects
+   through the existing owner and manifest, and report a concrete failure when
+   that cannot complete. Explicit operator repair uses its
    separate authorization instead and requires no historical cleanup proof;
    audited pre-launch recovery is optional. Neither route may fabricate native
    settlement, a successful prior result or erase the original failure.
@@ -268,8 +363,9 @@ current scope; this is not a competing driver or proof of a live repair.
   no overlapping installer or unrelated service interruption. No reboot,
   timestamp/PID shortcut, arbitrary queue edit or success-shaped reset qualifies.
 - Exercise explicit operator repair with absent historical cleanup evidence
-  and separately with an optional pre-launch audit. Ordinary callers must not
-  silently choose repair. Preserve the distinct authorization/native-proof
+  and separately with an optional pre-launch audit. Also prove ordinary
+  missing-recognizer fallback reaches fresh installation without requiring
+  that separate mode. Preserve the distinct authorization/native-proof
   labels and old failure history; verify current scoped takeover and selected
   readiness rather than requiring the broken producer to certify its past.
 - Verify read-only status, malformed state, unavailable launch/runtime,

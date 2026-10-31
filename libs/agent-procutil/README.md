@@ -4,6 +4,57 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`agent_procutil.streaming.SyncProcessOutput` drains synchronous stdout/stderr
+in byte chunks, including output without newlines. Its optional inactivity
+window renews only on newly read bytes or acknowledged native relay writes;
+an explicitly supplied absolute cap
+remains absolute. Optional `startup_timeout` applies only before the first
+captured byte; it never lengthens subsequent quiet windows.
+The caller still owns launch, cancellation and tree retirement,
+and must retire writers before `finish()` after an error. Relay-only callers
+can disable retained capture. `output_fds` uses finite, strictly contained
+byte relays, bounded queues and cancellable input writers; an undrained borrowed
+pipe never blocks the supervising thread. Its descriptor flags are unchanged.
+Successful drain and failure/cancellation both settle the relays and their
+reader/writer threads. A failed retirement must be retried and confirmed before
+capture can be marked finished. Delivery has a quiet allowance, not a total-output cap.
+Legacy `on_output` callbacks share captured storage and run only through
+`deliver()` after `finish()` and producer settlement; they are no longer live
+stdio adapters. This helper does not create keepalive output
+or change the existing generic owned-process timeout policy.
+After retiring its writers, a POSIX caller may use `finish(stop_at_idle=True)`
+to drain available bytes without waiting for EOF from an escaped daemon that
+retained an otherwise idle pipe. This never authorizes killing that daemon.
+
+`agent_procutil.process_retirement.PinnedProcess` is a finite external-process
+primitive for application-owned incumbent retirement on Windows and Linux.
+It validates the original birth against a retained process handle/pidfd,
+can pause that identity while the application closes its owned descendant
+scope, and confirms exit on that same kernel object. Context exit resumes
+a still-live process paused by the transaction; unconfirmed resume retains
+the pin on the raised error's `process` attribute for the caller's cleanup.
+It never discovers targets, authorizes an update, signals a group, or replaces
+the caller's lifecycle/critical-connectivity policy. Other platforms refuse
+external pinning rather than falling back to numeric PID kills.
+Linux pause confirmation requires every thread in a stable task-group snapshot
+to be stopped; a stopped leader alone does not freeze a multithreaded parent.
+
+For an installer that can be killed while its incumbents are paused, use
+`agent_procutil.retirement_custody.RetirementCustody(root)` from the
+`retirement-custody` extra, and obtain context-managed pins with
+`custody.pin(pid, birth)`. One attributed finite worker owns the actual pins
+outside the production caller's Windows Jobs or Linux process group. Windows
+uses the already-adopted launch broker and authenticated private pipe; Linux
+inherits one anonymous socketpair and the original caller's pidfd. The worker
+never discovers targets or adds update authority. Caller death, a closed
+lifeline, or a 30-second idle deadline resumes all remaining originals before
+worker exit. Normal close confirms kernel exit and settles the instance record.
+An ambiguous native resume retains the live pin without blindly repeating
+Windows suspend-count changes; the worker waits for that original's exit and
+the caller reports unsettled custody. No hard-kill cleanup is permitted while
+live paused pins remain. Contained tests do not escape their enclosing cleanup
+boundary; they are not evidence of production Job-death survival.
+
 `agent_procutil.diagnostics` also supplies the pure, bounded subprocess
 diagnostic parser/redactor originally owned by Bridge's resolver. Bridge retains
 its compatibility exports and retry policy; Dispatch can use
@@ -13,10 +64,122 @@ launch envelopes. Redaction handles known credential forms and supplied known
 values after control normalization; it is best-effort, not a guarantee about
 arbitrary third-party output.
 
-## Python-free Windows bootstrap admission
+## Windows bootstrap and shell admission
 
-The packaged `native_daemon.ps1` and `native_owned.ps1` expose the native
-counterparts needed before a Python interpreter exists. These are internal
+### Compiler-free migration boundary
+
+`daemon_instances.ps1` uses the shared standard-library Python owner. The
+compiled `native_daemon.ps1` and `native_owned.ps1` process launchers below
+remain separate migration boundaries.
+Python is an existing harness prerequisite owned by machine provisioning;
+a cold plugin runtime does not authorize another Python download or a
+helper-owned interpreter installation.
+
+The private `_daemon_instance_records` transactions retain the shared registry,
+locks, lease checks and filesystem checks while naming an adapter's original
+process rather than the helper that performs the transaction. An identity value
+is not authorization: an external adapter must authenticate and retain its
+original process object before invoking these operations. The public Python
+entrypoints remain current-process-only and accept no caller-identity override.
+The shell adapter composes those transactions with its authenticated transport
+and lifetime owner; the record functions alone grant neither.
+
+### Compiler-free PowerShell instance custody
+
+`daemon_instances.ps1` lazily uses one original-shell-owned Python helper,
+not another daemon or inventory. Its
+[PowerShell custody reference](docs/powershell-instances.md) owns the protocol,
+guard, native-handle, finite Job and fresh-process compatibility details.
+Portable facade/transaction controls and actual Windows process/desktop
+qualification remain distinct.
+
+The private `_windows_parent_job.transfer_lifetime_to_parent` primitive is
+a startup-only building block for a qualified, sacrificial Python helper.
+It pins the original direct parent's process handle and creation identity,
+creates a strict kill-on-close Job, duplicates a non-inheritable Job handle
+into that same parent, assigns the helper itself and closes the helper-local
+Job handle before returning. Only the original parent retains continuing
+Job custody. Parent exit or closure of that handle therefore retires the
+helper and its descendants in the kernel, not through a Python polling
+watchdog. No breakaway permission is added, including under test containment.
+
+The returned `ParentJob.parent_handle` belongs to the **parent's handle
+table**, not the helper's. The parent must adopt it through its existing
+handle owner before accepting application work. A stock .NET
+`SafeFileHandle` can own that native handle without compiling interop code.
+Application completion still requires the existing atomic target-Job owner,
+whole-descendant settlement and observation of the original helper's exit.
+A receipt is not a settlement witness. Transfer failure is terminal for the
+sacrificial helper; it must never continue application work.
+
+`offer_lifetime_to_pipe_server` is a distinct entry point for a trusted
+interpreter launcher between the shell and Python. It retains the same
+birth-pinned process handle and strict Job transfer, but requires the kernel's
+inherited-pipe server PID to name that original caller. It does not weaken the
+direct-parent API or walk/reopen numeric ancestry. It returns a `ParentJobOffer`,
+not an immediate transfer that discards its process reference before delivery.
+Publish `offer.receipt`, then call `accept()` only after the caller adopts the
+handle and acknowledges its actual worker's birth. Only an explicit unadopted
+declaration permits `abort()` to reclaim the offer through that retained parent.
+On failed/partial publication or unknown adoption, keep awaiting the caller's
+decision or call `abandon()` to release only the process reference and report
+unknown custody. Never infer non-adoption from an I/O failure. Every decision
+is one-shot, including a failed close; the direct-parent primitive is unchanged.
+
+The private `_shell_caller_owned.serve` adapter supplies this startup receipt,
+acknowledgement and correlated completion framing for synchronous shell
+callbacks. Windows keeps the continuing Job handle exclusively in the original
+shell; cancellation or shell death closes it. Before creating a Windows offer,
+the worker requires the shell's explicit permission after complete request
+delivery. The offer retains the same birth-pinned parent process handle until
+adoption or an explicit nonce-bound **unadopted** abort. Only that abort permits
+remote-handle reclamation; EOF or a malformed acknowledgement preserves explicit
+uncertainty and never closes a numeric handle the shell might already have
+disposed or reused. A failed receipt write still consumes that decision.
+If the shell sees receipt EOF, it unwinds to send its abort or close input
+before waiting for the worker and diagnostics; waiting first would deadlock
+a worker that is still awaiting the handoff decision.
+Linux/macOS retain the original shell's private stdin lifetime pipe in an
+independent forked watcher member, established before releasing the callback.
+The watcher's own membership pins the original group even if its leader dies;
+pipe loss retires that still-occupied group. Normal callback exit uses the
+existing leader-owned group retirement. The callback never inherits an application-input
+pipe or a continuing lifetime writer. The shell must reject missing completion
+or an unexpected owner-exit status; it closes the Job before awaiting captured
+pipe EOF, and its interruptible waits permit cancellation to run that cleanup.
+This is a caller-bounded helper, not a daemon, another service or a new registry.
+The source-only lifecycle archive packages the same implementation for cold
+shell callers; it contains Python source, not a compiled helper.
+
+This primitive does not select or admit an interpreter, authenticate a
+command, acquire an operation lock, or switch an existing bootstrap caller.
+Interpreter/complete-source admission, bounded shell framing, native desktop
+qualification and migration of the compiled implementations remain open in
+the [compiler-free amendment](../../efforts/active/lean-runtime-dependencies/compiler-free-execution.md).
+The portable controls and separate native parent-exit, explicit-handle-close
+and stale-parent-birth controls test this building block, not that complete
+bootstrap contract. `test_shell_caller_owned_native.py` separately exercises the
+actual PowerShell SDK's callback completion, abrupt exit, original caller death
+and runspace cancellation, observing pinned descendants before test cleanup.
+Its native offer controls hold preallocated fixture process/I/O resources
+constant across a separately gated cold SDK invocation. Raw parent-handle counts
+must show exactly the correlated offered Job, if any, and return to the same
+baseline after that known Job closes, before fixture disposal. This avoids
+attributing subprocess setup or reader-thread resources to the SDK; it does not
+permit a tolerance, warmup, garbage-collection workaround or unknown-handle close.
+An explicit unadopted abort closes the worker's last kill-on-close Job handle
+and may terminate it before Python can raise an error. The fixture therefore
+checks the exact offered handle is invalid (`ERROR_INVALID_HANDLE`), no callback
+or completion was published, and the same exact handle balance is restored;
+it does not infer abort custody from a nonzero process exit. See Windows'
+[last-Job-handle termination contract](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects#managing-job-objects).
+
+### Existing compiled entrypoints
+
+The packaged `native_daemon.ps1` and `native_owned.ps1` retain compiled process
+creation/control while their compiler-free replacements remain open. Their
+instance binding now requires setup-provided Python even before a plugin
+runtime exists. These are internal
 process primitives, not an installer, a request queue, an arbitrary-command
 installation CLI or a new lifecycle owner. A bootstrap must first validate
 its fixed source/recipe, acquire the canonical operation lock, and journal
@@ -34,23 +197,30 @@ Dot-source `native_daemon.ps1` from the resolved, attributable payload and use
 -WorkingDirectory <absolute-directory> -LogPath <absolute-diagnostic-file>`.
 Every path must be fully qualified and normalized; drive-relative and
 current-drive-rooted Windows paths refuse before activation or log opening.
-It uses the existing Windows WMI lifetime-broker mechanism. WMI rejects
-`CREATE_NO_WINDOW`, and a detached stock PowerShell can exit before evaluating
-its command; a headless `conhost` supplies the native console without opening
-a visible window. A current-user-only, bounded named-pipe handshake checks
-both actual endpoint PIDs. The worker independently verifies that it is
-outside every Job before running its entry point, and the parent pins that
-actual worker's handle before acknowledgement, not the broker or console PID.
-There is no inherited-lifetime fallback.
+It uses ordinary native `CREATE_NO_WINDOW` creation with explicit breakaway
+and a suspended child. Before resume, the parent verifies absence from every
+tracked launcher-owned cleanup Job and closes the temporary query handles.
+A current-user-only, bounded named-pipe handshake checks both actual endpoint
+PIDs against the retained native child identity. No WMI, COM, Scheduled Task,
+UAC or automatic inherited-lifetime fallback participates.
+Owned Job-scope environment keys are matched case-insensitively and scope
+syntax is checked before instance reservation, so malformed metadata cannot
+start the instance helper ahead of native refusal.
 
 The result is a `System.Diagnostics.Process`; keep it for observation and
 dispose it afterward. Spawn/admission is not application readiness or
 installation completion. `LogPath` records bootstrap failures; the entry point
-owns its continuing progress/result log. A
+owns its continuing progress/result log. After the target script returns or
+unwinds, the native host terminates only itself with the target's signed exit
+status (or `1` for an unhandled exception, `0` for normal completion). This
+avoids PowerShell/CLR shutdown changing or delaying the observable status.
+Application cleanup must run in the target's own `finally` blocks, not deferred
+process-exit handlers; native termination does not run CLR shutdown callbacks. A
 `NativeDaemonSpawnException.CleanupConfirmed` value of false preserves
-uncertainty, including a lost CIM response after actual creation or a lost
-return after acknowledgement; only an explicit refusal or observed cleanup
-clears that uncertainty. Callers must
+uncertainty, including failed native cleanup or a lost return after
+acknowledgement; only an explicit refusal or observed cleanup clears that
+uncertainty. `RetainedChild` preserves native custody after unconfirmed cleanup
+for an explicit bounded `Stop()` retry followed by `Dispose()`. Callers must
 consult their durable operation state rather than retrying installation.
 With `COPILOT_EXTENSIONS_TEST_CONTAINED=1`, the same handshake uses an ordinary
 windowless child and deliberately retains the caller's Job.
@@ -72,7 +242,7 @@ The native fixtures exercise actual stock Windows PowerShell, canonical
 Python/native lock contention, caller-Job closure, contained controls,
 descendant settlement and owner death. The explicit
 `PROCUTIL_NATIVE_DAEMON_LIFETIME=1` lane runs two production and two contained
-cycles with a PATH containing neither Python nor uv and the canonical
+cycles with setup-provided PATH Python and the canonical
 console/foreground observer. This is Windows admission evidence, not a
 fresh-host foundation installation or Linux/macOS qualification.
 The cleanup controls also force a verified pre-acknowledgement refusal,
@@ -167,6 +337,12 @@ ordinary Windows workers rather than claiming enforcement or deployed recovery.
 
 ## Bounded owned children
 
+`run_caller_owned(..., binary=True)` returns exact captured stdout/stderr bytes,
+including invalid UTF-8, NUL and unchanged CR/LF sequences. Its default remains
+strict UTF-8 text with the existing newline normalization. Both modes retain the
+same raw-byte stream budgets, caller lifetime and confirmed cleanup; binary
+output is encoded only inside the private POSIX completion transport.
+
 `run_caller_owned(..., on_settled=callback)` optionally reports positive native
 scope settlement, separately from execution success. The callback runs once
 after known pre-launch preparation refusal, or after the entire strict Windows
@@ -177,6 +353,22 @@ retain their existing types and details; notification never manufactures a
 completed result. Consumers must separately confirm their own authority and
 borrowed obligations before using this proof to release a durable fence.
 The callback is synchronous and should perform only bounded bookkeeping.
+
+Optional `cwd` and `env` select the native child context without changing the
+caller's working directory or environment. The POSIX guardian inherits that
+context through its native spawn; it is not added to the execution protocol or
+logged. Windows uses the same strict owned Job. Omitting both retains the
+existing inherited-context behavior, stream budgets and caller-death cleanup.
+
+`run_installation_owned()` is the explicit boundary for a trusted canonical
+installer that must start durable product daemons. It retains the same output
+budgets, caller-owned cleanup and settlement callback, but its Windows Job
+permits explicit daemon breakaway. Ordinary descendants remain contained and
+are retired before settlement; deliberately detached daemons belong to their
+own service lifecycle, not that settlement proof. An external restrictive Job
+still prevents escape. Contained tests suppress the exception. Ordinary tools
+continue to use strict `run_caller_owned()`; this is not a fallback or permission
+to detach bounded helpers, register tasks or elevate.
 
 `agent_procutil.startup.StartupClock` separates receipt-time communication
 silence from a fixed startup lifetime. `StartupTimeouts` defaults to 30 seconds
@@ -258,14 +450,76 @@ the group; the command's frame alone does not certify settlement. These
 helpers reserve FDs 5-8 and require non-interactive Bash with job control off.
 
 `native_daemon.sh` provides `start_native_daemon <script> <working-directory>
-<log> <arguments...>`, the Python-free Linux counterpart of the canonical
+<log> <arguments...>`, the Bash application frontend of the canonical
 POSIX daemon launch. It uses a new session with redirected stdio, closes
-unrelated inherited descriptors and acknowledges the direct child's actual
-session identity before executing the selected script. With
+unrelated inherited descriptors and acknowledges the admitted application's
+actual process identity before executing the selected script. With
 `COPILOT_EXTENSIONS_TEST_CONTAINED=1`, it preserves the caller's group instead.
 `__native_daemon_pid` is only a live launch observation, never persisted
 application custody or a completion receipt. Neither helper supplies cgroup
 escape, an installation queue or macOS admission.
+`__native_daemon_wait_pid` separately identifies the launcher's direct,
+waitable child. A synchronous observer waits that child for the native exit
+status; the admitted application can instead be a grandchild of the disposable
+lifecycle supervisor. Waiting the application PID with Bash `wait` is not valid
+in that case. Installation callers still own their durable receipt/result and
+must not interpret either PID as request acceptance.
+
+## Caller-owned interactive completion
+
+`interactive.run_interactive(argv, env=...)` runs a foreground command and
+returns its exit status. Use it after an
+interactive UI has returned, not on the UI's first-paint path. It requires
+the main thread and settles owned descendants before returning, including on
+Ctrl-C (130) or caller death. Cleanup failure raises `OwnedCleanupError` with
+retained process/Job custody rather than claiming completion.
+Normal exit codes are preserved; POSIX signal termination uses `128 + signal`,
+and Windows' native control-C status maps to 130 rather than a wrapped CLI code.
+
+Windows requires suspended assignment to a kill-on-close Job and confirms
+Job termination. Linux and macOS use a finite guardian with a private session.
+With a caller terminal, it owns a separate PTY: bytes and resize events are
+relayed, the completion terminal-device identity changes, and redirected
+non-TTY streams remain inherited rather than entering the relay. The caller's
+absent standard streams map to the null device, and private descriptors stay
+above fd 2 so those mappings cannot overwrite control pipes. The caller's
+terminal attributes are restored when the caller unwinds. Default SIGHUP,
+SIGTERM and SIGQUIT dispositions unwind cleanup before re-delivering the
+original signal; ignored and custom dispositions remain unchanged. An
+uncatchable SIGKILL cannot restore the caller's terminal modes, although the
+guardian still retires its descendants. A start gate precedes command
+execution and the command has its own foreground group inside that session.
+Control/status pipes remain separate from terminal data.
+Relay buffers are bounded. After owned-session settlement, terminal output
+drains under a two-second no-progress deadline rather than a total-output
+deadline; continuous progress does not discard a large command's tail.
+The relay continues bounded nonblocking output progress while waiting for
+settlement, so BSD terminal closure cannot wait on its paused master consumer.
+
+Retirement covers every ordinary job group in the private session, not just
+the initial group. Kernel `setpgroup` admission places owned child anchors only
+in that session; unreaped anchors pin group IDs through signalling. The caller
+retains the guardian unreaped until a whole-session census confirms no live
+members. A permission failure or partial census is not settlement.
+Stopped commands suspend the caller's foreground job group, including a shell
+wrapper, for normal suspend/resume. Without a
+controlling terminal, a stopped command fails explicitly and is cleaned up
+instead of signalling an unrelated parent group.
+Foreground ownership and terminal attributes are restored on exit;
+an unrelated foreground owner is never replaced.
+
+This is a finite post-UI relay and custody helper, not a shared terminal server
+or daemon. Workloads that explicitly detach into another session through
+managed lifecycle APIs remain outside its scope. The noninteractive streaming
+API below is preferred for
+bounded captured commands. `tests/test_interactive.py` covers strict Windows
+teardown plus native descendant and POSIX controlling-terminal behavior.
+`tests/test_interactive_session_native.py` additionally exercises an actual
+interactive shell with separate job groups, redirected JSON stdout and the
+managed-detachment exemption.
+The `interactive_completion=true` selector in the manual
+`installation-context-acceptance.yml` lane runs this focused packet on Linux,
+macOS and Windows; it does not widen required unit-only PR CI.
 
 ## Caller-owned native execution with streaming limits
 
@@ -308,6 +562,17 @@ cannot leave an unassigned suspended target.
 Input writing and bounded output draining remain deadline-supervised together;
 the Job must report zero active processes and pipe workers must settle before
 completion or an output-limit error.
+Zero active accounting alone is not a member-handle exit witness. Retirement
+pins current members before termination and waits for their native exit within
+the same cleanup budget. Birth counters fence the census; an unstable census,
+late unpinned birth, failed query or unconfirmed member exit remains a cleanup
+error, never a successful partial completion.
+Unconfirmed retirement retains its query Job and pinned member handles on the
+cleanup error's Job owner. The retained Windows process's
+`retire_job(error.job, timeout)` retries those same native exit witnesses;
+it does not substitute a fresh census after the original Job handle closed.
+An incomplete census or an unpinned birth remains a failure, not a retry that
+silently discards unknown descendants.
 Worker setup and startup stay inside that boundary, including interruption
 before a launched thread has assigned its identity.
 Normal early stdin closure preserves the target's result; unexpected input
@@ -384,6 +649,187 @@ evidence.
 
 ## Launching a resident daemon: `spawn_daemon`
 
+### Attributable instances and explicit test lifetime
+
+`agent_procutil.daemon_instances` is the shared filesystem lifecycle owner.
+It does not require an installer record, a running sibling service, a new
+singleton election, or an installed-package identity. Source paths are
+first-class provenance. Import and inspection never reconcile or start a service.
+
+```python
+from pathlib import Path
+from agent_procutil.daemon_instances import (
+    DaemonInstanceSpec, daemon_entrypoint, daemon_test_lifecycle,
+)
+
+@daemon_entrypoint("example", source=__file__, runtime_root=runtime_home, purpose="production")
+async def serve():
+    await run_server()
+
+with daemon_test_lifecycle(owner="example-test", registry_root=test_registry) as overlay:
+    # Pass overlay to the actual test process; its lifecycle owner renews it.
+    test_env = {**base_env, **overlay}
+```
+
+The entrypoint decorator retains admission across synchronous and asynchronous
+bodies. `runtime_root` may also be a resolver receiving the decorated callable's
+arguments. Nested admission in one process shares a reference-counted receipt.
+Production admission starts no expiry thread or extra containment Job.
+Raw admission/decorators default to **no purpose**, not protected production.
+Without an inherited reservation or actual test-lifecycle declaration they
+refuse before application work. A named production service entrypoint declares
+`purpose="production"` explicitly; a source pathname by itself is not that
+declaration. Zipapp provenance records the verified real archive plus its
+existing source member rather than pretending the virtual member is a file.
+
+Pass `instance=DaemonInstanceSpec(service, runtime_root, source, ...)` to
+`spawn_daemon`. It reserves before creation, carries a locator into startup
+admission, binds native birth identity, and returns `process.instance_receipt`.
+`spawn_instance(argv, instance=spec, popen=None, **kwargs)` supplies the same
+tracking for an existing raw/callback spawn without changing stdio or detachment.
+For a manually controlled spawn, use `reserve_instance`, `instance_environment`,
+and `bind_instance`; cancel only a **positively refused** creation through
+`cancel_instance_reservation(..., creation_refused=True)`. Lost responses and
+uncertain cleanup retain the original record.
+
+An automatic executable provenance is never a library-file fallback. POSIX
+lookup uses the actual child environment's `PATH` (including its default when
+absent), resolving relative entries/paths against the child cwd. Multiple
+distinct executable targets require an explicit instance rather than guessing
+which execution-error fallback succeeds. Windows automatic provenance requires
+an existing, fully qualified `.exe`/`.com`: `CreateProcess` search does not use
+the child's replacement `PATH`/cwd, so a bare Windows command requires an
+explicit instance. Normalized Python provenance names the actual executable.
+
+Positive creation refusals cancel only an unconsumed no-PID reservation.
+Broker failures distinguish no target creation, staged-but-unadmitted children,
+and possibly started work. Only a confirmed pre-admission exit may settle its
+tracking record without an application-file cleanup. Unknown exit, identity,
+custody or started effects preserve the original receipt and never trigger an
+automatic replay. Commit failure carries `instance_receipt` for recovery.
+
+`spawn_finite_worker(argv, instance=spec, **spawn_daemon_kwargs)` declares
+`spec.lifecycle="finite-worker"` and retains the same headless/broker lifetime
+policy. Production finite workers have **no TTL**. Their Python shim records
+`finished` work closure even after the creator exits; this is not a claim that a
+process observed its own kernel exit. The same explicit cleanup/backstop settles
+only the control record after exact process-birth exit is observed. It never
+stops live production finite work or deletes its production artifacts, and
+uncertain launch/protected records continue to hold.
+
+Production purpose has no lease. Explicit `unattended-test` purpose defaults to
+`DaemonLeasePolicy(ttl_seconds=600, max_lifetime_seconds=14400)`. Interactive
+tests must supply their own finite pause-tolerant policy; temporary pathnames,
+pytest metadata, and agent-turn activity never select a test policy.
+`daemon_test_lifecycle` yields an explicit environment declaration, not a shared
+single-use instance. Each child reserves separately. The actual owner process
+renews only its run, and its context teardown is the primary cleanup path.
+A daemon does not renew itself. Renewal cannot revive expiry or extend the
+immutable maximum lifetime.
+
+Leased Python commands receive same-process startup admission before application
+code. Windows venv redirectors are bypassed using `direct_python`, retaining
+venv imports. The child observes expiry independently of its launcher;
+Windows disposable children establish a strict kill-on-close descendant Job.
+One local lifecycle thread handles renewal/expiry per process.
+
+The default discovery root comes from the OS user's profile rather than an
+isolated `HOME`. Explicit test roots are supported. Schema 1 stores private,
+bounded `.instance` files containing `key<TAB>base64(UTF-8 value)` lines and
+per-instance `.lock` files. Windows uses the existing byte-lock offset
+`1 << 30`; Linux uses whole-file `flock`. Native birth tokens retain raw Windows
+creation FILETIME, Linux boot/namespace/start ticks, or Darwin start tuples.
+Windows path IDs use raw 64-bit volume/128-bit file identity consistently across
+Python versions. The registry stores no argv tails, credentials or environment
+dumps.
+
+`cleanup_instance(receipt)` returns `InstanceCleanupResult(instance_id, status,
+reason, removed)`, with status `settled`, `held`, `live`, or `missing`. It never
+signals an unproved numeric PID. Reused/unknown identities, redirected or changed
+paths, protected work and unknown launch outcomes hold. A guard may declare
+individual already-created lifecycle files using `add_artifact`; cleanup does
+not recursively delete runtime roots, source, installed code, undeclared logs,
+or retained evidence. Canonical lock files remain to prevent split custody.
+An existing code/config directory may be a borrowed, read-only metadata anchor,
+including a root-owned container payload. Recording its identity does not confer
+ownership or deletion authority. Registry entries and individually declared
+artifacts still require current-user ownership and exact file identity. Missing
+explicit runtime directories may be created privately as admission metadata;
+callers avoiding business-state creation should use an existing anchor.
+
+`reconcile_instances(registry_root=None, limit=128, max_seconds=5)` is an explicit
+installer backstop for **expired disposable** instances and observed-exit
+finite control records. Resident production and unexpired disposable records
+are preserved. No import, status, lookup or session-start
+routine invokes it implicitly. The module CLI offers `inspect` and `reconcile`
+with `--registry-root`, `--limit`, and `--max-seconds`.
+The additional finite-production control-record case requires observed native
+exit and never inherits disposable-artifact reclamation authority.
+Collectors resume lexicographically after the last visited canonical instance
+key and wrap at EOF, so protected, unexpired and held rows cannot permanently
+starve later entries. Count and whole-call time bounds still apply. The same
+owned inventory contains `.reconcile.lock` and atomically published
+`.reconcile.cursor`; all bindings use the ASCII header
+`copilot-daemon-reconcile-v1`, newline, an empty or 32-lowercase-hex key, and a
+final newline. This is progress metadata, not an instance or ownership grant.
+Nonblocking collector custody serializes cursor advancement across bindings.
+Missing inventories remain absent; empty inventories create no progress files.
+Invalid, redirected, inaccessible or foreign controls fail visibly without
+repair. Inspection never advances the cursor.
+
+The PowerShell binding is `daemon_instances.ps1`, with
+`New-DaemonInstanceReservation`, `Set-DaemonInstanceProcess`, `Enter-DaemonInstance`,
+`Exit-DaemonInstance`, and `Invoke-DaemonInstanceReconcile`. Bash exposes
+`new_daemon_instance_reservation`, `enter_daemon_instance`,
+`run_daemon_instance`, and `reconcile_daemon_instances`. Both use the same record
+protocol. Linux supervision and cleanup use the shared standard-library Python
+implementation; the package is a pure Python wheel with no custom native
+executable or compiler build hook. Production shell admission still executes
+the application directly. Disposable shell supervision and reconciliation
+require Python 3.10 or newer, selected through the absolute
+`COPILOT_EXTENSIONS_DAEMON_PYTHON` when supplied, otherwise an owned `python3`
+resolved from the caller's PATH. They invoke the deterministic package/payload-local
+`daemon_instance_runtime.pyz` source archive with `-I -S -B`, so filesystem
+custody covers the complete import closure rather than just one entry script.
+The archive contains only canonical `.py` files, not bytecode or native code;
+`tools/sync-versioned-runtime.py --only-installer-instances` publishes it beside
+the source-only installer adapters with non-group-writable permissions.
+
+The interpreter and selected source must have attributable filesystem custody.
+Missing, redirected or writable helper inputs refuse rather than downloading
+dependencies or substituting an ambient package. Linux requires kernel pidfds,
+unreaped-child `waitid` observation and the existing libc subreaper interface.
+Optional Python pidfd wrappers may be absent: the shared binding then calls
+the existing libc interface through `ctypes`, without compiling a helper.
+Owner loss, monotonic lease/hard deadlines and reparented-descendant settlement
+retain the matched settlement witness. Linux disposable reservations use record
+schema 2: `deadline_mono` and `hard_deadline_mono` are `CLOCK_MONOTONIC` timestamps,
+and `clock_domain` binds them to the kernel boot and the current time namespace.
+Reservation, renewal, admission, monitoring and collection use that same clock;
+epoch fields are informational only. Wall-clock steps cannot extend or shorten
+a committed renewal. A different boot/namespace, unavailable namespace identity,
+or legacy schema-1 Linux disposable lease refuses admission/renewal and holds
+live cleanup rather than guessing a conversion. Older readers reject schema 2;
+finish disposable work under its original owner before upgrading or rolling
+back. Production records remain schema 1 and never expire. A missing
+facility refuses disposable admission or holds cleanup with diagnostics;
+there is no numeric-PID signaling fallback. Windows uses the compiler-free
+PowerShell instance adapter described above; its retained compiled process
+launchers and actual native qualification remain separate gates. Darwin external
+termination currently holds when kernel-pinned custody cannot be established.
+
+Renewable expiry is decided from the current record while holding its mutation
+lock. A contended inspection remains explicitly unknown until a current read
+or the independent monotonic hard maximum; it is not evidence that a cached
+lease expired. Linux shell collection budgets can exceed 300 seconds, while
+each CLI process-stop attempt remains capped at 300 seconds.
+
+Windows startup uses ordinary native creation and verifies the tracked
+launcher-owned cleanup scopes described below. Legacy Task components remain
+available only for explicit owned recovery/removal; normal constructors no
+longer adopt them. Source qualification, Main release and authorized installed
+rollout remain separate states.
+
 A long-lived daemon (one started by an installer, a hook, a CLI or a cutover
 and meant to outlive it) launches through one primitive instead of hand-built
 `Popen` kwargs:
@@ -408,37 +854,25 @@ It composes the helpers above, so its flags never drift from them:
   and layer `extra_env` into the child environment. This bypasses Windows venv
   redirectors so process control names the actual worker while retaining its
   venv imports. Opaque executable commands are not rewritten by `spawn_daemon`.
-- **Escapes the caller.** `breakaway=True` (default) adds
-  `CREATE_BREAKAWAY_FROM_JOB` on Windows so a kill-on-close Job around the
-  caller (an installer or updater) does not kill the new daemon; POSIX gets a
-  new session. A Windows caller already in a Job uses the broker before
-  starting the daemon: nested Jobs, including a venv redirector's Job, can
-  accept the breakaway flag while retaining a caller-owned ancestor lifetime.
-  A successful `CreateProcess` is not escape proof. A failed Job-membership
-  query refuses the launch rather than assuming an uncontained caller.
-  When direct creation denies breakaway (`ERROR_ACCESS_DENIED`),
-  the shared launcher uses a bounded, windowless WMI bootstrap outside that
-  Job. Its bootstrap uses the actual base interpreter with WMI's supported
-  detached-process flag, not a venv redirector or a console window. It passes
-  the original argv, cwd, complete environment, creation policy
-  and split log paths over an authenticated, one-use loopback channel; neither
-  credentials nor shell-interpolated daemon arguments go on the broker command
-  line or into temporary files. The actual daemon is staged suspended, its
-  native process handle is adopted and its independent lifetime checked, then
-  it is resumed. Failed uncommitted launches are reaped before a retry.
-  Cleanup branches run independently and preserve `DaemonSpawnError`;
-  `cleanup_confirmed=False` reports uncertain process exit and prohibits even
-  an explicitly requested contained retry.
-  The returned handle names the **actual daemon**, not PowerShell, WMI or a
-  console wrapper, and supports `pid`, `poll()`, `wait(timeout=...)`,
-  `terminate()` and `kill()`. Brokerage has a 30-second launch deadline with a
-  bounded cleanup wait. If both direct breakaway and brokerage fail,
-  `DaemonSpawnError` (an `OSError`) is raised and the daemon log records why.
-  A caller for which the shorter lifetime still beats no daemon may explicitly
-  pass `contained_fallback=True`; only after brokerage fails is that degraded
-  launch attempted, with a warning and a log entry. `breakaway=False` and
-  contained test mode never invoke the broker. Such contained daemons die when
-  the caller's Job closes.
+- **Escapes tracked caller cleanup.** `breakaway=True` (default) requests native
+  breakaway and starts the Windows child suspended. Canonical Job producers
+  assign fresh `Local\ce-owned-job-<uuid>` names and propagate the complete
+  semicolon-separated chain in `COPILOT_EXTENSIONS_OWNED_JOB_SCOPES`, including
+  strict outer scopes. Explicit child environment replacement cannot drop
+  tracked ancestors. The daemon must be absent from every exact named Job,
+  not merely its caller's immediate Job. Missing/malformed scopes or failed
+  queries refuse admission. Temporary noninheritable query handles close
+  before resume; only the original owners retain continuing Job handles.
+  The daemon's environment drops the escaped chain. A retained restrictive
+  outer Job is refused even when an inner Job permits breakaway.
+  This guarantees escape from tracked launcher-owned cleanup scopes, not
+  arbitrary unknown external supervisors; ambient Job membership alone is not
+  a rejection. Native creation denial does not activate another mechanism.
+  Unconfirmed exit retains process custody on `DaemonSpawnError.process` and
+  prohibits replay. Only a settled refusal permits an explicitly requested
+  `contained_fallback=True`, with a warning and log entry accepting the shorter
+  lifetime. Explicit `breakaway=False` and contained tests stay contained.
+  The returned `Popen` controls the actual daemon. POSIX uses a new session.
 - **Explicit cwd.** `cwd` must be an existing absolute directory and must not be
   inside an `installed-plugins` payload, either as given or once symlinks and
   junctions are resolved (`<runtime>/current -> .../installed-plugins/...` is
@@ -468,6 +902,95 @@ or session, e.g. `CREATE_NEW_CONSOLE` or `CREATE_BREAKAWAY_FROM_JOB`) raises
 `ValueError` on every platform, so a caller cannot reopen a console or defeat
 `breakaway=False` and contained test mode. Interpreter selection stays with
 the caller (`windowless_python()` / `windowless_python_env()`).
+
+### Explicit finite Windows broker
+
+`windows_task_broker` supplies a consumer-owned on-demand Scheduled Task
+implementation. It requires the optional `windows-broker` extra, which reuses
+`agent-zdd`'s stdlib-only private native transport. Ordinary process operations
+retain no runtime dependencies and need no sibling plugin or service.
+
+Only the consumer's canonical installer, under its existing execution driver,
+calls `reconcile` with its validated installation identity, private durable root
+and already-qualified immutable runtime. Registration has no triggers, saved
+password, elevation or network listener. Installed action and cwd cannot point
+into a payload, checkout or session. Missing adoption fails explicitly; normal
+launches never install or repair it. Update drains finite accepted transactions
+without stopping them; stop/uninstall disable admission and report that already
+transferred child control remains the consumer's responsibility.
+
+`windows_broker_installation.registration(root, slot)` is the fixed numbered
+installation factory: identity derives from the normalized durable root, and
+the action uses that complete immutable slot's direct base `pythonw.exe` and
+installed `agent_procutil/windows_broker_entry.py`. The canonical interpreter
+selector bypasses the Windows venv redirector; the fixed entrypoint supplies its
+own installed import directory without a saved environment. The slot's canonical
+completion validator is used; mutable dev slots, missing helpers and linked
+paths refuse. `load(root)` reads that root's adoption without trusting ambient
+owner/config hints or repairing it. The explicit Task client's `spawn` calls
+`load_current()`, binding discovery to this module's fixed installed
+`versions/<generation>/Lib/site-packages/agent_procutil` location. It does not
+use `sys.prefix` (which can name the base interpreter under `-S`), the caller's
+cwd or owner/config environment variables. Source, vendored and linked import
+layouts refuse; a newer consumer slot may still use its installation's retained
+older broker action. Discovery never registers, repairs or activates a Task.
+Legacy explicit installation/recovery can use
+`update_driver.windows_broker.adopt` under actual inherited execution custody.
+Normal constructors and `spawn_daemon` do not invoke it or this Task client.
+Ordinary process operations remain stdlib-only.
+
+`reconcile` records credential-free publication intent before changing the Task
+or adopted configuration. While that record exists, ordinary launches refuse
+with `installer recovery required`; they never repair it. The next explicitly
+owned installer can call `recover` (also called at the start of `reconcile`)
+to restore the original action, enabled state and configuration. Recovery
+accepts only the recorded old/new action and configuration, refuses foreign
+state and keeps its record if restoration cannot be confirmed. Repeated
+adoption failure preserves a pre-existing Task rather than uninstalling it.
+The canonical execution driver must own mutation and settle its interrupted
+execution fences first. This record introduces no second mutation lock or
+automatic request replay. Both immutable generations must remain retained
+until publication or recovery removes the record. For canonical numbered
+installations, adoption publishes owner-scoped `runtime-references.json`
+barriers through the action slot's installed retention helper **before** Task
+mutation. Canonical GC and candidate removal honor those barriers after the
+installer process dies. Recovery shrinks them only after restoring Task and
+configuration and removing pending intent. A missing canonical helper or
+malformed reference evidence refuses rather than falling back to a process-local pin.
+`uninstall` confirms owned Task removal before removing adoption metadata and
+releasing that owner's barriers; an interrupted removal can be retried without
+touching another registration. Non-versioned independent installations retain
+their own immutable-action lifecycle and have no canonical slot collector.
+These are process-crash
+recovery semantics, not a claim of power-loss atomicity across Task Scheduler
+and filesystem storage.
+
+Each activation supplies only a fresh pipe rendezvous and public caller
+PID/birth metadata through Task Scheduler. The client pins the actual scheduler
+instance, checks its executable and authenticates that process as the native
+pipe creator before sending argv or environment. Owner-only local pipes reject
+other users and remote clients. The actual child is staged suspended and must
+be outside **every** Job. The client duplicates its native control handle
+through the already-pinned broker process, checks PID/birth/principal and Job
+membership, and adopts it before resume. A lost or ambiguous acknowledgement
+is a failed transaction with explicit cleanup state, not permission to launch
+another copy. Failed retirement retains retryable custody and blocks new work.
+
+The finite instance stays alive until the client's final commit and pipe close;
+the caller joins only that broker, not its resident. Independent custody before
+finite exit is the exemption from a resident broker's graceful-cutover contract.
+Containing tests refuse activation. The disposable native lane separately records
+which installer and normal-launch adapters it actually exercised; that evidence
+does not qualify full cold construction, every maintenance consumer, interactive
+desktop visibility, promotion or deployment.
+
+Scheduler failures expose only fixed phase names, a numeric native HRESULT
+and bounded same-machine monotonic elapsed milliseconds when available.
+JSON-cmdlet discovery and conversion have distinct phase markers; missing or
+invalid timing is `unobserved`. The last observed phase is not proof that the
+operation stalled there. Diagnostics never disclose launch arguments,
+environment values, registration contents or arbitrary native exception text.
+These measurements do not extend activation or cleanup deadlines.
 
 A child that must not outlive the process that spawned it is spawned inside a
 kill-on-close Windows Job Object:
@@ -614,8 +1137,29 @@ if the native operation fails after its caller was cancelled.
 The caller can boundedly await `asyncio.wrap_future(holder)` at shutdown without
 claiming native completion from a cancelled coroutine. The sampling thread is
 daemon-scoped to its owning process and cannot outlive that process.
-psutil may inspect system process tables internally; the identity cap alone
-does not prove host-independent constant sampling cost.
+Each uncached attempt shares one psutil parent-table snapshot across retained
+identities and newly discovered descendants, including reparented survivors.
+Edges are only discovery candidates: fresh PID/birth and parent checks still
+validate adoption. A failed snapshot remains explicitly unavailable/denied;
+partial results never become a successful empty topology. The snapshot is not
+reused between attempts. Its host-wide enumeration remains proportional to the
+system process table; the identity cap alone does not prove host-independent
+constant sampling cost.
+
+The one-snapshot count covers discovery, not every native parent-table read.
+Fresh child-parent validation still calls each candidate's ppid(); on Windows
+psutil 7.2.2 this performs another global parent-table enumeration. Thus a cold
+attempt discovering D children performs one discovery enumeration plus D fresh
+validation enumerations for a stable tree. An unchanged warm attempt performs
+one enumeration regardless of retained identity count, and cached reuse performs
+none. New candidates can add validation work on later attempts too. The native
+Windows regression profiles the underlying C enumeration entrypoint (including
+all Python aliases), checking cold counts of one plus newly retained descendants
+and exactly one warm enumeration for both one- and four-child fixture trees
+(including their real interpreter/console descendants). It preserves fresh
+validation rather than treating
+snapshot edges as ancestry authority. These are work counts, not aggregate CPU
+or latency qualification.
 
 Each actual attempt has immutable `SampleAccounting`: a random 32-character
 sampler instance, a bounded sequence, `pending`/`succeeded`/`failed` state,

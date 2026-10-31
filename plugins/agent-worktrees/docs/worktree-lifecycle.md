@@ -47,6 +47,28 @@ full verb catalog, see [cli-reference.md](cli-reference.md).
 deployment; **deployed** means a running system reflects it (a separate install
 step for runtime plugins). Don't call a merged change "deployed."
 
+Creation can select a registered destination with `--machine` and `--repo`
+without starting an agent. The
+[origin-owned allocation contract](worktree-allocation.md#ordinary-destination-selection)
+owns remote capability negotiation, stable retry identity and the distinction
+between durable receiving creation and asynchronous origin-claim linkage.
+
+### Background status freshness
+
+The resident status monitor uses a 30-second default correctness backstop.
+Existing lifecycle and advisory pushes interrupt that wait immediately; this
+does not delay pushed updates or change request, lease, or shutdown deadlines.
+The explicit `status-monitor --interval <seconds>` override remains available
+with its existing two-second minimum.
+
+Unavailable passive roster reads renew project demand but wake the producer only
+once while the same unavailable read-demand episode remains active. Repeated
+polls do not pull the full producer forward; the periodic backstop still retries.
+Successful owned publication, demand expiry and reactivation rearm the next
+unavailable wake. A successful passive read is not a producer-completion receipt:
+interleaved healthy reads cannot continually rearm failing-reader retries.
+Explicit Picker bootstrap and lifecycle wakes are unchanged.
+
 ### Creation starts from freshly resolved repository state
 
 Before creating an ordinary or paired worktree, agent-worktrees fetches the
@@ -73,6 +95,21 @@ planning does this before local guidance rendering even with
 `--defer-projections`; bare resume trusts the recorded checkout, not HOME.
 Restore establishes required trust before reclaiming an existing owner;
 projection preparation remains separate from that destructive boundary.
+On Windows, Restore resolves the live owner from the worktree's registered
+sessions, not from its latest resumable conversation or the process cwd.
+It preserves the selected PID/birth identity through reclaim, waits for native
+process exit, then checks current bindings again before ordinary Resume.
+An owner that exited before Restore may resume normally only after the same
+clear-state check. Unknown retirement, a concurrent owner or failed observation
+refuses Resume; a termination request alone never clears live lock evidence.
+For a tracked worktree, Reclaim also waits up to 35 seconds for the existing
+resident producer to publish a current, non-stale row observed after that
+ownership check, with no bound process or mux. It does not recompute the roster
+in the reader. Its `publication` result retains that generation/revision.
+Timeout reports native retirement separately as `native_state_clear` with
+roster confirmation pending; it does not report `state_clear` or allow Restore
+to continue to Resume. This is a bounded clear-state observation, not the
+general mutation/publication receipt contract tracked separately.
 Legacy labels must also resolve to a local record on the actual native
 platform; a coincidentally existing path is not authority. Declared aliases
 and record-scoped legacy WSL mappings remain supported.
@@ -140,6 +177,22 @@ If a sibling reopens during a repeated finalize, failed rollback of the old
 finalized state restores an active harness and an active paired obligation.
 The checkout and reopened work remain intact, and reconciliation can retry.
 
+### Finished-session cleanup cadence
+
+The automatic startup/exit sweep excludes archived records and finalized
+tombstones whose `reaped_at` is set and whose checkout is absent. Retained
+history does not repeat session scanning, ownership/configuration checks,
+branch deletion, permission cleanup or tombstone publication on every exit.
+A reaped pair is selected again when its exact reciprocal sibling is also
+finalized and reaped, allowing the existing BOTH-retirement path to finish.
+Missing, unreadable or nonreciprocal siblings leave the tombstone intact.
+
+This is a selection optimization, not cached cleanup authorization. Reopened
+records and recreated checkouts remain candidates for inspection, and every
+selected candidate still receives fresh liveness, identity, responsibility
+and pair checks under the existing cleanup locks. Explicit cleanup retains
+its existing behavior, including retries for residual branch cleanup.
+
 ### Session worktree names
 
 Seeded and unseeded session creation use the same timestamp and four-character
@@ -155,6 +208,18 @@ receipt, separate from the generated worktree name. Replaying the same request
 recovers that receipt's original allocation. Short-allocation receipts must
 agree with their recorded worktree ID, timestamp and suffix; inconsistent
 receipts are refused without rewriting the worktree record or staged prompt.
+Completed receipts with a complete allocation also prove the original record,
+creation nonce, owner/pair evidence, checkout and receiving project namespace
+before applying naming compatibility. New admissions retain the observed
+execution origin, so a later optional machine-map customization does not
+invalidate an otherwise identical completed replay. Older receipts are not
+backfilled: an original OS-derived identity can be independently reconstructed,
+but an unprovable former custom owner still requires ordinary ownership checks.
+The same-request replay and status read preserve the original record and seed;
+they do not grant mutation or seed-replacement authority. Fresh/unstarted
+allocations, first completion, Resume and actual seed writes keep their ordinary
+execution-authority checks. Consumed or superseded intent cannot be restored by
+replaying its admission.
 Existing worktrees and historical
 UUID-suffixed admissions retain their exact names, including during creation
 repair and paired-knowledge recovery.
@@ -162,6 +227,17 @@ When a caller's record is absent, delegate host inference accepts both complete
 allocation formats, not partial machine/environment prefixes. Matches for
 different host identities remain unresolved rather than authorizing finalization
 from an ambiguous host.
+
+### Advisory creation diagnostics
+
+Nonessential claim/branch notices and allocation/Git-creation progress do not
+reject a persisted owner claim or replace an actual allocation failure when
+stderr raises `OSError`. The existing activity log receives a sanitized
+`creation_diagnostic` event with its scope, error type and available numeric
+errno/winerror. Logging remains best-effort with its existing failure counter;
+it does not guarantee caller delivery. Required JSON output, real storage/Git
+failures and progress outside these creation scopes retain their normal
+semantics. This does not resume or reset an already-pending creation request.
 
 ### Replay-safe programmatic creation
 

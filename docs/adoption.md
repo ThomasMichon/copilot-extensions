@@ -15,7 +15,11 @@ with the component owner.
    [standalone worktrees guide](../plugins/agent-worktrees/docs/getting-started.md).
 2. **Decide repo ownership and policy.** Preserve the repo's contribution,
    branch, review, and state rules. A registry entry does not authorize edits
-   or make the repo a special operator harness.
+   or make the repo a special operator harness. A repository-owned
+   [`expose_agent: false`](configuration.md#repository-owned-agent-exposure)
+   refuses managed authoring-agent adoption and launch. Keep that repository
+   source-only and work on it from an eligible external harness instead;
+   missing policy or `true` does not itself adopt it.
 3. **Adopt explicitly.** Follow the selected plugin's `register`, `adopt`, or
    setup skill. Installation/update owns machine-local deployment;
    adoption write scope is [plugin-specific](patterns/install-vs-adopt-boundary.md).

@@ -16,7 +16,7 @@ from . import config as cfg
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
-from .worktree_naming import session_worktree_id
+from .worktree_naming import prospective_session_worktree_id
 
 if TYPE_CHECKING:
     from .__main__ import LaunchPreflight
@@ -35,10 +35,20 @@ def emit_launch_preflight_error(
 
 
 def preflight_launch(
-    config: cfg.Config, args: argparse.Namespace, work_dir: str
+    config: cfg.Config, args: argparse.Namespace, work_dir: str,
+    *, allocation_source: str | None = None,
 ) -> LaunchPreflight:
     """Read-only validation before any launch-side mutation."""
     from . import state_root as state_root_mod
+    from . import agent_policy
+    from repository_policy import AgentHostingError
+
+    try:
+        # A New allocation does not exist yet; its source policy is authoritative
+        # until the allocated checkout can be checked at the receiving boundary.
+        agent_policy.require(allocation_source if allocation_source is not None else work_dir)
+    except AgentHostingError as exc:
+        return _core().LaunchPreflight(policy_error=str(exc))
 
     recovery = getattr(args, "recovery", False)
     repo = config.default_repo
@@ -391,6 +401,10 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     record = context.record
     assert record is not None
 
+    admission = _preflight_launch(config, args, record.worktree_path)
+    if admission.error:
+        return _launch_preflight_error(admission)
+
     from .execution_spaces import ExecutionSpaceError, require_record_mutation
     try:
         require_record_mutation(record, config)
@@ -624,14 +638,18 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             return 3
     if seed_pending:
         launch_cmd = deferred_command(
-            launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
+            launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id, prepare_native=not args.dry_run,
+            environment=merged_env,
+            mux=not getattr(args, "no_mux", False),
         )
         print("   Launch prompt staged until Copilot handoff.")
     else:
         launch_cmd = deferred_command(
-            launch_cmd, record.yaml_path, admission_only=True,
+            launch_cmd, record.yaml_path, admission_only=True, prepare_native=not args.dry_run,
             preserve_seed_id=staged_seed.seed_id if staged_seed else None,
             native_resume_session=native_resume,
+            environment=merged_env,
+            mux=not getattr(args, "no_mux", False),
         )
 
     print()
@@ -651,6 +669,8 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         "cmd": launch_cmd,
         "env": merged_env,
         "worktree_id": record.worktree_id,
+        "record_path": str(record.yaml_path),
+        "pane_shell_version": 1,
         "post_exit": True,
         "no_mux": getattr(args, "no_mux", False),
         "seed_claimed": False,
@@ -693,10 +713,18 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3
     repo = config.default_repo
-    platform_name = cfg.detect_platform()
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     suffix = secrets.token_hex(2)
-    worktree_id = session_worktree_id(config.machine, platform_name, timestamp, suffix)
+    from .creation_identity import new_machine_identity
+
+    try:
+        identity = new_machine_identity(config, "tuple-v1")
+        assert identity is not None
+        worktree_id = prospective_session_worktree_id(identity, timestamp, suffix)
+    except (ValueError, RuntimeError) as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
 
@@ -706,7 +734,9 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
     print(f"   Path:     {worktree_path}")
     print()
 
-    launch_preflight = _preflight_launch(config, args, worktree_path)
+    launch_preflight = _preflight_launch(
+        config, args, worktree_path, allocation_source=repo.anchor,
+    )
     if launch_preflight.error:
         return _launch_preflight_error(launch_preflight)
 
@@ -750,6 +780,7 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
             recovery=getattr(args, "recovery", False),
             pending_seed=getattr(args, "seed", None),
             defer_projections=getattr(args, "defer_projections", False),
+            identity_mode="tuple-v1",
         )
     except LaunchSeedStagingFailure as exc:
         output.err(str(exc))
@@ -767,6 +798,10 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
         )
         return 3
     except profile_assignment.ProfileAssignmentError as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
+    except (ValueError, RuntimeError) as exc:
         output.err(str(exc))
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3

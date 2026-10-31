@@ -47,6 +47,23 @@ cannot renew its own grant using `start`. Signing-key rotation invalidates old
 grants. Tokens must not be logged, included in event records or placed in public
 task results.
 
+## Identity is not send custody
+
+Scoped grants are conditional, not universal per-agent or per-worktree tokens:
+the trusted start/grant path needs configured control signing authority and an
+exact bound owner session. A worktree/worker label alone proves no request's
+origin. The signature, expiry, task incarnation and current ownership checks
+establish the scoped request authority described above; ordinary trusted local
+or shared/control callers use their existing access boundary.
+
+A wake's delivery token is different: it is the leased custody identity of one
+outbox attempt, not a worker credential. The retained send identity links that
+original attempt to transport settlement. Losing or expiring a delivery lease
+does not prove a send absent, and a task grant cannot settle an unknown send.
+The [task recovery guide](task-recovery.md) explains the control-only diagnostic
+and evidence-bound reconciliation surfaces. They expose neither token value
+nor a universal identity scheme.
+
 ## Opt-in supervisor delivery
 
 An existing label-gated headless lane can select `restricted_worker` in its

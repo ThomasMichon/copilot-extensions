@@ -21,6 +21,25 @@ LOCAL_BIN="${HOME}/.local/bin"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+if [[ "$ACTION" == uninstall ]]; then
+    __uninstall_args=("$@")
+    for (( __arg=1; __arg<${#__uninstall_args[@]}; __arg++ )); do
+        if [[ "${__uninstall_args[$__arg]}" == --install-dir ]]; then
+            __arg=$((__arg + 1))
+            __root="${__uninstall_args[$__arg]:-}"
+            if [[ -z "$__root" || "$__root" == -* ]]; then
+                printf '%s\n' '--install-dir requires a directory' >&2
+                exit 2
+            fi
+            case "/$__root/" in
+                */../*) printf '%s\n' 'Logger uninstall requires a root without parent-traversal components' >&2; exit 2 ;;
+            esac
+            [[ "$__root" == /* ]] || __uninstall_args[$__arg]="$PWD/$__root"
+        fi
+    done
+    set -- "${__uninstall_args[@]}"
+fi
+
 # Staging itself writes installation state, so publication admission precedes it.
 case "$ACTION" in
     install|update|stamp|provision)
@@ -321,6 +340,15 @@ fi
 # is the authoritative TOTAL bound, this just shortens single-request stalls.
 if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 
+_bootstrap_python() {
+    # Keep construction supervision outside the candidate being built.
+    local __c
+    for __c in python3 python; do
+        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
+    done
+    return 1
+}
+
 if [[ $# -gt 0 ]]; then
     shift
 fi
@@ -341,10 +369,61 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+if [[ "$ACTION" == uninstall ]]; then
+    case "/$INSTALL_DIR/" in
+        */../*) printf '%s\n' 'Logger uninstall requires a root without parent-traversal components' >&2; exit 2 ;;
+    esac
+fi
 if [[ "$INSTALL_DIR" != /* ]]; then
     INSTALL_DIR="$PWD/$INSTALL_DIR"
 fi
-LEGACY_INSTALL_DIR="$HOME/.agent-logger"
+_normalize_install_root() {
+    local remaining="$1" component normalized=""
+    while [[ -n "$remaining" ]]; do
+        component="${remaining%%/*}"
+        if [[ "$remaining" == */* ]]; then remaining="${remaining#*/}"; else remaining=""; fi
+        case "$component" in ""|.) ;; *) normalized="$normalized/$component" ;; esac
+    done
+    printf '%s\n' "${normalized:-/}"
+}
+_uninstall_external_python() {
+    local root="${1:?runtime root required}" candidate selected probe
+    probe='import sys
+from pathlib import Path
+assert sys.version_info >= (3, 10)
+root = Path(sys.argv[1]).absolute()
+assert ".." not in root.parts
+roots = (root, root.resolve())
+paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
+         getattr(sys, "_base_executable", sys.executable))
+for value in paths:
+    path = Path(value).absolute()
+    for actual in (path, path.resolve(strict=True)):
+        assert all(not actual.is_relative_to(boundary) for boundary in roots)
+sys.stdout.write(str(Path(sys.executable).resolve(strict=True)))'
+    while IFS= read -r candidate; do
+        case "$candidate" in "$root"/*|*WindowsApps*) continue ;; esac
+        case "${OSTYPE:-}" in
+            msys*|cygwin*) [[ "$candidate" == *.exe || ! -f "$candidate.exe" ]] || candidate="$candidate.exe" ;;
+        esac
+        selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" || continue
+        [[ -n "$selected" && -x "$selected" ]] || continue
+        printf '%s' "$selected"
+        return 0
+    done < <(type -aP python3 python 2>/dev/null)
+    printf '%s\n' 'Uninstall requires an existing external Python outside runtime and prefix closure' >&2
+    return 1
+}
+INSTALL_DIR="$(_normalize_install_root "$INSTALL_DIR")"
+if [[ "$ACTION" == uninstall ]]; then
+    py="$(_uninstall_external_python "$INSTALL_DIR")" || {
+        printf '%s\n' 'Cannot validate Logger uninstall ownership without a bootstrap Python' >&2
+        exit 1
+    }
+    INSTALL_DIR="$("$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" \
+        --root "$INSTALL_DIR" --resolve-root)" || exit 1
+fi
+LEGACY_INSTALL_DIR="$(_normalize_install_root "$HOME/.agent-logger")"
 legacy_cmp="$(printf '%s' "$LEGACY_INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
 install_cmp="$(printf '%s' "$INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
 PUBLISH_GLOBAL_BINSTUBS=1
@@ -463,15 +542,6 @@ _rt_python() {
     printf '%s' "$py"
 }
 
-_bootstrap_python() {
-    # Keep construction supervision outside the candidate being built.
-    local __c
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
-    done
-    return 1
-}
-
 _payload_hash() {
     # Cheap payload fingerprint for the completion marker (#935): sha256 of
     # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
@@ -551,8 +621,45 @@ _write_runtime_manifest() {
         return 0
     fi
     _assert_source_runtime || return 1
-    write_deploy_manifest agent-logger agent-logger "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV" \
-        "" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
+    if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+        write_deploy_manifest agent-logger agent-logger "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV" \
+            "" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
+        return "$?"
+    fi
+    local py source_path kind commit branch dirty content_hash manifest_json
+    py="$(_bootstrap_python)" || return 1
+    source_path="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    kind="$(_source_kind "$source_path")" || return 1
+    commit=""; branch=""; dirty="false"
+    if [[ "$kind" == local ]]; then
+        local git_info
+        git_info="$(_git_info "$(dirname -- "$source_path")")" || return 1
+        read -r commit branch dirty <<<"$git_info" || return 1
+    fi
+    content_hash="$(_payload_hash)" || return 1
+    manifest_json="$("$py" -I -B -c '
+import datetime,json,platform,socket,sys
+kind,path,version,commit,branch,dirty,content_hash,venv = sys.argv[1:]
+source = dict(kind=kind,path=path,repo="copilot-extensions",plugin="agent-logger",
+              version=version,commit=commit or None,branch=branch or None,dirty=dirty=="true")
+if content_hash:
+    source["content_hash"] = content_hash
+print(json.dumps(dict(
+    schema_version=3,service="agent-logger",
+    deployed_at=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    deployed_by=socket.gethostname()+"-"+platform.system().lower(),
+    source=source,venv=venv,runtime="python",
+)))
+' "$kind" "$source_path" "$PACKAGE_VERSION" "$commit" "$branch" "$dirty" "$content_hash" "$VENV")" || return 1
+    if ! printf '%s\n' "$manifest_json" |
+        "$py" -I -B -X utf8 "$SCRIPT_DIR/command_binding.py" \
+            --payload-root "$PLUGIN_DIR" --plugin-id agent-logger --legacy-root "$INSTALL_DIR" \
+            --publish-legacy --write-manifest --source-payload-root "$source_path" \
+            --project-root "$__publication_project" >/dev/null; then
+        _fail 'Command ownership validation refused Logger deploy-manifest publication.'
+        return 1
+    fi
+    ok "Deploy manifest written (source: $kind)"
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -736,9 +843,8 @@ _ensure_uv_index() {
 # Deploy the self-provisioning `agent-logger` binstub (install-on-first-use). Fast
 # path execs the venv's `agent-logger` console script; otherwise it provisions on
 # first use -- announcing (a human line + a machine-readable ::agent-provisioning::
-# signal so a caller can extend its timeout), lock-serialized, fail-fast. The 5
-# auxiliary console-script binstubs (session-sync, collate-session, ...) are plain
-# symlinks created only by a full provision.
+# signal so a caller can extend its timeout). Cold commands delegate to the
+# selected snapshot's queued dispatcher, as do the five auxiliary wrappers.
 deploy_binstub() {
     local temporary
     mkdir -p "${LOCAL_BIN}" || return 1
@@ -780,46 +886,21 @@ if [ -n "${AGENT_LOGGER_NO_SELFPROVISION:-}" ]; then
     printf '%s\n' "[$_name] runtime not provisioned (AGENT_LOGGER_NO_SELFPROVISION set)." >&2
     exit 1
 fi
-_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
-[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
-if [ ! -f "$_install" ]; then
-    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
+_payload="$(cat "$_root/payload-dir" 2>/dev/null)"
+_shim="$_payload/bin/agent-logger"
+_gate="$_payload/scripts/runtime-gate.sh"
+if [ -z "$_payload" ] || [ ! -x "$_shim" ]; then
+    printf '%s\n' "[$_name] cannot self-provision: selected snapshot command not found. Re-enable/update the plugin, then retry." >&2
     exit 127
 fi
-_payload="${_install%/scripts/install.sh}"
-_probe="$_payload/scripts/installation-context/plugin-publication-probe.sh"
-if [ ! -f "$_probe" ]; then
-    printf '%s\n' "[$_name] Runtime publication refused: snapshot admission helper is unavailable. Re-enable/update the plugin, then retry." >&2
+if [ ! -f "$_gate" ] ||
+   ! grep -Fq '# Installation driver contract: logger-first-use-v1' "$_gate"; then
+    printf '%s\n' "[$_name] selected snapshot lacks the queued command contract. Re-enable/update the plugin, then retry." >&2
     exit 126
 fi
-bash "$_probe" "$_payload" "$_name" "$_root" || exit $?
-_resolve normal
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
-_lock="$_root/.provision.lock"
-exec 9>"$_lock"
-command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-bash "$_install" provision >&2
-_rc=$?
-_resolve
-if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$AGENT_RT_PY" -m agent_logger "$@"
-fi
-printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
-    _rc=1
-else
-    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
-fi
-exit "$_rc"
+COPILOT_PLUGIN_ROOT="$_payload"
+export COPILOT_PLUGIN_ROOT
+exec "$_shim" "$@"
 STUBEOF
     then
         rm -f "$temporary"
@@ -953,7 +1034,7 @@ deploy_auxiliary_compatibility_binstubs() {
             _fail "Logger auxiliary binstub staging is not a regular file: $temporary"; return 1;
         }
         if ! cat > "$temporary" << 'STUBEOF'
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Legacy/global compatibility wrapper. The owning payload shim selects and
 # self-provisions its own runtime; this file never resolves a same-named command
 # through PATH.
@@ -966,6 +1047,24 @@ if [ -z "$_payload" ] || [ ! -x "$_shim" ]; then
     printf '[%s] owning payload shim not found: %s\n' "$_command" "$_shim" >&2
     printf '[%s] re-enable/update agent-logger, then retry.\n' "$_command" >&2
     exit 127
+fi
+_gate="$_payload/scripts/runtime-gate.sh"
+if [ ! -f "$_gate" ] ||
+   ! grep -Fq '# Installation driver contract: logger-first-use-v1' "$_gate"; then
+    if [ ! -f "$_gate" ] ||
+       ! grep -Fq 'AGENT_LOGGER_NO_SELFPROVISION' "$_gate"; then
+        printf '[%s] selected snapshot lacks non-provisioning dispatch support; re-enable/update agent-logger.\n' "$_command" >&2
+        exit 126
+    fi
+    _resolver="$_payload/scripts/resolve-runtime.sh"
+    if [ ! -f "$_resolver" ] ||
+       ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
+        printf '[%s] read-only runtime resolver is unavailable; re-enable/update agent-logger.\n' "$_command" >&2
+        exit 126
+    fi
+    # The old gate owns effective-context resolution, but never construction.
+    AGENT_LOGGER_NO_SELFPROVISION=1
+    export AGENT_LOGGER_NO_SELFPROVISION
 fi
 COPILOT_PLUGIN_ROOT="$_payload"
 export COPILOT_PLUGIN_ROOT
@@ -1009,11 +1108,12 @@ _snapshot_requires_materialized_engine() {
 _materialize_snapshot_libs() {
     local snapshot_dir="$1"
     local libs_dir="$snapshot_dir/libs"
-    local lib src
+    local lib src package project temporary
+    project="$snapshot_dir/pyproject.toml"
     mkdir -p "$libs_dir" || {
         _fail "Snapshot libraries directory cannot be prepared: $libs_dir"; return 1;
     }
-    for lib in config-migrate agent-procutil dropin-registry plugin-resolve plugin-activation; do
+    for lib in config-migrate agent-procutil dropin-registry plugin-resolve plugin-activation single-instance-lease update-driver; do
         src="$PLUGIN_DIR/libs/$lib"
         if [[ ! -f "$src/pyproject.toml" ]]; then
             src="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/$lib" || {
@@ -1028,6 +1128,20 @@ _materialize_snapshot_libs() {
             cp -a "$src" "$libs_dir/$lib" || {
                 _fail "Snapshot library copy failed: $lib"; return 1;
             }
+            package="agent-$lib"
+            [[ "$lib" != agent-procutil ]] || package=agent-procutil
+            temporary="$project.tmp.$$"
+            sed "s|$package = { path = \"../../libs/$lib\", editable = true }|$package = { path = \"libs/$lib\" }|" \
+                "$project" >"$temporary" && mv -f "$temporary" "$project" || {
+                _fail "Snapshot dependency mapping failed: $lib"; return 1;
+            }
+            project="$libs_dir/$lib/pyproject.toml"
+            temporary="$project.tmp.$$"
+            sed 's/, editable = true }/ }/g' "$project" >"$temporary" &&
+                mv -f "$temporary" "$project" || {
+                _fail "Snapshot library mapping failed: $lib"; return 1;
+            }
+            project="$snapshot_dir/pyproject.toml"
         fi
     done
 }
@@ -1209,80 +1323,36 @@ install_package() {
     fi
     chg "created venv at ${VENV}"
   fi
-  local setuptools_out
-  if ! setuptools_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" 'setuptools>=83.0.0' --quiet); then
-    printf '%s\n' "$setuptools_out" >&2
-    exit 1
-  fi
-  local pyyaml_out
-  if ! pyyaml_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" 'pyyaml>=6.0' --quiet); then
-    printf '%s\n' "$pyyaml_out" >&2
+  local bootstrap_out
+  if ! bootstrap_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" 'setuptools>=83.0.0' 'pyyaml>=6.0' --quiet); then
+    printf '%s\n' "$bootstrap_out" >&2
     exit 1
   fi
   # Local first-party code still resolves its external and build dependencies
-  # through the configured, seasoned index.
-  local cfg_migrate_dir="${PLUGIN_DIR}/libs/config-migrate"
-  if [ ! -f "${cfg_migrate_dir}/pyproject.toml" ]; then
-    cfg_migrate_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/config-migrate"
-  fi
-  if [ -f "${cfg_migrate_dir}/pyproject.toml" ]; then
-    local cfg_migrate_out
-    if ! cfg_migrate_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet); then
-      printf '%s\n' "$cfg_migrate_out" >&2
-      exit 1
+  # through the configured, seasoned index, in one retained transaction.
+  local -a install_args=(--python "${VENV}/bin/python" --no-editable)
+  local lib_spec lib_dir lib_package
+  for lib_spec in \
+    config-migrate:agent-config-migrate \
+    agent-procutil:agent-procutil \
+    single-instance-lease:agent-single-instance-lease \
+    update-driver:agent-update-driver \
+    dropin-registry:agent-dropin-registry \
+    plugin-resolve:agent-plugin-resolve \
+    plugin-activation:agent-plugin-activation; do
+    lib_dir="${PLUGIN_DIR}/libs/${lib_spec%%:*}"
+    lib_package="${lib_spec#*:}"
+    if [[ ! -f "${lib_dir}/pyproject.toml" ]]; then
+      lib_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/${lib_spec%%:*}"
     fi
-  fi
-  local procutil_dir="${PLUGIN_DIR}/libs/agent-procutil"
-  if [ ! -f "${procutil_dir}/pyproject.toml" ]; then
-    procutil_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/agent-procutil"
-  fi
-  if [ -f "${procutil_dir}/pyproject.toml" ]; then
-    local procutil_out
-    if ! procutil_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-procutil "${procutil_dir}" --quiet); then
-      printf '%s\n' "$procutil_out" >&2
-      exit 1
+    if [[ -f "${lib_dir}/pyproject.toml" ]]; then
+      install_args+=(--reinstall-package "$lib_package" "$lib_dir")
     fi
-  fi
-  # plugin_activation's own transitive deps first, then plugin_activation
-  # itself (schema v3's registered-project trust gate; module
-  # ``plugin_activation``, used by ``repo_trust.py`` for canonical git-remote
-  # identity normalization).
-  local dropin_registry_dir="${PLUGIN_DIR}/libs/dropin-registry"
-  if [ ! -f "${dropin_registry_dir}/pyproject.toml" ]; then
-    dropin_registry_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/dropin-registry"
-  fi
-  if [ -f "${dropin_registry_dir}/pyproject.toml" ]; then
-    local dropin_registry_out
-    if ! dropin_registry_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-dropin-registry "${dropin_registry_dir}" --quiet); then
-      printf '%s\n' "$dropin_registry_out" >&2
-      exit 1
-    fi
-  fi
-  local plugin_resolve_dir="${PLUGIN_DIR}/libs/plugin-resolve"
-  if [ ! -f "${plugin_resolve_dir}/pyproject.toml" ]; then
-    plugin_resolve_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/plugin-resolve"
-  fi
-  if [ -f "${plugin_resolve_dir}/pyproject.toml" ]; then
-    local plugin_resolve_out
-    if ! plugin_resolve_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-plugin-resolve "${plugin_resolve_dir}" --quiet); then
-      printf '%s\n' "$plugin_resolve_out" >&2
-      exit 1
-    fi
-  fi
-  local plugin_activation_dir="${PLUGIN_DIR}/libs/plugin-activation"
-  if [ ! -f "${plugin_activation_dir}/pyproject.toml" ]; then
-    plugin_activation_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/plugin-activation"
-  fi
-  if [ -f "${plugin_activation_dir}/pyproject.toml" ]; then
-    local plugin_activation_out
-    if ! plugin_activation_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-plugin-activation "${plugin_activation_dir}" --quiet); then
-      printf '%s\n' "$plugin_activation_out" >&2
-      exit 1
-    fi
-  fi
+  done
+  install_args+=(--reinstall-package agent-logger "${PLUGIN_DIR}" --quiet)
   export INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="${PLUGIN_DIR}"
   local install_out
-  if ! install_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" "${PLUGIN_DIR}" --quiet); then
+  if ! install_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" "${install_args[@]}"); then
     unset INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB
     printf '%s\n' "$install_out" >&2
     exit 1
@@ -1581,6 +1651,12 @@ EOF
   chg "wrote systemd user units to ${UNIT_DIR}"
 }
 
+case "$ACTION" in
+  install|update|provision)
+    . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+    reconcile_installer_instances "$SCRIPT_DIR"
+    ;;
+esac
 case "${ACTION}" in
   install)
     if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package || exit 1; fi
@@ -1606,32 +1682,64 @@ case "${ACTION}" in
     ok "package + units updated"
     ;;
   uninstall)
+    py="$(_uninstall_external_python "$INSTALL_DIR")" || {
+      _fail "Cannot validate Logger uninstall ownership without a bootstrap Python"; exit 1;
+    }
+    "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" --root "$INSTALL_DIR" || exit 1
+    legacy_units="$("$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" \
+        --root "$INSTALL_DIR" --unit-names --unit-dir "$UNIT_DIR")" || exit 1
+    uninstall_units="$(printf '%s\n' "$TIMER_NAME" "$legacy_units" | sed '/^$/d' | sort -u)"
     if [[ "$DRY_RUN" -eq 1 ]]; then
       echo "(dry run -- nothing will be changed)"
-      if systemctl --user is-enabled "${TIMER_NAME}.timer" >/dev/null 2>&1 || \
-         [[ -f "${UNIT_DIR}/${TIMER_NAME}.timer" ]]; then
-        echo "[dry-run] would disable + remove: ${TIMER_NAME}.service / .timer"
-      fi
+      while IFS= read -r unit; do
+        if systemctl --user is-enabled "${unit}.timer" >/dev/null 2>&1 || \
+           systemctl --user is-active --quiet "${unit}.timer" >/dev/null 2>&1 || \
+           [[ -f "${UNIT_DIR}/${unit}.timer" ]]; then
+          echo "[dry-run] would disable + remove: ${unit}.service / .timer"
+        fi
+      done <<< "$uninstall_units"
       if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
         for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
           [[ -e "${LOCAL_BIN}/${name}" ]] && echo "[dry-run] would remove binstub: ${LOCAL_BIN}/${name}"
         done
       fi
+      echo "[dry-run] would remove runtime generations, snapshots, generated dispatchers and runtime selectors"
       echo "[dry-run] config/session-state at ${INSTALL_DIR} would be kept (agent-logger uninstall never removes it)"
       echo "agent-logger uninstall dry run complete -- nothing was changed"
     else
-      systemctl --user disable --now "${TIMER_NAME}.timer" 2>/dev/null || true
-      rm -f "${UNIT_DIR}/${TIMER_NAME}.service" "${UNIT_DIR}/${TIMER_NAME}.timer"
+      while IFS= read -r unit; do
+        timer_active=0
+        if systemctl --user is-active --quiet "${unit}.timer" >/dev/null 2>&1; then timer_active=1; fi
+        if [[ "$timer_active" == 1 || -f "${UNIT_DIR}/${unit}.timer" || -f "${UNIT_DIR}/${unit}.service" ]]; then
+          if [[ "$timer_active" == 1 || -f "${UNIT_DIR}/${unit}.timer" ]]; then
+            systemctl --user disable --now "${unit}.timer" || exit 1
+          fi
+          service_state=0
+          systemctl --user is-active --quiet "${unit}.service" || service_state=$?
+          case "$service_state" in
+            0) _fail 'Active Logger sync service; uninstall refused after disabling new scheduled starts'; exit 1 ;;
+            3|4) ;;
+            *) _fail 'Cannot determine Logger sync service state; uninstall refused'; exit 1 ;;
+          esac
+        fi
+      done <<< "$uninstall_units"
+      "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" --root "$INSTALL_DIR" --idle --prepare || exit 1
+      while IFS= read -r unit; do
+        rm -f "${UNIT_DIR}/${unit}.service" "${UNIT_DIR}/${unit}.timer" || exit 1
+      done <<< "$uninstall_units"
       systemctl --user daemon-reload || true
       chg "timer removed (config at ${INSTALL_DIR} kept)"
       if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
         for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
-          rm -f "${LOCAL_BIN}/${name}"
+          rm -f "${LOCAL_BIN}/${name}" || exit 1
         done
         chg "binstubs removed from ${LOCAL_BIN}"
       else
         chg "scoped install left legacy global binstubs unchanged"
       fi
+      "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" --root "$INSTALL_DIR" \
+        --idle --prepare --remove-runtime --shell "$BASH" || exit 1
+      chg "runtime generations and generated dispatchers removed (config/session-state kept)"
     fi
     ;;
   status)

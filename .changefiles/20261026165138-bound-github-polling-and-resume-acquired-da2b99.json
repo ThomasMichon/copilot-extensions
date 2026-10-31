@@ -1,0 +1,9 @@
+{
+  "comment": "Bound GitHub polling and resume acquired pages through the pending-crawl journal",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

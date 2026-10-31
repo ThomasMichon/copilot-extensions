@@ -36,6 +36,7 @@ placement is an explicit requirement; no option is a mandatory core dependency.
 | Deployment owner | Sequential adapter and fresh-environment proofs | Separate managed upstream worktree after plan review |
 | Runner loadout participant | Vision-first #7192 template, placement and declaration-to-managed-owner flow; existing release/lifecycle/authentication owners retained | Existing #7192 coordination and separate managed upstream worktree |
 | Trusted base-image participant | Bounded #8352 image recipe, contract, docs and tests; no controller or credential ownership | Separate managed upstream worktree; campaign owner integrates |
+| Diagnostic logging contributor | Bounded #8377 shared Bridge/Dispatch application logging, discovery and retention source; no installer/native capture or deployment ownership | Managed source worktree `spinning-sprocket` |
 | Adopter | Capacity, inventory, trust and live activation approval | Provider-specific downstream flow |
 
 ## Coordination
@@ -54,12 +55,58 @@ placement is an explicit requirement; no option is a mandatory core dependency.
   credentials, organization policy or downstream coordination links.
 - **Activation:** Reviewed upstream code is not permission to enroll a live fleet,
   acquire capacity, change operator credentials or move an existing service.
+- **Retained Komodo substrate:** The [canonical substrate contract](komodo-substrate-lifecycle.md)
+  keeps #8860 under current campaign/deployment/adopter roles, the original
+  appointed `komodo_*` owner and existing operation/admission/node-journal,
+  client-release/installer, SSH/onboarding, credential/storage and workload
+  custodians. #9274 SDK source and #9338 fixed-profile source credit do not
+  complete actual official-image/adopter/Linux-runtime acceptance. The earlier
+  continuity SDK lane is not Manager/Core installation. No new implementer,
+  claim transfer, coordinator or competing workload writer is appointed.
+  Generic Taking is not a new ACK ceremony, and responsibility does not expire
+  by age. Normal reviewed delivery and full receiving readback precede any
+  separately supported source judgment.
+  #9735 continues that same substrate appointment with focused identity,
+  native-observation and same-original SDK repair. Its
+  [repair amendment](komodo-substrate-lifecycle.md#original-attempt-sdk-repair-amendment)
+  was reviewed in #9738 and its qualified SDK source merged in #9752; it does
+  not transfer journal, admission, client-release, credential or workload
+  ownership. Release/acquisition, original UNKNOWN custody and actual adopter
+  qualification remain open.
+  The [fresh checkpoint-authorization proposal](komodo-repair-checkpoint-authorization.md)
+  continues #9735 within those same owners. Distinct freshly authenticated
+  permits must retain each 30-second ceiling and exact-original custody; no
+  common-admission change or ordinary convergence fallback is proposed.
+- **Logging slice:** `spinning-sprocket` owns Dispatch application diagnostics,
+  local discovery and existing-owner idle maintenance under #8377. It does not
+  modify #8370's installer-attempt capture or #6812's progress formatter.
+  Native capture, telemetry configuration adoption, controller/container mappings
+  and actual released/running qualification remain explicit integration acceptance.
+  The bounded application source merged as #8415 after approval and required
+  CI; the [logging sub-plan](logging-conventions.md) records its exact merge,
+  validation and transferred remaining interfaces. None of the broad logging
+  amendment's checkboxes is closed by that partial source delivery.
+  The continuation reuses its policy in the existing shared library and adopts
+  Bridge application logging with bounded producer work; native capture and
+  installer/lifecycle/deployment owners remain separate. Its source validation
+  and acceptance are tracked in the same logging sub-plan, not a competing effort.
+  Shared policy and Bridge application source merged as #8495 after exact-head
+  approval and required CI. #8577 subsequently accepted the additive retained
+  configuration loaders, worker-owned quiet maintenance and local discovery.
+  Adopter helper/configuration migration, release/install verification and live
+  qualification remain undelivered. The sub-plan records the exact source
+  contract and remaining owners; the parent and #8377 remain open.
 - **Trusted image slice:** #8352 owns the bounded
   [trusted harness container plan](trusted-harness-containers.md) under #6030.
   Its proposed `.devcontainer/trusted-harness-base/` reservation does not transfer
   controller, credential, publication/signing or Gateway/SSH source custody.
   Campaign owner retains integration and publication; implementation awaits
   the plan's merged review and an explicit execution instruction.
+- **Manager substrate slice:** #8860 owns the bounded
+  [declarative Komodo substrate lifecycle](komodo-substrate-lifecycle.md).
+  Its independent install/adopt/update/recovery source appointment does not
+  transfer client lifecycle, credential/release, SSH, workload or ARC ownership.
+  An offline role projection is not accepted as manager installation.
 
 ## Context
 
@@ -152,20 +199,54 @@ The latest execution request is:
 
 > Make sure the vision upstream accounts for this. Then, see if you can wire in a flow for this into the grand system, building out the pieces needed to make GitHub Actions Runners for copilot-extensions configurable via fleet-manager
 
+The operator subsequently prioritized adoption of the existing runner pool:
+
+> Let's focus on getting the ARC runners formally "adopted" by out fleet-manager and Gateway controller system, so nothing interferes with them. Then we can cease manual tweaks and leverage a formal kubernetes-style control plane for them.
+
+This prioritizes durable existing-pool adoption and controller ownership before
+further manual tuning or graphical presentation. It does not select another pool,
+replace ARC's pod lifecycle, or turn a session/task lease into permanent service
+ownership. The [adoption-first sequence](runner-loadouts.md#adoption-first-priority)
+retains the existing release, provider, custody, credential and activation gates.
+
+The operator subsequently accepted reusing the existing canonical Git-backed
+coordination store for a distinct permanent service-custody record, rather than
+another store or an extended task lease. The
+[custody realization proposal](runner-service-custody.md) preserves provider
+admission, exact accepted transfer and incumbent-safe reconciliation. Its
+protocol details are agent-recommended and await source review; live adoption
+and temporary-obligation discharge remain separately gated.
+
 The [runner-loadout realization plan](runner-loadouts.md) extends this
 existing campaign and #7192; it is not a second controller or a replacement
 for #6240/#6424/#6241 and #6681 ownership. Its decomposition and validation
 are **agent-recommended**. Existing client, Gateway/SSH, trusted-image and
 credential-provider work stays with its current owners.
 
-- [ ] Land the loadout/Gateway vision and this implementation amendment
+- [x] Land the loadout/Gateway vision and this implementation amendment
   through ordinary review before changing runtime behavior.
-- [ ] Implement contributed template/slot composition and capacity-aware
+  #8434 merged after exact-head Copilot approval and required CI; this closes
+  reviewed intent only, not runner provisioning or live fleet acceptance.
+- [x] Implement contributed template/slot composition and capacity-aware
   named-machine runner allocations, preserving custom registrar state.
+  #8465 supplies the installed design command and JSON resource grid. It does
+  not supply a graphical loadout surface, controller execution or live runners.
 - [ ] Connect the committed desired composition to controller-owned source
   acquisition, preparation, notification and exact-plan approval.
+  #8535 supplies the published-source and authenticated Gateway SDK path with
+  durable scoped proposals, notifications, bounded plan inspection and exact
+  review decisions. Production controller binding, selected deployment-version
+  admission and managed-owner execution remain open; review is not a grant.
 - [ ] Carry the typed runner declaration through the real supported deployment
   owner with complete support closure, bounded outcomes and no raw command API.
+  #8597 supplies fixed admitted Helm convergence with canonical operation,
+  exact-content grants, durable local resource custody and live owned-spec
+  checks. Production controller binding, actual support-owner authentication
+  and complete lifecycle/adoption remain open; this is not an adoption receipt.
+- [ ] Formally adopt the existing runner pool into durable fleet/controller
+  ownership, prove noninterference and session-independent reconciliation, then
+  retire manual tweaks and the temporary agent-held protection through the
+  existing ownership flow.
 - [ ] Prove real convergence, update/failure recovery, drain/removal and one
   authorized job; planner-only acceptance cannot close this amendment.
 
@@ -220,6 +301,17 @@ mutation follows from this amendment.
   and container-owned logging; preserve explicit incomplete-attempt protection.
 - [ ] Validate concurrent writers, native Windows/POSIX handles, protocol
   output/privacy and truthful failed/rolled-back/committed outcomes.
+- [ ] Deliver the [persistent isolated spawn reproducer](persistent-isolated-reproducer.md)
+  through a reviewed source plan, bounded synthetic implementation and separately
+  approved real persistence/fault qualification. Existing restricted-provider
+  invariants, ephemeral tests and native/installer/deployment owners stay unchanged.
+  The operator selected ordinary persistent volumes with monitored storage
+  thresholds, not hard quotas; #9101 reviewed the linked amendment before
+  implementation of that source policy.
+  The selected [retained experiment lifetime](retained-experiment-lifetime.md)
+  behavior and concrete API proposals cleared review in #9176 and #9183;
+  existing-owner integration settlement remains before service/peer wiring.
+  Ordinary disposable-test expiry and production lifetime remain unchanged.
 
 ### Mission amendment - Setup, refresh and first useful services
 
@@ -353,6 +445,17 @@ Implementation sequencing below is **agent-recommended**:
 - [ ] Land truthful adoption, diagnostics and ownership docs; resolve or transfer
   every Plan and Validation Plan item before marking this effort Done.
 
+### Direct retained Komodo substrate acceptance
+
+- [ ] Directly retain and resolve every original/refined/inherited #8860 Plan
+  duty in [the canonical substrate contract](komodo-substrate-lifecycle.md#plan):
+  versioned adopter-owned selected references; independent actual first
+  installation and Core-unavailable recovery; preserving adoption and unchanged
+  repeat; health-gated update/failed candidate/data-compatible recovery; exact
+  native identities and UNKNOWN operation/resource responsibility. Preserve
+  delivered SDK/profile credit and every existing source appointment. This is
+  an **agent-recommended tracking amendment**, not a new runtime assignment.
+
 ## Validation Plan
 
 All entries are **agent-recommended implementation gates**.
@@ -379,6 +482,11 @@ All entries are **agent-recommended implementation gates**.
   protected incomplete-attempt handling; size/count-only rotation is not proof.
 - [ ] Pure contracts: explicit provider/adapter selection, fixed named operations,
   untrusted/ambiguous input refusal and no raw remote script/URL/executable API.
+- [ ] Reproducer acceptance follows its [isolation and fault matrix](persistent-isolated-reproducer.md#validation-plan):
+  actual exclusive persistent volumes, monitored usage/free-space refusal,
+  no production reach, literal unknown
+  outcomes and independently retained evidence. Fake peers do not qualify native
+  CLI, actual task START, review completion or released/running adoption.
 - [ ] Client-only fresh install and uninstall on Windows/Linux: no controller,
   Komodo/database, host daemon, worker mutation or local secret issuer; API
   credentials are supplied through the existing provider custody contract.
@@ -406,6 +514,13 @@ All entries are **agent-recommended implementation gates**.
   without the manager; no new mandatory daemon or plugin merely for deployment.
 - [ ] Relevant tests, changefiles, documentation-impact review, automated review,
   real required CI and confirmed merges for each implementation slice.
+- [ ] Directly retain the COMPLETE matching [substrate Validation Plan](komodo-substrate-lifecycle.md#validation-plan)
+  for #8860 at its original evidence tier: actual selected official images and
+  authenticated Core/Periphery readiness, preserving existing identities/
+  credentials/database/volumes/workloads, unchanged rerun, compatible update/
+  candidate failure and independent recovery without a working Core. Source
+  fixtures, a count, SDK construction or old code slots alone do not prove
+  these native/adopter outcomes.
 
 ## Proposal
 
@@ -417,6 +532,283 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+### 2026-10-31 - Original-attempt repair SDK source merged
+
+See the [source qualification and remaining release/adopter gates](komodo-substrate-lifecycle.md#2026-10-31---original-attempt-repair-sdk-source-merged).
+
+### 2026-10-28 - Direct retained substrate acceptance
+
+- Incorporated complete #8860 substrate Plan AND Validation directly into this
+  ROOT, retaining the existing canonical sub-plan, Participants/Coordination
+  and every source/resource custodian. Original Request, checked credit and
+  first unresolved gates remain unchanged.
+- Retained #9274 host SDK and #9338 finite fixed-profile source credit without
+  repeating those repairs or calling them official-image/adopter acceptance.
+  No code, native run, provider operation, deployment, source appointment,
+  administrative supersession or claim/resource release is performed here.
+  Source-file interface coordination and exact-resource live authorization
+  remain specific to their owners, not new all-parent or generic ACK vetoes.
+
+- #9183 merged the concrete retained-admission/API proposal as
+  `dda0771bf792f61ab0dfd01d042c965b3535d11b` after exact-head Copilot approval,
+  no inline findings and all current required checks. Re-read this complete Plan
+  and Validation Plan. This reviews a proposal, not provider implementation or
+  #8403's acceptance of the integration seams. Existing source/platform ownership,
+  actual historical-reader qualification, retained fixture wiring and separately
+  approved resource/lifecycle proof remain open. The next step is that existing
+  owner's integration settlement, not another supervisor or an implicit rollout.
+- #9176 merged the retained-work behavior proposal as
+  `42f117714271fa8f423c25b6e6a3d3cd1c1ecb59` after exact-head Copilot approval,
+  no inline findings and all current required checks. Re-read this complete Plan
+  and Validation Plan. Only proposal review closes: precise existing-owner
+  admission/API and compatibility review, shared implementation and actual
+  container/service qualification remain open. Coordination was posted under
+  #8403 without transferring its compiler-free source/resource custody.
+  Continue that bounded owner integration; no resource, runtime or process
+  operation follows from this merge.
+- #9173 merged bounded runtime-origin observations as
+  `099473d9add28f9aafb306b6832c1243637c842f` after exact-head Copilot approval,
+  resolved stale-bytecode feedback and current required green checks.
+  The bounded packet passed 105 controls, including six explicit local
+  empty-venv controls with synthetic package/metadata. Actual timestamp-valid
+  caches first reproduced old-code execution, then the corrected probe refused
+  them before import, without cleanup. Re-read this complete Plan and Validation
+  Plan; main-package observations do not close image/dependency, guest/service,
+  persistence/fault, native START or running acceptance. Review the selected
+  retained-work lifetime extension through the existing instance owner before
+  implementing service/peer wiring; no resource or process action is authorized.
+- #9167 merged credential-free fixture preparation as
+  `f8fb176c02e554633675ad137d395f99033eb45a` after exact-head Copilot approval,
+  resolved explicit-CWD launch feedback and all required checks. The bounded
+  selectors passed 63 controls, including actual temporary Git/config-loader
+  and real Bridge launch-resolution/parser controls. Re-read this complete
+  Plan and Validation Plan; no image, guest, dependency-closure, service,
+  persistence/fault, native START or running acceptance closes. Continue
+  bounded runtime-origin observations and actual service/peer lifecycle through
+  existing owners, without new installation/readiness or replay protocols.
+  Resource creation and lifecycle actions remain separately approved.
+- #9161 merged image/runtime preparation source as
+  `f9f9651997c63e5bd3e3acefa28895572f5a1f9f` after exact-head Copilot approval,
+  resolved permission/symlink feedback and all required checks. The bounded
+  selectors passed 46 controls, including six explicit local command/copy/lock
+  cases on synthetic trees. Re-read this complete Plan and Validation Plan;
+  no image build, dependency closure, guest service, persistence/fault, native
+  START or running acceptance closes. Continue the credential-free synthetic
+  hosting workspace, owner configuration and actual service/peer fixture.
+  Resource creation and lifecycle actions remain separately approved.
+- #9151 merged the initial synthetic-task gate as
+  `42134b2b95042b842462366c38365afce66f0912` after exact-head Copilot
+  approval, resolved retained-history findings and all required checks.
+  The bounded selectors passed 114 controls, including 13 explicit actual
+  local-owner cases. Existing task/Bridge journals reject retained operations;
+  the strict diagnostic owner syncs before the existing task-create call.
+  Re-read this complete Plan and Validation Plan. No actual guest service,
+  mounted-volume, persistence/fault, native START or running acceptance closes.
+  Continue the actual offline guest fixture and source/image/runtime wiring
+  through existing service owners; resource creation remains separately approved.
+- #9139 merged explicit strict pre-effect writer source as
+  `62535d65c08d326a937a7233b2f0447f633eb4c2` after exact-head Copilot
+  approval, resolved numeric/type/mutation/portable-fixture feedback and all
+  required checks. The bounded selectors passed 73 controls: 63 synthetic
+  syscall/caller controls and 10 explicitly selected Linux local-file cases.
+  Ordinary logging, buffering, legacy append and diagnostic retention stay
+  unchanged. Re-read this complete Plan and Validation Plan; actual case
+  wiring, mounted-volume/crash qualification, complete guest/runtime/source,
+  native output and running adoption remain open. Continue existing-owner
+  source/runtime and operation-journal prerequisites for the selected offline
+  case. No image, container, volume or guest was provisioned.
+- #9134 merged fixed guest-state operation exclusion as
+  `8999e89ab263b270a7ca78063ea5d48af87cfb15` after passing current-head
+  Copilot review, resolved mount and documentation feedback, and all required
+  checks. The owner-authored clean-Comment rule supplied the review gate;
+  an author's inline reply was not counted as independent review.
+  The bounded selectors passed 512 controls, including 50 new synthetic/local
+  directory controls and two existing explicitly selected real local-Git cases.
+  Re-read this complete Plan and Validation Plan. Actual shared-volume custody,
+  crash settlement, complete guest/runtime/source, native output and strict
+  pre-effect qualification remain open. Continue the strict pre-effect writer
+  and guest/case prerequisites through their existing owners; ordinary logging
+  must retain its fail-open behavior. No resources were created.
+- #9128 merged explicit offline-mode declaration and finite loopback/no-route
+  observations as `c08ddfc5cced923802128fe92bcec32e4afcb87e` after exact-head
+  Copilot approval, no findings and all required checks. The bounded combined
+  selectors passed 462 controls, including 63 new synthetic offline controls
+  and two existing explicitly selected real local-Git cases.
+  Re-read this complete Plan and Validation Plan. The selected first case uses
+  one offline container with local fake peers; no resources were created.
+  Continue the guest/case and physical-state custody controls through existing
+  owners, then obtain exact resource approval before actual provisioning.
+  Real boundary/persistence/fault, full runtime/source, native-output and
+  strict pre-effect gates remain open; this does not close the reproducer.
+- #9124 merged bounded effective volatile-mount observations as
+  `4d0ee4b02552f6d193a8d3b177fdec8ae0a4d5d9` after exact-head Copilot
+  approval, resolved documentation feedback and all required checks.
+  The combined selectors passed 399 controls, including 60 new synthetic/local
+  descriptor controls and two existing explicitly selected real local-Git cases.
+  Re-read the complete Plan and Validation Plan. Actual guest mount/persistence,
+  exclusive resource/interrupted-driver custody, controlled egress, full guest
+  runtime/source, native output and strict pre-effect qualification remain open.
+  Continue the custody and complete guest/case prerequisites; no real Docker
+  resource, service or production state was created or changed.
+- #9115 merged immutable local source staging as
+  `1aabdbd663b4b2b5a2c32a37fbdabd2dc9051c2e` after exact-head Copilot
+  approval, resolved feedback and all required checks. The bounded selectors
+  passed 339 controls, including two explicitly selected real local-Git cases.
+  Review corrections excluded host attributes, matched the source object format,
+  rejected filesystem path aliases and bounded retained path-prefix inventory.
+  Re-read this complete Plan and Validation Plan. This supplies bounded
+  source inputs, not an image build, guest-source qualification or lab admission.
+  Continue the existing-owner custody and guest/runtime prerequisites; actual
+  egress, persistence/fault, native output and strict pre-effect gates remain open.
+  No resources, services or production state were created or changed.
+- #9111 merged finite internal-network/endpoint observations and exact static
+  volatile-mount checks as `304fdba1b9bbc96ef8b15f15a069c14cb6c9b4fa` after
+  exact-head Copilot approval, no findings and all required checks.
+  The bounded synthetic selectors passed 281 controls. Re-read this complete
+  Plan and Validation Plan; egress, exclusive custody, guest/runtime/source,
+  persistence/fault, native output and strict pre-effect gates remain open.
+  Continue the existing-owner source/materialization and custody prerequisites;
+  no resources, services or production state were created or changed.
+- #9104 merged finite reproducer observations and storage-only monitoring as
+  `482fe0b0f553067d5ca095410cfc60f616385246` after exact-head Copilot approval,
+  resolution of both full-volume/deadline findings and required checks.
+  The bounded synthetic selectors passed 206 controls. Re-read this complete
+  Plan and Validation Plan; no actual isolation/persistence, native-output,
+  strict-write or running acceptance gate closes. Implement the remaining
+  network/custody and guest/runtime prerequisites next, without creating
+  resources or altering the restricted provider or ephemeral test path.
+- #9101 merged the operator-selected ordinary-volume amendment as
+  `512b9d46371b1e698f73f4305dd8148adc4b21ef` after exact-head Copilot approval
+  and required checks. Re-read this Plan and Validation Plan. Implement the
+  finite host reader and monitored usage/free-space refusal next; thresholds
+  do not become hard quotas. No resources, services or host settings changed.
+  Real isolation/persistence/fault, strict-write and native gates remain open,
+  with separate provisioning approval still required.
+- #9071 merged the first pure reproducer controls as
+  `85d0d535ba244fda76a3ac53952a69da0efdee14` after exact-head Copilot approval,
+  resolution of both capability/cgroup findings and required checks.
+  The bounded synthetic selector passed 142 controls. Re-read this Plan and
+  Validation Plan; no actual isolation, persistence, strict-write or native
+  gate closes. Static observations retain explicit unavailable requirements.
+  The next source work selects the bounded persistent backend and implements
+  the finite host reader. Provisioning and lifecycle actions remain separately
+  approved; the parent and #8377 stay open.
+- #9069 merged the persistent isolated reproducer source proposal as
+  `2a17f7219697a4b324754d0d000f6eab5c429894` after exact-head Copilot approval
+  and all required checks. Re-read this complete Plan and Validation Plan.
+  The next bounded source slice implements pure experiment declaration and
+  boundary controls; no persistent resources or guest services are created.
+  Actual backend/quota support, provisioning approval, native capture, strict
+  pre-effect observation and running qualification remain open. Existing
+  restricted-provider policy and ephemeral test behavior remain unchanged.
+- #9044 merged the bounded Dispatch spawn-causal-logging source as
+  `649c58cce494f0703c86e580647d7c0ad3b37880` after exact-head Copilot
+  approval, resolved feedback and required checks. Actual worker-lane stages,
+  scheduling decisions, ordinary Bridge caller outcomes, legacy-message
+  filtering and standalone quiet maintenance reuse existing owners.
+  Isolated controls passed 898 (35 explicit platform/native skips), and the
+  admitted in-process packet passed 1,853. Re-read this complete Plan and
+  Validation Plan after merge; the broader logging, native, container,
+  release/install and live-fleet gates remain open. The next logging stretch
+  specifies the minimal persistent isolated reproducer and remaining
+  owner-specific capture/timeline boundaries, without production activation.
+- #9041 merged the bounded Dispatch spawn-causal-logging source plan after
+  exact-head Copilot approval and required checks. This accepts the first
+  implementation scope, not its logging or running-state validation. The next
+  slice wires the actual worker-lane application sink and records entry before
+  reconciliation, scheduling and ordinary Bridge calls through existing owners.
+  Native capture, wider retention integration, release/install qualification and
+  every broader fleet gate remain open. No live configuration changed.
+- #8875 merged the operator-selected in-process Gateway/ARC source bridge
+  after exact-head Copilot approval, resolved feedback and required-source
+  checks. The managed provider confirmed completion using the Maintainer
+  exception to an additional code-owner vote; no required CI was bypassed.
+  Re-read this full Request, Plan and Validation Plan immediately after merge.
+  This delivers source composition and the qualified installed-consumer path,
+  not a deployed controller or incumbent adoption receipt. The next stretch
+  establishes durable provider/service custody and an inspected adopt-in-place
+  transition through the existing host/controller owners. Preserve the actual
+  pool's identity, capacity, isolation and in-flight work; retain temporary
+  protection until the canonical provider acknowledges durable ownership.
+  All live adoption, production binding, reconciliation, lifecycle and actual-job
+  gates above remain open. No fleet, routing, capacity or credential state changed.
+- Prepared the operator-selected in-process deployment-control source slice:
+  the existing service Gateway retains the original verified caller, applies
+  separate current operation policy and invokes the fixed ARC owner without a
+  second controller or serialized permit. Exact code/slot/route/lifetime scope,
+  refusal proof consumption, final-clock expiry and accepted native-work drain
+  remain enforced. Local registration is not reported as backend readiness.
+  Native owner/local controls passed 64; original outbound families passed 22
+  and 38. All four built/offline-installed SDK identity/UNKNOWN
+  cells passed, including the real TLS SDK caller, native protocol process and
+  original journal replay. Those fixtures are not a live Helm/ARC deployment.
+  After pull-forward, the complete installed module passed five controls using
+  its shared immutable wheel, per-case 120-second enforcement and the existing
+  600-second component envelope; each SDK consumer still owns a fresh process
+  and target. Complete rebased package-closure and dependency-free installed
+  designer controls also passed. The original grouped
+  admission/profile packet had one 15-second cold-child timeout; that exact
+  unchanged child passed in 6.80 seconds when isolated, not an aggregate timing
+  guarantee. Explicit test-only wheel/probe budgets and supported functional
+  acquisition configuration are documented in `TESTING.md`; production defaults
+  and effect/publication limits are unchanged. Linux/macOS, full host clean-room
+  and live adoption remain unexercised in this slice. Source review/publication
+  is the next gate, not completion. Durable provider protection, incumbent-safe
+  adoption, production source/policy/artifact/support binding, reconciliation
+  and actual-job qualification remain open; no live fleet state changed.
+- #8597 merged the concrete ARC Helm owner prerequisite as
+  `c8b3fceb05fa6d69510ae0eee0a18c998bda3d00` after actual exact-head Copilot
+  approval and required-source checks. Its fixed operation binds the entire
+  selected deployment, preserves UNKNOWN without replay, refuses foreign-fleet
+  permits and terminating/drifted live resources, and releases refused local
+  permits without refunding proof evidence. The latest source and rebuilt
+  installed owner/admission packets each passed 107 controls; unchanged
+  persistence/replay and two-node recovery retain their separate qualification.
+  The combined shared-host packet exceeded its unchanged wall budget, so no
+  aggregate latency pass is claimed. The real offline official-chart lane is
+  distinct from native protocol fixtures; the unavailable Linux carrier and
+  unexercised live deployment remain explicit. One operator-approved temporary
+  publication deadline preserved every hook/check/review and left the ordinary
+  setting unchanged. Re-read this full Request, Plan and Validation Plan after
+  merge. The next stretch prioritizes actual adopt-in-place provider/service
+  custody and Gateway controller binding, preserving incumbent identity and
+  policy rather than manually tuning or recreating the pool. No live pool,
+  capacity, routing, credential or deployment state changed. Durable adoption,
+  its temporary-protection discharge and all broader parent gates remain open.
+- #8535 merged the published-source preparation and review SDK as
+  `b1cd2b1a1712dd4f6b4ac815e050b10fcfd990b1` after exact-head Copilot approval,
+  complete resolved-thread review and actual required-source checks. Acquisition
+  pins advertised immutable Git objects, ignores local replacement content and
+  preserves existing repository/process custody. The Gateway consumer retains
+  fleet-bound proposals and exact review decisions, with bounded current/replay
+  notices and linear, admission-paced plan inspection. Native source and actual
+  installed-package/Gateway contracts passed (37), as did handler/caller controls
+  (44) and selected observation contracts (5). Initial Linux source/installed
+  controls passed (20); the final broader rerun was unavailable after Docker
+  Desktop failed to start, not replaced by stub evidence. The required shared
+  installer-mirror guard was repaired by pulling forward the already-merged
+  #8574 fix, not bypassing CI. Re-read this full Request, Plan and Validation
+  Plan immediately after merge. The same worktree continues with real managed
+  ARC execution/lifecycle and production binding; graphical interaction and an
+  authorized actual job remain open. No live pool, capacity, routing, credential
+  or deployment state changed, and this parent remains Active.
+- #8465 merged the installed template/slot designer, portable ARC declaration,
+  dependency-capability closure and named-machine CPU/memory/disk accounting.
+  Exact-head Copilot approval and required checks passed after fixes for
+  publication reload bounds, intermediate expansion, shared adopter validation
+  and full-size blocked-grid diagnostics. Native focused contracts passed
+  (195), as did offline Linux contracts (58) and an actual built/installed
+  dependency-free command consumer. Re-read the parent Request, Plan and
+  Validation Plan after merge. The same worktree continues with controller-owned
+  source acquisition, prepared notification and exact confirmation; graphical
+  presentation, managed execution/lifecycle and actual-job proof remain open.
+  No live pool, routing, credential, capacity or deployment state changed.
+- #8434 merged the capacity-grid loadout child vision, complete confirmed
+  Gateway outfitting intent and linked #7192 realization plan. Exact-head
+  review and required checks passed. Re-read this parent Plan and Validation
+  Plan after merge, pulled the same worktree forward, and resumed the
+  declaration-to-managed-owner implementation. Existing live pools, routing,
+  credentials, capacity and all other parent gates remain unchanged.
 - Logging audit requested under #8377: existing append-only, size-rotated and
   daily-backup-count writers do not establish universal age-based retention.
   #8370's installer-attempt implementation and #6812's formatter remain with

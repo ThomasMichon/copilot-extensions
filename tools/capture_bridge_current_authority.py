@@ -19,6 +19,9 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import agent_bridge_contract_git as evidence
+import agent_bridge_contract_registry as registry_codec
+from agent_bridge_contract_publication import publish
+from agent_bridge_contract_paths import safe
 
 REPO = Path(__file__).resolve().parents[1]
 CONTRACT = "plugins/agent-bridge/contract/"
@@ -163,8 +166,10 @@ def capture(commit: str) -> dict[str, str]:
         input_paths.append(path)
     terminal = importlib.import_module("agent_bridge.preference_exec")
     host = importlib.import_module("agent_bridge.session_host.preference_spawn")
-    registry_text = committed(commit, REGISTRY)
-    registry = json.loads(registry_text)
+    snapshot = registry_codec.load(
+        REPO, read=lambda path: committed(commit, path).encode("utf-8"),
+    )
+    registry = copy.deepcopy(snapshot.materialized)
     vectors = [json.loads(committed(commit, CURRENT + name)) for name in FILES]
     authority, execution, consent = vectors
     frame, status, executed = producer_probe(a, terminal, authority, b"\x01")
@@ -250,11 +255,12 @@ def capture(commit: str) -> dict[str, str]:
                 "normalize only standalone root-module release labels."
             ),
         )
-        contract["provenance"].append(provenance)
-    indentation = re.search(r'(?m)^( +)"', registry_text)
-    output[REGISTRY] = json.dumps(
-        registry, indent=len(indentation[1]) if indentation else None,
-    ) + "\n"
+        if provenance not in contract["provenance"]:
+            contract["provenance"].append(provenance)
+    output.update({
+        path: data.decode("utf-8")
+        for path, data in registry_codec.plan(REPO, snapshot, registry).items()
+    })
     for path in set(input_paths):
         unchanged(commit, path)
     return output
@@ -263,12 +269,28 @@ def capture(commit: str) -> dict[str, str]:
 def output_paths(output: dict[str, str]) -> dict[str, Path]:
     """Preflight every output and ancestor before reading or writing payloads."""
     allowed = {REGISTRY, *(CURRENT + name for name in FILES)}
-    if set(output) != allowed:
+    if not allowed.issubset(output):
         raise ValueError("capture output set must contain only the four approved files")
+    # Fixed packet ownership is unchanged; additional outputs must be verified
+    # provenance members of the proposed complete index, never caller paths.
+    chunks = set()
+    if set(output) != allowed:
+        metadata = registry_codec.load(
+            REPO, read=lambda path: output[path].encode("utf-8") if path in output
+            else registry_codec.read_file(REPO, path),
+        )
+        chunks = set(metadata.inputs) - {REGISTRY}
+        if set(output) - chunks != allowed:
+            raise ValueError("capture output set must contain only the four approved files and provenance")
     root = REPO.resolve(strict=True)
     paths = {}
     identities = {}
     for relative in output:
+        if relative in chunks:
+            paths[relative] = safe(root, relative)
+            if paths[relative].exists() and paths[relative].read_bytes() != output[relative].encode():
+                raise ValueError(f"immutable provenance output changed: {relative}")
+            continue
         parts = Path(relative).parts
         if Path(relative).is_absolute() or ".." in parts:
             raise ValueError(f"capture output escapes repository: {relative}")
@@ -304,17 +326,30 @@ def main() -> int:
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args()
     try:
-        output = capture(args.source_commit)
-        paths = output_paths(output)
-        for path, text in output.items():
-            actual = paths[path].read_text(encoding="utf-8")
-            if actual not in (committed(args.source_commit, path), text):
-                raise ValueError(f"dirty capture output refused: {path}")
         if args.write:
+            from agent_bridge_contract_publication import recover_pending_links
+            recover_pending_links(REPO, args.source_commit)
+        output = capture(args.source_commit)
+        def validate() -> None:
             paths = output_paths(output)
             for path, text in output.items():
-                paths[path].write_text(text, encoding="utf-8")
-        elif any(paths[path].read_text(encoding="utf-8") != text for path, text in output.items()):
+                if path.startswith(registry_codec.PROVENANCE):
+                    continue
+                actual = paths[path].read_text(encoding="utf-8")
+                if actual not in (committed(args.source_commit, path), text):
+                    raise ValueError(f"dirty capture output refused: {path}")
+
+        validate()
+        if args.write:
+            publish(
+                REPO, args.source_commit,
+                {path: text.encode("utf-8") for path, text in output.items()},
+                validate=validate,
+            )
+        elif any(
+            safe(REPO, path).read_text(encoding="utf-8") != text
+            for path, text in output.items()
+        ):
             raise ValueError("current capture differs; review and use --write")
     except (ValueError, OSError) as exc:
         print(f"capture-bridge-current-authority: {exc}", file=sys.stderr)

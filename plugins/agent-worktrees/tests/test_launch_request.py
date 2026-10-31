@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from remote_policy_receiver import accepted_remote_owner as accepted_remote_owner
 
 from agent_worktrees import launch_request as request, launch_seed_state, tracking, tracking_write
 from agent_worktrees import remote_seed_launch
@@ -41,6 +42,7 @@ def _stub_create_worktree_core_internals(monkeypatch, tmp_path, config):
 def admission_config(tmp_path, monkeypatch):
     monkeypatch.setattr(request.cfg, "tracking_dir", lambda: tmp_path)
     monkeypatch.setattr(request.cfg, "detect_platform", lambda: "windows")
+    (tmp_path / "tree").mkdir()
     registry = tmp_path / ".agent-worktrees" / "machines.yaml"
     registry.parent.mkdir()
     registry.write_text("machines: {}\n", encoding="utf-8")
@@ -55,7 +57,8 @@ def admission_config(tmp_path, monkeypatch):
             }},
         }), encoding="utf-8")
     return request.cfg.Config(
-        srcroot=str(tmp_path), machine="test", platform="windows", repo_name="demo-repo",
+        srcroot=str(tmp_path), machine="test", configured_machine="test",
+        platform="windows", repo_name="demo-repo",
         repos={"demo-repo": request.cfg.RepoConfig(
             anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"), default_branch="dev",
         )},
@@ -152,7 +155,12 @@ def test_safe_but_mismatched_receipt_never_redirects_replay(
     intent = _intent(kind)
     record = tracking.create_new_record("wt-b", "worktree/wt-b", str(tmp_path / "tree"),
                                        "demo", "test", "windows", tmp_path)
+    if kind == "resume":
+        tracking.create_new_record(
+            "wt-a", "worktree/wt-a", str(tmp_path / "tree"), "demo", "test", "windows", tmp_path,
+        )
     args = {
+        "project": admission_config.repo_name,
         "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
         "fingerprint": hashlib.sha256(
             json.dumps(intent, sort_keys=True, ensure_ascii=False).encode("utf-8"),
@@ -305,6 +313,7 @@ def test_legacy_long_allocation_is_recovered_without_renaming(
     intent = _intent("new")
     identity = "test-wsl-wsl-20261013-100000-" + intent["request_id"]
     request._apply_admit({
+        "project": config.repo_name,
         "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
         "fingerprint": hashlib.sha256(
             json.dumps(intent, sort_keys=True, ensure_ascii=False).encode("utf-8"),
@@ -569,6 +578,7 @@ def test_status_never_exposes_incomplete_new_creation_as_ready(tmp_path, authori
                                        "demo", "test", "windows", tmp_path)
     intent = _intent("new")
     request._dispatch("launch_request_admit", {
+        "project": authority.repo_name,
         "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
         "fingerprint": "f" * 64, "kind": "new", "worktree_id": "wt-a",
         "timestamp": "20261010-120000",
@@ -580,6 +590,9 @@ def test_status_never_exposes_incomplete_new_creation_as_ready(tmp_path, authori
 
 
 def test_status_unstaged_resume_is_admission_incomplete(tmp_path, authority):
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "tree"), "demo", "test", "windows", tmp_path,
+    )
     intent = _intent()
     request._dispatch("launch_request_admit", {
         "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
@@ -645,6 +658,9 @@ def test_corrupt_admission_is_structured_for_every_registered_handler(
 
 
 def test_corrupt_admission_returns_over_real_wire_and_daemon_remains_usable(tmp_path, authority):
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "tree"), "demo", "test", "windows", tmp_path,
+    )
     args = {
         "tracking_dir": str(tmp_path), "request_id": "a" * 32,
         "fingerprint": "f" * 64, "kind": "resume", "worktree_id": "wt-a",
@@ -708,11 +724,14 @@ def test_remote_admission_sends_text_only_in_encoded_request(shell, monkeypatch)
     assert plan["seed_pending"] and plan["seed_kind"] == "resume"
 
 
-def test_real_powershell_transport_preserves_encoded_intent(tmp_path):
+@pytest.mark.parametrize("version", [1, 2])
+def test_real_powershell_transport_preserves_encoded_intent(tmp_path, version):
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
     intent = _intent()
+    if version == 2:
+        intent.update(version=2, attempt_id="b" * 32, native_seed_required=True)
     intent["text"] += "x" * (
         request.MAX_REQUEST_BYTES - len(json.dumps(intent, ensure_ascii=False).encode())
     )
@@ -721,10 +740,11 @@ def test_real_powershell_transport_preserves_encoded_intent(tmp_path):
     # platform's preferred encoding (cp1252 on many Windows hosts), which
     # cannot represent the intent's non-ASCII text.
     script = (
-        "import base64,json,sys;"
+        "import json,sys;"
+        "from agent_worktrees.launch_request import decode;"
         "assert sys.flags.utf8_mode == 1;"
         "sys.stdout.reconfigure(encoding='utf-8');"
-        "print(json.dumps(json.loads(base64.b64decode(sys.argv[1])),ensure_ascii=False))"
+        "print(json.dumps(decode(sys.argv[1]),ensure_ascii=False))"
     )
     command = remote_seed_launch.shell_command(
         "pwsh", [sys.executable, "-X", "utf8", "-c", script, encoded],
@@ -739,20 +759,24 @@ def test_real_powershell_transport_preserves_encoded_intent(tmp_path):
     assert json.loads(result.stdout) == intent
 
 
-def test_real_posix_transport_preserves_encoded_intent():
+@pytest.mark.parametrize("version", [1, 2])
+def test_real_posix_transport_preserves_encoded_intent(version):
     if sys.platform == "win32":
         pytest.skip("Native POSIX shell invocation is validated in the SSH lane")
     bash = shutil.which("bash")
     if not bash:
         pytest.skip("Bash is unavailable")
     intent = _intent()
+    if version == 2:
+        intent.update(version=2, attempt_id="b" * 32, native_seed_required=True)
     intent["text"] += "x" * (
         request.MAX_REQUEST_BYTES - len(json.dumps(intent, ensure_ascii=False).encode())
     )
     encoded = base64.b64encode(json.dumps(intent, ensure_ascii=False).encode()).decode()
     script = (
-        "import base64,json,sys;"
-        "print(json.dumps(json.loads(base64.b64decode(sys.argv[1])),ensure_ascii=False))"
+        "import json,sys;"
+        "from agent_worktrees.launch_request import decode;"
+        "print(json.dumps(decode(sys.argv[1]),ensure_ascii=False))"
     )
     command = remote_seed_launch.shell_command("bash", [sys.executable, "-c", script, encoded])
     result = subprocess.run(["bash", "-c", command], capture_output=True, text=True, timeout=20)

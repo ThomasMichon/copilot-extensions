@@ -4,7 +4,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'update', 'status', 'uninstall', 'stamp', 'provision', 'snapshot-prepare', 'snapshot-stamp', 'snapshot-validate', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate')]
+    [ValidateSet('install', 'update', 'status', 'uninstall', 'stamp', 'provision', 'snapshot-prepare', 'snapshot-stamp', 'snapshot-validate', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'broker-remove')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [string]$Context,
@@ -53,7 +53,7 @@ function Copy-InstallerStageDirectory {
 # Cell dispatch precedes self-staging, locks, and every legacy-root write.
 $cellParameters = @('Context', 'DurableHome', 'ExpectedMarketplaceId', 'SnapshotId',
     'RuntimeVersion', 'ExpectedNamespaceGeneration', 'ExpectedInstallGeneration')
-$cellRequested = $Action -like 'snapshot-*' -or $Action -like 'slot-*'
+$cellRequested = $Action -like 'snapshot-*' -or $Action -like 'slot-*' -or $Action -ceq 'broker-remove'
 foreach ($name in $cellParameters) {
     if ($PSBoundParameters.ContainsKey($name)) { $cellRequested = $true }
 }
@@ -92,6 +92,21 @@ if ($Action -cne 'status') {
 }
 
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+
+if ($env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'update', 'provision', 'uninstall')) {
+    $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
+        else { Join-Path $env:USERPROFILE '.agent-pull-requests' }
+    $driverOptions = @()
+    if ($Force) { $driverOptions += 'Force' }
+    $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
+        -Plugin 'agent-pull-requests' -Action $Action -Options $driverOptions
+    if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
+    $driverPython = $driverEntry.Python
+    $driverArguments = $driverEntry.Arguments
+}
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
@@ -311,20 +326,28 @@ function Invoke-VersionedActivate {
     Test-SourceRuntimeUnchanged
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    if (-not (Test-Path $py)) { return $true }
+    $py = $VenvPython
+    if (-not (Test-Path -LiteralPath $py -PathType Leaf)) {
+        Write-Fail "Candidate runtime interpreter is unavailable (versions/$SrcVersion) -- not activating"
+        return $false
+    }
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $VenvPython -c 'import agent_pull_requests' 2>$null
+    $nativeError = ''
+    [void](Invoke-Hidden -FilePath $VenvPython -ArgList @(
+        '-I', '-B', '-m', 'agent_pull_requests', '--help'
+    ) -ErrorOutput ([ref]$nativeError))
     $slotOk = ($LASTEXITCODE -eq 0)
     $ErrorActionPreference = $prevEAP
     if (-not $slotOk) {
+        Write-Fail "Isolated agent_pull_requests CLI health probe failed: $nativeError"
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         return $false
     }
     if (-not (Invoke-VersionedMarkComplete -PayloadHash $PayloadHash)) {
         return $false
     }
+    Invoke-RuntimeBrokerAdoption
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
     Test-SourceRuntimeUnchanged
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
@@ -408,7 +431,7 @@ function Get-SourceRuntimeIdentity {
         '--plugin', 'agent-pull-requests', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
     $nativeError = ''
-    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     $code = $LASTEXITCODE
     if ($code -ne 0) { throw "Source runtime identity validation failed (exit ${code}): $detail$nativeError" }
     return $detail.Trim()
@@ -417,8 +440,11 @@ function Get-SourceRuntimeIdentity {
 function Initialize-SourceRuntime {
     try {
         [IO.File]::GetAttributes((Join-Path $PluginDir 'runtime-source.json')) | Out-Null
-    } catch [IO.FileNotFoundException] { return
-    } catch [IO.DirectoryNotFoundException] { return }
+    } catch [IO.FileNotFoundException] {
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
+    } catch [IO.DirectoryNotFoundException] {
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
+    }
     $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
     $fields = $SourceRuntimeIdentity | ConvertFrom-Json
     if (-not $fields.PSObject.Properties['runtime_version']) {
@@ -555,8 +581,24 @@ function Invoke-VersionedMarkComplete {
         throw 'Payload changed during construction; completion refused'
     }
     Test-SourceRuntimeUnchanged
-    Complete-RuntimeConstruction -PayloadHash $actualHash
+    Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
+}
+
+function Invoke-RuntimeBrokerAdoption {
+    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
+    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
+        $script:RuntimeConstructionSession.Process.HasExited) {
+        throw 'Broker adoption requires attached complete-slot retention'
+    }
+    $diagnostic = ''
+    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
+        '--runtime-root', $InstallDir, '--slot', $VenvDir,
+        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
+        -ErrorOutput ([ref]$diagnostic)
+    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
+    $receipt = $result | ConvertFrom-Json
+    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
 }
 
 function Test-VersionedSlotComplete {
@@ -688,7 +730,8 @@ function Invoke-Stamp {
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
     $exclude = if ($SourceRuntimeIdentity) { @() } else {
-        @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests',
+            'snapshot-provenance.json')
     }
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
@@ -736,6 +779,10 @@ function Invoke-Stamp {
     Write-Ok 'Stamped: agent-pull-requests binstub on PATH; runtime provisions on first use.'
 }
 
+if ($Action -eq 'uninstall') {
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    Invoke-StatePreservingUninstall -AdmissionOnly
+}
 $needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision', 'uninstall')
 if ($Action -in @('install', 'update', 'stamp', 'provision')) { Initialize-SourceRuntime }
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
@@ -745,6 +792,10 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 
 try {
     if ($Action -in @('install', 'update', 'stamp', 'provision')) { Test-SourceRuntimeUnchanged }
+    if ($Action -in @('install', 'update', 'provision')) {
+        . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    }
     if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
     if ($Action -eq 'status') {
@@ -758,10 +809,14 @@ try {
     }
 
     if ($Action -eq 'uninstall') {
-        Remove-Item (Join-Path $LocalBin 'agent-pull-requests.ps1') -Force -ErrorAction SilentlyContinue
-        Remove-Item (Join-Path $LocalBin 'agent-pull-requests.cmd') -Force -ErrorAction SilentlyContinue
-        Remove-InstallRuntimeContent -InstallRoot $InstallDir
-        Write-Ok 'agent-pull-requests runtime removed (transaction/staging coordination retained)'
+        . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+        Invoke-StatePreservingUninstall -AdmissionOnly
+        if ($env:OS -eq 'Windows_NT' -and $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+            & $driverPython @driverArguments --remove-broker
+            if ($LASTEXITCODE -ne 0) { throw 'Owned runtime broker removal failed; runtimes preserved' }
+        }
+        Invoke-StatePreservingUninstall
+        Write-Ok 'agent-pull-requests runtime removed (durable, unknown and coordination state retained)'
         exit 0
     }
 
@@ -816,7 +871,7 @@ try {
 
     if (-not $slotAlreadyComplete) {
         if ($Force -or -not (Test-Path $VenvPython) -or -not (Test-Path (Join-Path $VenvDir 'pyvenv.cfg'))) {
-            if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true)) {
+            if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true -WithoutPip)) {
                 Write-Fail "Venv creation failed -- $VenvPython not found"
                 exit 1
             }
@@ -827,7 +882,9 @@ try {
 
         Remove-ConsoleTrampolines -VenvDir $VenvDir
         $pkgResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -PayloadDirToScrub $PluginDir `
-            -Arguments @('--python', $VenvPython, "$PluginDir", '--quiet')
+            -Arguments @('--python', $VenvPython, "$PluginDir",
+                '--reinstall-package', 'agent-update-driver',
+                '--refresh-package', 'agent-update-driver', '--quiet')
         # install-contract:v3 versioned-venv / uv pip install marker: wrapper intentionally
         # keeps the shared contract seam literal while the vendored engine owns the helper body.
         if ($pkgResult.ExitCode -ne 0) {

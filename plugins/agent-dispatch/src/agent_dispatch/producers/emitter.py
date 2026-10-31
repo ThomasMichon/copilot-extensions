@@ -7,6 +7,8 @@ that ensures only one eligible supervisor invokes the command.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import _thread
 import contextlib
 import json
@@ -32,8 +34,11 @@ class EmitterError(ValueError):
     """A malformed command-emitter spec."""
 
 
-def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False) -> None:
+def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False, snapshot=None) -> None:
     """Validate shape before admission; only held work resolves resources."""
+    snapshot_options = (
+        {"snapshot": snapshot.with_execution(execution=True)} if snapshot is not None else {}
+    )
     if not isinstance(spec, dict):
         raise EmitterError("emitter spec must be a JSON object")
     if not isinstance(spec.get("id"), str) or not spec["id"]:
@@ -85,6 +90,7 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False) -> N
             validate_config(
                 builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources,
                 worker_identity_cwd=spec.get("worker_identity_cwd"),
+                **snapshot_options,
             )
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
@@ -99,7 +105,9 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False) -> N
         from ..effort_driver_loops import validate_config
 
         try:
-            validate_config(effort_builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources)
+            validate_config(
+                effort_builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources, **snapshot_options,
+            )
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
     try:
@@ -444,7 +452,7 @@ def run_side_load(
     if not side_load:
         raise EmitterError(f"emitter {spec['id']!r} does not declare side_load")
     command, cwd = resolve_execution_resources(
-        _render_command(side_load["command"], change_ref=change_ref), spec.get("cwd"),
+        _render_command(side_load["command"], change_ref=change_ref), spec.get("cwd"), bind_relative_executable=True,
     )
     completed = runner(
         command,
@@ -571,7 +579,7 @@ def run_tick(
             }
         task_output_json = spec.get("task_output") == "json"
         command, command_cwd = resolve_execution_resources(
-            _render_command(spec["command"]), spec.get("cwd"),
+            _render_command(spec["command"]), spec.get("cwd"), bind_relative_executable=True,
         )
         completed = runner(
             command,
@@ -654,6 +662,7 @@ def _parse_tick_process_output(completed: Any) -> dict[str, Any]:
     }
 
 
+@daemon_entrypoint("agent-dispatch-emitter", source=__file__, purpose="production")
 def serve(
     spec_path: str | Path,
     *,

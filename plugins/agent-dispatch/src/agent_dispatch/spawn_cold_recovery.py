@@ -82,6 +82,8 @@ def recover_stranded_cold_reservations(supervisor: Any) -> int:
 
     recovered = 0
     for res in supervisor._pool_reservations(state=SpawnState.COLD):
+        if res.get("driver") in {"ordinary-bridge", "restricted-bridge"}:
+            continue  # Body absence never retires a retained native conversation.
         key = str(res.get("key") or "")
         if not key:
             continue

@@ -134,18 +134,45 @@ def test_standalone_module_copies_without_projection_engine(standalone_workspace
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-def test_separate_launch_processes_reuse_prepared_generation(standalone_workspace):
+def test_compatibility_publisher_uses_the_managed_publication_lease(standalone_workspace):
+    from agent_worktrees import static_instructions
+
+    standalone, _, repo, _, env = standalone_workspace
+    scripts = (
+        Path(__file__).resolve().parents[3] / "plugins/customizing-copilot"
+        / "skills/reviewing-customizations/scripts"
+    )
+    code = (
+        "import pathlib,sys; sys.path.insert(0,sys.argv[1]); "
+        "import instruction_projections as p; "
+        "root=pathlib.Path(sys.argv[2]); "
+        "def_discover=lambda: (_ for _ in ()).throw(AssertionError('discovery before lease')); "
+        "r=p.render_local_cache(root,def_discover); "
+        "assert r.blocking == 1, r.findings; "
+        "assert r.findings[0].check == 'projection-local-cache-lock', r.findings; "
+        "assert not r.changed"
+    )
+    with static_instructions.publication_lock(repo):
+        child = subprocess.run(
+            [sys.executable, "-B", "-c", code, str(scripts), str(repo)],
+            cwd=standalone, env=env, capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    assert child.returncode == 0, child.stderr
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_separate_launch_processes_always_copy_current_plugin(standalone_workspace):
     standalone, _, repo, _, env = standalone_workspace
     code = (
         "import json,sys; from dataclasses import asdict; "
         "from agent_worktrees import local_cache_refresh as r,static_instructions as s\n"
-        "if sys.argv[2]=='reuse':\n"
-        " def forbidden(*a,**kw): raise AssertionError('repeated preparation')\n"
-        " s._snapshot=s._git=forbidden\n"
         "print(json.dumps(asdict(r.prepare_for_launch(sys.argv[1]))))\n"
     )
     results = []
-    for mode in ("first", "reuse"):
+    for mode in ("first", "again"):
         child = subprocess.run(
             [sys.executable, "-c", code, str(repo), mode], env=env, cwd=standalone,
             capture_output=True, text=True, timeout=20,
@@ -154,8 +181,9 @@ def test_separate_launch_processes_reuse_prepared_generation(standalone_workspac
         assert child.returncode == 0, child.stderr
         results.append(json.loads(child.stdout))
     assert results[0]["status"] == results[1]["status"] == "ready"
-    assert results[0]["generation"] == results[1]["generation"]
-    assert results[0]["reused"] is False and results[1]["reused"] is True
+    assert results[0]["changed"] == results[1]["changed"] == 1
+    assert results[0]["reused"] is results[1]["reused"] is False
+    assert results[0]["publication_revision"] != results[1]["publication_revision"]
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -200,7 +228,7 @@ def test_newer_cross_process_publication_cannot_be_overwritten(standalone_worksp
             stdout, stderr = child.communicate(timeout=15)
             assert child.returncode == 0, stderr
             results.append(json.loads(stdout))
-        assert results[0]["status"] == "failed"
+        assert results[0]["status"] == "ready"
         assert results[1]["status"] == "ready"
         output = repo / ".github/instructions/agent-worktrees-generated/example/guidance/nested/body.local.instructions.md"
         assert output.read_bytes() == b"new generation"

@@ -12,14 +12,35 @@ directories, starting services, changing configuration, or querying the task
 coordinator. The target is **the invoking CLI's local machine**, independent of
 the operational machine selected elsewhere in the Manager.
 
+The Manager uses `agent-dispatch workers catalog --stream`. Its NDJSON output
+starts with `begin`, a loading summary and already-known built-in template
+`row` frames, so source discovery does not withhold that safe content.
+Configured instances and source declarations follow from the normal catalog,
+then its final `summary` and `done`. Rows are keyed by their existing IDs;
+a repeated template row replaces the earlier row rather than adding a copy.
+Discovery failure emits `error` without `done`, preserving explicit partial
+state. Early templates are not running workers, a complete inventory or
+permission to save/activate: normal validation and confirmation still apply.
+The plain JSON command and its schema remain unchanged.
+
+Local `workers catalog` and `workers save` invocations reuse the existing
+Workers parser and handlers without importing unrelated coordinator command
+families. Supervisor activity is read through the shared status-file I/O
+module, not by loading the supervisor CLI. Invocations with projected
+`AGENT_DISPATCH_TASK_*` authority retain the full CLI admission path; other
+commands and leading global options also retain their existing route.
+
 The table distinguishes:
 
-- **Configured**: user-local instance drafts, with **Edit** actions.
+- **Configured**: user-local instance drafts, with **Edit** actions only when
+  their original source and saved operator-input binding still verify.
 - **Source declarations**: discovered repository/plugin declarations, read-only
   here. Ownership/provenance identifies their configuration flow.
 - **Available templates**: built-in recipes plus a bounded worker-pool template,
-  with **Instantiate** actions; provider-owned fragments are discoverable but
-  have no Instantiate action. Recipe fragments are not complete instances.
+  and provider-owned fragments with owner-reported **Instantiate** capabilities.
+  Human Save actions require explicit operator-safe controls. Unsupported
+  fragments retain Details and a reason, not a raw declaration editor.
+  Recipe fragments are not complete instances.
 
 ### Shared catalog metadata
 
@@ -98,15 +119,137 @@ The catalog retains other instances and templates and includes the path and
 reason in that row's `publication_errors` and `summary.errors`; it never
 substitutes draft capacity for an unreadable publication.
 
-## Edit or instantiate
+### Human-facing titles and descriptions
 
-Select **Edit — Save only**, **Edit — Save and Activate**, or the corresponding
-**Instantiate** action. The full-content form supplies:
+A declaration document may supply an optional `title`: nonempty, single-line
+text of at most 200 characters, without control characters. Use a short,
+human-facing name, with a friendly README-style summary in the existing
+`description` field. Keep execution instructions in the owning recipe,
+worker identity or charter, not in either display field. Source declarations
+remain read-only in the catalog; change their guidance through the owning
+repository/plugin or an agent-supplied addendum only when its template permits.
+
+Titles are presentation metadata, not registration identity. The catalog keeps
+the immutable `name`, registration IDs, component identities and toggle target
+unchanged. Omitted titles fall back to the exact existing name; built-in
+templates use friendly labels while retaining their existing template IDs and
+fragment revisions. Provider template titles still come from their own index.
+Clients must not infer capabilities, routing or guidance from these labels.
+Unlike execution-related scalar overrides, a display `title` never supplies
+an implicit recipe parameter. An execution template that intentionally needs
+a `{title}` placeholder must receive its value explicitly through `params.title`,
+independently of the display label.
+
+The shared document expander applies a title to each component of a loop
+after recipe inheritance, without inserting it into the embedded producer
+configuration or changing runtime registrations. Nested `pool.title` is
+rejected as derived metadata, like `pool.description`; put the title at the
+document root. For a published instance,
+the row's title and description describe the published snapshot; a newer
+Save-only draft remains separate and does not relabel it. An unpublished
+instance displays its draft metadata. Details retain the technical name.
+Display metadata alone does not authorize a guidance editor or any additional
+action.
+
+Upgrade the owning Dispatch runtime before adding `title` to active
+declaration documents. Older owners keep their strict unknown-field rejection;
+they do not silently discard it. Removing the optional title restores the
+older document contract for rollback. Existing documents need no migration,
+and existing catalog consumers continue reading `title` and `description`
+without a new command, schema version or capability probe.
+
+## Operator controls
+
+The native Workers forms use the source-owned
+`agent-dispatch.worker-operator-inputs` contract, version `1`. Rows advertise
+`operator_contract`, `operator_instantiable` / `operator_editable`, and
+`operator_fields` from the runtime that actually handles `workers save`.
+The scalar `operator_contract_version: "1"` projection lets native action
+filters enforce the same version without changing their ordinary `when` grammar.
+Absent capabilities mean unsupported, not permission to try new arguments.
+The advanced `editable` / `instantiable` facts and `fields` retain their
+previous CLI meanings; they do not authorize a human JSON editor.
+
+The built-in **Task worker pool** exposes a watched label, repository filter
+and positive whole-number worker capacity. Its headless worker body remains
+source-owned. Other built-in recipes remain advanced-only until their owners
+define equivalent bounded controls. Existing template IDs and fragment
+revisions are unchanged.
+
+Provider index entries may opt in with `operator_fields`, using the existing
+native form vocabulary's `text` / `choice` subset:
+
+```json
+"operator_fields": [
+  {
+    "name": "task_label",
+    "type": "choice",
+    "label": "Watched task label",
+    "description": "Choose which source-owned lane this worker watches.",
+    "options": ["work", "documentation"],
+    "default": "work"
+  }
+]
+```
+
+Each field binds **only** to that named existing recipe parameter. A provider
+uses `{task_label}` in its own declaration as usual; no implicit placeholder
+discovery, declaration override, path setter or second expansion engine is
+introduced. The source author is responsible for declaring only operator-safe
+parameters, not executable commands or agent instructions. Names are unique
+portable parameter identifiers, excluding `name` and `owner`. Labels and short
+descriptions are required; defaults are optional strings. Choice options are
+nonempty, unique strings. At most 32 fields and 64 options per choice are
+accepted. Text values are bounded to 4096 characters. Empty `operator_fields`
+explicitly offers a fixed template with only name/repository context controls;
+absence means that no human configuration contract was declared.
+Multichoice, free-form instruction textareas, dynamic option commands, arbitrary
+JSON and agent-authored addenda are not part of this contract.
+
+Forms show the owner's label and description literally. They submit
+`name`, `repo_root` and `param_<parameter>` fields through the existing
+`workers save ... --operator-inputs` operation. The owner rejects unknown
+parameters, undeclared choices and any `declaration` field before persistence.
+Save-only, explicit Save-and-Activate consent and partial-publication receipts
+remain unchanged. For example:
+
+```text
+agent-dispatch workers save template:worker-pool --revision <catalog-revision> --operator-inputs --field name=docs-workers --field param_label=documentation --field param_repos=all --field param_concurrency=2
+```
+
+Saved operator values and their contract/configuration binding live in the
+existing instance record, outside `configuration`; execution revision and
+draft/published comparison retain their existing meaning. Safe retries also
+fingerprint the exact input fields, not merely the template ID/revision.
+Editing re-resolves the **original exact** source revision and verifies that
+its old parameter values still produce the saved configuration. Catalog
+refresh shares one source discovery and one read-only resource snapshot/deadline
+across dependency and operator-binding checks. Execution admission is unchanged;
+Save source rechecks start fresh operations. Edits therefore
+depend on source availability. Source changes, including cosmetic index
+changes, missing providers and mismatched saved values make human editing
+unavailable rather than silently selecting a newer template. Save checks again
+under the existing write lock, rejecting binding-only drift even when execution
+bytes have not changed. Previously published execution is unaffected.
+An advanced declaration save always clears the operator binding, including
+when its execution bytes are unchanged. Legacy instances remain advanced-only;
+there is no inferred provenance or automatic migration.
+
+Upgrade the provider runtime before publishing `operator_fields` metadata:
+older strict template-index readers reject that optional key. Removing it
+restores the earlier index contract for rollback. New native contributions
+hide safe Save actions when an older selected runtime reports no capability;
+they never trial an effectful new argument or fall back to raw JSON.
+
+## Advanced CLI editing
+
+The existing `workers save` syntax without `--operator-inputs` remains an
+advanced owning CLI path, not a native human form. It accepts:
 
 | Field | Meaning |
 |---|---|
 | `name` | Unique local instance name; immutable after creation |
-| `declaration` | Complete JSON declaration, prefilled with current values or a recipe scaffold |
+| `declaration` | Complete JSON for edits/built-ins; declaration overrides (including existing recipe `params`) for a provider template |
 | `repo_root` | Existing absolute repository root, required by issue/effort loops |
 
 The declaration uses the existing registrar's schema, filters, capacities, body,
@@ -145,7 +288,12 @@ overlay. They are reported separately, not merged using a new local-wins rule.
 Registering an active registrar pointer is not required to discover templates
 from an already registered repository. A legacy repository pointer retains its
 pointer attribution; its label/path basename is not a registered repo identity.
+It remains browse-only until a canonical repository identity is available.
 Arbitrary directory pointers are not additional template roots.
+Repository discovery consumes the resident repository map without point-lookup
+fan-out. Named recipe dependencies in one catalog refresh share the existing
+registered-resource snapshot and lookup deadline. Separate refreshes and Save
+rechecks retain fresh snapshots; this is not a persistent cache.
 
 ```json
 {
@@ -181,23 +329,131 @@ without a top-level kind.
 New rows qualify the provider's local ID with its source/root/layer context.
 The ID is stable while that context is stable; relocating a provider root
 produces a distinct variant. Revisions fingerprint the index entry, raw
-declaration object and resolution context, not unresolved inherited resources.
+declaration object, resolved inherited recipe documents and resolution context.
 Equal bytes at different relative dependency roots are distinct contributions.
+Inherited recipe files must be regular files; discovery and Save refuse
+nonregular sources without opening them.
 Details retain all provider-reported applicability scopes, root kind, index,
 declaration path, requirements and revision. Raw commands/specs/environment
 values are not returned by this discovery projection.
 
-Provider rows report `resolution: discovered-only`,
-`dependency_status: not-resolved`, `instantiable: "false"` and an explicit
-`unsupported_reason`. Only Details is available through the existing Manager
-contribution. The current `workers save` command still refuses these new IDs:
-safe external recipe materialization is not implemented. Do not treat declared
-requirements as evaluated prerequisites or copy relative references into the
-local-instance directory. Built-in IDs, recipe references and their existing
-save/activation actions are unchanged.
+Resolvable provider rows report `resolution: recipe-resolved`,
+`dependency_status: inputs-required` and `instantiable: "true"`. Their advanced
+CLI `fields` projection keeps the existing name, declaration and repository-root
+fields; it is not the native operator form. The declaration field starts as
+`{}`: supply overrides and the existing recipe's
+`params`, rather than copying the source and accidentally overriding its path
+origins. The repository-root default is the selected provider root; an
+execution-repository selector remains an ordinary declaration field.
+
+`workers save` re-discovers the qualified source using current activation and
+checks its revision, materializes it through the existing `extends` parameter/
+deep-merge authority, validates dependencies, and compares its expanded
+registrations before and after relocation. Every recipe read, including
+inherited forge provenance checks, must match the selected revision's physical
+source identities and decoded documents; a named-root change refuses before
+reading an unselected file. It rechecks source closure after
+collision validation before persistence. Inherited emitter/reviewer cwd values
+retain their defining directories. Registered repository references remain
+`repo:` resources through persistence and publication, retaining their owner's
+execution admission (including refusal of a reference-only checkout).
+Absolute and implicit source-local execution contexts are qualified by the
+same supplier-context owner used by registrar discovery; composed forms that
+cannot retain that qualification refuse rather than publishing plain paths.
+Named defining-hop suppliers remain qualified even when the selected outer
+template is local or plugin-owned and the inherited cwd was written as an
+absolute path.
+Absolute executable and script operands inside a named supplier retain `repo:`
+qualification as well, including emitter side-load and inline evaluator argv.
+Other command arguments remain opaque, so an output path need not exist at
+Save time and does not become a required source resource. Only an
+independently admitted named execution cwd permits read-only source arguments;
+an omitted cwd or unrelated plain path does not erase source admission.
+Overlapping named supplier roots refuse materialization rather than selecting
+one namespace's execution authority by iteration order. Inherited suppliers
+qualify explicit execution contexts only; they do not manufacture a missing
+working directory. Implicit defaults remain owned by the selected provider.
+Dependency inspection resolves named command/cwd resources read-only without
+replacing their persisted names or granting execution authority.
+Emitter runtime tokens such as `{python}` are rendered only in the temporary
+dependency-check argv, through the same renderer used by the emitter.
+Static side-load executable/script dependencies receive the same checks as
+periodic commands, including the explicit-cwd requirement for relative paths.
+`{change_ref}` remains runtime data; using it to select an executable, script,
+Python module or inline code refuses because Save has no concrete execution
+dependency to validate. Shell script/program operands follow the same rule;
+unsupported dynamic shell shapes refuse instead of treating code as data.
+Ordinary arguments after an identified script or POSIX shell `-c` program
+remain runtime data.
+Only the selected evaluator entry receives strict option/dependency checks.
+Unsupported unused entries stay inert with conservative named supplier paths,
+so they neither reject the current selection nor lose source admission if
+retained for a later selection. Ordinary trusted-pointer discovery uses
+qualification only, not Save-time grammar admission: existing commands that the
+bounded Save validator cannot interpret remain discoverable with their named
+supplier paths and normal runtime admission. PowerShell `-File` qualification
+names only its script operand, leaving subsequent optional data/output paths
+opaque even though strict Save admission does not yet support that option
+grammar. No dependency check executes provider code.
+The non-admitting qualification path also recognizes bounded POSIX shell
+flag/option prefixes (for example `sh -u` and `bash -o nounset`), without
+qualifying arguments after the script or widening strict Save admission.
+Legacy webhook emitters keep their existing runtime builder; command/builtin
+validation applies only when the registration owner selects that shape.
+A worker identity must retain its defining
+repository context; a changed execution root is not permission to select an
+unrelated identity. The existing cross-repository relative script-forge guard
+is applied before flattening and remains a refusal, not a solved limitation.
+Relative evaluator script contexts or other dependencies whose meaning cannot
+be preserved refuse explicitly. File-backed evaluator policies require an
+absolute local path; their existing runtime loader does not accept named
+repository resources, whether selected directly or by a lane.
+An absolute policy owned by a named supplier also refuses: that file loader
+cannot retain supplier admission for script contexts inside the policy.
+An evaluator inherited through a read-only supplier must use an inline policy,
+even when its file-backed policy lives elsewhere: a mutable policy file cannot
+carry that supplier's execution fence through publication. Declarative lane
+policies retain their existing non-script contract.
+The shared dependency validator uses the actual evaluator loader to inspect
+absolute policy files and the selected script's executable, script path and
+explicit working directory read-only, without evaluating a task or executing
+the script. Unselected script entries do not become required dependencies.
+Python script operands are checked after supported interpreter options,
+including option values and `--`; inline-code and module-mode arguments are
+not mistaken for script files. Python directory entry points require a regular
+`__main__.py` or `__main__.pyc`; other interpreters retain regular-script-file
+checks. Unknown Python options and script-file operands
+after non-Python options refuse rather than claiming dependency validation.
+Script policies, including file-backed ones, require an explicit absolute or
+named working directory; the CLI's current directory is not evidence of the
+future evaluator process's context.
+Path-containing evaluator executables are checked and invoked relative to
+that admitted policy directory on both platforms, preserving parent traversal
+for native filesystem resolution rather than collapsing symlink-sensitive paths.
+This binding is explicitly selected by evaluators and command-emitter tick and
+side-load execution. Script-forge retains its declaring-repository path resolution
+and still refuses relative scripts without a declaring root. Saving relative
+command or script dependencies requires an explicit working directory rather than
+validating against a root the eventual emitter process will not use.
+Selected inline policies
+retain precedence over ignored file-policy fields, as in the evaluator owner.
+Policy files must be regular files before the owner loader is called.
+Effort-loop identity relocation also refuses until its
+expansion owner can preserve a distinct defining context.
+A `composite` fragment without a supported
+ordinary declaration shape remains unsupported. Ambiguous multi-root `plugin:`
+dependencies also refuse; browsing each distinct provider root remains valid.
+
+Unavailable recipe dependencies expose an explicit `unsupported_reason`, no
+form and no Instantiate action. Resolution-error reasons are NUL-free and
+bounded to 4,096 characters, matching ordinary discovery finding limits.
+Missing required user inputs or dependencies
+fail Save without a record. Requirements prose is not executable policy.
+Provider commands never run while browsing or saving. Built-in IDs, recipe
+references and their existing save/activation actions are unchanged.
 
 `summary.template_discovery` reports `state` (`complete` or `partial`),
-`provider_templates`, `findings` and `instantiation: builtin-only`. Its findings
+`provider_templates`, `findings` and `instantiation: existing-local-save`. Its findings
 also appear as read-only Discovery errors rows labelled Template discovery
 requires attention, with `finding_scope: templates`. Missing optional
 indexes are normal; broken canonical, fallback or active marketplace template
@@ -252,7 +508,8 @@ Roots come from the active installation's `registrar_dir()` resolver, including
 `AGENT_DISPATCH_REGISTRAR_DIR`; no operational machine or legacy home is baked in.
 
 - `worker-instances/<name>.json`: atomic draft record, immutable source ID and
-  template revision, current configuration revision, and last submission baseline.
+  template revision (plus provider/root/index/declaration provenance for provider
+  templates), current configuration revision, and last submission baseline.
 - `worker-instances-active/<name>.json`: atomically published declaration snapshot.
 - `pointers.json`: one exact `dir` pointer named `user-worker-instances`, owned by
   `user-local:workers`. A conflicting pointer is never silently retargeted.

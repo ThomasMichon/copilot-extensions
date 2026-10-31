@@ -52,6 +52,10 @@ which must preserve legacy behavior for absent/false policy and fail closed
 instead of falling back when namespaced evidence is requested, malformed, or
 blocked.
 
+Dispatch's [command admission](../../plugins/agent-dispatch/README.md#install)
+uses this contract while preserving its separate global upstream-first and
+payload-local provisioning routes and explicit scoped-installer readiness.
+
 ### Test isolation
 
 Copied runtime fixtures materialize the selected consumer's declared dependencies
@@ -67,10 +71,15 @@ the real Worktrees CLI retain the complete copied runtime and staged dependencie
 ### Source-qualified command binding
 
 `installerLifecycle: true` packages the existing command-binding/lifecycle
-helpers for a required-context installer's admission without changing command
-catalogs or enabling their additive binding field. The installer must invoke
+helpers for a required-context or legacy version-1 installer's admission without
+changing command catalogs or enabling their additive binding field. A legacy
+installer still requires its vendored installation primitive; SDK packaging
+does not enable installation cells or required-context dispatch. The installer must invoke
 that admission before staging and authenticate a borrowed ticket on reentry;
 packaging alone does not enforce it. Logger is the first installer-only adopter.
+All current required-context Python runtime payloads package this SDK for
+installed-owner source-update validation and lifecycle execution. This does not
+convert the legacy version-1 manifest or change any command/catalog rendering.
 Its real managed-first-stamp regression and standalone/custody checks run in the
 ordinary suite. The full policy/action/root matrix is an explicit T3 portfolio:
 `python tools/run-plugin-tests.py payload-invocation --test-file
@@ -81,10 +90,17 @@ tests/test_adopter_publication.py --allow-explicit-tiers`.
 the first adopter. Other manifests retain byte-identical catalogs. The optional
 `catalogBindingModule` vendors the same pure ownership code into the runtime
 package for its existing deploy-manifest publisher.
-Binding emitters use isolated Python, including the PowerShell launcher probe
-and selected helper process: neither the project working directory, inherited
+Binding emitters use isolated Python, including the PowerShell launcher
+bootstrap and binding helper: neither the project working directory, inherited
 Python import paths, nor user-site startup hooks supply discovery code.
 Only the explicitly addressed payload helper supplies binding code.
+The PowerShell launcher admits its interpreter and runs that helper in the same
+process, avoiding a second Python startup. An unavailable launcher can fall
+back to a non-WindowsApps interpreter; an admitted helper's failure or empty
+response cannot trigger a retry. Each emission reads current ownership again:
+neither interpreter admission nor a prior catalog caches a binding decision.
+`COPILOT_EXTENSIONS_BOOT_TRACE` adds timestamped binding stages to stderr only;
+ordinary emission adds no trace output or diagnostic subprocess.
 
 The binding contains normalized source identity/fingerprint, plugin identity,
 and a selected installation only when its ownership has been validated.
@@ -110,6 +126,20 @@ the reservation and cannot produce a selected binding. Native children borrow
 only a matching live, same-host token whose source and runtime root are
 revalidated; environment-variable presence alone never admits mutation.
 Successful publication marks the reservation `complete`.
+Missing or syntactically corrupt legacy deployment metadata does not veto
+construction. Its stably read bytes are distinguished from storage/identity
+errors, which still refuse admission. Recovery uses the existing finite
+removal profile and exact native command recognizer, including Index's dedicated
+launcher matcher, against the resolved profile home to protect incumbent global
+commands; edited or foreign-root commands are not implicitly replaced. Intact
+incumbent publisher paths remain literal matching data for relocated payloads,
+not executable sources or a substitute for command ownership. A pending
+reservation never supplies missing footprint-recognizer evidence: only final
+publication installs a complete schema-3 deployment. A failed recovery retains
+its pending source owner, so another source cannot take over a partial build.
+Explicit foreign service, binding, reservation, policy and cell evidence still
+refuses mutation. Prepared-source currentness likewise treats missing or
+malformed deployment bytes as not current, without swallowing storage errors.
 Deferred `stamp` holds the same admission lock but neither reserves an
 unfinished runtime build nor publishes new selectable ownership. First-use
 `provision` performs the runtime-building transaction.
@@ -224,6 +254,33 @@ Store app-execution aliases are not interpreters. Missing Python reports an
 unresolved binding while retaining the supported payload command.
 Stable out-of-session launchers and other runtime
 adopters remain separate migration work.
+
+## In-process session catalogs
+
+`inProcessCatalog: true` additionally generates `scripts/emit_command_catalog.py`
+from the same manifest command specifications. Exact-session writers load that
+absolute payload-local source and call `render_context()` without starting a
+catalog shell or another Python interpreter. The generated module is stdlib-only,
+prints nothing, and performs only fresh payload-path/availability checks. It is
+not a runtime selector, persisted memo, installation permission, or readiness
+claim. Missing runtime/configuration does not hide an otherwise available payload
+command. Direct POSIX/PowerShell catalog emitters retain their public contract. PowerShell resolves its payload root literally, including bracket-containing paths.
+
+The opt-in is boolean and currently cannot combine with `catalogGate` or
+`catalogBinding`; those independently owned policies are not silently omitted.
+Windows command suffixes and CMD input warnings, POSIX executable/file predicates,
+and multi-command ordering are preserved. Missing or malformed module source
+leaves the writer's existing bounded unavailable guidance and empty hook response;
+it never falls back to activation or a subprocess ladder. The writer compiles
+the selected source in memory, without publishing Python bytecode.
+Source acquisition is capped by the writer's existing 64 KiB input budget;
+oversized source is unavailable rather than executed. Unexpected helper stdout
+is redirected to diagnostic stderr during both module loading and rendering,
+preserving the exact empty-object hook response even for a noisy broken helper.
+
+This closes the narrow redundant catalog-process path in the circumstantial-hook
+contract; it does not establish reusable full discovery facts or whole-hook
+performance qualification.
 
 ## Usage
 

@@ -1,5 +1,18 @@
 # agent-dispatch
 
+Native `uninstall` removes named runtime slots, snapshots, selectors, generated
+helpers and service launchers while retaining task databases, supervisor
+profiles, environment configuration, endpoint receipts, logs and unknown files.
+`--purge` / `-Purge` remains explicit and retains transaction coordination;
+dry runs are non-mutating. Foreign manifests, linked roots and unclassified
+runtime consumers refuse removal. Windows daemon attribution requires both
+the installation executable path and the expected module/subcommand.
+Canonical batch-removal custody covers runtime generations, snapshots and
+redirect publication through finite cleanup; released lease files remain
+without being mistaken for contention. See the
+[install contract](../../docs/install-contract.md). Native adapter fixtures do
+not establish whole-suite removal around a live session or retained transport.
+
 A **portable agent task-queue + per-host coordinator**. It lets multiple
 Copilot CLI agents (worktree sessions, bridged sub-agents, scheduled/reactive
 producers) coordinate work through a single, low-latency authority -- instead of
@@ -21,6 +34,10 @@ release does not depend on garbage collection.
 Held housekeeping on a completed task has a separate preview-first
 [`reservations retry-cleanup` recovery flow](docs/cleanup-recovery.md).
 It preserves failure and attachment history and never rearms completed work.
+
+For bounded task evidence and distinct assignment-detach, Proposed/Queued
+reset and original-wake reconciliation, see [task recovery](docs/task-recovery.md).
+These controls do not stop agents, erase unknown sends or authorize live recovery.
 
 The optional [execution handoff construction APIs](docs/execution-handoff.md)
 define the effect-adapter boundary and durable queue-level admission closure.
@@ -145,6 +162,22 @@ Supervisor transitions have a [structured lifecycle audit](docs/supervisor-lifec
 that separates runtime-slot readiness from service reconciliation and preserves
 observed native disablement without guessing its author.
 
+Ordinary supervisor exit, including `once=True` and interruption, retains its
+daemon admission, client and singleton until tracked local work finishes and
+owned executor threads retire. Borrowed executors are not shut down.
+`shutdown()` itself remains bounded; its cached grace verdict is not proof of
+later retirement. Committed self-update keeps its existing bounded force-exit
+authority. If force-exit returns or is refused, the old admission remains until
+local settlement. Committed handoff checks owned worker termination, including
+callbacks after a future finishes, within that same grace budget; an unrelated
+borrowed idle pool is not a reason to force-exit. Client-close or singleton-release
+interruptions cannot bypass retirement, and the first interruption is preserved.
+Production receives no new expiry.
+
+[Reversible action controls](docs/action-controls.md) pause automatic resident
+self-update without stopping readiness or lane polling. The guide names the
+supported boundaries, legacy bootstrap interaction and running-adoption limits.
+
 `agent-dispatch` is a standalone runtime plugin. Enabling the plugin installs the
 payload; the session-start hook can **stamp** a binstub into `~/.local/bin` so
 the first `agent-dispatch` invocation self-provisions the runtime. Repos that use
@@ -166,6 +199,51 @@ marketplace's same-named plugin. The existing `provision` lifecycle remains a
 full first-use installation, including the legacy compatibility wrappers and
 eligible local services; this adoption changes command selection, not that
 installer behavior.
+
+Both the catalog command and stamped global/board commands resolve the addressed
+installation through the canonical installation-context helper. A completed
+current or last-known-good runtime remains callable in managed-deployment mode.
+Cold invocation checks publication permission before tracing, status, locks,
+downloads or installer dispatch, and checks it again under the provisioning
+lock. Managed, malformed, foreign and unsupported deployment policies refuse
+without repair or fallback to another installation. Older admission/resolver
+helpers produce an explicit readiness error instead of running an unchecked
+installer.
+
+PowerShell first-use callers retry native Windows sharing violations and POSIX
+`EAGAIN` while another owner holds the provisioning lock, then reuse the
+owner's healthy runtime without running another installer. Other I/O errors
+remain fatal rather than becoming an indefinite contention wait.
+
+An active installation cell or explicitly selected custom root uses its own
+healthy runtime, never another root. Cold cell/custom-root provisioning reports
+explicit unsupported readiness: Dispatch's native installer still stages under
+the default legacy home and scoped service publication is not yet qualified.
+An otherwise permissive policy does not authorize using that legacy installer
+against a cell. Use the owning installation's explicit management path; this
+command-side adoption does not enable a new deployment owner or background
+publisher.
+
+An explicit scoped stamp copies its selected-root metadata and runtime helpers,
+but preserves existing global primary/board compatibility launchers byte-for-byte
+or leaves them absent. Only a default legacy-root install publishes those global
+names. Scoped stamping is not proof of isolated staging or service readiness.
+Launcher ownership compares actual directory identity, not the case-folded
+service-name suffix: equivalent legacy path spellings retain publication, while
+distinct case-sensitive directories do not acquire global commands.
+
+The actual process-boundary portfolio is the explicit T3 suite
+`libs/payload-invocation/tests/test_dispatch_first_use_publication.py`. Run it
+through the repository test runner with `--allow-explicit-tiers`; select
+`not cell`, `cell`, or a narrower `-k` expression to keep each job bounded.
+The shared OS-contention and unrelated-I/O controls are in
+`libs/payload-invocation/tests/test_containers_review_regressions.py`, selected
+with `-k "cold_caller or unrelated_io"`. These process-boundary controls are not
+part of required unit-only PR CI.
+Scoped-stamp ownership and healthy retained-command controls are in
+`libs/payload-invocation/tests/test_dispatch_scoped_publication.py`, also exposed
+by the explicit `dispatch-binding` manual portfolio described in
+[TESTING.md](../../TESTING.md#optional-dispatch-scoped-stamp-binding).
 
 The legacy global wrappers remain explicit compatibility and management
 boundaries for callers that do not inherit session catalogs: coordinator and
@@ -238,9 +316,22 @@ Windows runtime builds use the snapshot's own dependency-policy helper for
 both the library pre-installs and the selected package extras. This attributes
 the copied sources without widening the caller's trusted roots or relaxing
 dependency seasoning; a missing snapshot helper aborts the build.
+On Windows, `install`, `update`, and `provision` enter the finite native
+installation driver before staging. After immutable-slot completion, while its
+construction retention remains attached, they adopt the installation's finite
+launch broker before selecting the runtime or reconciling services.
+`-NoService` skips broker adoption as well as coordinator/supervisor setup.
+`status`, `start`, `stop`, and `stamp` do not provision a broker; ordinary durable
+launches require prior adoption. Owned uninstall removes the broker contract
+before deleting runtime content and fails closed if removal is refused;
+`uninstall -DryRun` remains a preview. Retained-runtime `restore` uses the same
+native driver with its exact record digest, holds the retained assembly's lease
+and adopts before selection. Its already-complete slot must contain the
+qualified broker dependencies and retained bootstrap helpers; an older
+helper-less assembly refuses rather than being rebuilt or retrofitted.
 Delayed same-version local stamps reject a superseded snapshot candidate before
 publishing markers or launchers. POSIX
-retains its owning-payload pointer. First use primarily fetches and runs the
+retains its owning-payload pointer. Global compatibility first use primarily fetches and runs the
 **upstream installer** (`services/dispatch/bootstrap.{sh,ps1}` on `main`
 -- the same Copilot-independent entrypoint the standalone package uses)
 rather than relying on the plugin's own already-staged payload; the locally
@@ -340,6 +431,15 @@ for the installer `start` action when its env selects
 Unlabeled legacy launchers remain inert, absent registrations are not enrolled,
 and an explicitly disabled Scheduled Task is not bypassed through a logon
 registration.
+The installer start-now path asks its generated launcher for a versioned launch
+description, preserving profile gates and slot selection, then submits the actual
+Python command to the shared durable-process SDK. This binds daemon admission to
+the supervisor PID, not a PowerShell wrapper. Description mode prepares the log
+path and rotates oversized logs but never starts the supervisor; normal logon/task entrypoints are unchanged.
+An explicit Python `-X agent_dispatch_install_dir=<root>` ownership marker keeps
+the direct base interpreter installation-scoped for retirement. It is combined
+with exact supervisor command parsing, never used to select arbitrary Python
+processes or to bypass process creation-identity checks.
 
 ### Same-cell sibling invocation
 
@@ -512,6 +612,12 @@ q.reconcile_liveness()
 
 ### State model
 
+**Current implementation.** The states below describe the worker-claim lifecycle. Supervised spawn
+reservation is a separate operation before the embodied worker claims the task;
+it does not itself move the task to `claimed`. The
+[pool-owned assignment/startup target](docs/spawn-supervisor.md#assignment-lifecycle-current-versus-target)
+and its linked repair plan are not implemented by this state diagram.
+
 ```
 proposed -> queued -> claimed -> started -> submitted -> completed
                 ^         |          |            |            (terminal)
@@ -590,7 +696,11 @@ started -> suspended -> started
   the stable wake id as the bridge idempotency key. Task
   generation, owner/session identity, lifecycle status, and latest-wake identity
   fence stale delivery after a requeue, completion, or newer wake. Delivery is
-  additionally fenced by the bridge against the exact captured session. Only
+  additionally fenced by the bridge against the exact captured session.
+  Hosted bodies use their retained Bridge/native identity and the standard
+  keyed native `send` command, never the represented CLI inbox. Explicit CLI
+  owners keep queued delivery; see [wake delivery and custody](docs/execution-wake-custody.md)
+  for compatibility, busy refusal and unknown-outcome limits. Only
   the active coordinator route claims wakes; short delivery leases let its
   promoted successor recover an interrupted claim without racing a live
   predecessor. Wakes are edge-triggered: the resumed/replacement worker runs
@@ -2619,6 +2729,7 @@ agent-dispatch complete <id> <owner> --result-ref artifact/123
 agent-dispatch complete <id> <owner> --result-file result.json
 agent-dispatch result <id> [--raw]
 agent-dispatch list --status queued
+agent-dispatch list --all-repos --status queued         # explicit cross-lane duplicate sweep
 agent-dispatch recover                                 # requeue tasks whose owner is gone
 agent-dispatch watch                                   # stream task events (SSE) as JSON lines
 ```
@@ -2660,7 +2771,15 @@ interpreting domain-specific fields.
 
 `inbox` complements the two lane-scoped reads: `worktree-status` is *this
 worktree's* assigned/owned tasks, and `list` is scoped to the calling repo's
-lane, but `inbox` spans **every** lane and returns the tasks *this machine* can
+lane by default. `list --all-repos` explicitly reads every lane without CWD
+repository discovery; it is mutually exclusive with `--repo` and retains the
+normal filters, category and limit. All-repository worker startup seeds use
+this form for their contract-net duplicate sweep. Peer browse forwards the
+explicit scope, so a peer running an older CLI rejects the new flag visibly;
+it never falls back to a narrower listing. No coordinator API change or new
+authorization grant is involved.
+
+`inbox` spans **every** lane and returns the tasks *this machine* can
 pick up — a matching `target_machine` plus machine-agnostic ones — defaulting to
 the `proposed` state. Each entry carries `target_worktree`, `affinity`, `labels`
 and `repo_name`, so a consumer (e.g. the worktree picker's task pivot) can group
@@ -2811,6 +2930,13 @@ turn-state sampler was retired because remote owners turned each sample into a
 new SSH command. Prompt turn-end wakeups will return only through a cursor-based
 Agent Bridge event subscription over a shared persistent carrier; until then,
 `--no-reactive` and `--reactive-interval` are accepted as compatibility no-ops.
+
+When a Bridge event wake is attached, lane shutdown retains admission and the
+original worker/stream objects until native worker retirement and confirmed
+stream closure. The wake's `close()` remains bounded; the lane's final cleanup
+waits through interruptions or failed close attempts and rethrows the first
+error only after settlement. Thread facade state is not retirement proof.
+This adds no event replay, cursor change, credential store or production expiry.
 
 The bare `supervise` above runs the loop in the foreground. The
 `supervise register|status|list|remove` subcommands instead manage durable
@@ -3084,6 +3210,12 @@ or changing/removing its shared URL or credential retires the subscription
 and waits for an in-flight intake before closing its client; replacement is
 deferred rather than racing two intakes. Credential-command resolution runs
 only on the owning federation tick, never in the per-event reader predicate.
+`FederationRunner.stop()` remains bounded and returns `False` while its tick
+thread or assignment intake is retiring. Coordinator hosting retains its daemon
+admission until a later bounded stop confirms both have settled; retries do not
+repeat directory resignation. Cleanup interruptions/errors propagate only after
+local settlement, and a partial federation startup settles its retained work
+before falling back to serving without federation. Production gains no expiry.
 Route ownership is refreshed on owner ticks and actual reconciliation
 admission, not per frame; the reader only checks the cached snapshot.
 Actual intake rechecks the live route inside the counted drain boundary;
@@ -3111,9 +3243,18 @@ configuration over token flags where process arguments may be observable.
   `AGENT_DISPATCH_NO_AUTOSTART` is set, a remote `--url`/`--shared` is used, or
   the caller is in WSL (the Windows host owns the coordinator).
 - `scripts/install.{sh,ps1} status` reports the deployed version/manifest, the
-  coordinator service, and every supervisor profile. Runtime logs live under
-  `~/.agent-dispatch/` (`serve-service.log`, `reconcile.err.log`,
-  `running-version.json`, `current-version`). The stdio of detached launches
+  coordinator service, and every supervisor profile. `agent-dispatch logs`
+  discovers the **local** installation's active, archived and known native/
+  fallback diagnostic locations as JSON without starting a service. Paths
+  come from the existing installation resolver, including installation-cell
+  overrides, not an assumed machine-global root. Application diagnostics are
+  UTC JSONL under `logs/diagnostics/{coordinator,supervisor}.jsonl`, with
+  record-age retention of 30 elapsed days. See
+  [Diagnostic logs](docs/diagnostic-logs.md) for attribution, maintenance,
+  compatibility and explicitly uncovered writers.
+  Native runtime logs include `serve-service.log` and `reconcile.err.log`.
+  `running-version.json` and `current-version` are **state, not logs**.
+  The stdio of detached launches
   is appended under `logs/`: `coordinator-generation.log` (a cutover's
   replacement coordinator), `supervisor-daemon.log`,
   `supervisor-successor.log` (a self-update respawn) and `self-deploy.log`.
@@ -3132,3 +3273,28 @@ configuration over token flags where process arguments may be observable.
   before replacing an attempt, including graceful coordinator cutover.
 - Wildcard binds (`0.0.0.0`, `::`) require `AGENT_DISPATCH_TOKEN`; otherwise the
   server refuses to start rather than expose the task-control API on the LAN.
+
+
+### Passive local owner-session reads
+
+Owner-session capture, CLI-task enrichment and liveness GC use the existing
+local Bridge `GET /api/v1/live-sessions/resolve?handle=...` metadata contract
+(HTTP generation 1), not a per-owner Bridge CLI/interpreter launch. Discovery,
+listener checks and authentication reuse Dispatch's local Bridge client. An
+explicit installation context validates the Dispatch owner and same-cell Bridge
+receipts/governance before selecting that cell's rendezvous and credentials;
+legacy config-directory and explicit loopback-URL overrides remain supported.
+Packaged validator code is reused in-process; receipts, source identity and
+governance are revalidated on every lookup, without an authority-result cache.
+Reads never ensure a service, enumerate providers or read conversations.
+
+Only the resolve endpoint's documented 404 means an absent owner. Discovery,
+authentication, protocol, transport and malformed-response failures are diagnosed
+as unavailable and remain UNKNOWN for GC. The captured session identity still
+determines LIVE/GONE; an uncaptured identity is UNKNOWN. Enrichment deduplicates
+equal local owner keys within one bounded wave only, with no cross-wave TTL.
+One operation deadline covers health and metadata status lines, headers and
+bodies; partial or trickling responses cannot renew that deadline. Invalid
+authentication headers also remain unavailable/UNKNOWN.
+Remote carrier/SSH/satellite routes and the existing liveness/GC age policy are
+unchanged.

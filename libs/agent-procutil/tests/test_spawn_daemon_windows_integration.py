@@ -57,13 +57,16 @@ import json, os, subprocess, sys, time, traceback
 spec = json.loads(sys.argv[1])
 try:
     import agent_procutil
+    from agent_procutil.daemon_instances import DaemonInstanceSpec, DaemonLeasePolicy, spawn_finite_worker
+    from pathlib import Path
     if spec.get("bootstrap_redirector"):
         agent_procutil.windowless_python = lambda _exe: spec["bootstrap_redirector"]
     if spec.get("direct_venv"):
         python, extra = agent_procutil.direct_python(spec["argv"][0])
         spec["argv"] = [python, *spec["argv"][1:]]
         spec["env_overrides"].update(extra)
-    proc = agent_procutil.spawn_daemon(
+    launch = spawn_finite_worker if spec.get("finite_worker") else agent_procutil.spawn_daemon
+    proc = launch(
         spec["argv"],
         cwd=spec["cwd"],
         log_path=spec["log_path"],
@@ -71,8 +74,15 @@ try:
         display="spawn-daemon-probe",
         stderr_log_path=spec["stderr_log_path"],
         env_overrides=spec["env_overrides"],
+        instance=DaemonInstanceSpec(
+            "windows-launch-probe", Path(spec["cwd"]), Path(__file__).resolve()
+            if "__file__" in globals() else Path(agent_procutil.__file__).resolve(),
+            purpose="unattended-test", registry_root=Path(spec["cwd"])/"instances",
+            lease=DaemonLeasePolicy(15, 60),
+        ),
     )
-    result = {"pid": proc.pid}
+    result = {"pid": proc.pid, "instance_id": proc.instance_receipt.instance_id,
+              "registry_root": str(proc.instance_receipt.registry_root)}
     if spec.get("direct_venv"):
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
@@ -92,7 +102,9 @@ try:
         result["returncode"] = proc.wait(timeout=5)
         result["poll"] = proc.poll()
 except agent_procutil.DaemonSpawnError as exc:
-    result = {"daemon_spawn_error": str(exc), "cause": str(exc.__cause__)}
+    result = {"daemon_spawn_error": str(exc), "cause": str(exc.__cause__),
+              "cleanup_confirmed": exc.cleanup_confirmed,
+              "admission_sent": exc.admission_sent}
 except BaseException:
     result = {"error": traceback.format_exc()}
 with open(spec["result"], "w", encoding="utf-8") as fh:
@@ -257,7 +269,7 @@ def _console_python() -> str:
 def _run_cycle(
     tmp_path: Path, cycle: int, console_children: bool, kernel32,
     *, allow_breakaway: bool = True, terminate: bool = False, redirector: bool = False,
-    venv: bool = False,
+    venv: bool = False, finite_worker: bool = False, expect_refused: bool = False,
 ) -> None:
     root = tmp_path / f"cycle-{cycle}"
     workdir = root / "home with spaces"
@@ -284,6 +296,7 @@ def _run_cycle(
         "env_overrides": {"BROKER_ENV_FIXTURE": environment},
         "terminate": terminate,
         "direct_venv": venv,
+        "finite_worker": finite_worker,
         "worker_status": str(state / "status.jsonl"),
         "bootstrap_redirector": str(Path(sys.executable).with_name("pythonw.exe"))
         if redirector else None,
@@ -310,11 +323,16 @@ def _run_cycle(
         result = _read_json(result_path)
         assert result is not None, "parent did not record a result"
         if "daemon_spawn_error" in result:
+            if expect_refused:
+                assert result["cleanup_confirmed"] and not result["admission_sent"]
+                assert not (state / "status.jsonl").exists()
+                return
             if not allow_breakaway:
                 pytest.fail(result["daemon_spawn_error"] + "; " + result.get("cause", ""))
             pytest.skip(
                 "this runner's own Job forbids breakaway: " + result["daemon_spawn_error"]
             )
+        assert not expect_refused, "strict caller cleanup unexpectedly admitted an escaping daemon"
         assert "pid" in result, result.get("error")
         if venv:
             worker = result["worker"]
@@ -372,6 +390,18 @@ def _run_cycle(
         code = wintypes.DWORD()
         assert kernel32.GetExitCodeProcess(daemon_handle, ctypes.byref(code))
         assert code.value == 0
+        if finite_worker:
+            from agent_procutil.daemon_instances import (
+                DaemonInstanceReceipt, inspect_instances, cleanup_instance,
+            )
+            receipt = DaemonInstanceReceipt(result["instance_id"], Path(result["registry_root"]))
+            row = next(
+                item for item in inspect_instances(receipt.registry_root)
+                if item["instance_id"] == receipt.instance_id
+            )
+            assert row["lifecycle"] == "finite-worker"
+            assert row["state"] == "finished"
+            assert cleanup_instance(receipt, terminate=False).status == "settled"
         log_text = log_path.read_text(encoding="utf-8", errors="replace")
         assert "spawn_daemon cwd=" in log_text
         assert "display=spawn-daemon-probe" in log_text
@@ -448,3 +478,18 @@ def test_broker_direct_venv_controls_worker_pid_and_preserves_imports(tmp_path, 
             )
     assert observer.surfaced == {}, f"visible windows surfaced: {observer.surfaced}"
     assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"
+
+
+def test_finite_worker_cannot_escape_strict_caller_job(tmp_path, monkeypatch):
+    # Positive durability belongs to the disposable permissive-launcher lane.
+    assert os.environ.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    user32, kernel32, callback_type = _configure_win32()
+    with _WindowObserver(user32, kernel32, callback_type) as observer:
+        for cycle in range(_CYCLES):
+            _run_cycle(
+                tmp_path, cycle, True, kernel32, allow_breakaway=False,
+                finite_worker=True, expect_refused=True,
+            )
+    assert observer.surfaced == {}
+    assert observer.focus_changes == {}

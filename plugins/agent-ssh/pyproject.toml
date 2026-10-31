@@ -26,9 +26,11 @@ dependencies = [
     "agent-fleet-contracts",
     "agent-machine-transport",
     "agent-plugin-resolve",
+    "agent-update-driver",
 ]
 
 [tool.uv.sources]
+agent-update-driver = { path = "../../libs/update-driver", editable = true }
 agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }
 agent-machine-transport = { path = "../../libs/machine-transport", editable = true }
 agent-fleet-contracts = { path = "../../libs/fleet-contracts", editable = true }
@@ -79,9 +81,11 @@ target-version = "py310"
 line-length = 99
 
 [project.optional-dependencies]
+fleet = ["fleet-manager>=0.1.0.dev1"]
 dev = [
     "pytest>=9.1.1",
     "jsonschema>=4.26.0",
+    "fleet-manager>=0.1.0.dev1",
 ]
 
 [tool.ruff.lint]

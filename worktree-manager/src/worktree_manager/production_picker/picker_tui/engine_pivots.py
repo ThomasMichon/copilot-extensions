@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 
 from .engine_helpers import BUILTIN_PIVOTS, PIVOT_PLACEMENT
+from .task_category_filter import combine_task_categories
 
 _UNTRACKED_CONFIG_REVISION = object()
 
@@ -41,7 +42,7 @@ class PickerScreenPivotsMixin:
                 ], []
                 config_sections = []
         self.registered_pivots = registered
-        self.pivots = descriptors
+        self.pivots = combine_task_categories(descriptors)
         # Cross-plugin worktree-row actions (a layer augmenting the Worktrees
         # view's Enter sub-menu, e.g. a bridge's "Send message"): discovered
         # from the same manifests, independent of any list pivot (#B).
@@ -83,7 +84,7 @@ class PickerScreenPivotsMixin:
             return
         registered, descriptors, wt_actions, config_sections = payload
         self.registered_pivots = registered
-        self.pivots = descriptors
+        self.pivots = combine_task_categories(descriptors)
         self.wt_actions = wt_actions
         self.config_sections = config_sections
         self._install_config_descriptors()
@@ -94,6 +95,8 @@ class PickerScreenPivotsMixin:
         if self._kind() == "config_section" and getattr(self, "_nf_mounted", False):
             self.call_after_refresh(self._load_current_config_section)
     def _install_config_descriptors(self):
+        from worktree_manager.installation_updates import PIVOT_NAME, configuration_pivot
+
         self._config_section_states = {}
         for descriptor in self.pivots:
             reg = descriptor.get("pivot")
@@ -105,6 +108,11 @@ class PickerScreenPivotsMixin:
             self.pivots.append({
                 "label": section.label, "kind": "config_section", "pivot": None,
                 "placement": "config", "section": section,
+            })
+        if not any(getattr(item.get("pivot"), "name", None) == PIVOT_NAME for item in self.pivots):
+            reg = configuration_pivot()
+            self.pivots.append({
+                "label": reg.label, "kind": "registered", "pivot": reg, "placement": "config",
             })
     def _pivot_descriptor_key(self, index=None):
         descriptors = getattr(self, "pivots", ())
@@ -323,8 +331,12 @@ class PickerScreenPivotsMixin:
         **account-scoped** pivot (a cross-machine shared resource like CodeSpaces)
         keys off a single constant so its ``list`` runs once, not per machine."""
         reg = self._reg_pivot()
-        if reg is not None and getattr(reg, "account_scoped", False):
-            return ""
+        if reg is not None:
+            from .registered_scopes import selects_machine
+            if reg.account_scoped or not selects_machine(reg):
+                return ""
+            if self.is_all() and reg.placement != "config":
+                return None
         return self._pivot_machine_id()
     def _pivot_runtime(self, reg):
         """Lazily build (and cache) the background runtime for a registered

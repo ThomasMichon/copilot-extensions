@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import agent_bridge_contract_registry as registry_codec
 from fastapi import HTTPException
 
 from agent_bridge import protocol as bridge_protocol
@@ -51,6 +52,8 @@ _GIT_ENV_NAMES = {
 
 
 def _fixture(relative: str) -> dict:
+    if relative == "registry.json":
+        return registry_codec.load(REPO).materialized
     return json.loads((CONTRACT / relative).read_text(encoding="utf-8"))
 
 
@@ -64,7 +67,7 @@ def test_http_declared_generation_matches_current_fixture() -> None:
 def test_http_declared_generation_matches_current_control_input() -> None:
     fixture = _fixture("inputs/http47/negotiated-drain.json")
     body = fixture["advertised"]
-    assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
+    assert body["protocol_version"] == bridge_protocol.NEGOTIATED_DRAIN_PROTOCOL_VERSION
     assert (
         body["min_protocol_version"]
         == bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED
@@ -87,7 +90,11 @@ def test_native_resume_does_not_reuse_the_published_receipt_generation() -> None
         bridge_protocol.NEGOTIATED_DRAIN_PROTOCOL_VERSION
         > bridge_protocol.STARTUP_PROGRESS_PROTOCOL_VERSION
     )
-    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 47
+    assert bridge_protocol.RETAINED_INBOX_PROTOCOL_VERSION == 48
+    assert bridge_protocol.RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION == 49
+    assert bridge_protocol.RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION == 50
+    assert bridge_protocol.NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION == 51
+    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 51
     assert bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED == 1
 
 
@@ -257,7 +264,8 @@ async def test_startup_golden_replays_through_public_http_and_durable_inbox(
 
 
 @pytest.mark.parametrize("mode", ["acp", "cli"])
-def test_native_resume_fixture_selects_mode_qualified_client_route(monkeypatch, mode):
+@pytest.mark.parametrize("allow_retry", [True, False])
+def test_native_resume_fixture_selects_mode_qualified_client_route(monkeypatch, mode, allow_retry):
     from agent_bridge.client import BridgeClient
     from unittest.mock import Mock
 
@@ -267,11 +275,11 @@ def test_native_resume_fixture_selects_mode_qualified_client_route(monkeypatch, 
     monkeypatch.setattr(client, "daemon_supports", lambda version: version <= 40)
     request = Mock(return_value={"durable_session_id": "native-example-head", "mode": mode})
     monkeypatch.setattr(client, "_request", request)
-    result = client.resume_worktree("example-worktree", mode=mode)
+    result = client.resume_worktree("example-worktree", mode=mode, allow_retry=allow_retry)
     request.assert_called_once_with(
         fixture["request"]["method"],
         fixture["request"]["path"].format(mode=mode),
-        params=None, request_timeout=None,
+        params=None, request_timeout=None, allow_retry=allow_retry,
     )
     assert result["durable_session_id"] == fixture["identity"]["durable_session_id"]
     assert fixture["capability"]["native_history_replacement"] is False
@@ -573,6 +581,11 @@ def test_health_fixture_matches_route_serialization(tmp_path, monkeypatch) -> No
         )
     )
     actual = asyncio.run(health_route.health(request))
+    assert actual.pop("capabilities") == {
+        health_route.HOSTING_CAPABILITY: health_route.HOSTING_CAPABILITY_VERSION,
+        bridge_protocol.NATIVE_SEND_RECEIPT_CAPABILITY:
+            bridge_protocol.NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
+    }
     expected["protocol_version"] = bridge_protocol.HTTP_PROTOCOL_VERSION
     expected["drain_contract"] = _fixture("inputs/http47/negotiated-drain.json")["advertised"]["drain_contract"]
     # "slot"."pid" is this test process's real pid (slot_descriptor calls

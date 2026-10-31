@@ -54,6 +54,155 @@ that carries no in-repo config.
 
 ---
 
+## Acquisition reports (Python owners)
+
+`config.load_config_report(path=None, *, include_control_plane_related_pr=True,
+include_knowledge_preferences=True, project=None)` returns an
+`AcquisitionReport[Config]`. It calls the same `load_config` operation, with
+unchanged arguments, precedence, optional fallbacks and caller-owned cache.
+It does not replay acquisition to reconstruct missing evidence.
+
+`inrepo_config_source.load_config_base_report(anchor, candidates, *, strict=False)`
+returns an `AcquisitionReport[dict]` for the committed-ref/disk base only. It
+excludes marketplace overlays and the rest of the full config load. Committed
+reads remain offline, keep the same candidate order and one-hop branch policy,
+and use the same bounded batch/presence/ordered-read fallback. An empty committed
+mapping still permits the existing disk fallback. Reporting adds no Git probes,
+parses, source rescans or hashes.
+
+Reports separate the operational `value` from ordered, metadata-only
+`observations` and sanitized `findings`:
+
+- `absent` means every observed applicable source is authoritatively absent or
+  unconfigured. A successfully parsed empty document is not a read failure.
+- `complete` means the observed acquisition path completed without unresolved
+  uncertainty; it does not mean the configuration grants authority or that the
+  complete full-loader input frontier is known.
+- `indeterminate` retains unreadable/malformed-source findings, unresolved
+  higher-priority candidate failures and opaque child-owner boundaries, even
+  when a lower layer supplies a usable value. Recovered batch/presence failures
+  remain visible rather than becoming an invented successful acquisition.
+
+`repos_registry_reader.read_registry_report(path, *, strict=False)` borrows the
+original registry byte read, decoding, parser, schema and normalization path.
+An originally missing native read is absent; a valid empty mapping is complete
+only with original migration coverage. Invalid sources and skipped or discarded
+fields retain uncertainty without removing healthy permissive contributions.
+Writer-concurrency `_baseline` revisions and `invalid` markers are unchanged;
+they do not establish completeness, retained-value authority or stable reuse.
+Strict pre-read/ancestor selection remains unproven where no read outcome exists.
+Strict errors keep their original identity or wrapping and causes.
+
+Lazy migration observations describe only its original success, unavailable or
+caught-error branch. Fallback still returns the exact input object, and successful
+migration returns its original result; neither reporting nor consumers retry it.
+Anchor/default helpers borrow the original registry observations and retain
+originally suppressed failures. Projects acquisition observes its original presence,
+UTF-8 read, strict parser, lazy migration and shape outcomes. A negative native
+`exists()` remains indeterminate: it does not expose a raw stat result and is not
+authoritative absence. Disappearance after positive presence and other caught
+read/parser/shape errors remain indeterminate before installer suppression.
+Parsed empty documents are complete without migration; mapping results require
+original successful migration coverage. Failed/unavailable migration retains
+its original input value and uncertainty, without retry.
+
+Adoption defaults preserve repository-first branch selection, projects fallback
+coercions and caller `setdefault` precedence. Original projects parser/reader
+and callback boundaries retain per-call coverage; replaced wrappers cannot turn
+successful sibling or discarded child observations into complete coverage for
+their replacement value. Reporting never normalizes those replacement values.
+Knowledge-preference observations describe the original owner's decision, not
+complete acquisition of its child sources. Unbound, non-stateless and
+unregistered gates can complete that decision while returning no preferences.
+An owner-`complete` observation does not upgrade uncertain child reads, opaque
+registry/in-repo boundaries or negative native `exists()` results; those findings
+remain independently visible and keep the aggregate report indeterminate.
+Originally suppressed unexpected exceptions retain type-only uncertainty, without
+error bodies. The selected preference, in-repo-reader and anchor-resolver
+callbacks remain unqualified when replaced, including wrappers that call an
+original owner or restore themselves before returning. Reporting adds no replay,
+read, parse or probe, and preserves the existing portable-key allowlist, tier
+precedence, values and cache behavior. These reports remain `reusable=False`;
+owner completion is not reusable-data certification.
+
+Installation-context observations describe the original Python decision in
+`registry_paths.installation_context()`, not its delegated validator's complete
+acquisition frontier. An unselected context completes that decision while returning
+`None` without loading a helper. A selected helper remains opaque and
+indeterminate even when the original decision completes and returns its value.
+The in-repo config consumer qualifies the exact callback selected after base
+acquisition; same-globals wrappers, calls to nested originals and self-restoring
+replacements cannot borrow original owner completion for their replacement value.
+The resolver method is still bound before payload-root and environment argument
+evaluation. Original results retain their identity, and original exceptions still
+propagate without fallback or rewrapping; diagnostics retain only the exception
+type, not its body. Reporting adds no read, parse, probe, replay or result cache,
+and an original completed decision does not make these reports reusable.
+
+Control-plane PR observations describe the original Python decision in
+`config._control_plane_related_pr_map()`, not complete acquisition of its
+discovery, config-source selection, graft or reader inputs. The no-control-plane
+and empty-anchor paths can complete that decision without certifying the child
+inputs. Originally caught inner discovery errors retain the anchor fallback;
+outer caught errors still return `{}`. Their observations retain only the
+exception type, never its body. An uncertain inner outcome remains visible when
+the fallback supplies usable PR blocks, and delegated `config-owner` coverage
+stays indeterminate even when the original decision completes.
+
+The `load_config` consumer qualifies the exact callback selected at the original
+late call site. Same-globals wrappers, nested calls to originals and
+self-restoring replacements cannot borrow original completion for their returned
+value. The config-source callee remains bound before the nested
+`load_project_config` argument executes. PR filtering and `entry.pr` object
+identity, repeated `local_path()` calls, callback order and fallback values are
+unchanged. Reporting adds no read, parse, probe, replay or cache. Disabling
+control-plane PR loading skips this decision; a config-cache hit neither replays
+it nor manufactures acquisition observations. All reports remain `reusable=False`;
+owner completion does not certify a stable input frontier or reusable data.
+
+Execution-machine discovery and unresolved child acquisition frontiers remain
+opaque. Non-default committed parser callbacks likewise lack parser coverage.
+A valid `Config` or mapping does not certify those owners. Fatal loads propagate
+their original exceptions, never a success-shaped report. These observations are
+not stable input witnesses.
+
+Disk candidate/marketplace presence selection preserves the existing single
+`Path.exists()` call and its exact native return/throw behavior. A negative result
+is `presence-provenance-unavailable` uncertainty: that API can suppress stat
+errors, so it cannot certify ordinary disk absence. The separate YAML-source
+report and existing `source_probes` consumers retain their own authoritative
+absence classification.
+
+`repos_configuration_sources.mapping_report(path)` reports the strict owner's
+original byte-read and parser outcomes. Its caught read-time `FileNotFoundError`
+is authoritative optional absence; successfully parsed empty YAML is complete.
+Other read errors and strict parser failures still raise without a success-shaped
+report. `inrepo_config_source.load_config_file(..., strict=True)` consumes those
+same observations; a replacement without owner provenance remains opaque.
+No additional presence probe, byte read or parse reconstructs provenance.
+
+The collector is request-scoped and restored on success or exception. Nested
+reports isolate their observations; a collector cannot be consumed by another
+thread, including through an explicitly copied context. Returned observations
+are immutable tuples, not retained request collectors. Drop-in observations keep
+the existing owner's entry verdicts, attribution and last-known-good retention
+without copying configuration bodies or unstructured owner error text.
+
+Within the existing committed-resolution snapshot scope, the same snapshot
+retains both its value and original acquisition metadata; later reads do not
+reacquire them. This is not a freshness witness. The separate `Config` memoization
+cache still owns values without acquisition provenance. A report that receives
+such a cached value returns `cached-config-unattributed` uncertainty without
+forcing another load.
+
+All reports remain `reusable=False`. `full-load-config-closure`,
+`inrepo-config-closure` (including marketplace selection), and
+`stable-owner-input-frontier` remain unavailable. These Python report seams do
+not qualify stable write-version/input witnesses, migrate hook/memo consumers,
+prove performance or establish live guidance delivery.
+
+---
+
 ## Execution-space identity
 
 Launch selectors accept both `--machine example-host --environment WSL` and
@@ -216,19 +365,32 @@ other-environment target still uses its configured transport.
 
 ### Execution machine identity
 
-Registries declaring `execution_platform` require an explicitly configured
-execution-space key; hostname detection and legacy guest suffix inference do
-not select that authority. The configured key and actual platform must satisfy
-the execution-space mutation fence.
+Machine maps are optional for local detection and configuration loading.
+Missing, empty and unrelated-only maps do not require enrollment of the
+current OS or substrate. A matching map customizes the local physical name and
+execution key through the shared local-execution context; invalid declarations,
+ambiguous matches and explicitly selected platform conflicts still fail.
+Existing config-source routing includes machine-local project maps for ordinary
+projects and bound knowledge overlays where applicable; no repository copy is
+required to retain those customizations.
+Naming facts do not grant receiving-project, record or allocation authority.
+The existing execution-space mutation fences and configured-identity read
+provenance remain independent; this configuration adapter does not relax them.
+Update and launch runtime-policy evaluation retain the same current context
+for physical-name lookup, including missing guest customization and literal OS
+suffixes. Non-local target selection remains strict, and a present runtime
+manifest still refuses omitted or foreign deployment selectors.
 
 For legacy registries without execution-space declarations,
 `machine` resolves machine-local > global > OS hostname. Repository config
 does not override that precedence. Windows and native Linux retain the winning
 configured string, or the OS hostname when unconfigured: there is no
 alias-to-key ownership migration. Direct native topology detection retains its
-existing `alias`-or-key result. WSL maps through topology keys and always uses
-`<host>-wsl`, adding the suffix
-only once, including when a local/global setting still names the host.
+existing `alias`-or-key result. WSL maps through topology keys or derives a
+guest execution name from the literal OS hostname or established local binding.
+A platform-like suffix in the actual hostname is part of the physical name:
+an OS hostname `example-wsl` without a customization yields `example-wsl-wsl`
+on WSL. An explicitly configured execution key remains unchanged.
 Qualification follows the actual execution environment, not an inherited
 `platform` path-selection override.
 
@@ -346,7 +508,7 @@ agent-worktrees ≥ 1.5.3-dev113.)
 | `session_path` | map(platform→list) | `{}` | Directories the normalized launcher prepends to `PATH` before launch (templated: `{work_dir}`, `{anchor}`, `{machine}`, `{repo_name}`) — e.g. `["{work_dir}/tools/bin"]`. The generic mechanism for a repo to expose its tool binstubs without an ambient PATH export. |
 | `session_env` | map(str→str) | `{}` | Environment variables the launch plan applies to the Copilot session (e.g. `COPILOT_FEATURE_FLAGS: extensions`, or `SUDO_ASKPASS: "{home}/.local/bin/vault-askpass"`). Values are **templated** (`{work_dir}`, `{anchor}`, `{machine}`, `{repo_name}`, `{home}`) so a per-machine path is portable. Merged below the backend profile. This is how a repo contributes session env **without** an ambient export — and it works with the normalized launcher, where the setup hook runs as a child process and so cannot set env for the Copilot exec. |
 | `validate_paths` | list[str] | `[]` | Repo-relative paths the `validate` command checks for. |
-| `validate_hook` | map(platform→list) | `{}` | Custom validation command per platform. |
+| `validate_hook` | map(platform→list) | `{}` | Compatibility parsing only; no longer executed during push/finalize. Move custom source validation into the adopting repository's required CI. |
 | `service_paths` | list[str] (globs) | `[]` | Globs for service discovery (`services` subcommands). |
 | `bootstrap_services` | list[str] | `[]` | Opt-in additional service names (discovered via `service_paths`) that the normalized launcher must confirm are current **before** starting Copilot, alongside agent-worktrees itself. The launcher declares no facility- or repo-specific service names by default -- a repo names its own here rather than the launcher assuming one exists. |
 | `post_install_hook` | map(platform→list) | `{}` | Command run after install, per platform. |
@@ -553,6 +715,11 @@ armed user configuration still fails before any worktree mutation.
 ---
 
 ## PR workflow — `repos.<name>.pr` (machine-local **or** in-repo)
+
+Optional `publication_origin: {id: control-plane, labels: [source:control-plane]}`
+defines an inert policy selected only by explicit publication options.
+See [publication-origin labels](pr-publication-labels.md) for attachment,
+worker export, additive reconciliation and metadata-only repair.
 
 Optional `publication_checks` configures fixed built-in self-review and scope
 checks that gate managed code publication. No external check commands or dynamic
@@ -886,11 +1053,15 @@ Reads degrade safely (a missing/malformed file yields an empty index); a bare
 `<anchor>/.agent-worktrees/related.yaml` fallback and an explicit marketplace
 overlay at
 `<anchor>/.copilot-extensions/agent-worktrees/marketplaces/<marketplace-id>/related.yaml`.
-Writes emit only non-empty fields, keeping the committed file minimal.
+Writes emit only non-empty fields, except that an explicitly empty `pr` block
+is retained to preserve clearing of inherited PR defaults.
 
 An active plugin may contribute a lowest-precedence related-repo fragment by
 shipping `.agent-worktrees/related.yaml` in its payload. The active corpus is
 resolved from the effective user plus adopted-project plugin configuration, so
 copied plugins and live directory-marketplace plugins follow the same enabled
 and identity-verified rules. Disabled or unresolved plugins contribute nothing;
-the project and knowledge layers still override plugin entries wholesale.
+the project and knowledge layers still replace relationship metadata wholesale.
+If a higher entry omits `pr`, contributed PR defaults survive; an explicit
+`pr` value replaces the lower related PR block without merging old target or
+credential fields. Empty blocks clear the inherited PR defaults.

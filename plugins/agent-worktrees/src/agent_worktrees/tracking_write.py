@@ -187,11 +187,13 @@ def has_inflight_write() -> bool:
 #: production verb module) that self-registers its own verb(s) via
 #: `register_verb` calls in its own module-level code, purely as an import
 #: side effect -- never a function reference or a registration RPC. Every
-#: process that reaches this module's :func:`compute`/:func:`run_direct`
-#: first calls :func:`_ensure_verb_modules_loaded`, which imports every
+#: daemon request and ordinary direct fallback first call
+#: :func:`_ensure_verb_modules_loaded`, which imports every
 #: module listed here -- so the daemon process and a CLI process both
 #: arrive at the identical registry independently, with no shared mutable
-#: state or wire message required between them. Phase 3's first migrated
+#: state or wire message required between them. Finite native seed/receipt
+#: fallbacks import their declared canonical owner directly instead; they do
+#: not advertise daemon capabilities or replace any handler. Phase 3's first migrated
 #: verb (`status_disposition_write`, see `tracking_disposition_write.py`) is
 #: the first real entry; a verb-owning module is added here, not wired via
 #: ad-hoc `register_verb` calls from arbitrary call sites.
@@ -201,12 +203,25 @@ _VERB_MODULES: tuple[str, ...] = (
     "agent_worktrees.tracking_claim_write",
     "agent_worktrees.tracking_producer_write",
     "agent_worktrees.tracking_relationship_write",
+    "agent_worktrees.tracking_allocation_write",
     "agent_worktrees.tracking_session_lifecycle_write",
     "agent_worktrees.tracking_session_registration_write",
     "agent_worktrees.tracking_session_deregistration_write",
     "agent_worktrees.launch_seed_state",
     "agent_worktrees.launch_request",
+    "agent_worktrees.launch_attempt",
+    "agent_worktrees.launch_execution",
+    "agent_worktrees.launch_native_observation",
 )
+
+# Finite native boundaries need only their canonical writer, not every CLI verb.
+_DIRECT_VERB_MODULES = {
+    "launch_attempt_execution": "agent_worktrees.launch_execution",
+    **dict.fromkeys((
+        "launch_seed_stage", "launch_seed_take", "launch_seed_restore",
+        "launch_seed_finish", "launch_seed_remove",
+    ), "agent_worktrees.launch_seed_state"),
+}
 
 _verb_modules_loaded = False
 _verb_modules_lock = threading.Lock()
@@ -215,10 +230,10 @@ _verb_modules_lock = threading.Lock()
 def _ensure_verb_modules_loaded() -> None:
     """Import every module named in :data:`_VERB_MODULES`, once per process.
 
-    Idempotent and thread-safe. Called at the top of both :func:`compute`
-    (the daemon-process path) and :func:`run_direct` (the direct-call
-    fallback, which may run in the daemon process or a separate CLI
-    process) -- see :data:`_VERB_MODULES`'s own docstring for why this is
+    Idempotent and thread-safe. Called by :func:`compute` and by
+    :func:`run_direct` when full-roster discovery is needed (the fallback may
+    run in the daemon process or a separate CLI process) -- see
+    :data:`_VERB_MODULES`'s own docstring for why this is
     what actually closes the cross-process registration gap, rather than a
     convention a caller could forget to follow.
     """
@@ -476,8 +491,14 @@ def run_direct(verb: str, args: dict, *, reason: str) -> dict:
     reconciliation pass has a durable trail of every mutation that happened
     outside the daemon's own mediation. Raises ``ValueError`` for an
     unregistered verb, mirroring :func:`compute`'s own validation.
+    Finite seed/receipt verbs load their canonical owner; unknown and other
+    verbs retain full-roster discovery. Handler fencing and logging are shared.
     """
-    _ensure_verb_modules_loaded()
+    owner = _DIRECT_VERB_MODULES.get(verb)
+    if owner is not None:
+        importlib.import_module(owner)
+    else:
+        _ensure_verb_modules_loaded()
     fn = _VERBS.get(verb)
     if fn is None:
         raise ValueError(f"tracking_write: unregistered verb {verb!r}")
@@ -623,17 +644,39 @@ def write_with_boot(
     ``min_version`` is forwarded to :func:`endpoint_from_rendezvous` --
     see its own docstring for the same-name-but-enriched-payload skew case
     it closes.
+
+    A published endpoint whose exact live PID/birth owner cannot serve this
+    request is not a starting monitor. Skip boot/wait in that case and use
+    the same locked fallback without ever sending to the incompatible owner.
+    Missing, dead or unconfirmed publishers retain ordinary boot handling.
     """
     started = time.time()
     verb = payload.get("verb") if isinstance(payload, dict) else None
+    lock_data: dict | None = None
 
     def _dial() -> tuple[str, int, str] | None:
-        return endpoint_from_rendezvous(read_lock_data(), verb=verb, min_version=min_version)
+        nonlocal lock_data
+        lock_data = read_lock_data()
+        return endpoint_from_rendezvous(lock_data, verb=verb, min_version=min_version)
+
+    def incompatible_live_owner() -> bool:
+        if endpoint_from_rendezvous(lock_data) is None:
+            return False
+        from . import locks
+
+        pid, birth = lock_data.get("pid"), lock_data.get("start_time")
+        return (
+            type(pid) is int and pid > 0 and isinstance(birth, str) and bool(birth)
+            and locks.pid_alive(pid) and locks.process_start_time(pid) == birth
+        )
 
     endpoint = _dial()
-    if endpoint is None and ensure_monitor is not None:
+    if endpoint is None and ensure_monitor is not None and not incompatible_live_owner():
         ensure_monitor()
-        while endpoint is None and time.time() - started < boot_wait_s:
+        while (
+            endpoint is None and not incompatible_live_owner()
+            and time.time() - started < boot_wait_s
+        ):
             time.sleep(poll_interval_s)
             endpoint = _dial()
     if endpoint is None:

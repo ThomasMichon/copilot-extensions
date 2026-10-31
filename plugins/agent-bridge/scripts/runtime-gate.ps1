@@ -1,3 +1,4 @@
+# Installation driver contract: bridge-first-use-v1
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
@@ -302,68 +303,51 @@ function Assert-RuntimePublication {
 }
 
 Assert-RuntimePublication
-$runtimePython = Resolve-RuntimePython -TraceMode normal
-if ($runtimePython) {
-    Invoke-Runtime -Python $runtimePython
+if (Test-Path Env:AGENT_BRIDGE_PINNED_CONTEXT) {
+    [Console]::Error.WriteLine('[agent-bridge] pinned invocation requires a prepared owning runtime; provision independently.')
+    exit 126
 }
-New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
-$statusPath = Join-Path $runtimeRoot '.provision-status'
-$_lockPath = Join-Path $runtimeRoot '.provision.lock'
-$_lock = $null
-while (-not $_lock) {
-    try {
-        $_lock = [IO.File]::Open(
-            $_lockPath,
-            [IO.FileMode]::OpenOrCreate,
-            [IO.FileAccess]::ReadWrite,
-            [IO.FileShare]::None
-        )
-    } catch {
-        Start-Sleep -Milliseconds 200
-    }
+$defaultRoot = Join-Path $env:USERPROFILE '.agent-bridge'
+if ($context -or $runtimeRoot -ine $defaultRoot -or
+    (Test-Path Env:AGENT_BRIDGE_INSTALLATION_ID)) {
+    [Console]::Error.WriteLine('[agent-bridge] cold namespaced/custom-root provisioning requires explicit installation management.')
+    exit 126
 }
-
-$_provisionedPy = $null
-$_provisionRc = 0
-try {
-    $_provisionedPy = Resolve-RuntimePython
-    if (-not $_provisionedPy) {
-        Assert-RuntimePublication
-        [Console]::Error.WriteLine(
-            '[agent-bridge] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.'
-        )
-        [Console]::Error.WriteLine(
-            "::agent-provisioning:: plugin=agent-bridge eta_seconds=120 reason=first-use status=$statusPath"
-        )
-        "provisioning $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" |
-            Set-Content -LiteralPath $statusPath -Encoding utf8
-        Set-RuntimeEnvironment
-        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
-            ForEach-Object { [Console]::Error.WriteLine($_) }
-        $_provisionRc = $LASTEXITCODE
-        if ($_provisionRc -eq 0) {
-            $_provisionedPy = Resolve-RuntimePython
-        }
-    }
-} finally {
-    if ($_lock) { $_lock.Dispose() }
+if (Test-Path Env:UPDATE_DRIVER_WITNESS) {
+    [Console]::Error.WriteLine('[agent-bridge] nested first-use submission is unsupported; retain the current installation owner.')
+    exit 126
 }
-if ($_provisionRc -ne 0) {
-    "failed rc=$_provisionRc $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" |
-        Set-Content -LiteralPath $statusPath -Encoding utf8
-    [Console]::Error.WriteLine(
-        "[agent-bridge] provisioning FAILED. See the log above; retry, or run: `"$installer`" provision -InstallDir `"$runtimeRoot`""
-    )
-    exit $_provisionRc
+$location = Get-Location
+if ($location.Provider.Name -cne 'FileSystem') {
+    throw 'Invocation requires a filesystem project location.'
 }
-if ($_provisionedPy) {
-    "ready $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" |
-        Set-Content -LiteralPath $statusPath -Encoding utf8
-    Invoke-Runtime -Python $_provisionedPy
+$firstUse = Join-Path $payloadRoot 'libs\update-driver\scripts\first-use.ps1'
+if (-not (Test-Path -LiteralPath $firstUse -PathType Leaf) -or -not (
+    Select-String -LiteralPath $firstUse -SimpleMatch `
+        '# Installation driver lifecycle contract: bridge-command-v1' -Quiet
+)) {
+    throw 'The packaged installation driver lacks the Bridge command contract.'
 }
-"failed rc=1 $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" |
-    Set-Content -LiteralPath $statusPath -Encoding utf8
+$executionRoot = Join-Path $env:USERPROFILE '.copilot-extensions\update-driver'
 [Console]::Error.WriteLine(
-    '[agent-bridge] provisioning reported success but no runtime slot resolved.'
+    '[agent-bridge] runtime not provisioned -- waiting for the installation driver. Extend your timeout; caller exit does not cancel the operation.'
+)
+[Console]::Error.WriteLine(
+    "::agent-provisioning:: plugin=agent-bridge reason=first-use status=$executionRoot"
+)
+$previousEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    $nativeShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    & $nativeShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $firstUse `
+        -Root $executionRoot -Payload $payloadRoot -RuntimeRoot $runtimeRoot `
+        -Project $location.ProviderPath -InstallerAction provision -Wait
+    $code = $LASTEXITCODE
+} finally { $ErrorActionPreference = $previousEap }
+if ($code -ne 0) { exit $code }
+$runtimePython = Resolve-RuntimePython
+if ($runtimePython) { Invoke-Runtime -Python $runtimePython }
+[Console]::Error.WriteLine(
+    '[agent-bridge] driver completed without a resolvable runtime.'
 )
 exit 1

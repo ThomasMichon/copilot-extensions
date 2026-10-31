@@ -1,0 +1,9 @@
+{
+  "comment": "Add an on-demand read-only Companion graph for reported disposition, resource references and retained session metadata",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Remove the obsolete C compiler installation from the standalone coordinator image build.",
+  "changes": [
+    {
+      "plugin": "services/dispatch",
+      "type": "patch"
+    }
+  ]
+}

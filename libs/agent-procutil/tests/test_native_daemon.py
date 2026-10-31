@@ -1,4 +1,4 @@
-"""Python-free native admission survives the actual submitting Job."""
+"""Native admission and setup-provided Python under the actual submitting Job."""
 
 import importlib.util
 import base64
@@ -37,10 +37,22 @@ def observer():
     return module._WindowObserver(user, kernel, callback)
 
 
-@pytest.mark.parametrize("mode", ["production", "contained"])
-def test_python_free_bootstrap_survives_only_authorized_caller_job_escape(tmp_path, monkeypatch, mode):
+def observed_worker(details):
     from agent_procutil.daemon_broker import WindowsDaemonProcess
+    from agent_procutil._daemon_instance_identity import _windows_birth
 
+    process = WindowsDaemonProcess(details["pid"], ["native-bootstrap-fixture"])
+    try:
+        if _windows_birth(process._handle) != details["birth"]:
+            raise ProcessLookupError("native fixture worker birth identity changed")
+    except BaseException:
+        process.close()
+        raise
+    return process
+
+
+@pytest.mark.parametrize("mode", ["production", "contained"])
+def test_native_bootstrap_refuses_strict_escape_and_preserves_contained_custody(tmp_path, monkeypatch, mode):
     base = Path(__file__).resolve().parents[2]
     monkeypatch.syspath_prepend(str(base / "single-instance-lease" / "src"))
     from single_instance_lease.operation import OperationLock, OperationLockedError
@@ -54,8 +66,9 @@ def test_python_free_bootstrap_survives_only_authorized_caller_job_escape(tmp_pa
             root = tmp_path / f"{mode}-{cycle}"
             root.mkdir()
             env = dict(os.environ)
-            # The native child has neither a Python nor uv command to discover.
-            env["PATH"] = str(shell.parent)
+            python = shutil.which("python")
+            assert python, "the native fixture requires setup-provided PATH Python"
+            env["PATH"] = str(Path(python).parent) + os.pathsep + str(shell.parent)
             if mode == "production":
                 env.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
             else:
@@ -70,9 +83,15 @@ def test_python_free_bootstrap_survives_only_authorized_caller_job_escape(tmp_pa
                 worker = None
                 try:
                     assert job is not None
-                    assert parent.wait(timeout=30) == 0, (root / "submitter.log").read_text()
+                    code = parent.wait(timeout=30)
+                    if mode == "production":
+                        assert code != 0, "strict caller Job must refuse durable escape"
+                        assert not (root / "worker.json").exists()
+                        assert not (root / "started").exists()
+                        continue
+                    assert code == 0, (root / "submitter.log").read_text()
                     details = json.loads((root / "worker.json").read_text())
-                    worker = WindowsDaemonProcess(details["pid"], ["native-bootstrap-fixture"])
+                    worker = observed_worker(details)
                     observe(lambda: (root / "started").exists() or worker.poll() is not None)
                     assert (root / "started").exists(), (
                         (root / "worker.log").read_text()
@@ -83,17 +102,8 @@ def test_python_free_bootstrap_survives_only_authorized_caller_job_escape(tmp_pa
                     assert worker.poll() is None
                     job.close()
                     job = None
-                    if mode == "contained":
-                        worker.wait(timeout=5)
-                        assert not (root / "result").exists()
-                    else:
-                        assert worker.poll() is None
-                        with pytest.raises(OperationLockedError):
-                            OperationLock(root / "bootstrap.lock").acquire()
-                        (root / "continue").write_text("go", encoding="ascii")
-                        assert worker.wait(timeout=15) == 7
-                        assert (root / "result").read_text() == "completed:7"
-                        assert "post-caller native prerequisite" in (root / "owned.log").read_text()
+                    worker.wait(timeout=5)
+                    assert not (root / "result").exists()
                     with OperationLock(root / "bootstrap.lock"):
                         pass
                 finally:
@@ -113,8 +123,17 @@ def test_python_free_bootstrap_survives_only_authorized_caller_job_escape(tmp_pa
         assert observation.focus_changes == {}
 
 
-@pytest.mark.parametrize("mode", ["refusal", "lost-response"])
-def test_native_broker_outcome_never_invents_cleanup_or_runs_foreground(tmp_path, mode):
+@pytest.mark.parametrize("scopes", [
+    "", "Local\\ce-owned-job-not-a-uuid", "Local\\ce-owned-job-" + "a" * 32 + ";",
+    ";".join(["Local\\ce-owned-job-" + "a" * 32] * 2),
+    ";".join(f"Local\\ce-owned-job-{value:032x}" for value in range(65)),
+    "x" * 4097,
+    "Local\\ce-owned-job-" + "a" * 32,
+])
+@pytest.mark.parametrize("scope_key", [
+    "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES", "copilot_extensions_owned_job_scopes",
+], ids=["canonical-key", "lowercase-key"])
+def test_native_direct_refusal_never_runs_foreground(tmp_path, scopes, scope_key):
     base = Path(__file__).resolve().parents[2]
     helper = base / "agent-procutil" / "src" / "agent_procutil" / "native_daemon.ps1"
     fixture = tmp_path / "entry.ps1"
@@ -127,50 +146,46 @@ def test_native_broker_outcome_never_invents_cleanup_or_runs_foreground(tmp_path
         f"[IO.File]::WriteAllText({quoted(tmp_path / 'started')}, 'unexpected entry point')",
         encoding="utf-8",
     )
-    activation = (
-        "$r = & $script:cim @PSBoundParameters; "
-        "if ($r.ReturnValue -ne 0) { throw 'fixture WMI activation refused' }; "
-        "$script:activation = [Diagnostics.Process]::GetProcessById([int]$r.ProcessId); "
-        "[void]$script:activation.Handle; throw 'fixture response lost after actual activation'; "
-        if mode == "lost-response" else "return [pscustomobject]@{ ReturnValue=8; ProcessId=0 }; "
-    )
+    reservation_guard = ""
+    if scopes != "Local\\ce-owned-job-" + "a" * 32:
+        # The adapter dot-sources its instance functions in its own scope.
+        assert helper.read_text().count("New-DaemonInstanceReservation -Service") == 1
+        reservation_guard = (
+            f"$source=Get-Content -LiteralPath {quoted(helper)} -Raw; "
+            "$source=$source.Replace('New-DaemonInstanceReservation -Service',"
+            "'Fail-NativeFixtureReservation -Service'); "
+            "function Fail-NativeFixtureReservation { throw 'fixture reservation reached' }; "
+            "Invoke-Expression $source; "
+            f"$script:NativeDaemonSource={quoted(helper)}; "
+        )
     script = (
         f"$ErrorActionPreference='Stop'; . {quoted(helper)}; "
         "$env:COPILOT_EXTENSIONS_TEST_CONTAINED=$null; "
-        "$script:activation=$null; "
-        "Import-Module (Join-Path $env:SystemRoot "
-        "'System32\\WindowsPowerShell\\v1.0\\Modules\\CimCmdlets\\CimCmdlets.psd1'); "
-        "$script:cim=Get-Command Invoke-CimMethod -CommandType Cmdlet; "
-        "function Invoke-CimMethod { [CmdletBinding()] param("
-        "[string]$ClassName,[string]$MethodName,[int]$OperationTimeoutSec,[hashtable]$Arguments); "
-        + activation + "}; "
-        "try { "
+        + reservation_guard
+        + "try { "
         f"$p = Start-NativeDaemon -Script {quoted(fixture)} -Arguments @('worker') "
         f"-WorkingDirectory {quoted(tmp_path)} -LogPath {quoted(tmp_path / 'worker.log')}; "
         "$p.Dispose(); exit 91 "
         "} catch { $e=$_.Exception; "
         "while ($e.InnerException -and $e -isnot [CopilotExtensions.NativeDaemonSpawnException]) "
         "{ $e=$e.InnerException }; "
-        "@{ settled=$e.CleanupConfirmed; type=$e.GetType().Name; error=$e.InnerException.Message } "
-        "| ConvertTo-Json -Compress } finally { "
-        "if ($script:activation) { try { "
-        "if (-not $script:activation.WaitForExit(20000)) { "
-        "$script:activation.Kill(); [void]$script:activation.WaitForExit(5000); "
-        "throw 'fixture activation did not retire after channel closure' } "
-        "} finally { $script:activation.Dispose() } } }"
+        "@{ settled=$e.CleanupConfirmed; type=$e.GetType().Name; message=$e.Message; "
+        "error=$e.InnerException.Message } "
+        "| ConvertTo-Json -Compress }"
     )
     encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
     result = subprocess.run(
         [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
         capture_output=True, text=True, timeout=45, **pu.no_window_kwargs(),
+        env={
+            **{key: value for key, value in os.environ.items() if key.lower() != scope_key.lower()},
+            scope_key: scopes,
+        },
     )
     assert result.returncode == 0, result.stderr
     outcome = json.loads(result.stdout)
-    assert outcome["type"] == "NativeDaemonSpawnException"
-    assert outcome["settled"] is (mode == "refusal")
-    assert (
-        "refused launch (8)" if mode == "refusal" else "response lost after actual activation"
-    ) in outcome["error"]
+    assert outcome["type"] == "NativeDaemonSpawnException", outcome
+    assert outcome["settled"] is True
     assert not (tmp_path / "started").exists()
 
 
@@ -230,3 +245,104 @@ def test_native_daemon_rejects_real_powershell_core_before_initialization():
     outcome = json.loads(result.stdout)
     assert "stock Windows PowerShell 5.1" in outcome["error"]
     assert outcome["initialized"] is False
+
+
+@pytest.mark.parametrize("cycle", [0, 1])
+def test_native_contained_handshake_with_credential_free_private_profile(tmp_path, cycle):
+    repository = Path(__file__).resolve().parents[3]
+    fixture_path = repository / "tools" / "windows_broker_fixture.py"
+    spec = importlib.util.spec_from_file_location("_native_private_profile", fixture_path)
+    fixture_environment = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture_environment)
+    helper = Path(__file__).resolve().parents[1] / "src" / "agent_procutil" / "native_daemon.ps1"
+    shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    profile = tmp_path / "private-profile"
+    roaming, local = profile / "AppData" / "Roaming", profile / "AppData" / "Local"
+    roaming.mkdir(parents=True)
+    local.mkdir(parents=True)
+    environment = fixture_environment.fixture_environment(dict(os.environ), control=True)
+    environment.update({
+        key: value for key, value in os.environ.items()
+        if key.startswith("COPILOT_EXTENSIONS_TEST_") or key in (
+            "COPILOT_EXTENSIONS_OWNED_JOB_SCOPES", "COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT",
+        )
+    })
+    environment.update({
+        "HOME": str(profile), "USERPROFILE": str(profile),
+        "APPDATA": str(roaming), "LOCALAPPDATA": str(local),
+        "HOMEDRIVE": profile.drive, "HOMEPATH": str(profile)[len(profile.drive):],
+        "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
+    })
+
+    def literal(path):
+        return "'" + str(path).replace("'", "''") + "'"
+
+    directory = tmp_path / f"private-{cycle}"
+    directory.mkdir()
+    argument = "quote'`;\n\u2603"
+    encoded_argument = base64.b64encode(argument.encode("utf-16le")).decode("ascii")
+    worker = directory / "worker.ps1"
+    worker.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        f"[IO.File]::WriteAllText({literal(directory / 'starting')}, $args[0])\n"
+        f"[IO.File]::Move({literal(directory / 'starting')}, {literal(directory / 'started')})\n"
+        "$deadline=[DateTime]::UtcNow.AddSeconds(15)\n"
+        f"while (-not (Test-Path -LiteralPath {literal(directory / 'continue')})) {{\n"
+        " if ([DateTime]::UtcNow -gt $deadline) { throw 'caller did not release worker' }\n"
+        " Start-Sleep -Milliseconds 50\n}\n",
+        encoding="utf-8",
+    )
+    caller = directory / "caller.ps1"
+    caller.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "Write-Output 'native caller loading admission'\n"
+        f". {literal(helper)}\n"
+        f". {literal(helper.with_name('daemon_instances.ps1'))}\n"
+        "Write-Output 'native caller starting daemon'\n"
+        f"$p=Start-NativeDaemon -Script {literal(worker)} -Arguments @("
+        f"([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{encoded_argument}')))) "
+        f"-WorkingDirectory {literal(directory)} -LogPath {literal(directory / 'daemon.log')}\n"
+        "Write-Output 'native caller received admission'\n"
+        "@{pid=$p.Id;birth=(Get-DaemonInstanceProcessBirth $p)} | ConvertTo-Json -Compress "
+        f"| Set-Content -LiteralPath {literal(directory / 'outcome.json')} -Encoding UTF8\n"
+        "$p.Dispose()\n",
+        encoding="utf-8",
+    )
+    daemon = None
+    env = {**environment, "COPILOT_EXTENSIONS_DAEMON_REGISTRY": str(directory / "instances")}
+    with (directory / "caller.log").open("wb") as log:
+        process, job = pu.spawn_sync_in_kill_on_close_job(
+            [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(caller)],
+            env=env, cwd=directory, require_job=True, allow_breakaway=False,
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **pu.no_window_kwargs(),
+        )
+    try:
+        code = process.wait(timeout=30)
+        assert code == 0, (directory / "caller.log").read_text(errors="replace")
+        outcome = json.loads((directory / "outcome.json").read_text(encoding="utf-8-sig"))
+        daemon = observed_worker(outcome)
+        observe(lambda: (directory / "started").exists() or daemon.poll() is not None)
+        assert (directory / "started").exists(), (directory / "daemon.log").read_text(errors="replace")
+        assert (directory / "started").read_text(encoding="utf-8") == argument
+        stages = (directory / "daemon.log").read_text(errors="replace")
+        for stage in ("prepared", "creating", "created-suspended", "resumed", "bootstrap",
+                      "peer-ready", "connected", "offered"):
+            assert f"native-daemon-stage:{stage}" in stages
+        assert daemon.poll() is None
+        job.close()
+        daemon.wait(timeout=5)
+    except BaseException:
+        print("\n".join(
+            path.name + ":\n" + path.read_text(encoding="utf-8", errors="replace")
+            for path in directory.glob("*.log")
+        ), flush=True)
+        raise
+    finally:
+        if job.handle:
+            job.terminate_and_wait(5)
+        process.wait(timeout=5)
+        if daemon is not None:
+            try:
+                daemon.wait(timeout=5)
+            finally:
+                daemon.close()

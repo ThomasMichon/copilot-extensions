@@ -67,7 +67,7 @@ def uses_ahp(req, worktree_id: str) -> bool:
     if (
         getattr(req, "machine", None) is None
         and worktree_id
-        and getattr(req, "mode", "") in {"resume", "bare-resume"}
+        and getattr(req, "mode", "") == "resume"
     ):
         try:
             persisted = engine_client.execution_leg_get(
@@ -85,11 +85,6 @@ def uses_ahp(req, worktree_id: str) -> bool:
                     raise engine_client.EngineError(
                         "worktree requires unsupported execution-leg "
                         f"provider {provider or '<unknown>'}"
-                    )
-                if req.mode == "bare-resume":
-                    raise engine_client.EngineError(
-                        "bare resume is incompatible with the worktree's "
-                        "active AHP execution leg"
                     )
                 use_ahp = True
     return use_ahp
@@ -200,6 +195,14 @@ def launch(
     want_mux: bool = True,
 ) -> int:
     """Compose then execute a launch plan (the Picker's launch/resume action)."""
+    if plan.action == "exec":
+        from . import engine_client
+
+        try:
+            engine_client.require_agent_hosting(str(plan.raw.get("status_path") or plan.work_dir))
+        except engine_client.EngineError as error:
+            print(f"error: repository hosting admission refused: {error}")
+            return 1
     return execute(compose_launch(plan, capability, want_mux=want_mux))
 
 

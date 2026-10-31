@@ -108,8 +108,15 @@ def _send(args: argparse.Namespace) -> None:
     core = _core()
     if getattr(args, "native_invocation_file", None) is not None:
         from .native_keyed_client import send, validate_options
+        from .hosting_admission_cli import configure_client as configure_hosting
         validate_options(args)
-        send(args, core._get_client())
+        client = core._get_client(ensure=False) if getattr(args, "receipt_only", False) else core._get_client()
+        configure_hosting(client, args)
+        send(args, client)
+        return
+    if getattr(args, "receipt_only", False):
+        from .native_send_receipt import send as observe_receipt
+        observe_receipt(args)
         return
     if getattr(args, "new", False):
         print(
@@ -120,13 +127,10 @@ def _send(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         sys.exit(2)
-
-    if getattr(args, "receipt_only", False) and not getattr(args, "native_invocation_file", None):
-        raise SendRefused("refused_invalid", reason="native_invocation_required",
-                          retryable=False, target=args.target,
-                          error="--receipt-only requires --native-invocation-file")
     client = core._get_client()
     configure_client(client, args)
+    from .hosting_admission_cli import configure_client as configure_hosting
+    configure_hosting(client, args)
     min_protocol = getattr(args, "min_daemon_protocol", None)
     if min_protocol and not client.daemon_supports(min_protocol):
         if getattr(args, "plugin_context_stdin", False):
@@ -337,6 +341,10 @@ def _submit_and_stream(
             result = submit_native_bound_prompt(
                 client, session_id, prompt, caller_id=caller_id,
                 expected_native_session_id=expected_native,
+                **(
+                    {"idempotency_key": args.idempotency_key}
+                    if getattr(args, "idempotency_key", None) is not None else {}
+                ),
             )
         else:
             result = client.submit_prompt(
@@ -734,7 +742,7 @@ def _cmd_create_cli(
                 repository, anchors=roots,
                 **({"match_registered_remote": True} if prefix == "ssh" else {}),
             ) if repository else []:
-                argv += selection_cli_args({"source": plugin.source, "enable": plugin.enable})
+                argv += selection_cli_args(plugin.selection())
             for root in roots:
                 argv += ["--plugin-root", str(root)]
     if detach:
@@ -761,6 +769,9 @@ def _cmd_create(args: argparse.Namespace) -> None:
         print("[FAIL] --detach requires --cli", file=sys.stderr)
         sys.exit(2)
     if getattr(args, "cli", False):
+        if getattr(args, "require_agent_hosting", False):
+            print("[FAIL] --require-agent-hosting is not supported with --cli", file=sys.stderr)
+            sys.exit(2)
         if getattr(args, "charter", None):
             print(
                 "[FAIL] --charter is not supported with --cli: the CLI-mode "
@@ -778,6 +789,8 @@ def _cmd_create(args: argparse.Namespace) -> None:
         return
     core = _core()
     client = core._get_client()
+    from .hosting_admission_cli import configure_client as configure_hosting
+    configure_hosting(client, args)
     target = args.target
     caller_id = core._caller_id_for(args)
 
@@ -921,6 +934,8 @@ def _mark_resume_if_behind(client, session_id: str, *, caller_id: str | None) ->
 def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None:
     core = _core()
     send_p = sub.add_parser("send", help="Send a prompt to an agent or session (reuses/resumes this caller's existing session)")
+    from .hosting_admission_cli import add_argument as add_hosting_argument
+    add_hosting_argument(send_p)
     send_p.add_argument("target", help="Agent name, session ID, or a live session's worktree handle (a worktree handle resolves to whichever session is live now)")
     send_p.add_argument("prompt", nargs="?", default=None, help="Prompt text to send (omit and use --prompt-file for multi-line prompts that shouldn't transit the shell's argv)")
     send_p.add_argument("--prompt-file", dest="prompt_file", default=None, metavar="PATH", help="Read the prompt from PATH (or '-' for stdin) instead of the positional argument. Use this for multi-line prompts to avoid shell argv mangling (e.g. PowerShell word-splitting a prompt at the first embedded double-quote). Mutually exclusive with the positional prompt.")
@@ -955,6 +970,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     send_p.set_defaults(func=_cmd_send)
 
     create_p = sub.add_parser("create", help="Create a fresh session for an agent (optionally send a first prompt). Refuses if a one-session-per-CodeSpace agent is busy.")
+    add_hosting_argument(create_p)
     create_p.add_argument("target", help="Agent name (not a session ID)")
     create_p.add_argument("prompt", nargs="?", default=None, help="Optional first prompt to send to the new session")
     create_p.add_argument("--prompt-file", dest="prompt_file", default=None, metavar="PATH", help="Read the first prompt from PATH (or '-' for stdin) instead of the positional argument. Use this for multi-line prompts to avoid shell argv mangling (e.g. PowerShell word-splitting a prompt at the first embedded double-quote). Mutually exclusive with the positional prompt.")

@@ -1,0 +1,13 @@
+{
+  "comment": "Run normalized Windows sessions in launch-owned shells and preserve pane lifecycle handling across console interrupts",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

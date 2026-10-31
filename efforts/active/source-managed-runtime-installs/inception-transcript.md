@@ -7,6 +7,60 @@ The implementation plan is a separate interpretation, not part of these quotes.
 Assistant design responses are summarized separately below; they are not
 additional operator instructions.
 
+## Independent V1-to-V2 repair acceptance
+
+Operator direction, 2026-10-29:
+
+> I think a very important test will be:
+>
+> 1. Install worktree-manager suite V1, get it all running
+> 2. Install worktree-manager suite V2 in repair mode. Avoid needing to even check the previous version's existence, just force-install
+> Applying and starting the new version without uninstalling, deleting, unregistering, or touching the old version should briefly result in both old and new versions running at one, all bunstubs replaced, and any task registrations updated. The old version *should* notice that it's outmoded and shut down on its own, after the new version starts. In theory, the install flow itself hardly needs to do anything about the old version
+
+This requests an independent repair-install acceptance test, not a live-host
+installation or teardown authorization. The earlier agent-recommended
+displaced-code-removal implementation remains unpublished while its role is
+reconciled with this start-first/self-retirement requirement.
+
+The coordinator asked whether this contract applies to ordinary updates as well
+as repair/force-install. The operator selected:
+
+```text
+update_scope=normal-and-repair
+```
+
+The same publish/start-first and old-owner self-retirement contract therefore
+governs ordinary updates and repair/force-install, not only the test's repair
+invocation.
+
+## Disposable services and YAML maintenance banner
+
+Operator direction, 2026-10-25:
+
+> Okay, focus on getting the upstream vision alignment to support the notion of all copilot-extensions services being properly "disposable", with support for a yaml "maintenance banner" file that simultaneously acts as a killswitch against auto-update, and a notification to all agents about what is going on. We'll need to pair that with an instructions file in agent-conduct-guidance which informs agents that if the tools they need to invoke from the agent-* catalogs appear to be missing, they need to look at the provided yaml file for instructions, polling every 30 minutes via scheduled prompt until the blockage clears. Agents are not to attempt their own self-repair if the maintenance banner is up and has an explanation for the outage.
+
+The [alignment contract](maintenance-banner.md) distinguishes this requested
+shared YAML control from the earlier JSON-only source companion. Its proposed
+filename, compatibility ordering and parser/admission safeguards are
+agent-recommended implementation detail. No activation or host teardown is
+authorized by this request capture.
+
+## Critical connectivity exemption
+
+Operator direction, 2026-10-25:
+
+> One thing we should ensure: machine-to-machine connectivity services must be spared from any uninstall/reinstall snenanigans and must be treated like "critical" session-state holders, similar to Copilot mux or session-host wrappers. We should audit whether each form of SSH host/client/gateway mechanics would be impacted if we attempted a "complete uninstall" of all other copilot-extensions services on a machine. For example, agent-ssh *positions* keys and performs OpenSSH setup, but in theory it isn't itself the service which manages SSH requests. We should draw clear boundaries there. We don't want a force uninstall over SSH to suddenly kill SSH.
+
+Follow-up scope clarification:
+
+> credential relays are fair game for uninstall. credential relays aren't needed for direct machine management, so it's okay if an uninstall takes those out.
+
+This qualifies the earlier all-supporting-services disposability statement.
+Protect actual access-bearing connectivity, not every component that provisions
+it or brokers agent credentials. Source audit and reviewed intent correction
+are tracked in #9048; neither statement authorizes a live uninstall or transport
+change.
+
 ## Initial request
 
 > We have a general problem that when we try to stabilize copilot-extensions in main, we have no good way of uniformly validating the suite against live usage. Presently, our installation package is coupled to `copilot plugin update`, and the sessionStart hooks in the various plugins bootstrap the version-slot install folders for the payload.
@@ -107,3 +161,50 @@ This approves the audited path without making it a prerequisite for explicit
 repair. The plan distinguishes operator authorization from native cleanup
 proof and retains the original failed outcome. The standing clarification is
 not itself a concrete request to run repair on any host.
+
+## Wholesale same-installation cutover
+
+After a progress update emphasized custom-root/installation-cell qualification,
+the operator clarified the existing runtime-only target:
+
+> I'm confused: with install-from-dev-branch, we do expect to be installing to the same global space, replacing the main-sourced install with dev install. It's just that the installers themselves source from a dev-hash instead of a main-version.
+
+> Er specifically have the global binstubs pointing at the dev install slot, and have the dev install work with the same runtime data as the main install would have
+
+> Right, we're not doing custom-cell/root for this. This is a wholesale cutover
+
+This is a wholesale replacement of code in the existing installation, not a
+second installation or runtime-data migration. Existing global commands and
+services must select the immutable Dev generation while using the existing
+Main installation's data/configuration. Separate scoped-install capability
+does not gate this transition. The clarification does not itself authorize
+a concrete host cutover, restart or configuration change.
+
+## Fresh-default upstream installation orchestration
+
+> The path is simple:
+> `<repo> update` -> `worktree-manager update --project=<repo>`
+> `update` should get intercepted by the global-install binstub, and direct to re-install from upstream source, unless overridden by an environment variable. We should then run the `irm/iex` command that pulls from GitHub main. Upon running, it should check for any local overrides (like dev-based install mode, marketplace cell, test override, etc.) and then be the install/update orchestrator. Its *default* assumption should be "I'm going to do a fresh install", and shold want to just blit over everything fresh if it can, after installing into its assigned slot folder.
+> Now, the installer/updater should have "recognizers" for valid existing footprints, which will permit incremental/ZDD updates and installs. So if it finds a match, then we can attempt incremental/ZDD install and cutover. But if we *don't* have a match, we want a "hard-kill" install, which just clears known runtime (non-persisted) state, kills known processes, unsets scheduled tasks, deletes only non-config globals, and starts fresh.
+> The use of "receipts" and checks is reversed. We check for the *ability to do incremental*, not *permission to update*. Obviously, we want to succeed in doing an incremental update every time, but our default fallback needs to be a "mostly fresh install", ensuring the old version goes silent.
+
+This changes the default recovery model: positive footprint recognition admits
+incremental/ZDD reuse; absence of that match selects the mostly fresh path,
+not refusal merely because old receipts are missing. Configuration and durable
+data remain outside runtime cleanup. Existing protected session/connectivity
+and scoped host-operation constraints remain; this architectural direction is
+not a concrete request to clean or terminate processes on a particular host.
+
+## Recognizer manifests and footprint migrations
+
+> What we likely need are "recognizer" manifests that keep track of expected runtime footprints. This provides two things:
+> 1. A list of everything we can assume is safe for us to clear/delete
+> 2. A list of markers and known version/contract ranges for each thing we find to ensure incremental update is possible.
+> Agents which make changes to what gets installed will need to take care to update the manifest as they add things, both to ensure what they add is trackeed, but also to handle deltas. This is equivalent to adding the schema-upgrade code for a DB installer every time you make a schema change in the product.
+
+The proposed manifest has distinct reset-scope and incremental-compatibility
+roles. Installed-footprint changes carry their corresponding manifest and
+delta/migration updates, rather than leaving new artifacts or old layouts
+untracked. This refines the fresh-default direction above; it does not turn
+recognizer mismatch into permission to erase unknown data or into a veto on
+the scoped fresh installation.

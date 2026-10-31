@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-23
+- **Last revised:** 2026-10-26
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -108,6 +108,12 @@ rather than creating another hidden agent. An existing conversation or
 uncertain prior launch still requires its ordinary continuity and ownership
 proof; sessionless is authoritative history, not an absence guess.
 
+For owned remote workspaces, Bridge consumes the ground layer's
+[origin-coordinated allocation](../agent-worktrees/README.md#origin-coordinated-remote-allocation).
+It does not replace that allocation transaction with its own remote-create and
+caller-ledger callback. Embodiment waits for confirmed workspace ownership;
+an unresolved allocation remains recoverable without starting a conversation.
+
 ### repository-owned hosting eligibility
 
 Workspace allocation does not imply permission to embody an authoring agent.
@@ -137,10 +143,13 @@ are attention boundaries.
 
 ### authenticated local control plane
 
-The bridge exposes authenticated local control and reconnectable event delivery
+The bridge exposes user-scoped local control and reconnectable event delivery
 for tools, UI/fronts, and other agents. Prompt submission and event consumption
 are separate concerns so a consumer can reconnect to the same session history
-instead of making a long turn depend on a single live socket.
+instead of making a long turn depend on a single live socket. Access follows
+the service model's
+[user-owned coordination boundary](../../plugin-services/README.md#user-owned-coordination-boundary),
+without an additional identity ceremony for each local consumer.
 
 ### negotiated contract envelope
 
@@ -898,9 +907,23 @@ messaging remains collaboration rather than impersonation.
 
 ### authenticated-local-control
 
-Control surfaces are local, tunnel-bound, or otherwise explicitly secured and
-authenticated. The bridge is a coordination control plane, not a public prompt
-socket.
+Control surfaces stay within the user's established access boundary or cross
+it through an explicitly secured transport. Container network bridges
+authenticate through their proxy wrappers; a raw listener is not a substitute.
+The [shared service boundary](../../plugin-services/README.md#user-owned-coordination-boundary)
+does not require another per-agent token inside that scope. The bridge is a
+coordination control plane, not a public prompt socket.
+
+### lossless-message-recovery
+
+Accepted messages remain durably recoverable across disconnects, timeouts and
+consumer restarts. Delivery acceptance, observed consumption and semantic
+completion remain distinct. Lost replies do not acknowledge or discard a
+message, and an uncertain send does not become an automatic resend. Recovery
+reconciles the original message through its existing owner; where absence or
+safe deduplication cannot be established, it retains visible outstanding work
+rather than claiming delivery or dropping it. Integrity checks protect the
+retained input against corruption and accidental identity reuse.
 
 ### connection-loss-never-destroys-the-target
 

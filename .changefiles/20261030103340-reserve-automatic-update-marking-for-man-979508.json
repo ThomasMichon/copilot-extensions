@@ -1,0 +1,13 @@
+{
+  "comment": "Reserve automatic update marking for Manager pre-session maintenance; preserve ordinary fleet update admission",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

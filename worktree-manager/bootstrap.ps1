@@ -20,6 +20,15 @@
 
 $ErrorActionPreference = 'Stop'
 
+if ($env:BOOTSTRAP_KILLSWITCH_STATE_FILE -and
+    -not $env:BOOTSTRAP_KILLSWITCH_STATE_FILE.StartsWith('~')) {
+    $holdPath = $env:BOOTSTRAP_KILLSWITCH_STATE_FILE
+    if (-not [IO.Path]::IsPathRooted($holdPath)) {
+        $holdPath = Join-Path (Get-Location).Path $holdPath
+    }
+    $env:BOOTSTRAP_KILLSWITCH_STATE_FILE = [IO.Path]::GetFullPath($holdPath)
+}
+
 $BootstrapClock = [Diagnostics.Stopwatch]::StartNew()
 function Write-BootstrapProgress(
     [string]$Message,
@@ -32,6 +41,182 @@ function Write-BootstrapProgress(
     }
 }
 
+function Resolve-BootstrapExecutable([string]$Path) {
+    $root = [IO.Path]::GetPathRoot($Path)
+    if (-not $root) { throw 'Bootstrap executable must have an absolute path.' }
+    $remaining = @($Path.Substring($root.Length) -split '[\\/]' | Where-Object { $_ })
+    $current = $root
+    $links = 0
+    $ordinaryFile = $false
+    while ($remaining.Count) {
+        $component = $remaining[0]
+        $remaining = @($remaining | Select-Object -Skip 1)
+        if ($component -eq '.') { continue }
+        if ($component -eq '..') {
+            $parent = [IO.Path]::GetDirectoryName($current)
+            if ($parent) { $current = $parent }
+            continue
+        }
+        $candidate = [IO.Path]::Combine($current, $component)
+        $item = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            $ordinaryFile = $false
+            $links++
+            $targets = @($item.Target)
+            if ($links -gt 40 -or $targets.Count -ne 1 -or -not $targets[0]) {
+                throw 'Bootstrap executable has an unsupported link or excessive indirection.'
+            }
+            $target = [string]$targets[0]
+            if (-not [IO.Path]::IsPathRooted($target)) { $target = [IO.Path]::Combine($current, $target) }
+            $current = [IO.Path]::GetPathRoot($target)
+            $remaining = @($target.Substring($current.Length) -split '[\\/]' |
+                Where-Object { $_ }) + $remaining
+            continue
+        }
+        if ([bool]$item.PSIsContainer -ne [bool]$remaining.Count) {
+            throw 'Bootstrap executable does not identify a regular file.'
+        }
+        $ordinaryFile = -not $item.PSIsContainer
+        $current = $candidate
+    }
+    if (-not $ordinaryFile) { throw 'Bootstrap executable does not identify a regular file.' }
+    return $current
+}
+
+function Get-RegisteredBootstrapPython {
+    foreach ($root in @(
+        'HKCU:\Software\Python\PythonCore',
+        'HKLM:\Software\Python\PythonCore',
+        'HKLM:\Software\WOW6432Node\Python\PythonCore'
+    )) {
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        foreach ($version in @(Get-ChildItem -LiteralPath $root -ErrorAction Stop)) {
+            $install = Join-Path $version.PSPath 'InstallPath'
+            if (-not (Test-Path -LiteralPath $install)) { continue }
+            $properties = Get-ItemProperty -LiteralPath $install -ErrorAction Stop
+            $executable = $properties.PSObject.Properties['ExecutablePath']
+            if ($executable -and $executable.Value -is [string] -and $executable.Value) {
+                $executable.Value
+                continue
+            }
+            $directory = $properties.PSObject.Properties['(default)']
+            if ($directory -and $directory.Value -is [string] -and $directory.Value) {
+                Join-Path $directory.Value 'python.exe'
+            }
+        }
+    }
+}
+
+function Initialize-BootstrapSignatureVerification {
+    $module = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1'
+    Import-Module -Name $module -ErrorAction Stop
+}
+
+function Find-PhysicalBootstrapPython([switch]$RequireSignature) {
+    if ($RequireSignature) { Initialize-BootstrapSignatureVerification }
+    $inspected = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $candidates = @(
+        foreach ($name in @('python3', 'python')) {
+            Get-Command $name -CommandType Application -All -ErrorAction SilentlyContinue |
+                ForEach-Object { $_.Source }
+        }
+        if ($RequireSignature) { Get-RegisteredBootstrapPython }
+    )
+    foreach ($candidate in $candidates) {
+        try {
+            if ($candidate -match '[\\/]WindowsApps[\\/]') { continue }
+            $physical = Resolve-BootstrapExecutable $candidate
+            foreach ($attempt in 1..2) {
+                if ($physical -match '[\\/]WindowsApps[\\/]') { break }
+                if ($RequireSignature) {
+                    if (-not $inspected.Add($physical)) { break }
+                    if ([IO.Path]::GetExtension($physical) -ine '.exe') { break }
+                    $signature = Get-AuthenticodeSignature -LiteralPath $physical -ErrorAction Stop
+                    if (-not $signature -or $signature.Status -eq 'UnknownError') {
+                        throw 'System Python signature verification could not complete.'
+                    }
+                    if ($signature.Status -ne 'Valid') { break }
+                }
+                $probe = @(& $physical -I -S -B -c "import json,sys; print(json.dumps({'version': list(sys.version_info[:2]), 'base': sys.prefix == sys.base_prefix, 'executable': sys._base_executable}))" 2>$null)
+                if ($LASTEXITCODE -ne 0 -or $probe.Count -ne 1) { break }
+                $info = $probe[0] | ConvertFrom-Json -ErrorAction Stop
+                if ($info.base -isnot [bool] -or -not $info.base -or $info.version.Count -ne 2) { break }
+                if (($info.version[0] -isnot [int] -and $info.version[0] -isnot [long]) -or
+                    ($info.version[1] -isnot [int] -and $info.version[1] -isnot [long])) { break }
+                if ($info.version[0] -lt 3 -or ($info.version[0] -eq 3 -and $info.version[1] -lt 11)) { break }
+                if ($info.executable -isnot [string] -or -not [IO.Path]::IsPathRooted($info.executable)) { break }
+                $base = Resolve-BootstrapExecutable $info.executable
+                if ($base -ieq $physical) { return $physical }
+                $physical = $base
+            }
+        } catch {
+            if ($RequireSignature -and $_.Exception -isnot [Management.Automation.ItemNotFoundException]) {
+                throw
+            }
+            continue
+        }
+    }
+    return $null
+}
+
+function Test-BootstrapInteractive {
+    return (
+        $Host.Name -eq 'ConsoleHost' -and [Environment]::UserInteractive -and
+        -not $env:COPILOT_AGENT_SESSION_ID -and -not $env:CI -and
+        -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected -and
+        -not ([Environment]::GetCommandLineArgs() -match '^-[Nn][Oo][Nn][Ii]\w*$')
+    )
+}
+
+function Find-SystemBootstrapPython {
+    $python = Find-PhysicalBootstrapPython -RequireSignature
+    if (-not $python) {
+        $winget = Get-Command winget -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if (-not $winget) { throw 'System Python bootstrap requires WinGet when no signed Python 3.11+ is available.' }
+        if (-not (Test-BootstrapInteractive)) {
+            throw 'System Python acquisition requires a real interactive Windows terminal; no package was installed.'
+        }
+        Write-BootstrapProgress 'No signed Python 3.11+ found; installing user-scoped Python through WinGet...'
+        & $winget.Source install --id Python.Python.3.11 --exact --source winget --scope user `
+            --accept-source-agreements --accept-package-agreements |
+            ForEach-Object { [Console]::Error.WriteLine([string]$_) }
+        if ($LASTEXITCODE -ne 0) { throw "System Python acquisition failed (WinGet exit $LASTEXITCODE)." }
+        $python = Find-PhysicalBootstrapPython -RequireSignature
+        if (-not $python) {
+            throw 'WinGet returned success, but no usable signed Python 3.11+ was found; refusing managed Python fallback.'
+        }
+    }
+    $directory = [IO.Path]::GetDirectoryName($python)
+    $remaining = @($env:PATH -split ';' | Where-Object { $_ -and $_ -ine $directory })
+    $env:PATH = (@($directory) + $remaining) -join ';'
+    return $python
+}
+
+function Find-BootstrapPython([string]$Uv) {
+    $ErrorActionPreference = 'Continue'
+    $lookup = @(& $Uv python find --no-project '>=3.11' 2>&1)
+    $lookupExit = $LASTEXITCODE
+    if ($lookupExit -eq 0) {
+        $output = @($lookup | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
+        if ($output.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace([string]$output[0])) {
+            return [string]$output[0]
+        }
+        throw 'Manager Python lookup returned an invalid executable.'
+    }
+    if (($lookup -join "`n") -match '(?i)(?:os error|WinError)\s+448\b') {
+        $physical = Find-PhysicalBootstrapPython
+        if ($physical) { return $physical }
+    }
+    & $Uv python install 3.11 | ForEach-Object { [Console]::Error.WriteLine([string]$_) }
+    if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
+    $python = @(& $Uv python find --no-project '>=3.11' 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $python.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$python[0])) {
+        throw 'Manager needs Python 3.11 or newer.'
+    }
+    return [string]$python[0]
+}
+
 $Root    = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } else { Join-Path $env:USERPROFILE '.worktree-manager' }
 $Staging = Join-Path $Root 'staging'
 $Config  = Join-Path $Root 'config.toml'
@@ -39,21 +224,72 @@ $Config  = Join-Path $Root 'config.toml'
 # Source (repo + ref): user-level config file [source] overrides, else defaults.
 $Repo = 'https://github.com/ThomasMichon/copilot-extensions.git'
 $Ref  = 'main'
-if (Test-Path $Config) {
-    $cfg = Get-Content $Config -Raw
-    # Isolate the [source] table (up to the next [table] header or EOF).
-    $sec = [regex]::Match($cfg, '(?ms)^\s*\[source\]\s*(.*?)(?=^\s*\[|\z)')
-    if ($sec.Success) {
-        $body  = $sec.Groups[1].Value
-        $mRepo = [regex]::Match($body, '(?m)^\s*repo\s*=\s*"(.*?)"')
-        $mRef  = [regex]::Match($body, '(?m)^\s*ref\s*=\s*"(.*?)"')
-        if ($mRepo.Success) { $Repo = $mRepo.Groups[1].Value }
-        if ($mRef.Success)  { $Ref  = $mRef.Groups[1].Value }
+function ConvertFrom-BootstrapSourceString([string]$Text) {
+    if (-not $Text -or $Text[0] -cnotin @([char]'"', [char]"'")) {
+        throw 'Unsupported or malformed source string.'
+    }
+    $quote = $Text[0]
+    $value = [Text.StringBuilder]::new()
+    for ($i = 1; $i -lt $Text.Length; $i++) {
+        $character = $Text[$i]
+        if ($character -ceq $quote) {
+            if ($Text.Substring($i + 1) -notmatch '^\s*(#.*)?$' -or -not $value.Length) {
+                throw 'Unsupported or malformed source string.'
+            }
+            return $value.ToString()
+        }
+        if ([char]::IsControl($character)) { throw 'Control characters in source string.' }
+        if ($quote -ceq [char]'"' -and $character -ceq [char]'\') {
+            $i++
+            if ($i -ge $Text.Length -or $Text[$i] -cnotin @([char]'\', [char]'"')) {
+                throw 'Unsupported or malformed source escape.'
+            }
+            $character = $Text[$i]
+        }
+        [void]$value.Append($character)
+    }
+    throw 'Unterminated source string.'
+}
+$explicitSource = $args.Count -ge 4 -and $args[0] -ceq '--repair-update' -and $args[3] -ceq 'update'
+if ((Test-Path -LiteralPath $Config) -and -not $explicitSource) {
+    $inSource = $false
+    $seen = @{}
+    $sourceSeen = $false
+    foreach ($line in [IO.File]::ReadAllLines($Config)) {
+        if ($line -match '^\s*\[') {
+            $inSource = $line -cmatch '^\s*\[source\]\s*(#.*)?$'
+            if ($line -cmatch '^\s*\[\[?\s*(?:source|["'']source["''])(?:[^A-Za-z0-9_-]|$)' -and
+                -not $inSource) { throw 'Unsupported source table syntax.' }
+            if ($inSource -and $sourceSeen) { throw 'Duplicate source table.' }
+            if ($inSource) { $sourceSeen = $true }
+            continue
+        }
+        if (-not $inSource -and $line -cmatch '^\s*["'']?source["'']?[\s.=]') { throw 'Unsupported inline source table.' }
+        if ($inSource -and $line -cmatch '^\s*(repo|ref)\s*=\s*(.*)$') {
+            $key = $Matches[1]
+            $encodedValue = $Matches[2]
+            if ($seen.ContainsKey($key)) { throw 'Duplicate source key.' }
+            $seen[$key] = $true
+            $value = ConvertFrom-BootstrapSourceString $encodedValue
+            if ($key -ceq 'repo') { $Repo = $value } else { $Ref = $value }
+        } elseif ($inSource -and $line -notmatch '^\s*(#.*)?$') {
+            throw 'Unsupported source key syntax.'
+        }
     }
 }
 
 $installerArgs = @()
 $commandArgs = @($args)
+$SystemPythonRequested = $commandArgs.Count -and $commandArgs[0] -ceq '--system-python'
+if ($SystemPythonRequested) {
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+        throw '--system-python requires the Windows WinGet bootstrap; unsupported on POSIX.'
+    }
+    $commandArgs = @($commandArgs | Select-Object -Skip 1)
+    if ($commandArgs.Count -and $commandArgs[0] -in @(
+        '--system-python', '--recover-for-repair', '--repair-update', '--bootstrap-update'
+    )) { throw 'System Python mode cannot be repeated or combined with bootstrap repair.' }
+}
 $RecoveryStaging = $null
 if ($commandArgs.Count -and $commandArgs[0] -ceq '--recover-for-repair') {
     $installerArgs += '--recover-for-repair'
@@ -67,7 +303,13 @@ if ($commandArgs.Count -and $commandArgs[0] -ceq '--recover-for-repair') {
     New-Item -ItemType Directory -Path $RecoveryStaging | Out-Null
     $Staging = Join-Path $RecoveryStaging 'source'
 }
-if ($commandArgs.Count -and $commandArgs[0] -ceq '--repair-update') {
+if ($commandArgs.Count -and $commandArgs[0] -ceq '--bootstrap-update') {
+    if ($commandArgs.Count -lt 2 -or $commandArgs[1] -cne 'update') {
+        throw 'Bootstrap update only accepts update.'
+    }
+    $installerArgs += '--repair-update'
+    $commandArgs = @($commandArgs | Select-Object -Skip 1)
+} elseif ($commandArgs.Count -and $commandArgs[0] -ceq '--repair-update') {
     if ($commandArgs.Count -lt 4 -or $commandArgs[3] -cne 'update') {
         throw 'Incomplete or invalid update bootstrap source/command.'
     }
@@ -76,8 +318,17 @@ if ($commandArgs.Count -and $commandArgs[0] -ceq '--repair-update') {
     $installerArgs += '--repair-update'
     $commandArgs = @($commandArgs | Select-Object -Skip 3)
 }
+if (-not $Repo -or $Repo.StartsWith('-') -or -not $Ref -or $Ref.StartsWith('-') -or
+    $Repo -match '[\x00-\x1f\x7f]' -or $Ref -match '[\x00-\x1f\x7f]') {
+    throw 'Invalid configured Git source/ref; source preserved.'
+}
+if ($Repo -notmatch '^[^/\\:]+:' -or [IO.Path]::IsPathRooted($Repo)) {
+    if (-not [IO.Path]::IsPathRooted($Repo)) { $Repo = Join-Path (Get-Location).Path $Repo }
+    $Repo = [IO.Path]::GetFullPath($Repo)
+}
 try {
 Write-BootstrapProgress 'Worktree Manager bootstrap'
+$SystemPython = if ($SystemPythonRequested) { Find-SystemBootstrapPython } else { $null }
 
 # -- Prerequisites (auto-provision; restart-aware; user-local first) ----------
 # The one-liner must take a *bare* machine into the Manager (vision installer
@@ -99,6 +350,9 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
         exit 1
     }
 }
+$UvCommand = Get-Command uv -CommandType Application,ExternalScript -ErrorAction Stop |
+    Select-Object -First 1
+$Uv = Resolve-BootstrapExecutable $UvCommand.Source
 
 $HaveGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
 if (-not $HaveGit) {
@@ -131,10 +385,15 @@ if ($HaveGit) {
         Write-BootstrapProgress "git fetch of $Repo@$Ref failed (exit $LASTEXITCODE)." failed
         exit $LASTEXITCODE
     }
-    git -C $Staging -c core.hooksPath= checkout -q --detach FETCH_HEAD
+    git -C $Staging -c core.longpaths=true -c core.hooksPath= checkout -q --detach FETCH_HEAD
     if ($LASTEXITCODE -ne 0) {
         Write-BootstrapProgress "git checkout of $Repo@$Ref failed (exit $LASTEXITCODE)." failed
         exit $LASTEXITCODE
+    }
+    git -C $Staging -c core.longpaths=true diff --quiet --no-ext-diff --no-textconv HEAD --
+    if ($LASTEXITCODE -ne 0) {
+        Write-BootstrapProgress 'Git source checkout is incomplete or changed; refusing Manager construction.' failed
+        exit 1
     }
     $PayloadParent = $Staging
 } else {
@@ -162,15 +421,7 @@ if ($HaveGit) {
 
 Push-Location (Join-Path $PayloadParent 'worktree-manager')
 try {
-    $Python = $null
-    try { $Python = & uv python find --no-project '>=3.11' 2>$null }
-    catch { $Python = $null }
-    if ($LASTEXITCODE -ne 0 -or -not $Python) {
-        & uv python install 3.11
-        if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
-        $Python = & uv python find --no-project '>=3.11'
-    }
-    if ($LASTEXITCODE -ne 0 -or -not $Python) { throw 'Manager needs Python 3.11 or newer.' }
+    $Python = if ($SystemPythonRequested) { $SystemPython } else { Find-BootstrapPython $Uv }
     if ($commandArgs.Count) {
         & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD @installerArgs -- @commandArgs
     } else {

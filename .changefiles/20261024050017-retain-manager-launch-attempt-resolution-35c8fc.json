@@ -1,0 +1,9 @@
+{
+  "comment": "Retain Manager launch-attempt resolution, refusal and launcher boundary observations without inferring Copilot acceptance.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

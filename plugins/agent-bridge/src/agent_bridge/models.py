@@ -26,7 +26,7 @@ from .live_message_models import (  # noqa: F401 -- re-exported public models
     SendMessageResult,
 )
 from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
-from .preference_models import PreferencePolicyFields
+from .preference_models import PreferencePolicyFields, SessionModes
 from .session_start_models import StartSessionRequest  # noqa: F401 -- public model re-export
 from .execution_identity_models import ExecutionSpaceConfigFields
 from .session_status import SessionStatus
@@ -623,7 +623,10 @@ class PhasedTimeouts(BaseModel):
         "sub-daemon host cold-started under AV real-time scanning) can exceed a "
         "tight 30s budget, which previously surfaced as a spurious "
         "LAUNCH_ACP/new_session internal error. Raise this in config.yaml if a "
-        "local host still times out on a very slow box.",
+        "local host still times out on a very slow box. Also bounds remote "
+        "credential-relay admission and reconnect readiness, including each "
+        "fresh SSH probe's transport establishment; the relay ping itself "
+        "retains its separate three-second response limit.",
     )
 
 
@@ -710,6 +713,7 @@ class RepoBridgeConfig(BaseModel):
     default_copilot_args: list[str] = Field(default_factory=list)
     default_env: dict[str, str] = Field(default_factory=dict)
     remote_acp_bindings: dict[str, RemoteAcpBinding] = Field(default_factory=dict)
+    session_modes: SessionModes = Field(default_factory=SessionModes)
 
 
 class ServiceConfig(ExecutionSpaceConfigFields):
@@ -724,6 +728,7 @@ class ServiceConfig(ExecutionSpaceConfigFields):
     # an ignored extra) so it round-trips through model_dump / save_config. Keep
     # in sync with agent_bridge.config_migrations.CONFIG_VERSION.
     schema_version: int = 2
+    session_modes: SessionModes = Field(default_factory=SessionModes)
     remote_acp: dict[str, RemoteAcpTarget] = Field(default_factory=dict)
     remote_acp_bindings: dict[str, RemoteAcpBinding] = Field(default_factory=dict)
     remote_acp_auth_sources: dict[str, RemoteAuthApproval] = Field(default_factory=dict)

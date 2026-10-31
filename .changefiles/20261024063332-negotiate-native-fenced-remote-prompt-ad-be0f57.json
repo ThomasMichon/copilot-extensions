@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate native-fenced remote prompt admission with persisted attempt correlation and strict receipts.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

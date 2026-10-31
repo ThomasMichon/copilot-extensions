@@ -25,13 +25,16 @@ NODE = "tools/promotion_unit_tests/test_example.py::test_example"
 
 
 @pytest.mark.parametrize("include_pr", [False, True])
-def test_native_inventory_tracks_explicit_pr_registration_without_effects(monkeypatch, include_pr):
+@pytest.mark.parametrize("component", ["pr", "ssh"])
+def test_native_inventory_tracks_explicit_pr_registration_without_effects(
+    monkeypatch, include_pr, component,
+):
     import materialized_candidate_inventory as inventory
 
     required = {"worktree-manager", "fleet-manager", "services/index", "services/dispatch",
                 "services/chat"}
     if include_pr:
-        required.add("services/pr")
+        required.add("services/" + component)
     observed = []
 
     def regular(root, relative):
@@ -43,19 +46,19 @@ def test_native_inventory_tracks_explicit_pr_registration_without_effects(monkey
     monkeypatch.setattr(inventory, "plugin_minutes", lambda *_args: 2)
     monkeypatch.setattr(inventory, "fleet_partitions", lambda _root: {"fixture": "fixture"})
     rows = inventory.matrix(Path("fixture"), {"agent-worktrees"}, required)["include"]
-    assert {row["os"] for row in rows if row["component"] == "pr"} == (
+    assert {row["os"] for row in rows if row["component"] == component} == (
         {"ubuntu-latest", "windows-latest"} if include_pr else set()
     )
-    assert ("services/pr/pyproject.toml" in observed) is include_pr
+    assert (f"services/{component}/pyproject.toml" in observed) is include_pr
     assert all(row["job_minutes"] <= 360 for row in rows)
     if include_pr:
         import validate_materialized_candidate as candidate
 
         monkeypatch.setattr(candidate, "_regular", regular)
-        recipe = candidate.recipes(Path("fixture"), "pr")
+        recipe = candidate.recipes(Path("fixture"), component)
         assert len(recipe) == 1
         assert recipe[0][0][2:] == [
-            "services/pr", "--prepare", "--admission-wait", "60", "--timeout", "180",
+            "services/" + component, "--prepare", "--admission-wait", "60", "--timeout", "180",
         ]
 
 
@@ -461,6 +464,97 @@ def test_v2_cli_writes_canonical_receipt_and_explicit_producer_outputs(unit_case
     assert fields["qualification_digest"] == qualification.receipt_digest(value)
 
 
+def _candidate_packet(case):
+    from promotion_candidate_units import derive_manifest
+    from promotion_development_map import build_mapping, project_coverage
+
+    source, candidate = case["args"]["dev_root"], case["args"]["candidate_root"]
+    target = "tools/unit_feature.py"
+    original = b'__version__ = "0.1.0-dev1"\ndef value(): return 1\n'
+    (source / target).write_bytes(original)
+    (candidate / target).write_bytes(original.replace(b"0.1.0-dev1", b"0.1.20-dev1"))
+    case["manifest"]["sources"][target] = hashlib.sha256(original).hexdigest()
+    for root in (source, candidate):
+        _write_json(root / MANIFEST, case["manifest"])
+    manifest, development, composed = derive_manifest(
+        case["manifest"], development_root=source, candidate_root=candidate,
+        dev_sha=DEV, candidate_tree=TREE,
+    )
+    mapping = build_mapping(
+        dev_sha=DEV, candidate_tree=TREE, sources={target: development[target]},
+        candidate_sources={target: composed[target]}, origins={target: target},
+    )
+    raw = case["coverage"]
+    raw["files"][target]["executed_lines"] = [1, 2]
+    raw["files"][target]["contexts"] = {"1": [""], "2": [NODE + "|call"]}
+    raw["development_projection"] = project_coverage(raw, mapping)
+    raw["development_mapping"] = mapping
+    directory = case["args"]["unit_packet_dir"]
+    digest = hashlib.sha256(_write_json(directory / "coverage.json", raw)).hexdigest()
+    _write_json(directory / "unit-manifest.json", manifest)
+    case["proof"].update(
+        profile=manifest["profile"], manifest_sha256=manifest_digest(manifest), coverage_sha256=digest,
+    )
+    _write_json(directory / "unit-proof.json", case["proof"])
+    case["reseal"]()
+    return mapping
+
+
+def test_v3_qualifies_stamped_bytes_and_verified_projection_without_retesting(unit_case):
+    _candidate_packet(unit_case)
+    value = qualification.qualify_units(
+        **unit_case["args"], profile=qualification.CANDIDATE_UNIT_PROFILE,
+    )
+    assert value["version"] == 3 and value["profile"] == "candidate-units-v3"
+    assert _verify_units(
+        unit_case, value, expected_profile=qualification.CANDIDATE_UNIT_PROFILE,
+    ) == qualification.receipt_digest(value)
+    assert unit_case["downloads"] == [789, 789]
+    projected = unit_case["coverage"]["development_projection"]
+    assert set(unit_case["coverage"]["development_mapping"]["files"]) == set(unit_case["coverage"]["files"])
+    assert projected["copies"]["tools/unit_feature.py"]["unmapped"]["1"]["reason"] == "changed-version-statement"
+    assert projected["coverage"]["tools/unit_feature.py"] == {"2": [NODE + "|call"]}
+
+
+@pytest.mark.parametrize("change", ["candidate-mutation", "dev-mutation", "forged-map", "forged-projection", "wrong-tree"])
+def test_v3_refuses_mutated_bytes_or_forged_development_attribution(unit_case, change):
+    _candidate_packet(unit_case)
+    target = "tools/unit_feature.py"
+    if change in ("candidate-mutation", "dev-mutation"):
+        root = unit_case["args"]["candidate_root" if change == "candidate-mutation" else "dev_root"]
+        (root / target).write_bytes(b"def value(): return 2\n")
+    else:
+        coverage = unit_case["coverage"]
+        if change == "forged-map":
+            coverage["development_mapping"]["files"][target]["lines"]["1"] = 1
+        elif change == "forged-projection":
+            coverage["development_projection"]["coverage"][target]["1"] = [NODE + "|call"]
+        else:
+            coverage["development_mapping"]["candidate_tree"] = "f" * 40
+        directory = unit_case["args"]["unit_packet_dir"]
+        unit_case["proof"]["coverage_sha256"] = hashlib.sha256(
+            _write_json(directory / "coverage.json", coverage),
+        ).hexdigest()
+        _write_json(directory / "unit-proof.json", unit_case["proof"])
+        unit_case["reseal"]()
+    with pytest.raises((ValueError, VerificationError)):
+        qualification.qualify_units(**unit_case["args"], profile=qualification.CANDIDATE_UNIT_PROFILE)
+    assert not unit_case["downloads"]
+
+
+def test_raw_dev_packet_cannot_be_reinterpreted_as_candidate_execution(unit_case):
+    with pytest.raises(ValueError, match="manifest"):
+        qualification.qualify_units(**unit_case["args"], profile=qualification.CANDIDATE_UNIT_PROFILE)
+    assert not unit_case["downloads"]
+
+
+def test_candidate_packet_is_not_accepted_under_historical_source_profile(unit_case):
+    _candidate_packet(unit_case)
+    with pytest.raises(ValueError, match="manifest"):
+        qualification.qualify_units(**unit_case["args"])
+    assert not unit_case["downloads"]
+
+
 @pytest.mark.parametrize("mutation", ["missing-job", "failed-job", "wrong-control", "missing-artifact", "archive-tamper"])
 def test_valid_packet_cannot_hide_wrong_provider_or_archive(unit_case, mutation):
     producer = unit_case["producer"]
@@ -566,6 +660,88 @@ def test_v2_publisher_consumes_the_real_packet_verifier_with_explicit_profile(un
     # or reach any additional artifact publication.
     assert publisher.main(arguments) == 1
     assert writes == [CANDIDATE]
+
+
+@pytest.mark.parametrize("failed_evidence", [False, True, "source", "missing-source"])
+def test_source_owned_unit_publication_requires_retained_evidence_before_success(
+    unit_case, tmp_path, monkeypatch, failed_evidence,
+):
+    import promotion_artifact_readiness as readiness
+    import promotion_release_evidence as release_evidence
+
+    _candidate_packet(unit_case)
+    value = qualification.qualify_units(
+        **unit_case["args"], profile=qualification.CANDIDATE_UNIT_PROFILE,
+    )
+    receipt_path = tmp_path / "qualification.json"
+    receipt_path.write_bytes(qualification.receipt_bytes(value))
+    directory, output = tmp_path / "artifacts", tmp_path / "outputs"
+    directory.mkdir()
+    index = {"schema_version": 2, "artifacts": []}
+    index_raw = _write_json(directory / publisher.INDEX_NAME, index)
+    monkeypatch.setenv("ARTIFACT_VERIFY_TOKEN", "synthetic-independent-read-authority")
+    monkeypatch.setattr(publisher, "verify_attestations", lambda *a, **k: {"schema_version": 2})
+    observed = []
+
+    def ready(*args, **kwargs):
+        observed.append("code-readback")
+        return f"python-artifacts-{DEV}", index
+
+    retained = {"filename": "qualified-evidence.zip", "sha256": "e" * 64, "asset_id": 20}
+
+    def retain(path, **kwargs):
+        assert observed == ["code-readback"] and path == directory
+        assert kwargs["packet_directory"] == unit_case["args"]["unit_packet_dir"]
+        assert kwargs["receipt"] == value
+        assert kwargs["qualification_digest"] == qualification.receipt_digest(value)
+        assert kwargs["dev_sha"] == DEV and kwargs["candidate_sha"] == CANDIDATE
+        observed.append("evidence-readback")
+        if failed_evidence is True:
+            raise ValueError("evidence readback failed")
+        return retained
+
+    source = {"tree": value["tree"], "assets": [{"sha256": "f" * 64}]}
+
+    def retain_source(path, **kwargs):
+        assert observed == ["code-readback", "evidence-readback"] and path == directory
+        assert kwargs["source_directory"] == tmp_path / "source-subjects"
+        assert kwargs["receipt"] == value and kwargs["qualification_digest"] == qualification.receipt_digest(value)
+        observed.append("complete-source-readback")
+        if failed_evidence == "source":
+            raise ValueError("complete-source readback failed")
+        return source
+
+    monkeypatch.setattr(readiness, "verify_ready_artifact_set", ready)
+    monkeypatch.setattr(release_evidence, "publish_evidence", retain)
+    monkeypatch.setattr(release_evidence, "publish_complete_source", retain_source)
+    source_arguments = (
+        [] if failed_evidence == "missing-source"
+        else ["--complete-source-dir", str(tmp_path / "source-subjects")]
+    )
+    result = publisher.main([
+        *_publish_arguments(unit_case, directory, receipt_path),
+        "--qualification-profile", qualification.CANDIDATE_UNIT_PROFILE,
+        "--unit-packet-dir", str(unit_case["args"]["unit_packet_dir"]),
+        "--unit-manifest", MANIFEST, "--dev-root", str(unit_case["args"]["dev_root"]),
+        "--github-output", str(output),
+        *source_arguments,
+    ])
+    assert result == (1 if failed_evidence else 0)
+    expected = [] if failed_evidence == "missing-source" else ["code-readback", "evidence-readback"]
+    if failed_evidence is not True and failed_evidence != "missing-source":
+        expected.append("complete-source-readback")
+    assert observed == expected
+    if failed_evidence:
+        assert not output.exists()
+    else:
+        publication = {
+            "dev_head": DEV, "candidate": CANDIDATE, "qualification": qualification.receipt_digest(value),
+            "index_digest": hashlib.sha256(index_raw).hexdigest(), "artifacts": [],
+            "unit_evidence": retained,
+            "complete_source": source,
+        }
+        digest = hashlib.sha256(json.dumps(publication, sort_keys=True).encode()).hexdigest()
+        assert f"publication_digest={digest}\n" in output.read_text()
 
 
 def test_v2_publisher_missing_packet_does_not_fall_back_to_legacy(unit_case, tmp_path):

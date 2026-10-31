@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -149,6 +150,41 @@ def _resolve(fixture: dict) -> dict:
     return result
 
 
+@pytest.mark.parametrize("borrowed", [False, True])
+@pytest.mark.parametrize("commit", [False, True])
+def test_manifest_publication_binds_before_commit_without_early_write(
+    binding_fixture: dict, borrowed: bool, commit: bool,
+) -> None:
+    fixture = binding_fixture
+    binding, primitive = fixture["binding"], fixture["primitive"]
+    receipt = _publish(fixture)
+    lifecycle = binding._load_lifecycle()
+    authority = (
+        lifecycle.legacy_lifecycle(binding._rules(), primitive, **fixture["arguments"])
+        if borrowed else nullcontext()
+    )
+    path = fixture["legacy"] / "deploy-manifest.json"
+    with authority:
+        previous = path.read_bytes()
+        with binding.legacy_manifest_publication(
+            primitive, {"schema_version": 3, "service": PLUGIN_ID},
+            **fixture["arguments"],
+        ) as (manifest, result, lock):
+            assert path.read_bytes() == previous
+            assert manifest["commandBinding"] == receipt
+            assert result == {"status": "published", "reason": "ownership-validated"}
+            lock.assert_owned()
+            if borrowed:
+                assert manifest["commandLifecycle"]["state"] == "complete"
+            if commit:
+                primitive._atomic_write_json(path, manifest, lock=lock)
+            lock.assert_owned()
+        if commit:
+            assert _resolve(fixture)["status"] == "selected"
+        else:
+            assert path.read_bytes() == previous
+
+
 def test_command_binding_unowned_legacy_is_explicitly_unresolved(binding_fixture: dict) -> None:
     result = _resolve(binding_fixture)
     assert result["status"] == "unresolved"
@@ -160,6 +196,87 @@ def test_command_binding_unowned_legacy_is_explicitly_unresolved(binding_fixture
         "source": {"path": str(binding_fixture["payload"]), "repo": "Example/Plugins"},
     })
     assert _resolve(binding_fixture)["reason"] == "legacy-ownership-missing"
+
+
+@pytest.mark.parametrize("lifecycle_state", [None, "complete", "pending"])
+def test_retained_owner_does_not_require_original_publisher(
+    binding_fixture: dict, lifecycle_state: str | None,
+) -> None:
+    fixture = binding_fixture
+    binding, primitive = fixture["binding"], fixture["primitive"]
+    receipt = _publish(fixture)
+    path = fixture["legacy"] / "deploy-manifest.json"
+    manifest = primitive.read_json(path)
+    if lifecycle_state is not None:
+        manifest["commandLifecycle"] = {
+            "version": 1, "state": lifecycle_state,
+            "owner": {key: value for key, value in receipt.items() if key != "payloadRoot"},
+        }
+        _write(path, manifest)
+    fixture["payload"].rename(fixture["payload"].with_name("publisher-unavailable"))
+    bootstrap = fixture["legacy"] / "versions/retained/.runtime-bootstrap"
+    bootstrap.mkdir(parents=True)
+    arguments = {**fixture["arguments"], "payload_root": bootstrap}
+    before = path.read_bytes()
+    with binding._load_lifecycle()._lock(primitive, arguments) as lock:
+        if lifecycle_state == "pending":
+            with pytest.raises(binding.CommandOwnershipConflict, match="not complete"):
+                binding.retained_legacy_binding(primitive, lock, **arguments)
+        else:
+            result = binding.retained_legacy_binding(primitive, lock, **arguments)
+            assert result["commandBinding"] == receipt
+            assert result == {
+                key: manifest[key] for key in ("commandBinding", "commandLifecycle") if key in manifest
+            }
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("field", [
+    "version", "pluginId", "runtimeRoot", "environment", "installationId",
+    "sourceFingerprint", "source", "payloadRoot", "lifecycle", "lock", "policy",
+    "null-lifecycle", "managed-policy",
+])
+def test_retained_owner_rejects_invalid_incumbent_or_authority(
+    binding_fixture: dict, field: str,
+) -> None:
+    fixture = binding_fixture
+    binding, primitive = fixture["binding"], fixture["primitive"]
+    _publish(fixture)
+    path = fixture["legacy"] / "deploy-manifest.json"
+    manifest = primitive.read_json(path)
+    receipt = manifest["commandBinding"]
+    if field == "version":
+        receipt[field] = True
+    elif field in ("pluginId", "runtimeRoot", "installationId", "sourceFingerprint"):
+        receipt[field] = "foreign"
+    elif field == "environment":
+        receipt[field] = {**receipt[field], "homeRealPath": str(fixture["home"] / "foreign")}
+    elif field == "source":
+        receipt[field]["record"] += "foreign"
+    elif field == "payloadRoot":
+        receipt[field] = "relative"
+    elif field == "lifecycle":
+        manifest["commandLifecycle"] = {"version": 1, "state": "complete", "owner": {}}
+    elif field == "null-lifecycle":
+        manifest["commandLifecycle"] = None
+    elif field == "policy":
+        _write(fixture["legacy"] / "runtime-deployment.json", {"invalid": True})
+    elif field == "managed-policy":
+        decision = primitive.resolve_runtime_deployment(**fixture["arguments"])
+        _write(fixture["legacy"] / "runtime-deployment.json", {
+            "schema": primitive.RUNTIME_DEPLOYMENT_SCHEMA, "version": 1, "managed": True,
+            "owner": primitive._deployment_owner(decision, fixture["arguments"]),
+        })
+    _write(path, manifest)
+    arguments = fixture["arguments"]
+    lock_arguments = {
+        **arguments, "legacy_root": fixture["legacy"].with_name("foreign"),
+    } if field == "lock" else arguments
+    before = path.read_bytes()
+    with binding._load_lifecycle()._lock(primitive, lock_arguments) as lock:
+        with pytest.raises(binding.CommandOwnershipConflict):
+            binding.retained_legacy_binding(primitive, lock, **arguments)
+    assert path.read_bytes() == before
 
 
 def test_command_binding_owned_legacy_and_retained_pointer(binding_fixture: dict) -> None:
@@ -364,6 +481,7 @@ def _catalog_environment(fixture: dict, interpreter: str | None = None) -> dict[
         "PSModuleAnalysisCachePath": os.devnull,
         "PYTHONDONTWRITEBYTECODE": "1",
     }
+    environment.pop("COPILOT_EXTENSIONS_BOOT_TRACE", None)
     for relative in (".cache/powershell", ".local/share/powershell/Modules"):
         (fixture["home"] / relative).mkdir(parents=True)
     if os.name == "nt":
@@ -516,9 +634,9 @@ def test_command_binding_catalog_disables_user_site_startup(
         launcher.write_text(
             "if ($args[0] -ne '-3') { throw 'Expected Python 3 launcher' }\n"
             "$probeArgs=@($args[1..($args.Count-1)])\n"
-            "$null=& $env:TEST_PYTHON @probeArgs\n"
+            "& $env:TEST_PYTHON @probeArgs\n"
             "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
-            "Write-Output $env:TEST_PYTHON\n",
+            "exit 0\n",
             encoding="utf-8",
         )
         wrapper = home / "site-catalog.ps1"
@@ -544,6 +662,7 @@ def test_command_binding_catalog_disables_user_site_startup(
             text=True, timeout=30, **kwargs,
         )
         assert completed.returncode == 0, completed.stdout + completed.stderr
+        assert "::boot-trace::" not in completed.stdout + completed.stderr
         envelope = json.loads(completed.stdout)
         match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
         assert match, completed.stdout
@@ -592,6 +711,9 @@ class _PowerShellHost:
             "    $response=@{returncode=$code;stdout=(($output -join \"`n\")+$capturedOut.ToString());"
             "stderr=(($errors -join \"`n\")+$capturedErr.ToString())}|ConvertTo-Json -Compress\n"
             "    $capturedOut.Dispose(); $capturedErr.Dispose()\n"
+            "    $nativeErr=[IO.StreamWriter]::new([Console]::OpenStandardError(),"
+            "[Text.UTF8Encoding]::new($false),1024,$true)\n"
+            "    $nativeErr.WriteLine('__fixture_stderr_complete__'); $nativeErr.Dispose()\n"
             "    [Console]::WriteLine($response)\n"
             "}\n",
             encoding="utf-8",
@@ -603,6 +725,7 @@ class _PowerShellHost:
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         self.lines: queue.Queue[str | None] = queue.Queue()
+        self.native_errors: queue.Queue[str | None] = queue.Queue()
         self.errors: list[str] = []
         self.closed = False
 
@@ -614,7 +737,10 @@ class _PowerShellHost:
 
         def read_errors() -> None:
             assert self.process.stderr
-            self.errors.extend(self.process.stderr)
+            for line in self.process.stderr:
+                self.errors.append(line)
+                self.native_errors.put(line)
+            self.native_errors.put(None)
 
         self.readers = [
             threading.Thread(target=read_output, daemon=True),
@@ -643,8 +769,20 @@ class _PowerShellHost:
         self.process.stdin.write(json.dumps(request) + "\n")
         self.process.stdin.flush()
         response = self._response()
+        native_errors = []
+        while True:
+            line = self.native_errors.get(timeout=30)
+            assert line is not None, "PowerShell fixture stderr closed before completion"
+            marker = "__fixture_stderr_complete__"
+            prefix, separator, suffix = line.rpartition(marker)
+            if separator and suffix in {"\n", "\r\n"}:
+                if prefix:
+                    native_errors.append(prefix)
+                break
+            native_errors.append(line)
         return subprocess.CompletedProcess(
-            argv, response["returncode"], response["stdout"], response["stderr"],
+            argv, response["returncode"], response["stdout"],
+            response["stderr"] + "".join(native_errors),
         )
 
     def close(self) -> None:
@@ -681,7 +819,7 @@ def powershell_host():
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")
-@pytest.mark.parametrize("result", ["ignored-native-failure", "exit", "throw"])
+@pytest.mark.parametrize("result", ["ignored-native-failure", "exit", "throw", "native-stderr"])
 def test_command_binding_initialized_host_preserves_script_outcome(
     binding_fixture: dict, result: str, powershell_host,
 ) -> None:
@@ -694,12 +832,20 @@ def test_command_binding_initialized_host_preserves_script_outcome(
         ),
         "exit": "Write-Output 'complete'\nexit 7\n",
         "throw": "throw 'fixture-script-error'\n",
+        "native-stderr": (
+            "& $env:TEST_PYTHON -c 'import sys;sys.stderr.write(\"native-error\")'\n"
+        ),
     }[result], encoding="utf-8")
     host = powershell_host(binding_fixture, environment)
     completed = host.run([POWERSHELL, "-File", str(script)])
-    assert completed.returncode == {"ignored-native-failure": 0, "exit": 7, "throw": 1}[result]
+    assert completed.returncode == {
+        "ignored-native-failure": 0, "exit": 7, "throw": 1, "native-stderr": 0,
+    }[result]
     if result == "throw":
         assert "fixture-script-error" in completed.stderr
+    elif result == "native-stderr":
+        assert "native-error" in completed.stderr
+        assert host.run([POWERSHELL, "-File", str(script)]).stderr == completed.stderr
     else:
         assert completed.stdout == "complete"
 
@@ -743,13 +889,35 @@ def test_command_binding_real_catalog_read_only(
         assert catalog["commands"][0]["availability"] == "ready"
         assert catalog["binding"]["status"] == ("selected" if owned else "unresolved")
         assert _snapshot(binding_fixture["home"]) == before
+    if owned:
+        manifest_path = binding_fixture["legacy"] / "deploy-manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["commandBinding"]["sourceFingerprint"] = "sha256:" + "0" * 64
+        _write(manifest_path, manifest)
+        before = _snapshot(binding_fixture["home"])
+        completed = host.run(argv) if host else subprocess.run(
+            argv, env=environment, cwd=binding_fixture["home"],
+            capture_output=True, text=True, timeout=30, check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        envelope = json.loads(completed.stdout)
+        match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
+        assert match, completed.stdout
+        binding = json.loads(match.group(1))["binding"]
+        assert binding["status"] == "blocked"
+        assert binding["reason"] == "legacy-ownership-mismatch"
+        assert binding["installation"] is None
+        assert _snapshot(binding_fixture["home"]) == before
     if host:
         host.close()
     assert _snapshot(binding_fixture["home"]) == before
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")
-@pytest.mark.parametrize("launcher", ["py", "python", "alias-only"])
+@pytest.mark.parametrize("launcher", [
+    "py", "python", "alias-only", "py-unavailable", "helper-failure", "empty-response",
+])
 def test_command_binding_catalog_python_launcher_avoids_app_alias(
     binding_fixture: dict, launcher: str, powershell_host,
 ) -> None:
@@ -761,23 +929,41 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
     launcher_path.write_text(
         "if ($args[0] -ne '-3') { throw 'Python launcher must select Python 3' }\n"
         "if (($args[1..6] -join ' ') -ne '-I -B -E -X utf8 -c') { throw 'Unexpected probe flags' }\n"
-        "Write-Output $env:TEST_PYTHON\nexit 0\n",
+        "if ($args.Count -ne 15 -or $args[8] -ne "
+        "(Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts/command_binding.py')) {\n"
+        "    throw 'Expected binding helper in the admitted interpreter process'\n"
+        "}\n"
+        "[Console]::Error.WriteLine('fixture-launcher-run')\n"
+        "if ($env:TEST_LAUNCHER -eq 'py-unavailable') { exit 3 }\n"
+        "$pythonArgs=@($args[1..($args.Count-1)])\n"
+        "& $env:TEST_PYTHON @pythonArgs\n"
+        "exit $LASTEXITCODE\n",
         encoding="utf-8",
     )
     environment.update({
         "TEST_PYTHON": python, "TEST_LAUNCHER": launcher,
         "TEST_LAUNCHER_PATH": str(launcher_path),
+        "COPILOT_EXTENSIONS_BOOT_TRACE": "1",
     })
+    if launcher in {"helper-failure", "empty-response"}:
+        helper = binding_fixture["payload"] / "scripts/command_binding.py"
+        helper.write_text(
+            "raise SystemExit(7)\n" if launcher == "helper-failure" else "pass\n",
+            encoding="utf-8",
+        )
     wrapper = binding_fixture["home"] / "app-alias-fixture.ps1"
     wrapper.write_text(
         "function Get-Command {\n"
         "    param($Name,$CommandType,$ErrorAction)\n"
-        "    if ($Name -eq 'py' -and $env:TEST_LAUNCHER -eq 'py') {\n"
+        "    if ($Name -eq 'py' -and $env:TEST_LAUNCHER -notin @('python','alias-only')) {\n"
         "        return @{Source=$env:TEST_LAUNCHER_PATH}\n"
+        "    }\n"
+        "    if ($Name -ne 'py' -and $env:TEST_LAUNCHER -in @('py','helper-failure','empty-response')) {\n"
+        "        throw 'An admitted interpreter must not trigger fallback discovery'\n"
         "    }\n"
         "    if ($Name -eq 'python3') { return $null }\n"
         "    if ($Name -eq 'python') {\n"
-        "        if ($env:TEST_LAUNCHER -eq 'python') { return @{Source=$env:TEST_PYTHON} }\n"
+        "        if ($env:TEST_LAUNCHER -in @('python','py-unavailable')) { return @{Source=$env:TEST_PYTHON} }\n"
         "        return @{Source='C:\\Users\\example\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe'}\n"
         "    }\n"
         "}\n"
@@ -787,13 +973,29 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
     host = powershell_host(binding_fixture, environment)
     completed = host.run([POWERSHELL, "-File", str(wrapper)])
     assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "::boot-trace::" not in completed.stdout
+    assert completed.stderr.count("fixture-launcher-run") == (
+        0 if launcher in {"python", "alias-only"} else 1
+    )
+    assert completed.stderr.count("phase=catalog-binding-complete ") == 1
+    assert completed.stderr.count("phase=catalog-python-start ") == (
+        1 if launcher in {"py", "helper-failure", "empty-response"} else 0
+    )
+    assert completed.stderr.count("phase=catalog-helper-start ") == (
+        1 if launcher in {"python", "py-unavailable"} else 0
+    )
     envelope = json.loads(completed.stdout)
     match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
     assert match, completed.stdout
     binding = json.loads(match.group(1))["binding"]
-    if launcher == "alias-only":
+    if launcher in {"alias-only", "helper-failure", "empty-response"}:
         assert binding["status"] == "unresolved"
-        assert binding["reason"] == "binding-interpreter-unavailable"
+        assert binding["reason"] == {
+            "alias-only": "binding-interpreter-unavailable",
+            "helper-failure": "binding-resolver-failed",
+            "empty-response": "binding-response-invalid",
+        }[launcher]
+        assert binding["installation"] is None
     else:
         assert binding["status"] == "selected", binding
 

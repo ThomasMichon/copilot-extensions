@@ -71,6 +71,17 @@
 <!-- The operator's ask, VERBATIM where possible. Don't paraphrase the premise
      away — capture it as stated, including any links or code references. -->
 
+## Scope Approvals
+
+<!-- OPTIONAL -- omit when no additional scope approval is needed. Otherwise
+     use one canonical record or link a sidecar. Capture upfront instructions
+     and one-time answers immediately: original operator/charter reference and
+     exact applicable wording; objective/destinations; operations and target/
+     resource owners; effects/accepted blast radius; exclusions and limits;
+     retry/revision policy, validity and later holds/narrowing/revocation.
+     Keep agent interpretation separate. A plan or receipt is not permission.
+     Carry the reference and current limits/changes in checkpoints/handoffs. -->
+
 ## Plan
 
 <!-- The implementation plan, in phases. Use checklists so progress is visible

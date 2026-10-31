@@ -1,0 +1,9 @@
+{
+  "comment": "Use passive exact local Bridge owner reads instead of per-owner CLI launches; retain identity-keyed tri-state liveness and bounded wave deduplication.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

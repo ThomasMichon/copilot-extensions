@@ -34,7 +34,6 @@ _SESSION_GUIDANCE_MAX_BYTES = 4 * 1024
 _COMMAND_CATALOG_HEADING = "## agent-worktrees session command catalog"
 _GUIDANCE_HEADER = "# Agent Worktrees session guidance\n\n"
 
-
 def _read_json(path: Path) -> dict | None:
     try:
         value = json.loads(path.read_text("utf-8"))
@@ -174,7 +173,6 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
         return lifecycle.unavailable(kind) if source_aware or kind == "sessionEnd" else None
     result = value.get("result")
     return result if isinstance(result, dict) else {}
-
 
 def _plugin_version() -> str:
     try:
@@ -526,8 +524,10 @@ def _bootstrap_first_install(payload: dict) -> dict:
         if shell and installer.is_file() and binding.is_file():
             state_path = Path(
                 os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
-                or Path.home() / ".copilot-extensions" / "bootstrap-killswitch.json"
+                or Path.home() / ".copilot-extensions" / "killSwitches" / "bootstrap-killswitch.json"
             )
+            if not os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE") and not state_path.exists():
+                state_path = Path.home() / ".copilot-extensions" / "bootstrap-killswitch.json"
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8-sig"))
             except (OSError, UnicodeError, ValueError):
@@ -577,21 +577,10 @@ def _bootstrap_first_install(payload: dict) -> dict:
                 f"[agent-worktrees] Bootstrap stamp failed (exit {completed.returncode}).\n"
             )
         return {"_stderr": diagnostic} if diagnostic else {}
-    result: dict = {}
-    stdout = (completed.stdout or "").strip()
-    if stdout:
-        try:
-            value = json.loads(stdout)
-        except (TypeError, ValueError):
-            result["additionalContext"] = stdout
-        else:
-            if isinstance(value, dict):
-                result.update(value)
-            else:
-                result["additionalContext"] = stdout
-    if completed.stderr:
-        result["_stderr"] = completed.stderr
-    return result
+    helper = _load_sibling("hook_lifecycle_runtime.py")
+    if helper is None:
+        return {"_stderr": "[agent-worktrees] Bootstrap result helper unavailable.\n"}
+    return helper.bootstrap_result(completed)
 
 
 def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = False) -> dict:
@@ -693,28 +682,13 @@ def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = Fals
     return result
 
 
-def _update_driver_image(helper, pid: int) -> str | None:
-    image = helper._pid_image_path(pid)
-    if image or sys.platform != "darwin":
-        return image
-    import ctypes
-
-    libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
-    probe = libproc.proc_pidpath
-    probe.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
-    probe.restype = ctypes.c_int
-    buffer = ctypes.create_string_buffer(4096)
-    if probe(pid, buffer, len(buffer)) <= 0:
-        return None
-    return os.fsdecode(buffer.value) or None
-
-
 def _external_update_driver_active(home: Path, python: Path) -> bool:
     """Defer only to a live update stage, not an installed Manager.
 
     Manager's launch wrapper drives ``stage-update`` through the engine. Its
-    ``update_stage.acquire_lock`` records pid/started in ``updater.lock`` for
-    at most 120 seconds and releases it in ``finally``. Read that ownership
+    ``update_stage.acquire_lock`` records PID/birth identity in ``updater.lock``
+    while it holds the native lease and removes the record before release.
+    Read that ownership
     signal directly, without invoking the stale runtime or a provider command.
     A completed stage or a cached ``skipped: locked`` status owns no work.
     """
@@ -731,14 +705,22 @@ def _external_update_driver_active(home: Path, python: Path) -> bool:
         or pid <= 0
         or type(started) not in (int, float)
         or (type(started) is float and not math.isfinite(started))
-        or not now - 120 < started <= now
+        or not 0 <= started <= now
     ):
         return False
     helper = _load_sibling("versioned_runtime.py")
     if helper is None:
         return False
     try:
-        image = _update_driver_image(helper, pid)
+        recorded = lock.get("start_time")
+        if recorded:
+            identity = _load_sibling("hook_process_identity.py")
+            if identity is None:
+                return False
+            current = identity.process_start_time(pid)
+            if current is None or str(recorded) != current:
+                return False
+        image = _RUNTIME.update_driver_image(helper, pid)
         return bool(
             image
             and Path(image).resolve() == python.resolve()
@@ -800,9 +782,12 @@ def _fallback_session_end(payload: dict, home: Path) -> dict:
     return helper.run_end(python, payload, timeout=_SESSION_END_TIMEOUT_S)
 
 
-@cache
 def _load_sibling(name: str):
-    path = Path(__file__).resolve().with_name(name)
+    return _load_file(Path(__file__).resolve().with_name(name))
+
+
+@cache
+def _load_file(path: Path):
     try:
         spec = importlib.util.spec_from_file_location(
             f"_agent_worktrees_hook_{path.stem}", path
@@ -842,62 +827,18 @@ def _merge_pre_decisions(current: dict, new: dict) -> dict:
     return result
 
 
-def _fallback_pre(payload: dict, home: Path) -> dict:
-    contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
-    if contextual:
-        helper = _load_sibling("registry_root.py")
-        if helper is None:
-            return {
-                "permissionDecision": "deny",
-                "permissionDecisionReason": (
-                    "agent-worktrees installation context cannot be validated"
-                ),
-            }
-        try:
-            helper.resolve_registry_root(
-                legacy_root=home / ".agent-worktrees",
-                environment=os.environ,
-            )
-        except Exception as error:
-            return {
-                "permissionDecision": "deny",
-                "permissionDecisionReason": (
-                    "agent-worktrees installation context is invalid: "
-                    f"{error}"
-                ),
-            }
-    deadline = time.monotonic() + _FALLBACK_PRE_BUDGET_S
-    combined: dict = {}
-    for name in (
-        "statelessness_guard.py",
-        "cross_repo_guard.py",
-        "anchor_write_guard.py",
-        "pr_supersede_guard.py",
-    ):
-        module = _load_sibling(name)
-        if module is None:
-            continue
-        try:
-            kwargs = (
-                {"deadline": deadline - 2.0}
-                if name == "cross_repo_guard.py" else {}
-            )
-            decision = module.decide(payload, home=home, **kwargs)
-        except Exception:
-            if contextual:
-                return {
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": (
-                        "agent-worktrees installation context changed during "
-                        "policy evaluation"
-                    ),
-                }
-            continue
-        if isinstance(decision, dict) and decision:
-            combined = _merge_pre_decisions(combined, decision)
-            if combined.get("permissionDecision") == "deny":
-                break
-    return combined
+def _fallback_pre(payload: dict, home: Path, *, require_policy: bool = False) -> dict:
+    policy = _load_file(Path(__file__).resolve().with_name("hook_pre_policy.py"))
+    decide_policy = getattr(policy, "decide", None)
+    if not callable(decide_policy):
+        return {
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "Required agent-worktrees pre-tool policy helper is unavailable",
+        }
+    return decide_policy(
+        payload, home=home, load_sibling=_load_sibling, merge_decisions=_merge_pre_decisions,
+        budget_seconds=_FALLBACK_PRE_BUDGET_S, require_policy=require_policy,
+    )
 
 
 def _fallback_post(payload: dict, home: Path) -> dict:
@@ -924,9 +865,13 @@ def _fallback_post(payload: dict, home: Path) -> dict:
     )
 
 
-def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
+def decide(
+    kind: str, payload: dict, *, home: Path | None = None, require_policy: bool = False,
+) -> dict:
     home = home or Path.home()
     contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
+    if kind == "preToolUse" and require_policy:
+        return _fallback_pre(payload, home, require_policy=True)
     if (
         kind == "sessionStart"
         and not isinstance(payload.get("_agentWorktrees"), dict)
@@ -934,6 +879,11 @@ def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
         payload = _enrich_session_payload(payload)
     if kind == "sessionEnd" and not isinstance(payload.get("_agentWorktrees"), dict):
         payload = _enrich_session_end_payload(payload)
+    if kind == "preToolUse" and (payload.get("toolName") or payload.get("tool_name")) in ("view", "rg", "glob", "bash", "sh", "shell", "powershell", "pwsh", "cmd", "run", "run_command", "execute", "exec", "terminal"):
+        helper = _load_sibling("hook_pre_relevance.py")
+        irrelevant = getattr(helper, "is_irrelevant", None)
+        if callable(irrelevant) and irrelevant(payload, contextual, _load_sibling):
+            return {}
     remote = _request(kind, payload, home)
     if remote is not None:
         return remote
@@ -953,8 +903,23 @@ def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     kind = argv[0] if argv else ""
+    if kind == "preToolUseStrict":
+        kind = "preToolUse"
+        argv.append("--require-policy")
     if kind not in {"preToolUse", "postToolUse", "sessionStart", "sessionEnd"}:
         return 0
+    strict_policy = kind == "preToolUse" and "--require-policy" in argv[1:]
+    if (kind == "preToolUse" and not strict_policy
+            and os.environ.get("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION") == "resident"):
+        return 0
+    if kind == "preToolUse":
+        switch = _load_sibling("pretool_killswitch.py")
+        if switch is None:
+            print("[pretool-killswitch] helper unavailable; guards remain enabled", file=sys.stderr)
+        elif switch.is_active():
+            if strict_policy:
+                sys.stdout.write("{}")
+            return 0
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
@@ -968,6 +933,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = _enrich_session_end_payload(payload)
         if kind == "postToolUse" and "--local-fallback" in argv[1:]:
             result = _fallback_post(payload, Path.home())
+        elif strict_policy:
+            result = decide(kind, payload, require_policy=True)
         else:
             result = decide(kind, payload)
         diagnostic = result.pop("_stderr", None)
@@ -984,7 +951,7 @@ def main(argv: list[str] | None = None) -> int:
                     else ""
                 ),
             )
-        elif result and kind != "sessionEnd":
+        elif kind != "sessionEnd" and (result or strict_policy):
             sys.stdout.write(json.dumps(result, separators=(",", ":")))
     except Exception:
         pass

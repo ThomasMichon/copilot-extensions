@@ -4,15 +4,173 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 
 import pytest
 
 from tools import plugin_test_containment
 from tools.plugin_test_containment import Limits, isolated_environment
+
+
+@pytest.mark.parametrize("supports_repeated", [False, True])
+def test_sandbox_cleanup_supports_both_stdlib_signatures(tmp_path, monkeypatch, supports_repeated):
+    seen = []
+
+    def legacy(name, ignore_errors=False):
+        seen.append((ignore_errors, None))
+        shutil.rmtree(name, ignore_errors=ignore_errors)
+
+    def current(name, ignore_errors=False, repeated=False):
+        seen.append((ignore_errors, repeated))
+        shutil.rmtree(name, ignore_errors=ignore_errors)
+
+    monkeypatch.setattr(
+        tempfile.TemporaryDirectory,
+        "_rmtree", staticmethod(current if supports_repeated else legacy),
+    )
+    sandbox = tmp_path / "owned-sandbox"
+    sandbox.mkdir()
+    (sandbox / "result.txt").write_text("complete", encoding="utf-8")
+    plugin_test_containment.TestSandbox._rmtree(sandbox, repeated=True)
+    assert not sandbox.exists()
+    assert seen == [(False, True if supports_repeated else None)]
+
+
+@pytest.mark.parametrize("inherited_name", ["PSModulePath", "PSMODULEPATH", "psmodulepath"])
+def test_isolated_environment_overrides_native_module_path_identity(tmp_path, inherited_name):
+    base = {inherited_name: "inherited-modules"}
+    environment = isolated_environment(base, tmp_path)
+    expected = str(tmp_path.resolve() / "powershell-modules")
+    assert environment["PSModulePath"] == expected
+    aliases = {
+        name: value for name, value in environment.items()
+        if name.casefold() == "psmodulepath"
+    }
+    if os.name == "nt" or inherited_name == "PSModulePath":
+        assert aliases == {"PSModulePath": expected}
+    else:
+        assert aliases == {inherited_name: "inherited-modules", "PSModulePath": expected}
+
+
+@pytest.mark.parametrize("mode", ["package", "script"])
+def test_fresh_stdlib_caller_imports_native_cleanup_in_both_modes(tmp_path, mode):
+    root = Path(__file__).resolve().parents[1]
+    script = """
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root))
+if sys.argv[2] == "package":
+    import tools.coverage_guided_selection.baseline
+    from tools import plugin_test_containment as containment
+    assert containment.native_test_path.__module__ == "tools.native_test_paths"
+else:
+    sys.path.insert(0, str(root / "tools"))
+    import plugin_test_containment as containment
+    import plugin_test_cache
+    assert containment.native_test_path.__module__ == "native_test_paths"
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(root), mode],
+        cwd=tmp_path, capture_output=True, text=True, timeout=15,
+        **plugin_test_containment.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_interactive_daemons_require_an_explicit_runner_policy(tmp_path, monkeypatch):
+    monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
+    monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
+    monkeypatch.setattr(
+        plugin_test_containment, "_run_contained_process",
+        lambda *args, **kwargs: pytest.fail("must refuse before starting a test"),
+    )
+    with pytest.raises(ValueError, match="explicit"):
+        plugin_test_containment.run_contained(
+            ["unused"], cwd=tmp_path, env={}, sandbox=tmp_path,
+            limits=Limits(), daemon_purpose="interactive-test",
+        )
+
+
+def test_runner_passes_pause_tolerant_policy_and_keeps_renewal_custody(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    events = []
+    policy = plugin_test_containment.DaemonLeasePolicy(90000, 172800)
+
+    @contextmanager
+    def lifecycle(**kwargs):
+        events.append(("enter", kwargs))
+        yield {"DAEMON_TEST_CONTEXT": "owned"}
+        events.append(("exit", None))
+
+    def run(command, **kwargs):
+        events.append(("run", kwargs["env"]))
+        return 0
+
+    monkeypatch.setattr(plugin_test_containment, "daemon_test_lifecycle", lifecycle)
+    monkeypatch.setattr(plugin_test_containment, "_run_contained_process", run)
+    monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
+    monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
+    assert plugin_test_containment.run_contained(
+        ["unused"], cwd=tmp_path, env={"KEEP": "yes"}, sandbox=tmp_path,
+        limits=Limits(), daemon_purpose="interactive-test", daemon_lease=policy,
+    ) == 0
+    assert [event for event, _ in events] == ["enter", "run", "exit"]
+    assert events[0][1]["purpose"] == "interactive-test"
+    assert events[0][1]["lease"] is policy
+    assert events[0][1]["registry_root"] == tmp_path.resolve() / "daemon-instances"
+    assert events[1][1] == {"KEEP": "yes", "DAEMON_TEST_CONTEXT": "owned"}
+
+
+@pytest.mark.parametrize("alias", [
+    "parent-reference",
+    "missing-child",
+    pytest.param("short-name", marks=pytest.mark.skipif(os.name != "nt", reason="Windows short path")),
+])
+def test_runner_canonicalizes_its_owned_sandbox_before_daemon_admission(tmp_path, monkeypatch, alias):
+    from contextlib import contextmanager
+
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    sandbox = parent / ".." / "sandbox"
+    if alias == "missing-child":
+        sandbox = parent / "pending" / "sandbox"
+        assert not sandbox.exists()
+    else:
+        sandbox.mkdir()
+    expected = sandbox.resolve() / "daemon-instances"
+    if alias == "short-name":
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = ctypes.windll.kernel32.GetShortPathNameW(str(sandbox.resolve()), buffer, len(buffer))
+        assert 0 < length < len(buffer)
+        sandbox = Path(buffer.value)
+        if sandbox == sandbox.resolve():
+            pytest.skip("volume does not expose an alternate short path")
+    admitted = []
+
+    @contextmanager
+    def lifecycle(**kwargs):
+        from agent_procutil._daemon_instance_store import _root
+
+        root = kwargs["registry_root"]
+        admitted.append(_root(root, create=True))
+        yield {}
+
+    monkeypatch.setattr(plugin_test_containment, "daemon_test_lifecycle", lifecycle)
+    monkeypatch.setattr(plugin_test_containment, "_run_contained_process", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
+    monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
+    assert plugin_test_containment.run_contained(
+        ["unused"], cwd=tmp_path, env={}, sandbox=sandbox, limits=Limits(),
+    ) == 0
+    assert admitted == [expected]
 
 
 def test_tree_size_counts_nested_files_without_repeated_path_stats(tmp_path, monkeypatch):
@@ -316,7 +474,8 @@ def test_native_powershell_module_discovery_is_host_detached(tmp_path, host, all
         "function Get-ContainmentProbe { 'host-module' }\n", encoding="utf-8",
     )
     parent_module_path = os.environ.get("PSModulePath")
-    base = {**os.environ, "PSModulePath": str(host_modules)}
+    base = {key: value for key, value in os.environ.items() if key.casefold() != "psmodulepath"}
+    base["PSModulePath"] = str(host_modules)
     sandbox = tmp_path / "sandbox"
     env = isolated_environment(
         base, sandbox, allow_explicit_tiers=allow_host_state, allow_host_state=allow_host_state,
@@ -1013,6 +1172,66 @@ def test_environment_audit_failure_cannot_mask_unreaped_retention(
     finally:
         if Path(sandbox.name).exists():
             shutil.rmtree(sandbox.name)
+
+
+def _overlong_sandbox_marker(root):
+    return root / ("nested-" * 25) / ("snapshot-" * 8) / "preserved.txt"
+
+
+def _native_sandbox_paths(root):
+    return (
+        plugin_test_containment.native_test_path(root),
+        plugin_test_containment.native_test_path(_overlong_sandbox_marker(root)),
+    )
+
+
+@pytest.mark.parametrize("root", [
+    r"\\server\share\cache", r"\\?\C:\cache", r"\\?\UNC\server\share\cache",
+])
+def test_sandbox_fixture_preserves_unc_and_native_root_spelling(monkeypatch, root):
+    helper = plugin_test_containment.native_test_path
+    monkeypatch.setattr(sys.modules[helper.__module__], "os", SimpleNamespace(name="nt"))
+    logical = PureWindowsPath(root)
+    native, marker = _native_sandbox_paths(logical)
+    assert str(native) == str(helper(logical))
+    assert str(marker) == str(helper(_overlong_sandbox_marker(logical)))
+
+
+@pytest.mark.parametrize("root", ["C:\\", r"C:\t"])
+def test_sandbox_fixture_exceeds_max_path_with_minimal_root(root):
+    marker = _overlong_sandbox_marker(PureWindowsPath(root))
+    assert len(str(marker)) > 260
+    assert all(len(part) <= 255 for part in marker.parts[1:])
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows sandbox paths")
+@pytest.mark.parametrize("unreaped", [False, True])
+def test_windows_long_path_sandbox_cleanup_preserves_unreaped_retention(tmp_path, unreaped):
+    sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
+    native, marker = _native_sandbox_paths(Path(sandbox.name).absolute())
+    assert len(str(marker)) > 260
+
+    def execute():
+        with sandbox:
+            marker.parent.mkdir(parents=True)
+            marker.write_text("owned")
+            if unreaped:
+                raise plugin_test_containment.UnreapedProcessError("synthetic custody remains")
+
+    try:
+        if unreaped:
+            with pytest.raises(plugin_test_containment.UnreapedProcessError):
+                execute()
+        else:
+            execute()
+        assert sandbox.retained is unreaped
+        if unreaped:
+            assert marker.read_text() == "owned"
+        else:
+            assert not native.exists()
+    finally:
+        if native.exists():
+            shutil.rmtree(native)
 
 
 def test_run_contained_detects_and_fails_on_persistent_environment_drift(

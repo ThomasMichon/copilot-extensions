@@ -31,6 +31,22 @@ forge client, lifecycle state machine, review rubric, or credential store.
 
 ## Coordination
 
+The complete direct retained #4358 acceptance below continues through this SAME Active
+ROOT's Plan, own and actual global Validation, and Journal under every incumbent source,
+integration, native and resource custodian. Administrative supersession retires
+duplicate tracking only; historical closed sources cannot serve as live coordination
+tokens. If current custody requires the original live token, retain it. No owner, claim,
+hold, completed row, accepted alternative or evidence tier is removed, and no
+implementation, runtime, credentials, process action, rollout or new blanket approval is
+authorized.
+
+The direct retained #4099 acceptance continues through this SAME existing Active ROOT's
+Plan, own and actual global Validation, and Journal under the incumbent domain, source,
+native and resource custodians. Every prior phase, alternative, hold and responsibility
+remains. Administrative supersession retires only duplicate tracking; a closed source is
+historical provenance, not a required live claim token. This intake grants no
+implementation, rollout, process action, reassignment or new blanket approval gate.
+
 - **Topology:** serial, bounded PRs against `dev`, with the reviewed plan first.
 - **Host (owns PRs):** Lifecycle driver.
 - **Delegates:** none assigned. Provider slices may acquire separate owners
@@ -141,7 +157,159 @@ proposal for review, not a claim of prior implementation or production consent.
   exact remaining gaps. Archive only when all Plan and Validation Plan items are
   resolved or explicitly transferred to named tracked objectives.
 
+<!-- backlog-reconciliation:7556:transfer:4099:to:efforts/active/pr-lifecycle-conformance/README.md -->
+
+### Direct finite basic multi-provider and bidirectional attribution acceptance from #4099
+
+Add this COMPLETE numbered finite case DIRECTLY to the EXISTING reviewed Active ROOT
+Plan, own Validation, actual global Validation Plan and continuing Coordination/Journal
+under SAME provider/source-attribution and existing lifecycle owners. Preserve all
+incumbent newer discussion/candidate/recovery phases and native/source holds; this
+finite intake neither replaces them nor makes their whole completion a prerequisite for
+the original basic interface/attribution outcome.
+
+#### Plan
+
+- [ ] P1: Credit actual GitHub/Gitea/Azure DevOps provider-neutral
+  create/get/configuration and existing tracked publication/source-head work. The
+  historical GitHub-only premise is obsolete; do not rebuild already-supported adapters
+  or invent another forge client/credential store.
+- [ ] P2: Produce an EXPLICIT per-provider matrix for BOTH worktree -> addressed PR
+  identity/tracking/publication AND addressed PR -> actual source/worktree resolution.
+  Trace current producer, parse/read, resolution and caller boundaries, with exact
+  repository/provider/source authority rather than one generic formatter.
+- [ ] P3: Preserve privacy-safe codename/default/optional identity and FROZEN
+  attribution policy, source-head managed-comment refresh without PR-body replacement,
+  tracking/claim and credential/source mismatch guards. Raw private
+  machine/worktree/session disclosure is NOT a new requirement for reverse lookup.
+- [ ] P4: Retain missing/malformed/disabled/unsupported/ambiguous source/codename
+  collision outcomes honestly, with actionable supported resolution or named retained
+  gap. A marker parser, interface conformance, mock lifecycle or one forge alone does
+  not prove both directions on all supported adapters.
+- [ ] P5: Keep original finite source/schema/consumer acceptance separate from #7051's
+  broader multi-round discussion/pagination/candidate-fence/recovery/scenario objective.
+  Preserve all those owners and gates without silently absorbing every newer feature
+  into this issue or inventing live-every-forge/all-host qualification.
+
+#### Validation
+
+- [ ] V1: Map and exercise each real adapter's applicable basic create/get and BOTH
+  attribution directions through existing supported source/transport-boundary contracts,
+  including source negatives/collisions/privacy and exact target identity. Mock-provider
+  success cannot replace actual adapter request/response mapping. Name any
+  still-unsupported required finite result rather than silently calling it parity.
+- [ ] V2: Verify tracked PR/source publication, frozen policy, managed head-update
+  comments and supported reverse resolution without private disclosure or
+  wrong-provider/caller-repo fallback. Retain original evidence tiers; whole newer
+  persistent-agent lifecycle and production/native/adopter rollout remain separate
+  requirements, not new preconditions for this finite row.
+- [ ] V3: BEFORE #4099 administrative supersession, obtain a NEW normal reviewed ACTUAL
+  merge containing the COMPLETE direct ROOT Plan/Validation/Coordination/Journal plus
+  actual global row, then read back CURRENT FULL receiving sections and unchanged
+  custody. Old #7060, source inventory, #1929/#2922, a link/title or this proposal is
+  not this intake receipt.
+
+#### Continuing Coordination and Journal
+
+- [ ] C1: Continue through SAME provider/source-attribution and Lifecycle driver under
+  OPEN #7051, this ROOT's reviewed Plan/Validation/Journal and actual eligible
+  bounded-source claims. Keep #2357/shared observation/reviewer owners intact; no
+  source/resource ownership transfer or generic new ACK.
+- [ ] C2: Journal NEW reviewed intake/current full readback, concrete delivered adapters
+  and exact remaining finite attribution matrix, then name the next unfinished bounded
+  item. Preserve every incumbent phase/history/hold, keep the ROOT Active and #7051
+  OPEN; no forge, service, credential, watch or product action is authorized.
+
+<!-- backlog-reconciliation:7556:transfer:4358:to:efforts/active/pr-lifecycle-conformance/README.md -->
+
+### Direct finite provider-repository resolution acceptance from #4358
+
+Append this COMPLETE case to the SAME existing Active ROOT's exact provider/repository
+identity lane. Preserve EVERY existing Plan, own/global Validation, Participants,
+Coordination, Proposal, full Journal, retained #4099 row and live #7051 acceptance/owner
+boundary. This is unresolved finite source-to-consumer work, not completed family-wide
+target resolution or a new lifecycle/credential authority.
+
+#### Plan
+
+- [ ] P1: Credit actual #4795 recognized set-pr URL-to-hosting-slug production AND #5609
+  guarded legacy-URL reconciliation/finalize readers, including matching
+  URL/number/provider/authority proof. Do not rebuild delivered paths or claim all
+  legacy records/all manual registration remain broken. Those partials are not a
+  universal fix for direct consumer fallbacks.
+- [ ] P2: Map and consistently resolve EVERY affected original PR-family target
+  consumer, including live state/status, comment threads, nudge, numberless/legacy and
+  out-of-band association readers, before actual provider calls AND credential lookup.
+  Prefer the tracked PR URL OR authoritative canonical remote/provider slug; preserve
+  the original project-name last-resort alternative only with actual supported target
+  evidence, never silent caller-project substitution. Shared helpers must reach the
+  actual consumers, not merely exist or carry a universal docstring.
+- [ ] P3: Retain legacy missing per-PR repository data, recognized and
+  unrecognized/supported provider URL shapes, canonical remote fallback, complete target
+  provider/repository/PR identity and truthful absent/ambiguous/unsupported outcomes. Do
+  not count new-record population as migration of all old reads or infer that every
+  reconciled nudge fails when guarded reconciliation can already heal the case.
+- [ ] P4: Preserve before/after reconciliation provider mismatch refusal, configured
+  endpoint/organization authority, URL/number agreement, correct account selection,
+  source identity, frozen attribution and existing PR/review/claim custody. No global
+  account switch, credential acquisition by consumers, raw forge client, guessing,
+  silent target reassignment or competing registry is introduced.
+
+#### Own Validation
+
+- [ ] V1: Map actual producer -> legacy parse -> resolver -> each original
+  provider/account consumer for recognized/unrecognized/out-of-band/legacy records and a
+  local project alias different from the hosting slug. Prove correct URL OR
+  canonical-remote resolution, the narrowly supported last resort, correct
+  provider/account destination and honest unknown/ambiguous refusal. Include a direct
+  reader that bypasses reconciliation as well as a guarded reader; a single new set-pr
+  or mocked target constant is insufficient.
+- [ ] V2: Preserve delivered guarded reconciliation and exact
+  URL-number/provider/endpoint mismatch controls, frozen source/claim ownership and
+  supported default compatibility. Qualify at the ORIGINAL finite source/schema/consumer
+  tier using existing contracts, preserving fixture OR isolated-repository choices where
+  applicable. Do not require every newer multi-round/discussion/recovery phase, every
+  live forge or all hosts to finish this finite row; independently existing
+  source/native/rollout holds remain with their owners.
+- [ ] V3: BEFORE administrative supersession of #4358, obtain a NEW normal reviewed
+  ACTUAL merge containing this COMPLETE direct ROOT Plan/own Validation/continuing
+  Coordination/Journal plus an entry in the ACTUAL global Validation Plan. Read back the
+  CURRENT FULL ROOT, Participants, all incumbent checkboxes, Coordination and complete
+  Journal with unchanged custody. Old #7060/#8623, a title/link/child note or this
+  proposal is not that intake receipt. If full compatible acceptance cannot be obtained,
+  retain the original.
+
+#### Continuing Coordination and Journal
+
+- [ ] C1: Continue through the SAME Lifecycle driver and existing
+  provider/PR/source/credential owners under OPEN #7051 and this ROOT. Preserve generic
+  task/session/shared observation ownership, separate ADO stewardship and every
+  source-specific reservation. Claim only a separately accepted bounded implementation
+  slice before code work; intake grants no assignment, claimant release, source takeover
+  or generic new ACK.
+- [ ] C2: Journal the NEW reviewed intake/current full readback, concrete delivered
+  #4795/#5609 paths and exact remaining direct-consumer/account-resolution gap; name the
+  next unfinished finite slice. Preserve existing broad lifecycle and retained #4099
+  outcomes without making their whole completion a prerequisite for this original leaf.
+  Keep ROOT Active and #7051 OPEN; no publication, credentials, runtime or resource
+  action is authorized by this checklist.
+
 ## Validation Plan
+
+- [ ] G2: Resolve EVERY directly retained #4358 original/refined target-repository Plan,
+  own Validation and continuing Coordination clause at its original finite tier,
+  preserving URL OR canonical-provider-remote resolution, supported last-resort
+  semantics, legacy/out-of-band coverage, actual account/provider/authority checks and
+  incumbent custody. Verify NEW reviewed intake and CURRENT FULL ROOT readback before
+  tracker supersession; intake is not implementation or parent completion.
+
+- [ ] G1: Resolve EVERY directly retained #4099 original/refined basic
+  provider-selection and BOTH-direction attribution Plan/Validation/continuing
+  Coordination clause at its ORIGINAL finite tier, preserving privacy alternatives,
+  exact source identity, typed unsupported/ambiguous state and SAME provider/lifecycle
+  owners. Tracker intake is not complete attribution parity, every newer lifecycle phase
+  or rollout.
+
 
 All additions follow `TESTING.md`: focused, change-scoped required CI with the
 exhaustive matrix in the existing scheduled/manual portfolio. Use the repository
@@ -187,6 +355,10 @@ No live test writes, credential configuration, service lifecycle or deployed
 host changes are authorized by the plan.
 
 ## Journal
+
+- [2026-10-24 - Direct retained acceptance from #4358](<journal/2026/10.24 backlog-intake-90.md>)
+
+- [2026-10-24 - Direct retained acceptance from #4099](<journal/2026/10.24 backlog-intake-85-86.md>)
 
 ### 2026-10-16 - Endpoint source prerequisite landed
 

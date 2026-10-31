@@ -3,7 +3,9 @@
 import asyncio
 import json
 import ssl
+import time
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
 from aiohttp import web
@@ -80,6 +82,33 @@ def test_authority_withdrawal_and_recovery_is_a_new_request(tmp_path):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_challenge_quota_preserves_429_before_credentials_or_dispatch(tmp_path, monkeypatch, method):
+    from fleet_manager import gateway_service_server
+
+    async def scenario():
+        async with running(tmp_path) as rig:
+            await rig.connect()
+            current = time.monotonic()
+            monkeypatch.setattr(gateway_service_server, "time", SimpleNamespace(
+                monotonic=lambda: current, time=time.time,
+            ))
+            rig.state.budget, rig.state.sampled = 0, current
+            credentials = []
+
+            async def access():
+                credentials.append(True)
+                return rig.access("caller-a", 3)
+
+            client = caller(rig, access_token_callback=access)
+            with pytest.raises(TransportError) as raised:
+                await client.request(method, "/api", body=b"not-dispatched")
+            assert raised.value.code == "gateway-challenge-refused"
+            assert raised.value.status == 429 and client._active == 0
+            assert not credentials and not rig.backends[0].requests
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("failure", ["exception", "invalid", "principal", "key", "tls"])
 def test_credentials_and_trust_fail_closed_without_backend_or_secret_diagnostics(tmp_path, failure):
     async def scenario():
@@ -116,13 +145,15 @@ def test_total_deadline_no_retry_and_no_retained_slot(tmp_path, method, code):
     async def scenario():
         async with running(tmp_path) as rig:
             await rig.connect()
-            client = caller(rig, timeout=0.5)
+            client = caller(rig, timeout=3)
             with pytest.raises(TransportError, match=code):
                 await client.request(method, "/api/hold")
             assert rig.backends[0].started.is_set()
             assert len(rig.backends[0].requests) == 1
             assert client._active == 0
             rig.backends[0].release.set()
+            # Recovery gets the normal budget; only the stalled exchange tests expiry.
+            client._timeout = 60
             assert (await client.request("GET", "/api")).status == 200
     asyncio.run(scenario())
 
@@ -260,6 +291,34 @@ def test_challenge_refusal_never_emits_token_or_attempts_application(tmp_path, f
             with pytest.raises(TransportError) as caught:
                 await client.request("POST", "/api")
             assert caught.value.code != "outcome-unknown"
+            assert paths == ["/_fleet/challenge"]
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 502, 503, 504])
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_challenge_status_survives_real_tls_without_credentials_dispatch_or_replay(
+    tmp_path, status, method,
+):
+    async def scenario():
+        paths = []
+
+        async def handle(request):
+            paths.append(request.path)
+            return web.Response(status=status)
+
+        async def access():
+            pytest.fail("refused challenge acquired credentials")
+
+        async with endpoint(tmp_path, handle) as selected:
+            client = ServiceCaller(
+                gateway_origin=selected, gateway_ca=str(tmp_path / "tls.pem"),
+                access_token_callback=access,
+                proof_key=ECKey.generate_key("P-256").get_op_key("sign"))
+            with pytest.raises(TransportError) as caught:
+                await client.request(method, "/api/enroll", body=b"original-request")
+            assert caught.value.code == "gateway-challenge-refused"
+            assert caught.value.status == status and client._active == 0
             assert paths == ["/_fleet/challenge"]
     asyncio.run(scenario())
 

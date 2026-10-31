@@ -20,6 +20,9 @@ when present.  These tests pin that contract: the flat consumer must receive an
 from __future__ import annotations
 
 import json
+import os
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -117,12 +120,115 @@ def test_bash_launcher_avoids_bash4_mapfile():
     assert '${_reconcile_project[@]+"${_reconcile_project[@]}"}' in text
 
 
+@pytest.mark.skipif(os.name != "posix", reason="Native Bash pane environment contract")
+@pytest.mark.parametrize("ahp", [False, True])
+@pytest.mark.parametrize("populated", [False, True])
+def test_shell_pane_environment_preserves_literal_values_and_ahp_exclusions(
+    tmp_path, ahp, populated,
+):
+    source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
+    start = source.index("    # Export profile env vars")
+    exports = source[start:source.index("    # Build command array from JSON", start)]
+    start = source.index("        TMUX_ENV_FLAGS=()")
+    flags = source[start:source.index("        # Pane wrapper", start)]
+    selected = {
+        "BASH_ENV": "", "FIXTURE_EMPTY": "", "FIXTURE_EQUALS": "one=two",
+        "FIXTURE_LITERAL": "two words ' \" \\ $() `literal` \u03a9\ncontinued\n\n",
+        "GH_TOKEN": "fixture-only", "GITHUB_TOKEN": "fixture-only",
+        "AGENT_WORKTREES_AHP_AUTH_TOKEN": "fixture-only",
+    } if populated else {}
+    code = "\n".join([
+        "set -euo pipefail",
+        f"PYTHON={shlex.quote(sys.executable)}",
+        f"JSON={shlex.quote(json.dumps({'env': selected}))}",
+        exports,
+        f"_AHP_RESUME_AVAILABLE={int(ahp)}",
+        "COPILOT_CLI_ENABLED_FEATURE_FLAGS=selected-features",
+        "SETUP_LOG='log with spaces'; LAUNCH_ID=fixture-launch",
+        flags,
+        "tmux() {",
+        '  "$PYTHON" -c \'import json,os,sys; print(json.dumps({'
+        '"argv":sys.argv[1:],"exported":{k:os.environ[k] for k in '
+        'json.loads(sys.argv[1])}}))\' "$JSON_KEYS" "$@"',
+        "}",
+        f"JSON_KEYS={shlex.quote(json.dumps(list(selected)))}",
+        'tmux "${TMUX_ENV_FLAGS[@]}"',
+    ])
+    environment = dict(os.environ)
+    environment.pop("BASH_ENV", None)
+    result = subprocess.run(
+        ["/bin/bash", "-c", code], cwd=tmp_path, env=environment,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["exported"] == selected
+    expected = {"WORKTREE_SETUP_LOG": "log with spaces", "WORKTREE_LAUNCH_ID": "fixture-launch"}
+    expected.update({
+        key: value for key, value in selected.items()
+        if not ahp or key not in {"GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"}
+    })
+    if ahp:
+        expected["COPILOT_CLI_ENABLED_FEATURE_FLAGS"] = "selected-features"
+    arguments = observed["argv"][1:]
+    assert arguments == [part for key, value in expected.items() for part in ("-e", f"{key}={value}")]
+
+
 def test_powershell_launcher_contains_unwrap():
     """The Windows launcher must unwrap the nested plan too, else `--json`
     ACP launches to Windows targets fail ($plan.action is null)."""
     text = _LAUNCH_PS1.read_text()
     assert "$plan.PSObject.Properties.Name -contains 'launch'" in text
     assert "$plan = $plan.launch" in text
+
+
+@pytest.mark.parametrize("command", [
+    ["bash", "default-setup.sh"],
+    ["pwsh", "-File", "default-setup.ps1"],
+    ["old-python", "-m", "agent_worktrees.launch_seed_exec", "--", "copilot"],
+    ["env", "BASH_ENV=", "bash", "default-setup.sh"],
+])
+def test_seed_interpreter_refresh_preserves_native_hosts(tmp_path, command):
+    expected = "selected-python" if command[0] == "old-python" else command[0]
+    if os.name == "nt":
+        source = _LAUNCH_PS1.read_text(encoding="utf-8")
+        start = source.index("if ($plan.cmd) {")
+        refresh = source[start:source.index("$knowledgeCwd =", start)]
+        code = "\n".join([
+            "$ErrorActionPreference = 'Stop'",
+            "$plan = '" + json.dumps({"seed_pending": True, "cmd": command}) + "' | ConvertFrom-Json",
+            "$VenvPython = 'selected-python'",
+            "function Write-SetupLog {}",
+            refresh,
+            "ConvertTo-Json -Compress -InputObject @($plan.cmd)",
+        ])
+        executable = shutil.which("pwsh")
+        assert executable, "The native Manager packet requires PowerShell"
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", code],
+            cwd=tmp_path, capture_output=True, text=True, timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    else:
+        source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
+        start = source.index('    if [[ "$_PENDING_NEW_SEED" == "1" &&')
+        refresh = source[start:source.index("    _KNOWLEDGE_CWD=", start)]
+        code = "\n".join([
+            "set -euo pipefail",
+            "CMD_ARRAY=(" + shlex.join(command) + ")",
+            "_PENDING_NEW_SEED=1; PYTHON=selected-python; setup_log() { :; }",
+            refresh,
+            shlex.quote(sys.executable) + " -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "
+            '"${CMD_ARRAY[@]}"',
+        ])
+        environment = dict(os.environ)
+        environment.pop("BASH_ENV", None)
+        result = subprocess.run(
+            ["/bin/bash", "-c", code], cwd=tmp_path, env=environment,
+            capture_output=True, text=True, timeout=15,
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == [expected, *command[1:]]
 
 
 def test_launchers_pass_project_to_resolve_and_post_exit():
@@ -212,11 +318,12 @@ def test_windows_launcher_encodes_wrapped_psmux_pane_argv():
     assert "[IO.File]::WriteAllText($paneArgsFile, $argsJson)" in ps
     assert '$paneArgsFile.Replace("\'", "\'\'")' in ps
     pane_start = ps.index('    Write-SetupLog "psmux: creating session $sessName"')
-    pane_create = ps.index("& $script:AwPsmuxBin new-session -d -s $sessName", pane_start)
+    pane_create = ps.index("Invoke-AwPsmuxFromHome -CommandArgs $psmuxArgs", pane_start)
     assert "-EncodedCommand" not in ps[pane_start:pane_create]
     assert "$paneCmd = $wrapPrefix + $cmd" not in ps
-    assert "& $script:AwPsmuxBin new-session -d -s $sessName" in ps
-    assert "-c $plan.work_dir @envFlags @paneCmd" in ps
+    assert "'new-session', '-d', '-s', $sessName" in ps[pane_start:pane_create]
+    assert "'-c', [string]$plan.work_dir" in ps[pane_start:pane_create]
+    assert ") + $envFlags + $paneCmd" in ps[pane_start:pane_create]
 
 
 def test_windows_launcher_applies_psmux_passthrough_per_session():
@@ -366,14 +473,14 @@ def test_windows_failed_psmux_creation_reaps_only_the_named_session():
     assert "Sort-Object Value -Descending" in ps
     assert "[Diagnostics.Process]::GetProcessById($pidValue)" in ps
     assert "$startDeltaMs -gt 1" in ps
-    # Three create-failure call sites (initial retry, argument handoff, and
-    # AHP token handoff) plus one defensive call after `attach`
+    # Four create-failure call sites (creation exception, nonzero result,
+    # argument handoff and AHP token handoff) plus one defensive call after `attach`
     # returns and `has-session` reports the session gone -- `has-session`
     # going away only means psmux's own registry forgot the session, not that
     # its server/pane process tree actually exited (see #2830's 935-process
-    # leak from a zombie mux session). All three share the same launch-id
+    # leak from a zombie mux session). All five share the same launch-id
     # ownership check, so this is a no-op on a genuinely clean exit.
-    assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 4
+    assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 5
 
 
 def test_windows_post_attach_session_gone_still_reaps_owned_tree():

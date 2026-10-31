@@ -1,0 +1,9 @@
+{
+  "comment": "Release the shared progress-renewed constructor and retained guardian support.",
+  "changes": [
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    }
+  ]
+}

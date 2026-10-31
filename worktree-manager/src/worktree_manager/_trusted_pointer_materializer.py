@@ -108,6 +108,8 @@ def _find_symlink(tree: Path) -> str | None:
     if not tree.is_dir():
         return None
     for entry in sorted(tree.rglob("*")):
+        if ".test-runs" in entry.relative_to(tree).parts:
+            continue
         if entry.is_symlink():
             return str(entry.relative_to(tree))
     return None
@@ -222,12 +224,12 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
 
     _remove_path(dst_sub)
     if src_sub.is_dir():
-        shutil.copytree(src_sub, dst_sub)
+        shutil.copytree(src_sub, dst_sub, ignore=shutil.ignore_patterns(".test-runs"))
 
     if refresh_tests:
         _remove_path(dst_tests_sub)
         if tests_sub.is_dir():
-            shutil.copytree(tests_sub, dst_tests_sub)
+            shutil.copytree(tests_sub, dst_tests_sub, ignore=shutil.ignore_patterns(".test-runs"))
 
     if canon_pp.exists() and copy_pp.exists():
         m = _VERSION_RE.search(canon_pp.read_text(encoding="utf-8"))
@@ -412,7 +414,7 @@ def _uv_editable_ignore(_dir: str, names: list[str]) -> set[str]:
     """Mirrors ``materialize_main.py``'s own ``_ignore`` -- excludes build/
     cache artifacts from the canonical-lib-tree copy."""
     return {n for n in names if n in {
-        ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist",
+        ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs", "build", "dist",
     } or n.endswith((".pyc", ".pyo")) or n.endswith(".egg-info")}
 
 
@@ -423,11 +425,13 @@ def _file_hashes(root: Path) -> dict[str, str]:
     ``ignore`` callback excludes (so a fresh copy is never falsely
     reported as "not matching" a canonical tree that still carries them
     as ordinary local dev artifacts)."""
-    ignored_dirs = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist"}
+    ignored_dirs = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs", "build", "dist"}
     out: dict[str, str] = {}
     if not root.is_dir():
         return out
     for f in root.rglob("*"):
+        if ".test-runs" in f.relative_to(root).parts:
+            continue
         if not f.is_file():
             continue
         rel_parts = set(f.relative_to(root).parts)

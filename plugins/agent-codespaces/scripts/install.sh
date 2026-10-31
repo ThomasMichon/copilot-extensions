@@ -353,6 +353,10 @@ REMOTE_LOGIN_SHELL_DIR="$PLUGIN_DIR/libs/remote-login-shell"
 if [[ ! -f "$REMOTE_LOGIN_SHELL_DIR/pyproject.toml" ]]; then
     REMOTE_LOGIN_SHELL_DIR="$REPO_ROOT/libs/remote-login-shell"
 fi
+UPDATE_DRIVER_DIR="$PLUGIN_DIR/libs/update-driver"
+if [[ ! -f "$UPDATE_DRIVER_DIR/pyproject.toml" ]]; then
+    UPDATE_DRIVER_DIR="$REPO_ROOT/libs/update-driver"
+fi
 
 DEPLOY_SOURCE_PATHS=("plugins/agent-codespaces/")
 INSTALLER_REL_PATH="plugins/agent-codespaces/scripts/install.sh"
@@ -498,19 +502,10 @@ _assert_uv() {
 # local code change propagates even without a version bump (uv otherwise skips
 # a same-version path dep, leaving the venv stale).
 #
-# Pass "--editable" as $2 (mutable-dev-slot, #3376) to install every one of
-# these path-dependencies with `uv pip install -e` instead, so the venv's
-# site-packages resolve straight back to this worktree's own checkout -- an
-# ordinary source edit takes effect without re-running the installer. Used
-# only for the mutable `versions/dev` slot; never for a real (numbered)
-# version.
+# Development generations use the same non-editable installation recipe.
 _install_package_into() {
-    local py="$1" mode="${2:-}"
+    local py="$1"
     _assert_source_runtime || return 1
-    if [[ "$mode" == --editable && -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
-        _fail "A source-qualified runtime cannot use editable dependencies"
-        return 1
-    fi
     if [[ ! -f "$SSH_MGR_DIR/pyproject.toml" ]]; then
         _fail "ssh-manager source not found at $SSH_MGR_DIR"
         return 1
@@ -543,22 +538,24 @@ _install_package_into() {
         _fail "remote-login-shell source not found at $REMOTE_LOGIN_SHELL_DIR"
         return 1
     fi
+    if [[ ! -f "$UPDATE_DRIVER_DIR/pyproject.toml" ]]; then
+        _fail "update-driver source not found at $UPDATE_DRIVER_DIR"
+        return 1
+    fi
     local packages=(agent-ssh-manager agent-credential-relay agent-config-migrate
         agent-zdd agent-venue-copilot agent-session-liveness-probe
-        agent-single-instance-lease agent-remote-login-shell agent-codespaces)
+        agent-single-instance-lease agent-remote-login-shell agent-update-driver agent-codespaces)
     local sources=("$SSH_MGR_DIR" "$CRED_RELAY_DIR" "$CFG_MIGRATE_DIR"
         "$ZDD_DIR" "$VENUE_COPILOT_DIR" "$SESSION_LIVENESS_PROBE_DIR"
-        "$SINGLE_INSTANCE_LEASE_DIR" "$REMOTE_LOGIN_SHELL_DIR" "$PLUGIN_DIR")
-    local i output mode_args
+        "$SINGLE_INSTANCE_LEASE_DIR" "$REMOTE_LOGIN_SHELL_DIR" "$UPDATE_DRIVER_DIR" "$PLUGIN_DIR")
+    local i output install_args=(--python "$py" --no-editable)
     for i in "${!packages[@]}"; do
-        mode_args=(--reinstall-package "${packages[$i]}")
-        [[ "$mode" == "--editable" ]] && mode_args=(--editable)
-        if ! output="$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$py" \
-            "${mode_args[@]}" "${sources[$i]}" --quiet 2>&1)"; then
-            _fail "${packages[$i]} install failed: $output"
-            return 1
-        fi
+        install_args+=(--reinstall-package "${packages[$i]}" "${sources[$i]}")
     done
+    if ! output="$(invoke_uv_pip_install_resilient "$UV_CMD" "${install_args[@]}" --quiet 2>&1)"; then
+        _fail "agent-codespaces closure install failed: $output"
+        return 1
+    fi
 }
 
 # Stamp _build_info.py into the INSTALLED site-packages copy (post-install).
@@ -735,13 +732,7 @@ do_dev() (
     [[ -f "$dev_python" && -f "$dev_dir/pyvenv.cfg" ]] || {
         _fail "Development venv is incomplete: $dev_dir"; return 1;
     }
-    _install_package_into "$dev_python" --editable || return 1
-    # NOTE: deliberately do NOT call _stamp_build_info here -- an editable
-    # install's "package dir" resolves straight back to src/agent_codespaces/
-    # in THIS checkout, so stamping would write _build_info.py into tracked
-    # source rather than an installed copy. `agent-codespaces version` in dev
-    # mode falls back to the plain importlib-derived __version__, which is
-    # enough for dev-mode diagnostics.
+    _install_package_into "$dev_python" || return 1
 
     if ! _codespaces_runtime_healthy "$dev_python"; then
         _fail "dev slot failed its module launch health gate -- not activating"
@@ -756,7 +747,7 @@ do_dev() (
         return 1
     fi
     _runtime_construction_finish || return 1
-    _ok "Development generation active: $dev_version (editable source: $PLUGIN_DIR)"
+    _ok "Development generation active: $dev_version (copied source: $PLUGIN_DIR)"
 
     deploy_binstub
     echo ""
@@ -1055,56 +1046,13 @@ do_uninstall() {
     _header "$SERVICE_NAME Uninstall"
     $DRY_RUN && echo "(dry run -- nothing will be changed)"
 
-    if $DRY_RUN; then
-        [[ -f "$HOME/.config/systemd/user/agent-codespaces-owner.service" ]] && \
-            echo "[dry-run] would stop + remove Connection Owner systemd unit"
-        local socket_dir="$INSTALL_DIR/sockets"
-        [[ -d "$socket_dir" ]] && echo "[dry-run] would stop managed SSH connections under: $socket_dir"
-    else
-        # Remove the Connection Owner systemd unit (if provisioned).
-        _remove_owner_service
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    local preview=0
+    $DRY_RUN && preview=1
+    uninstall_state_preserving_runtime "$preview" || return 1
 
-        # Stop managed SSH ControlMaster connections before removing files. They
-        # multiplex connections to CodeSpaces via sockets under
-        # ~/.agent-codespaces/sockets. Close each via `ssh -O exit` (best-effort),
-        # then kill any lingering ssh master referencing the socket dir.
-        local socket_dir="$INSTALL_DIR/sockets"
-        if [[ -d "$socket_dir" ]]; then
-            for sock in "$socket_dir"/*; do
-                [[ -e "$sock" ]] || continue
-                ssh -o "ControlPath=$sock" -O exit placeholder >/dev/null 2>&1 || true
-            done
-        fi
-        if command -v pkill &>/dev/null; then
-            pkill -f "ControlPath=$INSTALL_DIR/sockets" 2>/dev/null && \
-                _changed "Stopped managed SSH ControlMaster processes" || true
-        fi
-    fi
-
-    # Remove binstub
-    local stub_path="$LOCAL_BIN/agent-codespaces"
-    if [[ -f "$stub_path" ]]; then
-        if $DRY_RUN; then
-            echo "[dry-run] would remove binstub: $stub_path"
-        else
-            rm -f "$stub_path"
-            _changed "Removed binstub: $stub_path"
-        fi
-    else
-        _skip "Binstub not found"
-    fi
-
-    # Remove install directory (config, DB, venv -- agent-codespaces has no
-    # --purge distinction; uninstall always removes the whole install dir).
-    if [[ -d "$INSTALL_DIR" ]]; then
-        if $DRY_RUN; then
-            echo "[dry-run] would remove (config + DB + venv): $INSTALL_DIR"
-        else
-            rm -rf "$INSTALL_DIR"
-            _changed "Removed: $INSTALL_DIR"
-        fi
-    else
-        _skip "Install directory not found"
+    if ! $DRY_RUN; then
+        _changed "Owned runtime removed; durable and unknown state retained: $INSTALL_DIR"
     fi
 
     if $DRY_RUN; then
@@ -1289,6 +1237,15 @@ do_provision() {
 source "$SCRIPT_DIR/source-runtime.sh"
 PACKAGE_VERSION="$SRC_VERSION"
 SOURCE_RUNTIME_IDENTITY=""
+if [[ "$ACTION" == uninstall ]]; then
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    uninstall_state_preserving_runtime 1 validate || exit 1
+fi
+source "$SCRIPT_DIR/install-transaction.sh"
+if codespaces_requires_install_transaction "$ACTION" "$DRY_RUN"; then
+    enter_codespaces_install_transaction || exit 1
+    trap 'exit_codespaces_install_transaction' EXIT
+fi
 case "$ACTION" in
     install|update|provision|stamp|dev)
         _initialize_source_runtime || exit 1
@@ -1297,6 +1254,12 @@ case "$ACTION" in
             exit 1
         fi
         _assert_source_runtime || exit 1
+        ;;
+esac
+case "$ACTION" in
+    install|update|provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
         ;;
 esac
 case "$ACTION" in

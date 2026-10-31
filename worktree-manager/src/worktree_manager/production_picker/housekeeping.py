@@ -20,6 +20,7 @@ from pathlib import Path
 import yaml
 
 from .. import mux_mapping_registry
+from ..manager_config import automatic_maintenance_enabled
 from . import context, engine_group_d, monitor_roots, project_config
 
 REAP_IDLE_GRACE_SECS = 6 * 3600
@@ -53,7 +54,7 @@ def _iso_epoch(ts: str | None) -> float | None:
 
 
 def auto_clean_enabled() -> bool:
-    return not os.environ.get(_NO_AUTO_CLEAN_ENV)
+    return automatic_maintenance_enabled() and not os.environ.get(_NO_AUTO_CLEAN_ENV)
 
 
 def _auto_clean_grace_secs() -> float:
@@ -236,6 +237,8 @@ def sweep_finished_session_worktrees(**kwargs) -> dict:
 
 
 def sweep_managed_on_exit() -> None:
+    if not automatic_maintenance_enabled():
+        return
     try:
         report = sweep_managed_worktrees()
         removed = report.get("removed") or []
@@ -249,6 +252,8 @@ def sweep_managed_on_exit() -> None:
 
 
 def sweep_launcher_shells_on_exit() -> None:
+    if not automatic_maintenance_enabled():
+        return
     try:
         payload = reap_orphan_launcher_shells(dry_run=False)
         reaped = payload.get("reaped") or []
@@ -277,6 +282,8 @@ def sweep_finished_sessions_on_cadence() -> None:
 
 
 def start_picker_monitor_root(project: str | None = None):
+    if not automatic_maintenance_enabled():
+        return None
     root = monitor_roots.start_picker_monitor_root(project or context.project())
     if root is not None:
         atexit.register(root.close)

@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify actual Bridge bootstrap admission, packaged foundation, caller loss and isolated native service effects on Windows and Linux.",
+  "changes": [
+    {
+      "plugin": "update-driver",
+      "type": "patch"
+    }
+  ]
+}

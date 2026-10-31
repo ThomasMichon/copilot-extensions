@@ -1,0 +1,9 @@
+{
+  "comment": "Admit stable Compose 5 for the fixed Komodo substrate owner while retaining native custody and version refusal",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

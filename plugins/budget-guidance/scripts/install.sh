@@ -254,6 +254,7 @@ fi
 if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 
 PKG_SRC_DIR="$PLUGIN_DIR/src/budget_guidance"
+. "$SCRIPT_DIR/installer-engine.sh"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.budget-guidance}"
 VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
@@ -355,7 +356,7 @@ _source_runtime_identity() {
 }
 
 _initialize_source_runtime() {
-    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
     SOURCE_RUNTIME_IDENTITY="$(_source_runtime_identity)" || return 1
     if [[ "$SOURCE_RUNTIME_IDENTITY" == '{}' ]]; then
         _fail 'Source runtime identity disappeared during runtime selection'
@@ -676,6 +677,12 @@ if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACT
     _source_runtime_unchanged || exit 1
 fi
 
+case "$ACTION" in
+    install|update|provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
 # Cheap 'stamp': snapshot the exact owning payload, then splat the binstub and
 # defer the venv build to first use. The wrapper provisions only from this
 # immutable versioned snapshot and never searches other marketplace payloads.
@@ -754,16 +761,28 @@ if [[ "$ACTION" == "status" ]]; then
     exit 0
 fi
 
-if [[ "$ACTION" == "uninstall" ]]; then
-    rm -f "$STUB"
-    for entry in "$INSTALL_DIR"/* "$INSTALL_DIR"/.[!.]* "$INSTALL_DIR"/..?*; do
-        [[ -e "$entry" || -L "$entry" ]] || continue
-        case "${entry##*/}" in
-            .install.lock|.install.lock.pid|.install.lock.pid.reap|.install-stage) continue ;;
-        esac
-        rm -rf -- "$entry"
+_remove_budget_runtime_code() {
+    _finite_runtime_uninstall --remove-runtime
+}
+
+_remove_budget_helper_files() {
+    local directory="$1" name
+    shift
+    [[ -d "$directory" && ! -L "$directory" ]] || { _fail "Refusing linked runtime helpers"; return 1; }
+    for name in "$@"; do
+        [[ -e "$directory/$name" || -L "$directory/$name" ]] || continue
+        [[ -f "$directory/$name" && ! -L "$directory/$name" ]] || {
+            _fail "Refusing linked/non-file runtime helper"; return 1;
+        }
     done
-    _ok 'budget-guidance runtime removed (transaction/staging coordination retained)'
+    for name in "$@"; do rm -f -- "$directory/$name" || return 1; done
+}
+
+if [[ "$ACTION" == "uninstall" ]]; then
+    . "$SCRIPT_DIR/uninstall-runtime.sh"
+    _finite_runtime_uninstall --check || exit 1
+    _remove_budget_runtime_code || exit 1
+    _ok 'budget-guidance runtime removed (data, unknown files and coordination retained)'
     exit 0
 fi
 

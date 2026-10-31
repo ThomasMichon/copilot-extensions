@@ -7,6 +7,7 @@
 *.json text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
+.devcontainer/trusted-harness-base/** text eol=lf
 
 # Extensionless bash binstubs/launchers must stay LF (run on Linux/WSL).
 plugins/agent-worktrees/bin/agent-worktrees text eol=lf

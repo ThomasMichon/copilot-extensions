@@ -10,16 +10,26 @@ from __future__ import annotations
 
 import ctypes
 import os
-import shutil
+import shutil as shutil  # Retain the shared adapter seam for existing callers.
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TypeVar
+
+if __package__:
+    from .native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
+    from .plugin_test_containment_posix import (
+        GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
+    )
+else:
+    from native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
+    from plugin_test_containment_posix import (
+        GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
+    )
 
 # Repository runners consume the canonical source without a plugin installation.
 _previous_path = sys.path.copy()
@@ -28,6 +38,7 @@ sys.path.insert(
 )
 try:
     from agent_procutil import no_window_kwargs
+    from agent_procutil.daemon_instances import DaemonLeasePolicy, daemon_test_lifecycle
 finally:
     sys.path[:] = _previous_path
 
@@ -142,7 +153,7 @@ class UnreapedProcessError(ContainmentError):
     """Owned processes may still hold the sandbox; cleanup is unsafe."""
 
 
-class TestSandbox(tempfile.TemporaryDirectory):
+class TestSandbox(NativeTemporaryDirectory):
     """Retain owned files whenever termination cannot be established."""
 
     def __init__(self, *args, **kwargs):
@@ -281,6 +292,10 @@ def isolated_environment(
         for name in _CREDENTIAL_NAMES:
             env.pop(name, None)
         for name, relative in _ROOT_ENV.items():
+            if os.name == "nt":
+                for inherited_name in tuple(env):
+                    if inherited_name.casefold() == name.casefold():
+                        env.pop(inherited_name)
             value = root.joinpath(*relative.split("/"))
             value.mkdir(parents=True, exist_ok=True)
             env[name] = str(value)
@@ -352,6 +367,12 @@ def _tree_size(path: Path) -> int:
     return total
 
 
+def _temp_storage_violation(used_bytes: int, max_mb: int) -> str | None:
+    if used_bytes > max_mb * 1024 * 1024:
+        return f"temporary-storage limit exceeded ({max_mb} MiB)"
+    return None
+
+
 def _linux_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int] | None:
     proc_root = Path("/proc")
     if not proc_root.is_dir():
@@ -381,46 +402,15 @@ def _linux_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int]
     return count, rss
 
 
-def _ps_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int] | None:
-    ps = shutil.which("ps")
-    if not ps:
-        return None
-    result = subprocess.run(
-        [ps, "-eo", "pgid=,rss=,stat="],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=2,
-    )
-    if result.returncode != 0:
-        return None
-    count = 0
-    rss_kib = 0
-    for line in result.stdout.splitlines():
-        fields = line.split()
-        if len(fields) != 3:
-            if live_only and fields:
-                raise ValueError("Cannot parse POSIX process-group membership")
-            continue
-        if live_only and fields[2].startswith("Z"):
-            continue
-        try:
-            row_pgid, row_rss = map(int, fields[:2])
-        except ValueError:
-            if live_only:
-                raise
-            continue
-        if row_pgid == pgid:
-            count += 1
-            rss_kib += row_rss
-    return count, rss_kib * 1024
-
-
 def _posix_group_usage(pgid: int) -> tuple[int, int] | None:
+    if sys.platform == "darwin":
+        return _darwin_group_usage(pgid)
     return _linux_group_usage(pgid) or _ps_group_usage(pgid)
 
 
 def _posix_live_group_usage(pgid: int) -> tuple[int, int] | None:
+    if sys.platform == "darwin":
+        return _darwin_group_usage(pgid, live_only=True)
     return _linux_group_usage(pgid, live_only=True) or _ps_group_usage(pgid, live_only=True)
 
 
@@ -455,6 +445,17 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
         while True:
             try:
                 usage = _posix_live_group_usage(pgid)
+            except GroupObservationChanged as exc:
+                if sys.platform != "darwin":
+                    raise UnreapedProcessError("Cannot verify POSIX process-group termination") from exc
+                if time.monotonic() >= deadline:
+                    if remaining:
+                        return False
+                    raise UnreapedProcessError(
+                        "Darwin process-group termination remained unknown after observation churn"
+                    ) from exc
+                time.sleep(0.05)
+                continue
             except (OSError, ValueError, IndexError, subprocess.TimeoutExpired) as exc:
                 raise UnreapedProcessError(
                     "Cannot verify POSIX process-group termination"
@@ -856,6 +857,7 @@ def _run_contained_process(
                 assert result_read is not None
                 returncode = _posix_exit_code(result_read)
             now = time.monotonic()
+            cycle_deadline = min(now + limits.poll_seconds, started + limits.wall_seconds)
             if now - started > limits.wall_seconds:
                 print(
                     f"[LIMIT] wall-clock limit exceeded ({limits.wall_seconds:g}s)",
@@ -865,18 +867,15 @@ def _run_contained_process(
             if returncode is not None:
                 return returncode
             violation = None
-            if now >= next_temp_check:
-                temp_bytes = _tree_size(sandbox)
-                if temp_bytes > limits.max_temp_mb * 1024 * 1024:
-                    violation = (
-                        "temporary-storage limit exceeded "
-                        f"({limits.max_temp_mb} MiB)"
-                    )
+            if sys.platform != "darwin" and now >= next_temp_check:
+                violation = _temp_storage_violation(_tree_size(sandbox), limits.max_temp_mb)
                 next_temp_check = now + max(2.0, limits.poll_seconds)
             if violation is None and now >= next_usage_check:
                 usage = (
                     job.usage()
                     if os.name == "nt" and job is not None
+                    else _darwin_poll_group_usage(proc.pid, deadline=cycle_deadline)
+                    if sys.platform == "darwin"
                     else _posix_group_usage(proc.pid)
                 )
                 if usage is None:
@@ -892,10 +891,17 @@ def _run_contained_process(
                     elif rss_bytes > limits.max_memory_mb * 1024 * 1024:
                         violation = f"memory limit exceeded ({limits.max_memory_mb} MiB)"
                 next_usage_check = now + limits.poll_seconds
+            # Due Darwin resource sampling precedes synchronous directory traversal.
+            if sys.platform == "darwin" and violation is None and now >= next_temp_check:
+                violation = _temp_storage_violation(_tree_size(sandbox), limits.max_temp_mb)
+                next_temp_check = now + max(2.0, limits.poll_seconds)
             if violation is not None:
                 print(f"[LIMIT] {violation}", file=sys.stderr)
                 return 124
-            time.sleep(limits.poll_seconds)
+            if sys.platform == "darwin":
+                time.sleep(max(0.0, cycle_deadline - time.monotonic()))
+            else:
+                time.sleep(limits.poll_seconds)
     except KeyboardInterrupt:
         print("[LIMIT] interrupted; reaping contained process tree", file=sys.stderr)
         return 130
@@ -930,18 +936,26 @@ def run_contained(
     env: Mapping[str, str],
     sandbox: Path,
     limits: Limits,
+    daemon_purpose: str = "unattended-test",
+    daemon_lease: DaemonLeasePolicy | None = None,
 ) -> int:
-    """Run a contained tree and fail if it escapes into Windows environment state."""
+    """Run an owned test tree; interactive tests require an explicit lease policy."""
     environment_snapshot = _read_registry_environment()
     unreaped = None
     try:
-        result = _run_contained_process(
-            command,
-            cwd=cwd,
-            env=env,
-            sandbox=sandbox,
-            limits=limits,
-        )
+        with daemon_test_lifecycle(
+            owner=f"contained-test-runner:{os.getpid()}",
+            registry_root=sandbox.resolve() / "daemon-instances",
+            purpose=daemon_purpose,
+            lease=daemon_lease,
+        ) as daemon_environment:
+            result = _run_contained_process(
+                command,
+                cwd=cwd,
+                env={**env, **daemon_environment},
+                sandbox=sandbox,
+                limits=limits,
+            )
     except UnreapedProcessError as exc:
         unreaped = exc
         raise

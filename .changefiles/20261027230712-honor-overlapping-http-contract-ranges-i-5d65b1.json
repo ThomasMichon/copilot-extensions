@@ -1,0 +1,9 @@
+{
+  "comment": "Honor overlapping HTTP contract ranges in capability checks and every versioned request attempt, including peer replacement.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

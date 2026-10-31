@@ -8,6 +8,7 @@ import sys
 from worktree_identity import WorktreeMachineIdentityError, parse_machine_identity
 
 from .loop_commands import _resolve_cli_module
+from .task_recovery_cli import _cmd_reset as _cmd_reset  # compatibility export
 
 
 def _core():
@@ -342,22 +343,6 @@ def _cmd_force_stop(args: argparse.Namespace) -> int:
             print(f"agent-dispatch: {exc}", file=sys.stderr)
             return 1
     return _core()._emit(result)
-
-def _cmd_reset(args: argparse.Namespace) -> int:
-    if args.to != "proposed":
-        print(
-            f"agent-dispatch: reset only supports --to proposed today, not {args.to!r}",
-            file=sys.stderr,
-        )
-        return 2
-    with _core()._client(args) as c:
-        return _core()._emit(
-            c.reset(
-                args.task_id,
-                reason=args.reason,
-                expected_status=args.expected_status,
-            )
-        )
 
 def _cmd_confirm(args: argparse.Namespace) -> int:
     """The Completion Review card's Confirm action -- corroborate a

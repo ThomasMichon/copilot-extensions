@@ -1,0 +1,9 @@
+{
+  "comment": "Scope the mention guard to repository-local adopters and fail open on helper or runtime failures.",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

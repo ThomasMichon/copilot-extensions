@@ -1,0 +1,9 @@
+{
+  "comment": "Check actual guest Worktrees command health, delegate legacy repair to its owning installer and refuse failed preparation before launch effects.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

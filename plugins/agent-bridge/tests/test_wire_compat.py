@@ -6,20 +6,15 @@ daemon** and vice-versa. For that to stay *correct while skewed*, a model that
 crosses the wire must **ignore unknown fields** rather than reject them — an older
 receiver must tolerate a field a newer sender added.
 
-Pydantic v2 already defaults to ``extra="ignore"``, so today the suite is
-tolerant *by accident* (no wire model sets ``extra="forbid"``; verified during the
-#632 contract inventory). This test makes that property an **explicit, enforced
-invariant**: a single well-meaning ``model_config = ConfigDict(extra="forbid")``
-on a request/response model would silently break forward-compatibility under
-version skew, and this guard fails the moment one is introduced.
+Pydantic v2 defaults to ``extra="ignore"``. This test enforces that default for
+ordinary request/response models and inventories the narrow closed-contract
+exceptions, rather than exempting whole modules or inherited subclasses.
 
-Scope: every ``pydantic.BaseModel`` subclass *defined in* the ``agent_bridge``
-package (discovered by walking the package so new models are covered
-automatically), except the two explicitly classified local remote-endpoint
-configuration models. Those reject unknown configuration rather than silently
-ignoring an unsupported auth selector; they are not peer request/response
-readers. ``extra="allow"`` and the default (``"ignore"``) are both fine for wire
-models — only ``"forbid"`` is banned.
+Scope: ordinary peer models discovered throughout ``agent_bridge``. Explicit
+local configuration and closed, capability-gated control/identity envelopes
+are classified below. They refuse unknown intent rather than silently changing
+an exact invocation or destructive-control contract. Adding fields to those
+envelopes requires explicit negotiation, not tolerant-reader fallback.
 """
 
 from __future__ import annotations
@@ -34,10 +29,25 @@ from agent_bridge.remote_acp_config import (
     RemoteAcpTarget, RemoteAuth, RemoteAuthApproval, RemoteAuthRequirements,
     RemoteAcpBinding, RemoteAcpRequirements,
 )
+from agent_bridge.drain_contract import DrainContract, DrainRequest
+from agent_bridge.live_inbox_models import (
+    InboxBindingInfo, InboxConsumerInfo, InboxCurrentRequest, InboxEnrollRequest,
+    InboxHandoffRequest, InboxNegotiateRequest, InboxOutcomeRequest,
+)
+from agent_bridge.native_keyed_admission import KeyedNativePrompt, NativeInvocationBinding
 
 _LOCAL_CONFIGURATION_MODELS = frozenset({
     RemoteAcpTarget, RemoteAuth, RemoteAuthApproval, RemoteAuthRequirements,
     RemoteAcpBinding, RemoteAcpRequirements,
+})
+_CLOSED_CONTROL_MODELS = frozenset({
+    # Explicit preservation policy may not ignore an unknown destructive option.
+    DrainContract, DrainRequest,
+    # Immutable keyed invocation identity must not discard binding fields.
+    KeyedNativePrompt, NativeInvocationBinding,
+    # HTTP-48 retained-inbox-v1 is an exact owner/handoff observation contract.
+    InboxBindingInfo, InboxConsumerInfo, InboxCurrentRequest, InboxEnrollRequest,
+    InboxHandoffRequest, InboxNegotiateRequest, InboxOutcomeRequest,
 })
 
 
@@ -76,7 +86,7 @@ def test_wire_models_discovered():
 
 
 def test_no_wire_model_forbids_extra_fields():
-    """No agent-bridge wire model may reject unknown fields (forward-compat).
+    """Ordinary wire models cannot reject additive fields under version skew.
 
     ``extra="forbid"`` turns an additive field from a newer sender into a hard
     validation error against an older receiver — the exact skew failure this
@@ -85,7 +95,8 @@ def test_no_wire_model_forbids_extra_fields():
     offenders = [
         f"{c.__module__}.{c.__name__}"
         for c in _agent_bridge_models()
-        if c not in _LOCAL_CONFIGURATION_MODELS and c.model_config.get("extra") == "forbid"
+        if c not in _LOCAL_CONFIGURATION_MODELS | _CLOSED_CONTROL_MODELS
+        and c.model_config.get("extra") == "forbid"
     ]
     assert not offenders, (
         "These agent-bridge wire models set extra='forbid', which breaks "
@@ -116,3 +127,13 @@ def test_local_configuration_is_explicit_and_does_not_exempt_wire_subclasses():
         pass
 
     assert FutureWireModel not in _LOCAL_CONFIGURATION_MODELS
+
+
+def test_closed_control_classification_does_not_exempt_future_subclasses():
+    assert _CLOSED_CONTROL_MODELS <= set(_agent_bridge_models())
+    assert all(c.model_config.get("extra") == "forbid" for c in _CLOSED_CONTROL_MODELS)
+
+    class FutureWireModel(InboxNegotiateRequest):
+        pass
+
+    assert FutureWireModel not in _CLOSED_CONTROL_MODELS

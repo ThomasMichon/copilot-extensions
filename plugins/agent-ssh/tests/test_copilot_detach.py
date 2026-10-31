@@ -15,11 +15,23 @@ import pytest
 from ssh_manager import keeper_holds as shared_keeper_holds
 from agent_procutil import no_window_flags
 from venue_copilot import detached as venue_detached
+from venue_copilot.refs import deliver_note as real_deliver_note
 
 from agent_ssh import copilot_detach as detach
 from agent_ssh.copilot_detach import ensure_keeper as real_ensure_keeper, stop_keeper as real_stop_keeper
 from agent_ssh.copilot_plugins import resolve_launch as real_resolve_launch
 from agent_ssh.__main__ import main
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_bridge_structured_selection_reaches_ssh_parser(enabled):
+    from plugin_resolve.reflection import selection_cli_args
+
+    spec = {"source": "retired@local", "enable": enabled, "allow_missing": True}
+    parser = argparse.ArgumentParser()
+    detach.add_copilot_subparser(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["copilot", "synthetic", *selection_cli_args(spec)])
+    assert args.stage_plugins == [spec]
 
 
 def _args(**kw):
@@ -150,6 +162,28 @@ def test_detach_success_reserves_ssh_venue_and_reports_handle(seams, capsys):
     assert "--copilot-arg=--no-ask-user" in launch
     assert "--json" in launch
     assert seams.release == [("anchor-repo@devbox", "r1")]
+
+
+def test_owned_refusal_preserves_fixed_reason_without_replay(seams, monkeypatch, capsys):
+    attempts = []
+
+    def run(argv, **kwargs):
+        attempts.append(argv)
+        return types.SimpleNamespace(returncode=69, stdout=json.dumps({
+            "owned_delivery_version": 1, "admission_status": "not_admitted",
+            "reason": "plugins_not_ready", "error": "private readiness detail",
+        }))
+
+    monkeypatch.setattr(
+        "venue_copilot.refs.deliver_note",
+        lambda sid, note, **kwargs: real_deliver_note(sid, note, run=run, **kwargs),
+    )
+    assert detach.cmd_detach(_args()) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is False and report["refusal_reason"] == "plugins_not_ready"
+    assert "plugins_not_ready" in report["error"]
+    assert "private readiness detail" not in json.dumps(report)
+    assert len(attempts) == 1
 
 
 def test_streamed_receiver_transport_is_isolated_from_terminal_signals(monkeypatch):
@@ -550,6 +584,54 @@ def real_keeper(seams, monkeypatch):
         **state, "pid": 99999, "pid_identity": "synthetic-99999",
     })
     return store
+
+
+@pytest.mark.parametrize("selection", ["parent", "linked"])
+def test_keeper_runtime_root_uses_real_admission(seams, tmp_path, monkeypatch, selection):
+    from agent_procutil.daemon_instances import (
+        cancel_instance_reservation, inspect_instances, reserve_instance,
+    )
+
+    launch = tmp_path / "launch"
+    launch.mkdir()
+    state = tmp_path / "state"
+    state.mkdir()
+    root = launch / ".." / "state"
+    if selection == "linked":
+        root = launch / "linked"
+        try:
+            root.symlink_to(state, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"native directory symlink unavailable: {error}")
+    store = detach.KeeperStore(root)
+    if selection == "parent":
+        assert ".." in store.state_path("devbox").parts
+    monkeypatch.setattr(detach, "_STORE", store)
+    monkeypatch.setattr(detach, "read_keeper_state", lambda target: store.read(target))
+    monkeypatch.setattr(store, "alive", lambda key: store.read(key) is not None)
+    monkeypatch.setattr(store, "stop", lambda key: store.remove(key) or False)
+    admitted = []
+
+    def spawn(argv, environment, payload, *, popen, **kwargs):
+        instance = popen.keywords["instance"]
+        receipt = reserve_instance(instance, environment=environment)
+        try:
+            row = next(row for row in inspect_instances(receipt.registry_root)
+                       if row["instance_id"] == receipt.instance_id)
+            assert row["runtime_root"] == str(state) and row["state"] == "reserved"
+            admitted.append(instance.runtime_root)
+        finally:
+            cancel_instance_reservation(receipt, creation_refused=True)
+        return {**payload, "pid": 99999, "pid_identity": "synthetic-99999"}
+
+    monkeypatch.setattr(detach, "spawn_keeper", spawn)
+    if selection == "linked":
+        with pytest.raises((OSError, ValueError, RuntimeError)):
+            real_ensure_keeper("devbox", venue_port=41234, mux="fixture", probe=lambda _: True)
+        assert admitted == []
+    else:
+        result = real_ensure_keeper("devbox", venue_port=41234, mux="fixture", probe=lambda _: True)
+        assert result["started"] and admitted == [state]
 
 
 @pytest.mark.parametrize("other_hold", [False, True])

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+import agent_bridge_contract_registry as registry_codec
 from dropin_registry import EntryDecision, ScanAuthority
 from plugin_activation import ActivationReport, ActivePlugin
 
@@ -211,7 +212,7 @@ def _wire_generation(value, generation):
 
 @pytest.mark.parametrize(("generation", "reattested"), [(41, 40), (42, 42), (43, 42), (44, 45)])
 def test_reattestations_retain_independent_historical_expectations(generation, reattested):
-    registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
+    registry = registry_codec.load(REPO).materialized
     contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
     count = 0
     for registered in contract["fixtures"]:
@@ -236,7 +237,7 @@ def test_reattestations_retain_independent_historical_expectations(generation, r
 
 
 def test_generation_45_reattestations_preserve_independent_previous_vectors():
-    registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
+    registry = registry_codec.load(REPO).materialized
     contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
     count = 0
     for registered in contract["fixtures"]:

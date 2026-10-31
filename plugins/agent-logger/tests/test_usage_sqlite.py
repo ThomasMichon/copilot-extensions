@@ -319,7 +319,7 @@ def test_progress_callback_interrupts_expensive_scan(
 
     monkeypatch.setattr(usage_sqlite.sqlite3, "connect", timed_connect)
     monkeypatch.setattr(usage_sqlite.time, "monotonic", lambda: 10.0 if scanning else 0.0)
-    with pytest.raises(UsageReadError, match="could not be read safely"):
+    with pytest.raises(usage_sqlite.UsageTimeLimitError, match="time budget"):
         read_sqlite_usage(path, {"chosen"}, timeout=1.0)
     assert scanning
 

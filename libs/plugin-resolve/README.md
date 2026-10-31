@@ -245,6 +245,67 @@ the original origin, revision and location remain unchanged in target settings.
 Known local marketplace roots and local payload versions remain strict readiness
 expectations when native observation advertises them.
 
+Reference-mode preparation can also reuse an existing native Git marketplace
+cache when no user-global registration exists. A catalog name or legacy installed
+manifest alone is insufficient. The actual clone must match the declared Git
+origin, requested commit/ref and catalog location, have unchanged selected
+catalog/payload content and required asset closure, and contain the uniquely
+declared plugin. Selected ordinary files are hashed directly against their Git
+blob identities in the requested commit; status alone cannot prove unchanged
+bytes when the index has `assume-unchanged` or `skip-worktree` entries.
+Every file in the reflected closure must have one of those verified ordinary
+blobs; required files inside sibling submodules cannot inherit the parent
+repository's proof and retain ordinary acquisition.
+Committed ancestor entries are checked by depth without recursively scanning
+unrelated trees, so a deleted required file below a Gitlink cannot disappear
+from the proof. Payload roots excluded by reflection cannot qualify through
+an empty archive.
+On POSIX, the owner executable bit must also match the committed Git mode even
+when `core.filemode` suppresses status reporting. Windows retains its native
+non-POSIX mode semantics.
+Checkout transformations that change those bytes retain ordinary acquisition.
+The selected catalog and all higher-priority catalog locations participate in
+the proof even when currently missing; deleted native catalogs cannot silently
+select a fallback. Unselected lower-priority catalogs remain outside the proof.
+The declared source path, including `pluginRoot`, and required
+asset paths must have no symlink/reparse components; resolving a link to another
+clean directory is not origin proof. Generic Git URLs match the configured
+origin exactly; GitHub declarations retain transport-compatible repository
+identity, including repository names ending in `.git`. Only network origins
+qualify: filesystem and relative Git origins
+retain ordinary acquisition rather than treating compatibility normalization as
+exact filesystem identity. Unrelated clone changes are not scanned. Preparation returns
+that qualified cache payload, not an unproven legacy installed copy, while
+retaining the complete Git declaration in repository settings. Its commit and
+filtered payload digest are rechecked under the publication lock; effectively
+enabled sources are qualified again before any settings are written. Ambiguous
+clones refuse. Missing or incompatible evidence follows ordinary isolated
+installation; malformed/unreadable catalogs and invalid payload closures are
+reported as ineligible cache candidates rather than blocking that fallback.
+Git qualification probes keep their 30-second deadline; a probe timeout reports
+an ineligible candidate and leaves ordinary acquisition available.
+An inaccessible native-cache directory likewise reports unavailable inventory
+without preventing ordinary installation.
+That guard includes the initial cache-root directory check as well as enumeration.
+Permission errors while inspecting or resolving an individual candidate are
+reported as ineligible catalog evidence and do not abort that fallback.
+Resolution loops also remain ineligible evidence on Python versions before
+3.13, where `Path.resolve()` reports `RuntimeError` rather than `OSError`.
+This applies to candidate roots, declared payload lookup and required assets.
+Git filename output decodes losslessly with `surrogateescape`, so non-UTF-8
+POSIX filenames do not abort the optional qualification path.
+Catalog plugin entries must be objects and owner/location metadata must be valid.
+Referenced sibling files and directories remain in the qualification path set
+even when missing from the current tree, so deleted required assets cannot
+disappear from the Git status check. Declared source spellings use the same
+whitespace normalization as marketplace resolution, and every catalog/source
+component must exist; only referenced assets may retain a missing suffix.
+Copy mode and conflicting global
+registrations retain ordinary acquisition.
+This neither enables a plugin globally nor pins native startup to the cache's
+manifest version. The execution owner's existing startup-readiness barrier
+still gates task delivery.
+
 Each complete preparation reads ownership and authored settings together under
 the checkout lock. Publication prunes unchanged owned enablement observed in
 that initial snapshot when absent from both this preparation's payloads and
@@ -398,6 +459,38 @@ Relative local sources and Git-only selections do not trigger ownership lookup.
 Child-inventory settings accept the existing bounded leading-`//` comment-header
 convention used by activation readers. This is read-only compatibility, not a
 claim of a general JSONC parser; other malformed settings still fail explicitly.
+
+## Explicit missing-local selections
+
+A selection mapping accepts `allow_missing: true` alongside `source` and
+`enable` (both booleans are strict; `allow_missing` defaults to false).
+For example, `{source: retired@example-local, enable: true, allow_missing: true}`
+permits preparation to omit only that absent entry from its target-declared local
+marketplace, with a warning. A present entry stages normally, respecting target
+disablement and install-only selection. Other missing plugins remain fatal.
+
+The exception does not authorize acquisition from another marketplace, changing
+authored settings, or ignoring a malformed catalog, a declared-but-invalid
+payload, source identity, content proof or a dependency on the omitted source.
+Absence is checked again under the registration lock before publication.
+An unchanged operation-owned marketplace override is retired when it would
+mask the target's current local declaration; authored preferences are preserved.
+The permission is request-scoped and is never persisted as a target preference.
+Native and legacy settings use the existing native-last, last-per-key precedence.
+
+Structured CLI transport uses `--stage-plugin-spec '<JSON selection>'` only for
+this opt-in; ordinary and install-only selections retain their existing flags.
+An older CLI rejects the new argument rather than silently dropping the policy.
+The Codespaces planning command and SSH launch parser accept the same structured
+selection, including before strict producer planning.
+Remote streamed preparation carries its matching shared implementation, so it
+does not depend on an installed receiver's schema version. Local native requests
+retain their existing version and digest the full plan; older preparation code
+cannot honor the omission and still fails on the missing target-enabled source.
+Privileged ACP retains version 1: the authenticated context binds the controller
+directory, and the actual elevated receiver reads its related selections and
+revalidates preparation against its own allocated checkout. This does not grant
+elevation, change context ownership, or attest to running-peer support.
 
 ## Sources
 

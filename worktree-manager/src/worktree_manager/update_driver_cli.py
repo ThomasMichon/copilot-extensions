@@ -5,10 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from contextlib import contextmanager
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from .engine_acquisition_budget import TIMEOUT_ENV, acquisition_timeout
 
 _CONTEXT_KEYS = (
     "AGENT_HOME",
@@ -28,6 +32,7 @@ def handoff_environment(args: list[str]) -> dict[str, str]:
         (args[0] == "update" and "--auth-report" not in args)
         or (args[0] == "stage-update" and "--indicator-state" not in args)
         or (args[0] == "reconcile-plugins" and "--apply" in args and "--check-update" not in args)
+        or (args[0] == "self-install" and "--apply" in args)
     ):
         from update_driver import participant_environment
 
@@ -42,6 +47,7 @@ def handoff_launch_options(environment: dict[str, str], handoff: dict[str, str])
         from agent_procutil import no_window_kwargs
 
         options.update(no_window_kwargs())
+        options.update(stdout=sys.stdout, stderr=sys.stderr)
     return options
 
 
@@ -56,18 +62,24 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     mode.add_argument("--recover-after-restart", action="store_true")
     mode.add_argument("--recover-for-repair", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--engine-acquisition-timeout", help=argparse.SUPPRESS)
     options, forwarded = parser.parse_known_args(rest)
     if "--auth-report" in forwarded and (options.detach or options.supervised_debug):
         parser.error("--auth-report cannot select an installation execution mode")
     recovery = options.recovery_status or options.recover_after_restart or options.recover_for_repair
-    if (options.request_status or recovery) and forwarded:
+    if (options.request_status or recovery) and (
+        forwarded or options.engine_acquisition_timeout is not None
+    ):
         parser.error("request inspection/recovery does not accept installation options")
+    if "--auth-report" in forwarded and options.engine_acquisition_timeout is not None:
+        parser.error("authentication inspection does not accept an acquisition budget")
     if options.json and not (options.detach or options.request_status or recovery or "--auth-report" in forwarded):
         parser.error("--json requires request inspection, recovery, --detach or --auth-report")
     canonical = argparse.ArgumentParser(prog="worktree-manager update", add_help=False, allow_abbrev=False)
-    for name in ("force", "no-anchor-sync", "no-prune-pivots", "recreate-venv", "no-manager"):
+    for name in ("auto", "force", "no-anchor-sync", "no-prune-pivots", "recreate-venv", "no-manager"):
         canonical.add_argument("--" + name, action="store_true")
     canonical.add_argument("--project")
+    canonical.add_argument("--target")
     canonical.add_argument("--repair-engine", help=argparse.SUPPRESS)
     canonical.add_argument("--force-runtime", action="append")
     canonical.add_argument("--skip-modules", nargs="*")
@@ -77,6 +89,20 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     canonical.add_argument("--auth-non-repository", action="store_true")
     canonical.add_argument("--auth-environment", action="store_true")
     parsed = canonical.parse_args(forwarded)
+    options.auto = parsed.auto
+    options.target = parsed.target
+    options.repair = bool(
+        parsed.force or parsed.force_runtime or parsed.recreate_venv or parsed.repair_engine
+    )
+    if parsed.target is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", parsed.target):
+        parser.error("--target requires a nonempty component identifier")
+    if parsed.target is not None and options.engine_acquisition_timeout is not None:
+        parser.error("--target does not bootstrap an engine; --engine-acquisition-timeout is not applicable")
+    if parsed.target is not None and any((
+        parsed.force, parsed.force_runtime, parsed.skip_modules is not None,
+        parsed.recreate_venv, parsed.repair_engine, parsed.auth_report,
+    )):
+        parser.error("--target cannot be combined with force, repair, auth or module selection")
     if parsed.repair_engine is not None and forwarded[:1] != ["--repair-engine"]:
         parser.error("bootstrap repair must precede ordinary update arguments")
     if not parsed.auth_report and (
@@ -86,7 +112,8 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     return options, forwarded
 
 
-def source_identity() -> dict[str, str]:
+def source_identity() -> dict[str, object]:
+    from .runtime_source_config import configured_source
     from .self_install import default_root, manager_ref, manager_repo
     from .source_config import absolute_local_source
 
@@ -102,16 +129,18 @@ def source_identity() -> dict[str, str]:
         "root": str(root),
         "repo": repo,
         "ref": manager_ref(root),
+        "runtime_source": configured_source(root).document(),
     }
 
 
 def request_context() -> dict[str, str]:
-    from .engine_client import ENGINE_ARGV_ENV, inherited_engine_command
-
     context = {key: os.environ[key] for key in _CONTEXT_KEYS if key in os.environ}
-    accepted = inherited_engine_command()
-    if accepted is not None:
-        context[ENGINE_ARGV_ENV] = json.dumps(accepted)
+    if f"{__package__}.engine_client" in sys.modules:
+        from .engine_client import ENGINE_ARGV_ENV, inherited_engine_command
+
+        accepted = inherited_engine_command()
+        if accepted is not None:
+            context[ENGINE_ARGV_ENV] = json.dumps(accepted)
     return context
 
 
@@ -130,6 +159,23 @@ def _request_environment(context):
         for key in _CONTEXT_KEYS:
             os.environ.pop(key, None)
         os.environ.update(previous)
+
+
+@contextmanager
+def _acquisition_environment(value: str | None):
+    previous = os.environ.get(TIMEOUT_ENV)
+    selected = None if value is None else str(acquisition_timeout({TIMEOUT_ENV: value}))
+    try:
+        if selected is None:
+            os.environ.pop(TIMEOUT_ENV, None)
+        else:
+            os.environ[TIMEOUT_ENV] = selected
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(TIMEOUT_ENV, None)
+        else:
+            os.environ[TIMEOUT_ENV] = previous
 
 
 def _source_key() -> str:
@@ -162,11 +208,40 @@ def _report(request, *, as_json: bool) -> None:
             print(f"Repair release: {summary['recovery_authority']}; cleanup remains unconfirmed.")
 
 
+def self_install_request(operation: Callable[[], int]) -> int:
+    """Explicit installation uses the same native finite driver as bootstrap."""
+    import update_driver as driver
+
+    from .self_install import _runtime_installer, default_root, running_payload_dir
+
+    with _runtime_installer()._installation_custody() as custody:
+        if custody is not None:
+            return operation()
+        argv, environment = driver.runtime_command("worktree_manager", ["self-install", "--apply"])
+        root = str(default_root().resolve())
+        context = {**request_context(), "WORKTREE_MANAGER_ROOT": root}
+        request = driver.enqueue(
+            driver.RequestSpec(
+                "manager-self-install", ("--apply",), project=root,
+                cwd=str(running_payload_dir()), source=_source_key(), context=tuple(context.items()),
+            ),
+            runner=driver.TrustedRunner(
+                argv, str(running_payload_dir()), env=tuple(environment.items()), context_keys=_CONTEXT_KEYS,
+            ),
+        )
+        driver.drain()
+        result = driver.wait(request.id, output=sys.stdout)
+        if result.state != "completed" or result.exit_code is None:
+            _report(result, as_json=False)
+            return 1
+        return result.exit_code
+
+
 def cmd_update_request(rest: list[str]) -> int:
     import update_driver as driver
 
-    from . import __main__ as manager
     from .engine_client import EngineError
+    from .update_orchestration import extract_project
 
     options, forwarded = parse_options(rest)
     request = None
@@ -203,7 +278,7 @@ def cmd_update_request(rest: list[str]) -> int:
         if "--auth-report" in forwarded:
             from . import engine_client
 
-            project, args = manager._extract_project(forwarded)
+            project, args = extract_project(forwarded)
             return engine_client.run_engine_passthrough(
                 project, ["update", "--no-manager", *args, *(["--json"] if options.json else [])],
             )
@@ -213,18 +288,45 @@ def cmd_update_request(rest: list[str]) -> int:
                 request = driver.status(custody.request_id, root=custody.root)
                 if request.state != "running" or request.spec.backend not in {"manager", "engine"}:
                     raise driver.StateError("Manager does not own the active update request")
-                with _request_environment(request.spec.context):
+                with _request_environment(request.spec.context), _acquisition_environment(
+                    options.engine_acquisition_timeout,
+                ):
                     if request.spec.backend == "manager" and request.spec.source != _source_key():
                         raise driver.StateError("Manager source changed after submission; submit a new request")
                     custody.assert_owned()
+                    from . import __main__ as manager
+
                     return manager._cmd_update(forwarded)
-        project, _args = manager._extract_project(forwarded)
+        if options.target is not None and options.target != "worktree-manager":
+            from . import engine_client
+            from .runtime_source_config import require_marketplace
+
+            require_marketplace()
+            project, arguments = extract_project(forwarded)
+            observer = [
+                "--" + name.replace("_", "-")
+                for name in ("detach", "wait", "supervised_debug", "json")
+                if getattr(options, name)
+            ]
+            return engine_client.run_engine_passthrough(
+                project, ["update", "--no-manager", *arguments, *observer],
+                **({"headless": True} if options.detach else {}),
+            )
+        project, _args = extract_project(forwarded)
         cwd = Path.cwd().resolve()
+        arguments = list(forwarded)
+        budget = options.engine_acquisition_timeout
+        if budget is None and options.target is None:
+            budget = os.environ.get(TIMEOUT_ENV)
+        if budget is not None:
+            selected_budget = str(acquisition_timeout({TIMEOUT_ENV: budget}))
+            arguments.extend(["--engine-acquisition-timeout", selected_budget])
         spec = driver.RequestSpec(
-            backend="manager", argv=tuple(forwarded), project=project or "",
+            backend="manager", argv=tuple(arguments), project=project or "",
             cwd=str(cwd), source=_source_key(), context=tuple(request_context().items()),
+            repair=not options.auto,
         )
-        argv, env = driver.runtime_command("worktree_manager", ["update", *forwarded])
+        argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
         request = driver.enqueue(
             spec, runner=driver.TrustedRunner(
                 argv, str(cwd), env=tuple(env.items()), context_keys=_CONTEXT_KEYS,

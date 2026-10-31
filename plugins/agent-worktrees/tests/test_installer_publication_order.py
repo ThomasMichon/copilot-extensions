@@ -26,7 +26,7 @@ pytestmark = pytest.mark.guard
 @pytest.mark.parametrize("shell,executable", SHELLS)
 @pytest.mark.parametrize("case", [
     "healthy", "failed-health", "missing-resolver", "resolver-copy-failure",
-    "wrapper-copy-failure", "competing-activation",
+    "wrapper-copy-failure", "competing-activation", "monitor-failed", "monitor-exception",
 ])
 def test_native_publication_follows_health_and_precedes_monitor(
     tmp_path: Path, shell: str, executable: str | None, case: str,
@@ -64,16 +64,18 @@ def test_native_publication_follows_health_and_precedes_monitor(
         f"    published = Path({str(redirect)!r}).read_text()\n"
         "    assert published in ('wrappers', 'resolvers')\n"
         f"    with Path({str(events)!r}).open('a') as out: out.write('monitor:' + published + '\\n')\n"
-        "    return 0\n",
+        + ("    raise RuntimeError('fixture monitor failure')\n" if case == "monitor-exception"
+           else "    return 7\n" if case == "monitor-failed" else "    return 0\n"),
         encoding="utf-8",
     )
     (slot / ".install-complete.json").write_text(json.dumps({
         "version": "1.2.3", "completed_at": "2026-01-01T00:00:00Z", "pid": 0,
     }), encoding="utf-8")
+    completed_before = (slot / ".install-complete.json").read_bytes()
     for name in ("current-version", "last-known-good"):
         (root / name).write_text("1.2.2\n", encoding="utf-8")
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    failure = case not in {"healthy", "failed-health"}
+    failure = case not in {"healthy", "failed-health", "monitor-failed", "monitor-exception"}
     mode = "wrappers" if case in {"missing-resolver", "wrapper-copy-failure"} else "resolvers"
     if failure:
         (root / "versions" / "1.2.4").mkdir()
@@ -228,6 +230,12 @@ if (-not (Invoke-VersionedActivate -Publish resolvers)) { exit 1 }
         assert all((root / name).read_text().strip() == "1.2.3" for name in (
             "current-version", "last-known-good",
         ))
+    elif case.startswith("monitor-"):
+        assert observed == ["health", "complete", "wrappers", "monitor:wrappers", "released"]
+        assert redirect.read_text(encoding="utf-8") == "wrappers"
+        assert (root / "current-version").read_text().strip() == "1.2.3"
+        assert (root / "last-known-good").read_text().strip() == "1.2.3"
+        assert (slot / ".install-complete.json").read_bytes() == completed_before
     else:
         assert observed == (
             ["health", "complete", "released"] if failure else ["health", "released"]

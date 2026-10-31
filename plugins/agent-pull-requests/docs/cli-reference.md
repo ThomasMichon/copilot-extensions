@@ -205,3 +205,13 @@ For shutdown/restart boundaries, durability, and recovery detail, see
 Those remain later parity/migration slices, kept separate so this plugin's
 standalone shape stays independent of `agent-worktrees`' own worktree-bound
 PR flows.
+# Native foreground retirement
+
+Legacy `serve` and the reserved passive watch entry retain their original
+daemon admission and singleton/writer custody until accepted handlers, polling
+and delivery work actually settle. Shutdown first closes intake successfully;
+a failed close is unknown even with zero counted handlers. Bounded lower-level
+close APIs still raise on timeout, but the foreground owner retries settlement
+and reports the first failure only after releasing settled custody. Repeated
+interrupts do not abandon workers, replay requests, expire production ownership
+or authorize replacement. Partial startup follows the same retirement path.

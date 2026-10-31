@@ -1,0 +1,9 @@
+{
+  "comment": "Ship reuse-only closed-wheel evidence with the canonical installer engine",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

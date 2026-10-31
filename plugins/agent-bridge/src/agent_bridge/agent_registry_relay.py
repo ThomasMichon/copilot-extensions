@@ -243,3 +243,11 @@ def register_credential_sources(builder) -> None:
     from .http_provider_sources import register_http_credential_sources
 
     register_http_credential_sources(builder)
+    # Explicit local opt-in; no new listener, login, provider discovery or
+    # source capability is inferred from ordinary bridge/Gateway membership.
+    from credential_relay.account_relay import AccountRelay
+    from .config import config_dir
+
+    policy = config_dir() / "account-relay.json"
+    if policy.is_file():
+        builder.account_relay = AccountRelay(str(policy))
