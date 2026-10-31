@@ -120,6 +120,8 @@ class _Attempt:
         if before["status"] != "unknown":
             outcome = self.outcome(before["status"])
             self.original = outcome["original_attempt"]
+            if self.record["attempt"] is not None and self.record["attempt"] != self.original:
+                raise PlanError("Komodo repair has a conflicting pending attempt")
         attempt = self.original
         if (type(attempt) is not dict or attempt.get("request") != self.request.to_dict()
                 or attempt.get("deployment") != selected.deployment_digest
@@ -141,6 +143,7 @@ class _Attempt:
             raise PlanError("Komodo repair original profile is missing or changed")
         verify_attempt_keys(self.original, selected)
         self.keys = public_key_fingerprints(selected.material)
+        self.material = selected.material_evidence()
         KomodoOwner._preserved_material(self.record, selected, allow_new_identity=True)
         self.native = KomodoNative(selected.tooling)
         self.deadline = time.monotonic() + selected.declaration.to_dict()["outfitting_seconds"]
@@ -157,7 +160,8 @@ class _Attempt:
                 or self.journal.inspect(self.request) != self.receipt
                 or self.journal.inspect_named_external(resource=selected.resource) != self.receipt
                 or original_file(self.profile) != selected.profile()
-                or public_key_fingerprints(selected.material) != self.keys):
+                or public_key_fingerprints(selected.material) != self.keys
+                or selected.material_evidence() != self.material):
             raise PlanError("Komodo repair original evidence changed during reconciliation")
         verify_attempt_keys(self.original, selected, actual=self.keys)
 

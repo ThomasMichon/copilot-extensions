@@ -134,6 +134,14 @@ The completed status observation also spans the final authority/custody
 checkpoint before return. A bridge replaced immediately after its final
 inspection snapshot cannot be reported as a healthy installation.
 
+Final custody checks also compare current storage/credential path identities
+and credential content with the original in-memory material observation after
+immutable-evidence reads. Late material drift before commit preserves UNKNOWN,
+not a terminal receipt followed by a post-commit refusal. A terminal retry or
+status call accepts pending attempt metadata only when it exactly matches that
+terminal outcome's original attempt; conflicting metadata refuses unchanged
+rather than being ignored or cleared.
+
 ## Status, support and rollout
 
 `repair_status` reports schema `fleet-manager.komodo-repair-status`, version 1,

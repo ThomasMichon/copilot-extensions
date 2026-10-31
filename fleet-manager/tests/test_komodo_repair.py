@@ -27,6 +27,7 @@ from fleet_manager.node_journal import NodeJournal
 from fleet_manager.planning import PlanError, canonical, decode, digest
 from fleet_manager.runtime_admission import AdmissionError, AdmissionAuthority, OperationGrant
 from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
+from komodo_repair_test_controls import late_material_drift
 from test_komodo_declaration import intent
 from test_komodo_native import native_rig as native_rig
 from test_runtime_admission import Harness, actor, policy
@@ -47,6 +48,14 @@ REPLACED_TERMINAL = [
     "terminal-succeeded-replaced-network", "status-succeeded-replaced-network",
     "status-failed-replaced-network",
 ]
+CONFLICTING_ATTEMPTS = [
+    "terminal-succeeded-conflicting-attempt", "terminal-failed-conflicting-attempt",
+    "status-succeeded-conflicting-attempt", "status-failed-conflicting-attempt",
+]
+LATE_MATERIAL = [
+    "publication-late-credential-inode", "publication-late-credential-value",
+    "publication-late-data-inode",
+]
 DRIFTS = [
     f"publication-drift-{stage}-{change}"
     for stage in ("retain", "save", "append")
@@ -65,7 +74,7 @@ REFUSALS = [
     "health-endpoint-drift", "host-root-after-health",
     "missing-network-membership",
     "mismatched-network-attachment",
-] + DRIFTS
+] + DRIFTS + LATE_MATERIAL
 
 
 @pytest.mark.parametrize("mode", [
@@ -76,7 +85,7 @@ REFUSALS = [
                  "status-late-network",
                  "status-endpoint-drift", "status-missing-network-membership",
                  "status-mismatched-network-attachment", *REFUSALS, *CRASHES, *PARTIAL_SAVES,
-                 *TERMINAL_NETWORK, *CLEANUP_DRIFTS, *REPLACED_TERMINAL)
+                 *TERMINAL_NETWORK, *CLEANUP_DRIFTS, *REPLACED_TERMINAL, *CONFLICTING_ATTEMPTS)
 ])
 def test_original_unknown_uses_current_repair_without_native_replay(
     native_rig: Any, keys: Any, monkeypatch: Any, mode: str,
@@ -224,7 +233,9 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             uncertain = journal.inspect(original)
             assert uncertain.to_dict()["status"] == "unknown"
             assert uncertain.to_dict()["sequence"] == 2 and uncertain.to_dict()["result_ref"] is None
-            failed = mode == "failed" or mode in TERMINAL_NETWORK or mode == "status-failed-replaced-network"
+            failed = mode == "failed" or mode in TERMINAL_NETWORK or mode in (
+                "status-failed-replaced-network", "terminal-failed-conflicting-attempt",
+                "status-failed-conflicting-attempt")
             original_health_failure[0] = failed
 
             def resolve(identity: Any, request: Any, role: str, installation: str) -> KomodoRepairSelection:
@@ -345,6 +356,8 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 monkeypatch.setattr(KomodoOwner, "_ready", change_after_health)
 
             fired: list[bool] = []
+            if mode in LATE_MATERIAL:
+                fired = late_material_drift(monkeypatch, rig["material"], mode)
             partial_save: list[tuple[Path, bytes, int, int]] = []
             late_key = [False]
             if mode == "status-late-network":
@@ -539,6 +552,9 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     assert decode((owner_root / "selection.json").read_bytes())["attempt"] == retained
                     if mode == "publication-drift-retain-key-during-native":
                         assert decode((owner_root / "selection.json").read_bytes())["good"] is None
+                if mode in LATE_MATERIAL:
+                    assert fired and len(journal.results()) == 2
+                    assert decode((owner_root / "selection.json").read_bytes())["attempt"] == retained
                 if mode == "host-root-after-health" or mode.endswith("host-runtime"):
                     assert not (rig["root"] / "shifted-runtime" / candidate[0].resource).exists()
                 if mode == "missing-owner":
@@ -622,6 +638,19 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                         with pytest.raises(PlanError, match="retained native network"):
                             await asyncio.to_thread(call)
                     assert journal.inspect(original) == receipt and health_requests == before_health
+                elif mode in CONFLICTING_ATTEMPTS:
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        record = state.read()
+                        pending_attempt = {**retained, "request": intent(
+                            "conflicting-pending", generation=generation,
+                            deployment=candidate[0].deployment_digest).to_dict()}
+                        record["attempt"] = pending_attempt
+                        state.save(record)
+                    conflicting_state = (owner_root / "selection.json").read_bytes()
+                    with pytest.raises(PlanError, match="pending attempt"):
+                        await asyncio.to_thread(call, status=mode.startswith("status"))
+                    assert (owner_root / "selection.json").read_bytes() == conflicting_state
+                    assert journal.inspect(original) == receipt and not harness.owner._issued
                 else:
                     assert await asyncio.to_thread(call) == receipt
                 if mode in CLEANUP_DRIFTS:
@@ -642,7 +671,8 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     assert prior_value["deployment"] in value["selection"]["compatible_with"]
                 else:
                     assert value["prior_outcomes"] == {}
-                assert decode((owner_root / "selection.json").read_bytes())["attempt"] is None
+                assert decode((owner_root / "selection.json").read_bytes())["attempt"] == (
+                    pending_attempt if mode in CONFLICTING_ATTEMPTS else None)
                 if mode in ("renewed", "save-partial-renewed"):
                     assert value["repair"]["transition_revision"] == value["repair"]["admission_revision"] == 2
                 if mode in PARTIAL_SAVES:
