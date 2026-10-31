@@ -138,8 +138,10 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
           the task, return it with ``False`` -- the task is already being
           spawned or its prior allocation is still being released; the caller
           must **not** spawn.
-        * Otherwise mint a fresh reservation. ``attempt`` is ``max(prior
-          attempts) + 1`` (``1`` for the first), keyed
+        * Otherwise require a queued task's ``not_before <= now`` before
+          minting a fresh reservation. Active replay and suspended
+          re-embodiment do not admit new queued work.
+          ``attempt`` is ``max(prior attempts) + 1`` (``1`` for the first), keyed
           ``dispatch-task:<task_id>:<attempt>``, in state ``reserving``. Return
           it with ``True`` -- the caller owns this spawn.
 
@@ -251,6 +253,11 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 raise TaskError(
                     f"task {task_id!r} is {task.status!r} with owner "
                     f"{task.owner!r}; spawn reservation requires queued and unowned"
+                )
+            if task.status == Status.QUEUED and task.not_before > ts:
+                raise TaskError(
+                    f"task {task_id!r} is not due until {task.not_before}; "
+                    "spawn reservation requires not_before <= now"
                 )
             self.require_worker_admission()
             attempt = (max(r["attempt"] for r in rows) + 1) if rows else 1
