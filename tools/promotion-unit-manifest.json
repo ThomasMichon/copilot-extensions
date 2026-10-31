@@ -3837,8 +3837,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py",
         "libs/agent-procutil/src/agent_procutil/_native_owned.py",
         "libs/installer-engine/installer_engine_process.py",
-        "fleet-manager/src/fleet_manager/client_construction.py",
-        "tools/promotion_unit_tests/test_client_guardian_resources.py"
+        "fleet-manager/src/fleet_manager/client_construction.py"
     ],
     "max_seconds": 300
 }
