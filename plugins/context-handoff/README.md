@@ -93,6 +93,35 @@ If a control plane is present, it can watch the pending handoff state this
 plugin leaves behind and perform the actual cutover. If not, the plugin still
 returns a short handoff seed a human can use manually.
 
+## Authorization evidence and limits
+
+Capture upfront approvals and one-time answers in the existing current-owner
+checkpoint or canonical effort/charter when received. Both custom handoff
+shapes and native checkpoint guidance carry **Authorization Evidence & Limits**:
+original operator/charter source, applicable operations/destinations/owners and
+effects, accepted blast radius, exclusions, limits and later changes.
+
+The [carrier procedure](skills/context-handoff/references/authorization-continuity.md)
+keeps original evidence separate from interpretation and requires current
+authority before effects. A copied baton or consumption receipt does not grant
+deployment/content/external-owner permission; absent evidence remains explicit,
+while independent already-authorized work can continue.
+
+The offered `generate_handoff_prompt` tool optionally accepts
+`authorization_evidence`: compact existing approval references and exact
+applicable scope/limits/holds, at most 8192 UTF-8 bytes. Persist originals first.
+The extension retains that carrier for later generation/emergency drafting
+only within the current module lifetime. Reconnect/refork loses the convenience
+cache; the canonical checkpoint/effort remains the durable source and the new
+module reports **Not captured** until evidence is supplied again. Recover the
+existing record, not fresh operator consent. The cache is not a durable grant
+or current-authority evaluator. Empty text clears it;
+invalid or oversized input fails explicitly rather than truncating constraints.
+Without it, automatic drafts name evidence **Not captured** and direct bounded
+recovery. Older providers remain usable by placing the section in authored
+Markdown; the storage/consume contract is unchanged. Native checkpoint
+persistence remains host-owned, not implemented or certified by this plugin.
+
 ## Recovery prompt receipts
 
 The first root user message captures its recovery locator without invoking a
