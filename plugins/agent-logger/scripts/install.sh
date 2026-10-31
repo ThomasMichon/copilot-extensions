@@ -1113,7 +1113,7 @@ _materialize_snapshot_libs() {
     mkdir -p "$libs_dir" || {
         _fail "Snapshot libraries directory cannot be prepared: $libs_dir"; return 1;
     }
-    for lib in config-migrate agent-procutil dropin-registry plugin-resolve plugin-activation single-instance-lease update-driver; do
+    for lib in config-migrate agent-procutil zdd dropin-registry plugin-resolve plugin-activation single-instance-lease update-driver; do
         src="$PLUGIN_DIR/libs/$lib"
         if [[ ! -f "$src/pyproject.toml" ]]; then
             src="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/$lib" || {
@@ -1330,7 +1330,7 @@ install_package() {
   fi
   # Local first-party code still resolves its external and build dependencies
   # through the configured, seasoned index, in one retained transaction.
-  local -a install_args=(--python "${VENV}/bin/python" --no-editable)
+  local -a install_args=(--python "${VENV}/bin/python")
   local lib_spec lib_dir lib_package
   for lib_spec in \
     config-migrate:agent-config-migrate \

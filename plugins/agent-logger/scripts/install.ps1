@@ -893,12 +893,13 @@ function Resolve-SnapshotInstallerEngineSource {
 }
 
 function Materialize-SnapshotLibs {
-    param([Parameter(Mandatory)][string]$SnapshotDir)
+    param([Parameter(Mandatory)][string]$SnapshotDir, [switch]$PayloadCopied)
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
     $libraries = [ordered]@{
         'agent-config-migrate' = 'config-migrate'
         'agent-procutil' = 'agent-procutil'
+        'agent-zdd' = 'zdd'
         'agent-dropin-registry' = 'dropin-registry'
         'agent-plugin-resolve' = 'plugin-resolve'
         'agent-plugin-activation' = 'plugin-activation'
@@ -911,7 +912,8 @@ function Materialize-SnapshotLibs {
     foreach ($entry in $libraries.GetEnumerator()) {
         $lib = $entry.Value
         $source = Join-Path $PluginDir "libs\$lib"
-        if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) {
+        $payloadLibrary = Test-Path -LiteralPath (Join-Path $source 'pyproject.toml')
+        if (-not $payloadLibrary) {
             $source = Join-Path $PluginDir "..\..\libs\$lib"
         }
         if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) { continue }
@@ -919,8 +921,13 @@ function Materialize-SnapshotLibs {
         if ([System.IO.Path]::GetFullPath($source) -eq [System.IO.Path]::GetFullPath($destination)) {
             continue
         }
-        Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
-        Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+        if (-not ($PayloadCopied -and $payloadLibrary -and
+                (Test-Path -LiteralPath (Join-Path $destination 'pyproject.toml')))) {
+            if (Test-Path -LiteralPath $destination) {
+                Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction Stop
+            }
+            Copy-InstallerStageDirectory -Source $source -Destination $destination
+        }
         $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $lib
         $newLine = '{0} = {{ path = "libs/{1}" }}' -f $entry.Key, $lib
         $text = $text.Replace($oldLine, $newLine)
@@ -1035,9 +1042,9 @@ function Publish-PayloadSnapshot {
     } else {
         $snapTmp = "$snapDir.tmp-$PID"
         if (Test-Path $snapTmp) {
-            Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item $snapTmp -Recurse -Force -ErrorAction Stop
         }
-        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+        New-Item -ItemType Directory -Path $snapTmp -ErrorAction Stop | Out-Null
         $exclude = @(
             '.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist',
             '.pytest_cache', '.mypy_cache', 'tests'
@@ -1045,10 +1052,14 @@ function Publish-PayloadSnapshot {
         Get-ChildItem -LiteralPath $PluginDir -Force |
             Where-Object { $exclude -notcontains $_.Name } |
             ForEach-Object {
-                Copy-Item -LiteralPath $_.FullName `
-                    -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+                $destination = Join-Path $snapTmp $_.Name
+                if ($_.PSIsContainer) {
+                    Copy-InstallerStageDirectory -Source $_.FullName -Destination $destination
+                } else {
+                    Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
+                }
             }
-        Materialize-SnapshotLibs -SnapshotDir $snapTmp
+        Materialize-SnapshotLibs -SnapshotDir $snapTmp -PayloadCopied
         Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
         Publish-SnapshotSource -SnapshotDir $snapTmp
         Move-Item -LiteralPath $snapTmp -Destination $snapDir
@@ -1414,7 +1425,7 @@ function Install-Package {
     }
     # Local first-party code still resolves its external and build dependencies
     # through the configured, seasoned index, in one retained transaction.
-    $installArgs = @('--python', $VenvPython, '--no-editable')
+    $installArgs = @('--python', $VenvPython)
     foreach ($lib in @(
         @{
             Name = 'config-migrate'

@@ -2166,6 +2166,9 @@ The byte-identical `payload-copy` block follows required output initialization
 and precedes contextual staging. Worktrees also uses it for its structured
 payload copy, without changing context selection, canonical-library handling,
 staging paths or watchdog ownership.
+Codespaces and Logger stamps reuse it for snapshot directories and dependency trees.
+Freshly copied materialized libraries retain that first copy; metadata rewriting
+still runs, while independent materialization still replaces its destination.
 Guards:
 - `COPILOT_PLUGIN_INSTALL_STAGED=1` prevents a re-exec loop; the stage path (not under
   `installed-plugins`) is authoritative. An inherited staging flag from another
@@ -2518,7 +2521,9 @@ selected, and unknown siblings are retained.
 
 Agent MCP's `scripts/uninstall-profile.json` now uses the version-2
 `copilot-extensions.installed-footprint` contract. Its ordered history contains
-complete snapshots and exact introduced/changed/retired deltas. The latest
+complete snapshots and exact introduced/changed/retired deltas.
+Serialized history must fit the native reader's 64 KiB budget; compact JSON
+formatting may change without changing any published history record. The latest
 snapshot's version-1 finite profile is the removal inventory consumed by both
 the shared helper and MCP's native adapter; the adapter no longer maintains a
 second list. Existing version-1 profiles for other owners remain supported.
@@ -3711,6 +3716,14 @@ execution raises `RetainedInputCleanupError` and makes the CLI fail; it never
 turns an incomplete cleanup into success. Context-owned runtime construction
 uses the same exception-preserving cleanup path.
 
+The deployment CLI and immutable runtime engine select non-editable retention.
+Explicit editable operands, including requirement-file entries, are refused.
+Admitted local `tool.uv.sources` mappings are preserved but their editable flags
+are disabled only in private retained metadata; the original checkout is unchanged.
+Native `uv pip install` receives supported arguments, not `uv sync`'s
+`--no-editable` option. Ordinary retained-source API callers keep their explicit
+editable-install behavior unless they select non-editable retention.
+
 Absolute, non-editable source-only installations retain the common source/resource
 layout without reproducing unrelated caller-directory or staging ancestry.
 An unrelated caller uses a separate private working directory; its effective
@@ -4783,7 +4796,7 @@ repair, generation propagation and process-death/live monitor recovery still req
 own implementation and evidence.
 
 Construction uses the explicitly supplied base interpreter's `venv --copies`
-and one `uv pip install --no-sources --no-editable --link-mode copy` invocation
+and one retained, non-editable `uv pip install --link-mode copy` invocation
 over every frozen local package. It preserves the caller's configured indexes;
 it neither fetches unpublished local libraries from an index nor silently
 downgrades to another interpreter. An isolated installed-origin health probe

@@ -1381,7 +1381,7 @@ native integration remains explicitly manual, not required PR CI.
 Logger's corresponding manual `installation-context-full.yml` portfolio
 `logger-bootstrap` runs `test_first_use_logger_bootstrap.py` and the retained
 `test_first_use_logger.py` recipes on native Windows and Ubuntu. It measures the
-actual 15-second hook and exact `{}` stdout, Python-free cold and drift callers,
+actual 15-second hook and exact `{}` stdout, cold and drift callers,
 caller loss, concurrent submissions, ordinary durable receipts/results, complete
 packaged foundation and native raw-checkout snapshot mappings. Drift must run
 `install` (including isolated task/timer reconciliation), not service-less
@@ -1392,10 +1392,34 @@ payload binstub identity without configuring a host bridge or processing
 personal sessions. This is an explicit manual integration lane, not required PR
 CI, live timer/serving-worker proof, selected-snapshot recipe admission or rollout.
 
+The cold consumer fixture keeps the canonical runner's containment and daemon
+lifetime context. On Windows, both actual Logger consumers supply the documented
+`python` prerequisite for caller-owned admission; this is not Python-absent
+machine qualification. On Linux, only the nonproduction lifecycle supervisor
+receives a private, test-owned copy of the runner interpreter; product `PATH`
+still contains no Python.
+The installed foundation's SDK home must be inside the private fixture, proving
+it did not borrow that lifecycle interpreter. These are bounded consumer
+controls, not proof of escape from a caller cleanup Job.
+
 Windows runs recipe refusals, actual bootstrap hooks and the concurrent cold
 consumer in three separate contained packets. A filtered invocation combines
 its selected files, so each packet names only its own file. All three keep the
 canonical storage cap and retain every selected test.
+The Windows cold-hook packet streams bounded failure diagnostics before the
+observer waits for native owner settlement; that wait and its custody are unchanged.
+Fixture staging moves the already-materialized private payload into its installed
+location rather than copying the complete graph again.
+Bounded phase markers distinguish fixture readiness, owner acknowledgement,
+foundation observation and ordinary-result waits; diagnostic paths are fixture-relative.
+Terminal foundation failures, interrupted requests and owner exit without a
+receipt fail the observer immediately rather than consuming its remaining wait.
+After observing owner exit, re-read its receipt before declaring it missing.
+The contained Windows Logger hook fixture proves original caller-process exit,
+not cleanup-Job escape: it retains its strict test-owned Job until native owner
+settlement and closes it in final cleanup. Separate native controls retain
+strict-Job production refusal and contained-child exit on Job closure. Actual
+production Job-survival acceptance remains a separate unresolved requirement.
 
 ## Optional CodeSpaces bootstrap adoption
 
@@ -1824,6 +1848,16 @@ fixture build prerequisites and eight local distributions into a fresh
 unseeded slot, then refreshes a same-version source edit. Build isolation and
 seasoning remain enabled. The existing offline full-provision fixture checks
 the same batching against the real Logger package, health and publication flow.
+Its snapshot-only first-use control removes the original payload and libraries
+before invoking the compatibility wrapper. The UV emulator supplies private
+package effects and cache discovery, but uses the declared setuptools/wheel
+development inputs and native offline UV wheel builds. The actual foundation
+constructor, source/wheel verification, native custody and runtime health remain
+enabled; successful first use must include a recorded wheel build. Native stamp
+and first-use subprocess limits stay at 60 and 420 seconds.
+The outer observation window is 720 seconds to include release-payload
+materialization and real backend staging before those individually bounded calls;
+it does not extend either native subprocess or constructor phase allowance.
 Logger's existing Windows retry fixtures allow 180 seconds for their native
 subprocess and 210 seconds per item: three/four-attempt cases exceeded the old
 20-second subprocess cap on a slow host. Exact attempt counts, mocked 3/6/10

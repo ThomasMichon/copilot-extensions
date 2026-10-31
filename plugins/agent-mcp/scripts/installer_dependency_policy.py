@@ -140,26 +140,9 @@ def _contained(path: Path, roots: tuple[Path, ...]) -> Path:
 
 
 def _argument_pairs(arguments: list[str]):
-    iterator = iter(arguments)
-    positional = False
-    for argument in iterator:
-        if positional or not argument.startswith("-"):
-            yield "", argument
-        elif argument == "--":
-            positional = True
-        else:
-            option, separator, value = argument.partition("=")
-            if (not argument.startswith("--") and len(argument) > 2
-                    and argument[:2] in _VALUE_OPTIONS):
-                option, separator, value = argument[:2], "=", argument[2:]
-            if option in _VALUE_OPTIONS:
-                if not separator:
-                    value = next(iterator, "")
-                if not value or value.startswith("--"):
-                    raise DependencyPolicyError("dependency installation option has no value")
-                yield option, value
-            else:
-                yield option, value
+    return _configuration.argument_pairs(
+        arguments, _VALUE_OPTIONS, error_type=DependencyPolicyError,
+    )
 
 
 def _check_requirement(
@@ -406,7 +389,9 @@ def cutoff_arguments(
     )
 
 
-def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operation="install"):
+def _source_inputs(
+    arguments, environment, cwd, trusted_source_roots, *, operation="install", non_editable=False,
+):
     if "--" in arguments:
         raise DependencyPolicyError("UV end-of-options markers cannot precede mandatory resolver policy")
     if any(arg.split("=", 1)[0] in ("--show-settings", "--dry-run") for arg in arguments):
@@ -514,11 +499,12 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
         if environment.get(variable):
             for path in environment[variable].split():
                 _check_requirements_sources(base / path, set(), roots, base, seen, files, editables)
+    if non_editable and editables:
+        raise DependencyPolicyError("deployed runtimes require non-editable source inputs")
     source_editables = (
         operation != "source-compile"
-        and "--no-sources" not in dict(pairs) and "--no-editable" not in dict(pairs)
+        and not non_editable and "--no-sources" not in dict(pairs)
         and environment.get("UV_NO_SOURCES", "").lower() not in ("1", "true")
-        and environment.get("UV_NO_EDITABLE", "").lower() not in ("1", "true")
     )
     for project in seen if source_editables else ():
         mappings = _toml(project / "pyproject.toml").get("tool", {}).get("uv", {}).get("sources", {})
@@ -638,6 +624,7 @@ def retain_uv_install(
     trusted_source_roots: tuple[Path, ...] = (),
     retained_resource_roots: tuple[Path, ...] = (),
     excluded_local_packages: tuple[str, ...] = (),
+    non_editable: bool = False,
     _operation: str = "install",
     deadline: float | None = None, native_target: bool = False,
     _projection: list[str] | None = None,
@@ -648,6 +635,7 @@ def retain_uv_install(
         error_type=DependencyPolicyError,
         env=env, cwd=cwd, now=now, trusted_source_roots=trusted_source_roots,
         retained_resource_roots=retained_resource_roots, _operation=_operation,
+        **({"non_editable": True} if non_editable else {}),
         **({"deadline": deadline} if deadline is not None else {}),
         **({"native_target": True} if native_target else {}),
         **({"_projection": _projection} if _projection is not None else {}),
@@ -661,6 +649,7 @@ def _retain_uv_install(
     cwd: Path | None = None, now: datetime | None = None,
     trusted_source_roots: tuple[Path, ...] = (),
     retained_resource_roots: tuple[Path, ...] = (),
+    non_editable: bool = False,
     _operation: str = "install",
     _generated_constraints: tuple[Path, ...] = (),
     deadline: float | None = None, native_target: bool = False,
@@ -680,6 +669,7 @@ def _retain_uv_install(
     base, projects, files, editables = _source_inputs(
         arguments, environment, cwd, trusted_source_roots,
         **({"operation": _operation} if _operation != "install" else {}),
+        **({"non_editable": True} if non_editable else {}),
     )
     check_time()
     uv = _select_uv_executable(uv)
@@ -796,6 +786,8 @@ def _retain_uv_install(
             manifest = mirror(project) / "pyproject.toml"
             original_data = _toml(manifest)
             data = remap(original_data)
+            if non_editable:
+                _configuration.freeze_source_editables(data)
             if data != original_data:
                 _write_toml(Path(_native_retained_path(manifest)), data)
         for project in editables:
@@ -919,6 +911,7 @@ def run_uv_install(
     trusted_source_roots: tuple[Path, ...] = (),
     retained_resource_roots: tuple[Path, ...] = (),
     excluded_local_packages: tuple[str, ...] = (),
+    non_editable: bool = False,
     _operation: str = "install", **run_options,
 ) -> subprocess.CompletedProcess:
     """Audit and execute the same private source, requirements and configuration."""
@@ -928,6 +921,7 @@ def run_uv_install(
             uv, arguments, env=env, cwd=cwd, now=now,
             trusted_source_roots=trusted_source_roots,
             retained_resource_roots=retained_resource_roots,
+            **({"non_editable": True} if non_editable else {}),
             **({"excluded_local_packages": excluded_local_packages}
                if excluded_local_packages != () else {}),
             **({"_operation": _operation} if _operation != "install" else {}),
@@ -982,10 +976,10 @@ def main(argv: list[str] | None = None) -> int:
             raise DependencyPolicyError("deployed runtimes require non-editable immutable versioned slots")
         if any(option == "--link-mode" and value != "copy" for option, value in pairs):
             raise DependencyPolicyError("deployed runtimes require copied installation artifacts")
-        arguments = [*arguments, "--no-editable", "--link-mode", "copy"]
+        arguments = [*arguments, "--link-mode", "copy"]
         roots = () if args.registry_only else (tuple(args.trusted_source_root) or _anchor_roots())
         return run_uv_install(
-            args.uv, arguments, trusted_source_roots=roots,
+            args.uv, arguments, trusted_source_roots=roots, non_editable=True,
             stdout=sys.stdout, stderr=sys.stderr,
         ).returncode
     except RetainedInputCleanupError as exc:

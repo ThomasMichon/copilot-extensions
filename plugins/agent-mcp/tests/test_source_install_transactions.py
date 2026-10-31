@@ -917,7 +917,7 @@ _assert_source_runtime
     assert result.returncode == 0, result.stdout + result.stderr
     assert (tmp_path / "events").read_text().splitlines() == ["INSTALL"]
     arguments = json.loads((tmp_path / "install/install-arguments.json").read_text())
-    assert "--no-editable" in arguments and "--editable" not in arguments
+    assert "--no-editable" not in arguments and "--editable" not in arguments
     indices = [index for index, argument in enumerate(arguments) if argument == "--reinstall-package"]
     assert [arguments[index + 1] for index in indices] == [
         "agent-ssh-manager", "agent-credential-relay", "agent-config-migrate", "agent-zdd",
