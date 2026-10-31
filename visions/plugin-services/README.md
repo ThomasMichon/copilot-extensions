@@ -50,11 +50,16 @@ thing, and it never spawns one just to be sure.
 
 ### Reversible automatic-update inhibition
 
-An automatic-update KillSwitch prevents pending normal installation work from
-starting, without retaining inert jobs in the execution queue. Such jobs leave
-with an explicit non-success outcome stating that nothing ran. Clearing the
-switch permits new normal work without per-job provenance approval; trusted
-source selection and ordinary execution admission still apply.
+An automatic-update KillSwitch blocks only update requests explicitly classified
+by `--auto`, without retaining inert jobs in the execution queue. Such jobs leave
+with an explicit inhibited outcome stating that nothing ran. Manual update
+without `--auto`, raw self-install, setup/install-source, doctor/list and ordinary
+launch are not vetoed by that switch. Launch can skip its nested automatic update
+without failing to use an admitted healthy runtime.
+
+Request parsing and propagation preserve automatic versus manual classification.
+Clearing the switch permits new automatic work; trusted source selection and
+ordinary execution admission still apply.
 
 Explicit operator-authorized repair remains available while automatic updates
 are inhibited. One designated install driver can carry repair-as-needed
@@ -492,7 +497,10 @@ That narrow bootstrap switch is not the suite's
 The latter combines an explained operator hold with automatic-update admission
 across its explicitly addressed local suite scope, including Manager. A
 bootstrap-switch default or namespaced-installation exception cannot bypass an
-applicable maintenance hold; unrelated marketplace ownership stays independent.
+an applicable automatic hold for an explicitly automatic update; it is not a
+switch veto of manual installation or ordinary launch. Native ownership and
+unsettled-effect fences remain independent, and unrelated marketplace ownership
+stays independent.
 
 ### delegated-heavy-companion-runtime
 An explicitly

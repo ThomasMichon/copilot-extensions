@@ -30,9 +30,10 @@ Back to the [canonical effort](README.md) and
 
 ## Subsequent authorized scope — summarized, not a verbatim transcript
 
-The operator subsequently selected one combined draft proposal/implementation
-PR, rather than a separate docs-only merge. Effort and vision review precedes
-implementation on that PR. The local atomic all-prepared toolset strategy is
+The latest operator sequence requires the public effort/vision/performance
+proposal to be reviewed and merged first, then local end-to-end implementation
+and recovery qualification, then one final whole-flow implementation PR. This
+replaces the interim combined-draft sequence. The local atomic all-prepared toolset strategy is
 permitted with last-good selection, application-owned readiness, native
 ownership and rollback; it is not a new source-hash framework.
 
@@ -49,7 +50,12 @@ Container deployments use local promoted inputs without requiring a prior
 GitHub release. Source/dependency admission, existing release trust and
 Git/uv validation remain; no manual version or wheel-metadata weakening.
 
-Automatic update inhibition remains intact. The assigned manual rescue is
+Automatic update inhibition remains intact and blocks only an explicit
+`<repo> update --auto`. Manual update without that flag, raw self-install,
+setup/install-source, doctor/list and ordinary launch are not blocked by the
+switch; a nested automatic update does not break launch. Native exclusivity,
+unsettled-effect protection and source/security admission remain separate.
+The assigned manual rescue is
 bounded to its addressed installation and is not fleet rollout or permission
 to clear another owner's state. Already-ready doctor/inventory evidence comes
 first; preserve durable configuration/data, active worktrees/forwards, other

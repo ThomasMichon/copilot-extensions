@@ -272,6 +272,12 @@ installation ownership. Missing or incomplete declarations never imply
 automatic uninstall. Automatic inhibition leaves ordinary healthy launch/use
 available, and manual rescue does not settle an unknown queue owner.
 
+Only an explicitly automatic update request is inhibited by the update switch.
+Manual update without the automatic flag, raw self-install, setup/install-source,
+doctor/list and ordinary launch still reach their normal owner. A launch's
+skipped automatic preparation is not a launch failure. This distinction never
+removes independent source, privilege, active-owner or unsettled-effect guards.
+
 ### setup-invocation-authorizes-dependencies
 A user or authorized agent directly invoking the trusted harness setup flow
 authorizes installation of the dependencies required by its selected

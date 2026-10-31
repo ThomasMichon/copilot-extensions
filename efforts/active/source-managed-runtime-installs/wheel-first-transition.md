@@ -3,9 +3,10 @@
 Back to the [canonical effort](README.md).
 
 **Status: proposed direction; implementation and host deployment are not proven.**
-This extension uses one combined proposal/implementation PR. Initial review of
-the effort and vision changes is an intent checkpoint, not a docs-only merge
-or an installed-system acceptance result.
+The effort, vision and performance proposal is reviewed and merged upstream
+before implementation. Local construction, live version-update/cutover and
+recovery qualification then feed one final whole-flow implementation PR.
+A proposal merge is an intent checkpoint, not installed-system acceptance.
 
 ## Requested outcome
 
@@ -114,6 +115,22 @@ Inhibition suppresses automatic update work, not ordinary launch/use of an
 already admitted healthy runtime. Manual authority does not clear unsettled
 native queues or become a waiver of future unrelated maintenance.
 
+The automatic-update switch blocks only an explicitly classified
+`<repo> update --auto` invocation. Manual `update` without `--auto`, raw
+self-install, setup/install-source, doctor/list and ordinary launch are not
+blocked by that switch. A launch that requests a nested `update --auto` skips
+only the automatic update; it still launches admitted healthy tools.
+Actual parser/request propagation must preserve that classification.
+
+| Switch state / command | Required outcome |
+|---|---|
+| Active / `update --auto` | Explicit inhibited automatic outcome; no update runs |
+| Inactive / `update --auto` | Normal installation-owner admission |
+| Active / manual `update` | Manual owner admission; no switch veto |
+| Active / raw self-install or setup/install-source | Normal addressed owner admission |
+| Active / doctor/list/ordinary launch | Read/use proceeds; nested automatic update is skipped |
+| Any / foreign or unsettled native queue ownership | Independent ownership refusal remains; no stealing or clearing |
+
 Background preparation happens after Manager load, with bounded parallelism and
 one admitted maintenance owner. A long cadence, such as approximately hourly,
 is optional policy rather than an unconditional new scheduler. The next launch
@@ -144,10 +161,10 @@ edit installed code, add privilege, or replace other contributors' open fixes.
 
 ## Plan and acceptance
 
-### W0 — One combined PR and intent checkpoint
+### W0 — Reviewed upstream intent first
 - [ ] Capture the operator request and distinguish requested scope from recommendations.
-- [ ] Review these effort/vision/performance changes upstream before implementation.
-- [ ] Keep one draft PR identity; no docs-only merge or competing implementation PR.
+- [ ] Review and merge the effort/vision/performance proposal upstream before implementation.
+- [ ] Qualify locally, then submit one final implementation PR for the complete flow.
 
 ### W1 — Complete local promotion and Manager fast path
 - [ ] Reuse canonical Main seeding/changefile composition before all source/wheel locking.
@@ -169,16 +186,17 @@ edit installed code, add privilege, or replace other contributors' open fixes.
 - [ ] Replace foreground reconciliation/projection/hoist work with bounded prepared selection while proving correct fresh-body delivery.
 - [ ] Verify Windows PowerShell and POSIX noninteractive SSH-shaped self-install without TTY, ambient PATH or profile assumptions where available.
 
-### W4 — Final review and bounded local rollout
-- [ ] Clear required CI/review on the same combined PR and update actual operating documentation.
-- [ ] Only after likely-working container proof, read local owner/dependency risk and a specific rollback plan.
-- [ ] Refresh target-specific readiness/ownership before deployment; a healthy project doctor is not all-suite clearance.
-- [ ] Require the declared owner route/capability for any real remote SSH validation; distinguish it from local SSH-shaped process tests.
-- [ ] Obtain/apply the addressed manual local deployment authority; never silently roll out an SSH fleet.
-- [ ] Report actual CLI, Manager and required service health and preserved protected consumers.
+### W4 — Final implementation review and deployment-owner handoff
+- [ ] Clear required CI/review on the final whole-flow implementation PR and update actual operating documentation.
+- [ ] Confirm actual merge and Main promotion before handing the released flow to its deployment owner.
+- [ ] Supply the local qualification, target-specific owner/readiness and independent rollback evidence; a healthy project doctor is not all-suite clearance.
+- [ ] Leave host installation, peer coordination and any declared-route remote fleet update with the separately assigned deployment owner.
+- [ ] Distinguish local SSH-shaped process proof from actual remote SSH validation.
 
 The phases and owner reuse above are implementation decomposition
 _(agent-recommended)_. The operator explicitly requested whole-system proof,
-local promotion inputs, one combined PR, scoped recovery and preservation.
+local promotion inputs, proposal review before implementation, one final code
+PR, scoped recovery and preservation. The exact automatic/manual truth table is
+operator-required, not a generic maintenance-active veto.
 If an unavoidable external credential/model/role is required, identify the
 blocked service and scope; do not claim the portfolio passed.

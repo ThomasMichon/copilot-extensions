@@ -23,8 +23,8 @@ Windows runtime-only pilot and completing the adopter's installed service/tool
 transition. Keep the dedicated source healthy and current through the existing
 maintenance owner and canonical install flow. The [wheel-first extension](wheel-first-transition.md) proposes independently
 maintained runtime installation as the ordinary suite path, with plugins as
-connectors rather than installation sources. Its initial review is an intent
-checkpoint on one combined proposal/implementation PR, not a claim that the
+connectors rather than installation sources. Its initial reviewed proposal is an intent
+checkpoint merged before implementation, not a claim that the
 earlier optional-source deployment has already migrated or that native
 service-supervision ownership changes.
 
@@ -38,7 +38,7 @@ service-supervision ownership changes.
 | Linux clean-room runner | Reproduces and verifies actual source installation and activation | Existing Docker clean-room rig; WSL is a supported host |
 | Windows validation runner | Verifies native installer, resolver and non-deployment hook behavior | Isolated Windows fixtures, then an explicitly authorized runtime-only pilot |
 | Independent reviewer | Reviews each coherent proposal or implementation change | Repository PR review |
-| Wheel-first transition coordinator | Owns the operator-directed combined proposal/implementation slice and its container-before-host acceptance | #7028, #9688 and the combined PR; existing source/resource custodians remain |
+| Wheel-first transition coordinator | Owns the reviewed proposal followed by local qualification and one final implementation PR | #7028 and #9688; existing source/resource custodians remain; deployment/fleet handoff is separate |
 
 ## Coordination
 
@@ -326,11 +326,11 @@ disposable scope while preserving config and durable data.
 ## Plan
 
 ### Phase W — Wheel-first independent suite (proposal extension)
-- [ ] Review the [single-PR intent checkpoint and W0–W4 plan](wheel-first-transition.md#plan-and-acceptance) before implementing the new direction.
+- [ ] Review and merge the [upstream intent checkpoint and W0–W4 plan](wheel-first-transition.md#plan-and-acceptance) before implementing the new direction.
 - [ ] Deliver the Manager-only fast path and complete locally promoted uv/wheel inputs through existing source/release owners.
 - [ ] Prove whole-system Windows-container installation, source/version update, cutover, state survival and the generic recovery cases.
 - [ ] Integrate independent maintenance and bounded prepared plugin/guidance selection without foreground rebuilds/scans.
-- [ ] Complete review/CI on that same PR; consider only the separately admitted, addressed local rollout after container proof.
+- [ ] Complete review/CI and Main promotion of one final implementation PR, then hand installation/fleet work to its assigned deployment owner.
 
 This new direction is not retroactively qualified by completed historical
 phases or the environment-only benchmark. Its detailed acceptance matrix is
@@ -1155,8 +1155,9 @@ implementation, rollout or parent completion is declared.
 ## Proposal
 
 The [wheel-first extension](wheel-first-transition.md) is proposed for initial
-intent review on one combined draft PR. That checkpoint is not a docs-only merge
-or application acceptance. Implementation remains scoped by its W0–W4 gates,
+upstream review and merge before implementation. That checkpoint is not
+application acceptance. One final code PR follows local qualification.
+Implementation remains scoped by its W0–W4 gates,
 native ownership and the explicit container-before-host requirement.
 
 Keep deployment policy, source selection and serving-generation selection
