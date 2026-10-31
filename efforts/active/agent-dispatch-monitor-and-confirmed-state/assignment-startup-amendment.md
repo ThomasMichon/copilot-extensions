@@ -41,9 +41,12 @@ existing scheduling authority, not a reason to add another timer.
 
 `SpawnReservationMixin.reserve_spawn` is a distinct pre-worker operation:
 it reserves queued, unowned work without transitioning the task to `CLAIMED`.
-It does not enforce `Task.not_before`. Thus selection-time filtering is not an
-authoritative reservation-admission guarantee. Existing claim identity and
-per-lane capacity selection also do not implement the target transaction.
+Fresh queued admission now enforces the stored `Task.not_before` in the write
+transaction. Active/exclusive replay remains a non-spawning custody observation,
+and suspended re-embodiment preserves its existing owner/workspace path.
+This closes the selection-versus-reservation due-time gap without choosing a
+new retry policy. Existing claim identity and per-lane capacity selection still
+do not implement the target transaction. Source support is not installed proof.
 
 Startup revisions, allocation identity, native attachment history, effect
 custody and retained-reservation accounting are existing foundations. Preserve

@@ -142,7 +142,7 @@ of the current reservation and worker-claim operations:
 | Spawn reservation | `reserve_spawn` reserves a queued, unowned task separately from its execution claim | `QUEUED -> CLAIMED` commits pool binding, reservation creation/reuse and occupied capacity atomically |
 | Worker identity | `claim_one` requires a worker identity; the embodied worker claims later | Initial placement needs no worktree/native identity; startup attaches the actual identities afterward |
 | `STARTED` | A later worker-owned transition | Startup has succeeded and the worker has explicitly accepted and begun the assignment |
-| Retry eligibility | Supervisor selection and transactional `claim_one` check task `not_before`; `reserve_spawn` does not enforce that timestamp | Every new selection/reservation/claim enforces the applicable retry decision |
+| Retry eligibility | Supervisor selection, transactional `claim_one` and fresh queued `reserve_spawn` admission check task `not_before` | Every new selection/reservation/claim enforces the applicable retry decision, including any future scoped policy |
 
 These are source-level statements, not evidence about a particular installed
 runtime. The relevant owners are `Supervisor._eligible`,
@@ -151,6 +151,12 @@ runtime. The relevant owners are `Supervisor._eligible`,
 workspace allocation identity and effect-custody checks remain separate
 correctness constraints; the target must compose them, not replace them.
 
+Fresh queued reservations refuse with `TaskError` (HTTP 409) before the stored
+`not_before`, admit exactly at that deadline, and never change the scheduled
+timestamp. Existing active/exclusive reservations still return `reserved=false`
+as custody evidence without admitting another spawn. Suspended re-embodiment
+retains its existing owned-workspace path; it is not new queued admission.
+
 The [assignment/startup repair amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md)
 owns the target transition ordering, decline closeout, retry-policy choices,
 compatibility sequence and validation matrix. It retains bounded startup
@@ -158,7 +164,8 @@ attempts under the selected pool, periodic decision nudges through existing
 supervision, and return to `QUEUED` on exhaustion without prematurely freeing
 capacity or replaying unresolved effects. Retry duration, backoff and task-wide
 versus pool-specific scope remain open design choices. There is no new retry
-timer, runtime transition, or deployment in this documentation revision.
+timer or pool-owned `CLAIMED` transition in the due-time admission fix, and
+source support does not establish installed adoption.
 
 ## Retained startup and process capacity
 
