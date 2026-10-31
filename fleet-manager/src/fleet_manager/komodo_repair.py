@@ -170,6 +170,10 @@ class _Attempt:
         try:
             selected = self.resolution.current().candidate
             self._custody()
+            validate_retained_outcomes(self.state.root, self.record)
+            validate_history(self.state.root, self.history)
+            if self.retained is not None and read_outcome(self.state.root, self.retained[0]) != self.retained[1]:
+                raise PlanError("Komodo repair retained outcome changed during publication")
             if self.observation is not None:
                 containers = self.native.inspect(
                     selected.declaration, selected.material, deadline=self.deadline)
@@ -181,12 +185,8 @@ class _Attempt:
                     selected, containers, self.observation.network, pending=self.observation.failed)
                 if (network["Containers"] if network is not None else None) != self.observation.endpoints:
                     raise PlanError("Komodo repair native network endpoints changed during publication")
-                self.permit = self.owner.admission.revalidate(self.permit, self.request)
-            validate_retained_outcomes(self.state.root, self.record)
-            validate_history(self.state.root, self.history)
-            if self.retained is not None and read_outcome(self.state.root, self.retained[0]) != self.retained[1]:
-                raise PlanError("Komodo repair retained outcome changed during publication")
             self._custody()
+            self.permit = self.owner.admission.revalidate(self.permit, self.request)
         except BaseException:
             self.owner.admission.discard(self.permit)
             raise

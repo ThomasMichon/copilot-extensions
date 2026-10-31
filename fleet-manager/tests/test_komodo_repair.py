@@ -27,7 +27,7 @@ from fleet_manager.node_journal import NodeJournal
 from fleet_manager.planning import PlanError, canonical, decode, digest
 from fleet_manager.runtime_admission import AdmissionError, AdmissionAuthority, OperationGrant
 from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
-from komodo_repair_test_controls import late_material_drift
+from komodo_repair_test_controls import late_material_drift, late_publication_drift
 from test_komodo_declaration import intent
 from test_komodo_native import native_rig as native_rig
 from test_runtime_admission import Harness, actor, policy
@@ -56,6 +56,11 @@ LATE_MATERIAL = [
     "publication-late-credential-inode", "publication-late-credential-value",
     "publication-late-data-inode",
 ]
+LATE_PUBLICATION = [
+    f"publication-late-{decision}-{change}"
+    for decision in ("succeeded", "failed")
+    for change in ("transition", "grant", "expiry", "reconnect", "disconnect")
+]
 DRIFTS = [
     f"publication-drift-{stage}-{change}"
     for stage in ("retain", "save", "append")
@@ -74,7 +79,7 @@ REFUSALS = [
     "health-endpoint-drift", "host-root-after-health",
     "missing-network-membership",
     "mismatched-network-attachment",
-] + DRIFTS + LATE_MATERIAL
+] + DRIFTS + LATE_MATERIAL + LATE_PUBLICATION
 
 
 @pytest.mark.parametrize("mode", [
@@ -233,7 +238,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             uncertain = journal.inspect(original)
             assert uncertain.to_dict()["status"] == "unknown"
             assert uncertain.to_dict()["sequence"] == 2 and uncertain.to_dict()["result_ref"] is None
-            failed = mode == "failed" or mode in TERMINAL_NETWORK or mode in (
+            failed = mode == "failed" or mode.startswith("publication-late-failed-") or mode in TERMINAL_NETWORK or mode in (
                 "status-failed-replaced-network", "terminal-failed-conflicting-attempt",
                 "status-failed-conflicting-attempt")
             original_health_failure[0] = failed
@@ -358,6 +363,24 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             fired: list[bool] = []
             if mode in LATE_MATERIAL:
                 fired = late_material_drift(monkeypatch, rig["material"], mode)
+            elif mode in LATE_PUBLICATION:
+                def late_change() -> None:
+                    change = mode.rsplit("-", 1)[1]
+                    if change == "transition":
+                        transition["active"] = False
+                    elif change == "grant":
+                        harness.current = policy(revision=2, enrollments=())
+                    elif change == "expiry":
+                        harness.clock.value += 31
+                    else:
+                        path = rig["directory"] / "live.json"
+                        changed = live()
+                        attachment = changed["core"]["NetworkSettings"]["Networks"][desired["project"] + "_default"]
+                        attachment.update(EndpointID="reconnected-fixture" if change == "reconnect" else "",
+                                          NetworkID=attachment["NetworkID"] if change == "reconnect" else "")
+                        path.write_text(json.dumps(changed))
+
+                fired = late_publication_drift(monkeypatch, late_change)
             partial_save: list[tuple[Path, bytes, int, int]] = []
             late_key = [False]
             if mode == "status-late-network":
@@ -552,7 +575,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     assert decode((owner_root / "selection.json").read_bytes())["attempt"] == retained
                     if mode == "publication-drift-retain-key-during-native":
                         assert decode((owner_root / "selection.json").read_bytes())["good"] is None
-                if mode in LATE_MATERIAL:
+                if mode in (*LATE_MATERIAL, *LATE_PUBLICATION):
                     assert fired and len(journal.results()) == 2
                     assert decode((owner_root / "selection.json").read_bytes())["attempt"] == retained
                 if mode == "host-root-after-health" or mode.endswith("host-runtime"):
@@ -689,7 +712,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             assert (rig["directory"] / "effects").read_text() == expected_effects
             assert not (rig["directory"] / "retire-effects").exists()
             if mode not in ("mount-order", "changed-native", "process-after-health", "status-late-network",
-                            *DRIFTS, *REPLACED_TERMINAL):
+                            *DRIFTS, *REPLACED_TERMINAL, *LATE_PUBLICATION):
                 assert live() == native_before
             if mode not in ("revoked-transition",):
                 assert resolver_calls

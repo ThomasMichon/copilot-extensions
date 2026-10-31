@@ -154,6 +154,10 @@ transition admission, exact same-journal settlement, immutable prior-failure
 history, process/key drift and interrupted publication controls.
 `test_komodo_repair.py` retains four focused component smoke cases; the remaining
 matrix is marked `client_distribution_full` for explicit full/manual runs.
+Its late-publication controls withdraw transition/request authority, expire the
+permit or reconnect/disconnect the same container after immutable-evidence
+reads inside the original terminal transaction. Both success and failure must
+retain the exact UNKNOWN receipt, original attempt and two journal rows.
 Use the existing standalone runner with a `komodo_repair` selector and
 `-m "not client_distribution_full"` for its focused smoke/record controls;
 omit that marker filter for the full packet. Required unit-only CI is unchanged.
