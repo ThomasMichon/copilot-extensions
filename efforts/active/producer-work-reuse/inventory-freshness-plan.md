@@ -3,8 +3,11 @@
 [Effort](README.md) · [Previous authority contract](selected-authority-contract.md) · #7949
 
 **Status: proposal; no cache, push producer, transport, credential or runtime
-algorithm change is authorized by this document.** Exact grace durations and
-action-admission policy require a recorded decision before implementation.
+algorithm change is authorized by this document.** Subsequent explicit
+[status-policy/Option-F selection](inventory-r1b-consumer-proposal.md) records
+the chosen durations and control boundary. Caller/path/reconcile/transport
+implementation still requires exact admission; the historical proposal below
+does not itself activate it.
 The retained S3 draft remains unqualified.
 
 ## Request and boundaries
@@ -106,8 +109,9 @@ returns unknown rather than authoritative emptiness.
 
 Policy parameters are symbolic: `inventory_fresh_window`,
 `inactive_reconcile_window`, `connected_observation_grace`,
-`disconnected_recheck_window`, and a hard per-effect proof age. **No numeric
-duration or authorization is selected here.** Zero-work reads must not start
+`disconnected_recheck_window`, and a hard per-effect proof age. This original
+proposal's symbolic parameters are now resolved by the linked selected-policy
+record; no runtime implementation is activated here. Zero-work reads must not start
 an owner daemon merely to refresh a timestamp.
 
 | Input / boundary | Required proposed behavior |
@@ -148,11 +152,11 @@ No new remote Bridge/Worktrees stack or service is installed by this plan.
 
 ## Reconcile the authority contract explicitly
 
-The previous `selected_then_full_publication` contract remains the existing
-implementation requirement until a reviewed successor is explicitly accepted.
-This proposal changes **inventory freshness**, not credentials.
+`selected_then_full_publication` remains the control-authority contract.
+The selected status policy changes inventory freshness, not credentials or
+the full-all-account revocation boundary.
 
-**Proposed separation for review:**
+**Selected separation; implementation still gated:**
 
 1. Local status/cache publication and accepted passive push deltas are
    observational and age-labelled. They do not renew/release tenants, authorize
@@ -166,22 +170,21 @@ This proposal changes **inventory freshness**, not credentials.
    decision. The current Windows direct-exec route can reconnect; `is_alive`
    alone is not a no-reconnect guarantee. Until a real owned no-reconnect
    contract is admitted, recheck provider state before that effect or defer it.
-4. Full candidate/config/**credential** validation before **actionable**
-   publication is not silently removed. Decide separately whether the successor
-   uses bounded inventory proof plus fresh selected authority and source-owned
-   invalidation, or retains that full-authority validation at real control
-   publication boundaries. No opaque credential revision is invented. Unknown
+4. Full LIVE candidate/config/**credential** validation remains **once per
+   completed actionable control-publication batch**, not per status read,
+   push delta or tenant. Option F is selected, not Option S. No opaque
+   credential revision is invented. Unknown
    account/config/provider evidence still suppresses control publication.
 5. Heartbeat/release continue to compare expected tenant generations at the
    existing owner's atomic mutation boundary; queued mirrors require their own
    fresh admission at actual execution. Cache reads and push acceptance do not
    bypass those fences.
 
-The required decisions are: storage approval; freshness/grace parameters and
-which actions they permit; status-only versus control-publication semantics;
-no-reconnect/push endpoint ownership; and the full-versus-selected authority
-rule for real control publication. Review of this plan alone must not be
-presented as selecting missing durations or waiving a source owner's admission.
+The later user selection fixes status ages, demand/cooldown behavior and full
+Option-F control publication. Production path/source wiring, no-reconnect/push
+endpoint ownership and exact caller/provider hunks still require admission.
+Neither this plan's review nor that policy selection releases another source
+owner or grants transport/consumer implementation.
 
 ## Representative measurements and acceptance proposal
 

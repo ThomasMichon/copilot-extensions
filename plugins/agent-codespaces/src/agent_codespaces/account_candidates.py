@@ -3,12 +3,45 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .config import CodespacesConfig, ConfigProviderReports
+    from .gh_account import AccountInventory
+
+
+@dataclass(frozen=True)
+class CandidateRead:
+    """Values read by one candidate resolution, not a freshness authority.
+
+    Configuration and routing remain their source-owned values. Consumers must
+    project them without mutation. Provider reports retain partial/error
+    provenance; exceptions from the existing readers still propagate.
+    """
+
+    accounts: tuple[str | None, ...]
+    routing: AccountInventory
+    configuration: CodespacesConfig
+    provider_reports: ConfigProviderReports
+    bound_accounts: tuple[str, ...]
+    provider_configs: tuple[tuple[str, Path], ...]
+    active_account: str | None
 
 
 def candidates(
     *, on_account: Callable[[str | None], None] | None = None,
     concurrent: bool = False,
 ) -> tuple[str | None, ...]:
+    """Return the existing ordered accounts projection."""
+    return read_candidates(on_account=on_account, concurrent=concurrent).accounts
+
+
+def read_candidates(
+    *, on_account: Callable[[str | None], None] | None = None,
+    concurrent: bool = False,
+) -> CandidateRead:
     """Resolve account sources, optionally overlapping namespace discovery.
 
     Notifications follow discovery order; the returned tuple retains the existing
@@ -21,6 +54,8 @@ def candidates(
     bound = account_binding.bound_accounts_or_raise()
     groups: dict[int, tuple[str, ...]] = {}
     notified: set[str] = set()
+    configuration = None
+    provider_reports = None
 
     def record(rank: int, accounts: Iterable[str]) -> None:
         groups[rank] = tuple(account for account in accounts if account)
@@ -31,11 +66,13 @@ def candidates(
                 on_account(account)
 
     def configured_accounts(inventory: Callable[[], gh_account.AccountInventory]) -> tuple[str, ...]:
-        options = (
-            {"provider_reports": scan_config_providers(concurrent_roots=True)}
-            if concurrent else {}
+        nonlocal configuration, provider_reports
+        provider_reports = (
+            scan_config_providers(concurrent_roots=True)
+            if concurrent else scan_config_providers()
         )
-        repos = load_merged_config(include_cwd=False, **options).repos
+        configuration = load_merged_config(include_cwd=False, provider_reports=provider_reports)
+        repos = configuration.repos
         routing = inventory()
         return tuple(
             login for repo in repos if (login := routing.account_for(repo))
@@ -61,7 +98,8 @@ def candidates(
             record(2, providers)
             for future in as_completed((mapped, configured, active)):
                 if future is mapped:
-                    record(0, mapped.result().accounts)
+                    routing = mapped.result()
+                    record(0, routing.accounts)
                 elif future is configured:
                     record(3, configured.result())
                 else:
@@ -79,4 +117,7 @@ def candidates(
         selected.append(None)
         if on_account is not None:
             on_account(None)
-    return tuple(selected)
+    return CandidateRead(
+        tuple(selected), routing, configuration, provider_reports, bound,
+        tuple(providers.items()), groups[4][0] if groups[4] else None,
+    )
