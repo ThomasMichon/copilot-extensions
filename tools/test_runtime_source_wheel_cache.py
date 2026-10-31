@@ -90,6 +90,78 @@ def test_failed_build_or_validation_cannot_publish_or_poison_retry(assembly, fai
     assert len(builds) == (1 if failure == "build" else 2)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows sharing semantics")
+def test_cache_publication_recovers_released_native_share_lock(assembly, monkeypatch):
+    root, builds, assemble = assembly
+    rename = Path.rename
+    denied = []
+
+    def held_rename(candidate, destination):
+        if candidate.name == "entry" and not denied:
+            wheel = next(candidate.glob("*.whl"))
+            with cache._open(wheel):
+                try:
+                    return rename(candidate, destination)
+                except OSError as error:
+                    denied.append(error.winerror)
+                    raise
+        return rename(candidate, destination)
+
+    monkeypatch.setattr(Path, "rename", held_rename)
+    selected = assemble("first")
+    assert denied and denied[0] in (5, 32, 33)
+    assert selected.read_bytes() == assemble("repeated").read_bytes() == b"selected artifact"
+    assert len(builds) == 1
+    assert len(list((root / ".source-wheel-cache" / "inputs").glob("*/wheel.json"))) == 1
+
+
+@pytest.mark.parametrize("failure", ["persistent", "other", "changed", "foreign", "deadline"])
+def test_cache_publication_refuses_unrecoverable_or_changed_candidate(assembly, monkeypatch, failure):
+    root, builds, assemble = assembly
+    rename = Path.rename
+    attempts = []
+    denied = PermissionError("cache publication denied")
+    denied.winerror = 87 if failure == "other" else 32
+    foreign = []
+    clock = [time.monotonic()]
+    deadline = clock[0] + 10
+    if failure == "deadline":
+        monkeypatch.setattr(cache.time, "monotonic", lambda: clock[0])
+
+    def rejected_rename(candidate, destination):
+        if candidate.name != "entry":
+            return rename(candidate, destination)
+        attempts.append(candidate)
+        raise denied
+
+    def during_wait(_seconds):
+        candidate = attempts[-1]
+        if failure == "changed":
+            next(candidate.glob("*.whl")).write_bytes(b"changed artifact!")
+        elif failure == "foreign":
+            destination = candidate.parent.parent / cache.hashlib.sha256(
+                b"source+target+exact-backend",
+            ).hexdigest()
+            destination.mkdir()
+            marker = destination / "foreign"
+            marker.write_bytes(b"not this construction")
+            foreign.append(marker)
+        elif failure == "deadline":
+            clock[0] = deadline + 1
+
+    monkeypatch.setattr(Path, "rename", rejected_rename)
+    monkeypatch.setattr(cache.time, "sleep", during_wait)
+    expected = PermissionError if failure in ("persistent", "other") else WheelError
+    with pytest.raises(expected):
+        assemble("failed", deadline=deadline)
+    assert len(attempts) == (cache.runtime._AV_RETRY_ATTEMPTS if failure == "persistent" else 1)
+    assert len(builds) == 1
+    assert not list((root / ".source-wheel-cache" / "inputs").glob("*/wheel.json"))
+    assert not (root.parent / "failed").exists()
+    if failure == "foreign":
+        assert len(foreign) == 1 and foreign[0].read_bytes() == b"not this construction"
+
+
 @pytest.mark.parametrize("corruption", ["bytes", "receipt", "extra", "missing"])
 def test_corrupt_completed_entry_is_explicit_and_never_rebuilt(assembly, corruption):
     root, builds, assemble = assembly
