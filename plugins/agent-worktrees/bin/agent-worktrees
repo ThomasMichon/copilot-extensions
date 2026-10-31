@@ -9,8 +9,11 @@
 _aw_update_entry_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 . "$_aw_update_entry_dir/agent-worktrees-update-entry.sh"
 export PYTHONUTF8=1
-AGENT_WORKTREES_PAYLOAD_ROOT="$(CDPATH= cd -- "$_aw_update_entry_dir/.." && pwd -P)" || exit
-export AGENT_WORKTREES_PAYLOAD_ROOT
+_aw_payload_root="$(CDPATH= cd -- "$_aw_update_entry_dir/.." && pwd -P)" || exit
+if [ -f "$_aw_payload_root/plugin.json" ]; then
+  AGENT_WORKTREES_PAYLOAD_ROOT="$_aw_payload_root"
+  export AGENT_WORKTREES_PAYLOAD_ROOT
+fi
 # Sanitize inherited Python runtime variables before dispatching to the
 # resolved, architecture-correct runtime-slot interpreter (#2411 parity with
 # the Windows binstub fix). A stray mismatched-architecture PYTHONHOME/

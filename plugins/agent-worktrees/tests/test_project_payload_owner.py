@@ -102,8 +102,9 @@ def test_native_consumer_keeps_deployed_owner(payloads, tmp_path):
 
 @pytest.mark.parametrize("shell", ["powershell", "bash"])
 @pytest.mark.parametrize("inherited_payload", [False, True])
-def test_payload_entry_binds_relocated_runtime_to_its_own_peers(
-    tmp_path, request, shell, inherited_payload,
+@pytest.mark.parametrize("copied_entry", [False, True])
+def test_normal_entry_retains_selected_payload_for_relocated_runtime(
+    tmp_path, request, shell, inherited_payload, copied_entry,
 ):
     executable = request.getfixturevalue(f"native_{shell}")
     home = tmp_path / "home"
@@ -116,8 +117,10 @@ def test_payload_entry_binds_relocated_runtime_to_its_own_peers(
         (root / "bin" / f"{root.name}{suffix}").touch()
     runtime_bin = home / ".agent-worktrees" / "bin"
     runtime_bin.mkdir(parents=True)
+    entry_dir = home / ".local" / "bin" if copied_entry else payload / "bin"
+    entry_dir.mkdir(parents=True, exist_ok=True)
     if shell == "powershell":
-        entry = payload / "bin" / "agent-worktrees.ps1"
+        entry = entry_dir / "agent-worktrees.ps1"
         shutil.copyfile(PLUGIN / "bin" / entry.name, entry)
         name = "agent-worktrees-update-entry.ps1"
         shutil.copyfile(PLUGIN / "bin" / name, entry.parent / name)
@@ -126,7 +129,7 @@ def test_payload_entry_binds_relocated_runtime_to_its_own_peers(
         )
         command = [executable, "-NoProfile", "-File", str(entry)]
     else:
-        entry = payload / "bin" / "agent-worktrees"
+        entry = entry_dir / "agent-worktrees"
         shutil.copyfile(PLUGIN / "bin" / entry.name, entry)
         name = "agent-worktrees-update-entry.sh"
         shutil.copyfile(PLUGIN / "bin" / name, entry.parent / name)
@@ -149,7 +152,10 @@ def test_payload_entry_binds_relocated_runtime_to_its_own_peers(
     environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
         environment.pop(key, None)
-    if inherited_payload:
+    if copied_entry:
+        key = "AGENT_WORKTREES_PAYLOAD_ROOT" if inherited_payload else "COPILOT_PLUGIN_ROOT"
+        environment[key] = str(payload)
+    elif inherited_payload:
         environment["AGENT_WORKTREES_PAYLOAD_ROOT"] = str(tmp_path / "foreign-payload")
     result = subprocess.run(
         [*command, "pr-watch", "ownerstatus", "--json"], cwd=installed, env=environment,
