@@ -259,6 +259,9 @@ def _retained_windows(
 ):
     import msvcrt
 
+    execution_deadline = time.monotonic() + timeout
+    if deadline is not None:
+        execution_deadline = min(execution_deadline, deadline)
     packet = _guardian_packet(procutil, runtime_path, guardian_sources)
     reader, writer = os.pipe()
     process = None
@@ -269,12 +272,14 @@ def _retained_windows(
         os.set_handle_inheritable(handle, True)
         try:
             try:
+                if time.monotonic() >= execution_deadline:
+                    raise ChildTimeoutExpired(argv, timeout, output="", stderr="")
                 process = subprocess.Popen(
                     [sys.executable, "-I", "-B", "-c", _GUARDIAN_BOOTSTRAP,
                      "--owner-handle", str(handle), "--runtime-root", str(root),
                      "--runtime-version", version,
                      "--timeout", str(timeout),
-                     *(["--deadline", str(deadline)] if deadline is not None else []), "--", *argv],
+                     "--deadline", str(execution_deadline), "--", *argv],
                     cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                     startupinfo=startup, close_fds=True, executable=sys.executable,
@@ -287,7 +292,9 @@ def _retained_windows(
         os.close(reader)
         reader = -1
         try:
-            stdout, stderr = process.communicate(input=packet, timeout=timeout + 30)
+            stdout, stderr = process.communicate(
+                input=packet, timeout=max(0, execution_deadline - time.monotonic()) + 30,
+            )
         finally:
             os.close(writer)
             writer = -1
@@ -311,7 +318,7 @@ def _retained_windows(
             raise RuntimeError("installer retention guardian returned invalid completion")
         if outcome["launch_error"] is not None:
             raise ChildLaunchError(f"Installer child could not start: {outcome['launch_error']}")
-        if outcome["timed_out"]:
+        if outcome["timed_out"] or time.monotonic() >= execution_deadline:
             raise ChildTimeoutExpired(
                 argv, timeout, output=outcome["stdout"], stderr=outcome["stderr"],
             )
@@ -360,9 +367,12 @@ def _supervise_windows(args, argv):
 
 
 def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, expired):
+    deadline = time.monotonic() + args.timeout
+    if absolute_deadline is not None:
+        deadline = min(deadline, absolute_deadline)
     if disconnected():
         raise RuntimeError("installer caller exited before child execution")
-    if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
+    if time.monotonic() >= deadline:
         return expired
     try:
         process, job = procutil.spawn_sync_in_kill_on_close_job(
@@ -375,9 +385,6 @@ def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, e
             "returncode": 1, "stdout": "", "stderr": "",
             "timed_out": False, "launch_error": str(error),
         }
-    deadline = time.monotonic() + args.timeout
-    if absolute_deadline is not None:
-        deadline = min(deadline, absolute_deadline)
     timed_out = False
     try:
         while True:
@@ -389,6 +396,7 @@ def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, e
                 break
             try:
                 stdout, stderr = process.communicate(timeout=min(remaining, 0.1))
+                timed_out = time.monotonic() >= deadline
                 break
             except subprocess.TimeoutExpired:
                 continue

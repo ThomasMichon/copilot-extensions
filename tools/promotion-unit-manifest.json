@@ -3263,7 +3263,18 @@
         "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[from installer_engine_process import _load_guardian_resources as load]",
         "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[from installer_engine_process import _run_guardian_child]",
         "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[import installer_engine_process as process\\nprocess._load_guardian_resources(sources)]",
-        "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[import installer_engine_process as process\\nloader = process._guardian_packet]"
+        "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[import installer_engine_process as process\\nloader = process._guardian_packet]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_target_creation_cannot_rearm_the_requested_execution_limit",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_guardian_cannot_report_success_after_requested_execution_limit[spawn]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_guardian_cannot_report_success_after_requested_execution_limit[completion]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[packet-None]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[packet-2.0]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[startup-None]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[startup-2.0]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[completion-None]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[completion-2.0]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[retirement-None]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[retirement-2.0]"
     ],
     "sources": {
         "libs/versioned-runtime/versioned_runtime_publication.py": "070c9db612246d8722e3f2c94487bfb63177a78e2485a7f14c5d38ed8060b79d",
@@ -3341,7 +3352,7 @@
         "libs/installer-engine/installer_engine.py": "003dfea5d20dac38c22df88a2d0e806adc9117a676dfa5070380faf3a4caf3e4",
         "libs/installer-engine/installer_source_build.py": "dd55227353473855111c060feb8f35c8030520e13e9322086c770a09e4c5eb76",
         "libs/installer-engine/installer_source_wheel_cache.py": "5d7ff286daf2b2c5b2e9b4124f2d5b15c9b8ac3d336199b03fec0312858b64b0",
-        "libs/installer-engine/installer_engine_process.py": "bb2ef4d9a4b824a5cf72039bbff74f499e348fb0d6c65bde284bdd9325e09c27",
+        "libs/installer-engine/installer_engine_process.py": "1990497b25939436da4078b594a68788f41df24a5b4bc872b5968aaa32acaf69",
         "libs/installer-engine/installer_feed_policy.py": "529d45bd6d72cf36ac9b2c75dc56c98d63ad2b0364a26073ed8e355fd02b3c7d",
         "libs/installer-engine/installer_native_feed.py": "e7e6590d9f35fa7313d50ba685eafab793c7760fd78eb6ae6bc0afaaf9c294be",
         "libs/installer-engine/installer_packaging_seed.py": "1cdca7036d87411d2e30428d717b85dde62c265f69c24989a1a7b8e868266b74",
@@ -3520,7 +3531,7 @@
         "tools/qualify_promotion_candidate.py": "b060a7656f88d32f6f3457d323f192e08af55b8d8a4d9a6c52a6530a17d11b80",
         "tools/release_controller_contract.py": "c7ae2b51563a37f4290ff1fe42f19ba337ae363c82ea5ed329eb63b078e20f78",
         "tools/release_controller_shell.py": "ee579b2867686ea3788e1c22ea9e9c796a3849683988197f87055bef6cce426f",
-        "tools/release_helper_loaders.py": "5777fcc99d11c84d7837015bd6c59a0b83d77b6683ed2fe0f8857b3220016605",
+        "tools/release_helper_loaders.py": "7eb1c875afb4b81e659006fa1fe2a5f408704ff460d435ad86788b48d3a2b5ad",
         "tools/reuse_promotion_artifacts.py": "4fbd66d0f624a6b3eaca3ffbaf3058a09d3236d6240ea1304eddf26d0daa2a74",
         "tools/run-promotion-unit-tests.py": "e0ca288cd47480fd123c9920e6be8a5a4745c72bcc61c276221d7b89d080b804",
         "tools/runtime_profile.py": "3e2a25c54d9767c1757e2f8a2db42abd2bb0e51765e230d77f5582a4116221d0",
@@ -3641,8 +3652,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py": "5824b9349a74795f99deb7c078ab2179362ff9bbd9a7f8e488e8dd2e29464e89",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "6c496b46692599bf022cdbf8daecea7195fffde509bbc23f4b461d63ec18d6e6",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4",
-        "libs/agent-procutil/src/agent_procutil/_native_owned.py": "643c3333d3f435ece115f714c144ca6b64af571e37cc68aec9b3b8bf91bac06f",
-        "tools/promotion_unit_tests/test_native_owned.py": "da1356b2b9224d900a1535d13467ea630455d55073a1001c56c119518f7c24e1",
+        "libs/agent-procutil/src/agent_procutil/_native_owned.py": "16c873b25b0b60f552d8a3e434cb6e155805a55b49749538944e94926d4d09b1",
+        "tools/promotion_unit_tests/test_native_owned.py": "ee2eb245eb28747ccba5646c220923c137490b1c66c09fcdb07aa6abfe5d7293",
         "tools/promotion_unit_tests/test_sdk_functional.py": "20b31bfc943e9f6f9fd2967aa168489dbb10cd074509b980fbea79c36979d6b5",
         "tools/promotion_unit_tests/test_daemon_fixture_publication.py": "74eb81efecaffa08f0b26adfbf2825c61ab1a39ceb64653b78a22154ee0e1846",
         "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py": "ccfe54ab6c03376318535cd379a24b08ad6368aa25964bab6f3d4e498cbf11e2",
@@ -3662,7 +3673,7 @@
         "fleet-manager/src/fleet_manager/release_auth.py": "ed2ba53fdc3e988af3bfb56bf7e4eb9578cbc6107118ea327dbda1281ab648bc",
         "fleet-manager/src/fleet_manager/client_deactivation.py": "b4dc9e2cc10ff8f6b11097f45463cf572d3b27a5d6e11a197dc2fa976fef77d6",
         "fleet-manager/tests/test_client_diagnostics.py": "84eb14d24bc2c62e166e0ac9478ae6d7d60925d0c8f5363c13cc2b5d8a24a089",
-        "tools/promotion_unit_tests/test_client_guardian_resources.py": "d35fa3da1bd14582d417eb1cb2cde83c42f00064a48f19e1903e9f3ee2aa1dc5"
+        "tools/promotion_unit_tests/test_client_guardian_resources.py": "f6e6f99014df400e8b2b1efe3e51812fdfccf2425ff74703a5dbe60b65e93d28"
     },
     "coverage_targets": [
         "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py",

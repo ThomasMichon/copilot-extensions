@@ -117,6 +117,11 @@ The guardian loads only those bytes into private operation-owned modules; it
 does not reopen executable resources or resolve relative imports from disk.
 Ordinary source-install callers snapshot the same bounded closure before
 launching; this is not installed-wheel RECORD authentication.
+One monotonic execution deadline covers guardian source preparation, startup
+and target creation; neither process starts with a fresh timeout budget.
+Admission rechecks that deadline immediately before guardian launch and after
+confirmed settlement, so late completion cannot report success. The existing
+retirement allowance and uncertain process/Job custody remain unchanged.
 The finite guardian independently retains the candidate until its
 native Job settles, including after caller death. Losing a caller's
 construction lock alone therefore does not admit destructive cleanup while

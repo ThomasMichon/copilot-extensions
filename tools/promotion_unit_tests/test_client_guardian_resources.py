@@ -223,3 +223,98 @@ def test_bootstrap_rejects_invalid_complete_packet_before_executing_owner(monkey
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(packet.encode("ascii"))))
     with pytest.raises(ValueError):
         exec(compile(owner._GUARDIAN_BOOTSTRAP, "<guardian-bootstrap>", "exec"), {"__name__": "fixture"})
+
+
+@pytest.mark.parametrize("boundary", ["spawn", "completion"])
+def test_guardian_cannot_report_success_after_requested_execution_limit(monkeypatch, boundary):
+    path = ROOT / "libs/installer-engine/installer_engine_process.py"
+    spec = importlib.util.spec_from_file_location("fixture_guardian", path)
+    owner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(owner)
+    clock = {"now": 0.0}
+    observed = []
+
+    def communicate(*, timeout):
+        if boundary == "completion":
+            clock["now"] = 2.0
+        return "complete", ""
+
+    process = SimpleNamespace(returncode=0, communicate=communicate, wait=lambda **_: None)
+    job = SimpleNamespace(terminate_and_wait=lambda timeout: observed.append(("retire", timeout)))
+
+    def spawn(*_args, **_kwargs):
+        if boundary == "spawn":
+            clock["now"] = 2.0
+        return process, job
+
+    procutil = SimpleNamespace(
+        spawn_sync_in_kill_on_close_job=spawn, no_window_kwargs=lambda: {},
+        SyncProcessLaunchError=RuntimeError,
+    )
+    monkeypatch.setattr(owner, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+    outcome = owner._run_guardian_child(
+        SimpleNamespace(timeout=1.0), ["fixture"], procutil, lambda: False, None,
+        {"returncode": 1, "stdout": "", "stderr": "", "timed_out": True, "launch_error": None},
+    )
+    assert outcome["timed_out"] is True
+    assert observed == [("retire", 10)]
+
+
+@pytest.mark.parametrize("deadline", [None, 2.0])
+@pytest.mark.parametrize("boundary", ["packet", "startup", "completion", "retirement"])
+def test_retained_guardian_preserves_deadline_before_launch_and_after_settlement(
+    monkeypatch, tmp_path, boundary, deadline,
+):
+    path = ROOT / "libs/installer-engine/installer_engine_process.py"
+    spec = importlib.util.spec_from_file_location("fixture_guardian", path)
+    owner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(owner)
+    clock = {"now": 0.0}
+    launches, inheritance = [], []
+
+    def packet(*_args):
+        if boundary == "packet":
+            clock["now"] = 3.0
+        return "{}"
+
+    def startup():
+        if boundary == "startup":
+            clock["now"] = 3.0
+        return SimpleNamespace()
+
+    class Guardian:
+        returncode = 0
+
+        def __init__(self, argv, **_options):
+            assert argv[argv.index("--deadline") + 1] == "2.0"
+            launches.append(argv)
+            self.calls = 0
+
+        def communicate(self, *, input=None, timeout):
+            self.calls += 1
+            assert 0 < timeout <= 32
+            if boundary == "completion" or boundary == "retirement" and self.calls == 2:
+                clock["now"] = 3.0
+            return json.dumps({
+                "returncode": 0, "stdout": "complete", "stderr": "",
+                "timed_out": False, "launch_error": None,
+            }), ""
+
+    monkeypatch.setattr(owner, "_guardian_packet", packet)
+    monkeypatch.setattr(owner, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(get_osfhandle=lambda value: value))
+    monkeypatch.setattr(owner, "os", SimpleNamespace(
+        **{**vars(os), "set_handle_inheritable": lambda _handle, flag: inheritance.append(flag)},
+    ))
+    monkeypatch.setattr(owner.subprocess, "STARTUPINFO", startup, raising=False)
+    monkeypatch.setattr(owner.subprocess, "Popen", Guardian)
+    with pytest.raises(owner.ChildTimeoutExpired) as caught:
+        owner._retained_windows(
+            ["fixture"], cwd=tmp_path, env={}, timeout=2.0,
+            procutil=SimpleNamespace(no_window_kwargs=lambda: {}),
+            root=tmp_path, version="fixture", runtime_path=tmp_path / "runtime.py",
+            deadline=deadline,
+        )
+    assert caught.value.output == ("" if boundary in ("packet", "startup") else "complete")
+    assert len(launches) == (0 if boundary in ("packet", "startup") else 1)
+    assert inheritance == [True, False]

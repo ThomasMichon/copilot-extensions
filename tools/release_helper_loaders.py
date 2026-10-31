@@ -28,7 +28,7 @@ _ADAPTER = ast.parse(
 ).body[0]
 _TOOL_ROOT = ast.parse('tool_root = (trusted_source or scratch) / "tools"').body[0]
 _ACTOR_SOURCE = "libs/installer-engine/installer_engine_process.py"
-_RETAINED_ACTOR_SHA256 = "8132d6856886a0a20c571166606a9df89a67c2ca66dc5dec805cc36e3a063812"
+_RETAINED_ACTOR_SHA256 = "7d746c75e7cd475ed4110f47bfa5c7bb39b52503a6b36bfceb3004225faeebda"
 _RESOURCE_ADAPTER = ast.parse(
     "def _load_resource(name, path):\n"
     "    spec = importlib.util.spec_from_file_location(name, path)\n"

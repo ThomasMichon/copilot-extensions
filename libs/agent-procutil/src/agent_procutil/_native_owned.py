@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import ntpath
 import subprocess
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, BinaryIO
 
 from . import JobHandle, _job_scopes
@@ -111,6 +111,7 @@ def _failure(
 
 
 def _run_target(request: NativeOwnedRequest, output: BinaryIO) -> int:
+    deadline = time.monotonic() + request.timeout
     try:
         process, job = _spawn(request, output)
     except OwnedCleanupError as error:
@@ -120,7 +121,6 @@ def _run_target(request: NativeOwnedRequest, output: BinaryIO) -> int:
     primary = None
     code = None
     try:
-        deadline = time.monotonic() + request.timeout
         while not _job_empty(job):
             remaining = deadline - time.monotonic()
             if remaining <= 0:

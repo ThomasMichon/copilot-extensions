@@ -34,6 +34,10 @@ failed finite operation. Unconfirmed native cleanup retains its exact process
 and Job objects and fences the channel. Cancellation of an unfinished request
 closes helper custody from `finally`, including runspace stop that bypasses
 `catch`; an already-received uncertain outcome is retained, not replayed.
+The finite target's monotonic deadline starts before target creation and is
+never reset after spawning. A completion observed after that deadline remains
+a timeout; the separate ten-second retirement allowance does not grant more
+target execution time.
 Large outcomes use ordered, nonce/request-correlated fragments within the same
 request deadline. Each frame remains bounded; supported reconciliation batches
 and removed-artifact paths are reassembled without discarding outcomes after

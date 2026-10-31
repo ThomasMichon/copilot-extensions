@@ -100,6 +100,26 @@ def test_expired_query_never_publishes_success_and_still_retires(
     owned.process.close.assert_called_once_with()
 
 
+def test_target_creation_cannot_rearm_the_requested_execution_limit(
+    owned, parameters: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = {"now": 1.0}
+    owned.module.time.monotonic = lambda: clock["now"]
+
+    def delayed_spawn(*_args):
+        clock["now"] = 3.5
+        return owned.process, owned.job
+
+    owned.module._spawn.side_effect = delayed_spawn
+    owned.module._job_empty.side_effect = None
+    owned.module._job_empty.return_value = True
+    with pytest.raises(owned.module.NativeOwnedFailure, match="deadline") as failure:
+        owned.module._run_target(owned.module.validate_request(parameters), Mock())
+    assert failure.value.cleanup_confirmed is True
+    owned.process.retire_job.assert_called_once_with(owned.job, 10)
+    owned.process.close.assert_called_once_with()
+
+
 @pytest.mark.parametrize("stage", ["spawn", "retirement", "close"])
 def test_unknown_cleanup_keeps_exact_resources_and_refuses_automatic_retry(
     owned, parameters: dict, stage: str,
