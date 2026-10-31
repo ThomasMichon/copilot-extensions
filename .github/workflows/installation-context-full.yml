@@ -1445,6 +1445,7 @@ jobs:
     env:
       UPDATE_DRIVER_FOUNDATION_BUILD: "1"
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      COPILOT_EXTENSIONS_DAEMON_PYTHON: /usr/bin/python3
       UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
@@ -1459,8 +1460,9 @@ jobs:
           version: "0.12.6"
       - name: Qualify Linux native operation and child custody across exec
         env:
-          PYTHONPATH: libs/single-instance-lease/src:libs/agent-procutil/src
+          PYTHONPATH: tools:libs/single-instance-lease/src:libs/agent-procutil/src
         run: |
+          stat -Lc 'lifecycle interpreter owner=%u mode=%a' /usr/bin/python3
           python tools/seasoned_uv.py --uv uv -- --system pytest psutil setuptools
           python -m pytest -q libs/single-instance-lease/tests/test_operation.py libs/single-instance-lease/tests/test_native_operation_linux.py
           python -m pytest -q libs/agent-procutil/tests/test_native_child.py libs/agent-procutil/tests/test_caller_owned.py libs/agent-procutil/tests/test_caller_owned_native.py
@@ -1624,15 +1626,6 @@ jobs:
           --test-file tests/test_first_use.py
           --test-file tests/test_first_use_native.py
           --max-files-per-sub-suite 1 --test-timeout 1200 --timeout 1380
-      - name: Qualify Python-free Windows genesis and actual Vault bootstrap
-        run: >-
-          python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_first_use_genesis.py
-          --test-file tests/test_first_use_vault.py
-          --test-file tests/test_first_use_vault_command.py
-          --test-file tests/test_first_use_vault_bootstrap.py
-          --test-file tests/test_first_use_pull_requests.py
-          --max-files-per-sub-suite 1 --test-timeout 1200 --timeout 1380
       - name: Qualify isolated Pull Requests CLI health before completion
         run: >-
           python tools/run-plugin-tests.py agent-pull-requests
@@ -1661,3 +1654,32 @@ jobs:
           --test-file tests/test_bridge_first_use_publication.py
           -k "agent-vault or test_snapshot_retains_every_byte or test_snapshot_surfaces_file_read_failure or (test_bridge_actual_first_use_publication and legacy-managed-payload)"
           --allow-explicit-tiers --test-timeout 120 --timeout 540
+  foundation-first-use-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
+    name: foundation first use (Windows, ${{ matrix.module }})
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [genesis, vault, vault_command, vault_bootstrap, pull_requests]
+    env:
+      UPDATE_DRIVER_FOUNDATION_BUILD: "1"
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify one bounded cold first-use module
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_${{ matrix.module }}.py
+          --max-files-per-sub-suite 1 --test-timeout 1200 --timeout 1380

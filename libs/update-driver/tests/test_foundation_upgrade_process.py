@@ -14,7 +14,7 @@ from single_instance_lease.operation import OperationLock
 from update_driver import (
     RequestSpec, TrustedRunner, enqueue, foundation_state as fs, foundation_status, status, wait,
 )
-from update_driver.foundation_inputs import inspect
+from update_driver.foundation_inputs import PACKAGES, inspect
 
 import test_foundation_producer_process as producer_fixtures
 
@@ -23,17 +23,10 @@ producer_source = producer_fixtures.producer_source
 command = producer_fixtures.command
 
 
-@pytest.fixture
-def retained(producer_source, area):
-    root = area / "state"
-    root.mkdir()
-    digest = inspect(producer_source).digest
-    with OperationLock(root / "execution.lock") as owned:
-        admitted = fs.begin(root, digest, owned)
-        fs.finish(root, admitted, owned, exit_code=0)
+def installed_runtime(producer_source, area, target, version):
     installed = area / "retained-inputs"
     shutil.copytree(producer_source.parent, installed)
-    slot = root / "foundation" / "versions" / ("foundation-" + digest)
+    slot = target / "versions" / version
     result = subprocess.run(
         [sys.executable, "-I", "-B", "-m", "venv", "--copies", "--without-pip", str(slot)],
         capture_output=True, text=True, timeout=30, **pu.no_window_kwargs(),
@@ -44,16 +37,42 @@ def retained(producer_source, area):
     # The fixture explicitly supplies source mapping; hosted qualification uses real retained packages.
     (bootstrap / "runtime_launcher.py").write_text(
         "import runpy,sys\n"
-        f"sys.path[:0] = {[str(installed / name / 'src') for name in ('update-driver', 'agent-procutil', 'single-instance-lease')]!r}\n"
+        f"sys.path[:0] = {[str(installed / name / 'src') for name in PACKAGES]!r}\n"
         "assert sys.argv[1] == '-m'\n"
         "module = sys.argv[2]\n"
         "sys.argv = sys.argv[2:]\n"
         "runpy.run_module(module, run_name='__main__')\n",
         encoding="utf-8",
     )
-    (slot / ".install-complete.json").write_text("{}")
-    (root / "foundation" / "current-version").write_text(slot.name)
+    (slot / ".install-complete.json").write_text(
+        '{"version": "' + version + '", "completed_at": "fixture", "pid": 0}',
+    )
+    (target / "current-version").write_text(slot.name)
+    return slot, installed
+
+
+@pytest.fixture
+def retained(producer_source, area):
+    root = area / "state"
+    root.mkdir()
+    digest = inspect(producer_source).digest
+    with OperationLock(root / "execution.lock") as owned:
+        admitted = fs.begin(root, digest, owned)
+        fs.finish(root, admitted, owned, exit_code=0)
+    slot, installed = installed_runtime(
+        producer_source, area, root / "foundation", "foundation-" + digest,
+    )
     (producer_source / "upgrade.txt").write_text("different source, same package version")
+    return root, slot, installed
+
+
+@pytest.fixture
+def product_runtime(producer_source, area, request):
+    root = area / "state"
+    root.mkdir()
+    slot, installed = installed_runtime(
+        producer_source, area, area / "product", getattr(request, "param", "1.0.0"),
+    )
     return root, slot, installed
 
 
@@ -77,6 +96,121 @@ def observe(predicate, root, timeout=90):
     while not predicate():
         assert time.monotonic() < deadline, logs(root)
         time.sleep(.02)
+
+
+@pytest.mark.parametrize("product_runtime", [
+    "1.0.0", "1.24.271-dev123456+source." + "a" * 64 + ".repair." + "b" * 32,
+], indirect=True)
+def test_first_foundation_waits_for_custody_and_preserves_pending_queue(
+    producer_source, product_runtime,
+):
+    root, slot, _installed = product_runtime
+    request = enqueue(
+        RequestSpec("first-foundation-pending"), root=root,
+        runner=TrustedRunner(
+            (sys.executable, "-c", "from pathlib import Path; Path('unexpected-runner').touch()"),
+            str(root),
+        ),
+    )
+    before = (root / "queue.sqlite3").read_bytes()
+    selector = slot.parent.parent / "current-version"
+    selection = selector.read_bytes()
+    env = dict(os.environ, FOUNDATION_FIXTURE_PYTHON=sys.executable)
+    with (root / "processes.log").open("w") as log:
+        process = None
+        try:
+            with OperationLock(root / "execution.lock"):
+                process = subprocess.Popen(
+                    [*command(producer_source, root), "-AdmissionRuntimeRoot", str(slot.parent.parent)],
+                    env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                    **pu.no_window_kwargs(),
+                )
+                time.sleep(2)
+                assert process.poll() is None, logs(root)
+                assert not (root / fs.FILENAME).exists()
+                assert not (root / "prerequisite-started").exists()
+            assert process.wait(timeout=90) == 0, logs(root)
+        finally:
+            if process is not None:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=15)
+    assert foundation_status(root=root).state == "completed"
+    assert status(request.id, root=root) == request
+    assert (root / "queue.sqlite3").read_bytes() == before
+    assert selector.read_bytes() == selection
+    assert not (root / "unexpected-runner").exists()
+    assert (root / "builder-finished").exists()
+
+
+@pytest.mark.parametrize("case", [
+    "no-selection", "foreign-selection", "incomplete", "missing-admission", "protocol",
+    "schema", "interrupted", "foundation-artifacts", "foundation-record",
+])
+def test_first_foundation_refuses_unsupported_runtime_or_history_before_acquisition(
+    producer_source, product_runtime, case,
+):
+    root, slot, installed = product_runtime
+    request = enqueue(
+        RequestSpec("first-foundation-refusal"), root=root,
+        runner=TrustedRunner((sys.executable, "-c", "raise SystemExit(99)"), str(root)),
+    )
+    runtime = slot.parent.parent
+    if case == "no-selection":
+        (runtime / "current-version").unlink()
+        (runtime / "last-known-good").write_text(slot.name)
+    elif case == "foreign-selection":
+        (runtime / "current-version").write_text("..\\foreign")
+    elif case == "incomplete":
+        (slot / ".install-complete.json").write_text("{}")
+    elif case == "missing-admission":
+        (installed / "update-driver" / "src" / "update_driver" / "foundation_admission.py").unlink()
+    elif case == "protocol":
+        core = installed / "update-driver" / "src" / "update_driver" / "core.py"
+        content = core.read_text()
+        assert "SCHEMA = 4" in content
+        core.write_text(content.replace("SCHEMA = 4", "SCHEMA = 999", 1))
+    elif case == "schema":
+        with sqlite3.connect(root / "queue.sqlite3") as db:
+            db.execute("PRAGMA user_version=999")
+    elif case == "interrupted":
+        with sqlite3.connect(root / "queue.sqlite3") as db:
+            db.execute("UPDATE requests SET state='interrupted'")
+    elif case == "foundation-artifacts":
+        (root / "foundation").mkdir()
+    elif case == "foundation-record":
+        with OperationLock(root / "execution.lock") as owned:
+            admitted = fs.begin(root, inspect(producer_source).digest, owned)
+            fs.finish(root, admitted, owned, exit_code=7, error="fixture_failure")
+    before = (root / "queue.sqlite3").read_bytes()
+    progress = (root / fs.FILENAME).read_bytes() if (root / fs.FILENAME).exists() else None
+    result = subprocess.run(
+        [*command(producer_source, root), "-AdmissionRuntimeRoot", str(runtime)],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=90,
+        **pu.no_window_kwargs(),
+    )
+    assert result.returncode == 125, result.stdout + result.stderr + logs(root)
+    assert (root / "queue.sqlite3").read_bytes() == before
+    assert ((root / fs.FILENAME).read_bytes() if (root / fs.FILENAME).exists() else None) == progress
+    if case not in {"schema", "interrupted", "foundation-artifacts"}:
+        assert status(request.id, root=root) == request
+    assert not (root / "bootstrap").exists()
+    assert not (root / "prerequisite-started").exists()
+
+
+def test_product_admission_never_reuses_an_existing_matching_foundation(producer_source, retained):
+    root, slot, _installed = retained
+    (producer_source / "upgrade.txt").unlink()
+    before = (root / fs.FILENAME).read_bytes()
+    result = subprocess.run(
+        [*command(producer_source, root), "-AdmissionRuntimeRoot", str(slot.parent.parent)],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=90,
+        **pu.no_window_kwargs(),
+    )
+    assert result.returncode == 125, result.stdout + result.stderr + logs(root)
+    assert "only supported before the first retained foundation" in result.stderr
+    assert (root / fs.FILENAME).read_bytes() == before
+    assert not (root / "prerequisite-started").exists()
 
 
 @pytest.mark.parametrize("case", ["legacy-empty", "legacy-pending", "running", "interrupted", "blocked", "schema"])

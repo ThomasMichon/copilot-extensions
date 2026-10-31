@@ -20,7 +20,7 @@ OPTIONAL_SOURCES = {"agent-procutil": {"agent-zdd"}}
 SUPPORT = (
     "installer-engine.ps1", "installer-engine.sh",
     "installer_engine.py", "installer_engine_process.py", "installer_dependency_policy.py",
-    "installer_dependency_config.py", "runtime_launcher.py", "versioned_runtime.py",
+    "installer_dependency_config.py", "runtime_launcher.py", "resolve-runtime.ps1", "versioned_runtime.py",
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_source.py", "versioned_runtime_publication.py",
     "installer_source_build.py", "installer_source_wheel_cache.py",

@@ -25,6 +25,7 @@ from test_first_use_vault import (
     assert_stamp_only, cold_environment, materialized_vault as materialized_vault,
     native_genesis, vault_command,
 )
+from test_first_use_vault_command import uninstall_child_diagnostic
 
 
 ACKNOWLEDGEMENT = "[agent-vault] driver launch acknowledgement: "
@@ -353,8 +354,12 @@ def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service
     finally:
         clean_env = {key: value for key, value in env.items()
                      if key not in {"AGENT_VAULT_INSTALLATION_ID", "AGENT_VAULT_PIPE"}}
+        # Cold construction is complete; uninstall needs its existing external interpreter.
+        clean_env["PATH"] = str(Path(sys._base_executable).parent) + os.pathsep + clean_env["PATH"]
         removed = subprocess.run(
             cleanup, env=clean_env, cwd=project, stdin=subprocess.DEVNULL,
             capture_output=True, text=True, timeout=90, **agent_procutil.no_window_kwargs(),
         )
-        assert removed.returncode == 0, removed.stdout + removed.stderr
+        assert removed.returncode == 0, removed.stdout + removed.stderr + uninstall_child_diagnostic(
+            removed, shell=cleanup[0], env=clean_env, project=project,
+        )

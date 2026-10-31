@@ -172,6 +172,19 @@ approval engine is added by the pure notice controls. copilot-extensions
 How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
 
+The manual `installation-context-full.yml` `foundation` portfolio runs its
+five Windows cold first-use modules in independent packets. They retain the
+existing 900-second runner aggregate and 25-minute job caps instead of sharing
+one aggregate across multiple independent cold installations. All previous
+module selections remain covered; required unit-only CI is unchanged.
+
+Linux cold first-use fixtures keep Python and uv out of the product's native
+tool PATH. The runner-owned daemon lease separately selects an existing trusted
+system interpreter for test lifecycle accounting. That control-plane selector
+does not supply the product bootstrap interpreter or bypass lease enforcement;
+these cases prove Python-free product admission, not an interpreter-free pytest
+harness.
+
 Dispatch's reversible-maintenance Windows packet uses the existing
 `installation-context-full.yml` manual workflow with
 `portfolio=dispatch-maintenance`. Dispatch the reviewed source branch; each

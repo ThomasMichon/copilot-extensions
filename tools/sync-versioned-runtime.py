@@ -186,6 +186,7 @@ def main() -> int:
     for plugin in resolver_plugins:
         for name in RESOLVER_NAMES:
             pairs.append((resolver_bytes[name], plugin / "scripts" / name))
+    pairs.append((resolver_bytes["resolve-runtime.ps1"], REPO / "libs" / "update-driver" / "scripts" / "resolve-runtime.ps1"))
 
     instance_pairs: list[tuple[bytes, Path]] = []
     for name, source in installer_instance_sources(REPO).items():

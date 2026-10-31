@@ -780,6 +780,24 @@ Missing/corrupt selectors and incompatible queues refuse before bootstrap
 staging or prerequisites, preserving queue bytes and the healthy selection.
 No native branch reads, edits or deletes SQLite.
 
+For an existing queue that predates the first retained foundation, the same
+front door additionally accepts `-AdmissionRuntimeRoot <owning-product-runtime-root>`.
+The caller supplies its explicitly resolved installed runtime, never an ambient
+interpreter or command. This bridge is available only when foundation progress
+and artifacts are both absent; it does not repair or bypass an existing broken
+foundation. The canonical read-only runtime resolver must select the exact
+complete `current-version` slot. Last-known-good/newest fallback, linked paths,
+missing retention assets and incomplete slots refuse before acquisition.
+The selected runtime runs only the existing fixed `foundation_admission` module,
+with the same fresh witness and strict bounded child as a retained foundation.
+Installed health, actual witness interoperability and strict progress parsing
+are the compatibility boundary, not equality of independently released package
+versions. Unsupported installed modules or protocols refuse explicitly.
+Admission only reads queue history; pending requests are neither drained nor
+replayed, and unsettled effects remain fenced. The product selector is checked
+again after admission. Neither this option nor source availability authorizes a
+live repair or a later ordinary queue worker.
+
 The producer does not enroll maintenance or enable ordinary first-use
 publishers. Native macOS genesis and the remaining first-use integrations
 stay explicit, separate boundaries. The single foundation progress snapshot

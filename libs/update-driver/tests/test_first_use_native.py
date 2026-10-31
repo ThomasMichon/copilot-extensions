@@ -238,9 +238,13 @@ def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_dia
             command += ["-ServiceMode", "Client-Only"]
     if wait:
         command += ["-Wait" if os.name == "nt" else "--wait"]
+    env = dict(os.environ)
+    if sys.platform == "linux":
+        # Hosted toolcache Python need not satisfy the daemon's custody guard.
+        env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = "/usr/bin/python3"
     result = subprocess.run(
         command,
-        env=dict(os.environ), capture_output=True, text=True, encoding="utf-8", timeout=60,
+        env=env, capture_output=True, text=True, encoding="utf-8", timeout=60,
         **no_window_kwargs(),
     )
     assert (result.returncode != 0 if wait else result.returncode == 0), result.stdout + result.stderr

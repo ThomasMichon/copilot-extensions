@@ -730,6 +730,42 @@ def test_foundation_snapshot_staging_is_disposable_and_bounded() -> None:
         ]
 
 
+def test_linux_foundation_lease_interpreter_covers_every_qualification_step() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    job = workflow["jobs"]["foundation-linux"]
+    key = "COPILOT_EXTENSIONS_DAEMON_PYTHON"
+    assert job["env"][key] == "/usr/bin/python3"
+    for step in job["steps"]:
+        if "run" in step:
+            assert step.get("env", {}).get(key, job["env"][key]) == "/usr/bin/python3"
+
+
+def test_windows_cold_foundation_modules_have_independent_aggregate_budgets() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    job = workflow["jobs"]["foundation-first-use-windows"]
+    assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'"
+    assert job["runs-on"] == "windows-latest" and job["timeout-minutes"] == 25
+    assert job["strategy"]["fail-fast"] is False
+    modules = job["strategy"]["matrix"]["module"]
+    assert len(modules) == len(set(modules)) == 5
+    assert set(modules) == {"genesis", "vault", "vault_command", "vault_bootstrap", "pull_requests"}
+    step = next(entry for entry in job["steps"] if "run" in entry)
+    for module in modules:
+        args = shlex.split(step["run"].replace("${{ matrix.module }}", module))
+        assert args.count("--test-file") == 1
+        assert args[args.index("--test-file") + 1] == f"tests/test_first_use_{module}.py"
+        assert "--plugin-timeout" not in args
+    core = workflow["jobs"]["foundation-windows"]
+    assert all(
+        "tests/test_first_use_vault_bootstrap.py" not in entry.get("run", "")
+        for entry in core["steps"]
+    )
+
+
 def test_pull_requests_command_adoption_uses_explicit_native_portfolio() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
