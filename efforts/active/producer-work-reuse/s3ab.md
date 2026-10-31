@@ -527,6 +527,20 @@ another A/N1 native run):
   Ruff F/E9 and install/module/docs guards pass. Existing accepted model/N1
   originals and the earlier 299-case receipt remain unchanged. Fresh review
   and required CI are still needed at the corrective head.
+
+- The next review cleared both entry/context findings but explicitly disclosed
+  an omitted cleanup/cancellation finding; “no open issues” was not treated as a
+  clean verdict. The retained explicit probe now prevents a failed disconnect
+  from replacing an already-propagating cancellation or publishing a positive
+  result. Failure is an unknown observation with a sanitized type diagnostic,
+  never successful channel teardown.
+- Three regressions cover ordinary cleanup failure and cancellation during
+  execution or cleanup, including a failed disconnect. All owned test tasks are
+  joined; no real transport or shutdown receipt is claimed.
+- Latest complete focused selection: **306 passed**, zero failures/errors/skips;
+  10.30 seconds in pytest, 59.14 seconds including preparation/cleanup. Ruff,
+  install-contract, module-size and docs guards pass. Prior 299/303 and original
+  A/N1 evidence remain retained separately. Fresh current-head review is pending.
   `units.stdout.log`:
   `1280256ba9c23c5b470ebc28f71ce94be687935270e393e0ae73d34bcfa5bf21`.
   Unit stderr is empty; individual guard hashes are in the closed index.

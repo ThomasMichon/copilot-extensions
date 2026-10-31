@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import shlex
 import subprocess
 import time
@@ -16,6 +17,8 @@ from .owner_inventory import (
     credential_matches, joined_thread,
     bounded_operation, finish_cleanup,
 )
+
+log = logging.getLogger("agent-codespaces")
 
 
 def _admitted_source(codespace, account, token, remaining):
@@ -152,6 +155,7 @@ class RemoteMuxProbe:
     ) -> dict[str, bool | None]:
         unknown = dict.fromkeys(targets)
         manager = None
+        cleanup_failed = False
         try:
             scope = await joined_thread(self.scope_reader)
             row = inventory.lookup(
@@ -211,7 +215,15 @@ class RemoteMuxProbe:
             return unknown
         finally:
             if manager is not None:
-                await finish_cleanup(manager.disconnect(codespace))
+                try:
+                    await finish_cleanup(manager.disconnect(codespace))
+                except Exception as exc:
+                    # Do not replace a pending caller cancellation with a
+                    # cleanup error or publish a positive observation.
+                    log.warning("Owner mux disconnect failed (%s)", type(exc).__name__)
+                    cleanup_failed = True
+        if cleanup_failed:
+            return unknown
         try:
             await admit()
         except Exception:

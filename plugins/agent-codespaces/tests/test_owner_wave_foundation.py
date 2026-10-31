@@ -1,6 +1,7 @@
 """Explicit foundation contracts; production continues using its legacy probes."""
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import nullcontext
 from dataclasses import replace
@@ -180,3 +181,46 @@ async def test_default_factory_and_consumer_do_not_enter_wave_authority(monkeypa
     forwards = sf.SessionForwards(lambda *args: None, probe)
     await forwards.probe([])
     await forwards.shutdown()
+
+
+@pytest.mark.parametrize("cancel_phase", [None, "exec", "cleanup"])
+async def test_explicit_probe_cleanup_failure_is_unknown_and_preserves_cancellation(cancel_phase):
+    entered, release = asyncio.Event(), asyncio.Event()
+    disconnects = []
+
+    class Manager:
+        async def exec_command(self, *args, **kwargs):
+            if cancel_phase == "exec":
+                entered.set()
+                await release.wait()
+            return SimpleNamespace(exit_code=0, stdout="ACMUX1\t0\tpresent\nACMUX1\tDONE\t1\n")
+
+        async def disconnect(self, codespace):
+            disconnects.append(codespace)
+            if cancel_phase == "cleanup":
+                entered.set()
+                await release.wait()
+            raise RuntimeError("synthetic disconnect failure")
+
+    async def opener(name):
+        return Manager()
+
+    probe = mux.RemoteMuxProbe(
+        open_manager=opener, scope_reader=lambda: SCOPE, clock=lambda: 1,
+    )
+    task = asyncio.create_task(probe.probe_wave("cs", ["m"], inventory(), 1, lambda: True))
+    try:
+        if cancel_phase is not None:
+            await asyncio.wait_for(entered.wait(), timeout=2)
+            task.cancel()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            assert await task == {"m": None}
+        assert disconnects == ["cs"]
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

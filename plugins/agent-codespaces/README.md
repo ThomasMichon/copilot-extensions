@@ -535,6 +535,8 @@ default would hide or `403`/`404` the other org's CodeSpaces entirely.
   tracked separately in #7949 and #5761.
   The optional `heartbeat(..., generation=...)` fences renewal under the existing
   lock; omitting it preserves the existing behavior and does not activate a wave.
+  Explicit probe cleanup errors produce unknown observations and retain caller
+  cancellation; they do not establish successful channel teardown.
 - **Fully additive:** with no `account_map` configured, everything collapses to
   a single ambient `gh` call — today's behavior.
 
