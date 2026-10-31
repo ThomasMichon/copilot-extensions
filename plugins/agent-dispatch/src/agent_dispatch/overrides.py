@@ -48,6 +48,17 @@ _THREAD_LOCKS_GUARD = threading.Lock()
 _THREAD_LOCKS: dict[str, _thread.LockType] = {}
 
 
+class OverrideObservationError(ValueError):
+    """Malformed input with the legacy valid-entry subset retained."""
+
+    def __init__(self, data: object) -> None:
+        super().__init__("operator override map is malformed")
+        self.overrides = {
+            key: dict(rec) for key, rec in data.items()
+            if isinstance(key, str) and key and isinstance(rec, dict)
+        } if isinstance(data, Mapping) else {}
+
+
 def logical_override_id(owner: str, logical_id: str) -> str:
     """Override token that disables every registration for one logical unit."""
     return f"{LOGICAL_OVERRIDE_PREFIX}{owner}:{logical_id}"
@@ -59,24 +70,42 @@ def _thread_lock(path: Path) -> _thread.LockType:
         return _THREAD_LOCKS.setdefault(key, threading.Lock())
 
 
-def load_overrides(path: str | os.PathLike[str] | Path) -> dict[str, dict]:
+def validate_overrides(data: object) -> None:
+    """Reject an incomplete override map instead of silently dropping vetoes."""
+    if not isinstance(data, Mapping) or any(
+        not isinstance(key, str) or not key or not isinstance(rec, dict)
+        for key, rec in data.items()
+    ):
+        raise OverrideObservationError(data)
+
+
+def load_overrides(path: str | os.PathLike[str] | Path, *, strict: bool = False) -> dict[str, dict]:
     """Load the override map ``{registration_id -> record}``, best-effort.
 
     Returns ``{}`` when the file is missing, unreadable, or not a well-formed
     JSON object -- an unreadable override store must never crash a reconcile or a
     CLI read; it simply means "no overrides in effect". Each record is a dict like
     ``{"disabled": true, "reason": "...", "at": 1699999999.0}``; malformed entries
-    (non-dict values) are dropped.
+    (non-dict values) are dropped. With ``strict=True``, confirmed absence still
+    returns an empty map; all other read/parse/entry failures raise.
     """
     p = Path(path)
     try:
         raw = p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
     except (OSError, ValueError):
+        if strict:
+            raise
         return {}
     try:
         data = json.loads(raw)
     except (ValueError, TypeError):
+        if strict:
+            raise
         return {}
+    if strict:
+        validate_overrides(data)
     if not isinstance(data, dict):
         return {}
     out: dict[str, dict] = {}
