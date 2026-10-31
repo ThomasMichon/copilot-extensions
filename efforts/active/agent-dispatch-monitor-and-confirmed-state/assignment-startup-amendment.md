@@ -57,6 +57,39 @@ This policy selects budgets and backoff, not an installed capability or a
 release. It does not resolve result-rejection reassignment or terminal-worktree
 closeout policy.
 
+### Selected pool scope and ordering
+
+**Operator-selected policy, 2026-10-31; review and implementation pending:**
+Capacity is separate for each **machine/environment pool instance**, not one
+shared cap across hosts. When multiple eligible instances have capacity, use
+**configurable pool priority**, not registration-ID order alone.
+
+**Agent-recommended representation:** identify an instance by the registration's
+stable logical identity together with its actual execution machine and
+environment. Keep logical identity distinct from workspace/native identity;
+an unidentified execution machine is not a fabricated `local` instance.
+Use an integer priority, default `0`, with higher values considered first;
+break ties by registration identity, machine and environment. Equal-priority
+instances remain separate capacity owners.
+
+The coordinator must obtain a **complete effective pool definition set** from
+the existing registration/reconciliation owner before placement. Preserve full
+effective permit/reject filters, declared/direct precedence, equivalent-source
+deduplication, pauses and operator overrides. The raw `registrations` list is
+not that set: current declaration conversion drops filters, while overrides
+and source reconciliation happen in the daemon. Do not add an independently
+configured pool registry or trust a caller's preferred subset, winner or
+available-slot count.
+
+Expand normalized instance definitions and their lossless representation
+first, then the owning provider's revision-fenced effective-set publication
+and atomic placement. Publication must distinguish machine/environment
+instances and replace a scope's complete set atomically; an incomplete or
+uncertain expected scope blocks new admission without erasing existing
+custody. A definition or published metadata alone does not establish that a
+legacy lane enforces the new placement contract. Caller migration and
+mixed-cohort fencing remain separate reviewed source gates.
+
 ## Current foundations and discrepancy
 
 `Supervisor._eligible` filters future `Task.not_before` values.
@@ -84,7 +117,8 @@ The following sequencing and transaction means are **agent-recommended**;
 they implement the requested guarantees without claiming these APIs exist.
 
 1. Define one coordinator-owned supervised-placement operation. Recheck
-   routing, retry eligibility, retained assignment and pool capacity at commit;
+   the complete effective instance set, priority ordering, routing, retry
+   eligibility, retained assignment and instance capacity at commit;
    atomically bind the selected pool, create/reuse its reservation, consume the
    slot and transition to `CLAIMED`. No network/process/workspace operation
    runs inside that transaction. Attach real workspace/native identities later
@@ -161,8 +195,12 @@ not resolve the selected retry scope, atomic placement or mixed-runtime matrix.
   cooldown advances through 1/3/6/12 hours and remains at 12; successful
   current `STARTED` resets both counters. Restart/replay, prompt delivery,
   failed/stale `STARTED` and unanswered nudges cannot manufacture a reset.
-- [ ] Ordered all-pool selection, mismatching filters, no-capacity waiting,
-  retained-pool waiting and unsatisfiable retained assignment are observable.
+- [ ] Priority-ordered all-pool selection, deterministic equal-priority ties,
+  mismatching filters, no-capacity waiting, retained-pool waiting and
+  unsatisfiable retained assignment are observable. Same logical registration
+  on two machine/environment instances has independent capacity. Complete
+  effective-set publication preserves filters, source precedence, pauses and
+  overrides; stale/partial publication cannot manufacture admission.
 - [ ] Concurrent allocators cannot overconsume a pool or assign one task
   twice; reservation replay consumes one slot, not a second slot.
 - [ ] Initial `CLAIMED` works before a workspace/native exists; attachment and
