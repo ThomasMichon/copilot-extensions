@@ -196,9 +196,10 @@ live claim token. No new blanket ACK or executor appointment is created.
 
 ### Continuing slice - Pool-owned assignment/startup and retry eligibility
 
-- [ ] Land the #9709 vision/current-versus-target architecture and
+- [x] Land the #9709 vision/current-versus-target architecture and
       [repair amendment](assignment-startup-amendment.md) through normal review,
-      without behavioral changes.
+      without behavioral changes. Merged in
+      [#9710](https://github.com/ThomasMichon/copilot-extensions/pull/9710).
 - [ ] Execute the amendment's implementation/compatibility plan only through
       separately claimed, reviewed source slices, preserving incumbent startup,
       idle-worker, pool-capacity and submission owners.
@@ -983,6 +984,16 @@ extension policy are in the 2026-10-08 amendment):
 Phase 3/4's shapes are still pending their own design pass.
 
 ## Journal
+
+### 2026-10-30 - Assignment/startup design reviewed and merged
+
+- #9710 merged to `dev` as `d1f5b7c02db18f741d19751207f8b1b53fa3382b`
+  after a clean current-head Copilot approval and required checks. The existing
+  source worktree was pulled forward through the managed sync operation.
+- Closed only the documentation/review Plan item. #9709, the remaining
+  implementation/compatibility work, open policy choices, complete validation
+  matrix and parent effort remain open. No runtime or installed acceptance is
+  inferred from the documentation merge.
 
 ### 2026-10-30 - Assignment/startup and retry-eligibility proposal
 

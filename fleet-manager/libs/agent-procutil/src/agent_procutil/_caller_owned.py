@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import math
 import os
@@ -143,7 +144,7 @@ def _confirm_group(process: UnreapedChild) -> None:
 
 
 def _validate(request: object) -> dict:
-    if not isinstance(request, dict) or set(request) != {
+    if not isinstance(request, dict) or set(request) - {"binary"} != {
         "argv", "timeout", "input_text", "capture", "limits",
     }:
         raise ValueError("invalid caller-owned request")
@@ -161,6 +162,8 @@ def _validate(request: object) -> dict:
         request["input_text"].encode("utf-8")
     if type(request["capture"]) is not bool:
         raise ValueError("native child capture must be a boolean")
+    if type(request.get("binary", False)) is not bool:
+        raise ValueError("native child binary capture must be a boolean")
     limits = request["limits"]
     if not isinstance(limits, list) or len(limits) != 2 or any(
         type(limit) is not int or limit <= 0 for limit in limits
@@ -191,6 +194,13 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
         expected = str if request["capture"] else type(None)
         if type(code) is not int or not isinstance(stdout, expected) or not isinstance(stderr, expected):
             raise RuntimeError("caller-owned result is invalid")
+        if request.get("binary", False) and request["capture"]:
+            try:
+                stdout, stderr = (base64.b64decode(stream, validate=True) for stream in (stdout, stderr))
+                if any(len(stream) > limit for stream, limit in zip((stdout, stderr), request["limits"])):
+                    raise ValueError("binary completion exceeds capture limits")
+            except ValueError:
+                raise RuntimeError("caller-owned binary result is invalid") from None
         return subprocess.CompletedProcess(request["argv"], code, stdout, stderr)
     if kind == "output-limit":
         stream = reply.get("stream")
@@ -219,6 +229,7 @@ def run(
     cwd: str | os.PathLike | None = None,
     env: dict[str, str] | None = None,
     allow_daemon_breakaway: bool = False,
+    binary: bool = False,
 ) -> subprocess.CompletedProcess:
     if on_settled is not None and not callable(on_settled):
         raise TypeError("settlement notification must be callable")
@@ -226,6 +237,7 @@ def run(
         request = _validate({
             "argv": argv, "timeout": timeout, "input_text": input_text, "capture": capture,
             "limits": [max_stdout_bytes, max_stderr_bytes],
+            **({"binary": binary} if binary is not False else {}),
         })
         frame = json.dumps(request, ensure_ascii=True, allow_nan=False) + "\n"
         if len(frame) > _MAX_REQUEST:
@@ -243,6 +255,7 @@ def run(
             capture_limits=(max_stdout_bytes, max_stderr_bytes),
             on_settled=on_settled,
             allow_daemon_breakaway=allow_daemon_breakaway,
+            binary=binary,
             **({"cwd": cwd} if cwd is not None else {}),
             **({"env": env} if env is not None else {}),
         )
@@ -347,7 +360,12 @@ def _main() -> None:
                 request["argv"], timeout=request["timeout"],
                 input_text=request["input_text"], capture=request["capture"],
                 inherit_process_group=True, capture_limits=tuple(request["limits"]),
+                binary=request.get("binary", False),
             )
+            if request.get("binary", False) and request["capture"]:
+                result.stdout, result.stderr = (
+                    base64.b64encode(stream).decode("ascii") for stream in (result.stdout, result.stderr)
+                )
             response.update(
                 kind="completed", returncode=result.returncode,
                 stdout=result.stdout, stderr=result.stderr,

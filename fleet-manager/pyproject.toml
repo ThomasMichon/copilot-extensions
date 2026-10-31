@@ -10,7 +10,7 @@ agent-procutil = { path = "libs/agent-procutil" }
 
 [project]
 name = "fleet-manager"
-version = "0.1.65-dev1"
+version = "0.1.66-dev1"
 description = "Standalone fleet planner and opt-in authenticated Gateway runtime and SDK."
 readme = "README.md"
 license = "MIT"
