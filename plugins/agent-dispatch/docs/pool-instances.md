@@ -28,6 +28,10 @@ atomic task placement and runtime capability negotiation remain pending.
 A definition's version is not an executing-runtime support advertisement.
 Old reservation/claim and interactive/suspended paths are unchanged.
 
+The [internal catalog storage expansion](pool-publication.md) adds fenced scope
+replacement and registry-input invalidation. It has no production publisher or
+HTTP capability yet and does not close complete-source collection.
+
 The [canonical assignment/startup amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md#selected-pool-scope-and-ordering)
 owns the selected policy and remaining gates.
 See [current-versus-target architecture](spawn-supervisor.md#assignment-lifecycle-current-versus-target)

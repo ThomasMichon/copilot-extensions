@@ -1,0 +1,9 @@
+{
+  "comment": "Add internal generation-fenced pool catalog storage and registration input revision invalidation",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
