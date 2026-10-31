@@ -86,7 +86,10 @@ def _extract_function_block(name: str) -> str:
     end = text.index("\n}\n", start) + len("\n}")
     source = (_PLUGIN_ROOT / "scripts" / "source-runtime.sh").as_posix()
     engine = (_PLUGIN_ROOT.parents[1] / "libs" / "installer-engine" / "installer-engine.sh").as_posix()
-    return f". '{engine}'\n. '{source}'\n" + text[start:end]
+    preflight = ""
+    if name == "do_stamp":
+        preflight = _extract_function_block("_runtime_admission_preflight") + "\n"
+    return f". '{engine}'\n. '{source}'\n" + preflight + text[start:end]
 
 
 def _run_activate_harness(
@@ -133,6 +136,8 @@ def _run_activate_harness(
         f'_versioned_current() {{ printf \'%s\' "{current_active or ""}"; }}',
         _extract_function_block("_version_lt"),
         _extract_function_block("_versioned_activate"),
+        # Ordering tests do not exercise installation policy admission.
+        '_require_actions() { return 0; }',
         "VERSIONED_RUNTIME=1",
         f'SRC_VERSION="{src_version}"',
         f"FORCE={1 if force else 0}",
@@ -366,6 +371,7 @@ def _run_do_stamp_harness(
         f'deploy_binstub() {{ : > "{deployed_marker}"; }}',
         _extract_function_block("_version_lt"),
         _extract_function_block("do_stamp"),
+        '_require_actions() { return 0; }',
         f'INSTALL_DIR="{install_dir.as_posix()}"',
         'LINK_DIR="$INSTALL_DIR/.venv"',
         f'LOCAL_BIN="{(tmp_path / "localbin").as_posix()}"',

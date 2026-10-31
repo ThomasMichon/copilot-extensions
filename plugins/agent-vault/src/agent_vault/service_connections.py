@@ -64,7 +64,7 @@ class VaultConnections:
             return response
         self.busy.add(writer)
         worker = asyncio.get_running_loop().run_in_executor(
-            None, self.service.handle_request, request, peer, transport
+            None, self.service._handle_admitted_request, request, peer, transport
         )
         self.workers.add(worker)
         worker.add_done_callback(self.workers.discard)

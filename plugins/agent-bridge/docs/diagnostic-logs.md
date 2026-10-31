@@ -95,14 +95,35 @@ boundary. These source tests prove the bounded logging path under controlled
 contention/storage/history/shutdown cases; they neither identify that stall's
 cause nor constitute a live fix.
 
-The watchdog thread also appends probe failures, replacement requests and terminal
-reasons to `<effective-config-root>/agent-bridge-watchdog.log`, with the actual
-PID and epoch-nanosecond timestamp. A replacement request is recorded before
-launching the replacement, so its native stdout/stderr setup cannot truncate
-that evidence. This emergency file is separate from the application queue and
-has no automatic age retention. It creates no missing parent and a write error
-does not change the watchdog's decision. Discovery through `logs` includes it;
-its existence does not establish a stall's cause or successful recovery.
+The watchdog offers probe failures, replacement requests/outcomes and terminal
+reasons to one explicitly owned emergency `BufferedSink`, initialized while
+arming the watchdog. Producers only offer bounded primitives: event names are
+clipped to 64 characters, details to 512; exception details contain the class,
+not arbitrary exception formatting. The offer performs a bounded recursive
+primitive copy, including UTF-8 encoding for size accounting, under a 16 KiB
+copier budget; it performs no JSON serialization or I/O. This budget is not an
+exact heap-size or persisted-file-size guarantee. Config/path resolution,
+logfile JSON serialization and open/write/close all run on the writer, never
+on the decision thread. The queue holds at most 32 records plus one in-flight
+record. Missing/unavailable, invalid, full, contended or closed sinks are
+lossy and never gate supervision, replacement scheduling or exit.
+
+The worker appends to `<effective-config-root>/agent-bridge-watchdog.log`, with
+the originating PID and epoch-nanosecond timestamp. A replacement request is
+**offered before launching** the replacement, but durable persistence before
+replacement or hard exit is not guaranteed. Native stdout/stderr setup cannot
+truncate this separate file; abrupt exit can still lose accepted records.
+Terminal and replacement diagnostics perform no synchronous logging or stderr
+flush before the lifecycle action.
+
+The watchdog runner owns closure through `finally`, rejecting/abandoning queued
+work without flush or join. Initialization is attempted once per process; no
+closed, failed or blocked writer is replaced, even if its thread later stops.
+A storage stall can occupy only that one writer while watchdog decisions
+continue. No collector service/process is added. This emergency file remains
+separate from the application queue, has no automatic age retention and creates
+no missing parent. Discovery through `logs` includes it; its existence does not
+establish a stall's cause or successful recovery.
 
 The generated Windows `start-agent-bridge.ps1 -ResolveOnly` prints its actual
 selected interpreter and exits before PID handling, CWD/environment changes,

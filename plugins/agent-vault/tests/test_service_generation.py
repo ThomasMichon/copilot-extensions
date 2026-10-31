@@ -69,6 +69,93 @@ def test_confirmed_retirement_is_not_reactivated_when_the_successor_disappears(
     assert not controller.service._runtime_can_work
 
 
+@pytest.mark.parametrize("transport", ("tcp", "unix", "pipe"))
+def test_retirement_settles_admitted_queued_dispatch_but_rejects_late_arrivals(
+    monkeypatch: pytest.MonkeyPatch, transport: str,
+) -> None:
+    from agent_vault.service import VaultService, handle_client
+    from agent_vault.service_connections import VaultConnections
+
+    vault = VaultService()
+    dispatched = []
+    ttl_checks = []
+    monkeypatch.setattr(vault.cli, "has_password", lambda db=None: False)
+    monkeypatch.setattr(vault, "_check_password_ttl", lambda: ttl_checks.append("checked"))
+
+    def has(kpdb: str, entry: str, group: str | None = None) -> bool:
+        dispatched.append((kpdb, entry, group, vault._request_ctx.allow_prompt,
+                           vault._request_ctx.reason))
+        return True
+
+    monkeypatch.setattr(vault, "has", has)
+    connections = VaultConnections(vault, handle_client)
+    controller = object.__new__(generation.ServiceGeneration)
+    controller.service = vault
+    controller.connections = connections
+    controller.retiring = {"runtime_generation": "displaced-successor"}
+    monkeypatch.setattr(generation, "selected_generation", lambda: "next-successor")
+
+    async def exercise() -> None:
+        loop = asyncio.get_running_loop()
+        queued = []
+
+        def enqueue(executor: object, callback: Callable, *args: object) -> asyncio.Future:
+            future = loop.create_future()
+            queued.append((callback, args, future))
+            return future
+
+        monkeypatch.setattr(loop, "run_in_executor", enqueue)
+        writer = object()
+        request = {"action": "has", "kpdb": "fixture.kdbx", "entry": "fixture",
+                   "group": "fixture-group", "allow_prompt": False}
+        pending = connections.request(writer, request, "fixture-peer", transport)
+        assert pending in connections.work and pending in connections.workers
+        assert writer in connections.busy
+        assert len(queued) == 1 and not dispatched and not ttl_checks
+
+        await controller.tick()
+        assert not vault._runtime_can_work and not vault._shutdown
+        assert pending in connections.work and not pending.done()
+        late_writer = object()
+        late = connections.request(late_writer, request, "late-peer", transport)
+        assert await late == {"ok": False, "error": "service_transition", "retryable": True}
+        assert len(queued) == 1 and late_writer not in connections.busy
+        assert connections.work == connections.workers == {pending}
+
+        callback, args, future = queued.pop()
+        future.set_result(callback(*args))
+        assert await pending == {"ok": True, "exists": True}
+        assert dispatched == [("fixture.kdbx", "fixture", "fixture-group", False,
+                               "action=has peer=fixture-peer")]
+        assert ttl_checks == ["checked"]
+        await asyncio.sleep(0)
+        assert not connections.work and not connections.workers
+        await controller.tick()
+        assert vault._shutdown and not vault._runtime_can_work
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("metadata", (
+    {"admitted": True}, {"_admitted": True}, {"_admission_ticket": {"accepted": True}},
+))
+def test_public_request_cannot_forge_retired_lifecycle_admission(
+    monkeypatch: pytest.MonkeyPatch, metadata: dict,
+) -> None:
+    from agent_vault.service import VaultService
+
+    vault = VaultService()
+    vault._runtime_can_work = False
+
+    def unexpected_dispatch(*args: object) -> dict:
+        pytest.fail("Client metadata bypassed the public lifecycle guard")
+
+    monkeypatch.setattr(vault, "_handle_admitted_request", unexpected_dispatch)
+    assert vault.handle_request({"action": "has", **metadata}) == {
+        "ok": False, "error": "service_transition", "retryable": True,
+    }
+
+
 @pytest.mark.parametrize("response", (
     [1], {"ok": True, "pid": 123, "generation_protocol": True, "runtime_generation": "other"},
     {"ok": True, "pid": 123, "generation_protocol": 1, "runtime_generation": None},

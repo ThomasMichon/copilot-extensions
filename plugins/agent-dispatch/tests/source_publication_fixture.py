@@ -1,6 +1,7 @@
 """Contained source publication using the actual installer runtime functions."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import json
@@ -19,6 +20,29 @@ REPO = PLUGIN.parents[1]
 SCRIPTS = PLUGIN / "scripts"
 PACKAGE = "1.2.3-dev4"
 HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
+def mandatory_admission_files() -> tuple[str, ...]:
+    """Read the canonical bundle declaration without executing tooling."""
+    archive_tree = ast.parse((REPO / "tools" / "daemon_lifecycle_assets.py").read_text(encoding="utf-8"))
+    archive = next(
+        ast.literal_eval(node.value)
+        for node in archive_tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "ARCHIVE_NAME" for target in node.targets)
+    )
+    tree = ast.parse((REPO / "tools" / "sync-installation-context.py").read_text(encoding="utf-8"))
+    declaration = next(
+        node.value for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "FILES" for target in node.targets)
+    )
+    assert isinstance(declaration, ast.Tuple)
+    return tuple(
+        archive if isinstance(member, ast.Name) and member.id == "ARCHIVE_NAME"
+        else ast.literal_eval(member)
+        for member in declaration.elts
+    )
 
 
 def run_publication_bash(argv: list[str], tmp_path: Path) -> subprocess.CompletedProcess:
@@ -127,6 +151,7 @@ try {
 """
     else:
         names = (
+            "_runtime_admission_preflight",
             "_ensure_runtime", "_payload_hash", "_versioned_slot_clean", "_versioned_mark_complete",
             "_versioned_activate", "_versioned_current", "_activation_superseded_now",
             "_version_lt", "_write_manifest", "deploy_binstub", "do_stamp",

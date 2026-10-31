@@ -492,17 +492,9 @@ def _watchdog_dead(reason: str, *, active_port: int | None = None) -> None:
     _record_event("replacement-requested", reason)
     try:
         _core()._spawn_watchdog_replacement(active_port=active_port)
-        import logging
-
-        logging.getLogger("agent-bridge").error(
-            "Self-watchdog: scheduled a detached Windows replacement before exit"
-        )
+        _record_event("replacement-scheduled", reason)
     except Exception as exc:
-        import logging
-
-        logging.getLogger("agent-bridge").error(
-            "Self-watchdog: could not schedule Windows replacement: %s", exc
-        )
+        _record_event("replacement-failed", type(exc).__name__)
     _force_exit(reason)
 
 

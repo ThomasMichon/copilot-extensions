@@ -197,11 +197,23 @@ def test_watchdog_dead_still_exits_when_replacement_scheduling_crashes(monkeypat
     from agent_bridge import watchdog
 
     calls = []
+    diagnostics = []
 
     def crash(**_kwargs):
         raise RuntimeError("unexpected helper failure")
 
+    def forbidden_log(*_args, **_kwargs):
+        pytest.fail("replacement failure synchronously logged before exit")
+
     monkeypatch.setattr(m, "_spawn_watchdog_replacement", crash)
+    monkeypatch.setattr(watchdog, "_record_event", lambda event, detail: diagnostics.append(
+        (event, detail),
+    ))
+    monkeypatch.setattr(watchdog.log, "error", forbidden_log)
     monkeypatch.setattr(watchdog, "_force_exit", lambda reason: calls.append(("exit", reason)))
     m._watchdog_dead("listener stopped")
     assert calls == [("exit", "listener stopped")]
+    assert diagnostics == [
+        ("replacement-requested", "listener stopped"),
+        ("replacement-failed", "RuntimeError"),
+    ]

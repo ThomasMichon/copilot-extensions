@@ -32,6 +32,7 @@ on:
           - bridge-contracts
           - bridge-binding
           - dispatch-binding
+          - dispatch-publication
           - dispatch-maintenance
           - promotion-controls
           - pane-argv
@@ -44,6 +45,28 @@ permissions:
   contents: read
 
 jobs:
+  dispatch-publication-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-publication'
+    name: Dispatch admission publication (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact qualification source
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Qualify required admission files and owned publication rollback
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_conditional_runtime_publication.py
+          --test-file tests/test_install_sh_activation_guard.py
   exhaustive-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'context-windows'
     name: exhaustive adapters (Windows)

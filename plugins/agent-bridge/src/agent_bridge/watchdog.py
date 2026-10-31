@@ -32,11 +32,13 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sys
 import threading
 import time
 import urllib.request
 from collections.abc import Callable
+from functools import partial
+
+from process_telemetry.buffer import BufferedSink
 
 log = logging.getLogger("agent-bridge")
 
@@ -49,19 +51,54 @@ _DEFAULT_SHUTDOWN_GRACE = 120.0
 _WINDOWS_INTERVAL = 5.0
 _WINDOWS_SERVING_GRACE = 15.0
 _EXIT_CODE = 70  # EX_SOFTWARE -- distinguishable in logs/postmortems
+_diagnostic_writer: BufferedSink | None = None
+_diagnostics_initialized = False
+_diagnostic_owner_lock = threading.Lock()
+
+
+def _write_event(record: dict) -> None:
+    from .install_paths import effective_config_dir
+
+    with (effective_config_dir() / "agent-bridge-watchdog.log").open(
+        "a", encoding="utf-8",
+    ) as stream:
+        stream.write(json.dumps(record) + "\n")
+
+
+def _start_event_writer() -> BufferedSink | None:
+    """Initialize once while arming, never replace a closed or blocked writer."""
+    global _diagnostic_writer, _diagnostics_initialized
+    with _diagnostic_owner_lock:
+        if not _diagnostics_initialized:
+            _diagnostics_initialized = True
+            try:
+                _diagnostic_writer = BufferedSink(
+                    _write_event, capacity=32, batch_size=1, max_bytes=16384,
+                )
+                _diagnostic_writer.start()
+            except Exception:
+                if _diagnostic_writer is not None:
+                    _diagnostic_writer.close()
+        return _diagnostic_writer
 
 
 def _record_event(event: str, detail: str) -> None:
-    from .config import config_dir
+    """Offer bounded primitives; persistence never gates a watchdog decision."""
+    writer = _diagnostic_writer
+    if writer is None or type(event) is not str or type(detail) is not str:
+        return
+    writer({
+        "time_ns": time.time_ns(), "pid": os.getpid(),
+        "event": event[:64], "detail": detail[:512],
+    })
 
+
+def _run_watchdog(watchdog: ServingWatchdog, writer: BufferedSink | None) -> None:
     try:
-        with (config_dir() / "agent-bridge-watchdog.log").open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps({
-                "time_ns": time.time_ns(), "pid": os.getpid(),
-                "event": event, "detail": detail,
-            }) + "\n")
-    except OSError:
-        pass
+        watchdog.run()
+    finally:
+        if writer is not None:
+            writer.close()
 
 
 class ServingWatchdog:
@@ -196,24 +233,15 @@ def _make_health_probe(bind: str, port: int, *, timeout: float = 2.0) -> Callabl
             with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 -- fixed loopback http
                 return resp.status == 200
         except Exception as error:
-            _record_event("probe-failed", f"{type(error).__name__}: {error}")
+            _record_event("probe-failed", type(error).__name__)
             return False
 
     return _probe
 
 
 def _force_exit(reason: str) -> None:
-    """Log a fatal line and hard-exit so the kernel frees the singleton lock."""
+    """Offer the terminal reason, then hard-exit without logging/flush waits."""
     _record_event("exit", reason)
-    log.error(
-        "Self-watchdog: daemon wedged (%s) -- exiting so the singleton lock is "
-        "freed for a clean restart (#166)",
-        reason,
-    )
-    try:
-        sys.stderr.flush()
-    except Exception:
-        pass
     # os._exit (not sys.exit): the event loop / interpreter shutdown may itself be
     # wedged, and we must guarantee the process actually dies to release the lock.
     os._exit(_EXIT_CODE)
@@ -240,6 +268,7 @@ def arm_serving_watchdog(
         log.info("Self-watchdog disabled via AGENT_BRIDGE_WATCHDOG")
         return None
 
+    writer = _start_event_writer()
     watchdog = ServingWatchdog(
         is_started=lambda: bool(getattr(server, "started", False)),
         is_shutting_down=lambda: bool(getattr(server, "should_exit", False)),
@@ -252,9 +281,15 @@ def arm_serving_watchdog(
         serving_grace=serving_grace,
     )
     thread = threading.Thread(
-        target=watchdog.run, name="agent-bridge-watchdog", daemon=True
+        target=partial(_run_watchdog, watchdog, writer),
+        name="agent-bridge-watchdog", daemon=True,
     )
-    thread.start()
+    try:
+        thread.start()
+    except Exception:
+        if writer is not None:
+            writer.close()
+        raise
     log.info(
         "Self-watchdog armed: force-exit if wedged (startup_grace=%.0fs, "
         "serving_grace=%.0fs, interval=%.0fs)",

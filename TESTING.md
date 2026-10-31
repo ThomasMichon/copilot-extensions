@@ -251,6 +251,14 @@ and skips: WSL PowerShell and a skipped Windows-only case are not native Windows
 evidence. This focused opt-in lane neither expands required unit-only CI nor
 reenrolls the unavailable full Windows rotation.
 
+Dispatch's admission-bundle and conditional-publication POSIX packet uses the
+same manual workflow with `portfolio=dispatch-publication`. Its Ubuntu job
+verifies the exact source SHA and runs `test_conditional_runtime_publication.py`
+and `test_install_sh_activation_guard.py` through the bounded plugin runner.
+This includes ownership-aware rollback cases skipped on Windows. It does not
+expand the required unit packet or replace native Windows/whole-suite evidence;
+read its actual exits, containment cleanup and skips separately.
+
 Fleet-manager's `test_komodo_*` packet exercises strict declaration/current
 grant checks, real caller-owned synthetic Docker protocol processes, physical
 bridge and exact-container custody, preserving adoption versus managed fixed

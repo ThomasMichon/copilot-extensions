@@ -542,6 +542,11 @@ class VaultService:
             "ping", "stop", "handoff-export",
         }:
             return {"ok": False, "error": "service_transition", "retryable": True}
+        return self._handle_admitted_request(request, peer, transport)
+
+    def _handle_admitted_request(self, request: dict, peer: str = "?",
+                                 transport: str = "unknown") -> dict:
+        """Dispatch work whose lifecycle admission was decided by the server."""
         self.keepalive()
         self._check_password_ttl()
         action = request.get("action")

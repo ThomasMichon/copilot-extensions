@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import os
+import logging
 import threading
 import time
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from agent_procutil.daemon_instances import admit_daemon_instance, inspect_instances
 from work_coalescing_singleton import CoalescingServer, client
+from zdd import diagnostics, routing
 
 from worktree_manager import mux_daemon
 
@@ -190,9 +197,15 @@ def test_passive_loop_fences_observation_and_admits_before_recovery(
     monkeypatch.setattr(mux_daemon, "_acquire_daemon_lease", lambda root: lease)
     monkeypatch.setattr(mux_daemon, "_release_daemon_lease", lambda handle: None)
     monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: None)
-    monkeypatch.setattr(
-        mux_daemon.mux_daemon_cutover, "active_generation_for_pid", lambda *args, **kwargs: 1,
-    )
+    original_start = mux_daemon.MuxDaemonRuntime.start
+
+    def start(runtime):
+        original_start(runtime)
+        mux_daemon.mux_daemon_cutover.publish_route(
+            runtime.port, root=tmp_path, pid=os.getpid(), version=mux_daemon.route_version(),
+        )
+
+    monkeypatch.setattr(mux_daemon.MuxDaemonRuntime, "start", start)
 
     def activate(runtime):
         assert runtime.accepting_requests(), "Recovery activated before work admission"
@@ -207,6 +220,236 @@ def test_passive_loop_fences_observation_and_admits_before_recovery(
         tmp_path, passive=True, max_iterations=1, poll_interval_s=0,
     ) == 0
     assert events == (["activate", "observe"] if lease_available else [])
+
+
+@pytest.fixture
+def passive_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    state: dict[str, Any] = {"now": 0.0, "events": [], "selected": True, "handle": object()}
+    route_dir = mux_daemon.mux_daemon_cutover.routing_dir(tmp_path)
+
+    def publish(**changes: Any) -> routing.Endpoint:
+        return routing.publish_active(route_dir, **{
+            "bind": "127.0.0.1", "port": 43123, "pid": os.getpid(),
+            "version": "incoming-slot", "generation": 1, **changes,
+        })
+
+    def start(runtime: mux_daemon.MuxDaemonRuntime) -> None:
+        state["runtime"] = runtime
+        runtime.server = SimpleNamespace(
+            rendezvous=lambda: {
+                "endpoint": "127.0.0.1:43123", "transport": "tcp",
+                "token": "fixture-control", "generation": 1,
+            },
+            subscriber_count=lambda: 0, active_handler_count=lambda: 0,
+        )
+        monkeypatch.setattr(runtime.registry, "has_any_live", lambda: False)
+        monkeypatch.setattr(runtime.picker_sessions, "pump", lambda: None)
+        monkeypatch.setattr(runtime.attachment_observer, "observe", lambda registry: None)
+        monkeypatch.setattr(runtime.recovery_observer, "observe", lambda registry: None)
+        if state["selected"]:
+            publish()
+
+    def activate(runtime: mux_daemon.MuxDaemonRuntime) -> None:
+        assert runtime.accepting_requests()
+        state["events"].append(("activate", state["now"]))
+
+    def sleep(seconds: float) -> None:
+        state["now"] += 31
+
+    monkeypatch.setattr(mux_daemon, "time", SimpleNamespace(
+        time=lambda: state["now"], monotonic=time.monotonic, sleep=sleep,
+    ))
+    monkeypatch.setattr(mux_daemon, "route_version", lambda: "incoming-slot")
+    monkeypatch.setattr(mux_daemon, "process_start_time", lambda pid: "123")
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "123")
+    monkeypatch.setattr(mux_daemon.MuxDaemonRuntime, "start", start)
+    monkeypatch.setattr(mux_daemon.MuxDaemonRuntime, "activate_restart_recovery", activate)
+    monkeypatch.setattr(mux_daemon.MuxDaemonRuntime, "shutdown", lambda runtime: state["events"].append(("shutdown", state["now"])))
+    monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: None)
+    monkeypatch.setattr(mux_daemon.mux_daemon_cutover, "_health_check", lambda *args, **kwargs: True)
+    monkeypatch.setattr(mux_daemon, "_acquire_daemon_lease", lambda root: state["handle"])
+    monkeypatch.setattr(mux_daemon, "_release_daemon_lease", lambda handle: state["events"].append(("release", handle)))
+    monkeypatch.setattr(mux_daemon, "write_lock_data", lambda *args: state["events"].append(("rendezvous", state["now"])))
+    state.update(publish=publish, route_dir=route_dir)
+    state["run"] = lambda **kwargs: mux_daemon.run_daemon_foreground(
+        tmp_path, passive=True, max_iterations=kwargs.pop("max_iterations", 8), **kwargs,
+    )
+    return state
+
+
+def test_selected_passive_outwaits_idle_and_restarts_idle_after_promotion(
+    passive_loop: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = []
+
+    def acquire(root: Path) -> object | None:
+        attempts.append(passive_loop["now"])
+        return passive_loop["handle"] if passive_loop["now"] >= 93 else None
+
+    monkeypatch.setattr(mux_daemon, "_acquire_daemon_lease", acquire)
+    assert passive_loop["run"]() == 0
+    assert attempts == [0, 31, 62, 93]
+    assert ("activate", 93) in passive_loop["events"]
+    assert [at for event, at in passive_loop["events"] if event == "shutdown"] == [155, 155]
+
+
+@pytest.mark.parametrize("exit_kind", ["never-selected", "shutdown", "superseded"])
+def test_passive_wait_preserves_existing_exit_authority(
+    passive_loop: dict[str, Any], monkeypatch: pytest.MonkeyPatch, exit_kind: str,
+) -> None:
+    passive_loop["selected"] = exit_kind != "never-selected"
+
+    def acquire(root: Path) -> None:
+        if exit_kind == "shutdown":
+            passive_loop["runtime"].request_shutdown()
+        elif exit_kind == "superseded":
+            passive_loop["publish"](pid=os.getpid() + 100, port=43124, generation=2, version="next-slot")
+        return None
+
+    monkeypatch.setattr(mux_daemon, "_acquire_daemon_lease", acquire)
+    assert passive_loop["run"]() == 0
+    assert not any(event in {"activate", "rendezvous", "release"} for event, _ in passive_loop["events"])
+    expected = 62 if exit_kind == "never-selected" else 0 if exit_kind == "shutdown" else 31
+    assert passive_loop["now"] == expected
+
+
+@pytest.mark.parametrize("changed", ["pid", "generation", "port", "bind", "version", "process_start_time", "missing", "malformed"])
+def test_unselected_provisional_lease_never_admits_or_recovers(
+    passive_loop: dict[str, Any], monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    changes = {
+        "pid": os.getpid() + 100, "generation": 2, "port": 43124,
+        "bind": "127.0.0.2", "version": "next-slot", "process_start_time": "456",
+    }
+
+    def acquire(root: Path) -> object:
+        if changed in {"missing", "malformed"}:
+            routing.routing_table_path(passive_loop["route_dir"]).write_text(
+                '{"active": null}' if changed == "missing" else '{"active": []}', encoding="utf-8",
+            )
+        else:
+            if changed == "process_start_time":
+                monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "456")
+            passive_loop["publish"](**{changed: changes[changed]})
+        return passive_loop["handle"]
+
+    monkeypatch.setattr(mux_daemon, "_acquire_daemon_lease", acquire)
+    assert passive_loop["run"](max_iterations=1) == 0
+    assert [event for event, _ in passive_loop["events"]] == ["release", "shutdown", "shutdown"]
+    assert not passive_loop["runtime"].accepting_requests()
+    if changed == "pid":
+        assert routing.read_table(passive_loop["route_dir"])["active"]["pid"] == changes["pid"]
+
+
+@pytest.mark.parametrize("error", [routing.RoutingLockTimeout, OSError, KeyboardInterrupt])
+def test_provisional_lease_released_on_routing_authority_failure(
+    passive_loop: dict[str, Any], monkeypatch: pytest.MonkeyPatch, error: type[BaseException],
+) -> None:
+    def stalled_diagnostic(*args: Any, **kwargs: Any) -> None:
+        assert ("release", passive_loop["handle"]) in passive_loop["events"]
+        pytest.fail("Deferred promotion must not require a synchronous diagnostic")
+
+    monkeypatch.setattr(logging.getLogger(mux_daemon.__name__), "warning", stalled_diagnostic)
+
+    @contextmanager
+    def failed_lock(directory: Path, *, deadline: float):
+        assert time.monotonic() <= deadline <= time.monotonic() + 0.3
+        raise error("routing unavailable")
+        yield
+
+    monkeypatch.setattr(routing, "routing_lock", failed_lock)
+    if error is KeyboardInterrupt:
+        with pytest.raises(KeyboardInterrupt):
+            passive_loop["run"](max_iterations=1)
+    else:
+        assert passive_loop["run"](max_iterations=1) == 0
+    assert [event for event, _ in passive_loop["events"]] == ["release", "shutdown", "shutdown"]
+    assert not passive_loop["runtime"].accepting_requests()
+
+
+@pytest.mark.parametrize("corruption", [
+    b'{"active":', b"\xff", b"[" * 2000 + b"]" * 2000,
+    b'{"active":{"bind":"127.0.0.1","port":{}}}',
+    b'{"active":{"bind":"127.0.0.1","port":1e400}}',
+    b'{"active":{"bind":"127.0.0.1","port":"invalid"}}',
+])
+def test_malformed_raw_selection_refuses_without_lease_held_diagnostics(
+    passive_loop: dict[str, Any], monkeypatch: pytest.MonkeyPatch, corruption: bytes,
+) -> None:
+    table_path = routing.routing_table_path(passive_loop["route_dir"])
+    original = []
+
+    def acquire(root: Path) -> object:
+        original.append(table_path.read_bytes())
+        table_path.write_bytes(corruption)
+        return passive_loop["handle"]
+
+    def release(handle: object) -> None:
+        assert passive_loop["runtime"].passive
+        assert not passive_loop["runtime"].accepting_requests()
+        passive_loop["events"].append(("release", handle))
+        # Isolate final validation from the unchanged later self-retirement reader.
+        table_path.write_bytes(original[0])
+
+    def stalled_diagnostic(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("Malformed selection consulted a synchronous diagnostic")
+
+    monkeypatch.setattr(mux_daemon, "_acquire_daemon_lease", acquire)
+    monkeypatch.setattr(mux_daemon, "_release_daemon_lease", release)
+    monkeypatch.setattr(routing.log, "warning", stalled_diagnostic)
+    assert passive_loop["run"](max_iterations=1) == 0
+    assert [event for event, _ in passive_loop["events"]] == ["release", "shutdown", "shutdown"]
+
+
+def test_publication_serializes_promotion_but_not_recovery_io(
+    passive_loop: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempted, published = threading.Event(), threading.Event()
+    original_promote = mux_daemon.MuxDaemonRuntime.promote
+    original_lock = routing._routing_lock
+    errors = []
+
+    @contextmanager
+    def observed_lock(directory: Path, *, deadline: float | None = None):
+        if threading.current_thread().name == "route-publisher":
+            unlocked = routing._PROCESS_ROUTING_LOCK.acquire(blocking=False)
+            if unlocked:
+                routing._PROCESS_ROUTING_LOCK.release()
+            assert not unlocked, "Promotion did not hold publication authority"
+            attempted.set()
+        with original_lock(directory, deadline=deadline):
+            yield
+
+    def publisher() -> None:
+        try:
+            passive_loop["publish"](pid=os.getpid() + 100, port=43124, generation=2, version="next-slot")
+            published.set()
+        except BaseException as exc:
+            errors.append(exc)
+
+    def promote(runtime: mux_daemon.MuxDaemonRuntime) -> dict:
+        worker.start()
+        assert attempted.wait(2)
+        assert not published.is_set()
+        return original_promote(runtime)
+
+    def activate(runtime: mux_daemon.MuxDaemonRuntime) -> None:
+        assert published.wait(2), "Recovery retained routing authority"
+        runtime.request_shutdown()
+
+    worker = threading.Thread(target=publisher, name="route-publisher")
+    monkeypatch.setattr(routing, "_routing_lock", observed_lock)
+    monkeypatch.setattr(mux_daemon.MuxDaemonRuntime, "promote", promote)
+    monkeypatch.setattr(mux_daemon.MuxDaemonRuntime, "activate_restart_recovery", activate)
+    try:
+        assert passive_loop["run"]() == 0
+    finally:
+        if worker.ident is not None:
+            worker.join(3)
+    assert not worker.is_alive()
+    assert not errors
+    assert attempted.is_set() and published.is_set()
+    assert routing.read_table(passive_loop["route_dir"])["active"]["generation"] == 2
 
 
 def test_interrupted_shutdown_caller_cannot_retire_live_handler(runtime, monkeypatch):

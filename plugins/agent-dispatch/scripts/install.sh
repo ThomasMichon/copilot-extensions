@@ -962,7 +962,62 @@ _adopted_projects() {
 # remains only as an offline/network-restricted fallback
 # (AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to it) and is expected
 # to be dropped once the on-demand fetch path is validated.
+_runtime_admission_preflight() {
+    # Canonical bundle: tools/sync-installation-context.py FILES.
+    # Installer tests compare this Python-free list with that declaration.
+    local required
+    local -a required_files=(
+        _installation_context_base.py
+        _installation_context_files.py
+        _installation_context_source.py
+        _installation_context_lock_recovery.py
+        _installation_context_receipts.py
+        _installation_context_snapshot.py
+        _installation_context_runtime_slot_ownership.py
+        _installation_context_runtime_slot_completion.py
+        _installation_context_resolution.py
+        _installation_context_guest_environment.py
+        _installation_context_activation.py
+        _installation_context_legacy_attribution.py
+        _installation_context_legacy_transition.py
+        _installation_context_legacy_retirement.py
+        _installation_context_maintenance.py
+        _installation_context_mode_cli.py
+        _installation_context_deployment.py
+        _installation_context_publication.py
+        _installation_context_powershell.py
+        _installation_context_worker.py
+        installation_context.py
+        daemon_instance_runtime.pyz
+        installation-context.sh
+        installation-context.ps1
+        shell-caller-owned.ps1
+        plugin-publication-probe.ps1
+        plugin-publication-probe.sh
+        guest-environment.ps1
+        guest-environment.sh
+        json-query.awk
+    )
+    if [[ ! -d "$SCRIPT_DIR/installation-context" ]]; then
+        _fail "Required runtime admission bundle not found at $SCRIPT_DIR/installation-context"
+        return 1
+    fi
+    for required in "${required_files[@]}"; do
+        if [[ ! -f "$SCRIPT_DIR/installation-context/$required" ||
+              ! -r "$SCRIPT_DIR/installation-context/$required" ]]; then
+            _fail "Required runtime admission file missing or unreadable: $SCRIPT_DIR/installation-context/$required"
+            return 1
+        fi
+    done
+    if [[ -n "${1:-}" ]]; then
+        printf -v "$1" '%s\n' "${required_files[@]}" || return 1
+    fi
+    return 0
+}
+
 deploy_binstub() {
+    local required_bundle
+    _runtime_admission_preflight required_bundle || return 1
     _assert_source_runtime || return 1
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
         local snapshot
@@ -1007,8 +1062,13 @@ deploy_binstub() {
         fi
     done
     mkdir -p "$INSTALL_DIR/bin/installation-context" || return 1
+    while IFS= read -r r; do
+        _runtime_publication_copy "$SCRIPT_DIR/installation-context/$r" \
+            "$INSTALL_DIR/bin/installation-context/$r" || return 1
+    done <<< "${required_bundle%$'\n'}"
     for r in "$SCRIPT_DIR/installation-context/"*; do
         [[ -f "$r" ]] || continue
+        [[ $'\n'"$required_bundle" == *$'\n'"${r##*/}"$'\n'* ]] && continue
         _runtime_publication_copy "$r" \
             "$INSTALL_DIR/bin/installation-context/${r##*/}" || return 1
     done
@@ -1046,6 +1106,7 @@ _ensure_runtime() {
         return 1
     fi
     if [[ "$prepare_only" != 1 ]]; then
+        _runtime_admission_preflight || return 1
         _maintenance_preflight || return $?
     fi
     if [[ -z "${RETAINED_RUNTIME:-}" ]]; then
@@ -2204,6 +2265,7 @@ _install_supervisor_service() {
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
+    _runtime_admission_preflight || return 1
     _maintenance_preflight stamp || return $?
     _step 'agent-dispatch stamp; runtime deferred to first use'
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || return 1
@@ -2334,6 +2396,7 @@ do_stamp() {
 }
 
 do_install() {
+    _runtime_admission_preflight || return 1
     _maintenance_preflight install || return $?
     _step 'agent-dispatch install'
     _ensure_runtime || return $?
@@ -2358,6 +2421,7 @@ do_install() {
 }
 
 do_update() {
+    _runtime_admission_preflight || return 1
     _maintenance_preflight update || return $?
     _step 'agent-dispatch update'
     # Mark the live-service update lifecycle as in-progress (ce#5066) so a
@@ -2754,6 +2818,9 @@ if [[ "$ACTION" == restore ]]; then
     ACTION=update
 fi
 _LIFECYCLE_ACTION=""
+case "$ACTION" in
+    install|update|provision|stamp) _runtime_admission_preflight || exit 1 ;;
+esac
 case "$ACTION" in
     install|provision) _LIFECYCLE_ACTION=install ;;
     update|start|stop) _LIFECYCLE_ACTION="$ACTION" ;;

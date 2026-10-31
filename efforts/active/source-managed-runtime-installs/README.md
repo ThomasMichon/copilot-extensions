@@ -1759,4 +1759,9 @@ environment and custody contracts remain unchanged apart from the cache flags.
 The new exact head still needs both complete hosted modes and actual review;
 the historical writer is not claimed to be uniquely attributed.
 
+The [October 31 review-correction record](<journal/2026/10.31 review-corrections.md>)
+captures the reconciled source history, all six fixes, actual bounded local
+results and the remaining exact-head Windows/POSIX/review gates. No local result
+or earlier hosted head substitutes for qualification of the integrated changes.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

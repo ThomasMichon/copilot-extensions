@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
+import venv
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from agent_procutil import no_window_kwargs
+from agent_procutil import no_window_kwargs, python_cache_args
 
 PLUGIN = Path(__file__).resolve().parents[1]
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
@@ -41,6 +44,129 @@ def _run_ps(
         capture_output=True, text=True, timeout=30, check=False,
         **no_window_kwargs(),
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows lexical cache paths")
+@pytest.mark.parametrize("root", [
+    r"C:\owned index\state\..\root",
+    r"\\server\share\owned index",
+    r"\\?\C:\owned index",
+    r"\\?\UNC\server\share\owned index",
+])
+def test_native_cache_arguments_match_owned_lexical_python_contract(root: str) -> None:
+    result = _run_ps(
+        _function("Get-IndexPythonCacheArgs")
+        + f"\n@(Get-IndexPythonCacheArgs -Root {_literal(Path(root))})"
+        " | ConvertTo-Json -Compress\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == python_cache_args(root)
+
+
+@pytest.mark.parametrize("root", ["relative-root", r"C:relative-root"])
+def test_native_cache_arguments_refuse_relative_roots(root: str) -> None:
+    result = _run_ps(
+        _function("Get-IndexPythonCacheArgs")
+        + f"\ntry {{ Get-IndexPythonCacheArgs -Root '{root}' }}"
+        " catch { Write-Output $_; exit 23 }\n"
+    )
+    assert result.returncode == 23, result.stderr
+    assert "absolute owned runtime root" in result.stdout
+
+
+@pytest.mark.parametrize("prospective_exists", [False, True])
+@pytest.mark.parametrize("route", ["explicit", "restart-stop-failed"])
+def test_actual_stop_keeps_selected_slot_immutable_with_cold_warm_cache(
+    tmp_path: Path, prospective_exists: bool, route: str,
+) -> None:
+    root = tmp_path / "owned index"
+    slot = root / "versions" / "1.0.0"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    if os.name == "nt":
+        python = slot / "Scripts" / "python.exe"
+        site = slot / "Lib" / "site-packages"
+    else:
+        python = slot / "bin" / "python"
+        site = slot / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    package = site / "agent_index"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "probe.py").write_text("VALUE = 'inert selected runtime'\n", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import json, os, sys\nfrom . import probe\n"
+        "print(json.dumps({'args': sys.argv[1:], 'prefix': sys.pycache_prefix,"
+        " 'disabled': sys.dont_write_bytecode, 'runtime': sys.prefix,"
+        " 'cwd': os.getcwd(), 'rt_root': os.environ.get('AGENT_RT_ROOT'),"
+        " 'engine_home': os.environ.get('AGENT_INDEX_ENGINE_HOME'),"
+        " 'value': probe.VALUE}))\n"
+        "sys.exit(23 if sys.argv[1:] == ['engine', 'stop'] else 17)\n",
+        encoding="utf-8",
+    )
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": "1.0.0", "completed_at": "fixture", "pid": 0,
+    }), encoding="utf-8")
+    (root / "current-version").write_text("1.0.0", encoding="utf-8")
+    resolver = root / "bin" / "resolve-runtime.ps1"
+    resolver.parent.mkdir()
+    resolver.write_bytes((PLUGIN / "scripts" / "resolve-runtime.ps1").read_bytes())
+    prospective = root / "versions" / "9.0.0" / python.relative_to(slot)
+    if prospective_exists:
+        prospective.parent.mkdir(parents=True)
+        prospective.write_bytes(b"prospective interpreter must never run")
+    engine = tmp_path / "independent engine"
+    engine.mkdir()
+    (engine / "engine.pid").write_text("inert engine identity", encoding="utf-8")
+    before = {str(path.relative_to(tmp_path)): path.read_bytes()
+              for path in tmp_path.rglob("*") if path.is_file()}
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$InstallDir = {_literal(root)}\n$LinkPython = {_literal(prospective)}\n"
+        "$TaskName = 'inert-service'; $EngineTaskName = 'inert-engine'\n"
+        "$env:AGENT_RT_ROOT = 'caller-root'\n"
+        f"$env:AGENT_INDEX_ENGINE_HOME = {_literal(engine)}\n"
+        f"Set-Location -LiteralPath {_literal(tmp_path)}\n"
+        "function Get-ScheduledTask { return $null }\n"
+        "function Stop-ScheduledTask { throw 'Forbidden task stop' }\n"
+        + _function("Get-IndexPythonCacheArgs") + "\n"
+    )
+    if route == "explicit":
+        script += _function("Invoke-Stop") + "\nInvoke-Stop\nexit $LASTEXITCODE\n"
+    else:
+        script += (
+            f"$EngineVenvPython = {_literal(python)}\n$NoService = $false\n"
+            "function Start-Sleep { throw 'Failed stop must not restart' }\n"
+            + _function("Get-ActiveSlotPython") + "\n" + _function("Restart-EngineDaemon")
+            + "\ntry { Restart-EngineDaemon }"
+            " catch { Write-Host ('REFUSED:' + $_); exit $LASTEXITCODE }\n"
+        )
+    previous = None
+    cache = Path(python_cache_args(root)[1].partition("=")[2])
+    for _cycle in range(2):
+        result = _run_ps(script)
+        assert result.returncode == 23, result.stderr
+        records = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+        assert [record["args"] for record in records] == (
+            [["stop"], ["engine", "stop"]] if route == "explicit" else [["engine", "stop"]]
+        )
+        if route != "explicit":
+            assert "REFUSED:Primary index runtime failed to stop the engine" in result.stdout
+        for record in records:
+            assert record["prefix"] == str(cache)
+            assert not record["disabled"]
+            assert Path(record["runtime"]) == slot
+            assert Path(record["cwd"]) == tmp_path
+            assert record["rt_root"] == "caller-root"
+            assert Path(record["engine_home"]) == engine
+        assert all((tmp_path / name).read_bytes() == content for name, content in before.items())
+        assert not list(slot.rglob("*.pyc"))
+        assert not list(engine.rglob("*.pyc"))
+        caches = list(cache.rglob("*.pyc"))
+        assert caches and any(path.name.startswith("probe.") for path in caches)
+        current = {str(path): (path.read_bytes(), path.stat().st_mtime_ns, path.stat().st_ino)
+                   for path in caches}
+        if previous is not None:
+            assert current == previous
+        previous = current
 
 
 @pytest.mark.parametrize("versioned", [False, True])
