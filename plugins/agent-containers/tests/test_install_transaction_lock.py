@@ -10,6 +10,7 @@ message and a non-zero exit -- it must never proceed unlocked.
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import subprocess
@@ -672,7 +673,12 @@ def test_posix_legacy_numeric_symlink_is_never_lock_authority(
     install_dir.mkdir()
     path = install_dir / ".install.lock.pid"
     target = "1" * digits
-    path.symlink_to(target)
+    try:
+        path.symlink_to(target)
+    except OSError as error:
+        if error.errno != errno.ENAMETOOLONG:
+            raise
+        pytest.skip(f"filesystem cannot store a {digits}-byte symlink target")
     identity = path.lstat()
     result = _run_sh_block(
         bash, install_dir,

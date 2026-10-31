@@ -55,6 +55,9 @@ LIBRARIES = (
     "session-liveness-probe",
     "plugin-resolve",
     "repository-policy",
+    "dropin-registry",
+    "single-instance-lease",
+    "plugin-activation",
 )
 
 

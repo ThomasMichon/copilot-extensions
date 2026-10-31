@@ -19,6 +19,8 @@ def test_payload_manifest_describes_agent_containers_runtime() -> None:
         "module": "agent_containers",
         "legacyRuntimeRoot": ".agent-containers",
         "installationContext": "required",
+        "installerLifecycle": True,
+        "inProcessCatalog": True,
         "noSelfProvisionEnv": "AGENT_CONTAINERS_NO_SELFPROVISION",
         "purpose": "Manage local container fleets leases and dispatch",
         "installer": "init",
