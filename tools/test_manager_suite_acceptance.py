@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import importlib.util
 import json
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -91,6 +93,44 @@ def test_local_refusal_precedes_any_fixture_write(
     with pytest.raises(RuntimeError, match="disposable GitHub-hosted Windows VM"):
         runner.main()
     assert not root.exists()
+
+
+@pytest.mark.parametrize("body_error", (False, True))
+def test_process_observer_stops_and_retains_evidence_on_every_body_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body_error: bool,
+) -> None:
+    ready = tmp_path / "repair-process-trace.ready"
+    stop = tmp_path / "repair-process-trace.stop"
+    report = tmp_path / "repair-process-trace.json"
+
+    def run(argv: list[str], *, timeout: float) -> int:
+        assert argv[-1] == "controlled-observer"
+        ready.write_text("ready", encoding="utf-8")
+        deadline = time.monotonic() + 5
+        while not stop.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert stop.exists()
+        report.write_text('{"stop_observed":true}', encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(runner, "_run", run)
+    with pytest.raises(ValueError, match="body") if body_error else nullcontext():
+        with runner._observe_processes(tmp_path, "repair", lambda *args: "controlled-observer"):
+            assert ready.exists() and not stop.exists()
+            if body_error:
+                raise ValueError("body")
+    assert stop.exists()
+    assert json.loads(report.read_text(encoding="utf-8"))["stop_observed"]
+
+
+def test_process_observer_failure_cannot_enter_qualification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner, "_run", lambda *args, **kwargs: 3)
+    with pytest.raises(RuntimeError, match="observer"):
+        with runner._observe_processes(tmp_path, "normal", lambda *args: "controlled-observer"):
+            pytest.fail("Failed process observation cannot qualify a native run")
+    assert (tmp_path / "normal-process-trace.stop").exists()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows legacy pipe encoding")

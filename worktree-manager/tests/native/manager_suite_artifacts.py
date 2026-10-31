@@ -49,6 +49,50 @@ def _runtime_process_inventory_script(slots: dict[str, str]) -> str:
     )
 
 
+def _runtime_process_trace_script(home: Path, ready: Path, stop: Path, report: Path) -> str:
+    quoted = [str(path).replace("'", "''") for path in (home, ready, stop, report)]
+    return (
+        "$ErrorActionPreference='Stop';"
+        "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);"
+        f"$homePrefix='{quoted[0]}\\';$readyPath='{quoted[1]}';"
+        f"$stopPath='{quoted[2]}';$reportPath='{quoted[3]}';"
+        "$seen=[Collections.Generic.HashSet[string]]::new();"
+        "$rows=[Collections.Generic.List[object]]::new();$scanErrors=0;$truncated=$false;"
+        "$deadline=[DateTime]::UtcNow.AddSeconds(3300);"
+        "[IO.File]::WriteAllText($readyPath,'ready');"
+        "while(-not [IO.File]::Exists($stopPath) -and [DateTime]::UtcNow -lt $deadline){"
+        "try{"
+        "Get-CimInstance Win32_Process -Filter \"Name LIKE 'python%.exe'\" "
+        "-OperationTimeoutSec 1 | ForEach-Object {"
+        "$process=$_;$line=[string]$process.CommandLine;"
+        "$start=$line.IndexOf($homePrefix,[StringComparison]::OrdinalIgnoreCase);"
+        "if($start -lt 0){return};"
+        "$tail=$line.Substring($start+$homePrefix.Length);"
+        "if($tail -notmatch '^\\.(agent-[a-z-]+|worktree-manager)\\\\'){return};"
+        "$component=$Matches[1];"
+        "$birth=if($process.CreationDate){$process.CreationDate.ToUniversalTime().Ticks}else{$null};"
+        "$key=[string]$process.ProcessId+':'+[string]$birth;"
+        "if($seen.Contains($key)){return};"
+        "if($rows.Count -ge 512){$truncated=$true;return};"
+        "[void]$seen.Add($key);"
+        "$module=if($line -match '(?:^|\\s)-m\\s+([a-zA-Z_][a-zA-Z0-9_.]*)')"
+        "{$Matches[1]}else{$null};"
+        "$rows.Add([pscustomobject]@{component=$component;pid=$process.ProcessId;"
+        "parent_pid=$process.ParentProcessId;created_ticks=$birth;"
+        "observed_ticks=[DateTime]::UtcNow.Ticks;"
+        "cache_prefix=($line -match '(?:^|\\s)-X\\s+\"?pycache_prefix=');"
+        "no_bytecode=($line -match '(?:^|\\s)-B(?:\\s|$)');module=$module})"
+        "}}catch{$scanErrors++};"
+        "Start-Sleep -Milliseconds 100};"
+        "$result=@{schema='worktree-manager.native-process-trace.v1';"
+        "records=@($rows.ToArray());scan_errors=$scanErrors;truncated=$truncated;"
+        "stop_observed=[IO.File]::Exists($stopPath)};"
+        "[IO.File]::WriteAllText($reportPath,"
+        "(ConvertTo-Json -InputObject $result -Depth 4),[Text.UTF8Encoding]::new($false));"
+        "if(-not $result.stop_observed -or $scanErrors -gt 0){exit 1}"
+    )
+
+
 def _env(case: Path) -> dict[str, str]:
     # Keep Windows/toolchain discovery, but never inherit a host installation,
     # credential, profile/cell, pytest task suppression or per-runtime root.

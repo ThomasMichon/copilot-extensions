@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import sys
+import time
 
 from plugin_test_containment import no_window_kwargs
 from agent_procutil import contained_test_mode
@@ -26,6 +30,35 @@ def _run(argv: list[str], *, timeout: float) -> int:
     print(result.stdout, end="", flush=True)
     print(result.stderr, end="", file=sys.stderr, flush=True)
     return result.returncode
+
+
+@contextmanager
+def _observe_processes(root: Path, mode: str, script):
+    ready = root / f"{mode}-process-trace.ready"
+    stop = root / f"{mode}-process-trace.stop"
+    report = root / f"{mode}-process-trace.json"
+    command = [
+        shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+        script(root / mode / "h", ready, stop, report),
+    ]
+    with ThreadPoolExecutor(max_workers=1) as observer:
+        future = observer.submit(_run, command, timeout=3320)
+        try:
+            deadline = time.monotonic() + 15
+            while not ready.exists():
+                if future.done():
+                    raise RuntimeError(f"Native process observer exited before readiness: {future.result()}")
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Native process observer did not become ready")
+                time.sleep(0.05)
+            yield
+        finally:
+            stop.write_text("stop", encoding="utf-8")
+            code = future.result()
+            if code:
+                raise RuntimeError(f"Native process observer failed: {code}")
+            if not report.is_file():
+                raise RuntimeError("Native process observer did not retain its report")
 
 
 def qualify(root: Path, mode: str, python: Path) -> int:
@@ -90,7 +123,8 @@ def main() -> int:
         return prepared.returncode
     python = REPO / ".test-venvs" / sys.platform / "worktree-manager" / "Scripts" / "python.exe"
     root.mkdir(parents=True, exist_ok=True)
-    return qualify(root, args.mode, python)
+    with _observe_processes(root, args.mode, fixture["_runtime_process_trace_script"]):
+        return qualify(root, args.mode, python)
 
 
 if __name__ == "__main__":

@@ -89,6 +89,54 @@ def test_phase_diagnostics_report_pre_update_mutation_without_resealing(
     assert result["runtime_processes"] == []
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
+@pytest.mark.parametrize("extra", (0, 512))
+def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path: Path, extra: int) -> None:
+    from agent_procutil import no_window_kwargs
+    from manager_suite_artifacts import _runtime_process_trace_script
+
+    home = tmp_path / "h"
+    ready, stop, report = [tmp_path / name for name in ("ready", "stop", "report.json")]
+    interpreter = home / ".agent-worktrees" / "versions" / "v1" / "Scripts" / "python.exe"
+    private = "synthetic-sensitive-argument"
+    extra_records = (
+        f"foreach($i in 1..{extra}){{[pscustomobject]@{{ProcessId=10+$i;ParentProcessId=2;"
+        "CreationDate=$birth;CommandLine=$line}};"
+    ) if extra else ""
+    prefix = (
+        "function Get-CimInstance {param($ClassName,$Filter,$OperationTimeoutSec);"
+        f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');"
+        "$birth=[DateTime]::Parse('2026-01-01T00:00:00Z');"
+        f"$line='\"{str(interpreter).replace(chr(39), chr(39) * 2)}\" "
+        f"-B -m agent_worktrees {private}';"
+        "$first=[pscustomobject]@{ProcessId=7;ParentProcessId=2;"
+        "CreationDate=$birth;CommandLine=$line};"
+        "$first;$first;"
+        "[pscustomobject]@{ProcessId=7;ParentProcessId=2;"
+        "CreationDate=$birth.AddSeconds(1);CommandLine=$line.Replace('-B ','')};"
+        + extra_records +
+        "[pscustomobject]@{ProcessId=8;ParentProcessId=2;"
+        "CreationDate=$birth;CommandLine='python -m foreign_module private'};}"
+    )
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+         prefix + _runtime_process_trace_script(home, ready, stop, report)],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    raw = report.read_text(encoding="utf-8")
+    trace = json.loads(raw)
+    assert private not in raw and "CommandLine" not in raw and "foreign_module" not in raw
+    assert trace["stop_observed"] and trace["scan_errors"] == 0
+    assert trace["truncated"] is bool(extra)
+    records = trace["records"]
+    assert len(records) == (512 if extra else 2)
+    assert {row["component"] for row in records} == {"agent-worktrees"}
+    assert records[0]["pid"] == records[1]["pid"] == 7
+    assert records[0]["created_ticks"] != records[1]["created_ticks"]
+    assert [row["no_bytecode"] for row in records[:2]] == [True, False]
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows process inventory")
 def test_runtime_process_inventory_reports_flags_without_argument_values(tmp_path: Path) -> None:
     from agent_procutil import no_window_kwargs

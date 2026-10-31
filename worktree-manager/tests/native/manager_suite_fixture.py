@@ -38,6 +38,7 @@ from manager_suite_artifacts import (
     _DELIVERY, _MATERIALIZE, _command, _configuration, _env,
     _runtime_process_inventory_script, _task_inventory_script, _write,
 )
+from manager_suite_artifacts import _runtime_process_trace_script as _runtime_process_trace_script
 from manager_suite_diagnostics import (
     MARKERS, _consumer_demand, _engine_probe, _record, _resident_probe, _snapshot, _snapshot_difference,
     retain_driver_logs,
