@@ -2,14 +2,19 @@
 
 import json
 import os
+import shlex
+import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from agent_worktrees import installer as inst
 from agent_worktrees import project_command_templates as templates
 from agent_procutil import no_window_kwargs
+
+PLUGIN = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(params=["plain", "quote ' percent% dollar$"])
@@ -93,3 +98,85 @@ def test_native_consumer_keeps_deployed_owner(payloads, tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "native-owner-ok"
+
+
+@pytest.mark.parametrize("shell", ["powershell", "bash"])
+@pytest.mark.parametrize("inherited_payload,copied_entry,manifest_encoding", [
+    (inherited, copied, "utf-8")
+    for inherited in ("absent", "worktrees", "plugin")
+    for copied in (False, True)
+] + [("absent", True, "utf-8-sig")])
+@pytest.mark.parametrize("payload_label", ["marketplace with spaces", "marketplace-\u00e9"])
+def test_normal_entry_retains_selected_payload_for_relocated_runtime(
+    tmp_path, request, shell, inherited_payload, copied_entry, manifest_encoding, payload_label,
+):
+    executable = request.getfixturevalue(f"native_{shell}")
+    home = tmp_path / "home"
+    payload = tmp_path / payload_label / "agent-worktrees"
+    peer = payload.parent / "agent-pull-requests"
+    suffix = ".cmd" if os.name == "nt" else ""
+    for root in (payload, peer):
+        (root / "bin").mkdir(parents=True)
+        (root / "plugin.json").write_text(json.dumps({"name": root.name}), encoding="utf-8")
+        (root / "bin" / f"{root.name}{suffix}").touch()
+    runtime_bin = home / ".agent-worktrees" / "bin"
+    runtime_bin.mkdir(parents=True)
+    snapshot = runtime_bin.parent / "snapshots" / payload_label
+    snapshot.mkdir(parents=True)
+    shutil.copyfile(payload / "plugin.json", snapshot / "plugin.json")
+    (runtime_bin.parent / "payload-dir").write_text(
+        str(snapshot) + "\n",
+        encoding="utf-8",
+    )
+    (runtime_bin.parent / "deploy-manifest.json").write_text(json.dumps({
+        "schema_version": 3, "service": "agent-worktrees",
+        "source": {"kind": "marketplace", "path": str(payload)},
+    }, ensure_ascii=False), encoding=manifest_encoding)
+    entry_dir = home / ".local" / "bin" if copied_entry else payload / "bin"
+    entry_dir.mkdir(parents=True, exist_ok=True)
+    if shell == "powershell":
+        entry = entry_dir / "agent-worktrees.ps1"
+        shutil.copyfile(PLUGIN / "bin" / entry.name, entry)
+        name = "agent-worktrees-update-entry.ps1"
+        shutil.copyfile(PLUGIN / "bin" / name, entry.parent / name)
+        (runtime_bin / "resolve-runtime.ps1").write_text(
+            "$AwPy = '" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8",
+        )
+        command = [executable, "-NoProfile", "-File", str(entry)]
+    else:
+        entry = entry_dir / "agent-worktrees"
+        shutil.copyfile(PLUGIN / "bin" / entry.name, entry)
+        name = "agent-worktrees-update-entry.sh"
+        shutil.copyfile(PLUGIN / "bin" / name, entry.parent / name)
+        (runtime_bin / "resolve-runtime.sh").write_text(
+            f"AW_PY={shlex.quote(sys.executable)}\n", encoding="utf-8",
+        )
+        command = [executable, str(entry)]
+    installed = tmp_path / "relocated-runtime" / "Lib" / "site-packages"
+    package = installed / "agent_worktrees"
+    package.mkdir(parents=True)
+    (package / "__init__.py").touch()
+    for name in ("registry_paths.py", "pr_watch_owner.py"):
+        shutil.copyfile(PLUGIN / "src" / "agent_worktrees" / name, package / name)
+    (package / "__main__.py").write_text(
+        "import json,sys\n"
+        "from .pr_watch_owner import _payload_commands\n"
+        "print(json.dumps({'peers':_payload_commands(None,None),'args':sys.argv[1:]}))\n"
+        "raise SystemExit(23)\n", encoding="utf-8",
+    )
+    environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
+        environment.pop(key, None)
+    if inherited_payload != "absent":
+        key = "AGENT_WORKTREES_PAYLOAD_ROOT" if inherited_payload == "worktrees" else "COPILOT_PLUGIN_ROOT"
+        environment[key] = str(payload if copied_entry else tmp_path / "foreign-payload")
+    result = subprocess.run(
+        [*command, "pr-watch", "ownerstatus", "--json"], cwd=installed, env=environment,
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 23, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["peers"] == [
+        str(root.resolve() / "bin" / f"{root.name}{suffix}") for root in (payload, peer)
+    ]
+    assert observed["args"] == ["pr-watch", "ownerstatus", "--json"]

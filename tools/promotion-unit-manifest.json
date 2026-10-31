@@ -3549,7 +3549,7 @@
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_records.py": "722d48c76e5a9ac285f09868bd83291ba448fa1aa8a66c8e7854e9354e4fe4d4",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "e8a7e27c1e80d04b175d0ee782fc7f790b50ecc30cf18ef4f0cb2bf782c1fb88",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4",
-        "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py": "5824b9349a74795f99deb7c078ab2179362ff9bbd9a7f8e488e8dd2e29464e89",
+        "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py": "ffef2568286f6eacf352b87fc39ab2ab814bbe47ad73bf73ddac8bf8f6cb20c2",
         "tools/promotion_unit_tests/test_creation_diagnostics.py": "d4061059850bb6d429ac7f2e221a0ea8d6715f030c5e97221d193f6463f7df27",
         "plugins/agent-worktrees/src/agent_worktrees/creation_diagnostics.py": "9e9df2522173fa739ada6c7201d37e63c17d19c9a75de215eb176304a86e8940",
         "plugins/agent-worktrees/src/agent_worktrees/creation_owner_claim.py": "aea9f0de14e962099fb1c70b139d9c62a0ae0051c6cd3174683fe13d534acffa",
