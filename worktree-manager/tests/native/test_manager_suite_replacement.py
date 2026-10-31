@@ -69,6 +69,54 @@ def test_retention_diagnostics_bound_metadata_without_hiding_mutation_counts() -
     assert len(difference["added"]) == 128 and difference["truncated"]
 
 
+def test_phase_diagnostics_report_pre_update_mutation_without_resealing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slot = tmp_path / "slot"
+    slot.mkdir()
+    code = slot / "module.py"
+    code.write_bytes(b"source")
+    before = {"slots": {"component": str(slot)}, "sealed": {"component": diagnostics._snapshot(slot)}}
+    cached = slot / "__pycache__"
+    cached.mkdir()
+    (cached / "module.pyc").write_bytes(b"derived")
+    monkeypatch.setattr(fixture, "_run", lambda *args, **kwargs: SimpleNamespace(stdout="[]"))
+    result = fixture._phase_diagnostics(tmp_path, before)
+    assert result["retention_differences"]["component"]["counts"] == {
+        "added": 1, "removed": 0, "changed": 0,
+    }
+    assert set(before["sealed"]["component"]) == {"module.py"}
+    assert result["runtime_processes"] == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process inventory")
+def test_runtime_process_inventory_reports_flags_without_argument_values(tmp_path: Path) -> None:
+    from agent_procutil import no_window_kwargs
+    from manager_suite_artifacts import _runtime_process_inventory_script
+
+    marker = str(tmp_path / "synthetic-private-argument")
+    process = subprocess.Popen(
+        [sys.executable, "-B", "-X", "pycache_prefix=" + str(tmp_path),
+         "-c", "import time;time.sleep(20)", marker], **no_window_kwargs(),
+    )
+    try:
+        result = subprocess.run(
+            [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+             _runtime_process_inventory_script({"fixture": str(tmp_path)})],
+            check=False, capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        rows = json.loads(result.stdout)
+        row = next(item for item in rows if item["pid"] == process.pid)
+        assert row["cache_prefix"] and row["no_bytecode"]
+        assert row["module"] is None and row["component"] == "fixture"
+        assert marker not in result.stdout and str(tmp_path) not in result.stdout
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=5)
+
+
 def test_baseline_owner_demand_uses_the_installed_startup_contract(monkeypatch):
     import inspect
 

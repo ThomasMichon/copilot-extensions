@@ -35,7 +35,8 @@ from xml.etree import ElementTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manager_suite_artifacts import (
-    _DELIVERY, _MATERIALIZE, _command, _configuration, _env, _task_inventory_script, _write,
+    _DELIVERY, _MATERIALIZE, _command, _configuration, _env,
+    _runtime_process_inventory_script, _task_inventory_script, _write,
 )
 from manager_suite_diagnostics import (
     MARKERS, _consumer_demand, _engine_probe, _record, _resident_probe, _snapshot, _snapshot_difference,
@@ -75,6 +76,7 @@ def _run(
 
     # Same native owner as run_installation_owned, with explicit cwd/env so
     # concurrent read-only observation cannot race process-global HOME changes.
+    started_at_ns = time.time_ns()
     result = run(
         list(map(str, argv)), timeout=timeout, input_text=None, capture=True,
         cwd=case / "project", env={**_env(case), **(extra_env or {})},
@@ -85,6 +87,7 @@ def _run(
         stream.write(json.dumps({
             "argv": list(map(str, argv)), "returncode": result.returncode,
             "stdout": result.stdout, "stderr": result.stderr,
+            "started_at_ns": started_at_ns, "completed_at_ns": time.time_ns(),
         }) + "\n")
     if result.returncode:
         retain_driver_logs(case, "\n".join((result.stdout, result.stderr)))
@@ -140,6 +143,7 @@ def _observe(case: Path, declared: dict[str, Any]) -> dict[str, Any]:
         name: str(root / "versions" / observed["versions"][name]) for name, root in roots.items()
     }
     observed["sealed"] = {name: _snapshot(Path(slot)) for name, slot in observed["slots"].items()}
+    observed["sealed_at_ns"] = time.time_ns()
     observed["origins"] = {}
     observed["commands"] = {}
     for name, root in roots.items():
@@ -183,6 +187,25 @@ def _observe(case: Path, declared: dict[str, Any]) -> dict[str, Any]:
         server_project.read_text(encoding="utf-8"),
     )["project"]["version"]
     return observed
+
+
+def _phase_diagnostics(case: Path, before: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        "sampled_at_ns": time.time_ns(),
+        "retention_differences": {
+            name: _snapshot_difference(before["sealed"][name], _snapshot(Path(slot)))
+            for name, slot in before["slots"].items()
+        },
+    }
+    try:
+        inventory = _run([
+            shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+            _runtime_process_inventory_script(before["slots"]),
+        ], case, timeout=30)
+        result["runtime_processes"] = json.loads(inventory.stdout)
+    except Exception as error:
+        result["process_inventory_error"] = f"{type(error).__name__}: {error}"
+    return result
 
 
 def _tasks(case: Path) -> list[dict[str, Any]]:
@@ -760,6 +783,7 @@ def prepare(directory: Path, mode: str) -> None:
             before["resident_observations"][name] = health
             _write(case / "setup.json", setup)
         setup["tasks"] = _tasks(case)
+        before["preparation_complete"] = _phase_diagnostics(case, before)
         setup["ready"] = True
         _write(case / "setup.json", setup)
     except BaseException as error:
@@ -783,6 +807,7 @@ def exercise(directory: Path, mode: str) -> None:
         "source": str(case / "published"), "cleanup_errors": [],
     }
     before = setup["before"]
+    report["pre_exercise"] = _phase_diagnostics(case, before)
     roots = {name: Path(value) for name, value in before["roots"].items()}
     witness = roots["agent-worktrees"] / "continuity.sqlite"
     durable = [roots["worktree-manager"] / "config.toml", witness,

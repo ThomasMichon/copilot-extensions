@@ -29,6 +29,26 @@ def _task_inventory_script(home: Path) -> str:
     )
 
 
+def _runtime_process_inventory_script(slots: dict[str, str]) -> str:
+    document = json.dumps(slots).replace("'", "''")
+    return (
+        "$ErrorActionPreference='Stop';"
+        "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);"
+        f"$slots=ConvertFrom-Json '{document}'; $rows=@("
+        "Get-CimInstance Win32_Process -Filter \"Name LIKE 'python%.exe'\" | ForEach-Object {"
+        "$process=$_; $line=[string]$process.CommandLine;"
+        "foreach($slot in $slots.PSObject.Properties){"
+        "if($line.IndexOf([string]$slot.Value,[StringComparison]::OrdinalIgnoreCase) -ge 0){"
+        "[pscustomobject]@{component=$slot.Name;pid=$process.ProcessId;"
+        "parent_pid=$process.ParentProcessId;"
+        "cache_prefix=($line -match '(?:^|\\s)-X\\s+\"?pycache_prefix=');"
+        "no_bytecode=($line -match '(?:^|\\s)-B(?:\\s|$)');"
+        "module=if($line -match '(?:^|\\s)-m\\s+([a-zA-Z_][a-zA-Z0-9_.]*)')"
+        "{$Matches[1]}else{$null}}}}}"
+        "); ConvertTo-Json -InputObject $rows -Depth 4 -Compress"
+    )
+
+
 def _env(case: Path) -> dict[str, str]:
     # Keep Windows/toolchain discovery, but never inherit a host installation,
     # credential, profile/cell, pytest task suppression or per-runtime root.
