@@ -6,10 +6,11 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from .komodo_declaration import KomodoDeclaration, SERVICES
+from .komodo_evidence import legacy_evidence_unproved, native_subset_matches
 from .komodo_health import identity_digest
 from .komodo_native import KomodoNative
 from .komodo_network import retained_network, verify_network
-from .komodo_owner import native_fingerprint, native_running, verify_candidate
+from .komodo_owner import native_running, verify_candidate
 from .komodo_state import KomodoState
 from .node_journal import NodeJournal
 from .operations import OperationIntent
@@ -62,7 +63,6 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
             observed = None
             observed_declaration = None
             drift_error = None
-            fingerprints = {name: native_fingerprint(item) for name, item in containers.items()}
             candidate = (accepted == "unknown" and attempt is not None
                          and attempt["request"] == request.to_dict()
                          and attempt["deployment"] == content and "before" in attempt)
@@ -77,9 +77,10 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
                         and identity != selected.adopted_public_identity):
                     blockers.append("retained-storage-credentials-or-identity-changed")
                     identity = None
-            if retained is not None and all(
-                retained["native"].get(name) == value for name, value in fingerprints.items()
-            ):
+            if (retained is not None and not candidate
+                    and legacy_evidence_unproved(retained["native"], containers)):
+                blockers.append("legacy-native-evidence-unproved")
+            if retained is not None and native_subset_matches(retained["native"], containers):
                 installed = set(containers) == set(SERVICES)
                 observed = retained["deployment"]
                 if installed and retained.get("selected_native") is False:

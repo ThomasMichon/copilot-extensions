@@ -12,6 +12,14 @@ def network_fingerprint(network: dict[str, Any]) -> str:
     return digest({key: value for key, value in network.items() if key != "Containers"})
 
 
+def same_network_observation(before: dict[str, Any] | None, after: dict[str, Any] | None) -> bool:
+    """Compare paired verified bridge identity and complete endpoint observations."""
+    if before is None or after is None:
+        return before is after
+    return (network_fingerprint(before) == network_fingerprint(after)
+            and before["Containers"] == after["Containers"])
+
+
 def verify_network(network: dict[str, Any] | None, selected: KomodoSelection,
                    containers: dict[str, dict[str, Any]], expected: str | None, *,
                    created: bool = False, pending: bool = False) -> str | None:
@@ -31,6 +39,9 @@ def verify_network(network: dict[str, Any] | None, selected: KomodoSelection,
     identities = {item["Id"] for item in containers.values()}
     if not set(network["Containers"]).issubset(identities):
         raise PlanError("Komodo native network has foreign endpoints")
+    running = {item["Id"] for item in containers.values() if item["State"].get("Running") is True}
+    if not running.issubset(network["Containers"]):
+        raise PlanError("Komodo running native container network membership is missing")
     for item in containers.values():
         attachments = item.get("NetworkSettings", {}).get("Networks")
         if (not isinstance(attachments, dict) or set(attachments) != {name}
@@ -42,6 +53,12 @@ def verify_network(network: dict[str, Any] | None, selected: KomodoSelection,
                      and attachments[name].get("NetworkID") == "")
         if attachments[name].get("NetworkID") != network["Id"] and not unstarted:
             raise PlanError("Komodo native container network attachment changed")
+        if item["Id"] in running:
+            endpoint = network["Containers"][item["Id"]]
+            identity = attachments[name].get("EndpointID")
+            if (type(endpoint) is not dict or type(identity) is not str or not identity
+                    or endpoint.get("EndpointID") != identity):
+                raise PlanError("Komodo native network attachment identity differs")
     actual = network_fingerprint(network)
     if expected is not None:
         if actual != expected:

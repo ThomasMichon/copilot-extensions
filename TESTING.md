@@ -175,9 +175,35 @@ authenticated loopback readiness and receipt-owned retirement/reinstallation.
 enrolled-PoP caller boundary without a service connector.
 `test_komodo_installed.py` installs a fresh noneditable SDK, denies checkout
 reads and invokes the public bootstrap with a real machine-key verification
-result. These are contained component/installed-SDK controls, not actual Docker,
+result. Its repair controls retain an original UNKNOWN created by a separately
+built pre-repair committed SDK (the pinned revision in
+`test_continuity_installed.py` must already exist in the test checkout),
+discover unsupported repair from that actual
+installed control module without native effects, then use a distinct current
+noneditable SDK and fresh machine identity to settle the exact original grant.
+Grant/transition/executor skew refuses; interrupted state and journal publication
+resume in a fresh process with unchanged immutable original evidence.
+These are contained component/installed-SDK controls, not actual Docker,
 official-image, automatically constructed controller or production evidence.
 Native/network/build tests remain outside the required no-actor unit packet.
+The original-attempt repair packet adds distinct candidate/executor and current
+transition admission, exact same-journal settlement, immutable prior-failure
+history, process/key drift and interrupted publication controls.
+`test_komodo_repair.py` retains four focused component smoke cases; the remaining
+matrix is marked `client_distribution_full` for explicit full/manual runs.
+Its late-publication controls withdraw transition/request authority, expire the
+permit or reconnect/disconnect the same container after immutable-evidence
+reads inside the original terminal transaction. Both success and failure must
+retain the exact UNKNOWN receipt, original attempt and two journal rows.
+Interrupted success/failure publication controls replace a container on the
+same bridge and require pending status and success/failure retries to refuse
+native attribution before any credentialed HTTP request. Successful and failed
+terminal retries have the same replacement-container control, retaining the
+exact terminal state and journal rows. Restoring the retained container resumes
+the same original decision without another native apply.
+Use the existing standalone runner with a `komodo_repair` selector and
+`-m "not client_distribution_full"` for its focused smoke/record controls;
+omit that marker filter for the full packet. Required unit-only CI is unchanged.
 
 Agent-worktrees' `test_mux_creation_admission.py` covers Windows gate and
 join-result semantics without claiming or typing a seed. Its explicit native

@@ -1,5 +1,8 @@
 """Explicit node persistence; no transport, authentication or remote executor."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
@@ -13,12 +16,18 @@ from .planning import PlanError, identifier, integer
 class NodeJournal:
     """Own local acceptance and receipts independently of a Gateway connection."""
 
-    def __init__(self, path, *, authority, installation, target):
+    def __init__(self, path, *, authority, installation, target, existing_only: bool = False):
+        if type(existing_only) is not bool:
+            raise PlanError("node existing-journal selection requires a boolean")
         for name, value in (("authority", authority), ("installation", installation),
                             ("target", target)):
             identifier(value, f"node {name}")
         self.path = Path(path).resolve()
         self.authority, self.installation, self.target = authority, installation, target
+        if existing_only:
+            with self._transaction(write=False):
+                pass
+            return
         with self._transaction(create=True) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             if version == 0:
@@ -408,16 +417,26 @@ class NodeJournal:
             self._append(connection, operation_id, receipt)
             return True
 
-    def reconcile(self, intent, receipt):
+    def reconcile(self, intent: OperationIntent, receipt: TargetReceipt, *,
+                  checkpoint: Callable[[], None] | None = None) -> TargetReceipt:
         """Caller supplies attributable terminal evidence; parsing is not proof."""
         self._scope(intent)
         receipt.check_intent(intent)
         value = receipt.to_dict()
         if value["status"] not in ("succeeded", "failed"):
             raise PlanError("reconciliation requires terminal evidence")
+        if checkpoint is not None and not callable(checkpoint):
+            raise PlanError("reconciliation requires a code-registered checkpoint")
+
+        def check() -> None:
+            if checkpoint is not None and checkpoint() is not None:
+                raise PlanError("reconciliation checkpoint returned unsupported evidence")
+
         with self._transaction() as connection:
+            check()
             operation_id, prior = self._accepted(connection, intent)
             if receipt.encoded == prior.encoded:
+                check()
                 return prior
             before = prior.to_dict()
             if before["status"] != "unknown":
@@ -425,6 +444,7 @@ class NodeJournal:
             if value["sequence"] != before["sequence"] + 1:
                 raise PlanError("reconciliation requires the next receipt sequence")
             self._append(connection, operation_id, receipt)
+            check()
             return receipt
 
     def inspect(self, intent):
