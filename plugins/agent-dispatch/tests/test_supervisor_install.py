@@ -562,7 +562,8 @@ class TestWindowsSupervisorInstall:
         assert "$isRegistrarChild" in helper
         assert "$supervisorRun" in helper
         assert "AGENT_DISPATCH_RUN_DIR" in helper
-        assert "$isSupervisor = $underRoot -and" in helper
+        assert "$ownedRuntime = $underRoot -or (Test-SupervisorInstallMarker" in helper
+        assert "$isSupervisor = $ownedRuntime -and" in helper
         assert "Get-SupervisorDispatchArguments -CommandLine $cmd" in helper
         assert "$enumerationFailed" in helper
         assert "if ($rc -eq 0 -or -not $enumerationFailed)" in helper

@@ -1640,4 +1640,14 @@ refuse. Both new positive controls fail before correction; the updated bounded
 fixture/coordinator packet passes 52 tests with 2 hosted cases deselected.
 This source correction still requires exact-head hosted qualification.
 
+Run `41162149444` at `76e883b0d2` again completes both updates with exit 0,
+all seven successor-ready observations before predecessor exit 0, the same
+healthy independent engine and clean final settlement. The fixture next rejects
+Dispatch's custom marker-resolving coordinator launcher before reaching the
+formal assertions. Both generated Dispatch coordinator and supervisor launchers
+now expose the same read-only selected-interpreter observation before startup
+effects, with native controls covering current selection, last-known-good and
+unresolved selection without file changes. The task-routing proof remains
+required; this is not a hosted-suite pass.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

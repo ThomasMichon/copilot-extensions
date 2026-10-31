@@ -368,6 +368,76 @@ def test_native_broker_task_requires_current_code_and_its_exact_owned_registrati
         assert not any("--check-runtime" in call for call in calls)
 
 
+@pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Dispatch task resolvers")
+@pytest.mark.parametrize("launcher_name", ("serve-service.ps1", "supervise-service.ps1"))
+@pytest.mark.parametrize("variant", ("current", "last-known-good", "unresolved"))
+def test_dispatch_tasks_probe_the_actual_resolver_without_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, launcher_name: str, variant: str,
+) -> None:
+    from agent_procutil import no_window_kwargs
+    import xml.etree.ElementTree as ET
+
+    root = tmp_path / "h" / ".agent-dispatch"
+    python = root / "versions" / "2.0.0" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    if variant != "unresolved":
+        python.write_bytes(b"fixture must never execute")
+    (root / "current-version").write_text("2.0.0" if variant == "current" else "missing")
+    (root / "last-known-good").write_text("2.0.0")
+    (root / "service.env").write_text("AGENT_DISPATCH_HOST=must-not-be-read\n")
+    (root / "supervisor.env").write_text("AGENT_DISPATCH_SUPERVISE_LABELS=\n")
+    launcher = root / launcher_name
+
+    def quote(value: object) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+
+    installer = fixture.REPO / "plugins" / "agent-dispatch" / "scripts" / "install.ps1"
+    marker = ("agent-dispatch coordinator launcher" if launcher_name == "serve-service.ps1"
+              else "agent-dispatch-supervisor-launch-v1")
+    render = (
+        "$ErrorActionPreference='Stop';$tokens=$null;$errors=$null;"
+        "$ast=[System.Management.Automation.Language.Parser]::ParseFile("
+        f"{quote(installer)},[ref]$tokens,[ref]$errors);"
+        "$assignment=$ast.Find({param($node)"
+        "$node -is [System.Management.Automation.Language.AssignmentStatementAst] -and "
+        "$node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and "
+        "$node.Left.VariablePath.UserPath -eq 'launcherBody' -and "
+        f"$node.Extent.Text.Contains({quote(marker)})" + "},$true);"
+        f"$InstallDir={quote(root)};$LinkDir={quote(root / '.venv')};$LinkPython={quote(python)};"
+        ". ([scriptblock]::Create($assignment.Extent.Text));"
+        f"[IO.File]::WriteAllText({quote(launcher)},$launcherBody)"
+    )
+    rendered = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", render],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert rendered.returncode == 0, rendered.stdout + rendered.stderr
+    before_files = {str(path.relative_to(root)): path.read_bytes()
+                    for path in root.rglob("*") if path.is_file()}
+    xml = ET.Element("Task")
+    action = ET.SubElement(ET.SubElement(xml, "Actions"), "Exec")
+    ET.SubElement(action, "Arguments").text = f'-File "{launcher}"'
+    monkeypatch.setattr(fixture, "_tasks", lambda case: [{
+        "name": "agent-dispatch", "xml": ET.tostring(xml, encoding="unicode"),
+    }])
+    monkeypatch.setattr(fixture, "_run", lambda argv, case, **kwargs: subprocess.run(
+        argv, capture_output=True, text=True, check=True, timeout=30, **no_window_kwargs(),
+    ))
+    before = {"slots": {"agent-dispatch": str(root / "versions" / "1.0.0")},
+              "index_engine": {"slot": str(root / "engine" / "versions" / "1.0.0")}}
+    after = {"roots": {"agent-dispatch": str(root)},
+             "origins": {"agent-dispatch": {"prefix": str(python.parent.parent)}},
+             "index_engine": {"root": str(root / "engine")}}
+    if variant == "unresolved":
+        with pytest.raises(subprocess.CalledProcessError, match="non-zero exit status"):
+            fixture._registration_routes(tmp_path, before, after)
+    else:
+        row = fixture._registration_routes(tmp_path, before, after)[0]
+        assert Path(row["resolver_proofs"][0]["python"]) == python
+    assert {str(path.relative_to(root)): path.read_bytes()
+            for path in root.rglob("*") if path.is_file()} == before_files
+
+
 @pytest.mark.parametrize("exit_code", (259, 0))
 def test_retained_engine_attests_original_health_and_native_lifetime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int,

@@ -9,6 +9,13 @@ Discovery alone cannot prove another process can write: `write_health` remains
 
 ## Application owner
 
+The generated Windows `serve-service.ps1 -ResolveOnly` and
+`supervise-service.ps1 -ResolveOnly` print the interpreter selected by the
+launcher's normal current-version, last-known-good and installed-slot fallback
+chain. They return before environment loading, changing directory, supervisor
+label checks, log writes or process startup; unresolved selection fails.
+This is routing evidence only, not service health or activation evidence.
+
 The implementation is now the optional owner-injected
 `process_telemetry.diagnostic_logs` policy shared with Bridge. Dispatch keeps its
 existing compatibility adapter, paths, discovery schema, synchronous emission and
