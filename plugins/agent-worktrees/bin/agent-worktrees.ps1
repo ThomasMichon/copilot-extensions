@@ -1,6 +1,7 @@
 . (Join-Path $PSScriptRoot 'agent-worktrees-update-entry.ps1') @args
 if ($_awUpdateHandled) { exit $LASTEXITCODE }
 $env:PYTHONUTF8 = '1'
+$env:AGENT_WORKTREES_PAYLOAD_ROOT = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 # Sanitize inherited Python runtime variables before dispatching to the
 # resolved, architecture-correct runtime-slot interpreter (#2411). A stray
 # mismatched-architecture PYTHONHOME/PYTHONPATH -- set at Windows User scope,

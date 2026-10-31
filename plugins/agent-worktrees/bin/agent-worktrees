@@ -9,6 +9,8 @@
 _aw_update_entry_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 . "$_aw_update_entry_dir/agent-worktrees-update-entry.sh"
 export PYTHONUTF8=1
+AGENT_WORKTREES_PAYLOAD_ROOT="$(CDPATH= cd -- "$_aw_update_entry_dir/.." && pwd -P)" || exit
+export AGENT_WORKTREES_PAYLOAD_ROOT
 # Sanitize inherited Python runtime variables before dispatching to the
 # resolved, architecture-correct runtime-slot interpreter (#2411 parity with
 # the Windows binstub fix). A stray mismatched-architecture PYTHONHOME/

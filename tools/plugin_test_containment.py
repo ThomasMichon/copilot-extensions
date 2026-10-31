@@ -9,6 +9,7 @@ launch state; intentional interactive child launches are not rewritten.
 from __future__ import annotations
 
 import ctypes
+import inspect
 import os
 import shutil as shutil  # Retain the shared adapter seam for existing callers.
 import signal
@@ -172,9 +173,13 @@ class TestSandbox(tempfile.TemporaryDirectory):
 
     @classmethod
     def _rmtree(cls, name, ignore_errors=False, repeated=False):
-        return super()._rmtree(
+        cleanup = super()._rmtree
+        options = {"ignore_errors": ignore_errors}
+        if "repeated" in inspect.signature(cleanup).parameters:
+            options["repeated"] = repeated
+        return cleanup(
             str(native_test_path(Path(name).absolute())),
-            ignore_errors=ignore_errors, repeated=repeated,
+            **options,
         )
 
     def __exit__(self, exc_type, exc_value, traceback):

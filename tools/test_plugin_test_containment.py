@@ -15,6 +15,30 @@ from tools import plugin_test_containment
 from tools.plugin_test_containment import Limits, isolated_environment
 
 
+@pytest.mark.parametrize("supports_repeated", [False, True])
+def test_sandbox_cleanup_supports_both_stdlib_signatures(tmp_path, monkeypatch, supports_repeated):
+    seen = []
+
+    def legacy(name, ignore_errors=False):
+        seen.append((ignore_errors, None))
+        shutil.rmtree(name, ignore_errors=ignore_errors)
+
+    def current(name, ignore_errors=False, repeated=False):
+        seen.append((ignore_errors, repeated))
+        shutil.rmtree(name, ignore_errors=ignore_errors)
+
+    monkeypatch.setattr(
+        plugin_test_containment.tempfile.TemporaryDirectory,
+        "_rmtree", staticmethod(current if supports_repeated else legacy),
+    )
+    sandbox = tmp_path / "owned-sandbox"
+    sandbox.mkdir()
+    (sandbox / "result.txt").write_text("complete", encoding="utf-8")
+    plugin_test_containment.TestSandbox._rmtree(sandbox, repeated=True)
+    assert not sandbox.exists()
+    assert seen == [(False, True if supports_repeated else None)]
+
+
 @pytest.mark.parametrize("inherited_name", ["PSModulePath", "PSMODULEPATH", "psmodulepath"])
 def test_isolated_environment_overrides_native_module_path_identity(tmp_path, inherited_name):
     base = {inherited_name: "inherited-modules"}
@@ -449,7 +473,8 @@ def test_native_powershell_module_discovery_is_host_detached(tmp_path, host, all
         "function Get-ContainmentProbe { 'host-module' }\n", encoding="utf-8",
     )
     parent_module_path = os.environ.get("PSModulePath")
-    base = {**os.environ, "PSModulePath": str(host_modules)}
+    base = {key: value for key, value in os.environ.items() if key.casefold() != "psmodulepath"}
+    base["PSModulePath"] = str(host_modules)
     sandbox = tmp_path / "sandbox"
     env = isolated_environment(
         base, sandbox, allow_explicit_tiers=allow_host_state, allow_host_state=allow_host_state,
