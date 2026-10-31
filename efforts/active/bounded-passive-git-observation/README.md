@@ -445,3 +445,35 @@ review-gated platform slice, not disabling ordinary POSIX classification.
   now selects the unchanged legacy contract with the real carrier, and all 184
   tests in its file pass. Current-base requalification and fresh review remain
   outstanding; no production or installed state changed.
+
+### 2026-10-31 - Current-base requalification blocked
+
+- Rebased the complete 17-commit source slice onto current `dev`, retaining the
+  original committed history in a local backup. The qualified candidate is
+  `204f9241cb6edf0120769a6ebe9818a1e13ee7ce`. Conflict resolution preserves the
+  newer named-Job/breakaway implementation, both installer-wrapper and legacy
+  cutover tests, and upstream removal of physical ZDD vendor copies. The guarded
+  changes remain in canonical ZDD source; no deleted vendor is resurrected.
+- The contained 15-file affected/native packet completed with **732 passed and
+  14 failed**, zero skipped. This is a failed candidate, not current-head
+  acceptance. Six failures expose the canonical launch fixture's missing Job
+  name parameter; three warm-roster fixtures omit `observe_records`; the guarded
+  monitor fixture lacks a runtime generation. Three actual native observation
+  cases failed to reach their bounded markers, and the first-install hook's
+  bootstrap stamp exceeded its lifecycle deadline. None is waived or counted as
+  an unavailable-platform pass.
+- Install contract, documentation consistency, effort structure and whitespace
+  checks passed. Module-size qualification failed: canonical procutil
+  `__init__.py` is 1,028 lines against 1,000; the worktrees main module is 6,763
+  against its 6,761 shrink-only ceiling; monitor CLI is 1,017 against 1,000.
+  Two already-admitted procutil source hashes also require final manifest
+  reconciliation. Today's manifest has 3,174 nodes and 176 production targets;
+  the historical 2,407-node receipt does not qualify this candidate.
+- Further shared SDK source edits are excluded from this continuation. Resolving
+  the canonical procutil size/fixture seam requires its existing owner's scoped
+  admission before proceeding; no new API, competing PR or baseline increase
+  was introduced. Required unit execution, meaningful failure repair, fresh
+  source review and required CI remain blocking.
+- #8458 was not pushed or merged. Keep this effort Active, the existing PR and
+  preserved source history under ownership, and R1b/R2/POSIX/installed/broader
+  acceptance open. No runtime, live service or other checkout was changed.

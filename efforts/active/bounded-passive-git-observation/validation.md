@@ -442,3 +442,59 @@ and using the real carrier, its complete `test_status_monitor.py` file passed
 184 cases. This is not a claim that the wider current-base packet, required
 promotion packet, review/CI or installed qualification is complete. Linux Docker
 is unavailable; native opt-in tests retain their existing contained fixture Jobs.
+
+### 2026-10-31 current-base qualification failure
+
+Candidate: `204f9241cb6edf0120769a6ebe9818a1e13ee7ce`, rebased onto current `dev`.
+The five third-round fixes remain committed, but the current-base packet failed:
+**732 passed, 14 failed, zero skipped**, 417.79 seconds pytest and 510.42 seconds
+including managed preparation/cleanup. Retained local receipt:
+`.venv-tools/r1a-currentbase-20261031.log`.
+
+The normal runner selected these 15 files with
+`AGENT_WORKTREES_NATIVE_RECOVERY=1`, `--test-timeout 90`, `--timeout 900` and
+`--plugin-timeout 2700`:
+
+- `test_atomic_observation_process.py`
+- `test_git_observation_deadline.py`
+- `test_git_ops.py`
+- `test_status_segment.py`
+- `test_windows_observation_custody.py`
+- `test_observation_publication_fences.py`
+- `test_observation_review_regressions.py`
+- `test_hook_ipc.py`
+- `test_status_monitor.py`
+- `test_status_monitor_cutover_helper.py`
+- `test_status_monitor_guarded_recovery.py`
+- `test_status_monitor_observation_retirement.py`
+- `test_status_monitor_guarded_recovery_native.py`
+- `test_status_monitor_guarded_cutover_native.py`
+- `test_git_observation_native.py`
+
+Six atomic-consumer cases failed because the canonical fixture's Job constructor
+does not accept the current SDK's `name` argument. Three warm-roster cases lack
+the current `observe_records` adapter argument, and guarded monitor dispatch
+receives no runtime generation. Actual native `stall`, `before-resume` and
+`cancel` controls failed at their bounded marker gates. The real first-install
+hook bootstrap stamp exceeded its lifecycle deadline. These require diagnosis
+and repair; fixture mismatches do not waive actual native or bootstrap failures.
+
+The first runner attempt used the cached test interpreter while preparation
+tried to replace that interpreter, producing an access error. Re-running from
+the independent Python 3.12.14 base interpreter reached the completed packet
+above. No tooling or product dependency manifest changed.
+
+Install contract, docs consistency, effort structure and whitespace checks pass;
+module-size qualification fails at canonical procutil 1,028/1,000 lines,
+worktrees main 6,763/6,761 and monitor CLI 1,017/1,000. Two existing procutil
+manifest hashes differ from the final source. The current manifest contains
+3,174 exact nodes and 176 coverage targets, rather than the historical 2,407/129.
+The exact required packet was not run: its selected interpreter lacks coverage,
+and canonical source binding still requires reconciliation. No earlier receipt
+is represented as final-source proof.
+
+Shared SDK source edits remain outside this continuation's admission; obtain
+the existing owner's scoped decision for the procutil size/fixture seam before
+continuing. No publication, fresh accepted review, required green CI, merge,
+release, installed proof or broader-effort completion is claimed. The retained
+source and canonical effort remain open and resumable.
