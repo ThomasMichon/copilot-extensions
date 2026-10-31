@@ -236,6 +236,10 @@ and remain subject to this plan's review before runtime edits.
 
 #### Repair plan and validation obligations
 
+- [ ] Review and deliver the [fresh checkpoint-authorization amendment](komodo-repair-checkpoint-authorization.md)
+  through the existing SDK/signing/admission owners. Preserve each 30-second
+  permit and the exact original; whole-operation fixed-clock fixtures do not
+  qualify cumulative acquisition or terminal-publication timing.
 - [x] Review this amendment before identity, native-observation or repair edits
   (#9738).
 - [x] Implement the focused corrections and installed, code-registered
