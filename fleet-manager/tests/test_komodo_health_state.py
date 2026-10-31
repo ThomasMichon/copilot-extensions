@@ -17,6 +17,7 @@ from fleet_manager.komodo_declaration import KomodoDeclaration
 from fleet_manager.komodo_health import current_health
 from fleet_manager.komodo_state import KomodoState
 from fleet_manager.planning import PlanError, canonical
+from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
 from test_komodo_native import native_rig as native_rig
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host substrate contract")
@@ -24,6 +25,8 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
 
 @pytest.mark.parametrize("failure", [
     None, "credentials", "version", "key", "disconnected", "payload", "missing-core", "missing-periphery",
+    "global", "global-inline", "global-missing", "global-wrong", "global-mount", "missing-override",
+    "live-key", "retained-key",
 ])
 def test_real_authenticated_current_core_and_periphery_health(
     native_rig: Any, failure: str | None,
@@ -31,7 +34,20 @@ def test_real_authenticated_current_core_and_periphery_health(
     rig = native_rig
     for name in ("core", "periphery"):
         if failure != "missing-" + name:
-            (rig["material"].keys / (name + ".pub")).write_text("fixture-public-key-" + name)
+            (rig["material"].keys / (name + ".pub")).write_text(
+                "invalid-key" if failure == "retained-key" else PUBLIC_PEM[name])
+    core = {
+        "Config": {"Env": ["KOMODO_PERIPHERY_PUBLIC_KEY=file:/config/keys/periphery.pub"]},
+        "Mounts": [{"Type": "bind", "Source": str(rig["material"].keys), "Destination": "/config/keys"}],
+    }
+    if failure == "global-inline":
+        core["Config"]["Env"] = ["KOMODO_PERIPHERY_PUBLIC_KEY=" + PUBLIC_DER["periphery"]]
+    elif failure == "global-wrong":
+        core["Config"]["Env"] = ["KOMODO_PERIPHERY_PUBLIC_KEY=" + PUBLIC_DER["core"]]
+    elif failure == "global-missing":
+        core["Config"]["Env"] = []
+    elif failure == "global-mount":
+        core["Mounts"][0]["Source"] = str(rig["root"] / "foreign-keys")
 
     async def exercise() -> None:
         token = "local-fixture-session-token"
@@ -60,12 +76,15 @@ def test_real_authenticated_current_core_and_periphery_health(
                 "/read/GetVersion": {"version": "2.0.1" if failure == "version" else "2.0.0"},
                 "/read/GetServer": {
                     "id": "server-a", "name": "example-host", "config": {"enabled": True},
-                    "info": {"public_key": "wrong-key" if failure == "key"
-                             else "fixture-public-key-periphery"},
+                    "info": ({} if failure == "missing-override" else {
+                        "public_key": PUBLIC_DER["core"] if failure == "key"
+                        else "" if failure and failure.startswith("global")
+                        else PUBLIC_DER["periphery"]}),
                 },
                 "/read/GetServerState": {"status": "NotOk" if failure == "disconnected" else "Ok"},
                 "/read/GetPeripheryInformation": {
-                    "version": "2.0.0", "public_key": "fixture-public-key-periphery",
+                    "version": "2.0.0", "public_key": PUBLIC_DER[
+                        "core" if failure == "live-key" else "periphery"],
                     "docker_connected": True,
                 },
             }
@@ -80,8 +99,8 @@ def test_real_authenticated_current_core_and_periphery_health(
             declaration["core_port"] = server.port
             selected = KomodoDeclaration.from_dict(declaration)
             deadline = time.monotonic() + (0.15 if failure in ("disconnected", "payload") else 3)
-            if failure is None:
-                result = await current_health(selected, rig["material"], deadline=deadline)
+            if failure in (None, "global", "global-inline"):
+                result = await current_health(selected, rig["material"], deadline=deadline, core=core)
                 assert result["core_version"] == result["periphery_version"] == "2.0.0"
                 assert result["server"] == "server-a"
                 assert token.encode() not in canonical(result)
@@ -91,7 +110,7 @@ def test_real_authenticated_current_core_and_periphery_health(
                 ]
             else:
                 with pytest.raises(PlanError) as caught:
-                    await current_health(selected, rig["material"], deadline=deadline)
+                    await current_health(selected, rig["material"], deadline=deadline, core=core)
                 assert token not in str(caught.value) and "fixture-material" not in str(caught.value)
                 if failure in ("missing-core", "missing-periphery"):
                     assert str(caught.value) == "Komodo retained public identity is unavailable"

@@ -14,6 +14,7 @@ from aiohttp.test_utils import TestServer
 import pytest
 
 from fleet_manager.komodo_declaration import KomodoDeclaration
+from fleet_manager.komodo_evidence import FIELDS
 from fleet_manager.komodo_health import identity_digest
 from fleet_manager.komodo_network import network_fingerprint
 from fleet_manager.komodo_native import KomodoNative
@@ -21,8 +22,9 @@ from fleet_manager.komodo_owner import KomodoOwner, native_fingerprint
 from fleet_manager.komodo_profile import render_profile
 from fleet_manager.komodo_selection import KomodoSelection
 from fleet_manager.komodo_state import KomodoState
-from fleet_manager.planning import PlanError
+from fleet_manager.planning import PlanError, digest
 from fleet_manager.runtime_admission import AdmissionError, OperationGrant
+from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
 from test_komodo_declaration import intent
 from test_komodo_native import native_rig as native_rig
 from test_runtime_admission import Harness, actor, policy
@@ -50,18 +52,23 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
     "repeat-stopped-after-health", "status-stopped-after-health", "repeat-key-drift-after-health",
     "status-stopped-periphery", "missing-key-evidence",
     "status-paused-periphery", "status-restarting-core",
+    "mount-order-after-health", "retained-mount-order", "failed-mount-order", "global-trust",
+    "legacy-readback", "legacy-order-unproved", "legacy-missing-core",
 ])
 def test_composed_owner_preserves_original_operation_and_real_native_custody(
     native_rig: Any, keys: Any, scenario: str, monkeypatch: Any, compose_version: str,
 ) -> None:
     rig = native_rig
+    if scenario.startswith("legacy-"):
+        monkeypatch.setattr("fleet_manager.komodo_owner.native_fingerprint",
+                            lambda item: digest({name: item[name] for name in FIELDS}))
     (rig["directory"] / "compose-version").write_text(compose_version)
     (rig["directory"] / "stateful").touch()
     runtime = rig["root"] / "host-runtime"
     runtime.mkdir(mode=0o700)
     for name in ("core", "periphery"):
         if not scenario.startswith("first-"):
-            (rig["material"].keys / (name + ".pub")).write_text("fixture-public-key-" + name)
+            (rig["material"].keys / (name + ".pub")).write_text(PUBLIC_PEM[name])
 
     def live() -> dict:
         return json.loads((rig["directory"] / "live.json").read_text())
@@ -99,20 +106,28 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                                     else core_version},
                 "/read/GetServer": {
                     "id": "server-a", "name": "example-host", "config": {"enabled": True},
-                    "info": {"public_key": "fixture-public-key-periphery"},
+                    "info": {"public_key": "" if scenario == "global-trust" else PUBLIC_DER["periphery"]},
                 },
                 "/read/GetServerState": {"status": "Ok"},
                 "/read/GetPeripheryInformation": {
                     "version": periphery_version,
-                    "public_key": "fixture-public-key-periphery", "docker_connected": True,
+                    "public_key": PUBLIC_DER["periphery"], "docker_connected": True,
                 },
             }[request.path]
+            if ((request.path == "/read/GetPeripheryInformation"
+                 and scenario == "mount-order-after-health" and not health_changes)
+                    or (request.path == "/read/GetVersion" and scenario == "failed-mount-order")):
+                health_changes.append(True)
+                changed = live()
+                for item in changed.values():
+                    item["Mounts"].reverse()
+                (rig["directory"] / "live.json").write_text(json.dumps(changed))
             if (request.path == "/read/GetPeripheryInformation" and not health_changes and health_armed[0]
                     and scenario.endswith(("stopped-after-health", "key-drift-after-health",
                                            "restart-after-health"))):
                 health_changes.append(True)
                 if scenario.endswith("key-drift-after-health"):
-                    (rig["material"].keys / "core.pub").write_text("changed-after-health")
+                    (rig["material"].keys / "core.pub").write_text(PUBLIC_PEM["periphery"])
                 else:
                     changed = live()
                     if scenario.endswith("stopped-after-health"):
@@ -323,7 +338,7 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                         {"core"} if scenario in ("first-partial-core", "first-partial-key-drift")
                         else set())
                 if scenario == "first-partial-key-drift":
-                    (rig["material"].keys / "core.pub").write_text("unapproved-replacement-key")
+                    (rig["material"].keys / "core.pub").write_text(PUBLIC_PEM["periphery"])
                     with pytest.raises(PlanError, match="storage, credentials or identity"):
                         await invoke(owner(), original)
                     assert effects() == 1 and not health_requests
@@ -340,7 +355,7 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 repaired = await invoke(owner(), request("compatible-first-install-repair"))
                 assert repaired.to_dict()["status"] == "succeeded" and effects() == 2
                 return
-            if scenario == "stopped-core" or scenario.startswith("failed-short-"):
+            if scenario in ("stopped-core", "failed-mount-order") or scenario.startswith("failed-short-"):
                 health_failure[0] = True
                 original = request()
                 with pytest.raises(PlanError, match="current Core version"):
@@ -451,6 +466,20 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
             assert receipt.to_dict()["status"] == "succeeded"
             original_native = live()
             assert effects() == 1
+            if scenario in ("retained-mount-order", "legacy-order-unproved"):
+                for item in original_native.values():
+                    item["Mounts"].reverse()
+                (rig["directory"] / "live.json").write_text(json.dumps(original_native))
+            if scenario == "legacy-order-unproved":
+                before_http = len(health_requests)
+                status = await invoke(owner(), original, status=True)
+                assert "legacy-native-evidence-unproved" in status["blockers"]
+                assert status["currently_healthy"] is None and not status["converged"]
+                assert len(health_requests) == before_http
+                with pytest.raises(PlanError, match="legacy native evidence does not prove"):
+                    await invoke(owner(), original)
+                assert effects() == 1 and live() == original_native
+                return
             repeated = await invoke(owner(), original)
             assert repeated == receipt and effects() == 1 and live() == original_native
             status = await invoke(owner(), original, status=True)
@@ -595,7 +624,7 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     assert restored.to_dict()["status"] == "succeeded" and effects() == 2
                     assert path.read_bytes() == network and sentinel.read_text() == "must-survive"
                 return
-            if scenario == "recovery":
+            if scenario in ("recovery", "legacy-missing-core"):
                 missing = live()
                 del missing["core"]
                 (rig["directory"] / "live.json").write_text(json.dumps(missing))

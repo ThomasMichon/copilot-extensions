@@ -19,6 +19,7 @@ from fleet_manager.komodo_declaration import KomodoDeclaration
 from fleet_manager.komodo_native import KomodoNative, KomodoTooling
 from fleet_manager.komodo_profile import DATA_NAMES, SECRET_NAMES, KomodoMaterialization, render_profile
 from fleet_manager.planning import PlanError
+from komodo_public_fixtures import PUBLIC_PEM
 from test_komodo_declaration import declaration
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host substrate contract")
@@ -181,7 +182,7 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
                     key_root = Path(profile["services"][name]["volumes"][0]["source"])
                     key = key_root / (name + ".pub")
                     if not key.exists():
-                        key.write_text("fixture-public-key-" + name)
+                        key.write_text(PUBLIC_PEM[name])
             (root / "live.json").write_text(json.dumps(live))
             if failure.get("fail"):
                 return 7, "settled-container-creation-failure"
@@ -218,7 +219,7 @@ def native_rig(tmp_path: Path, monkeypatch: Any) -> Any:
     selected = KomodoDeclaration.from_dict(declaration())
     script = tmp_path / "docker-fixture.py"
     script.write_text(
-        "import sys\n" + inspect.getsource(_docker_protocol)
+        "import sys\nPUBLIC_PEM = " + repr(PUBLIC_PEM) + "\n" + inspect.getsource(_docker_protocol)
         + "\ncode, output = _docker_protocol(sys.argv[1:], "
         + repr(str(directory)) + ")\nprint(output, end='')\nraise SystemExit(code)\n")
     executable = Path(sys.executable).resolve()

@@ -1,0 +1,9 @@
+{
+  "comment": "Validate Komodo public-key and mount evidence and add admitted original-attempt SDK repair",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

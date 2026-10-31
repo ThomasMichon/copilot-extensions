@@ -10,6 +10,7 @@ import aiohttp
 
 from .artifact_staging import _bytes
 from .komodo_declaration import KomodoDeclaration
+from .komodo_identity import effective_global_key, public_identity
 from .komodo_profile import KomodoMaterialization, ordinary_path
 from .planning import PlanError, decode, digest, identifier
 
@@ -39,6 +40,7 @@ def public_keys(material: KomodoMaterialization, *, missing_ok: bool = False) ->
             raise PlanError("Komodo retained public identity is unavailable") from None
         if not value:
             raise PlanError("Komodo retained public identity is unavailable")
+        public_identity(value)
         result[name] = value
     return result
 
@@ -81,7 +83,7 @@ async def _request(client: aiohttp.ClientSession, base: str, endpoint: str,
 
 
 async def current_health(declaration: KomodoDeclaration, material: KomodoMaterialization,
-                         *, deadline: float) -> dict[str, str]:
+                         *, deadline: float, core: dict[str, Any] | None = None) -> dict[str, str]:
     """Call only after exact native ownership, image and loopback-port inspection.
 
     Fixed read APIs verify the live connection, not a saved readiness document.
@@ -120,7 +122,12 @@ async def current_health(declaration: KomodoDeclaration, material: KomodoMateria
                         or not isinstance(info, dict)):
                     raise PlanError("Komodo registered Periphery differs from selected instance")
                 keys = public_keys(material)
-                if info.get("public_key") != keys["periphery"]:
+                override = info.get("public_key")
+                if override == "":
+                    if core is None:
+                        raise PlanError("Komodo Core global public identity custody is unproved")
+                    override = effective_global_key(core, material, keys["periphery"])
+                if public_identity(override) != public_identity(keys["periphery"]):
                     raise PlanError("Komodo registered Periphery identity differs from retained keys")
                 state = await _request(client, base, "/read/GetServerState", {
                     "server": selected["server_name"],
@@ -131,7 +138,7 @@ async def current_health(declaration: KomodoDeclaration, material: KomodoMateria
                 if (state.get("status") != "Ok" or periphery.get("docker_connected") is not True):
                     raise _Starting
                 if (periphery.get("version") != selected["images"]["periphery"]["version"]
-                        or periphery.get("public_key") != keys["periphery"]):
+                        or public_identity(periphery.get("public_key")) != public_identity(keys["periphery"])):
                     raise PlanError("Komodo live Periphery differs from selected version or identity")
                 server_id = server.get("id", server.get("_id"))
                 if isinstance(server_id, dict) and set(server_id) == {"$oid"}:

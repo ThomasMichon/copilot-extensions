@@ -16,6 +16,8 @@ from .runtime_identity import VerifiedIdentity
 from .enrolled_identity import EnrolledIdentity, PROFILE as ENROLLED_PROFILE
 from .machine_identity import MachineIdentity, PROFILE as MACHINE_PROFILE
 
+CallerIdentity = VerifiedIdentity | EnrolledIdentity | MachineIdentity
+
 MAX_ENROLLMENTS = 64
 MAX_GRANTS = 256
 MAX_PERMITS = 4096
@@ -253,7 +255,7 @@ class Permit:
 @dataclass(frozen=True)
 class _Issued:
     permit: Permit
-    identity: VerifiedIdentity
+    identity: CallerIdentity
     request: Request
     checkpoint: Callable[[], None] | None = None
 
@@ -420,7 +422,7 @@ class AdmissionAuthority:
             raise AdmissionError("forbidden-scope")
         return requested
 
-    def authorize(self, identity: VerifiedIdentity, request: Request, *,
+    def authorize(self, identity: CallerIdentity, request: Request, *,
                   role: str, installation: str,
                   checkpoint: Callable[[], None] | None = None) -> Permit:
         self._identity(identity)

@@ -9,6 +9,10 @@ import time
 from typing import Any
 
 from .komodo_declaration import KomodoDeclaration, SERVICES, fingerprint
+from .komodo_evidence import (
+    legacy_evidence_unproved, native_fingerprint, native_matches, native_set_matches,
+    native_subset_matches, same_native_observation,
+)
 from .komodo_health import current_health, identity_digest, public_key_fingerprints, public_keys
 from .komodo_native import KomodoImage, KomodoNative
 from .komodo_network import retained_network, verify_network
@@ -19,11 +23,6 @@ from .operations import OperationIntent, TargetReceipt
 from .planning import PlanError, decode, digest, integer
 from .private_state import create_private_file, validate_private_file
 from .runtime_admission import AdmissionAuthority, Permit
-
-
-def native_fingerprint(container: dict[str, Any]) -> str:
-    """Keep secret-bearing native config in memory, never in a receipt or state file."""
-    return digest({name: container[name] for name in ("Id", "Image", "Config", "HostConfig", "Mounts")})
 
 
 def native_running(container: dict[str, Any]) -> bool:
@@ -119,9 +118,9 @@ def verify_candidate(containers: dict[str, dict[str, Any]], selected: KomodoSele
                      images: dict[str, KomodoImage], profile: bytes, attempt: dict[str, Any], *,
                      ready: bool = True) -> None:
     verify_attempt_keys(attempt, selected)
-    if not attempt["fixed_profile"] and attempt["before"] != {
-        name: native_fingerprint(item) for name, item in containers.items()
-    }:
+    if not attempt["fixed_profile"] and legacy_evidence_unproved(attempt["before"], containers):
+        raise PlanError("Komodo legacy native evidence does not prove the current observation")
+    if not attempt["fixed_profile"] and not native_set_matches(attempt["before"], containers):
         raise PlanError("Komodo adopted native candidate was replaced or changed")
     verify_native(containers, selected, images, profile,
                   owned=attempt["fixed_profile"], ready=ready)
@@ -135,7 +134,7 @@ def verify_failed_candidate(containers: dict[str, dict[str, Any]], selected: Kom
         verify_candidate(containers, selected, images, profile, attempt, ready=False)
         return True
     replacements = {name: item for name, item in containers.items()
-                    if attempt["before"].get(name) != native_fingerprint(item)}
+                    if name not in attempt["before"] or not native_matches(attempt["before"][name], item)}
     verify_native(replacements, selected, images, profile, owned=True, ready=False, complete=False)
     try:
         verify_native(containers, selected, images, profile, owned=True, ready=False)
@@ -189,17 +188,13 @@ class KomodoOwner:
             raise PlanError("Komodo native readiness owner is unavailable")
         if set(containers) != set(SERVICES) or not all(map(native_running, containers.values())):
             raise PlanError("Komodo native runtime is not ready")
-        health = asyncio.run(current_health(declaration, selected.material, deadline=deadline))
+        health = asyncio.run(current_health(
+            declaration, selected.material, deadline=deadline, core=containers["core"]))
         after = native.inspect(declaration, selected.material, deadline=deadline)
         if set(after) != set(SERVICES) or not all(map(native_running, after.values())):
             raise PlanError("Komodo native runtime changed during readiness inspection")
-        for name, item in containers.items():
-            observed = after[name]
-            if (native_fingerprint(item) != native_fingerprint(observed)
-                    or item.get("RestartCount") != observed.get("RestartCount")
-                    or any(item["State"].get(key) != observed["State"].get(key)
-                           for key in ("Pid", "StartedAt"))):
-                raise PlanError("Komodo native process changed during readiness inspection")
+        if not same_native_observation(containers, after):
+            raise PlanError("Komodo native process changed during readiness inspection")
         verify_network(native.network(declaration, selected.material, deadline=deadline),
                        selected, after, network)
         if (identity_digest(selected.material) != health["public_identity"]
@@ -216,9 +211,11 @@ class KomodoOwner:
         record = state.read()
         if record is None:
             adoption = dict(selected.adoption)
+            if legacy_evidence_unproved(adoption, containers):
+                raise PlanError("Komodo legacy native evidence does not prove the current observation")
             if containers and (
                 set(containers) != set(SERVICES)
-                or adoption != {name: native_fingerprint(item) for name, item in containers.items()}
+                or not native_set_matches(adoption, containers)
             ):
                 raise PlanError("Komodo incumbent requires exact existing-owner adoption")
             if not containers and adoption:
@@ -242,8 +239,9 @@ class KomodoOwner:
         if retained is None:
             return
         KomodoOwner._preserved_material(record, selected)
-        if any(name not in retained["native"] or native_fingerprint(item) != retained["native"][name]
-               for name, item in containers.items()):
+        if legacy_evidence_unproved(retained["native"], containers):
+            raise PlanError("Komodo legacy native evidence does not prove the current observation")
+        if not native_subset_matches(retained["native"], containers):
             raise PlanError("Komodo retained native resource was replaced or changed")
         if (retained["deployment"] != selected.deployment_digest
                 and retained["deployment"] not in selected.compatible_with):
@@ -350,8 +348,10 @@ class KomodoOwner:
                         raise PlanError("Komodo retained attempt requires original-operation reconciliation")
                     if attempt is not None:
                         verify_attempt_keys(attempt, selected, allow_new=False)
-                        if (attempt.get("deployment") != content or attempt.get("before") != {
-                                name: native_fingerprint(item) for name, item in containers.items()}):
+                        if legacy_evidence_unproved(attempt["before"], containers):
+                            raise PlanError("Komodo legacy native evidence does not prove the current observation")
+                        if (attempt.get("deployment") != content
+                                or not native_set_matches(attempt["before"], containers)):
                             raise PlanError("Komodo accepted native attempt was replaced or changed")
                         verify_network(network, selected, containers,
                                        attempt["network_before"], pending=pending)
@@ -498,7 +498,7 @@ class KomodoOwner:
                     try:
                         asyncio.run(current_health(
                             selected.declaration, selected.material,
-                            deadline=deadline - min(2, remaining / 3)))
+                            deadline=deadline - min(2, remaining / 3), core=containers["core"]))
                     except PlanError:
                         self._selected(request, content)
                     else:
@@ -507,8 +507,7 @@ class KomodoOwner:
                 verify_network(self.native.network(
                     selected.declaration, selected.material, deadline=deadline),
                     selected, after, network, pending=True)
-                if ({name: native_fingerprint(item) for name, item in containers.items()}
-                        != {name: native_fingerprint(item) for name, item in after.items()}):
+                if not same_native_observation(containers, after):
                     raise PlanError("Komodo failed native candidate changed during reconciliation")
                 keys = public_keys(selected.material, missing_ok=True)
                 verify_attempt_keys(attempt, selected, actual={
