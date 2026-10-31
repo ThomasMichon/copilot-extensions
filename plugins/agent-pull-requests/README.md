@@ -863,6 +863,10 @@ The [exact local source attachment](docs/source-attachment.md) verifies already
 prepared common/head objects through the existing Worktrees workspace owner and
 returns a separate attachment envelope, without fetching or rewriting metadata.
 
+The [review owner-store data APIs](docs/review-owner-store.md) explicitly extend
+the same durable replay owner with selected review intents and fenced native
+receipts. They are not a backend executor or serving authorization.
+
 The [explicit generation cache](docs/generation-cache.md) stores retained
 immutable views with CAS publication; it starts no provider read or service
 and is separate from replay state and submission receipts.
