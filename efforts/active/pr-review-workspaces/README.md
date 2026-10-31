@@ -141,6 +141,8 @@ The source implementation continuation is admitted; operational effects are not.
 ### Phase 3 - Build explicit submission and reconciliation after admission
 The [explicit submission/reconciliation slice](submission-slice.md) selects an
 extension of the existing `ReplayStore` envelope, not a second posting ledger.
+- [x] Review and admit the source contract (#9724); no serving/backend adoption
+  or effect authority is inferred from this admission.
 - [ ] Accept selected comments, owned-thread updates and a named verdict bound
   to the reviewed candidate; preserve caller/repository authority boundaries.
 - [ ] Perform fresh required checks and readback inside the operation, without
@@ -196,6 +198,64 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-10-30 - Existing-store Phase 3 data realization
+- Extend the actual `ReplayStore`, its existing file/lock/atomic writer and
+  namespace/service binding with explicit outer v2 adoption and review data.
+  Preserve the inner replay codec and the other namespace on every transaction.
+- Add bounded selected-intent validation, immutable operation fingerprints,
+  reserved receipt growth, ordered durable in-flight fencing and native
+  receipt/partial-ID retention. These APIs perform no backend effect and are not
+  a permission grant or a protected writer/reconciliation adapter.
+- Real file/legacy-reader/source consumers validate reader-lifecycle exclusion,
+  native/service restart, replay coexistence, no blind replay after uncertain
+  persistence, original owner-denial propagation and full-capacity persistence.
+  Final contained replay/cache/new-owner packet passed 94 cases with unchanged
+  budgets, including pending-growth admission/acknowledgement, comment-only
+  selection and cache rebuild with an unknown review in the same owner file.
+- Fixed review findings about replay growth double-counting and unsupported
+  `COMMENTED` vote actions. An existing disconnect-consumer cold dependency
+  import timed out once; its unchanged narrow selector passed three cases,
+  then the entire unchanged-budget consumer packet passed 94 cases.
+- Subsequent review required counting actual retained baseline bytes separately
+  from pending-event growth, retaining old `COMMENTED` data without admitting
+  new no-op vote intents, and target/principal-specific receipt coverage.
+  Twenty-seven real-store controls now pass, including tight-capacity baseline/
+  event cases and restart after reply/edit/verdict confirmations or mismatches.
+- Fund unknown-baseline promotion together with the first firing event before
+  accepting a waiting registration; once that noncontinuous event is frozen,
+  preserve its actual bytes without reserving another event. The empty-baseline/
+  large-firing-event regression passes within a tight configured store capacity.
+- Recheck current-owner authority after lock inspection immediately before a
+  mutation and after admitted persistence before exporting its result. Source
+  controls distinguish pre-mutation withdrawal (no write) from withdrawal during
+  an admitted atomic commit (denial with durable readback, not fictional rollback).
+- Finish owner-envelope encoding/validation before the last replay mutation
+  guard. Withdrawal during that preparation is refused before the atomic writer
+  starts, rather than persisting then reporting an avoidable denial.
+- The original credential/principal/discussion freshness, actual effect-specific
+  reconciliation, executor/provider integration and live serving qualification
+  remain open. No new ledger, issuer, daemon, hosting repair or rollout is made.
+
+### 2026-10-30 - Phase 3 contract accepted; source realization next
+- Merged #9724 as `c8292442e6eec8ed84e800afd137d05803554e69`
+  after current-head review had no remaining Medium/High findings, all threads
+  resolved, the final advisory was assessed and required CI passed.
+- Fixed actual write-credential/principal binding, action-relevant discussion
+  freshness, replay/receipt capacity reservation, identity-versus-namespace
+  terminology and the existing lifecycle owner's legacy-reader conversion
+  prerequisite. No new issuer, delegate gate, service or ledger is selected.
+- Existing `ReplayStore`, `watch-replay.json`, its lock and atomic writer own
+  both namespaces. The inner replay codec stays v1; explicit outer v2 adoption
+  preserves existing state and fails closed for unsupported readers.
+- Realization begins with explicit adoption, durable selected intent and
+  reserved receipt growth under that owner. Backend IO remains outside bounded
+  shared-store transitions with durable unknown-state fencing; subsequent
+  commits reload current state and preserve concurrent replay updates.
+- Whole-envelope rewrite/fsync cost near configured capacity remains a concrete
+  implementation qualification item, not a demonstrated latency guarantee.
+  Original Plan/Validation, source/live adopter qualification and serving
+  rollout remain unresolved. The effort stays Active.
 
 ### 2026-10-30 - Exact source contract and implementation continuation
 - Implementation #9708 merged as `71ea35ed429a57d41808c7c2f6693446c77a822c`
