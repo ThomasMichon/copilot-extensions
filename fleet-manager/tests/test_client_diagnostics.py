@@ -30,9 +30,11 @@ def installed(tmp_path, monkeypatch):
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime_publication.py",
-        "_installer_process.py", "_construction_procutil.py", "_runtime_launcher.py",
+        "_installer_process.py", "_runtime_launcher.py",
+        "_construction_procutil/__init__.py", "_construction_procutil/_job_scopes.py",
     ):
         data = b"resource bytes\n"
+        (package / name).parent.mkdir(parents=True, exist_ok=True)
         (package / name).write_bytes(data)
         files.append(Entry(f"fleet_manager/{name}", data))
     distribution = SimpleNamespace(
@@ -58,9 +60,144 @@ def test_client_evidence_does_not_claim_release_or_controller_readiness(installe
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime_publication.py",
-        "_installer_process.py", "_construction_procutil.py", "_runtime_launcher.py",
+        "_installer_process.py", "_runtime_launcher.py",
+        "_construction_procutil/__init__.py", "_construction_procutil/_job_scopes.py",
     }
     assert report["runtime_resource_sha256s"]["_versioned_runtime.py"] == report["runtime_resource_sha256"]
+
+
+def installed_procutil(installed, monkeypatch):
+    from fleet_manager import client_construction
+
+    distribution, package = installed
+    canonical = Path(__file__).resolve().parents[2] / "libs/agent-procutil/src/agent_procutil"
+    for name in ("__init__.py", "_job_scopes.py"):
+        relative = "_construction_procutil/" + name
+        content = (canonical / name).read_bytes()
+        (package / relative).write_bytes(content)
+        member = f"fleet_manager/{relative}"
+        distribution.files = [
+            entry for entry in distribution.files if str(entry) != member
+        ] + [Entry(member, content)]
+    monkeypatch.setattr(client_construction, "__file__", str(package / "client_construction.py"))
+    return client_construction, package, client_diagnostics.diagnose_client()
+
+
+def test_construction_uses_retained_package_and_scope_bytes_without_module_leaks(installed, monkeypatch):
+    import sys
+
+    construction, package, evidence = installed_procutil(installed, monkeypatch)
+    original = construction.artifact_staging._bytes
+
+    def replaced(path, limit):
+        content = original(path, limit)
+        if path.parent == package / "_construction_procutil":
+            path.write_text("raise AssertionError('late unadmitted code executed')\n")
+        return content
+
+    monkeypatch.setattr(construction.artifact_staging, "_bytes", replaced)
+    with construction._procutil_resource(evidence) as module:
+        name = module.__name__
+        supplied = "Local\\ce-owned-job-" + "1" * 32
+        appended = "Local\\ce-owned-job-" + "2" * 32
+        assert module._job_child_environment(
+            {module._JOB_SCOPES_ENV: supplied}, append=appended, inherit_current=False,
+        )[module._JOB_SCOPES_ENV] == supplied + ";" + appended
+        assert module.__path__ == []
+        assert module._job_child_environment({}, inherit_current=False) == {}
+    assert not any(key == name or key.startswith(name + ".") for key in sys.modules)
+
+
+@pytest.mark.parametrize("member", ["__init__.py", "_job_scopes.py"])
+def test_changed_construction_package_member_refuses_before_execution(installed, monkeypatch, member):
+    import sys
+
+    construction, package, evidence = installed_procutil(installed, monkeypatch)
+    (package / "_construction_procutil" / member).write_text(
+        "raise AssertionError('unadmitted construction code executed')\n",
+    )
+    before = set(sys.modules)
+    with pytest.raises(PlanError, match="changed after RECORD admission"):
+        with construction._procutil_resource(evidence):
+            pytest.fail("changed construction member was admitted")
+    assert set(sys.modules) == before
+
+
+@pytest.mark.parametrize("name", [
+    "../escape.py", "/escape.py", "_construction_procutil/../escape.py",
+    "\\escape.py", "C:escape.py", "C:/escape.py", "\\\\host\\share\\escape.py",
+    "_construction_procutil\\_job_scopes.py", "_construction_procutil/./_job_scopes.py",
+    "_construction_procutil//_job_scopes.py", "_construction_procutil/_job_scopes.py:stream",
+])
+def test_process_resource_rejects_path_escape_before_read(installed, monkeypatch, name):
+    construction, _package, _evidence = installed_procutil(installed, monkeypatch)
+
+    def read(*_args):
+        raise AssertionError("invalid resource path was read")
+
+    monkeypatch.setattr(construction.artifact_staging, "_bytes", read)
+    with pytest.raises(PlanError, match="canonical and relative"):
+        construction._process_resource(name, evidence={"runtime_resource_sha256s": {name: "0" * 64}})
+
+
+@pytest.mark.parametrize("platform", ["posix", "nt"])
+@pytest.mark.parametrize("failed", [False, True])
+def test_construction_owner_call_keeps_pair_available_and_preserves_failure_custody(
+    installed, monkeypatch, tmp_path, failed, platform,
+):
+    import os
+    import sys
+
+    construction, _package, evidence = installed_procutil(installed, monkeypatch)
+    installed_runtime(installed, monkeypatch)
+    evidence = construction.artifact_staging.diagnose_client()
+    retained = construction._process_resource_data("_installer_process.py", evidence=evidence)[1]
+    monkeypatch.setattr(construction, "os", SimpleNamespace(**{**vars(os), "name": platform}))
+    failure = RuntimeError("native ownership is unconfirmed")
+    failure.process, failure.job = object(), object()
+    custody = failure.process, failure.job
+    observed = []
+
+    def run_owned(argv, **options):
+        module = options["procutil"]
+        observed.append(module.__name__)
+        assert sys.modules[module.__name__] is module
+        assert module._job_child_environment({}, inherit_current=False) == {}
+        sources = options["guardian_sources"]
+        if platform == "nt":
+            assert sources == {
+                name: construction._process_resource_data(name, evidence=evidence)[1]
+                for name in (
+                    "_installer_process.py", "_construction_procutil/__init__.py",
+                    "_construction_procutil/_job_scopes.py", "_versioned_runtime.py",
+                    "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+                    "versioned_runtime_source.py", "versioned_runtime_publication.py",
+                )
+            }
+            assert sources["_installer_process.py"] == retained
+        else:
+            assert sources is None
+        if failed:
+            raise failure
+        return SimpleNamespace(stdout="complete", stderr="")
+
+    def owner(name, *, evidence):
+        assert name == "_installer_process.py"
+        return SimpleNamespace(run_owned=run_owned, _retained_source_bytes=retained)
+
+    monkeypatch.setattr(construction, "_process_resource", owner)
+    slot = tmp_path / "runtime" / "versions" / "fixture"
+    slot.mkdir(parents=True)
+    if failed:
+        with pytest.raises(RuntimeError) as caught:
+            construction._run(["fixture"], slot, "fixture", descriptor=1, resource_evidence=evidence)
+        assert caught.value is failure and (failure.process, failure.job) == custody
+    else:
+        assert construction._run(
+            ["fixture"], slot, "fixture", descriptor=1, resource_evidence=evidence,
+        ) == b"complete"
+    assert len(observed) == 1
+    assert not any(key == observed[0] or key.startswith(observed[0] + ".") for key in sys.modules)
 
 
 def installed_runtime(installed, monkeypatch):

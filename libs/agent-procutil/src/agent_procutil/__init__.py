@@ -137,19 +137,12 @@ def _job_scope_names(environment) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _job_child_environment(environment=None, *, append: str | None = None) -> dict[str, str]:
-    child = dict(os.environ if environment is None else environment)
-    names = list(_job_scope_names(os.environ))
-    for key in tuple(child):
-        if key.upper() == _JOB_SCOPES_ENV:
-            names.extend(_job_scope_names({_JOB_SCOPES_ENV: child.pop(key)}))
-    names = list(dict.fromkeys(names))
-    if append is not None:
-        names.append(append)
-    if names:
-        child[_JOB_SCOPES_ENV] = ";".join(names)
-        _job_scope_names(child)
-    return child
+def _job_child_environment(
+    environment=None, *, append: str | None = None, inherit_current: bool = True,
+) -> dict[str, str]:
+    from ._job_scopes import child_environment
+
+    return child_environment(environment, append=append, inherit_current=inherit_current)
 
 
 def _publish_job_scope(name: str) -> None:

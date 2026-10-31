@@ -295,9 +295,13 @@ bindings, not all executable loads in that module.
 Dynamic module-import aliases use lexical provenance too; renaming a loader
 cannot hide an unadmitted dependency.
 The existing Windows retention guardian retains its separate runtime-actor
-contract: only its exact adapter and two owned resource-call shapes are
-recognized as external runtime loads, never as qualified repository helpers.
-Release implementations cannot invoke that private loader interface.
+contract: its exact legacy adapter/resource-call shapes or complete pinned
+retained-source actor are recognized as external runtime loads, never as
+qualified repository helpers. Fingerprints structurally omit only the empty
+definition `type_params` fields absent before Python 3.12 and retain empty-list
+dumping on Python 3.13. Nonempty type parameters and changed source remain
+pinned; string constants and caller ASTs are not rewritten. Release
+implementations cannot invoke that private loader interface.
 
 Source PR guards compare helper-required CLI inputs and complete-source
 construction/attestation/publication against both the prepared proposal and

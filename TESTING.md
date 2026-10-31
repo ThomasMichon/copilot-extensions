@@ -67,6 +67,32 @@ birth-verified pins before fixture cleanup. This lane remains outside required
 unit-only CI; continuous desktop observation, source/release and installed
 acceptance are separate evidence.
 
+The finite runner's `test_native_owned.py` exercises ordinary completion,
+descendant waiting, timeout cleanup, path refusal and original Job-scope
+publication on both native PowerShell hosts. Separately,
+`PROCUTIL_NATIVE_OWNED_LIFETIME=1` selects
+`test_native_owned_lifetime_native.py`: two cycles of caller loss, helper loss
+and runspace cancellation under normal and test-venv PATH Python. Its closed
+publications bind the original shell, actual helper, optional venv launcher,
+writer and leaf to native process births. Every unique pin must exit before
+fixture cleanup; a helper-loss transport failure remains unconfirmed rather
+than becoming successful cleanup evidence. Neither matrix belongs in required
+unit-only CI.
+
+`test_native_owned_powershell.py` separately uses real shells with an inert
+dispatcher and an in-memory Job owner. It proves import/legacy refusal,
+argument and Boolean-cleanup contracts and actual runspace-stop `finally`
+behavior without native process effects. `test_windows_owned_stdio.py` checks
+the two unique inherited stdio handles through synthetic native calls and
+owned file descriptors. The admitted `tools/promotion_unit_tests/test_native_owned.py`
+packet covers finite outcome/retirement logic with explicit native-boundary
+doubles; none of these portable checks replaces the native/desktop matrix.
+The same real-shell facade packet extracts the actual `Invoke-FoundationChild`
+consumer function and exercises child failure through the finite adapter. Only
+Boolean cleanup evidence is accepted, an outer false dominates an inner true,
+and the original failure must survive. It does not execute or qualify the
+remaining compiled foundation bootstrap or its opt-in acquisition lanes.
+
 Update-driver's `test_native_lifetime.py -k queued_installer`, admitted with
 `UPDATE_DRIVER_NATIVE_LIFETIME=1`, separately exercises the real queued executor
 launching a disposable durable daemon. It pins the native identities before
@@ -281,6 +307,14 @@ not admitted promotion units or Windows desktop qualification.
 The fixture's identity report is admitted only after a separate marker confirms
 the producer completed its closed-file publication. A failed admitted read stays
 an error; the fixture does not suppress permissions failures or retry them as a pass.
+The daemon shell-lifetime fixture uses the same admission boundary: `ready.closed`
+is published after the `ready.json` rename returns, and its reader does not open
+the report before that marker. The original wait and identity-pinned cleanup
+bounds remain unchanged.
+`tools/promotion_unit_tests/test_daemon_fixture_publication.py` supplies five
+admitted Python reader/wait controls. Its separate producer-order assertion reads
+the PowerShell fixture and runs through the bounded source-check path, not the
+promotion packet's Python/build-data input contract.
 
 The separate opt-in desktop witness is
 `libs/agent-procutil/tests/sdk_visibility.py`, with its co-located pure observer
@@ -289,6 +323,59 @@ mode requires explicit single-control consent, a source-bound request, a normal
 local unelevated desktop and the admitted outer native Job owner. Job membership
 alone does not establish that producer's limits; do not invoke the visible mode
 directly or bypass a hosted-only fixture's guard.
+
+On an actively used workstation, do not require the operator to stop using the
+desktop so an unattended qualification can pass. The visible calibration
+deliberately activates a window, and whole-desktop quiet capture can reject
+ordinary operator activity. Neither is appropriate for an active workstation
+without a separately arranged desktop-testing window.
+
+The `functional` mode runs the same exact, source-bound native packets through
+the same private parent handshake, finite workers, cleanup and JUnit checks,
+without creating a calibration window, querying the foreground or requesting
+foreground activation. Its explicit `functional-worker` path checks the
+existing outer Job, local-console session, token, station and input-desktop
+prerequisites without reading a foreground HWND or window owner. The ordinary
+`worker` used by desktop qualification retains its complete foreground
+visibility and same-session checks; there is no fallback between these paths.
+Its request has the probe's source and packet fields but **no**
+`visible_controls`; it also rejects `--allow-visible-control-once`. It writes
+`functional-result.json` with `kind: sdk-functional`,
+`visible_controls_attempted: 0` and `desktop_qualified: false`, never a
+`visibility-result.json`. This is process/protocol/lifetime evidence only:
+it does not certify the absence of unintended windows or focus changes.
+Desktop qualification remains a separate gate; do not relabel functional
+results, normal operator observations or a failed calibration as desktop proof.
+Both modes retain the existing whole deadline and 150-second worker cutoff,
+complete before/after source hashes and exact literal packet identities.
+Functional source hashing must finish before native admission. Each packet
+rechecks the original worker cutoff immediately before constructing its child;
+the shared child rechecks its unchanged request deadline after publishing the
+request and immediately before native process creation. Slow hashing, parent
+queries, earlier packets or request-file writes cannot launch a late worker.
+
+`tools/native_qualification_receiver.py` supplies an explicitly selected,
+source-managed result receiver when the command transport cannot witness final
+native exit and post-capture timing. It adds one process inside the existing
+caller Job, never another Job or a larger deadline. Its immutable request has
+exact `command`, `scope`, `cwd` and `manifest_sha256` fields. The command is the
+accepted PowerShell launcher invocation with no profile, interaction or shell
+command substitution. The receiver and launcher both belong to the complete
+hash-bound prepared manifest.
+
+The launcher must accept `OriginalStartMonotonic` and `OriginalStartUtc` and
+use that same origin for every existing 165-second work, 150-second worker and
+180-second whole-bound check; it must not start a replacement clock. A terminal
+receipt remains provisional until the receiver observes the actual launcher
+exit, settles both bounded streams, closes its process handle, verifies every
+final indexed artifact and records fresh post-capture/post-verification times.
+The receiver rechecks its complete prepared source after native exit, preserves
+raw captured bytes and refuses an expired bound,
+uncertain cleanup, mismatched scope, changed source, duplicate evidence or
+unindexed file. It never kills, retries, creates a Job, inspects the foreground
+or upgrades functional evidence to desktop acceptance. Pure/fake-process
+receiver controls do not qualify Windows; fresh prepared-source review and
+separate native execution remain necessary.
 
 The `passive` mode creates no window and changes no foreground state: it checks
 the native bindings, complete raw-event/poll capture and private-pipe identity
@@ -3237,6 +3324,15 @@ entry point while changing the original resources, then verifies the retained
 wheel's exact bytes. The full development extra remains broader than the
 dependency-free client; selected source distributions can still require a
 platform's native build prerequisites.
+
+`tools/promotion_unit_tests/test_client_guardian_resources.py` exercises the real
+client-to-guardian caller boundary with process/native-import value doubles and the actual
+stdin bootstrap. It replaces each admitted executable member after snapshot,
+checks the private runtime/procutil namespaces and preserved uncertain custody,
+and refuses incomplete, malformed or oversized bundles before execution.
+These are portable unit controls, not native Windows process, Job, lifetime
+or desktop qualification. The release-helper verifier pins the retained
+guardian's complete source shape without executing that actor during discovery.
 
 ## The turn-key runner
 

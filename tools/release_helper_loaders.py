@@ -5,6 +5,7 @@ import ast
 import hashlib
 import sys
 from collections import Counter
+from copy import deepcopy
 from pathlib import PurePosixPath
 
 from promotion_unit_contract import UnitEvidenceError, relative_file
@@ -13,7 +14,9 @@ _SPEC = "importlib.util.spec_from_file_location"
 _MODULE = "importlib.util.module_from_spec"
 _UNSUPPORTED = {"SourceFileLoader", "SourcelessFileLoader", "load_module"}
 _ACTOR_PRIVATE = {"_load_resource", "_supervise_windows"}
-_SENSITIVE = _UNSUPPORTED | _ACTOR_PRIVATE | {
+_RETAINED_PRIVATE = {"_guardian_packet", "_load_guardian_resources", "_run_guardian_child"}
+_PRIVATE_BOUNDARIES = _ACTOR_PRIVATE | _RETAINED_PRIVATE
+_SENSITIVE = _UNSUPPORTED | _PRIVATE_BOUNDARIES | {
     "spec_from_file_location", "module_from_spec", "exec_module", "_load_module",
 }
 _ADAPTER = ast.parse(
@@ -26,6 +29,7 @@ _ADAPTER = ast.parse(
 ).body[0]
 _TOOL_ROOT = ast.parse('tool_root = (trusted_source or scratch) / "tools"').body[0]
 _ACTOR_SOURCE = "libs/installer-engine/installer_engine_process.py"
+_RETAINED_ACTOR_SHA256 = "689db795d0e738890462073d22aa6dac2a31f93be1c74b1d2fe483d1513ec4e7"
 _RESOURCE_ADAPTER = ast.parse(
     "def _load_resource(name, path):\n"
     "    spec = importlib.util.spec_from_file_location(name, path)\n"
@@ -74,11 +78,22 @@ _INSTALLED_ACTORS = {
 }
 
 
-def _actor_digest(function: ast.FunctionDef) -> str:
-    # Python 3.13 changed dump's empty-list default; fingerprints retain them.
+def _dump_ast(tree: ast.AST) -> str:
+    normalized = deepcopy(tree)
+    for node in ast.walk(normalized):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and getattr(node, "type_params", None) == []
+        ):
+            # Python 3.12 added this empty field; nonempty type parameters stay pinned.
+            node._fields = tuple(field for field in node._fields if field != "type_params")
     options = {"show_empty": True} if sys.version_info >= (3, 13) else {}
-    signature = ast.dump(function.args, **options)
-    body = ast.dump(ast.Module(body=function.body, type_ignores=[]), **options)
+    return ast.dump(normalized, **options)
+
+
+def _actor_digest(function: ast.FunctionDef) -> str:
+    signature = _dump_ast(function.args)
+    body = _dump_ast(ast.Module(body=function.body, type_ignores=[]))
     return hashlib.sha256((signature + "\n" + body).encode("utf-8")).hexdigest()
 
 
@@ -151,6 +166,23 @@ class _Discovery:
     def runtime_boundary(self) -> None:
         """Admit only the existing owned Windows product/runtime actor seam."""
         if self.relative != _ACTOR_SOURCE:
+            return
+        if any(
+            isinstance(node, ast.FunctionDef) and node.name == "_load_guardian_resources"
+            for node in self.tree.body
+        ):
+            fingerprint = hashlib.sha256(
+                _dump_ast(self.tree).encode("utf-8"),
+            ).hexdigest()
+            if fingerprint != _RETAINED_ACTOR_SHA256:
+                self.fail(self.tree, "retained runtime actor source shape changed")
+            # This exact actor transports a complete source bundle, not file
+            # loader edges. Foreign modules still cannot access its private seams.
+            self.actor_calls.update(
+                node for node in ast.walk(self.tree)
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in _PRIVATE_BOUNDARIES
+            )
             return
         definitions = [
             node for node in ast.walk(self.tree)
@@ -397,12 +429,12 @@ class _Discovery:
             if isinstance(node, ast.Import):
                 for item in node.names:
                     local = item.asname or item.name.split(".")[0]
-                    if item.name.rsplit(".", 1)[-1] in _ACTOR_PRIVATE or local in _ACTOR_PRIVATE:
+                    if item.name.rsplit(".", 1)[-1] in _PRIVATE_BOUNDARIES or local in _PRIVATE_BOUNDARIES:
                         self.fail(node, "private runtime boundary cannot be imported")
                     imported(local, item.name if item.asname else local)
             elif isinstance(node, ast.ImportFrom):
                 for item in node.names:
-                    if item.name in _ACTOR_PRIVATE or item.asname in _ACTOR_PRIVATE:
+                    if item.name in _PRIVATE_BOUNDARIES or item.asname in _PRIVATE_BOUNDARIES:
                         self.fail(node, "private runtime boundary cannot be imported")
                     if item.name == "*" and node.module in ("importlib", "importlib.util", "importlib.machinery"):
                         self.fail(node, "wildcard loader import")

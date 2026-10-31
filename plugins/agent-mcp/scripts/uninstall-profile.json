@@ -2629,6 +2629,1686 @@
         ],
         "retired": []
       }
+    },
+    {
+      "revision": 17,
+      "snapshot": {
+        "profile": {
+          "version": 1,
+          "root_entries": [
+            "versions",
+            ".venv",
+            "venv",
+            "snapshots",
+            "current-version",
+            "last-known-good",
+            "running-version.json",
+            "deploy-manifest.json",
+            "payload-dir",
+            "stamped-version",
+            ".provision-status"
+          ],
+          "bin_entries": [
+            "resolve-runtime.ps1",
+            "resolve-runtime.sh"
+          ],
+          "script_entries": [],
+          "local_bin_entries": [
+            "agent-mcp",
+            "agent-mcp.cmd",
+            "agent-mcp.ps1"
+          ],
+          "module": "agent_mcp"
+        },
+        "effects": {
+          "retirement-custodian": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "retirement-coordination": {
+            "kind": "preserved-state",
+            "scope": "installation",
+            "entries": [
+              "private-native-retirement-lifeline",
+              "daemon-instance:runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "legacy-runtime-processes": {
+            "kind": "process",
+            "scope": "runtime-root",
+            "entries": [
+              ".venv",
+              "venv",
+              "tool"
+            ],
+            "disposition": "retire"
+          },
+          "vendored-tool": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "tool"
+            ],
+            "disposition": "reset"
+          },
+          "resident-processes": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "agent_mcp",
+              "identity-bound-owned-descendants"
+            ],
+            "disposition": "retire"
+          },
+          "runtime-control": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "serve.sock",
+              "serve.sock.endpoint",
+              "serve-g{generation}.sock",
+              "serve-g{generation}.sock.endpoint",
+              "serve-control-{pid}.token",
+              "active.json"
+            ],
+            "disposition": "reset"
+          },
+          "registrations": {
+            "kind": "registration",
+            "scope": "installation",
+            "entries": [],
+            "disposition": "retire"
+          },
+          "shared-path": {
+            "kind": "shared-environment",
+            "scope": "user-environment",
+            "entries": [
+              "PATH:{user-home}/.local/bin"
+            ],
+            "disposition": "preserve"
+          },
+          "coordination": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              ".install.lock",
+              ".install.lock.pid",
+              ".install.lock.pid.reap",
+              ".install-stage",
+              ".provision.lock",
+              ".construction-leases",
+              ".retention-leases",
+              ".publication-leases",
+              "active.lock",
+              "service-instance-leases",
+              "agent-mcp-serve.lock",
+              "zdd-cutover.lock"
+            ],
+            "disposition": "preserve"
+          },
+          "configuration-and-data": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              "bridges",
+              "overrides",
+              "token-cache",
+              "materialized",
+              "logs",
+              "serve.log",
+              "serve-g{generation}.log",
+              "retirement-custodian.log",
+              "unknown-contents"
+            ],
+            "disposition": "preserve"
+          }
+        },
+        "recognizers": {
+          "legacy-complete-v1": {
+            "kind": "versioned-runtime-v1",
+            "footprint": [
+              1,
+              1
+            ],
+            "deployment_schema": [
+              3,
+              3
+            ],
+            "completion_contract": [
+              1,
+              1
+            ]
+          }
+        },
+        "producers": {
+          "scripts": "77ae741579f6e7902a6512711628c5781fc36e8d20434de92ebd06a9fb8a1c7b",
+          "src": "bc105c7f586800030974daeda7a65667a62a3cbc8bd4efa0accb071bbac1a684"
+        }
+      },
+      "delta": {
+        "introduced": [],
+        "changed": [
+          "producers:scripts"
+        ],
+        "retired": []
+      }
+    },
+    {
+      "revision": 18,
+      "snapshot": {
+        "profile": {
+          "version": 1,
+          "root_entries": [
+            "versions",
+            ".venv",
+            "venv",
+            "snapshots",
+            "current-version",
+            "last-known-good",
+            "running-version.json",
+            "deploy-manifest.json",
+            "payload-dir",
+            "stamped-version",
+            ".provision-status"
+          ],
+          "bin_entries": [
+            "resolve-runtime.ps1",
+            "resolve-runtime.sh"
+          ],
+          "script_entries": [],
+          "local_bin_entries": [
+            "agent-mcp",
+            "agent-mcp.cmd",
+            "agent-mcp.ps1"
+          ],
+          "module": "agent_mcp"
+        },
+        "effects": {
+          "retirement-custodian": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "retirement-coordination": {
+            "kind": "preserved-state",
+            "scope": "installation",
+            "entries": [
+              "private-native-retirement-lifeline",
+              "daemon-instance:runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "legacy-runtime-processes": {
+            "kind": "process",
+            "scope": "runtime-root",
+            "entries": [
+              ".venv",
+              "venv",
+              "tool"
+            ],
+            "disposition": "retire"
+          },
+          "vendored-tool": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "tool"
+            ],
+            "disposition": "reset"
+          },
+          "resident-processes": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "agent_mcp",
+              "identity-bound-owned-descendants"
+            ],
+            "disposition": "retire"
+          },
+          "runtime-control": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "serve.sock",
+              "serve.sock.endpoint",
+              "serve-g{generation}.sock",
+              "serve-g{generation}.sock.endpoint",
+              "serve-control-{pid}.token",
+              "active.json"
+            ],
+            "disposition": "reset"
+          },
+          "registrations": {
+            "kind": "registration",
+            "scope": "installation",
+            "entries": [],
+            "disposition": "retire"
+          },
+          "shared-path": {
+            "kind": "shared-environment",
+            "scope": "user-environment",
+            "entries": [
+              "PATH:{user-home}/.local/bin"
+            ],
+            "disposition": "preserve"
+          },
+          "coordination": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              ".install.lock",
+              ".install.lock.pid",
+              ".install.lock.pid.reap",
+              ".install-stage",
+              ".provision.lock",
+              ".construction-leases",
+              ".retention-leases",
+              ".publication-leases",
+              "active.lock",
+              "service-instance-leases",
+              "agent-mcp-serve.lock",
+              "zdd-cutover.lock"
+            ],
+            "disposition": "preserve"
+          },
+          "configuration-and-data": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              "bridges",
+              "overrides",
+              "token-cache",
+              "materialized",
+              "logs",
+              "serve.log",
+              "serve-g{generation}.log",
+              "retirement-custodian.log",
+              "unknown-contents"
+            ],
+            "disposition": "preserve"
+          }
+        },
+        "recognizers": {
+          "legacy-complete-v1": {
+            "kind": "versioned-runtime-v1",
+            "footprint": [
+              1,
+              1
+            ],
+            "deployment_schema": [
+              3,
+              3
+            ],
+            "completion_contract": [
+              1,
+              1
+            ]
+          }
+        },
+        "producers": {
+          "scripts": "64a01f9ddea790fa64b58b1d040dfb4c4f2e60d4ca771b91fdef85b8149d0ada",
+          "src": "bc105c7f586800030974daeda7a65667a62a3cbc8bd4efa0accb071bbac1a684"
+        }
+      },
+      "delta": {
+        "introduced": [],
+        "changed": [
+          "producers:scripts"
+        ],
+        "retired": []
+      }
+    },
+    {
+      "revision": 19,
+      "snapshot": {
+        "profile": {
+          "version": 1,
+          "root_entries": [
+            "versions",
+            ".venv",
+            "venv",
+            "snapshots",
+            "current-version",
+            "last-known-good",
+            "running-version.json",
+            "deploy-manifest.json",
+            "payload-dir",
+            "stamped-version",
+            ".provision-status"
+          ],
+          "bin_entries": [
+            "resolve-runtime.ps1",
+            "resolve-runtime.sh"
+          ],
+          "script_entries": [],
+          "local_bin_entries": [
+            "agent-mcp",
+            "agent-mcp.cmd",
+            "agent-mcp.ps1"
+          ],
+          "module": "agent_mcp"
+        },
+        "effects": {
+          "retirement-custodian": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "retirement-coordination": {
+            "kind": "preserved-state",
+            "scope": "installation",
+            "entries": [
+              "private-native-retirement-lifeline",
+              "daemon-instance:runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "legacy-runtime-processes": {
+            "kind": "process",
+            "scope": "runtime-root",
+            "entries": [
+              ".venv",
+              "venv",
+              "tool"
+            ],
+            "disposition": "retire"
+          },
+          "vendored-tool": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "tool"
+            ],
+            "disposition": "reset"
+          },
+          "resident-processes": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "agent_mcp",
+              "identity-bound-owned-descendants"
+            ],
+            "disposition": "retire"
+          },
+          "runtime-control": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "serve.sock",
+              "serve.sock.endpoint",
+              "serve-g{generation}.sock",
+              "serve-g{generation}.sock.endpoint",
+              "serve-control-{pid}.token",
+              "active.json"
+            ],
+            "disposition": "reset"
+          },
+          "registrations": {
+            "kind": "registration",
+            "scope": "installation",
+            "entries": [],
+            "disposition": "retire"
+          },
+          "shared-path": {
+            "kind": "shared-environment",
+            "scope": "user-environment",
+            "entries": [
+              "PATH:{user-home}/.local/bin"
+            ],
+            "disposition": "preserve"
+          },
+          "coordination": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              ".install.lock",
+              ".install.lock.pid",
+              ".install.lock.pid.reap",
+              ".install-stage",
+              ".provision.lock",
+              ".construction-leases",
+              ".retention-leases",
+              ".publication-leases",
+              "active.lock",
+              "service-instance-leases",
+              "agent-mcp-serve.lock",
+              "zdd-cutover.lock"
+            ],
+            "disposition": "preserve"
+          },
+          "configuration-and-data": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              "bridges",
+              "overrides",
+              "token-cache",
+              "materialized",
+              "logs",
+              "serve.log",
+              "serve-g{generation}.log",
+              "retirement-custodian.log",
+              "unknown-contents"
+            ],
+            "disposition": "preserve"
+          }
+        },
+        "recognizers": {
+          "legacy-complete-v1": {
+            "kind": "versioned-runtime-v1",
+            "footprint": [
+              1,
+              1
+            ],
+            "deployment_schema": [
+              3,
+              3
+            ],
+            "completion_contract": [
+              1,
+              1
+            ]
+          }
+        },
+        "producers": {
+          "scripts": "5b7427e9658ac5d8665e6ec3a37fca07c22cb2936234a86d6d015cd5fabb97ca",
+          "src": "bc105c7f586800030974daeda7a65667a62a3cbc8bd4efa0accb071bbac1a684"
+        }
+      },
+      "delta": {
+        "introduced": [],
+        "changed": [
+          "producers:scripts"
+        ],
+        "retired": []
+      }
+    },
+    {
+      "revision": 20,
+      "snapshot": {
+        "profile": {
+          "version": 1,
+          "root_entries": [
+            "versions",
+            ".venv",
+            "venv",
+            "snapshots",
+            "current-version",
+            "last-known-good",
+            "running-version.json",
+            "deploy-manifest.json",
+            "payload-dir",
+            "stamped-version",
+            ".provision-status"
+          ],
+          "bin_entries": [
+            "resolve-runtime.ps1",
+            "resolve-runtime.sh"
+          ],
+          "script_entries": [],
+          "local_bin_entries": [
+            "agent-mcp",
+            "agent-mcp.cmd",
+            "agent-mcp.ps1"
+          ],
+          "module": "agent_mcp"
+        },
+        "effects": {
+          "retirement-custodian": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "retirement-coordination": {
+            "kind": "preserved-state",
+            "scope": "installation",
+            "entries": [
+              "private-native-retirement-lifeline",
+              "daemon-instance:runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "legacy-runtime-processes": {
+            "kind": "process",
+            "scope": "runtime-root",
+            "entries": [
+              ".venv",
+              "venv",
+              "tool"
+            ],
+            "disposition": "retire"
+          },
+          "vendored-tool": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "tool"
+            ],
+            "disposition": "reset"
+          },
+          "resident-processes": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "agent_mcp",
+              "identity-bound-owned-descendants"
+            ],
+            "disposition": "retire"
+          },
+          "runtime-control": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "serve.sock",
+              "serve.sock.endpoint",
+              "serve-g{generation}.sock",
+              "serve-g{generation}.sock.endpoint",
+              "serve-control-{pid}.token",
+              "active.json"
+            ],
+            "disposition": "reset"
+          },
+          "registrations": {
+            "kind": "registration",
+            "scope": "installation",
+            "entries": [],
+            "disposition": "retire"
+          },
+          "shared-path": {
+            "kind": "shared-environment",
+            "scope": "user-environment",
+            "entries": [
+              "PATH:{user-home}/.local/bin"
+            ],
+            "disposition": "preserve"
+          },
+          "coordination": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              ".install.lock",
+              ".install.lock.pid",
+              ".install.lock.pid.reap",
+              ".install-stage",
+              ".provision.lock",
+              ".construction-leases",
+              ".retention-leases",
+              ".publication-leases",
+              "active.lock",
+              "service-instance-leases",
+              "agent-mcp-serve.lock",
+              "zdd-cutover.lock"
+            ],
+            "disposition": "preserve"
+          },
+          "configuration-and-data": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              "bridges",
+              "overrides",
+              "token-cache",
+              "materialized",
+              "logs",
+              "serve.log",
+              "serve-g{generation}.log",
+              "retirement-custodian.log",
+              "unknown-contents"
+            ],
+            "disposition": "preserve"
+          }
+        },
+        "recognizers": {
+          "legacy-complete-v1": {
+            "kind": "versioned-runtime-v1",
+            "footprint": [
+              1,
+              1
+            ],
+            "deployment_schema": [
+              3,
+              3
+            ],
+            "completion_contract": [
+              1,
+              1
+            ]
+          }
+        },
+        "producers": {
+          "scripts": "f4093af599cf342e5c8657f1b34be6ae8f8787f11388a0b56d1d30367dc838ae",
+          "src": "bc105c7f586800030974daeda7a65667a62a3cbc8bd4efa0accb071bbac1a684"
+        }
+      },
+      "delta": {
+        "introduced": [],
+        "changed": [
+          "producers:scripts"
+        ],
+        "retired": []
+      }
+    },
+    {
+      "revision": 21,
+      "snapshot": {
+        "profile": {
+          "version": 1,
+          "root_entries": [
+            "versions",
+            ".venv",
+            "venv",
+            "snapshots",
+            "current-version",
+            "last-known-good",
+            "running-version.json",
+            "deploy-manifest.json",
+            "payload-dir",
+            "stamped-version",
+            ".provision-status"
+          ],
+          "bin_entries": [
+            "resolve-runtime.ps1",
+            "resolve-runtime.sh"
+          ],
+          "script_entries": [],
+          "local_bin_entries": [
+            "agent-mcp",
+            "agent-mcp.cmd",
+            "agent-mcp.ps1"
+          ],
+          "module": "agent_mcp"
+        },
+        "effects": {
+          "retirement-custodian": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "retirement-coordination": {
+            "kind": "preserved-state",
+            "scope": "installation",
+            "entries": [
+              "private-native-retirement-lifeline",
+              "daemon-instance:runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "legacy-runtime-processes": {
+            "kind": "process",
+            "scope": "runtime-root",
+            "entries": [
+              ".venv",
+              "venv",
+              "tool"
+            ],
+            "disposition": "retire"
+          },
+          "vendored-tool": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "tool"
+            ],
+            "disposition": "reset"
+          },
+          "resident-processes": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "agent_mcp",
+              "identity-bound-owned-descendants"
+            ],
+            "disposition": "retire"
+          },
+          "runtime-control": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "serve.sock",
+              "serve.sock.endpoint",
+              "serve-g{generation}.sock",
+              "serve-g{generation}.sock.endpoint",
+              "serve-control-{pid}.token",
+              "active.json"
+            ],
+            "disposition": "reset"
+          },
+          "registrations": {
+            "kind": "registration",
+            "scope": "installation",
+            "entries": [],
+            "disposition": "retire"
+          },
+          "shared-path": {
+            "kind": "shared-environment",
+            "scope": "user-environment",
+            "entries": [
+              "PATH:{user-home}/.local/bin"
+            ],
+            "disposition": "preserve"
+          },
+          "coordination": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              ".install.lock",
+              ".install.lock.pid",
+              ".install.lock.pid.reap",
+              ".install-stage",
+              ".provision.lock",
+              ".construction-leases",
+              ".retention-leases",
+              ".publication-leases",
+              "active.lock",
+              "service-instance-leases",
+              "agent-mcp-serve.lock",
+              "zdd-cutover.lock"
+            ],
+            "disposition": "preserve"
+          },
+          "configuration-and-data": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              "bridges",
+              "overrides",
+              "token-cache",
+              "materialized",
+              "logs",
+              "serve.log",
+              "serve-g{generation}.log",
+              "retirement-custodian.log",
+              "unknown-contents"
+            ],
+            "disposition": "preserve"
+          }
+        },
+        "recognizers": {
+          "legacy-complete-v1": {
+            "kind": "versioned-runtime-v1",
+            "footprint": [
+              1,
+              1
+            ],
+            "deployment_schema": [
+              3,
+              3
+            ],
+            "completion_contract": [
+              1,
+              1
+            ]
+          }
+        },
+        "producers": {
+          "scripts": "96b0bb04b8f918e3309f10ed635bea2ccffd0666c0cb81f3869c4a511a6482e8",
+          "src": "bc105c7f586800030974daeda7a65667a62a3cbc8bd4efa0accb071bbac1a684"
+        }
+      },
+      "delta": {
+        "introduced": [],
+        "changed": [
+          "producers:scripts"
+        ],
+        "retired": []
+      }
+    },
+    {
+      "revision": 22,
+      "snapshot": {
+        "profile": {
+          "version": 1,
+          "root_entries": [
+            "versions",
+            ".venv",
+            "venv",
+            "snapshots",
+            "current-version",
+            "last-known-good",
+            "running-version.json",
+            "deploy-manifest.json",
+            "payload-dir",
+            "stamped-version",
+            ".provision-status"
+          ],
+          "bin_entries": [
+            "resolve-runtime.ps1",
+            "resolve-runtime.sh"
+          ],
+          "script_entries": [],
+          "local_bin_entries": [
+            "agent-mcp",
+            "agent-mcp.cmd",
+            "agent-mcp.ps1"
+          ],
+          "module": "agent_mcp"
+        },
+        "effects": {
+          "retirement-custodian": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "retirement-coordination": {
+            "kind": "preserved-state",
+            "scope": "installation",
+            "entries": [
+              "private-native-retirement-lifeline",
+              "daemon-instance:runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "legacy-runtime-processes": {
+            "kind": "process",
+            "scope": "runtime-root",
+            "entries": [
+              ".venv",
+              "venv",
+              "tool"
+            ],
+            "disposition": "retire"
+          },
+          "vendored-tool": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "tool"
+            ],
+            "disposition": "reset"
+          },
+          "resident-processes": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "agent_mcp",
+              "identity-bound-owned-descendants"
+            ],
+            "disposition": "retire"
+          },
+          "runtime-control": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "serve.sock",
+              "serve.sock.endpoint",
+              "serve-g{generation}.sock",
+              "serve-g{generation}.sock.endpoint",
+              "serve-control-{pid}.token",
+              "active.json"
+            ],
+            "disposition": "reset"
+          },
+          "registrations": {
+            "kind": "registration",
+            "scope": "installation",
+            "entries": [],
+            "disposition": "retire"
+          },
+          "shared-path": {
+            "kind": "shared-environment",
+            "scope": "user-environment",
+            "entries": [
+              "PATH:{user-home}/.local/bin"
+            ],
+            "disposition": "preserve"
+          },
+          "coordination": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              ".install.lock",
+              ".install.lock.pid",
+              ".install.lock.pid.reap",
+              ".install-stage",
+              ".provision.lock",
+              ".construction-leases",
+              ".retention-leases",
+              ".publication-leases",
+              "active.lock",
+              "service-instance-leases",
+              "agent-mcp-serve.lock",
+              "zdd-cutover.lock"
+            ],
+            "disposition": "preserve"
+          },
+          "configuration-and-data": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              "bridges",
+              "overrides",
+              "token-cache",
+              "materialized",
+              "logs",
+              "serve.log",
+              "serve-g{generation}.log",
+              "retirement-custodian.log",
+              "unknown-contents"
+            ],
+            "disposition": "preserve"
+          }
+        },
+        "recognizers": {
+          "legacy-complete-v1": {
+            "kind": "versioned-runtime-v1",
+            "footprint": [
+              1,
+              1
+            ],
+            "deployment_schema": [
+              3,
+              3
+            ],
+            "completion_contract": [
+              1,
+              1
+            ]
+          }
+        },
+        "producers": {
+          "scripts": "0a9f2602a9bbdd132709560ad8c0ea758d56bbebd78f08863b05f72251dbbd2a",
+          "src": "bc105c7f586800030974daeda7a65667a62a3cbc8bd4efa0accb071bbac1a684"
+        }
+      },
+      "delta": {
+        "introduced": [],
+        "changed": [
+          "producers:scripts"
+        ],
+        "retired": []
+      }
+    },
+    {
+      "revision": 23,
+      "snapshot": {
+        "profile": {
+          "version": 1,
+          "root_entries": [
+            "versions",
+            ".venv",
+            "venv",
+            "snapshots",
+            "current-version",
+            "last-known-good",
+            "running-version.json",
+            "deploy-manifest.json",
+            "payload-dir",
+            "stamped-version",
+            ".provision-status"
+          ],
+          "bin_entries": [
+            "resolve-runtime.ps1",
+            "resolve-runtime.sh"
+          ],
+          "script_entries": [],
+          "local_bin_entries": [
+            "agent-mcp",
+            "agent-mcp.cmd",
+            "agent-mcp.ps1"
+          ],
+          "module": "agent_mcp"
+        },
+        "effects": {
+          "retirement-custodian": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "retirement-coordination": {
+            "kind": "preserved-state",
+            "scope": "installation",
+            "entries": [
+              "private-native-retirement-lifeline",
+              "daemon-instance:runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "legacy-runtime-processes": {
+            "kind": "process",
+            "scope": "runtime-root",
+            "entries": [
+              ".venv",
+              "venv",
+              "tool"
+            ],
+            "disposition": "retire"
+          },
+          "vendored-tool": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "tool"
+            ],
+            "disposition": "reset"
+          },
+          "resident-processes": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "agent_mcp",
+              "identity-bound-owned-descendants"
+            ],
+            "disposition": "retire"
+          },
+          "runtime-control": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "serve.sock",
+              "serve.sock.endpoint",
+              "serve-g{generation}.sock",
+              "serve-g{generation}.sock.endpoint",
+              "serve-control-{pid}.token",
+              "active.json"
+            ],
+            "disposition": "reset"
+          },
+          "registrations": {
+            "kind": "registration",
+            "scope": "installation",
+            "entries": [],
+            "disposition": "retire"
+          },
+          "shared-path": {
+            "kind": "shared-environment",
+            "scope": "user-environment",
+            "entries": [
+              "PATH:{user-home}/.local/bin"
+            ],
+            "disposition": "preserve"
+          },
+          "coordination": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              ".install.lock",
+              ".install.lock.pid",
+              ".install.lock.pid.reap",
+              ".install-stage",
+              ".provision.lock",
+              ".construction-leases",
+              ".retention-leases",
+              ".publication-leases",
+              "active.lock",
+              "service-instance-leases",
+              "agent-mcp-serve.lock",
+              "zdd-cutover.lock"
+            ],
+            "disposition": "preserve"
+          },
+          "configuration-and-data": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              "bridges",
+              "overrides",
+              "token-cache",
+              "materialized",
+              "logs",
+              "serve.log",
+              "serve-g{generation}.log",
+              "retirement-custodian.log",
+              "unknown-contents"
+            ],
+            "disposition": "preserve"
+          }
+        },
+        "recognizers": {
+          "legacy-complete-v1": {
+            "kind": "versioned-runtime-v1",
+            "footprint": [
+              1,
+              1
+            ],
+            "deployment_schema": [
+              3,
+              3
+            ],
+            "completion_contract": [
+              1,
+              1
+            ]
+          }
+        },
+        "producers": {
+          "scripts": "0cf4fd6c7c1db38f14a0a60eed6458aa5e3dc1d7cf9816565fedbb207754914b",
+          "src": "bc105c7f586800030974daeda7a65667a62a3cbc8bd4efa0accb071bbac1a684"
+        }
+      },
+      "delta": {
+        "introduced": [],
+        "changed": [
+          "producers:scripts"
+        ],
+        "retired": []
+      }
+    },
+    {
+      "revision": 24,
+      "snapshot": {
+        "profile": {
+          "version": 1,
+          "root_entries": [
+            "versions",
+            ".venv",
+            "venv",
+            "snapshots",
+            "current-version",
+            "last-known-good",
+            "running-version.json",
+            "deploy-manifest.json",
+            "payload-dir",
+            "stamped-version",
+            ".provision-status"
+          ],
+          "bin_entries": [
+            "resolve-runtime.ps1",
+            "resolve-runtime.sh"
+          ],
+          "script_entries": [],
+          "local_bin_entries": [
+            "agent-mcp",
+            "agent-mcp.cmd",
+            "agent-mcp.ps1"
+          ],
+          "module": "agent_mcp"
+        },
+        "effects": {
+          "retirement-custodian": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "retirement-coordination": {
+            "kind": "preserved-state",
+            "scope": "installation",
+            "entries": [
+              "private-native-retirement-lifeline",
+              "daemon-instance:runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "legacy-runtime-processes": {
+            "kind": "process",
+            "scope": "runtime-root",
+            "entries": [
+              ".venv",
+              "venv",
+              "tool"
+            ],
+            "disposition": "retire"
+          },
+          "vendored-tool": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "tool"
+            ],
+            "disposition": "reset"
+          },
+          "resident-processes": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "agent_mcp",
+              "identity-bound-owned-descendants"
+            ],
+            "disposition": "retire"
+          },
+          "runtime-control": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "serve.sock",
+              "serve.sock.endpoint",
+              "serve-g{generation}.sock",
+              "serve-g{generation}.sock.endpoint",
+              "serve-control-{pid}.token",
+              "active.json"
+            ],
+            "disposition": "reset"
+          },
+          "registrations": {
+            "kind": "registration",
+            "scope": "installation",
+            "entries": [],
+            "disposition": "retire"
+          },
+          "shared-path": {
+            "kind": "shared-environment",
+            "scope": "user-environment",
+            "entries": [
+              "PATH:{user-home}/.local/bin"
+            ],
+            "disposition": "preserve"
+          },
+          "coordination": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              ".install.lock",
+              ".install.lock.pid",
+              ".install.lock.pid.reap",
+              ".install-stage",
+              ".provision.lock",
+              ".construction-leases",
+              ".retention-leases",
+              ".publication-leases",
+              "active.lock",
+              "service-instance-leases",
+              "agent-mcp-serve.lock",
+              "zdd-cutover.lock"
+            ],
+            "disposition": "preserve"
+          },
+          "configuration-and-data": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              "bridges",
+              "overrides",
+              "token-cache",
+              "materialized",
+              "logs",
+              "serve.log",
+              "serve-g{generation}.log",
+              "retirement-custodian.log",
+              "unknown-contents"
+            ],
+            "disposition": "preserve"
+          }
+        },
+        "recognizers": {
+          "legacy-complete-v1": {
+            "kind": "versioned-runtime-v1",
+            "footprint": [
+              1,
+              1
+            ],
+            "deployment_schema": [
+              3,
+              3
+            ],
+            "completion_contract": [
+              1,
+              1
+            ]
+          }
+        },
+        "producers": {
+          "scripts": "3a12bc5125b5aed5f34f3631c69766383a63dea8e60c8d8bd8bae587e6d722d1",
+          "src": "bc105c7f586800030974daeda7a65667a62a3cbc8bd4efa0accb071bbac1a684"
+        }
+      },
+      "delta": {
+        "introduced": [],
+        "changed": [
+          "producers:scripts"
+        ],
+        "retired": []
+      }
+    },
+    {
+      "revision": 25,
+      "snapshot": {
+        "profile": {
+          "version": 1,
+          "root_entries": [
+            "versions",
+            ".venv",
+            "venv",
+            "snapshots",
+            "current-version",
+            "last-known-good",
+            "running-version.json",
+            "deploy-manifest.json",
+            "payload-dir",
+            "stamped-version",
+            ".provision-status"
+          ],
+          "bin_entries": [
+            "resolve-runtime.ps1",
+            "resolve-runtime.sh"
+          ],
+          "script_entries": [],
+          "local_bin_entries": [
+            "agent-mcp",
+            "agent-mcp.cmd",
+            "agent-mcp.ps1"
+          ],
+          "module": "agent_mcp"
+        },
+        "effects": {
+          "retirement-custodian": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "retirement-coordination": {
+            "kind": "preserved-state",
+            "scope": "installation",
+            "entries": [
+              "private-native-retirement-lifeline",
+              "daemon-instance:runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "legacy-runtime-processes": {
+            "kind": "process",
+            "scope": "runtime-root",
+            "entries": [
+              ".venv",
+              "venv",
+              "tool"
+            ],
+            "disposition": "retire"
+          },
+          "vendored-tool": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "tool"
+            ],
+            "disposition": "reset"
+          },
+          "resident-processes": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "agent_mcp",
+              "identity-bound-owned-descendants"
+            ],
+            "disposition": "retire"
+          },
+          "runtime-control": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "serve.sock",
+              "serve.sock.endpoint",
+              "serve-g{generation}.sock",
+              "serve-g{generation}.sock.endpoint",
+              "serve-control-{pid}.token",
+              "active.json"
+            ],
+            "disposition": "reset"
+          },
+          "registrations": {
+            "kind": "registration",
+            "scope": "installation",
+            "entries": [],
+            "disposition": "retire"
+          },
+          "shared-path": {
+            "kind": "shared-environment",
+            "scope": "user-environment",
+            "entries": [
+              "PATH:{user-home}/.local/bin"
+            ],
+            "disposition": "preserve"
+          },
+          "coordination": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              ".install.lock",
+              ".install.lock.pid",
+              ".install.lock.pid.reap",
+              ".install-stage",
+              ".provision.lock",
+              ".construction-leases",
+              ".retention-leases",
+              ".publication-leases",
+              "active.lock",
+              "service-instance-leases",
+              "agent-mcp-serve.lock",
+              "zdd-cutover.lock"
+            ],
+            "disposition": "preserve"
+          },
+          "configuration-and-data": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              "bridges",
+              "overrides",
+              "token-cache",
+              "materialized",
+              "logs",
+              "serve.log",
+              "serve-g{generation}.log",
+              "retirement-custodian.log",
+              "unknown-contents"
+            ],
+            "disposition": "preserve"
+          }
+        },
+        "recognizers": {
+          "legacy-complete-v1": {
+            "kind": "versioned-runtime-v1",
+            "footprint": [
+              1,
+              1
+            ],
+            "deployment_schema": [
+              3,
+              3
+            ],
+            "completion_contract": [
+              1,
+              1
+            ]
+          }
+        },
+        "producers": {
+          "scripts": "1aa11797fa27c943ba6b449a4e2ca5868432782f78f69a67f0c08bc896a6e720",
+          "src": "bc105c7f586800030974daeda7a65667a62a3cbc8bd4efa0accb071bbac1a684"
+        }
+      },
+      "delta": {
+        "introduced": [],
+        "changed": [
+          "producers:scripts"
+        ],
+        "retired": []
+      }
+    },
+    {
+      "revision": 26,
+      "snapshot": {
+        "profile": {
+          "version": 1,
+          "root_entries": [
+            "versions",
+            ".venv",
+            "venv",
+            "snapshots",
+            "current-version",
+            "last-known-good",
+            "running-version.json",
+            "deploy-manifest.json",
+            "payload-dir",
+            "stamped-version",
+            ".provision-status"
+          ],
+          "bin_entries": [
+            "resolve-runtime.ps1",
+            "resolve-runtime.sh"
+          ],
+          "script_entries": [],
+          "local_bin_entries": [
+            "agent-mcp",
+            "agent-mcp.cmd",
+            "agent-mcp.ps1"
+          ],
+          "module": "agent_mcp"
+        },
+        "effects": {
+          "retirement-custodian": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "retirement-coordination": {
+            "kind": "preserved-state",
+            "scope": "installation",
+            "entries": [
+              "private-native-retirement-lifeline",
+              "daemon-instance:runtime-retirement-custodian"
+            ],
+            "disposition": "preserve"
+          },
+          "legacy-runtime-processes": {
+            "kind": "process",
+            "scope": "runtime-root",
+            "entries": [
+              ".venv",
+              "venv",
+              "tool"
+            ],
+            "disposition": "retire"
+          },
+          "vendored-tool": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "tool"
+            ],
+            "disposition": "reset"
+          },
+          "resident-processes": {
+            "kind": "process",
+            "scope": "installation",
+            "entries": [
+              "agent_mcp",
+              "identity-bound-owned-descendants"
+            ],
+            "disposition": "retire"
+          },
+          "runtime-control": {
+            "kind": "runtime-state",
+            "scope": "runtime-root",
+            "entries": [
+              "serve.sock",
+              "serve.sock.endpoint",
+              "serve-g{generation}.sock",
+              "serve-g{generation}.sock.endpoint",
+              "serve-control-{pid}.token",
+              "active.json"
+            ],
+            "disposition": "reset"
+          },
+          "registrations": {
+            "kind": "registration",
+            "scope": "installation",
+            "entries": [],
+            "disposition": "retire"
+          },
+          "shared-path": {
+            "kind": "shared-environment",
+            "scope": "user-environment",
+            "entries": [
+              "PATH:{user-home}/.local/bin"
+            ],
+            "disposition": "preserve"
+          },
+          "coordination": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              ".install.lock",
+              ".install.lock.pid",
+              ".install.lock.pid.reap",
+              ".install-stage",
+              ".provision.lock",
+              ".construction-leases",
+              ".retention-leases",
+              ".publication-leases",
+              "active.lock",
+              "service-instance-leases",
+              "agent-mcp-serve.lock",
+              "zdd-cutover.lock"
+            ],
+            "disposition": "preserve"
+          },
+          "configuration-and-data": {
+            "kind": "preserved-state",
+            "scope": "runtime-root",
+            "entries": [
+              "bridges",
+              "overrides",
+              "token-cache",
+              "materialized",
+              "logs",
+              "serve.log",
+              "serve-g{generation}.log",
+              "retirement-custodian.log",
+              "unknown-contents"
+            ],
+            "disposition": "preserve"
+          }
+        },
+        "recognizers": {
+          "legacy-complete-v1": {
+            "kind": "versioned-runtime-v1",
+            "footprint": [
+              1,
+              1
+            ],
+            "deployment_schema": [
+              3,
+              3
+            ],
+            "completion_contract": [
+              1,
+              1
+            ]
+          }
+        },
+        "producers": {
+          "scripts": "3945e9f711b51a53d8dc727a070387da49e49f7414addd06ccab037f5cd901e9",
+          "src": "bc105c7f586800030974daeda7a65667a62a3cbc8bd4efa0accb071bbac1a684"
+        }
+      },
+      "delta": {
+        "introduced": [],
+        "changed": [
+          "producers:scripts"
+        ],
+        "retired": []
+      }
     }
   ]
 }

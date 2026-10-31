@@ -96,8 +96,33 @@ this is not a hermetic interpreter or hostile-code sandbox.
 The canonical installer child supervisor bounds execution and settles its
 descendants. Its fixed helpers use one retained owning-SDK RECORD snapshot,
 with helper bytes rechecked before every child; this is separate from fresh
-release-policy authentication. POSIX retains the construction descriptor in its existing guardian.
-On Windows a finite guardian independently retains the candidate until its
+release-policy authentication. Its procutil resource is a static, canonical
+two-file package: `__init__.py` and `_job_scopes.py`. Both have unique installed
+RECORD entries and are freshly read and verified before execution. The client
+retains both byte streams in one operation-owned package namespace, preserving
+relative imports without an ambient package or a later unverified source read.
+The operation's `finally` removes only its private module entries; it does not
+discard native process/Job references retained by the existing failure owner. The standalone
+wheel and sdist ship the same pair; a lone renamed module is not a complete
+construction resource. The release artifact verifier binds both members to
+their canonical sources. Process resource names must be canonical relative
+POSIX paths on every platform; rooted or drive-qualified paths, backslashes
+and alternate data streams refuse before reading resources.
+POSIX retains the construction descriptor in its existing guardian.
+On Windows the private guardian's stdin carries the complete eight-member
+retained executable closure: the supervisor itself, the runtime and its four
+companions, and both procutil members. A fixed standard-library bootstrap
+validates the exact bounded bundle before executing its retained supervisor.
+The guardian loads only those bytes into private operation-owned modules; it
+does not reopen executable resources or resolve relative imports from disk.
+Ordinary source-install callers snapshot the same bounded closure before
+launching; this is not installed-wheel RECORD authentication.
+One monotonic execution deadline covers guardian source preparation, startup
+and target creation; neither process starts with a fresh timeout budget.
+Admission rechecks that deadline immediately before guardian launch and after
+confirmed settlement, so late completion cannot report success. The existing
+retirement allowance and uncertain process/Job custody remain unchanged.
+The finite guardian independently retains the candidate until its
 native Job settles, including after caller death. Losing a caller's
 construction lock alone therefore does not admit destructive cleanup while
 that guardian still owns retention. This is finite caller-owned supervision,

@@ -1,17 +1,18 @@
 """Offline construction and local health of an admitted client, never activation."""
 
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from email.parser import BytesParser
 import hashlib
 import importlib.util
 from importlib import metadata
 import io
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import sqlite3
 import subprocess
 import sys
 import time
+from types import ModuleType
 import uuid
 import zipfile
 
@@ -171,33 +172,84 @@ def _environment(slot):
     return environment
 
 
-def _process_resource(name, *, evidence=None):
+def _process_resource_data(name, *, evidence=None):
+    if (
+        not isinstance(name, str) or not name or any(value in name for value in ("\\", ":", "\0"))
+        or PureWindowsPath(name).anchor or PurePosixPath(name).anchor
+        or ".." in PurePosixPath(name).parts or PurePosixPath(name).as_posix() != name
+    ):
+        raise PlanError("client construction process resource name must be canonical and relative")
     if evidence is None:
         evidence = artifact_staging.diagnose_client()
-    path = Path(__file__).absolute().with_name(name)
+    if name not in evidence["runtime_resource_sha256s"]:
+        raise PlanError("client construction process resource is not RECORD-admitted")
+    path = Path(__file__).absolute().parent / name
     content = artifact_staging._bytes(path, MAX_BYTES)
     if hashlib.sha256(content).hexdigest() != evidence["runtime_resource_sha256s"][name]:
         raise PlanError("client construction process resource changed after RECORD admission")
+    return path, content
+
+
+def _process_resource(name, *, evidence=None):
+    path, content = _process_resource_data(name, evidence=evidence)
     spec = importlib.util.spec_from_file_location("fleet_manager." + path.stem, path)
     if spec is None or spec.loader is None:
         raise PlanError("client construction process resource could not be loaded")
     module = importlib.util.module_from_spec(spec)
     exec(compile(content, str(path), "exec"), module.__dict__)
+    module._retained_source_bytes = content
     return module
+
+
+@contextmanager
+def _procutil_resource(evidence):
+    parent_path, parent_bytes = _process_resource_data(
+        "_construction_procutil/__init__.py", evidence=evidence,
+    )
+    child_path, child_bytes = _process_resource_data(
+        "_construction_procutil/_job_scopes.py", evidence=evidence,
+    )
+    name = f"fleet_manager._retained_construction_procutil_{uuid.uuid4().hex}"
+    module, child = ModuleType(name), ModuleType(name + "._job_scopes")
+    module.__file__, module.__package__, module.__path__ = str(parent_path), name, []
+    child.__file__, child.__package__ = str(child_path), name
+    module._retained_source_pair = (parent_bytes, child_bytes)
+    sys.modules[name] = module
+    try:
+        exec(compile(parent_bytes, str(parent_path), "exec"), module.__dict__)
+        sys.modules[child.__name__] = child
+        exec(compile(child_bytes, str(child_path), "exec"), child.__dict__)
+        yield module
+    finally:
+        if sys.modules.get(child.__name__) is child:
+            del sys.modules[child.__name__]
+        if sys.modules.get(name) is module:
+            del sys.modules[name]
 
 
 def _run(argv, slot, phase, *, descriptor, resource_evidence=None):
     evidence = (artifact_staging.diagnose_client()
                 if resource_evidence is None else resource_evidence)
     owner = _process_resource("_installer_process.py", evidence=evidence)
-    procutil = _process_resource("_construction_procutil.py", evidence=evidence)
     try:
-        result = owner.run_owned(
-            [str(value) for value in argv], cwd=slot, env=_environment(slot),
-            timeout=45, procutil=procutil, construction_fd=descriptor,
-            runtime_root=slot.parent.parent, runtime_version=slot.name,
-            runtime_path=Path(__file__).absolute().with_name("_versioned_runtime.py"),
-        )
+        with _procutil_resource(evidence) as procutil:
+            sources = {
+                "_installer_process.py": owner._retained_source_bytes,
+                "_construction_procutil/__init__.py": procutil._retained_source_pair[0],
+                "_construction_procutil/_job_scopes.py": procutil._retained_source_pair[1],
+                **{name: _process_resource_data(name, evidence=evidence)[1] for name in (
+                    "_versioned_runtime.py", "versioned_runtime_leases.py",
+                    "versioned_runtime_construction.py", "versioned_runtime_source.py",
+                    "versioned_runtime_publication.py",
+                )},
+            } if os.name == "nt" else None
+            result = owner.run_owned(
+                [str(value) for value in argv], cwd=slot, env=_environment(slot),
+                timeout=45, procutil=procutil, construction_fd=descriptor,
+                runtime_root=slot.parent.parent, runtime_version=slot.name,
+                runtime_path=Path(__file__).absolute().with_name("_versioned_runtime.py"),
+                guardian_sources=sources,
+            )
     except subprocess.TimeoutExpired:
         raise PlanError(f"client {phase} timed out") from None
     except subprocess.CalledProcessError as error:

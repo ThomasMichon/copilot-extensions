@@ -420,6 +420,7 @@
       "r:plugins/agent-worktrees/scripts/hook_client.py::_fallback_legacy_session_start::Popen": 1,
       "t:plugin_test_containment.py::_posix_worker::Popen": 1,
       "t:plugin_test_containment.py::_run_contained_process::Popen": 1,
+      "t:native_qualification_receiver.py::receive::Popen": 1,
       "r:plugins/agent-index/scripts/cell-runtime.py::_spawn_windows_owned_process::Popen": 1,
       "r:plugins/agent-mcp/examples/ado/probe.py::main::Popen": 1,
       "r:plugins/budget-guidance/src/budget_guidance/_command_host.py::main::posix_spawn": 1,

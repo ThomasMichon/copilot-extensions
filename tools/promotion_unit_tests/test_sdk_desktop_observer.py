@@ -830,7 +830,10 @@ def test_launcher_identity_failure_retires_exact_created_handle_before_construct
     monkeypatch.setattr(runner.threading, "Thread", Reader)
     evidence = {}
     with pytest.raises(observer.ObservationBlocked, match="injected birth"):
-        runner.Child(api, ["python"], {}, tmp_path, "launcher", evidence=evidence)
+        runner.Child(
+            api, ["python"], {"deadline": runner.time.monotonic() + 10},
+            tmp_path, "launcher", evidence=evidence,
+        )
     assert calls == [("terminate-exact", 42), "reader-join", "reader-join", "wait", "handle-close"]
     assert evidence["launched"] and evidence["exit"] == 23
     assert evidence["stdout"] == "partial stdout"

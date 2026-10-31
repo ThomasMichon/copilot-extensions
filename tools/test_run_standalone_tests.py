@@ -95,6 +95,7 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
         for relative, name in (
             ("plugins/agent-ssh", "agent-ssh"),
             ("libs/single-instance-lease", "agent-single-instance-lease"),
+            ("libs/agent-procutil", "agent-procutil"),
         ):
             dependency = checkout / relative
             dependency.mkdir(parents=True)
@@ -107,7 +108,8 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
         companions = {
             "_runtime_launcher.py": Path("libs/installer-engine/runtime_launcher.py"),
             "_installer_process.py": Path("libs/installer-engine/installer_engine_process.py"),
-            "_construction_procutil.py": Path("libs/agent-procutil/src/agent_procutil/__init__.py"),
+            "_construction_procutil/__init__.py": Path("libs/agent-procutil/src/agent_procutil/__init__.py"),
+            "_construction_procutil/_job_scopes.py": Path("libs/agent-procutil/src/agent_procutil/_job_scopes.py"),
         }
         for destination, relative in companions.items():
             target = checkout / relative
