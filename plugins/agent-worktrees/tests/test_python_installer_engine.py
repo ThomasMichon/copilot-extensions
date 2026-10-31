@@ -478,7 +478,7 @@ def test_productive_owned_child_renews_timeout_and_relays_before_completion(
         pass
 
 
-@pytest.mark.parametrize("condition", ["progress", "silent"])
+@pytest.mark.parametrize("condition", ["progress", "uneven", "silent"])
 def test_source_phase_initial_retention_progress_crosses_real_quiet_window(
     engine, procutil, tmp_path, condition,
 ):
@@ -506,10 +506,15 @@ def test_source_phase_initial_retention_progress_crosses_real_quiet_window(
         " return prepare(*args,**kwargs)\n"
         "policy.prepare_uv_install=measured_prepare\n"
         "copy=policy._copy_retained_file\n"
+        "copy_count=0\n"
         "def measured_copy(*args,**kwargs):\n"
+        " global copy_count\n"
         f" if {condition == 'silent'}:\n"
         "  print('retention-copy-entered',file=sys.stderr,flush=True)\n"
-        f" time.sleep({.35 if condition == 'progress' else 20})\n"
+        f" delays={(1.0, .5, 2.8) if condition == 'uneven' else ()!r}\n"
+        f" delay=delays[copy_count] if copy_count<len(delays) else {20 if condition == 'silent' else .1 if condition == 'uneven' else .35}\n"
+        " copy_count+=1\n"
+        " time.sleep(delay)\n"
         " return copy(*args,**kwargs)\n"
         "policy._copy_retained_file=measured_copy\n"
         f"uv=pathlib.Path({uv!r})\n"
@@ -526,7 +531,7 @@ def test_source_phase_initial_retention_progress_crosses_real_quiet_window(
             cwd=tmp_path, env=environment, timeout=3, procutil=procutil, construction_fd=None,
             output_fds={"stderr": stream.fileno()},
         )
-        if condition == "progress":
+        if condition != "silent":
             result = engine.run_owned([sys.executable, "-I", "-B", "-c", actor], **options)
             assert time.monotonic() - started > 5
             assert json.loads(result.stdout) == {"hash": before}

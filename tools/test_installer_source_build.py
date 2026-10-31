@@ -114,6 +114,10 @@ def test_initial_retention_renews_only_completed_work_and_preserves_source(
 
     def measured_copy(original, destination, **options):
         copies.append(Path(destination))
+        if condition == "silent":
+            preparation = capsys.readouterr()
+            assert "phase=retention state=starting" in preparation.err
+            assert "Source wheel progress: phase=retention" in preparation.err
         now[0] += 11 if condition == "silent" else 1
         result = copy(original, destination, **options)
         if condition == "mutation" and Path(original).name == "input0.py":

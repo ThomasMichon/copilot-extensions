@@ -10,6 +10,9 @@ file batches. Focused source-phase controls also retain an actual fresh source
 graph through native UV settings inspection, copying and fingerprinting. A
 productive copy outlives the real quiet window; a silent copy is stopped through
 the same process owner, preserving source bytes and confirmed writer exit.
+An uneven-duration copy sequence also proves every completed local renewal
+reaches the native observer before a subsequent near-allowance copy finishes;
+no periodic or fixture heartbeat keeps that productive sequence alive.
 Deterministic controls separately refuse late completed work and changed source,
 and closed-wheel deadline controls retain their absolute bounds. These checks
 do not qualify deferred source stamping, every native self-stage watchdog or

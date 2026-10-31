@@ -162,7 +162,7 @@ class SourceWheelInputs:
         started = time.monotonic()
         progress = (
             deadline if isinstance(deadline, _SourceProgress)
-            else _SourceProgress("verification", self.io_timeout, started + self.io_timeout, started)
+            else _SourceProgress("verification", self.io_timeout, started + self.io_timeout)
         )
         records = {record["filename"]: record for record in self.receipt().values()}
         if {path.name for path in self.archives} != records.keys():
@@ -193,19 +193,16 @@ class _SourceProgress:
     name: str
     timeout: float
     deadline: float
-    reported_at: float
     units: int = 0
 
     def renew(self) -> None:
         now = time.monotonic()
         self.deadline = now + self.timeout
         self.units += 1
-        if now - self.reported_at >= min(1.0, self.timeout / 4):
-            print(
-                f"Source wheel progress: phase={self.name} completed-units={self.units}",
-                file=sys.stderr, flush=True,
-            )
-            self.reported_at = now
+        print(
+            f"Source wheel progress: phase={self.name} completed-units={self.units}",
+            file=sys.stderr, flush=True,
+        )
 
 
 def _source_deadline(deadline: float | _SourceProgress) -> float:
@@ -456,7 +453,7 @@ def _source_phase(name: str, timeout: float, elapsed: dict[str, float]):
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise WheelError(f"source wheel phase={name} requires a positive finite process allowance")
     started = time.monotonic()
-    progress = _SourceProgress(name, timeout, started + timeout, started)
+    progress = _SourceProgress(name, timeout, started + timeout)
     state = "failed"
     print(f"Source wheel phase: phase={name} state=starting", file=sys.stderr, flush=True)
     try:

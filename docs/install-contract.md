@@ -4552,7 +4552,10 @@ Ordinary source-wheel phases now renew their quiet allowance from actual child
 stdout/stderr and completed file, copy and verification units. The owned
 constructor relays child bytes immediately, including partial lines; its
 Windows retention guardian keeps the final completion JSON on stdout and
-relays progress separately on stderr. A silent child still times out and must
+relays progress separately on stderr. Each completed source-phase renewal
+flushes its progress to stderr, keeping the native observer's allowance from
+lagging the local deadline when a quick unit precedes a longer productive unit.
+A silent child still times out and must
 settle every owned writer before construction or retention custody is released.
 Native relay errors preserve their error codes; failed strict Job confirmation
 retains the exact process and Job rather than treating handle closure as proof.
