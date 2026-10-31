@@ -143,6 +143,9 @@ The [explicit submission/reconciliation slice](submission-slice.md) selects an
 extension of the existing `ReplayStore` envelope, not a second posting ledger.
 - [x] Review and admit the source contract (#9724); no serving/backend adoption
   or effect authority is inferred from this admission.
+- [x] Realize the existing-store data portion: explicit v2 adoption, selected
+  immutable intents, reserved growth, ordered fences and native receipt
+  preservation (#9731). Protected backend execution/freshness remains open.
 - [ ] Accept selected comments, owned-thread updates and a named verdict bound
   to the reviewed candidate; preserve caller/repository authority boundaries.
 - [ ] Perform fresh required checks and readback inside the operation, without
@@ -199,7 +202,34 @@ contract.
 
 ## Journal
 
+### 2026-10-30 - Protected owner/provider executor source continuation
+- Implement the finite executor over the merged `ReplayStore`, not a new
+  ledger/effect owner. Native serializers/shared reader use one existing
+  protected, current write-credential transport with actual material binding.
+- Check native authorized principal, exact current source range, action-relevant
+  discussion/ownership and caller policy before and after durable in-flight
+  admission. Preserve native response IDs and conservative unknown states;
+  marked native thread attribution is read-only, never equal-value inference.
+- Keep backend IO outside the shared store lock and preserve other reviewers,
+  completion presence/values and metadata/source observation clocks. Source
+  fixtures are synthetic; actual transport/owner adoption and live effects
+  remain external and unqualified.
+- Initial contained protected-executor/new-store/original-replay packet:
+  109 passed, including 24 synthetic transport consumers. The native source
+  adapter creates no HTTP/auth client, and no installed operational command
+  or write-context adoption is claimed.
+
 ### 2026-10-30 - Existing-store Phase 3 data realization
+- Merged #9731 as `5b4e8770cf18e0fb3cab202dc3fca12ada28640c`
+  from source head `6cdc6387305c42764b80d72927407f80e1e18947`
+  after actual current-head approval, resolved review threads and passing
+  required CI. Final contained new-owner/original-replay/cache packet:
+  110 passed with unchanged test/IO budgets.
+- This completes the data slice only. The next original source item is the
+  protected owner/provider executor with same-write-credential principal
+  binding, action-relevant discussion/revision freshness and trustworthy
+  effect-specific reconciliation. Actual backend/live serving qualification,
+  source fetching and separately authorized rollout remain unresolved.
 - Extend the actual `ReplayStore`, its existing file/lock/atomic writer and
   namespace/service binding with explicit outer v2 adoption and review data.
   Preserve the inner replay codec and the other namespace on every transaction.

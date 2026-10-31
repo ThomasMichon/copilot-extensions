@@ -1,0 +1,390 @@
+"""Real durable store and synthetic existing protected transport; zero live effects."""
+
+from contextlib import contextmanager
+import copy
+import json
+from pathlib import Path
+import re
+import time
+
+import pytest
+
+from agent_pull_requests.review_executor import execute_review
+from agent_pull_requests.review_workspace import _digest, build_generation
+from agent_pull_requests.watch_replay_store import ReplayStore
+
+
+@pytest.fixture
+def environment(tmp_path, monkeypatch):
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(root / "plugins" / "agent-worktrees" / "src"))
+    from agent_worktrees.providers.azure_owned_review import AdoReviewContext, NativeReviewResponse, ReviewContextUnavailable
+
+    evidence = json.loads((root / "plugins" / "agent-pull-requests" / "docs" /
+                           "review-evidence.example.json").read_text())
+    evidence["sections"]["discussions"] = {
+        "observed_from": "2026-10-30T00:00:03Z", "observed_to": "2026-10-30T00:00:04Z",
+        "data": [], "complete": True, "errors": [],
+    }
+    evidence["sections"]["changes"]["data"] = []
+    generation = build_generation(evidence)["generation"]
+    scope = generation["scope"]
+    source = {"schema": "agent-pull-requests.local-source", "version": 1, "scope": copy.deepcopy(scope),
+              "revision": copy.deepcopy(generation["revision"]), "complete": True, "errors": [],
+              "files": [], "workspace_id": "synthetic-existing-source"}
+    source["id"] = _digest(source)
+    attachment = {"state": "ready", "scope": copy.deepcopy(scope), "generation_id": generation["id"], "source": source}
+    selected = {
+        "schema": "agent-pull-requests.review-intent", "version": 1, "operation_id": "selected-operation",
+        "scope": copy.deepcopy(scope), "generation_id": generation["id"], "source_id": source["id"],
+        "revision": {key: generation["revision"][key] for key in ("head_sha", "common_sha", "iteration")},
+        "actions": [{"id": "finding", "kind": "comment", "body": "Synthetic selected finding"},
+                    {"id": "verdict", "kind": "verdict", "verdict": "APPROVED"}],
+    }
+    store = ReplayStore(tmp_path.resolve(), "existing-owner")
+    store.provision()
+    store.adopt_review_operations(lifecycle_checkpoint=lambda: None, expires_at=int(time.time()) + 600)
+
+    class Credential:
+        pass
+
+    class Backend:
+        credential = Credential()
+        observer = None
+        denied = None
+        lose_reply = False
+        drift_after_comment = False
+        on_policy = None
+        before_dispatch = None
+        after_write = None
+        partial_reply = False
+        mismatched_reply = False
+        require_policy = False
+        policy_failed = False
+
+        def __init__(self):
+            self.pr = copy.deepcopy(evidence["sections"]["pull_request"]["data"])
+            self.iterations = copy.deepcopy(evidence["sections"]["iterations"]["data"])
+            self.threads = []
+            self.calls = []
+            self.other_reviewer = {"id": "other-reviewer", "vote": 5}
+            self.policy_calls = []
+            self.vote = None
+
+        def checkpoint(self):
+            if self.denied is not None:
+                raise self.denied
+
+        def review_check(self, operation, action, current, *, context):
+            self.policy_calls.append(action["id"])
+            if self.require_policy:
+                from agent_pull_requests.review_executor import ReviewCandidateChanged
+                inputs = context.read_decision_inputs()
+                if not inputs["policy_evaluations"]["complete"] or any(
+                    row.get("status") == "failed" for row in inputs["policy_evaluations"]["data"]
+                ):
+                    raise ReviewCandidateChanged("existing caller policy requires a different selection")
+            if self.on_policy is not None:
+                self.on_policy(self, action)
+
+        def request(self, method, url, body, *, query, expected_binding, remaining):
+            self.checkpoint()
+            if method != "GET" and self.before_dispatch is not None:
+                self.before_dispatch(self)
+            used = self.observer if self.observer is not None and "connectionData" in url else self.credential
+            if used is not expected_binding:
+                raise ReviewContextUnavailable("existing transport detected changed actual material")
+            self.calls.append((method, url, copy.deepcopy(body), expected_binding, remaining))
+            if method == "GET":
+                if "connectionData" in url:
+                    return NativeReviewResponse(200, {"authorizedUser": {"id": scope["principal_id"]},
+                                                     "authenticatedUser": {"id": "different-delegated-user"}})
+                if "/iterations?" in url:
+                    return NativeReviewResponse(200, {"value": copy.deepcopy(self.iterations)})
+                if "/threads?" in url:
+                    return NativeReviewResponse(200, {"value": copy.deepcopy(self.threads)})
+                if "/statuses?" in url or "/policy/evaluations?" in url:
+                    values = [{"id": "synthetic-evaluation", "status": "failed"}] if self.policy_failed else []
+                    return NativeReviewResponse(200, {"value": values})
+                return NativeReviewResponse(200, copy.deepcopy(self.pr))
+            retained = store.inspect_review(selected["operation_id"], scope, expires_at=int(time.time()) + 600)
+            action = next(row for row in retained["actions"] if row["state"] == "unknown")
+            assert action["attempt_id"], "backend entered before durable in-flight persistence"
+            if method == "PUT":
+                self.vote = body["vote"]
+                return NativeReviewResponse(200, {"id": scope["principal_id"], "vote": self.vote})
+            if method == "POST" and "/threads?" in url:
+                thread = {"id": 100 + len(self.threads), "status": 1, "properties": body["properties"],
+                          "comments": [{"id": 1, "parentCommentId": 0, "commentType": 1,
+                                        "content": body["comments"][0]["content"],
+                                        "author": {"id": scope["principal_id"]}}]}
+                self.threads.append(thread)
+                if self.drift_after_comment:
+                    self.threads.append({"id": 999, "status": 1, "comments": [
+                        {"id": 1, "content": "Unrelated author reply", "author": {"id": "other-author"}}]})
+                if self.lose_reply:
+                    raise OSError("synthetic reply lost after acceptance")
+                if self.after_write is not None:
+                    self.after_write(self)
+                if self.partial_reply:
+                    return NativeReviewResponse(201, {"id": thread["id"]})
+                if self.mismatched_reply:
+                    mismatched = copy.deepcopy(thread)
+                    mismatched["comments"][0]["content"] = "Different response content"
+                    return NativeReviewResponse(201, mismatched)
+                return NativeReviewResponse(201, copy.deepcopy(thread))
+            thread_id = int(re.search(r"/threads/(\d+)/", url)[1])
+            thread = next(row for row in self.threads if row["id"] == thread_id)
+            if method == "PATCH":
+                comment_id = int(re.search(r"/comments/(\d+)", url)[1])
+                comment = next(row for row in thread["comments"] if row["id"] == comment_id)
+                comment["content"] = body["content"]
+            else:
+                comment = {"id": len(thread["comments"]) + 1, "parentCommentId": 0, "commentType": 1,
+                           "content": body["content"], "author": {"id": scope["principal_id"]}}
+                thread["comments"].append(comment)
+            return NativeReviewResponse(200, copy.deepcopy(comment))
+
+        @contextmanager
+        def context(self):
+            yield AdoReviewContext(
+                scope, request=self.request, credential_binding=lambda: self.credential,
+                checkpoint=self.checkpoint, review_check=self.review_check,
+            )
+
+    return store, selected, generation, attachment, Backend(), Credential
+
+
+def run(environment):
+    store, selected, generation, attachment, backend, _ = environment
+    return execute_review(store, selected, generation, attachment, context_factory=backend.context,
+                          checkpoint=backend.checkpoint, expires_at=int(time.time()) + 600, budget_seconds=120)
+
+
+def writes(backend):
+    return [call for call in backend.calls if call[0] != "GET"]
+
+
+def test_real_store_and_bound_transport_complete_without_completion_or_other_reviewer_changes(environment):
+    store, selected, generation, attachment, backend, _ = environment
+    original = copy.deepcopy((generation, attachment, backend.pr, backend.other_reviewer))
+    result = run(environment)
+    assert result["status"] == "complete", result
+    assert len(writes(backend)) == 2 and backend.vote == 10
+    assert all(row["state"] == "confirmed" for row in result["actions"])
+    assert (generation, attachment, backend.pr, backend.other_reviewer) == original
+    assert not generation["complete"]  # Incomplete policy facts do not invent a merge gate.
+    assert writes(backend)[-1][2] == {"vote": 10}
+    assert all(call[3] is backend.credential for call in backend.calls)
+    assert run(environment)["status"] == "complete"
+    assert len(writes(backend)) == 2
+
+
+@pytest.mark.parametrize("drift", ["head", "discussion", "observer_material", "renewal"])
+def test_pre_send_source_discussion_and_actual_write_binding_drift_never_votes(environment, drift):
+    _, _, _, _, backend, Credential = environment
+    if drift == "head":
+        backend.pr["lastMergeSourceCommit"]["commitId"] = "c" * 40
+    elif drift == "discussion":
+        backend.threads.append({"id": 50, "status": 1, "comments": [{"id": 1, "content": "new reply"}]})
+    elif drift == "observer_material":
+        backend.observer = Credential()
+    else:
+        backend.on_policy = lambda value, action: setattr(value, "credential", Credential())
+    result = run(environment)
+    assert result["status"] != "complete"
+    assert writes(backend) == []
+
+
+def test_lost_native_comment_reply_is_attributed_read_only_without_reposting(environment):
+    _, _, _, _, backend, _ = environment
+    backend.lose_reply = True
+    first = run(environment)
+    assert first["status"] == "unknown" and first["actions"][0]["state"] == "unknown"
+    backend.lose_reply = False
+    second = run(environment)
+    assert second["status"] == "complete", second
+    assert len([call for call in writes(backend) if call[0] == "POST"]) == 1
+    assert backend.vote == 10
+
+
+@pytest.mark.parametrize("action", ["finding", "verdict"])
+def test_unknown_vote_value_or_unmarked_matching_content_never_confirms_or_replays(environment, action):
+    store, selected, _, _, backend, _ = environment
+    if action == "verdict":
+        selected["actions"].reverse()
+        backend.vote = 10
+    store.admit_review(selected, expires_at=int(time.time()) + 600)
+    store.begin_review_action(selected["operation_id"], selected["scope"], action, expires_at=int(time.time()) + 600)
+    if action == "finding":
+        backend.threads.append({"id": 100, "status": 1, "comments": [
+            {"id": 1, "content": selected["actions"][0]["body"], "author": {"id": selected["scope"]["principal_id"]}}]})
+    result = run(environment)
+    assert result["status"] == "unknown"
+    assert writes(backend) == []
+
+
+def test_unrelated_reply_after_known_effect_preserves_receipt_and_stops_verdict(environment):
+    _, _, _, _, backend, _ = environment
+    backend.drift_after_comment = True
+    result = run(environment)
+    assert result["status"] == "candidate_changed"
+    assert result["actions"][0]["state"] == "confirmed"
+    assert result["actions"][1]["state"] == "unattempted"
+    assert len(writes(backend)) == 1 and backend.vote is None
+
+
+def test_existing_owner_denial_is_original_and_does_not_create_effect(environment):
+    _, _, _, _, backend, _ = environment
+    denied = PermissionError("existing owner cancelled")
+    backend.denied = denied
+    with pytest.raises(PermissionError) as error:
+        run(environment)
+    assert error.value is denied and writes(backend) == []
+
+
+def test_existing_transport_refuses_credential_change_at_actual_dispatch(environment):
+    _, _, _, _, backend, Credential = environment
+    backend.before_dispatch = lambda value: setattr(value, "credential", Credential())
+    result = run(environment)
+    assert result["status"] == "unknown"
+    assert result["actions"][0]["state"] == "unknown"
+    assert writes(backend) == []
+
+
+@pytest.mark.parametrize("error_type", [PermissionError, RuntimeError])
+def test_owner_loss_after_backend_acceptance_keeps_durable_unknown_and_no_following_vote(environment, error_type):
+    store, selected, _, _, backend, _ = environment
+    denied = error_type("existing owner lost/cancelled after acceptance")
+    backend.after_write = lambda value: setattr(value, "denied", denied)
+    with pytest.raises(error_type) as error:
+        run(environment)
+    assert error.value is denied and len(backend.threads) == 1 and backend.vote is None
+    state = store.inspect_review(selected["operation_id"], selected["scope"], expires_at=int(time.time()) + 600)
+    assert state["actions"][0]["state"] == "unknown" and state["actions"][1]["state"] == "unattempted"
+
+
+def test_partial_native_reply_retains_ids_and_is_never_automatically_reposted(environment):
+    store, selected, _, _, backend, _ = environment
+    backend.partial_reply = True
+    result = run(environment)
+    assert result["status"] == "unknown"
+    assert result["actions"][0]["receipt"]["platform_ids"] == {"thread_id": 100}
+    assert backend.vote is None and len(writes(backend)) == 1
+    backend.partial_reply = False
+    assert run(environment)["status"] == "complete"
+    assert len([call for call in writes(backend) if call[0] == "POST"]) == 1
+
+
+@pytest.mark.parametrize("kind,owned", [("reply", True), ("edit_owned_comment", True), ("edit_owned_comment", False)])
+def test_selected_reply_and_edit_apply_only_to_fresh_native_owned_target(environment, kind, owned):
+    from agent_pull_requests.review_workspace import _record
+    _, selected, generation, attachment, backend, _ = environment
+    principal = selected["scope"]["principal_id"]
+    thread = {"id": 50, "status": 1, "comments": [
+        {"id": 1, "parentCommentId": 0, "commentType": 1, "content": "Reviewed original",
+         "author": {"id": principal if owned else "other-author"}}]}
+    backend.threads = [copy.deepcopy(thread)]
+    generation["sections"]["discussions"]["data"] = [_record("discussions", thread)]
+    generation["id"] = _digest({key: value for key, value in generation.items() if key != "id"})
+    selected["generation_id"] = generation["id"]
+    attachment["generation_id"] = generation["id"]
+    action = {"id": "finding", "kind": kind, "thread_id": 50, "body": "Selected update"}
+    if kind == "edit_owned_comment":
+        action.update(comment_id=1, expected_content_id=_digest("Reviewed original"))
+    selected["actions"][0] = action
+    result = run(environment)
+    assert result["status"] == ("complete" if owned else "candidate_changed"), result
+    if owned:
+        assert backend.vote == 10 and len(writes(backend)) == 2
+        assert run(environment)["status"] == "complete" and len(writes(backend)) == 2
+    else:
+        assert writes(backend) == [] and backend.threads == [thread]
+
+
+def test_unverified_native_response_retains_complete_ids_without_confirming(environment):
+    _, _, _, _, backend, _ = environment
+    backend.mismatched_reply = True
+    result = run(environment)
+    assert result["status"] == "unknown"
+    assert result["actions"][0]["state"] == "unknown"
+    assert result["actions"][0]["receipt"]["platform_ids"] == {"thread_id": 100, "comment_id": 1}
+    assert backend.vote is None
+
+
+@pytest.mark.parametrize("kind", ["reply", "edit_owned_comment"])
+def test_multiple_confirmed_own_updates_advance_only_their_expected_thread_state(environment, kind):
+    from agent_pull_requests.review_workspace import _record
+    _, selected, generation, attachment, backend, _ = environment
+    principal = selected["scope"]["principal_id"]
+    thread = {"id": 50, "status": 1, "comments": [
+        {"id": 1, "parentCommentId": 0, "commentType": 1, "content": "Original",
+         "author": {"id": principal}}]}
+    backend.threads = [copy.deepcopy(thread)]
+    generation["sections"]["discussions"]["data"] = [_record("discussions", thread)]
+    generation["id"] = _digest({key: value for key, value in generation.items() if key != "id"})
+    selected["generation_id"] = attachment["generation_id"] = generation["id"]
+    actions = []
+    for index, body in enumerate(("First selected update", "Second selected update")):
+        action = {"id": f"update-{index}", "kind": kind, "thread_id": 50, "body": body}
+        if kind == "edit_owned_comment":
+            action.update(comment_id=1, expected_content_id=_digest("Original" if index == 0 else actions[0]["body"]))
+        actions.append(action)
+    selected["actions"] = [*actions, selected["actions"][-1]]
+    result = run(environment)
+    assert result["status"] == "complete", result
+    assert backend.vote == 10 and len(writes(backend)) == 3
+    assert run(environment)["status"] == "complete" and len(writes(backend)) == 3
+
+
+def test_pre_send_store_failure_never_enters_mutation_transport(environment, monkeypatch):
+    from agent_pull_requests import watch_replay_store as storage
+    store, selected, _, _, backend, _ = environment
+    original = storage._atomic_write_json
+
+    def fail(path, document):
+        if document.get("reviews") and document["reviews"][0]["actions"][0]["state"] == "unknown":
+            raise OSError("synthetic durable-fence failure")
+        original(path, document)
+
+    monkeypatch.setattr(storage, "_atomic_write_json", fail)
+    result = run(environment)
+    assert result["status"] == "unknown" and writes(backend) == []
+    assert store.inspect_review(selected["operation_id"], selected["scope"],
+                                expires_at=int(time.time()) + 600)["actions"][0]["state"] == "unattempted"
+
+
+def test_full_receipt_reservation_refuses_before_any_backend_context(environment):
+    _, _, _, _, backend, _ = environment
+    def unavailable_context():
+        raise AssertionError("backend opened after rejected data admission")
+    store, selected, generation, attachment, _, _ = environment
+    document = json.loads(store.path.read_text())
+    document["capacities"]["review_bytes"] = 1024
+    store.path.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="capacity"):
+        execute_review(store, selected, generation, attachment, context_factory=unavailable_context,
+                       checkpoint=backend.checkpoint, expires_at=int(time.time()) + 600, budget_seconds=120)
+    assert writes(backend) == []
+
+
+def test_existing_caller_policy_refreshes_actual_evaluations_through_the_same_bound_context(environment):
+    _, _, _, _, backend, _ = environment
+    backend.require_policy = backend.policy_failed = True
+    result = run(environment)
+    assert result["status"] == "candidate_changed" and writes(backend) == []
+    evaluations = [call for call in backend.calls if "/policy/evaluations?" in call[1]]
+    assert evaluations and all(call[3] is backend.credential for call in evaluations)
+
+
+def test_ambiguous_native_marker_matches_remain_unknown_without_new_writes(environment):
+    _, _, _, _, backend, _ = environment
+    backend.lose_reply = True
+    assert run(environment)["status"] == "unknown"
+    duplicate = copy.deepcopy(backend.threads[0])
+    duplicate["id"] += 1
+    backend.threads.append(duplicate)
+    backend.lose_reply = False
+    before = len(writes(backend))
+    result = run(environment)
+    assert result["status"] == "unknown" and len(writes(backend)) == before
