@@ -283,6 +283,31 @@ def test_malformed_or_duplicate_iteration_evidence_retains_action_states(environ
     assert len(writes(backend)) == int(after_effect) and backend.vote is None
 
 
+@pytest.mark.parametrize("field", ["threadContext", "pullRequestThreadContext", "properties", "parentCommentId", "commentType"])
+def test_unrelated_metadata_on_confirmed_new_thread_cannot_advance_selection(environment, field):
+    _, _, _, _, backend, _ = environment
+
+    def drift(value):
+        thread = value.threads[0]
+        if field in ("parentCommentId", "commentType"):
+            thread["comments"][0][field] = 2
+        else:
+            thread[field] = (
+                {"CodeReviewThreadType": {"$value": "UnrelatedType"}}
+                if field == "properties" else {"filePath": "/unselected.txt"}
+            )
+
+    backend.after_write = drift
+    result = run(environment)
+    assert result["status"] == "candidate_changed"
+    assert result["actions"][0]["state"] == "confirmed"
+    assert result["actions"][1]["state"] == "unattempted"
+    assert len(writes(backend)) == 1 and backend.vote is None
+    backend.after_write = None
+    assert run(environment)["status"] == "candidate_changed"
+    assert len(writes(backend)) == 1
+
+
 def test_real_store_and_bound_transport_complete_without_completion_or_other_reviewer_changes(environment):
     store, selected, generation, attachment, backend, _ = environment
     original = copy.deepcopy((generation, attachment, backend.pr, backend.other_reviewer))

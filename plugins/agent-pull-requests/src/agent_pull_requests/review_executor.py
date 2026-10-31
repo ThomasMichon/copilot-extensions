@@ -55,7 +55,12 @@ def _expected_discussions(baseline, actual, operation, raw_discussions):
         ):
             raise ReviewCandidateChanged("confirmed owned comment is unavailable")
         if selected["kind"] == "comment":
-            if thread_id in expected or current.get("status") not in (1, "active"):
+            if (
+                thread_id in expected or current.get("status") not in (1, "active")
+                or current.get("threadContext") is not None
+                or current.get("pullRequestThreadContext") is not None
+                or current.get("properties") not in (None, {})
+            ):
                 raise ReviewCandidateChanged("new owned thread has unrelated changes")
             expected[thread_id] = {**copy.deepcopy(current), "comments": []}
         before = expected.get(thread_id)
@@ -69,6 +74,8 @@ def _expected_discussions(baseline, actual, operation, raw_discussions):
         if selected["kind"] in ("comment", "reply"):
             if comment_id in original_comments:
                 raise ReviewCandidateChanged("confirmed reply identity already existed")
+            if owned.get("parentCommentId") != 0 or owned.get("commentType") not in (1, "text"):
+                raise ReviewCandidateChanged("confirmed comment metadata differs from the selected effect")
             projected = copy.deepcopy(owned)
             projected["content"] = selected["body"]
             original_comments[comment_id] = projected

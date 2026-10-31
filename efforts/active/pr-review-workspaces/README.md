@@ -226,6 +226,14 @@ contract.
   accepting indexed-only identity evidence and string system-comment enums while
   rejecting conflicts. Retain bounded write-reply IDs unconfirmed after a late
   response or malformed author, without reporting success or dispatching again.
+- Follow-up review hardening rejects singleton continuations, duplicate native
+  iterations and malformed commit objects, preserving structured action states.
+  Validate each response/readback ID independently and retain usable partial IDs;
+  new-thread anchors/types and new-comment parent/type drift cannot become an
+  expected own-effect baseline. Final bounded packets pass 24 new controls,
+  36 existing executor controls and 85 existing store/replay controls. A combined
+  executor packet exceeded its unchanged wall limit; these separate packets,
+  not the interrupted packet, are the passing proof.
 
 ### 2026-10-30 - Existing-store Phase 3 data realization
 - Merged #9731 as `5b4e8770cf18e0fb3cab202dc3fca12ada28640c`

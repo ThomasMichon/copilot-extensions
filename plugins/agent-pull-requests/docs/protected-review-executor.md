@@ -116,6 +116,9 @@ Each returned native ID is validated independently, retaining usable partial IDs
 without confirming an incomplete response. Unexpected singleton-read continuations
 produce an unavailable structured outcome; malformed or missing readback IDs cannot
 establish attribution.
+New general threads cannot acquire an unselected source anchor or thread type,
+and new comments/replies must retain the selected parent and text-comment type.
+Those metadata changes stop subsequent actions even after a confirmed own effect.
 Actual owner denials/cancellation propagate through the existing path. A denial
 is not proof an already-admitted effect or atomic store commit was absent.
 
