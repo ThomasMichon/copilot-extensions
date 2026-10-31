@@ -52,6 +52,7 @@ class SyncProcessOutput:
         self._events: queue.Queue = queue.Queue(maxsize=64)
         self._output = {"stdout": bytearray(), "stderr": bytearray()}
         self._last_output = time.monotonic()
+        self._has_output = False
         self._lock = threading.Lock()
         self._stop_at_idle = threading.Event()
         self._readers = []
@@ -95,6 +96,7 @@ class SyncProcessOutput:
                     return
                 with self._lock:
                     self._last_output = time.monotonic()
+                    self._has_output = True
                 self._events.put((name, chunk))
         except BaseException as error:
             self._events.put((name, error))
@@ -131,8 +133,9 @@ class SyncProcessOutput:
         self, timeout: float | None, *, deadline: float | None = None,
         on_wait: Callable[[], None] | None = None, wait_for_eof: bool = True,
         inactivity_start: float | None = None,
+        startup_timeout: float | None = None,
     ) -> None:
-        """Renew only from newly read bytes; an explicit absolute cap stays absolute."""
+        """Renew from bytes; optional startup grace ends at the first output."""
         try:
             if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
                 raise ValueError("process inactivity timeout must be finite and positive")
@@ -140,6 +143,10 @@ class SyncProcessOutput:
                 raise ValueError("process absolute deadline must be finite")
             if inactivity_start is not None and not math.isfinite(inactivity_start):
                 raise ValueError("process inactivity phase start must be finite")
+            if startup_timeout is not None and (
+                not math.isfinite(startup_timeout) or startup_timeout <= 0
+            ):
+                raise ValueError("process startup timeout must be finite and positive")
             if self._startup_errors:
                 raise self._startup_errors.pop(0)
             while True:
@@ -169,6 +176,7 @@ class SyncProcessOutput:
                         return
                 with self._lock:
                     last_progress = self._last_output
+                    has_output = self._has_output
                 if inactivity_start is not None:
                     last_progress = max(last_progress, inactivity_start)
                 if not self._relay_failed:
@@ -176,7 +184,8 @@ class SyncProcessOutput:
                         last_progress,
                         *(relay.last_progress for relay in self._relays.values()),
                     ) if self._relays else last_progress
-                expires = None if timeout is None else last_progress + timeout
+                quiet = startup_timeout if not has_output and startup_timeout is not None else timeout
+                expires = None if quiet is None else last_progress + quiet
                 if deadline is not None:
                     expires = deadline if expires is None else min(expires, deadline)
                 remaining = None if expires is None else expires - time.monotonic()

@@ -616,7 +616,7 @@ def test_owned_child_undrained_sink_preserves_supervision_and_settlement(
     try:
         started = time.monotonic()
         with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
-            with pytest.raises(subprocess.TimeoutExpired):
+            with pytest.raises(subprocess.TimeoutExpired) as failure:
                 engine.run_owned(
                     [sys.executable, "-c", program],
                     cwd=tmp_path, env=dict(os.environ), timeout=1,
@@ -627,6 +627,8 @@ def test_owned_child_undrained_sink_preserves_supervision_and_settlement(
                         "runtime_path": Path(engine.runtime.__file__),
                     } if retained else {}),
                 )
+            assert "output" in failure.value.stdout
+            assert "diagnostic" in failure.value.stderr
             _assert_writers_dead(engine, _wait_for_writer(marker))
         assert time.monotonic() - started < 90
         with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):

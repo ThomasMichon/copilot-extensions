@@ -8,7 +8,9 @@ containment consistent instead of reimplementing them in each consumer.
 in byte chunks, including output without newlines. Its optional inactivity
 window renews only on newly read bytes or acknowledged native relay writes;
 an explicitly supplied absolute cap
-remains absolute. The caller still owns launch, cancellation and tree retirement,
+remains absolute. Optional `startup_timeout` applies only before the first
+captured byte; it never lengthens subsequent quiet windows.
+The caller still owns launch, cancellation and tree retirement,
 and must retire writers before `finish()` after an error. Relay-only callers
 can disable retained capture. `output_fds` uses finite, strictly contained
 byte relays, bounded queues and cancellable input writers; an undrained borrowed

@@ -26,6 +26,10 @@ class ChildTimeoutExpired(subprocess.TimeoutExpired):
     """The child's deadline expired and every owned writer has settled."""
 
 
+class _OwnerDisconnected(RuntimeError):
+    pass
+
+
 def _output_capture(process, procutil, on_output, output_fds=None):
     capture = import_module(procutil.__name__ + ".streaming").SyncProcessOutput
     return capture(process, on_output=on_output, output_fds=output_fds)
@@ -188,6 +192,7 @@ def _retained_windows(
     reader, writer = os.pipe()
     process = None
     capture = None
+    timeout_error = None
     try:
         handle = msvcrt.get_osfhandle(reader)
         startup = subprocess.STARTUPINFO()
@@ -224,7 +229,12 @@ def _retained_windows(
                     if on_output is not None else None,
                     {"stderr": output_fds["stderr"]} if output_fds and "stderr" in output_fds else None,
                 )
-                capture.wait(timeout + 30, deadline=deadline, wait_for_eof=False)
+                capture.wait(
+                    timeout, startup_timeout=timeout + 30,
+                    deadline=deadline, wait_for_eof=False,
+                )
+        except subprocess.TimeoutExpired as error:
+            timeout_error = error
         finally:
             os.close(writer)
             writer = -1
@@ -254,10 +264,10 @@ def _retained_windows(
             raise RuntimeError("installer retention guardian returned invalid completion")
         if outcome["launch_error"] is not None:
             raise ChildLaunchError(f"Installer child could not start: {outcome['launch_error']}")
-        if outcome["timed_out"]:
+        if timeout_error is not None or outcome["timed_out"]:
             raise ChildTimeoutExpired(
                 argv, timeout, output=outcome["stdout"], stderr=outcome["stderr"],
-            )
+            ) from timeout_error
         result = subprocess.CompletedProcess(
             argv, outcome["returncode"], outcome["stdout"], outcome["stderr"],
         )
@@ -332,7 +342,7 @@ def _supervise_windows(args, argv):
                 if args.progress_output:
                     def observe_owner():
                         if disconnected():
-                            raise RuntimeError("installer caller exited during child execution")
+                            raise _OwnerDisconnected("installer caller exited during child execution")
 
                     capture = _output_capture(
                         process, procutil, None,
@@ -345,6 +355,9 @@ def _supervise_windows(args, argv):
                         )
                     except subprocess.TimeoutExpired:
                         timed_out = True
+                    except _OwnerDisconnected:
+                        # Return the captured outcome after the same Job settlement.
+                        pass
                 else:
                     while True:
                         if disconnected():

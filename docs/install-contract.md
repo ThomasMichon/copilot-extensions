@@ -4862,6 +4862,13 @@ after caller death; release of the caller's construction byte lock alone does
 not admit destructive cleanup. The supplied runtime root, version and helper
 path must form a complete custody context. Child launch and settled-timeout
 outcomes retain their existing explicit error classes.
+The parent allows the guardian's existing startup grace only until its first
+output. Subsequent progress renews the configured child inactivity window,
+not the startup-plus-teardown allowance; a blocked output pipe cannot postpone
+hang detection by repeatedly borrowing that grace.
+If the parent's quiet window expires first, it closes its liveness pipe and
+continues draining the guardian's settled completion before propagating the
+timeout, preserving the child's original stdout and stderr channels.
 POSIX uses an owner-death pipe guardian retaining the construction descriptor,
 an unreaped process-group leader and verified process-group teardown. The
 canonical POSIX lease releases on final descriptor close, not an explicit

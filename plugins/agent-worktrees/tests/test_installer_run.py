@@ -478,6 +478,40 @@ def test_productive_installer_renews_inactivity_timeout(tmp_path, monkeypatch, o
     assert all(f"progress{index:02d}" in text for index in range(20))
 
 
+@pytest.mark.parametrize("stall", [False, True])
+def test_startup_grace_ends_when_real_output_begins(tmp_path, stall):
+    ready = tmp_path / "first-output"
+    program = textwrap.dedent("""
+        import pathlib, sys, time
+        time.sleep(1.5)
+        pathlib.Path(sys.argv[1]).write_text(str(time.monotonic()))
+        print("started", flush=True)
+        if sys.argv[2] == "stall":
+            time.sleep(60)
+        else:
+            for index in range(6):
+                time.sleep(.3)
+                print("progress", flush=True)
+    """)
+    proc, job = installer_run._spawn(
+        [sys.executable, "-c", program, str(ready), "stall" if stall else "progress"],
+        tmp_path, os.environ, True, require_tree_exit=os.name == "nt",
+    )
+    capture = installer_run.SyncProcessOutput(proc)
+    try:
+        if stall:
+            with pytest.raises(subprocess.TimeoutExpired):
+                capture.wait(1, startup_timeout=10)
+            assert time.monotonic() - float(ready.read_text()) < 5
+        else:
+            capture.wait(1, startup_timeout=10)
+            assert capture.output()[0].count("progress") == 6
+    finally:
+        installer_run._kill_tree(proc, job)
+        capture.finish(10)
+    assert all(not reader.is_alive() for reader in capture._readers)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
 def test_posix_group_killed(tmp_path, stub):
     run = installer_run.run_installer(
