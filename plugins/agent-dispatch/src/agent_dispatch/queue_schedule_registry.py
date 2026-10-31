@@ -33,6 +33,7 @@ import secrets
 import sqlite3
 
 from .queue_records import ResourceReservation, ScheduleLease, ScheduleRecord, TaskError
+from .queue_pool_catalog import advance_pool_registry_revision
 from .registrations import (
     RegistrationError,
     RegistrationKind,
@@ -193,7 +194,7 @@ class ScheduleRegistrationMixin:
             raise TaskError(f"registration 'spec' is not JSON-serializable: {exc}") from exc
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            exists = conn.execute("SELECT id FROM registrations WHERE id = ?", (rid,)).fetchone()
+            exists = conn.execute("SELECT * FROM registrations WHERE id = ?", (rid,)).fetchone()
             if exists:
                 conn.execute(
                     "UPDATE registrations SET kind = ?, spec = ?, machine = ?, "
@@ -208,6 +209,11 @@ class ScheduleRegistrationMixin:
                     (rid, kind, spec_json, machine, env, RegistrationStatus.ACTIVE, ts, ts),
                 )
             row = conn.execute("SELECT * FROM registrations WHERE id = ?", (rid,)).fetchone()
+            if exists is None or any(exists[key] != row[key] for key in ("kind", "machine", "env")) or (
+                json.dumps(json.loads(exists["spec"]), sort_keys=True)
+                != json.dumps(json.loads(row["spec"]), sort_keys=True)
+            ):
+                advance_pool_registry_revision(conn)
             conn.execute("COMMIT")
         return self._registration_from_row(row)
 
@@ -252,7 +258,10 @@ class ScheduleRegistrationMixin:
     def remove_registration(self, rid: str) -> bool:
         """Delete a registration; return whether a row was removed."""
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             cur = conn.execute("DELETE FROM registrations WHERE id = ?", (rid,))
+            if cur.rowcount:
+                advance_pool_registry_revision(conn)
         return cur.rowcount > 0
 
     def set_registration_status(
@@ -269,7 +278,7 @@ class ScheduleRegistrationMixin:
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT id FROM registrations WHERE id = ?", (rid,)).fetchone()
+            row = conn.execute("SELECT id, status FROM registrations WHERE id = ?", (rid,)).fetchone()
             if row is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such registration: {rid}")
@@ -277,6 +286,8 @@ class ScheduleRegistrationMixin:
                 "UPDATE registrations SET status = ?, updated_at = ? WHERE id = ?",
                 (status, ts, rid),
             )
+            if row["status"] != status:
+                advance_pool_registry_revision(conn)
             row = conn.execute("SELECT * FROM registrations WHERE id = ?", (rid,)).fetchone()
             conn.execute("COMMIT")
         return self._registration_from_row(row)
