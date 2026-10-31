@@ -3258,8 +3258,8 @@
         "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[from installer_engine_process import _guardian_packet]",
         "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[from installer_engine_process import _load_guardian_resources as load]",
         "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[from installer_engine_process import _run_guardian_child]",
-        "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[import installer_engine_process as process\nprocess._load_guardian_resources(sources)]",
-        "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[import installer_engine_process as process\nloader = process._guardian_packet]"
+        "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[import installer_engine_process as process\\nprocess._load_guardian_resources(sources)]",
+        "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[import installer_engine_process as process\\nloader = process._guardian_packet]"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
