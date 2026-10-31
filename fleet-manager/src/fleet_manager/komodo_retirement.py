@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from .komodo_native import KomodoNative
 from .komodo_network import retained_network, verify_network
-from .komodo_owner import native_fingerprint
+from .komodo_evidence import legacy_evidence_unproved, native_subset_matches
 from .komodo_state import KomodoState
 from .node_journal import NodeJournal
 from .operations import OperationIntent, TargetReceipt
@@ -48,8 +48,9 @@ def retire_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) -
             if before_declaration != current_declaration:
                 raise PlanError("Komodo retirement cannot also change the selected deployment")
             owner._preserved_material(record, selected)
-            if any(retained["native"].get(name) != native_fingerprint(item)
-                   for name, item in containers.items()):
+            if legacy_evidence_unproved(retained["native"], containers):
+                raise PlanError("Komodo legacy native evidence does not prove the current observation")
+            if not native_subset_matches(retained["native"], containers):
                 raise PlanError("Komodo retirement refuses replaced or foreign containers")
             network = verify_network(owner.native.network(
                 selected.declaration, selected.material, deadline=deadline),

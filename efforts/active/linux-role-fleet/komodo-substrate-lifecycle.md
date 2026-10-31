@@ -236,7 +236,8 @@ and remain subject to this plan's review before runtime edits.
 
 #### Repair plan and validation obligations
 
-- [ ] Review this amendment before identity, native-observation or repair edits.
+- [x] Review this amendment before identity, native-observation or repair edits
+  (#9738).
 - [ ] Implement the focused corrections and installed, code-registered
   original-attempt repair seam; preserve normal convergence and prior readers.
 - [ ] Test PEM/DER equivalence, populated/global trust, malformed/private/
@@ -334,6 +335,19 @@ Actual adopter construction, native official-image acceptance and production
 delivery remain open; no deployment or incumbent adoption is claimed here.
 
 ## Journal
+
+### 2026-10-30 - Original-attempt repair contract reviewed
+
+- #9738 merged as `b6937bd5441ee5896ae539487269f4af94603594` after
+  current-head Copilot approval, no inline findings and successful required
+  checks. Normal source reconciliation retained the pre-completion history.
+- Re-read the parent Plan and Validation Plan. Only amendment review closes;
+  identity/native corrections, the installed repair seam, current transition
+  authority, interrupted settlement and actual original-attempt acceptance
+  remain open under #9735 and the existing substrate owners.
+- Next implement and qualify the focused source corrections and the
+  reconcile-only original-candidate/current-executor separation. No runtime
+  was patched, native effect replayed, journal cleared or deployment accepted.
 
 ### 2026-10-27 - Official-image startup contract correction
 
