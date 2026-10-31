@@ -32,20 +32,49 @@ def remaining_timeout(deadline, *, error_type, cap=None):
     return remaining if cap is None else min(remaining, cap)
 
 
-def copy_retained_file(source, destination, *, native_path, deadline, error_type):
+def copy_retained_file(source, destination, *, native_path, deadline, error_type, on_progress=None):
     remaining_timeout(deadline, error_type=error_type)
     if deadline is None:
-        return shutil.copy2(native_path(source), native_path(destination))
-    with open(native_path(source), "rb") as incoming, open(native_path(destination), "wb") as output:
-        while True:
-            remaining_timeout(deadline, error_type=error_type)
-            chunk = incoming.read(1 << 20)
-            if not chunk:
-                break
-            output.write(chunk)
-    shutil.copystat(native_path(source), native_path(destination))
+        result = shutil.copy2(native_path(source), native_path(destination))
+    else:
+        with open(native_path(source), "rb") as incoming, open(native_path(destination), "wb") as output:
+            while True:
+                remaining_timeout(deadline, error_type=error_type)
+                chunk = incoming.read(1 << 20)
+                if not chunk:
+                    break
+                output.write(chunk)
+        shutil.copystat(native_path(source), native_path(destination))
+        result = destination
     remaining_timeout(deadline, error_type=error_type)
-    return destination
+    if on_progress is not None:
+        on_progress()
+    return result
+
+
+def verify_retained_sources(
+    projects, mirror, *, native_path, check_time, error_type, on_progress=None,
+):
+    source_hashes = {}
+    verified_pairs = set()
+    for project in projects:
+        destination = Path(native_path(mirror(project)))
+        for path in destination.rglob("*"):
+            check_time()
+            if path.is_file():
+                original_path = project / path.relative_to(destination)
+                # Preserve exact names even where Path equality folds case.
+                pair = (str(original_path), str(path))
+                if pair in verified_pairs:
+                    continue
+                retained_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+                if hashlib.sha256(Path(native_path(original_path)).read_bytes()).hexdigest() != retained_hash:
+                    raise error_type("source content changed while retaining UV inputs")
+                source_hashes[original_path] = retained_hash
+                verified_pairs.add(pair)
+                if on_progress is not None:
+                    on_progress()
+    return source_hashes
 
 
 def prepare_uv_install(

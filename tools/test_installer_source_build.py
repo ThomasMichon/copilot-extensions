@@ -87,6 +87,72 @@ def test_source_phase_renews_from_verified_file_batches(monkeypatch, tmp_path, c
     assert "Source wheel progress: phase=offline" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("condition", ["progress", "silent", "mutation"])
+def test_initial_retention_renews_only_completed_work_and_preserves_source(
+    engine, monkeypatch, tmp_path, capsys, condition,
+):
+    import installer_wheel_inputs as wheels
+    from test_installer_dependency_policy import settings
+
+    now = [100.0]
+    clock = SimpleNamespace(monotonic=lambda: now[0])
+    monkeypatch.setattr(builds, "time", clock)
+    monkeypatch.setattr(wheels, "time", clock)
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "pyproject.toml").write_text(
+        '[project]\nname="example"\nversion="1.0.0"\n', encoding="utf-8",
+    )
+    for index in range(16):
+        (source / f"input{index}.py").write_text(f"VALUE = {index}\n", encoding="utf-8")
+    packages = engine._package_roots(source)
+    before = engine.runtime.fingerprint_source(engine._source_files(packages))
+    inputs = engine.FrozenInputs(source, packages, before)
+    policy = sys.modules[engine.retain_uv_install.__module__]
+    copy = policy._copy_retained_file
+    copies = []
+
+    def measured_copy(original, destination, **options):
+        copies.append(Path(destination))
+        if condition == "silent":
+            preparation = capsys.readouterr()
+            assert "phase=retention state=starting" in preparation.err
+            assert "Source wheel progress: phase=retention" in preparation.err
+        now[0] += 11 if condition == "silent" else 1
+        result = copy(original, destination, **options)
+        if condition == "mutation" and Path(original).name == "input0.py":
+            Path(original).write_text("VALUE = -1\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(policy, "_copy_retained_file", measured_copy)
+    monkeypatch.setattr(policy, "_select_uv_executable", lambda _value: sys.executable)
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **_options: subprocess.CompletedProcess(command, 0, settings(), ""),
+    )
+    uv = Path(sys.executable)
+    if condition == "progress":
+        with engine._retained_inputs(inputs, uv, uv, refresh=False, timeout=10) as retained:
+            assert now[0] - 100 > 10
+            assert retained.retained_hash == before
+            assert all(path.exists() for path in copies)
+        assert engine.runtime.fingerprint_source(engine._source_files(packages)) == before
+    else:
+        expected = wheels.WheelDeadlineError if condition == "silent" else policy.DependencyPolicyError
+        message = "retention.*deadline" if condition == "silent" else "source content changed"
+        with pytest.raises(expected, match=message):
+            with engine._retained_inputs(inputs, uv, uv, refresh=False, timeout=10):
+                pytest.fail("expired or changed source cannot reach construction")
+    assert copies and not any(path.exists() for path in copies)
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert f"phase=retention state={'completed' if condition == 'progress' else 'failed'}" in output.err
+    if condition == "silent":
+        assert "Source wheel progress: phase=retention" not in output.err
+    else:
+        assert "Source wheel progress: phase=retention" in output.err
+
+
 @pytest.fixture
 def ordinary(tmp_path, monkeypatch, feeds, engine):
     source = tmp_path / "source"
