@@ -442,27 +442,17 @@ default would hide or `403`/`404` the other org's CodeSpaces entirely.
   account when a CodeSpace uses ambient ownership. Each must be logged in with
   the `codespace` scope; the remedy is the account's recorded `accounts.yaml`
   login flow.
-- **Connection Owner observation waves:** due session holds share one immutable,
-  per-account inventory; a poll with no due holds does not list accounts. The
-  flattened `list_codespaces()` API remains unchanged. Owner-only qualified
-  listings retain errors and treat the 50-row limit as incomplete. Missing,
-  ambiguous, incomplete or expired observations never authorize a connection.
-  Admission revalidates installation, effective configuration, candidate accounts
-  and selected credential digests without relisting. This still performs metadata
-  work; listing-call savings are not a measured whole-system CPU improvement.
-  Up to four venues are probed concurrently by default, with one complete,
-  versioned mux batch per venue and a 30-second inventory admission window.
-  Expired queued venues defer to the next due wave instead of refreshing secretly.
-  The owner pins the observed account directly, bounds config acquisition to one
-  admitted attempt, drains its child on cancellation, and checks admission before
-  connection/exec retries. Stopped venues are never connected; an unknown state
-  is not a negative mux verdict. Missing tmux, malformed output and missing batch
-  completion remain unknown. Session renewal and release compare launch
-  generations under the existing owner lock. Legacy two-argument probe providers
-  remain supported. Default bridge proof reuses inventory admission but opens and
-  closes its own manager; no transport is borrowed or shared, and transcript
-  transport behavior is unchanged. Scope is rechecked after execution and
-  disconnect before publishing a verdict; registry checks run off the owner loop.
+- **Private observation foundations:** `owner_inventory` and `owner_mux_probe`
+  expose explicit qualified inventory and versioned mux-protocol operations.
+  They are not wired into the Connection Owner's default factories or session
+  consumer. Production retains its existing listing, probing and cleanup paths.
+  A qualified listing treats errors and the 50-row limit as incomplete; it is
+  not a complete inventory or fresh selected-authority API. Repeated full scope
+  resolution remains unqualified for production cost. Consumer integration,
+  selected-effect/full-publication scheduling and provider admission remain
+  tracked separately in #7949 and #5761.
+  The optional `heartbeat(..., generation=...)` fences renewal under the existing
+  lock; omitting it preserves the existing behavior and does not activate a wave.
 - **Fully additive:** with no `account_map` configured, everything collapses to
   a single ambient `gh` call — today's behavior.
 
@@ -547,9 +537,9 @@ actual configuration-provider reports and bound/provider/active selection
 observations. `candidates()` remains the ordered accounts tuple. The result
 contains no credentials and is not a cache or a currentness authority; nested
 source-owned configuration/routing values must not be mutated. Consumers make
-their own immutable projection. The Connection Owner uses the actual reports
-to withhold authority when a provider is indeterminate, including when retained
-configuration would otherwise produce the same merged value.
+their own immutable projection. The unwired inventory foundation uses the actual
+reports to withhold authority when a provider is indeterminate, including when
+retained configuration would otherwise produce the same merged value.
 
 `inventory_store` is an **unwired internal JSON/storage prototype**, not an
 enabled inventory cache. Its caller supplies an absolute existing data parent,

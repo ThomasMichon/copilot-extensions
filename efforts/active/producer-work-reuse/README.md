@@ -103,6 +103,16 @@ authorized runtime behavior.
 
 ## Plan
 
+### Bounded source-foundation increment — existing #8143
+
+- [x] Admit history-preserving removal of only the draft's production wave wiring,
+  retaining the existing production consumer and the unwired foundations.
+- [ ] Validate the retained model/protocol/authority and legacy-consumer contracts.
+- [ ] Obtain current-head review, resolve the removed-path performance thread,
+  pass required CI and merge existing #8143.
+- [ ] Journal the source-only result; keep the R1b/provider/transport and native
+  qualification gates below open under #7949/#5761.
+
 ### S3 inventory freshness amendment — plan/review only
 
 - [x] Trace current inventory, eligibility storage, availability, transport and

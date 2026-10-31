@@ -2,7 +2,7 @@
 
 [Parent effort](README.md) · [Reviewed design](codespaces.md)
 
-- **Status:** Blocked
+- **Status:** Active — bounded foundation publication; integration blocked
 - **Tracker:** #7949
 - **Participant:** placid-battery, source implementation and PR owner.
 - **Scope:** qualified owner-wave inventory, batched mux checks, bounded venue
@@ -12,7 +12,9 @@
 - **Current slice:** new captured A/N1 correctness is accepted; selected status
   policy and full Option-F control publication are recorded. Exact R1b
   consumer/path/reconcile/owner admission remains pending. The private prototype
-  stays unwired; N2/performance/activation/full-source gates are not complete.
+  stays unwired; N2/performance/activation/full-integration gates are not complete.
+  #8143 now publishes only the separable source foundation, not the production
+  owner-wave consumer. The existing production session/probe paths are retained.
   The additive candidate seam has narrow explicit user authorization, not an
   owner release. The previous multi-mux cost conflict is historical analysis,
   not the new representative profile's ceiling. No cache/push algorithm is
@@ -62,7 +64,8 @@ launch/recovery, production deployment or live venue probes.
   not a prerequisite for this design work.
 - [x] Implement immutable inventory and batch protocol with explicit wave adapter.
 - [x] Implement bounded concurrent probes, cancellation and atomic renewal fence.
-- [ ] Validate and independently review; publish and merge through normal gates.
+- [ ] Validate and independently review the unwired foundation; publish and merge
+  existing #8143 through normal gates without claiming production integration.
 - [ ] Reconcile source outcome and retained #7949 qualification after merge.
 
 ## Validation Plan
@@ -390,10 +393,10 @@ defers to the next due wave, with no hidden per-venue refresh.
 
 ## Reproduction and remaining cells
 
-Run from the source root with a supported Python and the existing bounded runner:
+Current source-only foundation and legacy-consumer regression selection:
 
 ```text
-python tools/run-plugin-tests.py agent-codespaces --test-file tests/test_owner_wave.py --test-file tests/test_owner_wave_native.py --test-file tests/test_session_forwards.py --test-file tests/test_lifecycle.py --test-file tests/test_transcript_mirror.py
+python tools/run-plugin-tests.py agent-codespaces --test-file tests/test_inventory_store.py --test-file tests/test_candidate_read.py --test-file tests/test_owner_scope_read.py --test-file tests/test_owner_wave_foundation.py --test-file tests/test_session_forwards.py --test-file tests/test_owner_never_blocks.py --test-file tests/test_lifecycle.py
 ```
 
 R1a's admitted pure/injected-OS selection is separate:
@@ -402,17 +405,17 @@ R1a's admitted pure/injected-OS selection is separate:
 python tools/run-plugin-tests.py agent-codespaces --test-file tests/test_inventory_store.py
 ```
 
-The native baseline lane needs the pinned commit available in the local Git
-object database and Bash (Git Bash on Windows) for its explicit shell control.
-It uses only synthetic credentials and owned local children. It is an explicit
-development/integration lane, not an addition to required unit-only CI.
+The earlier owner-wave native/accounting/profile tests belong to the deferred
+integration and are preserved in the pre-slice source history. Their evidence
+files remain unchanged here. They are not tests of the current unwired candidate
+and no historical count is reused as current-source performance qualification.
 
 | Cell | State |
 |------|-------|
-| Source tests | 223 scoped tests pass; CI passed, but review blocks total authority-process fanout and merge remains pending |
+| Source tests | Historical 223-case integration and 128-case model receipts retained; fresh foundation/legacy-consumer review and CI pending |
 | Release | Pending source merge and ordinary promotion; no release claim |
 | Installed/native venue | Unavailable by scope; no updater or live CodeSpace probe |
-| CPU/whole-wave metadata/latency tails | CPU/tails unmeasured; repeated authority CLI fanout is a known blocking source defect retained by #7949 |
+| CPU/whole-wave metadata/latency tails | CPU/tails unmeasured; repeated authority CLI fanout blocks deferred production integration retained by #7949/#5761 |
 | S3c transport reuse | Excluded and retained by #7949 |
 
 ### Pure policy-model correction checkpoint
@@ -458,6 +461,31 @@ another A/N1 native run):
   `e03244508c77bea3dd82c6abff9f4c85a96d2b6fbc6efdf485017fdeda15237e`.
   `junit.xml`:
   `401e7bd31b17e9157ad717f60b1fe1c0779b1f48c6b107c5740429f7431d4a83`.
+
+### 2026-10-31 — Explicit incremental source-foundation disposition
+
+- Admitted history-preserving removal of this PR's production wave wiring only.
+  Restored the production `session_forwards.py` and its directly changed legacy
+  tests to the PR base before reconciling current Dev. No already-shipped
+  capability, credential behavior, cleanup or probe schedule is removed.
+- Retain the explicitly invoked inventory/protocol/authority foundations,
+  CandidateRead's narrowly admitted additive seam, optional heartbeat generation
+  fence, and the private JSON model/policy correction. None is a cache activation
+  or a default factory/consumer integration.
+- Retained the complete pre-slice implementation in a local backup before
+  editing. Its integration-specific test bodies remain in source history;
+  retained raw manifests/frames and accepted A/N1 originals are unchanged.
+  Focused foundation tests retain qualification/unknown/no-wake/protocol and
+  heartbeat controls, plus a real default-factory/consumer regression against
+  accidentally re-entering the deferred wave authority.
+- The production fanout review thread is addressed by removing its caller path,
+  not by claiming cheaper authority or waiving performance. Exact R1b
+  keep/drop/defer-rebuild, path/limits, page completeness, fresh selected auth,
+  Option-F publication, producer exclusion and transport admission still need
+  their existing owners. #5761 is not released; #7949 and this effort stay open.
+- This increment may clear source review/CI and merge independently. It does
+  not complete R1b, N2/sharing/crash/native performance, release, installed
+  readiness or activation. Fresh targeted validation and publication are pending.
   `units.stdout.log`:
   `1280256ba9c23c5b470ebc28f71ce94be687935270e393e0ae73d34bcfa5bf21`.
   Unit stderr is empty; individual guard hashes are in the closed index.
