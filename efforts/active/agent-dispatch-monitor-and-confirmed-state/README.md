@@ -1276,3 +1276,34 @@ separate. The coordinator publisher still drops top-level metadata and does not
 publish the final effective set. Its revision-fenced publication, atomic
 capacity/claim transaction and conditional caller migration are the next
 implementation stretch, not inferred completion of this amendment.
+
+The normalized-definition source merged in
+[#9774](https://github.com/ThomasMichon/copilot-extensions/pull/9774) as
+`ce207738304506b0f980bda9b6c341f2734f8ff8` after current-head approval
+and required checks. Managed pull-forward reached that exact merge with no
+surviving diff. This closes only the definition prerequisite; the next stretch
+is the existing owner's complete effective-set publication and provider
+admission, not a live pool migration.
+
+### 2026-10-31 - Internal pool catalog provider boundary
+
+Implemented the [internal provider storage expansion](../../../plugins/agent-dispatch/docs/pool-publication.md):
+machine/environment generation CAS, whole-scope publication revision CAS,
+retained generation/publication history and original definition attribution.
+Registry mutations invalidate accepted snapshots in their existing transaction;
+idempotent writes preserve freshness. Pending, unavailable, registry-stale and
+expired expected scopes block the global view without freeing incumbent work.
+Expiry is an admission observation, not a liveness or retirement verdict.
+
+The final bounded disconnected packet passes 137 cases across catalog,
+registration and reservation controls, including 49 catalog cases. Focused
+lint/type, install-contract and documentation checks pass. The daemon's actual
+singleton is an OS lock, not a shared renewable lease; existing schedule and
+producer-runtime mechanisms cannot be relabeled as supervisor enrollment.
+
+This source prerequisite has no HTTP route, capability advertisement or
+production caller. The controlling owner's complete expected-scope membership,
+fresh effective-source collection, authenticated transport and mixed-cohort
+qualification remain the next stretch before atomic placement. It does not
+claim that a caller-supplied correlation proves completeness or that a source
+merge enables a live pool.
