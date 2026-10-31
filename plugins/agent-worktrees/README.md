@@ -1074,9 +1074,10 @@ not activate it.
 then return before policy work. The host and all extension/command children must
 inherit the same launch-time value. Setting only
 `AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON` does not register a second hook.
-Resident mode also needs that interpreter; invalid policy construction produces
-an explicit SDK denial, not a second command-policy evaluation. No live settings
-are changed and automatic hot handback is not provided. Keep command mode until
+Resident mode also needs that interpreter; unavailable policy construction returns
+bounded recovery context without a fabricated permission decision, not a second
+command-policy evaluation. Confirmed protected violations retain their deny/ask
+outcomes. No live settings are changed and automatic hot handback is not provided. Keep command mode until
 matched complete-path measurements demonstrate a gain and the host's lifecycle
 is qualified. See the [resident pre-tool contract](docs/architecture.md#opt-in-resident-pre-tool-pilot)
 for selection, conservative failure behavior and lifetime limitations.

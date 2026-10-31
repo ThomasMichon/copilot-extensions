@@ -91,6 +91,11 @@ const make = invokePolicy => createResidentPreToolHook({
   },
 });
 const hook = make(fallback);
+const assertUnavailable = result => {
+  assert.equal(result.permissionDecision, undefined);
+  for (const field of ["agent-worktrees", "Boundary:", "Effect:", "Next:", "Retry:"])
+    assert.ok(result.additionalContext.includes(field), JSON.stringify(result));
+};
 if (name === "reads" || name === "bom") {
   if (name === "bom") {
     const path = join(root, "anchor_write_guard.py");
@@ -130,7 +135,7 @@ if (name === "reads" || name === "bom") {
   assert.equal((await hook({ ...input, toolName: "edit" })).permissionDecision, "deny");
   assert.equal(calls, 1);
 } else if (name === "sdk-input") {
-  assert.equal((await hook({ ...input, workingDirectory: undefined })).permissionDecision, "deny");
+  assertUnavailable(await hook({ ...input, workingDirectory: undefined }));
   assert.equal(calls, 0);
   assert.deepEqual(reports, ["invalid-sdk-input"]);
 } else if (["real-allowed-shell", "real-allowed-tool"].includes(name)) {
@@ -184,11 +189,11 @@ if (name === "reads" || name === "bom") {
     assert.equal(raw.error, undefined);
     assert.equal(raw.status, 0, raw.stderr);
     const decision = JSON.parse(raw.stdout);
-    assert.equal(decision.permissionDecision, "deny");
-    assert.match(decision.permissionDecisionReason, /policy helper is unavailable/);
+    assertUnavailable(decision);
+    assert.match(decision.additionalContext, /hook_pre_policy.py unavailable/);
   }
   const actual = make(createPythonPolicy({ scriptsRoot: root, python, environment: env }));
-  assert.equal((await actual(payload)).permissionDecision, "deny");
+  assertUnavailable(await actual(payload));
   assert.deepEqual(reports, ["policy-unavailable"]);
 } else if (name.startsWith("real-")) {
   if (name === "real-invalid-context") env.COPILOT_EXTENSIONS_CONTEXT = join(cwd, "missing-context.json");
@@ -207,11 +212,15 @@ if (name === "reads" || name === "bom") {
   const result = await actual({
     ...input, toolName: "create", toolArgs: { path: join(cwd, "efforts", "active", "fixture.md") },
   });
-  assert.equal(result.permissionDecision, "deny");
-  assert.equal(reports.length, 0, "must be an actual policy denial, not adapter failure");
-  assert.match(result.permissionDecisionReason,
-    name === "real-protected-write" ? /stateless|personal/i :
-    name === "real-invalid-context" ? /context/i : /required.*policy/i);
+  assert.equal(reports.length, 0, "must be an actual policy outcome, not adapter failure");
+  if (name === "real-protected-write") {
+    assert.equal(result.permissionDecision, "deny");
+    assert.match(result.permissionDecisionReason, /stateless|personal/i);
+  } else {
+    assertUnavailable(result);
+    assert.match(result.additionalContext,
+      name === "real-invalid-context" ? /context/i : /statelessness_guard.py/i);
+  }
 } else if (["python-policy", "python-error", "python-missing-guard", "python-empty", "python-legacy", "python-invalid-json", "python-encoding", "python-warning", "python-invalid-shape", "python-runtime-unavailable", "python-missing-worker", "python-unknown-response"].includes(name)) {
   if (name === "python-encoding") env.PYTHONIOENCODING = "cp1252";
   if (name === "python-runtime-unavailable") writeFileSync(join(root, "agent_procutil.py"), "# no owned runtime API\\n");
@@ -233,9 +242,13 @@ if (name === "reads" || name === "bom") {
     "import sys\\nif sys.argv[1] == 'preToolUse': print('{}')\\n");
   const actual = make(createPythonPolicy({ scriptsRoot: root, python, environment: env }));
   const result = await actual({ ...input, toolName: "edit" });
-  assert.equal(result.permissionDecision, "deny");
-  assert.equal(result.permissionDecisionReason.includes("real Python policy"), ["python-policy", "python-encoding", "python-warning"].includes(name));
-  assert.equal(reports.length, ["python-policy", "python-encoding", "python-warning"].includes(name) ? 0 : 1);
+  if (["python-policy", "python-encoding", "python-warning", "python-missing-guard"].includes(name)) {
+    assert.equal(result.permissionDecision, "deny");
+    assert.equal(result.permissionDecisionReason, "real Python policy");
+  } else {
+    assertUnavailable(result);
+  }
+  assert.equal(reports.length, ["python-policy", "python-encoding", "python-warning", "python-missing-guard"].includes(name) ? 0 : 1);
   const diagnostic = {
     "python-empty": "policy-response-empty", "python-legacy": "policy-response-empty",
     "python-error": "policy-process-failed", "python-invalid-json": "policy-response-invalid",
@@ -251,7 +264,9 @@ if (name === "reads" || name === "bom") {
     active: true, contract: { id: "copilot-extensions.pretool-killswitch", version: 2 },
   }));
   const payload = ["write", "failure", "invalid-result", "report-failure"].includes(name) ? { ...input, toolName: "edit" } : input;
-  assert.equal((await hook(payload)).permissionDecision, "deny");
+  const result = await hook(payload);
+  if (["failure", "invalid-result", "report-failure"].includes(name)) assertUnavailable(result);
+  else assert.equal(result.permissionDecision, "deny");
   assert.equal(calls, 1);
   if (["failure", "invalid-result"].includes(name)) {
     await hook(payload);
@@ -277,3 +292,73 @@ console.log(JSON.stringify({ case: name, calls, reports }));
         assert "expected policy warning" in result.stderr
     elif case in {"python-error", "python-invalid-json", "python-invalid-shape", "python-unknown-response"}:
         assert "private policy diagnostic" not in result.stderr
+
+
+@pytest.mark.parametrize("fault", [
+    "missing-entry", "missing-policy", "broken-policy", "missing-runtime", "malformed-event", "none",
+    "failed-component-deny", "failed-component-ask", "activation-report-failure", "missing-sibling-protected",
+    "unsafe-sibling-protected",
+])
+def test_sdk_pretool_unavailable_recovery_preserves_confirmed_violation(tmp_path, fault):
+    from agent_procutil import no_window_kwargs
+    from test_hook_pre_relevance import _assert_pretool_recovery_outcome, _pretool_recovery_fixture
+
+    node = shutil.which("node")
+    assert node, "SDK recovery consumer requires Node"
+    home, cwd, scripts, env = _pretool_recovery_fixture(tmp_path, fault)
+    target = cwd / "efforts" / "active" / "fixture.md"
+    module = PLUGIN / "extensions" / "agent-worktrees" / "resident-pre-tool.mjs"
+    driver = tmp_path / "recovery.mjs"
+    driver.write_text(
+        """
+import { pathToFileURL } from 'node:url';
+const [modulePath, scriptsRoot, python, cwd, fault] = process.argv.slice(2);
+const { createPythonPolicy, createResidentPreToolHook, selectResidentPreToolHooks } =
+  await import(pathToFileURL(modulePath));
+const environment = { ...process.env, AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION: 'resident' };
+const hooks = selectResidentPreToolHooks({
+  environment, report: () => {
+    if (fault === 'activation-report-failure') throw new Error('fixture reporter failed');
+  },
+  createHook: () => {
+    if (fault === 'activation-report-failure') throw new Error('fixture activation failed');
+    return createResidentPreToolHook({
+    scriptsRoot, environment, report: () => {},
+    invokePolicy: createPythonPolicy({
+      scriptsRoot, python: fault === 'missing-runtime' ? python + '.missing' : python, environment,
+    }),
+    });
+  },
+});
+const protectedEvent = fault === 'none' || fault.endsWith('sibling-protected') || fault.startsWith('failed-component-');
+const event = {
+  toolName: protectedEvent ? 'create' : 'powershell',
+  toolArgs: protectedEvent ? { path: cwd + '/efforts/active/fixture.md' } :
+    { command: 'agent-worktrees doctor --json' },
+  workingDirectory: cwd, sessionId: 'recovery-fixture', timestamp: new Date(),
+};
+const result = await hooks.onPreToolUse(fault === 'malformed-event' ? [] : event);
+console.log(JSON.stringify(result));
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [node, str(driver), str(module), str(scripts), sys.executable, str(cwd), fault],
+        capture_output=True, text=True, encoding="utf-8", env=env, cwd=home, timeout=35,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert not target.exists()
+    decision = json.loads(result.stdout)
+    if fault.startswith("failed-component-"):
+        assert decision.get("permissionDecision") == fault.rsplit("-", 1)[1], decision
+        assert "anchor" in decision.get("permissionDecisionReason", "").lower(), decision
+        assert "statelessness_guard.py evaluation failed" in decision.get("additionalContext", ""), decision
+    elif fault in ("none", "missing-sibling-protected"):
+        assert decision.get("permissionDecision") == "deny", decision
+        assert "personal" in decision.get("permissionDecisionReason", "").lower(), decision
+    else:
+        _assert_pretool_recovery_outcome(decision)
+        if fault == "activation-report-failure":
+            assert "policy activation unavailable" in decision["additionalContext"]
+            assert "diagnostic-failed" in decision["additionalContext"]
