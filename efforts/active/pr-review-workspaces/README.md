@@ -192,6 +192,37 @@ contract.
 
 ## Journal
 
+### 2026-10-30 - Exact source contract and implementation continuation
+- Contract #9703 merged as `5267c7010200a53acaee48dfe9e9e6876a2cb790`
+  after an actual current-head approval, resolved feedback and passing CI.
+  Corrected the distinction between absent paths and existing zero-byte blobs.
+- Implement the admitted Worktrees local source owner and separate PR-domain
+  attachment envelope over already prepared objects. Extend the existing bounded
+  process owner with opt-in exact binary capture; preserve default text behavior,
+  lifetime cleanup and per-stream limits rather than adding a second owner.
+- Initial contained controls: shared process owner 88 passed / 12 platform skips;
+  source/tree contracts 52 passed / 2 existing opt-in skips. Final source and
+  malformed-result controls remain in progress; this is not effort completion.
+- PR #9708 review identified four legitimate mapping/effect/aliasing/performance
+  findings. Protect the validated scope from in-place owner request mutation,
+  require a common-side object for original paths, disable internal Git hooks
+  through the existing Worktrees mechanical policy, and batch tree/blob IO.
+  Twenty actual synthetic source controls pass, including hostile owner mutation,
+  a real reference-hook witness, misleading rename coverage, 108-path bounded
+  process counts and deep Windows ref paths. Fix the two CI source-admission/
+  generated-archive failures through their existing manifest/generator owners;
+  no failing gate is waived.
+- The first four findings cleared re-review. Fix the two subsequent findings
+  with explicit symbolic-ref refusal/no-dereference publication/readback and
+  file/directory-transition mapping. Twenty-four native synthetic source cases
+  now pass. The required Linux unit job is confirmed successful at the repaired
+  source head; an optional local Windows full packet did not complete inside
+  its declared unit budget and is not claimed as qualification.
+- The remaining CI guard requires an append-only MCP scripts-producer footprint
+  revision for the regenerated shared caller-lifetime archive. Advance only that
+  producer through the footprint owner's digest/delta functions, preserving
+  existing effects, profile, recognizers and all published history.
+
 ### 2026-10-30 - Priority cursorless native change paging
 - Merged source PR #9697 as `eef6ddbd87f1c708a6ac334fa622f1dfa7abf44e`
   after 112 contained tests, lint/install-contract gates, passing required CI

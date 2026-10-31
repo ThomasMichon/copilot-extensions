@@ -307,6 +307,12 @@ ordinary Windows workers rather than claiming enforcement or deployed recovery.
 
 ## Bounded owned children
 
+`run_caller_owned(..., binary=True)` returns exact captured stdout/stderr bytes,
+including invalid UTF-8, NUL and unchanged CR/LF sequences. Its default remains
+strict UTF-8 text with the existing newline normalization. Both modes retain the
+same raw-byte stream budgets, caller lifetime and confirmed cleanup; binary
+output is encoded only inside the private POSIX completion transport.
+
 `run_caller_owned(..., on_settled=callback)` optionally reports positive native
 scope settlement, separately from execution success. The callback runs once
 after known pre-launch preparation refusal, or after the entire strict Windows
