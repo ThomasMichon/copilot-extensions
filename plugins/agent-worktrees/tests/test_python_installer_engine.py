@@ -478,6 +478,79 @@ def test_productive_owned_child_renews_timeout_and_relays_before_completion(
         pass
 
 
+@pytest.mark.parametrize("condition", ["progress", "uneven", "silent"])
+def test_source_phase_initial_retention_progress_crosses_real_quiet_window(
+    engine, procutil, tmp_path, condition,
+):
+    plugin = _package(tmp_path / "source", "example")
+    for index in range(16):
+        (plugin / f"input{index}.py").write_text(f"VALUE = {index}\n", encoding="utf-8")
+    before = engine.runtime.fingerprint_source(engine._source_files((plugin,)))
+    uv = shutil.which("uv")
+    assert uv, "the initial retention contract requires native UV"
+    marker = tmp_path / "retention-writer"
+    scripts = Path(engine.__file__).parent
+    actor = (
+        "import json,os,pathlib,sys,time\n"
+        f"sys.path.insert(0,{str(scripts)!r})\n"
+        f"sys.path.insert(1,{str(Path(engine.runtime.__file__).parent)!r})\n"
+        "import installer_engine as engine\n"
+        "policy=sys.modules[engine.retain_uv_install.__module__]\n"
+        f"plugin=pathlib.Path({str(plugin)!r})\n"
+        f"pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n"
+        "packages=engine._package_roots(plugin)\n"
+        "inputs=engine.FrozenInputs(plugin,packages,engine.runtime.fingerprint_source(engine._source_files(packages)))\n"
+        "prepare=policy.prepare_uv_install\n"
+        "def measured_prepare(*args,**kwargs):\n"
+        f" time.sleep({1 if condition == 'silent' else 0})\n"
+        " return prepare(*args,**kwargs)\n"
+        "policy.prepare_uv_install=measured_prepare\n"
+        "copy=policy._copy_retained_file\n"
+        "copy_count=0\n"
+        "def measured_copy(*args,**kwargs):\n"
+        " global copy_count\n"
+        f" if {condition == 'silent'}:\n"
+        "  print('retention-copy-entered',file=sys.stderr,flush=True)\n"
+        f" delays={(1.0, .5, 2.8) if condition == 'uneven' else ()!r}\n"
+        f" delay=delays[copy_count] if copy_count<len(delays) else {20 if condition == 'silent' else .1 if condition == 'uneven' else .35}\n"
+        " copy_count+=1\n"
+        " time.sleep(delay)\n"
+        " return copy(*args,**kwargs)\n"
+        "policy._copy_retained_file=measured_copy\n"
+        f"uv=pathlib.Path({uv!r})\n"
+        "with engine._retained_inputs(inputs,uv,pathlib.Path(sys.executable),refresh=False,timeout=3) as retained:\n"
+        " print(json.dumps({'hash':retained.retained_hash}))\n"
+    )
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("UV_", "PIP_")) and key not in {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"}
+    }
+    started = time.monotonic()
+    with (tmp_path / "native-output").open("wb") as stream:
+        options = dict(
+            cwd=tmp_path, env=environment, timeout=3, procutil=procutil, construction_fd=None,
+            output_fds={"stderr": stream.fileno()},
+        )
+        if condition != "silent":
+            result = engine.run_owned([sys.executable, "-I", "-B", "-c", actor], **options)
+            assert time.monotonic() - started > 5
+            assert json.loads(result.stdout) == {"hash": before}
+            assert "Source wheel progress: phase=retention" in result.stderr
+            assert "phase=retention state=completed" in result.stderr
+        else:
+            with pytest.raises(subprocess.TimeoutExpired) as failure:
+                engine.run_owned([sys.executable, "-I", "-B", "-c", actor], **options)
+            assert time.monotonic() - started < 13
+            assert "phase=retention state=starting" in failure.value.stderr
+            preparation, entered, stalled = failure.value.stderr.partition("retention-copy-entered\n")
+            assert entered and "Source wheel progress: phase=retention" in preparation
+            assert "Source wheel progress: phase=retention" not in stalled
+            assert "phase=retention state=completed" not in failure.value.stderr
+    assert marker.is_file()
+    _assert_writers_dead(engine, [int(marker.read_text())])
+    assert engine.runtime.fingerprint_source(engine._source_files((plugin,))) == before
+
+
 def test_source_phase_and_cache_keep_productive_child_progress(
     engine, procutil, tmp_path, monkeypatch, capsys,
 ):

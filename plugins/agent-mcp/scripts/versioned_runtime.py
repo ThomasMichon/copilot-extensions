@@ -1536,10 +1536,11 @@ def _normalize_windows_extended_path(target: str) -> str:
     return target
 
 
-def fingerprint_source(paths) -> str:
+def fingerprint_source(paths, *, on_progress=None) -> str:
     """Fingerprint complete source inputs through the shipped stdlib component."""
     return _runtime_component("versioned_runtime_source").fingerprint_source(
         paths, _normalize_windows_extended_path=_normalize_windows_extended_path,
+        on_progress=on_progress,
     )
 
 

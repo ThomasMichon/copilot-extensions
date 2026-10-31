@@ -4552,7 +4552,10 @@ Ordinary source-wheel phases now renew their quiet allowance from actual child
 stdout/stderr and completed file, copy and verification units. The owned
 constructor relays child bytes immediately, including partial lines; its
 Windows retention guardian keeps the final completion JSON on stdout and
-relays progress separately on stderr. A silent child still times out and must
+relays progress separately on stderr. Each completed source-phase renewal
+flushes its progress to stderr, keeping the native observer's allowance from
+lagging the local deadline when a quick unit precedes a longer productive unit.
+A silent child still times out and must
 settle every owned writer before construction or retention custody is released.
 Native relay errors preserve their error codes; failed strict Job confirmation
 retains the exact process and Job rather than treating handle closure as proof.
@@ -4562,6 +4565,16 @@ stale pre-build wall-clock limit. Explicit caller-supplied absolute deadlines
 for closed-wheel acquisition/inspection remain absolute, and all byte, file,
 identity, seasoning and publication checks remain unchanged. No supervisor
 generates periodic output to conceal an idle backend.
+
+Initial source selection and UV-input retention use the same phase reporter.
+Completed directory scans, file copies, matching source comparisons and
+deterministic fingerprint entries renew the constructor's quiet allowance;
+the check precedes renewal, so late completion cannot erase a silent expiry.
+Retention reporting finishes before construction starts, while the original
+retained-input owner keeps its files until construction and native cleanup
+settle. The optional fingerprint callback does not change framing or digest
+bytes, and CLI stdout remains unchanged. Deferred source stamping and native
+self-stage watchdog integration remain separate boundaries.
 
 Ordinary immutable source candidates request UV hardlinks from its extracted
 wheel cache, with UV's normal copy fallback when linking is unavailable.
