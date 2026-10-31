@@ -78,7 +78,7 @@ def test_daemon_producer_closes_ready_before_publishing_admission() -> None:
     assert source.index(move) < source.index(closed)
 
 
-def test_daemon_lifetime_wait_uses_actual_closed_publication_reader() -> None:
+def test_daemon_lifetime_wait_uses_actual_closed_publication_reader(tmp_path: Path) -> None:
     function = next(
         node for node in ast.parse(SOURCE.read_bytes()).body
         if isinstance(node, ast.FunctionDef)
@@ -95,3 +95,7 @@ def test_daemon_lifetime_wait_uses_actual_closed_publication_reader() -> None:
         isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
         and node.func.attr == "read_text" for node in ast.walk(function)
     )
+    report = {"parent": {"pid": 42, "birth": "windows:43"}}
+    (tmp_path / "ready.json").write_text(json.dumps(report), encoding="utf-8")
+    (tmp_path / "ready.closed").write_text("closed", encoding="ascii")
+    assert ready_reader()(tmp_path) == report
