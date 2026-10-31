@@ -259,7 +259,11 @@ def test_ensure_uses_declared_invocation_root_and_bounded_headless_custody(
     assert argv == [*command, "mux-daemon", "ensure"]
     assert kwargs["cwd"] == str(root)
     assert kwargs["env"]["WORKTREE_MANAGER_ROOT"] == str(root)
-    assert json.loads(kwargs["env"]["WORKTREE_MANAGER_ENGINE_ARGV"])[1:] == ["-m", "agent_worktrees"]
+    from agent_worktrees import manager_launch_cli
+
+    assert json.loads(kwargs["env"]["WORKTREE_MANAGER_ENGINE_ARGV"]) == (
+        manager_launch_cli._agent_worktrees_launch_command(None)
+    )
     assert kwargs["require_job"] is True
     assert kwargs["stdin"] == kwargs["stdout"] == kwargs["stderr"] == subprocess.DEVNULL
     for field, value in mux_status_link.no_window_kwargs().items():

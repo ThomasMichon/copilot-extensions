@@ -89,14 +89,17 @@ def dispatch(argv: list[str]) -> int | None:
         return None
     environment = dict(os.environ)
     environment[BOOTSTRAP_ENV] = json.dumps(result, separators=(",", ":"))
-    environment["WORKTREE_MANAGER_ENGINE_ARGV"] = json.dumps([sys.executable, "-m", "agent_worktrees"])
+    from . import manager_launch_cli
+
+    engine_command = manager_launch_cli._agent_worktrees_launch_command(None)
+    environment["WORKTREE_MANAGER_ENGINE_ARGV"] = json.dumps(engine_command)
     environment["PYTHONUTF8"] = "1"
     environment.pop("PYTHONHOME", None)
     environment.pop("UV_INTERNAL__PYTHONHOME", None)
     if result.get("manager_session"):
         from .picker_session_entry import open_session
 
-        code = open_session(result, [sys.executable, "-m", "agent_worktrees"], environment)
+        code = open_session(result, engine_command, environment)
         if code is not None:
             return code
     from agent_procutil import spawn_sync_in_kill_on_close_job

@@ -218,7 +218,9 @@ def _invoke_manager_ensure(manifest, root: Path) -> bool:
 
     env = manager_launch_cli._launch_probe_env()
     env["WORKTREE_MANAGER_ROOT"] = str(root)
-    env["WORKTREE_MANAGER_ENGINE_ARGV"] = json.dumps([sys.executable, "-m", "agent_worktrees"])
+    env["WORKTREE_MANAGER_ENGINE_ARGV"] = json.dumps(
+        manager_launch_cli._agent_worktrees_launch_command(None),
+    )
     posix = sys.platform != "win32"
     if posix:
         owned_process._require_posix_execution_support()

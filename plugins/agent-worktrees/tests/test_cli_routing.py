@@ -1522,9 +1522,11 @@ def test_manager_handoff_binds_exact_engine_runtime(monkeypatch):
     assert seen["argv"] == [
         r"C:\manager\worktree-manager.cmd", "--project", "demo"
     ]
+    from agent_worktrees import manager_launch_cli
+
     assert json.loads(
         seen["env"][m._WORKTREE_MANAGER_ENGINE_ARGV_ENV]
-    ) == [r"C:\runtime\python.exe", "-m", "agent_worktrees"]
+    ) == manager_launch_cli._agent_worktrees_launch_command(None)
 
 
 def test_exec_worktree_manager_closes_job_on_windows_clean_exit(monkeypatch):
