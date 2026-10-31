@@ -763,8 +763,21 @@ jobs:
           QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
         run: |
           remote_ref=$(git ls-remote --heads origin "refs/heads/$CANDIDATE_BRANCH")
-          if [ "$(printf '%s\n' "$remote_ref" | cut -f1)" != "$CANDIDATE_SHA" ]; then
+          remote_sha=$(printf '%s\n' "$remote_ref" | cut -f1)
+          if [ "$remote_sha" != "$CANDIDATE_SHA" ]; then
+            case "$remote_ref" in
+              "") observed=missing-ref ;;
+              *$'\n'*) observed=multiple-refs ;;
+              *)
+                if [[ "$remote_sha" =~ ^[0-9a-f]{40}$ ]]; then
+                  observed="$remote_sha"
+                else
+                  observed=malformed-ref
+                fi
+                ;;
+            esac
             echo "::error::Remote branch does not match the trusted promoter's candidate."
+            printf '::error::Candidate ref verification: expected=%s observed=%s\n' "$CANDIDATE_SHA" "$observed"
             exit 1
           fi
           git fetch origin "refs/heads/$CANDIDATE_BRANCH"
