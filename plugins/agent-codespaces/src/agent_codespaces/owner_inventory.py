@@ -93,6 +93,8 @@ def credential(account: str | None) -> str:
 
 
 def _read_authority():
+    from dropin_registry import EntryStatus, ScanAuthority
+
     from .account_candidates import read_candidates
     from .config import RUNTIME_DIR
     from .worktrees import validate_context
@@ -100,7 +102,14 @@ def _read_authority():
     context = validate_context()
     read = read_candidates()
     reports = (read.provider_reports.active_plugins, read.provider_reports.config_d)
-    if any(report.authority.value not in {"complete", "absent"} for report in reports):
+    if any(
+        report.authority not in {ScanAuthority.COMPLETE, ScanAuthority.ABSENT}
+        or any(
+            decision.status is EntryStatus.INDETERMINATE
+            for decision in report.snapshot.decisions.values()
+        )
+        for report in reports
+    ):
         raise RuntimeError("Owner configuration provider authority unavailable")
     source = _digest(json.dumps(
         [str(RUNTIME_DIR), context, os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")],
@@ -229,9 +238,10 @@ def collect_inventory(
 
 
 def qualified_account_listing(account, *, clock=time.monotonic):
-    from .lifecycle import _list_codespaces_under
+    from .lifecycle import _list_codespaces_under, validate_context
     from .worktrees import ContextRefused
 
+    validate_context()
     observed = clock()
     try:
         rows = _list_codespaces_under(account, qualified=True)

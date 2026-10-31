@@ -93,6 +93,23 @@ def test_explicit_qualified_listing_reports_errors_and_limit(monkeypatch, payloa
     assert (result.complete, result.error) == (complete, error)
 
 
+@pytest.mark.parametrize("account", [None, "a"])
+def test_direct_qualified_listing_refuses_context_before_credentials_or_listing(monkeypatch, account):
+    from agent_codespaces.worktrees import ContextRefused
+
+    def refused():
+        raise ContextRefused("synthetic refused context")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("refused context must not resolve credentials or list")
+
+    monkeypatch.setattr(lifecycle, "validate_context", refused)
+    monkeypatch.setattr(inv, "credential", forbidden)
+    monkeypatch.setattr(lifecycle.subprocess, "run", forbidden)
+    with pytest.raises(ContextRefused):
+        lifecycle.qualified_account_listing(account)
+
+
 async def test_explicit_probe_rejects_expired_or_changed_scope_before_connect():
     opened = []
 

@@ -504,6 +504,29 @@ another A/N1 native run):
   qualification or activation. Existing contention/history remains separate.
 - Current-head forge review, required CI and existing-PR publication remain
   pending; no source-merge or runtime-readiness claim is made.
+
+### Foundation review corrections
+
+- The fresh review at `667fb413bf062f7d243178a27e8d86aaafa9e6bc`
+  confirms the original production authority-fanout path is removed. It found
+  two foundation defects: a direct qualified listing could bypass context
+  refusal, and an otherwise complete provider scan could retain indeterminate
+  entry configuration without withholding authority.
+- Qualified direct listing now invokes the existing context validator before
+  any credential/listing work and propagates refusal. The scope projection
+  rejects existing `snapshot.decisions` whose status is indeterminate for both
+  provider registries, including persistent failures with unchanged values.
+  No source-owner signature, provider/discovery algorithm or production consumer
+  changes; these are corrections inside the retained explicit foundation.
+- Four focused regressions cover named/ambient direct-entry refusal and both
+  complete-scan/indeterminate-entry cases. An initial test indentation error
+  and then an invalid no-finding EntryDecision fixture were corrected; the
+  failed logs are retained, not represented as passes.
+- Final matched selection: **303 passed**, zero failures/errors/skips,
+  10.08 seconds in pytest and 69.02 seconds including preparation/cleanup.
+  Ruff F/E9 and install/module/docs guards pass. Existing accepted model/N1
+  originals and the earlier 299-case receipt remain unchanged. Fresh review
+  and required CI are still needed at the corrective head.
   `units.stdout.log`:
   `1280256ba9c23c5b470ebc28f71ce94be687935270e393e0ae73d34bcfa5bf21`.
   Unit stderr is empty; individual guard hashes are in the closed index.
