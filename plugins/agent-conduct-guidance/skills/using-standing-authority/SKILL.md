@@ -82,11 +82,18 @@ deduplication, source repair, implementation details and effort slugs. Ask only
 for unavailable information that changes the intended outcome, genuinely
 missing effect authority, a material scope change or a separately reserved gate.
 
-State one concrete decision, the recommendation and consequences, and what
-authorized work can continue. Do not offer "Pause here" instead of already
-authorized diagnosis or source work. Keep a blocked effect blocked, retain the
-root objective and pursue independent permitted work; do not invent busywork,
-abandon the objective or take another owner's work to avoid the question.
+Before a blocking question, build the
+[decision packet](references/decision-preparation.md) from authorized
+investigation, planning and documentation. Preserve the affected branch and
+original return through the adopted agenda when available, record a real
+attempt/revisit or response reference, and pursue another accepted avenue.
+The clock, Autopilot and guessed presence do not grant authority. An explicit
+all-work hold still stops the lane; unavailable approval alone does not.
+
+When useful safe work is exhausted, state one concrete decision, recommendation,
+ramifications and exact requested scope in the host's supported decision/wait
+surface. Do not offer "Pause here" instead of already-authorized work, repeatedly
+send the same incremental question, invent busywork or take another owner's work.
 
 ## 6. Preserve authority through continuity
 

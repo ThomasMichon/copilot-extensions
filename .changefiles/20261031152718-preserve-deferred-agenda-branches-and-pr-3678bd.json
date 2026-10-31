@@ -1,0 +1,17 @@
+{
+  "comment": "Preserve deferred agenda branches and prepare unattended decisions before blocking approval prompts",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

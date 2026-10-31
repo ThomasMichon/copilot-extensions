@@ -37,9 +37,16 @@ single-attempt limits, expiry, revocation and holds; reconcile unknown prior
 effects through their owner instead of blindly replaying them. Ask only for
 the missing or materially changed scope, not blanket reapproval.
 
-If one effect is blocked, preserve that boundary and continue independent
-already-authorized work toward the same objective. "Pause here" is not an
-alternative to useful work already permitted; neither is unrelated busywork.
+If one effect is blocked, preserve that boundary and prepare a durable decision
+packet: plain-language context/cause, evidence/uncertainty, options, conditional
+future projections, a general-class framework and exact acceptance scope.
+Defer a blocking question while useful authorized research/planning/docs or
+another accepted avenue can progress. An adopted agenda can park the original
+branch/return with actual attempt and revisit times; a clock or response is
+reinspection, not consent. Autopilot is continuation, not operator-presence
+evidence; do not default to presence polling. Explicit all-work holds and
+privacy/resource bounds remain stronger. "Pause here" is not an alternative
+to useful work already permitted; neither is unrelated busywork.
 Use `using-standing-authority` to capture, qualify or recover a pre-clearance.
 Actual enforcement, peer custody, review, security and elevation remain with
 their existing owners; this guidance is not automatic tool approval.

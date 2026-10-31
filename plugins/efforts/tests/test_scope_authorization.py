@@ -50,3 +50,24 @@ def test_capture_is_immediate_source_bound_and_lean():
 ])
 def test_record_reuse_does_not_change_adoption_or_effect_authority(clause):
     assert clause in " ".join(_REFERENCE.read_text().split())
+
+
+def test_deferred_process_is_explicit_optional_and_carries_current_decisions():
+    skill = (_PLUGIN / "skills/driving-effort-agendas/SKILL.md").read_text()
+    assert "references/deferred-branches.md" in skill
+    assert "Parking is not a successful return" in " ".join(skill.split())
+    assert "active/deferred agenda identities" in skill
+    reference = " ".join(
+        (_PLUGIN / "skills/driving-effort-agendas/references/deferred-branches.md").read_text().split()
+    )
+    for clause in (
+        "Older version-1-only helpers reject this cursor",
+        "It is not an approval",
+        "not a polling default",
+        "Do not overwrite intervening progress",
+        "reset a pin/use/detour/visit budget",
+        "complete cursor cannot contain unresolved deferred branches",
+    ):
+        assert clause in reference
+    assert "not permission" in reference or "not consent" in reference
+    assert "does not originate a turn" in reference

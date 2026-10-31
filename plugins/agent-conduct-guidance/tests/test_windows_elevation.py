@@ -73,7 +73,10 @@ def test_window_observation_requires_actual_desktop_binding(baseline, observer, 
     assert desktop_binding_verified(baseline, observer, target) is bound
 
 
-@pytest.mark.skipif(not PWSH, reason="PowerShell 7 is unavailable")
+@pytest.mark.skipif(
+    os.name != "nt" or not PWSH,
+    reason="Discovery control constructs the Windows-only IdentityNotMappedException",
+)
 def test_discovery_excludes_inaccessible_entries_but_requires_positive_owner_match():
     control = r"""
 public static class ElevationDiscoveryControl {

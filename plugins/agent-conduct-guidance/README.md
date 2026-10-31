@@ -136,6 +136,13 @@ explicit pins, use limits, holds and revocation remain binding. The procedure
 works without a runtime, broker or companion plugin; it does not certify model
 compliance or replace execution-owner enforcement.
 
+At an unapproved effect boundary, the
+[decision-preparation procedure](skills/using-standing-authority/references/decision-preparation.md)
+prepares context, evidence, conditional projections, options and a general-class
+framework before a blocking prompt. An adopted agenda can preserve the branch
+and revisit point while authorized work continues. Autopilot or guessed human
+presence is not consent; explicit all-work/privacy/resource holds still govern.
+
 ## Per-machine maintenance notice
 
 The [standby instruction](instructions/maintenance-standby.instructions.md) is
