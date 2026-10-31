@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-27
+- **Last revised:** 2026-10-30
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -56,6 +56,27 @@ source.
   available from an approved source, or refused with a precise reason.
 
 ## Features
+
+### copyable-wheel-first-application-inputs
+
+Canonical release composition produces complete application inputs that can
+be copied into an owned immutable generation and initialized through their exact
+dependency lock. First-party dependencies and non-package build resources are
+closed within that representation; no live dependency on a development checkout
+or replaceable Copilot plugin payload remains.
+
+Associated prebuilt first-party wheels are the preferred construction path.
+They cover the complete selected first-party closure, not only the top-level
+application. Registry dependencies retain their selected approved-source policy,
+and native tags and optional profiles remain explicit. Missing associated
+artifacts can select the separately governed source path; incompatible or corrupt
+artifacts do not masquerade as ordinary absence.
+
+Source, version composition and artifact association use native Git/release and
+uv identities with existing release authority. Assembly does not add a parallel
+whole-source fingerprint or a full-suite attestation barrier merely to copy
+already-selected applications. Native ownership, package integrity, immutable
+completion and readiness remain independent obligations.
 
 ### adopter-supplied-complete-defaults
 
@@ -165,7 +186,7 @@ an ordinary availability fallback. If no permitted dependency closure can
 be assembled, the outcome is explicit and the current generation survives.
 
 ### selected-development-source-assembly
-An authority-selected, clean merged development snapshot can be assembled
+An authority-selected development snapshot can be assembled
 directly, without waiting for a generated release-branch payload or installing
 Copilot plugin content from that checkout. This explicit source mode is not
 an artifact-availability fallback and does not claim promotion attestation.
@@ -177,13 +198,21 @@ from the selected snapshot, including development-only source indirections.
 Materialization and version composition use the canonical source
 representation rather than a second approximation of promotion. The
 assembled runtime contains no live dependency on the source checkout.
+Default installation follows trusted upstream Main/release selection. Explicit
+local promotion and controlled source-change validation can use a committed
+development snapshot under their stated authority before public artifact
+publication, without claiming it is merged or promotion-attested. A selected
+last-known-good Main ancestor keeps its own finalized version/lock identity
+rather than impersonating the latest Main.
+
 Source identity, package version, optional capability profile and exact
 assembly/dependency identity remain separately observable.
 
 Interactive development also freezes source and build inputs before assembly;
-it never deploys an editable venv linked to the working checkout. The complete
-source hash contributes to generation identity even when the package version
-is unchanged. A new edit requires a new immutable generation or exact healthy
+it never deploys an editable venv linked to the working checkout.
+Native Git source and exact dependency/artifact identity distinguish a changed
+generation even when a package version is unchanged, without a new independent
+whole-source hashing framework. A new edit requires a new immutable generation or exact healthy
 reuse, not mutation of the selected environment. This does not relax the clean,
 merged-source admission required for unattended Dev deployment.
 
@@ -197,6 +226,11 @@ its predecessor cannot cooperate. The service lifecycle owns identity-checked
 termination and exclusive ownership, and consumers tolerate the outage while
 the newcomer recovers durable work. Immutable construction, source admission
 and state-safe recovery are not waived.
+
+An operator-selected atomic local set keeps its last good selection until every
+incoming member has admitted readiness and state-compatible rollback. A member
+that cannot participate safely blocks that atomic transition; independent cold
+takeover does not silently downgrade a requested all-prepared set.
 
 ### optional-client-artifacts-complete-promotion
 
