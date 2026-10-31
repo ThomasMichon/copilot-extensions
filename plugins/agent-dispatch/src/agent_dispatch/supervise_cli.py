@@ -461,16 +461,12 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     declared_source = None
     if not getattr(args, "no_declared", False):
         from . import registrar_discovery
+        from .pool_source_snapshot import read_supervisor_declarations
 
         registrar_sources = registrar_discovery.RegistrarSources()
-        if getattr(args, "legacy_env", False):
-            # Back-compat bridge: pointer-discovered declarations PLUS the host's
-            # legacy supervisor.env / supervisors/*.env profiles, deduped by name
-            # (a first-class declaration wins). Lets a host switch its supervisor
-            # unit to `serve` without dropping its existing profiles mid-migration.
-            declared_source = registrar_sources.discover_with_legacy
-        else:
-            declared_source = registrar_sources.discover
+        declared_source = lambda: read_supervisor_declarations(
+            registrar_sources, legacy=getattr(args, "legacy_env", False),
+        )
     elif getattr(args, "legacy_env", False):
         # --no-declared drops pointer discovery but --legacy-env still bridges the
         # legacy env profiles.

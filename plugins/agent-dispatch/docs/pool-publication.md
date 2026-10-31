@@ -5,6 +5,52 @@
 It is **not yet exposed over HTTP or used by a production supervisor or
 allocator**. Its metadata does not advertise atomic-placement support.
 
+## Implemented local collection boundary
+
+`SupervisorSources`, composed through the existing `BoundedReconciliation`
+owner, collects the same declaration/direct desired set as subprocess
+reconciliation. Its `pool_source_snapshot()` is an immutable, all-or-none
+local observation **before** companion resolution/materialization, **after**
+declaration precedence, runtime-equivalent-source deduplication and concrete/
+logical override vetoes. Paused direct rows remain excluded by the existing
+scoped registration read. Non-worker registrations remain in the legacy desired
+set but are not pool definitions.
+
+Each attempt requires observations from all three sources and an identified
+machine/environment. Effective worker rows need complete, scope-consistent
+normalized definitions. A missing or invalid definition cannot simply disappear
+from the pool list. Failed or cached reads, a future consumed from an earlier
+attempt, unconfirmed declaration writes/withdrawals and duplicate source IDs
+make the entire collection unavailable. Inspecting the retained snapshot does
+not perform I/O or renew freshness; unsuccessful attempts do not expose a partial
+definition tuple. The catalog storage owner retains earlier published evidence.
+
+Declaration metadata confirmation must match this attempt's complete publishable
+ID set and every current target. Settling an unknown older write is not confirmation
+of a changed or removed declaration. An exhausted publication budget cannot
+renew a complete snapshot from a previously confirmed ledger.
+
+Ordinary supervisor declaration discovery consumes the registrar's actual
+refresh report in the same bounded source call. Indeterminate trusted/plugin
+scans and any plugin finding conservatively withhold complete publication,
+including retained or quarantined entries. Trusted-over-plugin name precedence
+still uses the registrar's selected declarations. Legacy env profiles and
+plain custom iterable callbacks remain usable by subprocess reconciliation but
+do not yet provide a completeness observation.
+
+The daemon reads overrides once in strict observation mode. Confirmed absence
+is an empty map; unreadable/invalid input is not. On malformed maps it retains
+the same valid-entry veto subset used by the legacy reader while withholding
+complete publication. Existing `load_overrides` callers keep their best-effort
+default. This observer adds no registration store, source scan, timer, endpoint,
+process or allocator.
+
+Collection completeness is not a coherent publication fence: the local attempt
+number is inspection correlation, not a coordinator revision. Final publication
+still needs the lock-holder generation, coordinator input revision and local
+source rechecks below. Collection alone does not establish the complete configured
+scope membership or executing-runtime support.
+
 ## Implemented storage boundary
 
 Each enrolled machine/environment scope has a monotonically increasing
@@ -54,9 +100,10 @@ equivalent-source deduplication, pauses and overrides. This storage API does not
 prove that collection is complete. Its opaque `input_revision` is a correlation
 provided by that owner, not an arbitrary allocator's completeness certificate.
 No ordinary allocator may publish a preferred subset or available-slot count.
-Input failure or cached fallback must produce unavailable metadata, not a
-success-shaped publication. Pending local inputs and withdrawals need the
-owner's own revision fencing before a source snapshot can be qualified.
+The local collector refuses failed/cached/uncertain observations, but transport
+must carry its unavailable result rather than reuse an older complete tuple.
+Pending local inputs and withdrawals still need the owner's own revision
+fencing and rechecks before a source snapshot can be published.
 
 The controlling registration owner must also establish the complete expected
 scope membership. These primitives retain every scope it enrolls; an empty

@@ -346,29 +346,6 @@ class SupervisorDaemon(BoundedReconciliation):
     def _recheck_governance(self, checkpoint: str) -> dict[str, Any] | None:
         return self._governance.recheck(checkpoint)
 
-    def _overridden_off(self) -> set[str]:
-        """Registration ids an operator has disabled via the override store.
-
-        Best-effort: read via the injected ``overrides_source`` or, by default, the
-        local ``overrides.json``. Any failure yields an empty set (no override in
-        effect) rather than tearing down units on a bad read -- the override is a
-        *stop* signal, so its absence must fail safe toward "keep running what is
-        declared".
-        """
-        from . import overrides as ov
-
-        try:
-            if self.overrides_source is not None:
-                data = self.overrides_source()
-            else:
-                from .config import overrides_path
-
-                data = ov.load_overrides(overrides_path())
-        except Exception:  # pragma: no cover - override read is environment-dependent
-            log.exception("failed to read operator overrides; treating as none")
-            return set()
-        return ov.overridden_off_ids(data)
-
     def _desired(self) -> dict[str, dict]:
         """Active registrations scoped to this daemon's (machine, env), minus
         operator overrides.
@@ -383,38 +360,9 @@ class SupervisorDaemon(BoundedReconciliation):
         discovery layer and a later re-sync cannot quietly revive the unit (vision
         Behavior *overrides-take-precedence*). A dropped id is then wound down by the
         reconcile's stop-not-desired step."""
-        declared = self._declared()
-        regs = self._store_registrations()
-        regs = [r for r in regs if r.get("id") not in self._published_declared_ids]
-        merged = merge_registration_sources(regs, declared)
-        diagnostics = (tuple(merged.deduplicated), tuple(merged.conflicts))
-        if diagnostics != self._last_merge_diagnostics:
-            for rid in merged.deduplicated:
-                log.info(
-                    "equivalent declaration supersedes direct registration %s; "
-                    "keeping the direct row dormant for reversible migration",
-                    rid,
-                )
-            for conflict in merged.conflicts:
-                log.warning(
-                    "direct/declaration registration conflict: %s; preserving both",
-                    conflict,
-                )
-            self._last_merge_diagnostics = diagnostics
-        desired = merged.registrations
-        overridden = self._overridden_off()
-        for rid in overridden:
-            desired.pop(rid, None)
-            replacement = merged.replacements.get(rid)
-            if replacement:
-                desired.pop(replacement, None)
-        for rid, registration in list(desired.items()):
-            if registration_override_ids(registration) & overridden:
-                desired.pop(rid, None)
+        desired = self._effective_registrations()
         self._resolve_companion_desired(desired)
         self._materialize_managed_runtime_desired(desired)
-        self._deduplicated = merged.deduplicated
-        self._conflicts = merged.conflicts
         return desired
 
     def _companion(self) -> CompanionController:

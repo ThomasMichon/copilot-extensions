@@ -1,0 +1,9 @@
+{
+  "comment": "Collect complete effective pool definitions through the existing reconciliation owner; refuse cached and uncertain source observations without changing legacy supervision.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

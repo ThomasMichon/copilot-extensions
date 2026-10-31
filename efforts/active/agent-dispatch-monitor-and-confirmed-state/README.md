@@ -1307,3 +1307,43 @@ fresh effective-source collection, authenticated transport and mixed-cohort
 qualification remain the next stretch before atomic placement. It does not
 claim that a caller-supplied correlation proves completeness or that a source
 merge enables a live pool.
+
+The internal catalog provider source merged in
+[#9781](https://github.com/ThomasMichon/copilot-extensions/pull/9781) as
+`825e9f53ec534bec6f6a4d3317648f19c6750715` after current-head approval
+and successful required checks. Managed pull-forward reached that exact merge
+with no surviving diff. This closes only the storage prerequisite; actual
+complete effective-source collection and its publication authority remain
+the next integration slice before any placement or running adoption.
+
+### 2026-10-31 - Effective pool source collection
+
+The existing declaration/direct/override reconciliation owner now captures an
+immutable all-or-none local worker-definition snapshot after source precedence,
+runtime-equivalent deduplication and override vetoes, before companion mutation.
+It preserves legacy desired-set reconciliation while refusing cached/delayed
+reads, uncertain publication/withdrawal, missing definitions and partial input
+observations as complete pool evidence. Ordinary declarations use the actual
+registrar report; strict override observation retains valid legacy vetoes but
+does not mistake unreadable/malformed input for confirmed absence.
+
+This advances only the local collection prerequisite described in
+[pool publication](../../../plugins/agent-dispatch/docs/pool-publication.md).
+It is not catalog publication authority: local/coordinator revision rechecks,
+actual lock-holder enrollment, authenticated transport, expected-scope
+membership, legacy-source qualification and mixed-cohort admission remain open
+before atomic placement. No pool activation, runtime capability or live
+qualification follows from the source observation.
+
+The bounded packets pass 195 incumbent-supervisor/collection/override controls
+and 158 final-collection/registrar/selected-authority controls. Actual temporary
+registrar corruption retains legacy declarations without complete pool evidence;
+recovery requires a fresh report. Delayed and prewithdrawal observations refuse
+complete collection. Focused lint/type and packaging/documentation checks pass.
+These source controls do not resolve the full assignment/startup matrix.
+
+The final bounded packet passes 203 collection/incumbent-supervisor/override
+controls. Metadata completion now compares the complete current target set,
+not just each ledger entry's confirmation state: settling an older unknown
+write or exhausting the publication budget cannot confirm a changed, removed
+or newly added declaration. Five controls cover those cases and fresh recovery.
