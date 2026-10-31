@@ -315,6 +315,9 @@ Normal mux-daemon startup uses the
 [external Python bytecode cache](../libs/agent-procutil/README.md#managed-python-bytecode-cache)
 under Manager's durable root. Explicitly read-only retention/bootstrap controls
 keep their separate no-bytecode contract.
+Worktrees' direct Manager and fast-Picker handoffs carry the same cache policy
+on their frozen engine callback command, using Worktrees' durable root rather
+than Manager's root. The callback keeps its original interpreter and arguments.
 The retained launch-session registration and pane-wrapper removal callbacks
 also use that payload's constructed interpreter and retention bootstrap, without
 requiring `uv`. Their bounded metadata work is dispatched through the existing

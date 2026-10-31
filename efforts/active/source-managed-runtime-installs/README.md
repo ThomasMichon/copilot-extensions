@@ -1683,4 +1683,19 @@ values. Their 56 local tests pass with the two hosted evidence assertions
 deselected and cleanup verified. No baseline is resealed, no assertion is
 relaxed, and the underlying retention discrepancy remains open.
 
+Diagnostic head `d8feab8525` passes both complete hosted modes in run
+`41192837539`, including strict original retention and clean settlement.
+Preparation-end and pre-exercise comparisons are unchanged, and the observed
+Worktrees resident carries cache-prefix and no-bytecode launch flags. The
+earlier 145 additions do not reproduce; that pass alone does not identify
+their writer. A separate source regression proves that Worktrees' frozen
+Manager engine callbacks still omit cache routing and create bytecode beside
+their source. Direct Manager, status-link and fast-Picker handoffs now reuse
+the existing cache-aware callback command with Worktrees' durable root.
+The cold/warm real child and affected callback/Picker controls pass 101 tests
+with 156 deselected and verified cleanup. Callback interpreter, argument,
+environment and custody contracts remain unchanged apart from the cache flags.
+The new exact head still needs both complete hosted modes and actual review;
+the historical writer is not claimed to be uniquely attributed.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.
