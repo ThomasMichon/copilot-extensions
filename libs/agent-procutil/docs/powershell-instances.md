@@ -38,6 +38,10 @@ The finite target's monotonic deadline starts before target creation and is
 never reset after spawning. A completion observed after that deadline remains
 a timeout; the separate ten-second retirement allowance does not grant more
 target execution time.
+Fully qualified, normalized UNC share-root working directories retain their
+original spelling, with or without a trailing backslash. The cwd exception
+does not admit a bare share root as an executable or log filename, or relax
+drive-relative, current-drive-rooted or unnormalized path refusal.
 Large outcomes use ordered, nonce/request-correlated fragments within the same
 request deadline. Each frame remains bounded; supported reconciliation batches
 and removed-artifact paths are reassembled without discarding outcomes after

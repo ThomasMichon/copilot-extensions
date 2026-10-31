@@ -73,6 +73,39 @@ def test_invalid_request_refuses_before_log_or_native_creation(
     owned.module._spawn.assert_not_called()
 
 
+@pytest.mark.parametrize("cwd", [r"\\server\share", "\\\\server\\share\\"],
+                         ids=["without-separator", "with-separator"])
+def test_unc_share_root_cwd_reaches_target_unchanged(owned, parameters: dict, cwd: str) -> None:
+    parameters["cwd"] = cwd
+    request = owned.module.validate_request(parameters)
+    assert request.cwd == cwd
+    assert request.argv == [parameters["executable"], *parameters["arguments"]]
+    assert request.environment == parameters["environment"]
+    output = Mock()
+    assert owned.module._run_target(request, output) == 7
+    owned.module._spawn.assert_called_once_with(request, output)
+    owned.process.retire_job.assert_called_once_with(owned.job, 10)
+
+
+@pytest.mark.parametrize("field,path", [
+    ("executable", r"\\server\share"), ("log", r"\\server\share"),
+    ("cwd", r"\\server"), ("cwd", "\\\\server\\"), ("cwd", r"\\?\C:"),
+    ("cwd", "C:fixture"), ("cwd", r"C:\fixture\..\other"),
+], ids=[
+    "share-root-executable", "share-root-log", "missing-share", "empty-share",
+    "device-root", "drive-relative-cwd", "unnormalized-cwd",
+])
+def test_unc_cwd_exception_does_not_relax_other_path_refusals(
+    owned, parameters: dict, field: str, path: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(owned.module, "open", lambda *args, **kwargs: pytest.fail("log opened"), raising=False)
+    parameters[field] = path
+    with pytest.raises(owned.module.NativeOwnedFailure, match="fully qualified") as failure:
+        owned.module.run(parameters)
+    assert failure.value.cleanup_confirmed is True
+    owned.module._spawn.assert_not_called()
+
+
 @pytest.mark.parametrize("code", [0, 7, 0xC0000005, 0xFFFFFFFF])
 def test_root_status_waits_for_every_job_writer_and_exact_retirement(
     owned, parameters: dict, code: int,

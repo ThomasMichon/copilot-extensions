@@ -38,14 +38,22 @@ class NativeOwnedFailure(OSError):
         self.log_error: BaseException | None = None
 
 
-def _absolute_path(value: object) -> str:
+def _absolute_path(value: object, *, allow_unc_root: bool = False) -> str:
     if not isinstance(value, str) or not value or "\0" in value:
         raise ValueError("native process paths must be fully qualified and normalized")
     drive, tail = ntpath.splitdrive(value)
     normalized = ntpath.normpath(value)
     if value.endswith("\\") and not normalized.endswith("\\"):
         normalized += "\\"
-    if not drive or not tail.startswith(("\\", "/")) or normalized.lower() != value.lower():
+    components = drive[2:].split("\\")
+    unc_root = (
+        allow_unc_root and not tail and drive.startswith("\\\\")
+        and len(components) == 2 and all(components) and components[0] not in ("?", ".")
+    )
+    if (
+        not drive or not (tail.startswith(("\\", "/")) or unc_root)
+        or normalized.lower() != value.lower()
+    ):
         raise ValueError("native process paths must be fully qualified and normalized")
     return value
 
@@ -55,9 +63,9 @@ def validate_request(value: object) -> NativeOwnedRequest:
         "executable", "arguments", "cwd", "log", "timeout_ms", "environment",
     }:
         raise ValueError("invalid native owned-process request")
-    executable, cwd, log = (
-        _absolute_path(value[name]) for name in ("executable", "cwd", "log")
-    )
+    executable = _absolute_path(value["executable"])
+    cwd = _absolute_path(value["cwd"], allow_unc_root=True)
+    log = _absolute_path(value["log"])
     arguments = value["arguments"]
     if not isinstance(arguments, list) or any(
         not isinstance(argument, str) or "\0" in argument for argument in arguments

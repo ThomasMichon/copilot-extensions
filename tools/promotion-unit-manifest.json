@@ -3274,7 +3274,16 @@
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[completion-None]",
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[completion-2.0]",
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[retirement-None]",
-        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[retirement-2.0]"
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_guardian_preserves_deadline_before_launch_and_after_settlement[retirement-2.0]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_unc_share_root_cwd_reaches_target_unchanged[without-separator]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_unc_share_root_cwd_reaches_target_unchanged[with-separator]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_unc_cwd_exception_does_not_relax_other_path_refusals[share-root-executable]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_unc_cwd_exception_does_not_relax_other_path_refusals[share-root-log]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_unc_cwd_exception_does_not_relax_other_path_refusals[missing-share]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_unc_cwd_exception_does_not_relax_other_path_refusals[empty-share]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_unc_cwd_exception_does_not_relax_other_path_refusals[device-root]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_unc_cwd_exception_does_not_relax_other_path_refusals[drive-relative-cwd]",
+        "tools/promotion_unit_tests/test_native_owned.py::test_unc_cwd_exception_does_not_relax_other_path_refusals[unnormalized-cwd]"
     ],
     "sources": {
         "libs/versioned-runtime/versioned_runtime_publication.py": "070c9db612246d8722e3f2c94487bfb63177a78e2485a7f14c5d38ed8060b79d",
@@ -3652,8 +3661,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py": "5824b9349a74795f99deb7c078ab2179362ff9bbd9a7f8e488e8dd2e29464e89",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "6c496b46692599bf022cdbf8daecea7195fffde509bbc23f4b461d63ec18d6e6",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4",
-        "libs/agent-procutil/src/agent_procutil/_native_owned.py": "16c873b25b0b60f552d8a3e434cb6e155805a55b49749538944e94926d4d09b1",
-        "tools/promotion_unit_tests/test_native_owned.py": "ee2eb245eb28747ccba5646c220923c137490b1c66c09fcdb07aa6abfe5d7293",
+        "libs/agent-procutil/src/agent_procutil/_native_owned.py": "908a6021d730ff6c15da3ff3619e098a48ea1936c578c3d745c40d7e8e3460a4",
+        "tools/promotion_unit_tests/test_native_owned.py": "0a277a3d73e25da40e16a7bd2bcb8693c7525cae29ce46b4f0d79f3a53c402d5",
         "tools/promotion_unit_tests/test_sdk_functional.py": "20b31bfc943e9f6f9fd2967aa168489dbb10cd074509b980fbea79c36979d6b5",
         "tools/promotion_unit_tests/test_daemon_fixture_publication.py": "74eb81efecaffa08f0b26adfbf2825c61ab1a39ceb64653b78a22154ee0e1846",
         "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py": "ccfe54ab6c03376318535cd379a24b08ad6368aa25964bab6f3d4e498cbf11e2",

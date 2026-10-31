@@ -60,6 +60,37 @@ def test_validation_preserves_original_arguments_environment_and_trailing_cwd(na
     assert parsed.environment is not native_request["environment"]
 
 
+@pytest.mark.parametrize("cwd", [r"\\server\share", "\\\\server\\share\\"])
+def test_validation_preserves_unc_share_root_cwd(native_request: dict, cwd: str) -> None:
+    native_request["cwd"] = cwd
+    parsed = owned.validate_request(native_request)
+    assert parsed.cwd == cwd
+    assert parsed.argv == [native_request["executable"], *native_request["arguments"]]
+    assert parsed.environment == native_request["environment"]
+
+
+@pytest.mark.parametrize("field", ["executable", "log"])
+def test_unc_share_root_is_not_a_file_path(
+    native_request: dict, field: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(owned, "open", Mock(side_effect=AssertionError("log opened")), raising=False)
+    native_request[field] = r"\\server\share"
+    with pytest.raises(owned.NativeOwnedFailure, match="fully qualified") as failure:
+        owned.run(native_request)
+    assert failure.value.cleanup_confirmed is True
+
+
+@pytest.mark.parametrize("cwd", [r"\\server", "\\\\server\\", r"\\?\C:"])
+def test_incomplete_unc_or_device_root_cwd_refuses_before_log_open(
+    native_request: dict, cwd: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(owned, "open", Mock(side_effect=AssertionError("log opened")), raising=False)
+    native_request["cwd"] = cwd
+    with pytest.raises(owned.NativeOwnedFailure, match="fully qualified") as failure:
+        owned.run(native_request)
+    assert failure.value.cleanup_confirmed is True
+
+
 def test_original_scope_boundary_excludes_helper_metadata_and_normalizes_key_case(
     native_request: dict, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
