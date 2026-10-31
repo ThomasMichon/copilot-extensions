@@ -14,7 +14,6 @@ import shutil as shutil  # Retain the shared adapter seam for existing callers.
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -22,12 +21,12 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence, TypeVar
 
 if __package__:
-    from .native_test_paths import native_test_path
+    from .native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
     from .plugin_test_containment_posix import (
         GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
     )
 else:
-    from native_test_paths import native_test_path
+    from native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
     from plugin_test_containment_posix import (
         GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
     )
@@ -154,7 +153,7 @@ class UnreapedProcessError(ContainmentError):
     """Owned processes may still hold the sandbox; cleanup is unsafe."""
 
 
-class TestSandbox(tempfile.TemporaryDirectory):
+class TestSandbox(NativeTemporaryDirectory):
     """Retain owned files whenever termination cannot be established."""
 
     def __init__(self, *args, **kwargs):
@@ -169,13 +168,6 @@ class TestSandbox(tempfile.TemporaryDirectory):
                 f"[KEEP] Unreaped process tree: sandbox retained at {self.name}",
                 file=sys.stderr,
             )
-
-    @classmethod
-    def _rmtree(cls, name, ignore_errors=False, repeated=False):
-        return super()._rmtree(
-            str(native_test_path(Path(name).absolute())),
-            ignore_errors=ignore_errors, repeated=repeated,
-        )
 
     def __exit__(self, exc_type, exc_value, traceback):
         if isinstance(exc_value, UnreapedProcessError):
