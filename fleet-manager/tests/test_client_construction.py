@@ -446,9 +446,13 @@ def test_sanitized_child_environment_preserves_native_custody_tools_without_host
         assert set(os.defpath.split(os.pathsep)) <= set(environment["PATH"].split(os.pathsep))
 
 
-@pytest.mark.parametrize("member", ["_installer_process.py", "_construction_procutil.py", "_runtime_launcher.py"])
+@pytest.mark.parametrize("member", [
+    "_installer_process.py", "_construction_procutil/__init__.py",
+    "_construction_procutil/_job_scopes.py", "_runtime_launcher.py",
+])
 def test_installed_process_resource_replacement_refuses_execution(tmp_path, monkeypatch, member):
     resource = tmp_path / member
+    resource.parent.mkdir(parents=True, exist_ok=True)
     resource.write_bytes(b"raise AssertionError('changed resource executed')\n")
     monkeypatch.setattr(construction, "__file__", str(tmp_path / "client_construction.py"))
     monkeypatch.setattr(construction.artifact_staging, "diagnose_client", lambda: {

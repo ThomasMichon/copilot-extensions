@@ -34,7 +34,8 @@ COMPANIONS = (
 PROCESS_RESOURCES = {
     "_runtime_launcher.py": Path("installer-engine") / "runtime_launcher.py",
     "_installer_process.py": Path("installer-engine") / "installer_engine_process.py",
-    "_construction_procutil.py": Path("agent-procutil") / "src" / "agent_procutil" / "__init__.py",
+    "_construction_procutil/__init__.py": Path("agent-procutil") / "src" / "agent_procutil" / "__init__.py",
+    "_construction_procutil/_job_scopes.py": Path("agent-procutil") / "src" / "agent_procutil" / "_job_scopes.py",
 }
 
 
@@ -423,6 +424,53 @@ def test_gateway_docker_context_delivers_complete_procutil_source_closure(tmp_pa
             member = "agent_procutil/" + name.removeprefix(prefix)
             assert artifact.namelist().count(member) == 1, member
             assert artifact.read(member) == (repository / name).read_bytes(), member
+
+
+@pytest.mark.parametrize("loader", ["package", "guardian"])
+def test_standalone_construction_resource_preserves_package_relative_job_scopes(tmp_path, loader):
+    project, _library = project_at(tmp_path / "checkout")
+    output = tmp_path / "artifacts"
+    result = build(project, output)
+    assert result.returncode == 0, result.stderr
+    extracted = tmp_path / "resources"
+    extracted.mkdir()
+    with zipfile.ZipFile(next(output.glob("*.whl"))) as archive:
+        names = {
+            name for name in archive.namelist()
+            if name.startswith("fleet_manager/_construction_procutil")
+            or name == "fleet_manager/_installer_process.py"
+        }
+        for name in names:
+            target = extracted / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(archive.read(name))
+    entry = next(path for path in extracted.rglob("*.py") if path.name in {
+        "_construction_procutil.py", "__init__.py",
+    })
+    name = "standalone_construction_scope_fixture"
+    spec = importlib.util.spec_from_file_location(name, entry)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        if loader == "guardian":
+            guardian_path = extracted / "fleet_manager/_installer_process.py"
+            guardian_spec = importlib.util.spec_from_file_location("construction_guardian_fixture", guardian_path)
+            assert guardian_spec and guardian_spec.loader
+            guardian = importlib.util.module_from_spec(guardian_spec)
+            guardian_spec.loader.exec_module(guardian)
+            module = guardian._load_resource(name, entry)
+        else:
+            spec.loader.exec_module(module)
+        original, appended = "Local\\ce-owned-job-" + "1" * 32, "Local\\ce-owned-job-" + "2" * 32
+        result = module._job_child_environment(
+            {module._JOB_SCOPES_ENV: original}, append=appended, inherit_current=False,
+        )
+        assert result[module._JOB_SCOPES_ENV] == original + ";" + appended
+    finally:
+        for key in tuple(sys.modules):
+            if key == name or key.startswith(name + "."):
+                del sys.modules[key]
 
 
 @pytest.mark.parametrize("context_kind", ["repository", "pinned"])
