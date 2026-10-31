@@ -1866,8 +1866,13 @@ wheel identities, target/profile,
 executor/tooling bytes and the actual sanitized build environment. Retained
 temporary paths and package versions alone never identify a build. Cache
 publication uses the existing per-key kernel lease and an atomic completed-entry
-rename; corrupt or foreign completed entries refuse explicitly. Cached bytes
-are copied and hashed into caller-owned output before the ordinary wheel
+rename; corrupt or foreign completed entries refuse explicitly. Wheels
+remain unpublished through finite Windows sharing-lock retries. Native controls
+hold a real wheel handle across the first rename, then release it; persistent
+denial, changed candidates, destination collisions and expired allowances still
+refuse without publishing or removing another owner's entry. Retries retain the
+original deadline and reverify the same wheel and receipt. Cached bytes are
+copied and hashed into caller-owned output before the ordinary wheel
 inspection and installed-content checks. The cache is not source/feed approval
 and does not enable another consumer. `tools/test_runtime_source_wheel_cache.py`
 covers failure, corruption, input invalidation and concurrent construction;
