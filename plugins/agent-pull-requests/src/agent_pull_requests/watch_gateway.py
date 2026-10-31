@@ -92,6 +92,7 @@ class WatchGateway:
         self, store: ReplayStore, *, fleet: str, gateway: str, slot: str,
         bindings: tuple[WatchScopeBinding, ...],
         checkpoint: Callable[[], None] | None = None,
+        workspaces=None,
     ) -> None:
         for name in (fleet, gateway, slot):
             identifier(name)
@@ -115,6 +116,14 @@ class WatchGateway:
         self._checkpoint = checkpoint
         self.fleet, self.gateway, self.slot = fleet, gateway, slot
         self.bindings = MappingProxyType(selected)
+        from .workspace_operations import WorkspaceOperations
+        workspaces = {} if workspaces is None else dict(workspaces)
+        if any(
+            key not in selected or not isinstance(value, WorkspaceOperations) or value.store is not store
+            for key, value in workspaces.items()
+        ):
+            raise ValueError("workspace operations must use an existing admitted scope/storage owner")
+        self.workspaces = MappingProxyType(workspaces)
         self._tasks: set[asyncio.Task[ServiceResponse]] = set()
         self._closing = False
 
@@ -134,6 +143,8 @@ class WatchGateway:
             or caller.expires_at <= self.store.clock()
         ):
             return _response(403, {"error": "watch_caller_refused"})
+        if request.target.startswith("/v2/review/"):
+            return await self._handle_workspace(request)
         matched = _PATH.fullmatch(request.target)
         if matched is None:
             return _response(404, {"error": "watch_route_not_found"})
@@ -192,6 +203,72 @@ class WatchGateway:
         request.lifetime.check()
         if self._checkpoint is not None:
             self._checkpoint()
+
+    async def _handle_workspace(self, request):
+        from .workspace_operations import OPERATIONS
+        matched = re.fullmatch(r"/v2/review/([a-z0-9][a-z0-9-]{0,63})/([a-z]+)", request.target)
+        if matched is None or matched[2] not in OPERATIONS:
+            return _response(404, {"error": "workspace_route_not_found"})
+        target, operation = matched.groups()
+        workspace = self.workspaces.get((request.context.principal, target))
+        if workspace is None:
+            return _response(404, {"error": "workspace_unsupported"})
+        if request.method != "POST":
+            return _response(405, {"error": "workspace_method_refused"})
+        if len(request.body) > BODY_BYTES:
+            return _response(413, {"error": "workspace_request_limit"})
+        if dict(request.headers).get("content-type", "").split(";")[0] != "application/json":
+            return _response(415, {"error": "workspace_json_required"})
+        try:
+            payload = json_object(request.body)
+            if set(payload) != {"binding", "request"} or not isinstance(payload["request"], dict):
+                raise ValueError
+            expected = ReplayBinding.from_document(payload["binding"])
+            if self._binding(request, target) != expected:
+                raise ReplayBindingMismatch
+        except ReplayBindingMismatch:
+            return _response(409, {"error": "workspace_binding_mismatch"})
+        except (ValueError, UnicodeError, RecursionError):
+            return _response(400, {"error": "invalid_workspace_request"})
+        if self._closing or len(self._tasks) >= 8:
+            return _response(503, {"error": "workspace_service_unavailable"})
+        task = asyncio.create_task(self._execute_workspace(
+            workspace, operation, payload["request"], request, target, expected,
+        ))
+        self._tasks.add(task)
+        task.add_done_callback(self._completed)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            request.lifetime.close()
+            raise
+
+    async def _execute_workspace(self, workspace, operation, payload, request, target, expected):
+        from .workspace_operations import WorkspaceUnavailable
+
+        def checkpoint():
+            self._check(request)
+            if self._binding(request, target) != expected:
+                raise ReplayBindingMismatch
+
+        try:
+            value = await asyncio.to_thread(
+                workspace.execute, operation, payload,
+                expires_at=request.context.expires_at, checkpoint=checkpoint,
+            )
+            checkpoint()
+            value = dict(value, binding=expected.document())
+            if len(json.dumps(value, allow_nan=False).encode("utf-8")) > BODY_BYTES:
+                return _response(503, {"error": "workspace_response_limit"})
+            return _response(200, value)
+        except RequestDisconnected:
+            return _response(503, {"error": "workspace_request_disconnected"})
+        except ReplayBindingMismatch:
+            return _response(409, {"error": "workspace_binding_mismatch"})
+        except (WorkspaceUnavailable, OSError, RuntimeError):
+            return _response(503, {"error": "workspace_owner_unavailable"})
+        except (ValueError, OverflowError):
+            return _response(400, {"error": "invalid_workspace_operation"})
 
     def _binding(self, request: ServiceRequest, target: str) -> ReplayBinding:
         caller = request.context

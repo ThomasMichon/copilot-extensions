@@ -99,11 +99,11 @@ The source implementation continuation is admitted; operational effects are not.
 ### Phase 1 - Reconcile standing intent and architecture
 - [x] Reconcile the existing PR plugin/capability visions; revise their
   intent-level features and behaviors where this proposal extends them.
-- [ ] Specify PR-domain ownership, service-backed cache and client workspace
+- [x] Specify PR-domain ownership, service-backed cache and client workspace
   roles without retaining a parallel forge implementation.
-- [ ] Resolve the proposal's explicit architecture decisions and document
+- [x] Resolve the proposal's explicit architecture decisions and document
   capability discovery, supported peer behavior and expand/migrate/contract.
-  Next reviewed admission is the bounded
+  Reviewed admission #9787 is the bounded
   [existing-owner service/client integration](service-client-integration-slice.md):
   optional existing-gateway routes, immutable framed materialization and the
   same protected operations; no new transport or deployment owner.
@@ -207,6 +207,24 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-10-31 - Existing-owner service/client source realization
+- #9787 merged as `5a47a3b278b614f0f6422cd115c21403113a718d`
+  from head `a2d61dfa6b2123c9a6287af37e8e496234f0fd05` after actual approval,
+  resolved compatibility finding and required CI success. Kept strict old watch
+  capability responses unchanged rather than adding an incompatible field.
+- Realize optional workspace operations inside the existing gateway/service
+  lifecycle, native and existing Fleet clients, protected read/executor owners,
+  atomic generation cache and the same durable ReplayStore. Immutable generation
+  framing keeps the physical transport limit unchanged; oversized submit refuses.
+- Initial contained packet passes 173 actual source consumer controls, including
+  13 workspace integration cases and unchanged gateway/client/service controls.
+  Real store/client/handler cases cover retained materialization, section deltas,
+  partial evidence, concurrent CAS, request disconnect/drain, unknown submission
+  reconciliation, old strict readers and missing/unsupported capabilities.
+- Actual backend/source acquisition, current protected owner adoption, running
+  compatible v2 readers and installed serving/release/rollout remain unqualified.
+  No operational command or standalone callback deployment is introduced.
 
 ### 2026-10-31 - Protected source executor merged; integration remains open
 - #9745 merged as `eb6d6e3fe007aeb07582c31d8daa4e2604cfeb45`
