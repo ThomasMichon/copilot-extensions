@@ -13,7 +13,7 @@ agent-zdd = { path = "../zdd", editable = true }
 # "procutil") to prevent dependency-confusion; the import module is
 # ``agent_procutil``. Mirrors agent-config-migrate / agent-ssh-manager.
 name = "agent-procutil"
-version = "0.1.11-dev1"
+version = "0.1.12-dev1"
 description = "Shared Windows-headless / detached process-spawn kwargs for Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"

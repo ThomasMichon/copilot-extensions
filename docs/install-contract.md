@@ -4573,8 +4573,17 @@ the check precedes renewal, so late completion cannot erase a silent expiry.
 Retention reporting finishes before construction starts, while the original
 retained-input owner keeps its files until construction and native cleanup
 settle. The optional fingerprint callback does not change framing or digest
-bytes, and CLI stdout remains unchanged. Deferred source stamping and native
-self-stage watchdog integration remain separate boundaries.
+bytes, and CLI stdout remains unchanged.
+
+Deferred source identity validation and snapshot stamping likewise report
+completed input checks, deterministic fingerprint entries and file copies on
+stderr. PowerShell source callers select stderr-only native byte streaming
+while retaining the original captured diagnostics, stdin, exit code and parsed
+stdout; POSIX command substitution already leaves stderr attached to its caller.
+Snapshot leases, source revalidation, copy semantics and publication cleanup
+remain with their original owners. Quiet copying still expires through the
+caller's existing process owner; progress cannot publish an incomplete snapshot.
+Native self-stage watchdog integration remains a separate boundary.
 
 Ordinary immutable source candidates request UV hardlinks from its extracted
 wheel cache, with UV's normal copy fallback when linking is unavailable.

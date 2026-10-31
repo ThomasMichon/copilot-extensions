@@ -81,11 +81,15 @@ function Invoke-Hidden {
         [string[]]$ArgList = @(),
         [ref]$ErrorOutput,
         [string]$InputText,
-        [switch]$StreamOutput
+        [switch]$StreamOutput,
+        [switch]$StreamErrorOutput
     )
     if ($StreamOutput -and ($PSBoundParameters.ContainsKey('ErrorOutput') -or
         $PSBoundParameters.ContainsKey('InputText'))) {
         throw 'Streaming native output cannot be combined with captured streams.'
+    }
+    if ($StreamOutput -and $StreamErrorOutput) {
+        throw 'Native output must select either both streams or stderr-only streaming.'
     }
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FilePath
@@ -108,6 +112,65 @@ function Invoke-Hidden {
     $psi.RedirectStandardInput = $PSBoundParameters.ContainsKey('InputText')
     $proc = [System.Diagnostics.Process]::Start($psi)
     try {
+        if ($StreamErrorOutput) {
+            $stdout = $proc.StandardOutput.ReadToEndAsync()
+            $stderrStream = [Console]::OpenStandardError()
+            $capture = New-Object System.IO.MemoryStream
+            $buffer = New-Object byte[] 4096
+            $read = $proc.StandardError.BaseStream.ReadAsync($buffer, 0, $buffer.Length)
+            $write = $null
+            $inputWrite = $null
+            try {
+                if ($psi.RedirectStandardInput) {
+                    $encoding = New-Object System.Text.UTF8Encoding($false)
+                    $bytes = $encoding.GetBytes($InputText)
+                    $inputWrite = $proc.StandardInput.BaseStream.WriteAsync($bytes, 0, $bytes.Length)
+                }
+                while ($read -or $write -or $inputWrite) {
+                    if ($stdout.IsFaulted) { [void]$stdout.GetAwaiter().GetResult() }
+                    if ($inputWrite -and $inputWrite.IsCompleted) {
+                        [void]$inputWrite.GetAwaiter().GetResult()
+                        $proc.StandardInput.Close()
+                        $inputWrite = $null
+                    }
+                    if ($write -and $write.IsCompleted) {
+                        [void]$write.GetAwaiter().GetResult()
+                        $write = $null
+                        $read = $proc.StandardError.BaseStream.ReadAsync($buffer, 0, $buffer.Length)
+                    }
+                    if ($read -and $read.IsCompleted) {
+                        $count = $read.GetAwaiter().GetResult()
+                        $read = $null
+                        if ($count) {
+                            $capture.Write($buffer, 0, $count)
+                            $write = $stderrStream.WriteAsync($buffer, 0, $count)
+                        }
+                    }
+                    if ($read -or $write -or $inputWrite) { [Threading.Thread]::Sleep(10) }
+                }
+                $proc.WaitForExit()
+                $output = $stdout.GetAwaiter().GetResult()
+                $stderrStream.Flush()
+                $capture.Position = 0
+                $reader = New-Object System.IO.StreamReader($capture, $proc.StandardError.CurrentEncoding)
+                try { $errors = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                $global:LASTEXITCODE = $proc.ExitCode
+                if ($ErrorOutput) { $ErrorOutput.Value = $errors }
+                return $output
+            } catch {
+                $failure = $_
+                if (-not $proc.HasExited) { $proc.Kill() }
+                $proc.WaitForExit()
+                foreach ($task in @($stdout, $read, $write, $inputWrite)) {
+                    if ($task -and -not $task.IsCompleted) {
+                        try { [void]$task.GetAwaiter().GetResult() } catch { $failure = $_ }
+                    }
+                }
+                throw $failure
+            } finally {
+                $capture.Dispose()
+            }
+        }
         if ($StreamOutput) {
             $stdoutStream = [Console]::OpenStandardOutput()
             $stderrStream = [Console]::OpenStandardError()

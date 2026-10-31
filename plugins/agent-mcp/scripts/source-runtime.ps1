@@ -13,7 +13,7 @@ function Get-SourceRuntimeIdentity {
     $previousErrorAction = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $result = @(Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError))
+        $result = @(Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput)
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousErrorAction
@@ -79,7 +79,7 @@ function Publish-SourceSnapshot {
         '--expected-source-identity', $script:SourceRuntimeIdentity,
         '--snapshot-root', $InstallDir)
     $nativeError = ''
-    $snapshot = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $snapshot = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     $code = $LASTEXITCODE
     if ($code -ne 0) {
         throw "Source snapshot publication failed (exit ${code}): $snapshot$nativeError"
