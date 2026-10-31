@@ -1671,4 +1671,16 @@ finds no additional derived changes. Both complete hosted modes must qualify
 the corrected head before this draft becomes ready; no acceptance assertion is
 weakened and no live rollout is authorized.
 
+At corrected head `adebd56e6b`, hosted run `41189935743` passes normal mode:
+all 14 original slots have zero added, changed or removed files. Repair's
+preparation, exercise and settlement pass, but strict retention finds 145
+added files in the old Worktrees slot; the bounded path sample is truncated.
+Sampled modification times precede repair bootstrap startup, so the writer
+cannot be assigned to that installer without more evidence. Diagnostic-only
+fixture changes now compare preparation-end and pre-exercise state to the
+original seal and record scoped runtime process launch flags, never argument
+values. Their 56 local tests pass with the two hosted evidence assertions
+deselected and cleanup verified. No baseline is resealed, no assertion is
+relaxed, and the underlying retention discrepancy remains open.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.
