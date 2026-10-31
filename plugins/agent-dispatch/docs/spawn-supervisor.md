@@ -138,7 +138,7 @@ of the current reservation and worker-claim operations:
 
 | Boundary | Current implementation | Target, not yet implemented |
 |----------|------------------------|-----------------------------|
-| Pool selection | Each lane sweeps its own candidates and capacity; no universal ordered all-pool sweep | The allocator selects the first matching pool with capacity, or waits for the task's retained pool |
+| Pool selection | Each lane sweeps its own candidates and capacity; no universal ordered all-pool sweep | The allocator selects the first priority-ordered matching machine/environment instance with capacity, or waits for the task's retained instance |
 | Spawn reservation | `reserve_spawn` reserves a queued, unowned task separately from its execution claim | `QUEUED -> CLAIMED` commits pool binding, reservation creation/reuse and occupied capacity atomically |
 | Worker identity | `claim_one` requires a worker identity; the embodied worker claims later | Initial placement needs no worktree/native identity; startup attaches the actual identities afterward |
 | `STARTED` | A later worker-owned transition | Startup has succeeded and the worker has explicitly accepted and begun the assignment |
@@ -167,6 +167,9 @@ task-wide cooldown sequence and successful-`STARTED` counter resets are
 **implementation-pending policy**, not current provider behavior. There is no new retry
 timer or pool-owned `CLAIMED` transition in the due-time admission fix, and
 source support does not establish installed adoption.
+The amendment's [pool scope and ordering](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md#selected-pool-scope-and-ordering)
+also remain implementation-pending: the current raw registration view does not
+carry the complete effective pool definitions required by atomic placement.
 
 ## Retained startup and process capacity
 
