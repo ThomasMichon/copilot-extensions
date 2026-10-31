@@ -73,6 +73,12 @@ The shared verifier requires every running container in the bridge membership
 before readiness; two observations with the same missing member cannot prove
 successful repair. The existing pending-created and stopped-container custody
 exceptions remain separate from running readiness.
+Running attachment identities must agree between container and bridge
+observations, not just across two bridge observations. Original key, profile,
+state and journal custody are rechecked both before and after the checkpoint's
+native, authority and immutable-evidence work, including the final pre-commit
+check. A key change during a native read cannot be deferred until a later,
+post-commit refusal.
 Every checkpoint rereads current/pending immutable outcome references and the
 original historical references; the just-retained outcome is compared with its
 in-memory expected value before state publication. Missing or corrupted evidence

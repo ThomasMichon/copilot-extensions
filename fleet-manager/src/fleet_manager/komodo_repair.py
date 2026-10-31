@@ -148,20 +148,24 @@ class _Attempt:
         self.retained: tuple[str, dict[str, Any]] | None = None
         self.checkpoint()
 
+    def _custody(self) -> None:
+        selected = self.resolution.current().candidate
+        self.state.check()
+        if (self.permit.fleet != selected.fleet
+                or canonical(self.state.read()) != self.saved
+                or _file_identity(self.path) != self.journal_identity
+                or self.journal.inspect(self.request) != self.receipt
+                or self.journal.inspect_named_external(resource=selected.resource) != self.receipt
+                or original_file(self.profile) != selected.profile()
+                or public_key_fingerprints(selected.material) != self.keys):
+            raise PlanError("Komodo repair original evidence changed during reconciliation")
+        verify_attempt_keys(self.original, selected, actual=self.keys)
+
     def checkpoint(self) -> None:
         self.permit = self.owner.admission.revalidate(self.permit, self.request)
         try:
             selected = self.resolution.current().candidate
-            self.state.check()
-            if (self.permit.fleet != selected.fleet
-                    or canonical(self.state.read()) != self.saved
-                    or _file_identity(self.path) != self.journal_identity
-                    or self.journal.inspect(self.request) != self.receipt
-                    or self.journal.inspect_named_external(resource=selected.resource) != self.receipt
-                    or original_file(self.profile) != selected.profile()
-                    or public_key_fingerprints(selected.material) != self.keys):
-                raise PlanError("Komodo repair original evidence changed during reconciliation")
-            verify_attempt_keys(self.original, selected, actual=self.keys)
+            self._custody()
             if self.observation is not None:
                 containers = self.native.inspect(
                     selected.declaration, selected.material, deadline=self.deadline)
@@ -178,6 +182,7 @@ class _Attempt:
             validate_history(self.state.root, self.history)
             if self.retained is not None and read_outcome(self.state.root, self.retained[0]) != self.retained[1]:
                 raise PlanError("Komodo repair retained outcome changed during publication")
+            self._custody()
         except BaseException:
             self.owner.admission.discard(self.permit)
             raise

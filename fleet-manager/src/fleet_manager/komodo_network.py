@@ -53,6 +53,12 @@ def verify_network(network: dict[str, Any] | None, selected: KomodoSelection,
                      and attachments[name].get("NetworkID") == "")
         if attachments[name].get("NetworkID") != network["Id"] and not unstarted:
             raise PlanError("Komodo native container network attachment changed")
+        if item["Id"] in running:
+            endpoint = network["Containers"][item["Id"]]
+            identity = attachments[name].get("EndpointID")
+            if (type(endpoint) is not dict or type(identity) is not str or not identity
+                    or endpoint.get("EndpointID") != identity):
+                raise PlanError("Komodo native network attachment identity differs")
     actual = network_fingerprint(network)
     if expected is not None:
         if actual != expected:

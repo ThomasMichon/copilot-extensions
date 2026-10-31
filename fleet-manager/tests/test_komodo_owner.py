@@ -59,6 +59,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
     "endpoint-after-health", "repeat-endpoint-after-health", "status-endpoint-after-health",
     "missing-membership-before-health", "repeat-missing-network-membership", "status-missing-network-membership",
     "failed-short-native-1",
+    "mismatched-attachment-before-health", "repeat-mismatched-attachment", "status-mismatched-attachment",
 ])
 def test_composed_owner_preserves_original_operation_and_real_native_custody(
     native_rig: Any, keys: Any, scenario: str, monkeypatch: Any, compose_version: str,
@@ -470,17 +471,21 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
 
             first = owner()
             original = request()
-            if scenario == "missing-membership-before-health":
+            if scenario in ("missing-membership-before-health", "mismatched-attachment-before-health"):
                 def omit_membership(arguments: list[str], **kwargs: Any) -> Any:
                     result = rig["tooling"].run(arguments, **kwargs)
                     if arguments[5] == "compose" and "up" in arguments[6:]:
-                        (rig["directory"] / "excluded-endpoints.json").write_text(json.dumps([
-                            live()["core"]["Id"],
-                        ]))
+                        identity = live()["core"]["Id"]
+                        path = rig["directory"] / ("excluded-endpoints.json"
+                            if scenario == "missing-membership-before-health" else "endpoint-overrides.json")
+                        value = [identity] if scenario == "missing-membership-before-health" else {
+                            identity: {"EndpointID": "f" * 64}}
+                        path.write_text(json.dumps(value))
                     return result
                 first.native = KomodoNative(replace(rig["tooling"], run=omit_membership))
             if scenario in ("stopped-after-health", "key-drift-after-health", "restart-after-health",
-                            "endpoint-after-health", "missing-membership-before-health"):
+                            "endpoint-after-health", "missing-membership-before-health",
+                            "mismatched-attachment-before-health"):
                 with pytest.raises(PlanError, match="readiness|runtime|identity|process|membership"):
                     await invoke(first, original)
                 assert effects() == 1
@@ -543,6 +548,10 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 before_http = len(health_requests)
                 if scenario.endswith("missing-network-membership"):
                     (rig["directory"] / "excluded-endpoints.json").write_text(json.dumps([live()["core"]["Id"]]))
+                elif scenario.endswith("mismatched-attachment"):
+                    (rig["directory"] / "endpoint-overrides.json").write_text(json.dumps({
+                        live()["core"]["Id"]: {"EndpointID": "f" * 64},
+                    }))
                 if scenario in ("status-stopped-periphery", "status-paused-periphery", "status-restarting-core"):
                     changed = live()
                     if scenario == "status-stopped-periphery":

@@ -21,6 +21,7 @@ pytestmark = [
 @pytest.mark.parametrize("case", [
     "running-present", "running-missing", "pending-running-missing",
     "created-pending", "created-not-pending", "stopped-missing",
+    "running-endpoint-mismatch", "running-endpoint-missing",
 ])
 def test_network_membership_requires_running_nodes_but_preserves_pending(
     native_rig: Any, case: str,
@@ -37,7 +38,8 @@ def test_network_membership_requires_running_nodes_but_preserves_pending(
     containers = {"core": {
         "Id": node, "State": {"Status": "created" if created else "running" if running else "exited",
                              "Running": running},
-        "NetworkSettings": {"Networks": {name: {"NetworkID": "" if created else identity}}},
+        "NetworkSettings": {"Networks": {name: {"NetworkID": "" if created else identity,
+                                               "EndpointID": "d" * 64 if running else ""}}},
     }}
     network = {
         "Id": identity, "Name": name, "Driver": "bridge", "Scope": "local",
@@ -45,10 +47,16 @@ def test_network_membership_requires_running_nodes_but_preserves_pending(
         "ConfigFrom": {"Network": ""}, "Options": {}, "IPAM": {"Driver": "default"},
         "Labels": {"io.fleet-manager.owner": selected.owner,
                    "com.docker.compose.project": project, "com.docker.compose.network": "default"},
-        "Containers": {node: {"Name": "core"}} if case == "running-present" else {},
+        "Containers": {node: {"Name": "core", "EndpointID": "d" * 64}} if case in (
+            "running-present", "running-endpoint-mismatch", "running-endpoint-missing") else {},
     }
+    if case == "running-endpoint-mismatch":
+        network["Containers"][node]["EndpointID"] = "e" * 64
+    elif case == "running-endpoint-missing":
+        del network["Containers"][node]["EndpointID"]
     pending = case in ("pending-running-missing", "created-pending")
-    if case in ("running-missing", "pending-running-missing", "created-not-pending"):
+    if case in ("running-missing", "pending-running-missing", "created-not-pending",
+                "running-endpoint-mismatch", "running-endpoint-missing"):
         with pytest.raises(PlanError, match="membership|attachment"):
             verify_network(network, selected, containers, None, created=True, pending=pending)
     else:

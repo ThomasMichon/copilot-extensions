@@ -42,7 +42,7 @@ DRIFTS = [
     for stage in ("retain", "save", "append")
     for change in ("stop", "restart", "resource", "network", "endpoint", "attachment", "disconnect",
                    "immutable-outcome-missing", "immutable-outcome-corrupt", "immutable-history-missing",
-                   "immutable-history-corrupt", "host-runtime")
+                   "immutable-history-corrupt", "host-runtime", "key-during-native")
 ]
 REFUSALS = [
     "different-request", "different-generation", "changed-candidate", "changed-executor", "same-executor",
@@ -54,6 +54,7 @@ REFUSALS = [
     "process-after-health", "state-after-health", "executor-after-health", "runtime-after-health",
     "health-endpoint-drift", "host-root-after-health",
     "missing-network-membership",
+    "mismatched-network-attachment",
 ] + DRIFTS
 
 
@@ -62,7 +63,8 @@ REFUSALS = [
         "success", "revoked-transition", "revoke-after-health", "journal-revoke",
     ) else [pytest.mark.client_distribution_full])
     for mode in ("success", "failed", "mount-order", "renewed", "prior-failed",
-                 "status-endpoint-drift", "status-missing-network-membership", *REFUSALS, *CRASHES)
+                 "status-endpoint-drift", "status-missing-network-membership",
+                 "status-mismatched-network-attachment", *REFUSALS, *CRASHES)
 ])
 def test_original_unknown_uses_current_repair_without_native_replay(
     native_rig: Any, keys: Any, monkeypatch: Any, mode: str,
@@ -218,6 +220,10 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             selected_request = original
             if mode in ("missing-network-membership", "status-missing-network-membership"):
                 (rig["directory"] / "excluded-endpoints.json").write_text(json.dumps([live()["core"]["Id"]]))
+            elif mode in ("mismatched-network-attachment", "status-mismatched-network-attachment"):
+                (rig["directory"] / "endpoint-overrides.json").write_text(json.dumps({
+                    live()["core"]["Id"]: {"EndpointID": "f" * 64},
+                }))
             if mode == "success":
                 baseline.current = lambda: executor[0]
                 calls = (rig["directory"] / "calls.jsonl").read_bytes()
@@ -308,6 +314,18 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 monkeypatch.setattr(KomodoOwner, "_ready", change_after_health)
 
             fired: list[bool] = []
+            late_key = [False]
+            if mode.endswith("key-during-native"):
+                original_network = KomodoNative.network
+
+                def changed_after_network(instance: Any, *args: Any, **kwargs: Any) -> Any:
+                    result = original_network(instance, *args, **kwargs)
+                    if late_key[0]:
+                        late_key[0] = False
+                        (rig["material"].keys / "core.pub").write_text(PUBLIC_PEM["periphery"])
+                    return result
+
+                monkeypatch.setattr(KomodoNative, "network", changed_after_network)
             if mode in CRASHES:
                 if mode.startswith("native"):
                     target, name = KomodoNative, "prerequisites"
@@ -365,6 +383,9 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                               else original_method(instance, *args, **kwargs))
                     if selected:
                         fired.append(True)
+                        if change == "key-during-native":
+                            late_key[0] = True
+                            return result
                         if change == "host-runtime":
                             shifted = rig["root"] / "shifted-runtime"
                             shifted.mkdir(mode=0o700)
@@ -409,7 +430,8 @@ def test_original_unknown_uses_current_repair_without_native_replay(
 
                 monkeypatch.setattr(target, name, drifted)
 
-            if mode in ("status-endpoint-drift", "status-missing-network-membership"):
+            if mode in ("status-endpoint-drift", "status-missing-network-membership",
+                        "status-mismatched-network-attachment"):
                 status = await asyncio.to_thread(call, status=True)
                 assert status["accepted"] == "unknown" and status["unresolved_effects"]
                 assert status["installed"] is status["currently_healthy"] is None
@@ -429,6 +451,8 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 if mode in DRIFTS:
                     assert fired and len(journal.results()) == (5 if prior_ref is not None else 2)
                     assert decode((owner_root / "selection.json").read_bytes())["attempt"] == retained
+                    if mode == "publication-drift-retain-key-during-native":
+                        assert decode((owner_root / "selection.json").read_bytes())["good"] is None
                 if mode == "host-root-after-health" or mode.endswith("host-runtime"):
                     assert not (rig["root"] / "shifted-runtime" / candidate[0].resource).exists()
                 if mode == "missing-owner":

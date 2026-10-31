@@ -68,7 +68,8 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
         excluded = root / "excluded-endpoints.json"
         exclusions = json.loads(excluded.read_text()) if excluded.exists() else []
         network["Containers"].update({
-            item["Id"]: {"Name": name, **endpoints.get(item["Id"], {})}
+            item["Id"]: {"Name": name, "EndpointID": item["NetworkSettings"]["Networks"][
+                network["Name"]]["EndpointID"], **endpoints.get(item["Id"], {})}
             for name, item in live.items() if item["State"]["Running"] and item["Id"] not in exclusions
         })
         return 0, json.dumps([network])
@@ -170,7 +171,8 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
                         "StartedAt": "fixture-start-" + str(sequence),
                     },
                     "NetworkSettings": {"Networks": {
-                        network["Name"]: {"NetworkID": network["Id"]},
+                        network["Name"]: {"NetworkID": network["Id"],
+                                          "EndpointID": hashlib.sha256(f"{name}-{sequence}-endpoint".encode()).hexdigest()},
                     }},
                 }
             if (root / "corrupt-fixed").exists():
@@ -182,6 +184,7 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
                     for item in live.values():
                         item["State"] = {"Status": "created", "Running": False}
                         item["NetworkSettings"]["Networks"][network["Name"]]["NetworkID"] = ""
+                        item["NetworkSettings"]["Networks"][network["Name"]]["EndpointID"] = ""
             for name in ("core", "periphery"):
                 if name in live and live[name]["State"]["Running"]:
                     key_root = Path(profile["services"][name]["volumes"][0]["source"])
