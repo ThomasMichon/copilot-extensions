@@ -21,7 +21,9 @@ SPEC.loader.exec_module(rv)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows process observation")
-@pytest.mark.parametrize("observation", ["recovered", "exited", "unknown", "changed"])
+@pytest.mark.parametrize("observation", [
+    "recovered", "recovered-root-child", "recovered-root-foreign-child", "exited", "unknown", "changed",
+])
 def test_native_windows_census_refresh_keeps_identity_and_unknown_owner_refusal(
     tmp_path, observation,
 ):
@@ -41,16 +43,20 @@ $target=$PID
 $current=[Diagnostics.Process]::GetCurrentProcess()
 try { $stamp=$current.StartTime.ToUniversalTime().ToFileTimeUtc() } finally { $current.Dispose() }
 $finished=$null
-if ($observation -eq 'exited') {
+$child=$null
+if ($observation -eq 'exited' -or $observation.StartsWith('recovered-root-')) {
     $start=[Diagnostics.ProcessStartInfo]::new()
     $start.FileName='PYTHON'
-    $start.Arguments='-I -c pass'
+    $start.Arguments=if($observation -eq 'exited'){'-I -c pass'}else{'-I -c "import time;time.sleep(60)"'}
     $start.UseShellExecute=$false
     $start.CreateNoWindow=$true
-    $finished=[Diagnostics.Process]::Start($start)
-    $target=$finished.Id
-    $stamp=$finished.StartTime.ToUniversalTime().ToFileTimeUtc()
-    if (-not $finished.WaitForExit(10000)) { throw 'Fixture child did not exit' }
+    $launched=[Diagnostics.Process]::Start($start)
+    if ($observation -eq 'exited') {
+        $finished=$launched
+        $target=$finished.Id
+        $stamp=$finished.StartTime.ToUniversalTime().ToFileTimeUtc()
+        if (-not $finished.WaitForExit(10000)) { throw 'Fixture child did not exit' }
+    } else { $child=$launched }
 }
 $created=[datetime]::FromFileTimeUtc($stamp-($stamp%10))
 $script:observations=0
@@ -66,15 +72,37 @@ function Get-CimInstance {
         ExecutablePath=$(if($complete){'IMAGE'}else{''})
         CommandLine=$(if($complete){'fixture-census'}else{''})
     }
+    if (-not $Filter -and $child) {
+        $childStamp=$child.StartTime.ToUniversalTime().ToFileTimeUtc()
+        [pscustomobject]@{
+            ProcessId=$child.Id;ParentProcessId=$target;Name='node.exe'
+            CreationDate=[datetime]::FromFileTimeUtc($childStamp-($childStamp%10))
+            ExecutablePath='PYTHON';CommandLine='native-child'
+        }
+    }
 }
 function Invoke-CimMethod {
     param($InputObject,$MethodName,$ErrorAction)
-    [pscustomobject]@{ReturnValue=0;Sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value}
+    $ownerSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    if ($observation -eq 'recovered-root-foreign-child' -and $InputObject.ProcessId -eq $child.Id) {
+        $ownerSid='S-1-5-21-0'
+    }
+    [pscustomobject]@{ReturnValue=0;Sid=$ownerSid}
 }
 """.replace("OBSERVATION", observation).replace("PYTHON", python).replace("IMAGE", image)
 
     def run(argv):
-        argv = [*argv[:-1], preamble + argv[-1] + "\nif($finished){$finished.Dispose()}\n"]
+        argv = [*argv[:-1], preamble + "\ntry {\n" + argv[-1] + r"""
+} finally {
+    if($finished){$finished.Dispose()}
+    if($child){
+        try {
+            if(-not $child.HasExited){$child.Kill()}
+            if(-not $child.WaitForExit(10000)){throw 'Fixture child did not settle'}
+        } finally {$child.Dispose()}
+    }
+}
+"""]
         result = run_owned(argv, timeout=30)
         if result.returncode:
             raise subprocess.CalledProcessError(
@@ -82,15 +110,25 @@ function Invoke-CimMethod {
             )
         return result.stdout
 
-    if observation in {"unknown", "changed"}:
+    if observation in {"unknown", "changed", "recovered-root-foreign-child"}:
         with pytest.raises(subprocess.CalledProcessError) as caught:
             inspector.inspect_processes(tmp_path, str(shell), "fixture", run, descendants=True)
-        expected = "candidate process (pid=" if observation == "unknown" else "identity changed"
+        expected = {
+            "unknown": "candidate process (pid=", "changed": "identity changed",
+            "recovered-root-foreign-child": "another user",
+        }[observation]
         assert expected in caught.value.stderr
     else:
         rows = inspector.inspect_processes(tmp_path, str(shell), "fixture", run, descendants=True)
         if observation == "exited":
             assert rows == []
+        elif observation == "recovered-root-child":
+            assert len(rows) == 2
+            parent = next(row for row in rows if row["inspectionHost"])
+            child = next(row for row in rows if not row["inspectionHost"])
+            assert parent["image"] == str(tmp_path / "python.exe")
+            assert child["ppid"] == parent["pid"] and child["image"] == sys.executable
+            assert parent["created"] > 0 and child["created"] > 0
         else:
             assert len(rows) == 1 and rows[0]["image"] == str(tmp_path / "python.exe")
             assert rows[0]["created"] > 0 and rows[0]["inspectionHost"]
@@ -570,6 +608,7 @@ def test_real_dead_main_thread_cannot_hide_a_live_runtime(
         process.stdout.close()
 
 
+@pytest.mark.timeout(90 if os.name == "nt" else 30)
 def test_real_tree_exit_spares_original_parent(tmp_path):
     if os.name != "nt" and not sys.platform.startswith("linux"):
         pytest.skip("External identity-pinned retirement requires Windows or Linux")

@@ -39,7 +39,13 @@ not perform full installation, old-owner retirement or installed-host rollout.
 The same optional lane separately executes MCP's `test_reap_versions.py` and
 procutil's `test_process_retirement.py` and `test_retirement_custody.py` on Windows and Linux. A real synthetic
 tree (including Windows-owned headless console hosts) must exit through retained
-kernel identities while its original parent survives. Native pause/rollback
+kernel identities while its original parent survives. Retirement uses two
+complete censuses; measured Windows owner queries made steady progress
+but exceeded the default 30-second item guard. That native tree fixture uses
+the same 90-second guard as fresh settlement, retaining its 60-second children,
+full census, identity checks and owned cleanup. Production deadlines, unit-only
+packet policy, non-Windows item and aggregate runner budgets are unchanged.
+Native pause/rollback
 and both shell adapters' fresh-failure propagation are distinct controls.
 Abrupt caller death after its first native pause must resume the original target,
 settle the finite custodian, and leave the observing parent alive. A separate
