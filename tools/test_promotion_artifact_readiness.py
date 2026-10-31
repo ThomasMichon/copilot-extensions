@@ -616,8 +616,15 @@ def test_workflow_pr_profile_refuses_missing_or_ambiguous_ownership():
         _pr_profile(unknown)
 
 
-@pytest.mark.parametrize("remote", ["d" * 40, ""])
-def test_native_ready_step_refuses_moved_or_deleted_remote_before_publication(tmp_path, remote):
+@pytest.mark.parametrize("remote,observed", [
+    ("d" * 40 + "\trefs/heads/release/promote-fixture", "d" * 40),
+    ("", "missing-ref"),
+    ("opaque-sensitive-detail", "malformed-ref"),
+    ("opaque-first-result\nopaque-second-result", "multiple-refs"),
+])
+def test_native_ready_step_refuses_moved_or_deleted_remote_before_publication(
+    tmp_path, remote, observed,
+):
     bash = shutil.which("bash")
     git = shutil.which("git")
     if os.name == "nt" and git:
@@ -636,14 +643,14 @@ def test_native_ready_step_refuses_moved_or_deleted_remote_before_publication(tm
     git() {
       printf '%s\\n' "$*" >> "$CALL_LOG"
       if [ "$1" != "ls-remote" ]; then exit 91; fi
-      if [ -n "$MOVED_SHA" ]; then
-        printf '%s\\t%s\\n' "$MOVED_SHA" "refs/heads/$CANDIDATE_BRANCH"
+      if [ -n "$REMOTE_REF" ]; then
+        printf '%s\\n' "$REMOTE_REF"
       fi
     }
     """ + ready["run"]
     env = {
         **os.environ, "CANDIDATE_SHA": TREE, "CANDIDATE_BRANCH": "release/promote-fixture",
-        "MOVED_SHA": remote, "CALL_LOG": call_log.as_posix(), "GITHUB_OUTPUT": output.as_posix(),
+        "REMOTE_REF": remote, "CALL_LOG": call_log.as_posix(), "GITHUB_OUTPUT": output.as_posix(),
     }
     result = subprocess.run(
         [bash, "--noprofile", "--norc"], input=script, text=True, capture_output=True,
@@ -652,6 +659,8 @@ def test_native_ready_step_refuses_moved_or_deleted_remote_before_publication(tm
     )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "Remote branch does not match the trusted promoter's candidate" in result.stdout
+    assert f"Candidate ref verification: expected={TREE} observed={observed}" in result.stdout
+    assert "opaque-" not in result.stdout + result.stderr
     assert len(call_log.read_text().splitlines()) == 1
     assert not output.exists()
 
