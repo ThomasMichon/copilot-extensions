@@ -125,6 +125,19 @@ It rejects nonregular exclude inputs before index queries can consult them,
 then reads the current exclude contents again immediately before appending its
 rule. A FIFO must fail explicitly without waiting for a writer or consuming the
 Git timeout, and a refusal leaves the previous generated instructions intact.
+The same publisher-owned namespace preparation is used for a validated paired
+knowledge **worktree** before its overlay composition can complete. It resolves
+`info/exclude` through Git (including a linked worktree's common directory),
+preserves existing rules, adds the reserved rule at most once, and checks
+effective ignore coverage without discovering or publishing companion sources.
+This preparation runs even when plugin overlay composition is disabled; it
+does not enable plugins. Anchor pairs are not companion write targets.
+The overlay transaction remains outermost, followed by the companion publication
+lock. Tracked namespace conflicts, indirect/nonregular or oversized exclude
+inputs (over 2 MiB), and unwritable excludes fail visibly, retain the harness's
+pending-pair marker, and can be retried through normal composition after repair.
+No tracked ignore file, settings declaration, or source roster is changed by
+namespace preparation.
 It resolves user, repository and local activation settings in process and uses
 the existing vendored `plugin_resolve` marketplace/path helpers and host
 installed-root resolver. Built-in unqualified plugin settings are outside this

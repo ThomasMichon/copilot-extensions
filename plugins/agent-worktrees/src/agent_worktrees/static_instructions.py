@@ -366,6 +366,85 @@ def _safe_path(root: Path, path: Path, *, removable_files: set[Path] | None = No
             raise ValueError(f"instruction output parent is not a directory: {candidate}")
 
 
+def _read_exclude(exclude: Path) -> str:
+    _safe_path(Path(exclude.anchor), exclude)
+    if not exclude.exists():
+        return ""
+    info = exclude.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError(f"instruction input is not a regular file: {exclude}")
+    limit = 2 * 1024 * 1024
+    if info.st_size > limit:
+        raise ValueError("instruction exclude exceeds the 2 MiB limit")
+    with exclude.open("rb") as handle:
+        content = handle.read(limit + 1)
+    if len(content) > limit:
+        raise ValueError("instruction exclude exceeds the 2 MiB limit")
+    return content.decode("utf-8")
+
+
+def _namespace_preflight(root: Path, *, deadline: float | None) -> tuple[Path, dict]:
+    _safe_path(root, root / NAMESPACE)
+    exclude = Path(os.fsdecode(_git(root, "rev-parse", "--git-path", "info/exclude", deadline=deadline)).strip())
+    if not exclude.is_absolute():
+        exclude = root / exclude
+    exclude = Path(os.path.abspath(exclude))
+    # Git's index queries may read ignore rules before our later append.
+    _read_exclude(exclude)
+    validated_git = preparation.git_state(root, deadline=deadline)
+    # Include staged removals, even when Git could classify one as a rename.
+    tracked = (
+        _git(root, "ls-files", "-z", "--", ":(icase).github", deadline=deadline)
+        + _git(root, "diff", "--cached", "--name-only", "--diff-filter=D", "--no-renames", "-z", "--", ":(icase).github", deadline=deadline)
+    ).split(b"\0")
+    # An independent append must not be lost while index evidence stays fixed.
+    for path in validated_git:
+        if Path(path).resolve() == exclude.resolve():
+            validated_git[path] = preparation.stamp(Path(path), deadline=deadline)
+    preparation.require_git_state(root, validated_git, deadline=deadline)
+    namespace = NAMESPACE.casefold()
+    for raw in tracked:
+        path = os.fsdecode(raw).casefold()
+        if path and (path == namespace or path.startswith(namespace + "/") or namespace.startswith(path + "/")):
+            raise ValueError(f"tracked instruction output is protected: {os.fsdecode(raw)}")
+    return exclude, validated_git
+
+
+def _ensure_output_ignored(
+    root: Path, exclude: Path, validated_git: dict, relatives, *, deadline: float | None,
+) -> None:
+    rule = f"/{NAMESPACE}/"
+    previous = _read_exclude(exclude)
+    if rule not in previous.splitlines():
+        _remaining(deadline)
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        with exclude.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n{rule}\n")
+        for path in validated_git:
+            if Path(path).resolve() == exclude.resolve():
+                validated_git[path] = preparation.stamp(Path(path), deadline=deadline)
+    paths = {os.fsencode(f"{NAMESPACE}/{relative}") for relative in relatives}
+    if paths:
+        ignored = _git(
+            root, "check-ignore", "--no-index", "-z", "--stdin",
+            input=b"\0".join(sorted(paths)) + b"\0", deadline=deadline,
+        )
+        if paths - set(ignored.split(b"\0")):
+            raise ValueError("instruction output namespace is not completely ignored by Git")
+    preparation.require_git_state(root, validated_git, deadline=deadline)
+
+
+def prepare_output_namespace(root: Path, *, deadline: float | None = None) -> None:
+    """Prepare a companion's disposable namespace without discovering its sources."""
+    root = root.resolve()
+    with publication_lock(root, deadline=deadline):
+        exclude, validated_git = _namespace_preflight(root, deadline=deadline)
+        _ensure_output_ignored(
+            root, exclude, validated_git, ("preparation.local.instructions.md",),
+            deadline=deadline,
+        )
+
+
 def publish(root: Path, home: Path, *, deadline: float | None = None) -> preparation.Publication:
     """Resolve inside the publication lock; preflight the whole set before copying."""
     with publication_lock(root, deadline=deadline):
@@ -400,53 +479,13 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
         )
         stale = set() if desired.failures else existing - desired.keys()
         removable_files = {output / relative for relative in stale}
-        exclude = Path(os.fsdecode(_git(root, "rev-parse", "--git-path", "info/exclude", deadline=deadline)).strip())
-        if not exclude.is_absolute():
-            exclude = root / exclude
-        # Git's index queries may read ignore rules before our later append.
-        if exclude.exists():
-            _read_regular_bytes(exclude)
-        validated_git = preparation.git_state(root, deadline=deadline)
-        # Include staged removals, even when Git could classify one as a rename.
-        tracked = (
-            _git(root, "ls-files", "-z", "--", ":(icase).github", deadline=deadline)
-            + _git(root, "diff", "--cached", "--name-only", "--diff-filter=D", "--no-renames", "-z", "--", ":(icase).github", deadline=deadline)
-        ).split(b"\0")
-        # The exclude file is reread and checked by check-ignore below; an
-        # independent append must not be lost while index evidence stays fixed.
-        for path in validated_git:
-            if Path(path).resolve() == exclude.resolve():
-                validated_git[path] = preparation.stamp(Path(path), deadline=deadline)
-        preparation.require_git_state(root, validated_git, deadline=deadline)
-        namespace = NAMESPACE.casefold()
-        for raw in tracked:
-            path = os.fsdecode(raw).casefold()
-            if path and (path == namespace or path.startswith(namespace + "/") or namespace.startswith(path + "/")):
-                raise ValueError(f"tracked instruction output is protected: {os.fsdecode(raw)}")
+        exclude, validated_git = _namespace_preflight(root, deadline=deadline)
         for relative in desired:
             path = output / relative
             _safe_path(root, path, removable_files=removable_files)
             if path.exists() and not path.is_file() and not path.is_dir():
                 raise ValueError(f"instruction destination is not a regular file: {path}")
-        rule = f"/{NAMESPACE}/"
-        previous = _read_regular_bytes(exclude).decode("utf-8") if exclude.exists() else ""
-        if rule not in previous.splitlines():
-            _remaining(deadline)
-            exclude.parent.mkdir(parents=True, exist_ok=True)
-            with exclude.open("a", encoding="utf-8") as handle:
-                handle.write(f"\n{rule}\n")
-            for path in validated_git:
-                if Path(path).resolve() == exclude.resolve():
-                    validated_git[path] = preparation.stamp(Path(path), deadline=deadline)
-        if desired:
-            paths = {os.fsencode(f"{NAMESPACE}/{relative}") for relative in desired}
-            ignored = _git(
-                root, "check-ignore", "--no-index", "-z", "--stdin",
-                input=b"\0".join(sorted(paths)) + b"\0", deadline=deadline,
-            )
-            if paths - set(ignored.split(b"\0")):
-                raise ValueError("instruction output namespace is not completely ignored by Git")
-        preparation.require_git_state(root, validated_git, deadline=deadline)
+        _ensure_output_ignored(root, exclude, validated_git, desired, deadline=deadline)
         revision = preparation.publication_revision(root)
         mutation_started = False
 

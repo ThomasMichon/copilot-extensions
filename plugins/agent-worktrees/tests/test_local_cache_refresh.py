@@ -504,6 +504,14 @@ def test_changed_git_protection_link_target_refuses_before_copy(copy_workspace, 
         if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
             pytest.skip("native file-link privilege unavailable")
         raise
+    if kind == "exclude":
+        previous = target.read_bytes()
+        result = lcr.prepare_for_launch(root)
+        assert result.status == "failed"
+        assert "redirects through a link" in result.detail
+        assert target.read_bytes() == previous
+        assert not output.exists()
+        return
     assert lcr.prepare_for_launch(root).status == "ready"
     previous = output.read_bytes()
     template.write_bytes(b"must not replace after stale Git preflight")
@@ -1164,6 +1172,7 @@ def test_post_success_pair_failure_blocks_backup_until_repaired(
     template, output = provider(root, home)
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
+    shutil.copytree(root / ".git", knowledge / ".git", copy_function=shutil.copyfile)
     settings = knowledge / ".github" / "copilot" / "settings.json"
     write_json(settings, {})
     resolution = _pair_resolution(root, knowledge)
@@ -1397,6 +1406,7 @@ def test_real_knowledge_only_provider_copied_after_composition(copy_workspace, t
     harness, home = copy_workspace
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
+    shutil.copytree(harness / ".git", knowledge / ".git", copy_function=shutil.copyfile)
     if pending_pair:
         lcr.mark_pair_pending(harness)
     template, _ = provider(knowledge, home)
@@ -1406,8 +1416,6 @@ def test_real_knowledge_only_provider_copied_after_composition(copy_workspace, t
     write_json(catalog / "marketplace.json", {
         "name": "private", "plugins": [{"name": "demo", "source": "./demo"}],
     })
-    import shutil
-
     shutil.copytree(plugin, catalog / "demo")
     write_json(knowledge / ".github" / "copilot" / "settings.json", {
         "enabledPlugins": {"demo@private": True},
@@ -1424,6 +1432,189 @@ def test_real_knowledge_only_provider_copied_after_composition(copy_workspace, t
     output = harness / static.NAMESPACE / "private" / "demo" / "fallback.local.instructions.md"
     assert output.read_bytes() == template.read_bytes()
     assert not static.pair_pending_path(harness).exists()
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_paired_preparation_ignores_companion_before_publication(
+    copy_workspace, tmp_path, monkeypatch, linked,
+):
+    from test_knowledge_plugins import _pair_resolution
+
+    harness, home = copy_workspace
+    knowledge = tmp_path / "knowledge"
+
+    def git(root, *args):
+        prefix = ["--git-dir", str(root)] if root.suffix == ".git" else ["-C", str(root)]
+        return subprocess.run(
+            ["git", *prefix, *args], check=True, capture_output=True,
+            input=b"",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout
+
+    if linked:
+        bare = tmp_path / "knowledge.git"
+        subprocess.run(
+            ["git", "init", "--bare", "--quiet", str(bare)],
+            check=True, capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        tree = git(bare, "mktree").decode().strip()
+        commit = git(
+            bare, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "commit-tree", tree, "-m", "Empty fixture",
+        ).decode().strip()
+        git(bare, "worktree", "add", "--quiet", "-b", "companion", str(knowledge), commit)
+    else:
+        shutil.copytree(harness, knowledge, copy_function=shutil.copyfile)
+    template, output = provider(knowledge, home)
+    git(knowledge, "add", ".github/copilot/settings.json")
+    exclude = Path(git(knowledge, "rev-parse", "--git-path", "info/exclude").decode().strip())
+    if not exclude.is_absolute():
+        exclude = knowledge / exclude
+    original = (exclude.read_bytes() if exclude.exists() else b"") + b"\n/operator-existing/\n"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_bytes(original)
+    before = git(knowledge, "status", "--porcelain")
+    resolution = _pair_resolution(harness, knowledge)
+    config = SimpleNamespace(knowledge_repo="private")
+    monkeypatch.setattr(knowledge_plugins, "_resolve_pair_state", lambda **kw: (resolution, config, None))
+
+    for _ in range(2):
+        assert knowledge_plugins.compose_from_pair(cwd=harness, config=config)["paired"]
+        assert git(knowledge, "check-ignore", "--no-index", str(output)).strip()
+        assert not output.exists(), "companion preparation must not publish its source roster"
+    assert exclude.read_bytes().startswith(original)
+    assert exclude.read_text().splitlines().count(f"/{static.NAMESPACE}/") == 1
+    assert git(knowledge, "status", "--porcelain") == before
+    scripts = (
+        Path(__file__).resolve().parents[3] / "plugins" / "customizing-copilot"
+        / "skills" / "reviewing-customizations" / "scripts"
+    )
+    monkeypatch.syspath_prepend(str(scripts))
+    import instruction_projections
+
+    compatibility = instruction_projections.render_local_cache(
+        knowledge, lambda: [SimpleNamespace(origin="market/demo", payload_root=template.parents[1])],
+    )
+    assert not compatibility.blocking, compatibility.findings
+    assert len(compatibility.changed) == 1
+    assert output.read_bytes() == template.read_bytes()
+    output.unlink()
+    assert lcr.refresh_local_cache(knowledge).status == "ready"
+    assert output.read_bytes() == template.read_bytes()
+    assert git(knowledge, "status", "--porcelain") == before
+
+
+@pytest.mark.parametrize("fault", ["directory", "oversize", "unwritable", "indirect", "tracked", "negated"])
+def test_companion_ignore_failure_is_visible_pending_and_retryable(
+    copy_workspace, tmp_path, monkeypatch, fault,
+):
+    from test_knowledge_plugins import _pair_resolution
+
+    harness, home = copy_workspace
+    knowledge = tmp_path / "knowledge"
+    shutil.copytree(harness, knowledge, copy_function=shutil.copyfile)
+    template, output = provider(knowledge, home)
+    resolution = _pair_resolution(harness, knowledge)
+    config = SimpleNamespace(knowledge_repo="private")
+    monkeypatch.setattr(knowledge_plugins, "_resolve_pair_state", lambda **kw: (resolution, config, None))
+    exclude = knowledge / ".git" / "info" / "exclude"
+    original = exclude.read_bytes()
+    if fault == "directory":
+        exclude.unlink()
+        exclude.mkdir()
+    elif fault == "oversize":
+        exclude.write_bytes(b"#" * (2 * 1024 * 1024 + 1))
+    elif fault == "negated":
+        (knowledge / ".gitignore").write_text("!**/\n!*.local.instructions.md\n", encoding="utf-8")
+    elif fault == "tracked":
+        output.parent.mkdir(parents=True)
+        output.write_bytes(b"tracked source, not disposable")
+        subprocess.run(
+            ["git", "-C", str(knowledge), "add", "-f", str(output)],
+            check=True, capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    with monkeypatch.context() as broken:
+        if fault == "unwritable":
+            native_open = Path.open
+
+            def open_path(path, mode="r", *args, **kwargs):
+                if path == exclude and mode == "a":
+                    raise PermissionError("exclude write refused")
+                return native_open(path, mode, *args, **kwargs)
+
+            broken.setattr(Path, "open", open_path)
+        elif fault == "indirect":
+            native_stat = Path.lstat
+
+            def lstat(path, *args, **kwargs):
+                value = native_stat(path, *args, **kwargs)
+                if path == exclude.parent:
+                    fields = {name: getattr(value, name) for name in dir(value) if name.startswith("st_")}
+                    fields["st_file_attributes"] = 0x400
+                    return SimpleNamespace(**fields)
+                return value
+
+            broken.setattr(Path, "lstat", lstat)
+        result = lcr.prepare_for_launch(harness, compose_pair=True, config=config)
+        assert result.status == "failed"
+        assert "repair and retry preparation" in result.detail
+        assert static.pair_pending_path(harness).exists()
+        assert not (harness / ".github" / "copilot" / "settings.local.json").exists()
+        assert not (harness / static.NAMESPACE).exists()
+        if fault == "tracked":
+            assert output.read_bytes() == b"tracked source, not disposable"
+        else:
+            assert not output.exists()
+    if fault == "directory":
+        exclude.rmdir()
+    elif fault == "negated":
+        (knowledge / ".gitignore").unlink()
+    elif fault == "tracked":
+        subprocess.run(
+            ["git", "-C", str(knowledge), "rm", "--cached", "-f", str(output)],
+            check=True, capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        output.unlink()
+    exclude.write_bytes(original)
+    assert lcr.prepare_for_launch(harness, compose_pair=True, config=config).status == "ready"
+    assert not static.pair_pending_path(harness).exists()
+    assert lcr.refresh_local_cache(knowledge).status == "ready"
+    assert output.read_bytes() == template.read_bytes()
+
+
+@pytest.mark.parametrize("kind,existing", [("worktree", False), ("worktree", True), ("anchor", False)])
+def test_companion_ignore_preparation_respects_anchor_and_disabled_composition(
+    copy_workspace, tmp_path, monkeypatch, kind, existing,
+):
+    from dataclasses import replace
+    from test_knowledge_plugins import _pair_resolution
+
+    harness, home = copy_workspace
+    knowledge = tmp_path / "knowledge"
+    shutil.copytree(harness, knowledge, copy_function=shutil.copyfile)
+    provider(knowledge, home)
+    resolution = replace(_pair_resolution(harness, knowledge), pair_kind=kind)
+    config = SimpleNamespace(
+        knowledge_repo="private",
+        repos={"harness": SimpleNamespace(compose_knowledge_plugins=False)},
+    )
+    monkeypatch.setattr(knowledge_plugins, "_resolve_pair_state", lambda **kw: (resolution, config, None))
+    exclude = knowledge / ".git" / "info" / "exclude"
+    original = exclude.read_bytes()
+    if existing:
+        # A previously prepared companion must not gain duplicate rules.
+        original += f"\n/{static.NAMESPACE}/\n".encode()
+        exclude.write_bytes(original)
+    summary = knowledge_plugins.compose_from_pair(cwd=harness, config=config)
+    assert summary["action"] == "disabled"
+    if kind == "anchor" or existing:
+        assert exclude.read_bytes() == original
+    else:
+        assert exclude.read_text().splitlines().count(f"/{static.NAMESPACE}/") == 1
+    assert not (knowledge / static.NAMESPACE).exists()
 
 
 @pytest.mark.parametrize("deferred", [False, True])

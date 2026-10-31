@@ -586,6 +586,7 @@ def test_creation_repair_preserves_only_proven_local_parent_refs(
     if parent_kind == "original-lexical":
         parent_checkout = parent_checkout / ".." / parent_checkout.name
     elif parent_kind == "relative":
+        monkeypatch.chdir(tmp_path)
         parent_checkout = Path(os.path.relpath(parent_checkout))
     parent_identity = creation.record.machine_identity
     parent_machine = creation.record.machine
