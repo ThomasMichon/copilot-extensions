@@ -76,6 +76,15 @@ unavailable; do not improvise an operational command, role, identity or fallback
 Source-only fake backend adapters prove the library contract without claiming
 installed owner adoption or live effects.
 
+The owner must bind the identity check and selected write to the **same actual
+current write credential/transport context**. An identity read under a separate
+observer credential does not prove the writer principal. Credential renewal,
+account switching or a changed binding requires re-verification at the mutation
+boundary before sending. For ADO the namespace is the effective native
+`connectionData.authorizedUser.id`, not `authenticatedUser.id` or an Entra object
+ID. This is enforced inside the existing credential/auth pipeline; no credential
+bytes, fabricated issuer label or new universal verifier is passed to the caller.
+
 ## Effect and persistence ordering
 
 1. Validate immutable intent and the existing selected owner scope.
@@ -83,6 +92,15 @@ installed owner adoption or live effects.
 3. Before each selected action, run the owner's real permission/input checks and
    read current native principal and head/iteration/common range. A changed or
    incomplete candidate prevents remaining unattempted actions.
+   Check action-relevant current discussion/comment ownership and baseline
+   content/status, and refresh the decision inputs required by the caller's
+   existing review policy before a verdict. Reply/edit/deletion or another
+   relevant decision-input change can invalidate selection without a source
+   push. Preserve the observed delta and pause unattempted actions rather than
+   silently refreshing their immutable intent or resetting observation clocks.
+   Previously confirmed actions in this same operation may advance the expected
+   owned state through their actual receipts/readback; they do not excuse an
+   unrelated concurrent change or force an unconditional all-policies-green gate.
 4. Persist that action's **unknown/in-flight** state durably before entering the
    backend operation. A pre-replace commit failure performs no backend call;
    uncertain local persistence requires readback and does not authorize a send.
@@ -105,6 +123,22 @@ Actual finite operation/byte/action/storage limits are explicit and owned by the
 library/store contract. They are not delegate permission, read-count or phase
 ceilings. A full store refuses new admission without dropping old or unknown
 receipts. No automatic receipt eviction is added.
+
+Capacity admission reserves **bounded worst-case receipt/state growth for every
+selected action before any send**, including partial and unknown outcomes and
+their native IDs. Receipt persistence and reconciliation consume that reservation,
+not a new admission quota after the effect. Unexpected oversized backend data
+cannot become an unbounded receipt; retain bounded known IDs and an honest
+unknown/error outcome within the reserved shape.
+
+Replay and review namespaces have explicit disjoint capacity reservations.
+Review admission cannot consume headroom required by existing pending watch
+registrations/events and their durable outcomes. Adoption validates the existing
+replay envelope plus its possible pending-event growth against that reservation
+before converting it. Full review capacity must not prevent replay observation,
+delivery/acknowledgement or durable review reconciliation; reject new admission
+instead. Do not narrow old replay retention/capacity silently or evict receipts
+to make the new namespace fit.
 
 ## Reconciliation and race limitations
 
@@ -138,12 +172,18 @@ batch is an automatic response to drift or an ambiguous write.
   namespaces; old/unsupported/corrupt readers fail without fallback or data loss.
 - [ ] Same-ID intent replay, mismatched intent, exact source/principal drift,
   selected action/ownership validation and unchanged-head follow-up are explicit.
+- [ ] Credential/account changes between identity checks and writes refuse before
+  send; identity under an observer credential cannot qualify a different writer.
+- [ ] Discussion-only/decision-input drift pauses stale selection, while verified
+  prior self-effects advance only the expected owned baseline.
 - [ ] Real atomic-file consumers and synthetic protected actions prove
   pre-send persistence, no-send failures, post-effect uncertainty, cancellation/
   owner loss, lock contention, partial outcomes and native-ID retention.
 - [ ] Lost replies do not repeat confirmed actions; unattributable current vote/
   content remains unknown. Full/partial readback and drift never fabricate proof.
 - [ ] Cache rebuild cannot erase either namespace or revive an effect.
+- [ ] Reserved receipt growth remains writable at capacity, and review admission
+  cannot starve pending watch events, replay acknowledgements or reconciliation.
 - [ ] Existing registration/store/provider conformance remains intact; focused
   tests, contained validation, source gates and actual PR review/CI/merge pass.
 
