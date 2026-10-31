@@ -127,6 +127,28 @@ memoized away. Optional discovery should not dominate the essential event path.
 An operator should be able to carry personal policy across target repositories
 without copying it into each repository or erasing repository-owned overrides.
 
+### charter-bounded-useful-autonomy
+
+An agent should continue ordinary investigation, source fixes, bounded
+validation and issue/PR publication within its established charter and
+designated destinations without asking permission to remain useful. Genuine
+decisions, explicit holds and independent review, security and ownership gates
+remain binding; a blocked effect should not stop independent authorized work.
+
+### persistent-effect-scope-preclearance
+
+Explicit operator approvals should retain their original evidence, allowed
+operations, targets, resource owners, effects, accepted blast radius, limits
+and later narrowing or revocation across efforts, checkpoints and handoffs.
+An ordinary revision or retry inside the approved scope should not require
+another permission ceremony.
+
+Deployment, personal or non-source-controlled content, disclosure and resources
+outside the operator's control need applicable explicit effect authority.
+Current scope and circumstances remain revalidated before action; confidence,
+convenience, a copied record or expected recoverability should never create a
+grant or bypass a product gate.
+
 ### configurable-attribution-signatures
 
 AI disclosure should have one authoritative policy owner. An adopting harness
