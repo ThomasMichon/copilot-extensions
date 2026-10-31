@@ -15,6 +15,11 @@ depend on its IPC contract to start the new process. The scheduled launcher
 continues resolving the current slot; `IgnoreNew` task behavior cannot substitute
 for ensuring the selected generation independently.
 
+Explicit Windows stop uses the installed runtime's canonical read-only
+resolver, independently of the installer payload's prospective version.
+Refreshing a payload alone does not make its uninstalled slot a shutdown
+prerequisite. Automatic replacement still does not call predecessor stop.
+
 Each running build holds its own generation lease. This makes repeated starts
 idempotent without mistaking another build's healthy ping for currentness.
 Replacement compares immutable build identities, not numerical version order.

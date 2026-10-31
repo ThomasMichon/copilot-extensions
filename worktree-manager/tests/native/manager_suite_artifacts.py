@@ -89,19 +89,28 @@ if kind == 'gh':
         raise SystemExit(0)
 elif kind == 'copilot':
     source = case / 'published'
-    roster = json.loads((case / 'setup.json').read_text())['declared']
+    roster = {entry['name']: entry['source'] for entry in
+              json.loads((source / '.github' / 'plugin' / 'marketplace.json').read_text())['plugins']}
     if args[:2] in (['plugin', 'update'], ['plugin', 'install']):
         name = args[2].split('@')[0]
         assert name in roster, ('unexpected acquisition', args)
+        origin = (source / roster[name]).resolve()
+        assert origin.is_relative_to(source / 'plugins'), ('unexpected payload source', name)
         target = Path.home() / '.copilot' / 'installed-plugins' / 'copilot-extensions' / name
         if target.exists():
             shutil.rmtree(target)
-        shutil.copytree(source / 'plugins' / name, target)
+        shutil.copytree(origin, target)
         config = Path.home() / '.copilot' / 'config.json'
         value = json.loads(config.read_text())
+        version = json.loads((origin / 'plugin.json').read_text())['version']
         for item in value['installedPlugins']:
             if item['name'] == name:
-                item['version'] = json.loads((target / 'plugin.json').read_text())['version']
+                item['version'] = version
+                break
+        else:
+            value['installedPlugins'].append({
+                'name': name, 'marketplace': 'copilot-extensions', 'version': version, 'enabled': True,
+            })
         config.write_text(json.dumps(value))
         print('Controlled published artifact delivered')
         raise SystemExit(0)

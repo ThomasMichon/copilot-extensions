@@ -1537,4 +1537,29 @@ lease-less predecessor exclusions. Its custody packet passes 176 tests with
 1 skip. This closes the named source-level ordering defect, not the still-open
 exact-head hosted suite or installed-adoption gate.
 
+Run `41153778636` at `1d80d4f3d2` confirms normal Codespaces successor readiness
+before clean predecessor exit. Normal update returns 0, but its fixture next
+incorrectly requires an MCP resolver trace; MCP shares Machines' command-only
+direct-slot fast path. Repair reaches replacement, then the controlled delivery
+fixture rejects the required payload-only harness because it admits only the
+runtime roster. Delivery now uses the complete canonical catalog and records
+newly installed payloads without admitting unknown sources.
+
+Bridge's preserved watchdog diagnostics identify repeated Windows socket
+allocation error 10048, not evidence that the server stopped serving.
+The fixture's 20 ms route-metadata polling opened a fresh listener-probe TCP
+connection on every read. Metadata observation now omits that redundant
+connection; authenticated health and native birth/exit checks remain required.
+No watchdog policy, socket limits or host settings change.
+
+Normal settles cleanly; repair leaves birth-verified Index and Vault V1
+processes alive after native task cleanup. Both installer stop functions had
+tested their prospective payload-version interpreter, which was not installed
+after payload refresh alone, and skipped the real shutdown command. Explicit
+stop now resolves the installed selection. Native callee controls reproduce
+both omissions before correction and verify the selected interpreter afterward.
+The combined fixture/coordinator packet passes 48 tests with 2 hosted cases
+deselected; all 11 focused failures pass after correction. Full hosted
+qualification and final settlement remain open.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

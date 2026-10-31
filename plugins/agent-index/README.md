@@ -58,6 +58,9 @@ its own versioned slot, and the plugin's installer/runtime commands supervise
 it directly. `install`/`update` rebuild only the light `[store,server]` service
 slot, then cut traffic over with zdd; the durable engine remains on its separate
 explicit lifecycle and is never rebuilt by a routine service update.
+Explicit Windows stop resolves the installed selected runtime, not the
+installer payload's prospective slot. A payload refresh without runtime
+installation therefore does not skip shutdown of the existing owner.
 
 Native legacy `uninstall` stops the registered service/engine and removes owned
 runtime generations, source snapshots, selectors and generated command helpers.

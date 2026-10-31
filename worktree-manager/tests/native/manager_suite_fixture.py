@@ -160,7 +160,7 @@ def _observe(case: Path, declared: dict[str, Any]) -> dict[str, Any]:
             invocation = _read(payload / "payload-invocation.json")
             commands = invocation.get("commands") or [invocation]
             commands = [{"command": row["command"], "module": row["module"],
-                         "variants": ["cmd"] if name == "agent-machines" else ["cmd", "ps1"]}
+                         "variants": ["cmd"] if name in {"agent-machines", "agent-mcp"} else ["cmd", "ps1"]}
                         for row in commands]
         observed["commands"][name] = commands
     engine = roots["agent-index"] / "engine"
@@ -284,12 +284,12 @@ def _frontdoors(case: Path, after: dict[str, Any]) -> dict[str, Any]:
                 if not path.is_file():
                     raise RuntimeError(f"{name}: declared Windows frontdoor was not produced: {path}")
                 trace = traces / (basename + ".jsonl")
-                argv = ["--version"] if name in {"worktree-manager", "agent-machines"} else ["--help"]
+                argv = ["--version"] if name in {"worktree-manager", "agent-machines", "agent-mcp"} else ["--help"]
                 invoked = _run(
                     _command(case, command, *argv, extension=extension), case, timeout=30,
                     extra_env={"COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH": str(trace)},
                 )
-                if name in {"worktree-manager", "agent-machines"}:
+                if name in {"worktree-manager", "agent-machines", "agent-mcp"}:
                     version = after["origins"][name]["version"].replace("-dev", ".dev")
                     current = version in invoked.stdout.replace("-dev", ".dev").split()
                     proof = {"kind": "installed version command", "version": version}

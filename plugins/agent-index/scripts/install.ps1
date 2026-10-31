@@ -2850,8 +2850,20 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
-    if (Test-Path $LinkPython) {
-        & $LinkPython -I -X utf8 -m agent_index stop | Out-Host
+    $stopPython = $LinkPython
+    $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+    if (Test-Path -LiteralPath $resolver) {
+        $previousRoot = $env:AGENT_RT_ROOT
+        try {
+            $env:AGENT_RT_ROOT = $InstallDir
+            . $resolver -TraceMode read-only
+            $stopPython = $AgentRtPy
+        } finally {
+            $env:AGENT_RT_ROOT = $previousRoot
+        }
+    }
+    if ($stopPython -and (Test-Path -LiteralPath $stopPython)) {
+        & $stopPython -I -X utf8 -m agent_index stop | Out-Host
         # The durable engine daemon is a SEPARATE detached process from the
         # light service stopped above (daemon.py, launched by 'engine start' /
         # Ensure-Running via a plain detached Popen, not necessarily under
@@ -2862,7 +2874,7 @@ function Invoke-Stop {
         # gotcha in service-lifecycle-supervision.md). `engine stop` uses the
         # daemon's own pid file and is idempotent -- a no-op when the engine
         # was never started.
-        & $LinkPython -I -X utf8 -m agent_index engine stop | Out-Host
+        & $stopPython -I -X utf8 -m agent_index engine stop | Out-Host
     }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
