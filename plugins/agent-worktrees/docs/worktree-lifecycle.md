@@ -228,6 +228,17 @@ allocation formats, not partial machine/environment prefixes. Matches for
 different host identities remain unresolved rather than authorizing finalization
 from an ambiguous host.
 
+### Advisory creation diagnostics
+
+Nonessential claim/branch notices and allocation/Git-creation progress do not
+reject a persisted owner claim or replace an actual allocation failure when
+stderr raises `OSError`. The existing activity log receives a sanitized
+`creation_diagnostic` event with its scope, error type and available numeric
+errno/winerror. Logging remains best-effort with its existing failure counter;
+it does not guarantee caller delivery. Required JSON output, real storage/Git
+failures and progress outside these creation scopes retain their normal
+semantics. This does not resume or reset an already-pending creation request.
+
 ### Replay-safe programmatic creation
 
 `create --creation-key <opaque-key> --json` binds one logical request to its
