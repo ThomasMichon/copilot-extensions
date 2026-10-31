@@ -387,7 +387,12 @@ def _registration_routes(case: Path, before: dict[str, Any], after: dict[str, An
             matches == ["agent-bridge"] and launcher.name == "start-agent-bridge.ps1"
             and "param([switch]$ResolveOnly)" in body
         )
-        if not matches or ("resolve-runtime.ps1" not in body and not bridge_probe):
+        dispatch_probe = (
+            matches == ["agent-dispatch"] and launcher.name in {"serve-service.ps1", "supervise-service.ps1"}
+            and "[switch]$ResolveOnly" in body
+        )
+        launcher_probe = bridge_probe or dispatch_probe
+        if not matches or ("resolve-runtime.ps1" not in body and not launcher_probe):
             raise RuntimeError(f"{task['name']}: no recognized canonical task runtime resolver")
         # A scheduler definition pointing at a stable launcher is not proof.
         # Execute its actual canonical resolver read-only and compare V2 prefix.
@@ -402,7 +407,7 @@ def _registration_routes(case: Path, before: dict[str, Any], after: dict[str, An
                 "if(-not $AgentRtPy){throw 'Task runtime unresolved'}; Write-Output $AgentRtPy"
             )
             command = ([shutil.which("pwsh"), "-NoProfile", "-NonInteractive",
-                        "-File", str(launcher), "-ResolveOnly"] if bridge_probe else
+                        "-File", str(launcher), "-ResolveOnly"] if launcher_probe else
                        [shutil.which("pwsh"), "-NoProfile", "-Command", code])
             native = _run(command, case, timeout=30)
             resolved = Path(native.stdout.strip()).resolve()
