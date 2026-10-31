@@ -29,9 +29,12 @@ evidence preserves partial sections and all observation/revision clocks.
 
 ## Wire expansion and discovery
 
-Retain watch v1/v2 endpoints and meanings unchanged. Extend the existing scoped
-watch `capabilities` response additively with optional `workspace` metadata.
-Absence means unsupported workspace operations, not loss of ordinary watches.
+Retain watch v1/v2 endpoints and response fields unchanged. Existing independently
+deployed `ReplayClient` capability readers reject additional fields, so even an
+optional `workspace` field must not be added to their responses. The new workspace
+route has its own read-only capability operation on the same authenticated
+handler, not another service or universal handshake. Old handlers' explicit 404
+means unsupported workspace operations, not loss of ordinary watches.
 The executing gateway advertises only operations whose trusted owner callbacks,
 cache and store support are actually supplied; package version is not support.
 
@@ -45,6 +48,8 @@ scope. Body account/provider/endpoint labels cannot substitute for that owner.
 
 Operations:
 
+- `capabilities`: read-only executing workspace support and existing binding;
+  new clients probe this route before other workspace operations.
 - `load`: acquire through the current protected read owner, validate normalized
   scope and bounded evidence, publish using an explicit expected-current CAS.
 - `sync`: refresh through that same owner and compare to the exact retained
@@ -106,7 +111,8 @@ withdraws later effects, but already-admitted work remains retained through drai
 No task cancellation or transport timeout releases writer custody early.
 Current caller and service checkpoints govern publication, mutation and response.
 
-Expand optional source receiver/discovery first. Migrate clients only after the
+Expand the optional workspace receiver/discovery first while returning the exact
+legacy watch capability shape to unchanged strict clients. Migrate clients only after the
 executing peer advertises this protocol and required operations. No legacy watch
 endpoint or provider fallback is equivalent to workspace operations. Keep old
 watch readers and native commands unchanged; no old form is contracted here.
@@ -122,7 +128,8 @@ actual compatible-reader transition/drain, never an HTTP request or startup fix.
   unsupported peers and disconnect; concurrent CAS cannot publish half-current
   data or replace the generation selected by an in-flight reader.
 - [ ] Existing watch behavior remains intact with absent and present optional
-  workspace support; drain owns admitted source work.
+  workspace support, including an actual unchanged strict `ReplayClient`
+  capability exchange against the expanded handler; drain owns admitted source work.
 - [ ] Actual merged protected executor/store prove bounded explicit submit,
   durable pre-send fencing, partial/unknown receipt retention and no blind replay.
 - [ ] Oversized submit refuses locally; missing current read/write owners are
