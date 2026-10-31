@@ -103,6 +103,22 @@ portable core.
 
 ## How executor plugins build on efforts
 
+### Optional scope approvals
+
+The canonical effort can capture original upfront approvals and one-time answers
+in **Scope Approvals** or a linked record. Preserve the operator/charter source,
+operations/destinations/owners/effects and accepted blast radius, limits,
+repetition/revision policy and later holds or revocation. Reuse only within that
+scope; plan review and source revisions are not new operational grants.
+
+The [planning procedure](skills/planning-efforts/SKILL.md#capture-and-reuse-scope-approvals)
+and its [record seam](skills/planning-efforts/references/efforts.md#scope-approvals)
+own capture and reuse. Checkpoints and handoffs retain references, exclusions and
+current changes. This is optional, standalone guidance, not an approval runtime;
+deployment, personal-data/disclosure and external-owner effects remain gated.
+
+### Executor ownership
+
 The README's **participants seam** is where executor plugins can plug in. The
 efforts plugin is standalone: a repo can use the README contract with no
 agent-worktrees registration and no executor plugin at all. When executor

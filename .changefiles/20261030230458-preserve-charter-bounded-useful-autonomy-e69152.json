@@ -1,0 +1,17 @@
+{
+  "comment": "Preserve charter-bounded useful autonomy and original scoped approval evidence through effort and context continuity",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    },
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

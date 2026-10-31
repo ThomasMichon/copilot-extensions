@@ -1,7 +1,7 @@
 ## Effort-Backed Session Continuation
 
 For **native context-only rollover**, use the same objective/gate/delta and live
-obligation fields in the current owner's revision-guarded `session_artifacts`
+obligation and authorization-evidence/limit fields in the current owner's revision-guarded `session_artifacts`
 checkpoint, plus **exactly one next action**. Keep ownership and live flows in
 place. Read the verified bound artifact after terminal `new_context`, refresh
 durable guidance, and execute that action. The custom task-completion/transfer
@@ -38,6 +38,17 @@ only when genuinely none exist; do not omit the section.>
 - **External state owned by this session:** <open PRs awaiting review/merge,
   held claims/leases/dispatch tasks, peer-agent conversations or delegated
   work still in flight>
+
+### Authorization Evidence & Limits
+- **Canonical reference/original evidence:** <Scope Approvals record or original
+  operator/charter answer; preserve evidence not yet canonical>
+- **Applicable scope:** <operations, destinations/resources/owners, effects and
+  accepted blast radius, exclusions, limits and retry/revision policy>
+- **Validity/current changes:** <pins, limited uses, expiry, holds and later
+  narrowing/revocation with original references>
+- **Unresolved:** <missing decisions/evidence; "none" only when established>
+<Read current authority before effects. A copied record or successful handoff
+does not grant permission. Keep the effort pointer instead of duplicating it.>
 
 ### Completion Gates
 - **Current handoff:** <Complete the deferred handoff task only when this relay
@@ -89,6 +100,17 @@ only when genuinely none exist; do not omit the section.>
 - **External state owned by this session:** <open PRs awaiting review/merge,
   held claims/leases/dispatch tasks, peer-agent conversations or delegated
   work still in flight>
+
+### Authorization Evidence & Limits
+- **Original evidence:** <operator/charter reference and necessary exact wording;
+  retain applicable evidence directly or reference its canonical record>
+- **Applicable scope:** <operations, destinations/resources/owners, effects and
+  accepted blast radius, exclusions, limits and retry/revision policy>
+- **Validity/current changes:** <pins, limited uses, expiry, holds and later
+  narrowing/revocation with original references>
+- **Unresolved:** <missing decisions/evidence; "none" only when established>
+<Read current authority before effects. A copied record or successful handoff
+does not grant permission; recover missing evidence before affected effects.>
 
 ### Completion Gates
 - **Current handoff:** <Complete the deferred handoff task only when this relay
