@@ -3290,7 +3290,7 @@ dependency-free client; selected source distributions can still require a
 platform's native build prerequisites.
 
 `tools/promotion_unit_tests/test_client_guardian_resources.py` exercises the real
-client-to-guardian caller boundary with process value doubles and the actual
+client-to-guardian caller boundary with process/native-import value doubles and the actual
 stdin bootstrap. It replaces each admitted executable member after snapshot,
 checks the private runtime/procutil namespaces and preserved uncertain custody,
 and refuses incomplete, malformed or oversized bundles before execution.

@@ -3262,6 +3262,7 @@
         "tools/promotion_unit_tests/test_release_helper_loaders.py::test_retained_guardian_private_seams_cannot_become_release_helper_edges[import installer_engine_process as process\\nloader = process._guardian_packet]"
     ],
     "sources": {
+        "libs/versioned-runtime/versioned_runtime_publication.py": "070c9db612246d8722e3f2c94487bfb63177a78e2485a7f14c5d38ed8060b79d",
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
         "tools/core_runtime_profile.py": "5319efe24a0a08652e0903baae6593a428d866a2cb302c0c10628cee6890fa1c",
         "tools/python_project_inventory.py": "6981a4cf50106c205847e5f946c23c09c5a0959cc5e2caf30920264c91c0b538",
@@ -3657,7 +3658,7 @@
         "fleet-manager/src/fleet_manager/release_auth.py": "ed2ba53fdc3e988af3bfb56bf7e4eb9578cbc6107118ea327dbda1281ab648bc",
         "fleet-manager/src/fleet_manager/client_deactivation.py": "b4dc9e2cc10ff8f6b11097f45463cf572d3b27a5d6e11a197dc2fa976fef77d6",
         "fleet-manager/tests/test_client_diagnostics.py": "8da4a6a7119cdd90f840b6cd63ef44232c9f3c46e58ac80e1e16be8b66764e9a",
-        "tools/promotion_unit_tests/test_client_guardian_resources.py": "d009152bee7bf949116af3600df6fc399733b67b6b9ab2e53b11bac3f18b3bdd"
+        "tools/promotion_unit_tests/test_client_guardian_resources.py": "e27274a79be7d0d4e2849fdbe5786f57ad6cc7f46286d5ccf985ef8bc8748229"
     },
     "coverage_targets": [
         "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py",

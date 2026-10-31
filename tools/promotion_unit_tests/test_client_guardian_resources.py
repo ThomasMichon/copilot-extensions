@@ -10,13 +10,30 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
 from test_client_diagnostics import installed as installed  # noqa: F401
 from test_client_diagnostics import installed_procutil
 from test_client_diagnostics import installed_runtime
+
+
+class _ValueStructure:
+    pass
+
+
+def _inert_native_import() -> ModuleType:
+    module = ModuleType("ctypes")
+    module.__file__ = None
+    module.Structure = _ValueStructure
+    module.c_int64, module.c_uint32 = object(), object()
+
+    def native_access(name: str) -> object:
+        raise AssertionError(f"native ctypes API is outside this pure unit: {name}")
+
+    module.__getattr__ = native_access
+    return module
 
 
 @pytest.mark.parametrize("failed", [False, True])
@@ -87,6 +104,7 @@ def test_guardian_receives_admitted_pair_after_disk_replacement(
             }), ""
 
     monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(get_osfhandle=lambda value: value))
+    monkeypatch.setitem(sys.modules, "ctypes", _inert_native_import())
     monkeypatch.setattr(owner, "os", SimpleNamespace(
         **{**vars(os), "name": "nt", "set_handle_inheritable": lambda *_: None},
     ))
