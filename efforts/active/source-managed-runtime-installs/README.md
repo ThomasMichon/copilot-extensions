@@ -1571,4 +1571,31 @@ execution of the actual preparation snippet covers that contract, and the
 bounded fixture packet passes 29 tests with the 2 hosted cases deselected.
 No service API is changed, and Bridge's earlier failure remains unproven.
 
+Hosted run `41148076239` at `7ddefb7184` completes the normal Manager update
+with exit 0, then fails the fixture's unsupported assumption that Machines'
+stdio-safe command emits a resolver trace. Its real fast path selects the
+current slot directly. The fixture now uses its exact installed version output
+and the actual command-only Windows producer contract. Repair preparation
+reaches a successful baseline update but exceeds the outer 900-second stage
+budget before completing the independent engine setup. Preparation now has a
+bounded 1800-second budget; exercise, assertions and settlement remain separately
+bounded. Both failed jobs settle with no errors or remaining tasks.
+
+The corrected fixture/coordinator packet passes 41 tests with 2 hosted cases
+deselected. Bridge watchdog diagnostics pass 18 tests and retain PID, timestamp,
+failed probe and terminal reason before replacement log setup; the fixture also
+retains the existing application diagnostic stream. This is diagnostic evidence,
+not a fix or waiver for Bridge's early exit 70. Codespaces' observed predecessor
+exit before successor creation remains a separate readiness-ordering defect.
+Neither mode has qualified the complete start-first contract, and installed
+adoption and the parent Plan/Validation remain open.
+
+The Codespaces candidate now separates selection demotion from process
+retirement. Demotion stops new work admission; a fresh principal/birth-verified
+beacon of the different selected successor permits incumbent cleanup and exit.
+The native process control starts V2 before V1 drains, and retains the existing
+lease-less predecessor exclusions. Its custody packet passes 176 tests with
+1 skip. This closes the named source-level ordering defect, not the still-open
+exact-head hosted suite or installed-adoption gate.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

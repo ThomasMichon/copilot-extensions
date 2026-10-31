@@ -57,6 +57,24 @@ def test_preparation_timeout_still_settles(
     assert calls == ["prepare", "settle"]
 
 
+def test_serial_baseline_preparation_can_finish_before_its_outer_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+
+    def run(argv: list[str], *, timeout: float) -> int:
+        stage = next((name for name in ("prepare", "exercise", "settle")
+                      if "--" + name in argv), "assertions")
+        calls.append(stage)
+        if stage == "prepare" and timeout < 1050:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return 0
+
+    monkeypatch.setattr(runner, "_run", run)
+    assert runner.qualify(tmp_path, "repair", Path(sys.executable)) == 0
+    assert calls == ["prepare", "exercise", "assertions", "settle"]
+
+
 def test_failed_settlement_never_reports_acceptance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

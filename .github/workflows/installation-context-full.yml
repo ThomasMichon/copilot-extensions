@@ -505,7 +505,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-suite'
     name: Manager whole-suite replacement (Windows, ${{ matrix.mode }})
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

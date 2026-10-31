@@ -80,6 +80,100 @@ def test_pin_keeps_hold_without_tenants(store):
     assert owner.get_hold("cs-one") is None
 
 
+@pytest.mark.parametrize(
+    ("peer", "retire"),
+    (
+        ("selection-only", False), ("passive", True), ("active", True),
+        ("stale", False), ("foreign", False), ("birth-mismatch", False),
+        ("unknown-birth", False), ("wrong-generation", False),
+        ("unknown-state", False), ("linked", False),
+    ),
+)
+def test_selection_change_retires_only_after_authenticated_selected_peer_readiness(
+    store, monkeypatch, peer, retire,
+):
+    from agent_codespaces import owner_beacon, owner_identity
+
+    selection = types.SimpleNamespace(
+        identity="old-full-slot-identity", selected_identity=lambda: "selected-full-slot-identity",
+        superseded=lambda: True,
+    )
+    monkeypatch.setattr(owner, "_PROCESS_SELECTION", selection)
+    monkeypatch.setattr(owner_beacon, "_PROCESS_SELECTION", selection)
+    monkeypatch.setattr(owner, "owner_process_identity", lambda pid: "current-native-birth")
+    monkeypatch.setattr(owner_identity, "owner_process_identity", lambda pid: "current-native-birth")
+    monkeypatch.setattr(owner, "_pid_alive", lambda pid: True)
+    owner._write_liveness(.1, active=["incumbent"])
+    if peer != "selection-only":
+        raw = json.loads(owner.LIVE_FILE.read_text())
+        raw.update(
+            pid=os.getpid() + 12345, process_identity="current-native-birth",
+            runtime_identity="selected-full-slot-identity", state="passive",
+        )
+        if peer == "active":
+            raw["state"] = "active"
+        elif peer == "stale":
+            raw["heartbeat_at"] = 0
+        elif peer == "foreign":
+            raw["host"] = "foreign-host"
+        elif peer == "birth-mismatch":
+            raw["process_identity"] = "different-native-birth"
+        elif peer == "unknown-birth":
+            raw["process_identity"] = None
+        elif peer == "wrong-generation":
+            raw["runtime_identity"] = "unselected-full-slot-identity"
+        elif peer == "unknown-state":
+            raw["state"] = "unknown"
+        owner.LIVE_FILE.write_text(json.dumps(raw))
+        if peer == "linked":
+            os.link(owner.LIVE_FILE, store / "untrusted-beacon-alias")
+    assert owner_beacon.renew_owner_singleton(.1, active=["incumbent"], state="active") is not retire
+    if not retire:
+        assert owner.read_liveness().pid == os.getpid()
+        assert owner.read_liveness().active == ("incumbent",)
+
+
+async def test_demoted_owner_retains_custody_without_admitting_new_cycles_before_peer_ready(
+    store, monkeypatch,
+):
+    from agent_codespaces import owner_beacon
+
+    changed = False
+    stop = asyncio.Event()
+    admitted = asyncio.Event()
+    calls = []
+    selection = types.SimpleNamespace(
+        identity="old", superseded=lambda: changed,
+        selected_identity=lambda: "selected" if changed else "old",
+    )
+    monkeypatch.setattr(owner, "_PROCESS_SELECTION", selection)
+    monkeypatch.setattr(owner_beacon, "_PROCESS_SELECTION", selection)
+
+    class Channels:
+        def active_codespaces(self):
+            return set()
+
+        async def reconcile(self):
+            nonlocal changed
+            calls.append("admitted")
+            changed = True
+            admitted.set()
+
+        async def shutdown(self):
+            calls.append("cleaned")
+
+    task = asyncio.create_task(owner.run_owner_daemon.__wrapped__(Channels(), interval=.01, stop_event=stop))
+    try:
+        await asyncio.wait_for(admitted.wait(), timeout=3)
+        await asyncio.sleep(.08)
+        assert calls == ["admitted"]
+        assert not task.done(), "selection alone cannot retire the incumbent"
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=3)
+    assert calls == ["admitted", "cleaned"]
+
+
 def test_stale_tenant_reclaimed_by_ttl(store):
     owner.hold("cs-one", "tenant-a")
     # With a zero TTL every tenant is immediately stale.

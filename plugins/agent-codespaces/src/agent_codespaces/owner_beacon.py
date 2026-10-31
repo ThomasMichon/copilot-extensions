@@ -22,6 +22,8 @@ from .connection_owner import (
     _owner_lock,
     _write_liveness,
     _PROCESS_SELECTION,
+    selected_successor_ready,
+    verified_owner_beacon,
 )
 
 log = logging.getLogger("agent-codespaces")
@@ -50,13 +52,19 @@ def renew_owner_singleton(
     (Windows), so a beacon that lapsed during one slow cycle lets a second
     Owner start. Without this check both keep rewriting the beacon and both
     keep competing forwards into every CodeSpace, indefinitely. Each cycle,
-    under the registry lock, an Owner that finds another's fresh beacon
-    yields (False) instead of overwriting it."""
+    under the registry lock, an installed incumbent yields only to a verified
+    ready process of the selected different identity. Selection publication
+    alone is not incoming-process readiness."""
     with _owner_lock():
-        if _PROCESS_SELECTION and _PROCESS_SELECTION.superseded():
-            return False
         live = _live_snapshot()
-        if live is not None and live.pid != os.getpid():
+        if _PROCESS_SELECTION is None and live is not None and live.pid != os.getpid():
+            return False
+        if selected_successor_ready(live):
+            return False
+        if (_PROCESS_SELECTION and state == "passive" and live and live.pid != os.getpid()
+                and live.runtime_identity == _PROCESS_SELECTION.identity and live.state == "active"
+                and verified_owner_beacon(live)):
+            # A losing same-build passive contender has admitted no channel work.
             return False
         from .owner_control import stop_requested
 
@@ -166,7 +174,14 @@ async def run_owner_loop(
         while not stop.is_set():
             if keeper.yielded or not keeper.beat():
                 break
+            demoted = bool(_PROCESS_SELECTION and _PROCESS_SELECTION.superseded())
             if not keeper.active:
+                if demoted:
+                    try:
+                        await asyncio.wait_for(stop.wait(), timeout=min(interval, 1.0))
+                    except (TimeoutError, asyncio.TimeoutError):
+                        pass
+                    continue
                 with registry._owner_lock():
                     if not legacy_work_blocked():
                         try:
@@ -184,10 +199,11 @@ async def run_owner_loop(
                 if not keeper.beat():
                     break
             work.assert_owned()
-            try:
-                await owner.reconcile()
-            except Exception as exc:
-                log.warning("Connection Owner reconcile cycle failed: %s", exc)
+            if not demoted:
+                try:
+                    await owner.reconcile()
+                except Exception as exc:
+                    log.warning("Connection Owner reconcile cycle failed: %s", exc)
             if keeper.yielded or not keeper.beat():
                 break
             if idle_shutdown_after is not None:

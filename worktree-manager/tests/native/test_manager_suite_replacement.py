@@ -60,6 +60,34 @@ def test_baseline_owner_demand_uses_the_installed_startup_contract(monkeypatch):
     assert calls == [("hold", "native-suite", "manager-suite"), ("ensure", None)]
 
 
+@pytest.mark.parametrize("reported_version", ("0.1.1.dev6", "0.1.1.dev5", "0.1.1.dev60"))
+def test_machines_frontdoor_qualifies_its_actual_version_without_a_resolver_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reported_version: str,
+) -> None:
+    command = tmp_path / "h" / ".local" / "bin" / "agent-machines.cmd"
+    command.parent.mkdir(parents=True)
+    command.write_text("fixture", encoding="utf-8")
+    after = {
+        "commands": {"agent-machines": [{"command": "agent-machines",
+                                        "module": "agent_machines", "variants": ["cmd"]}]},
+        "origins": {"agent-machines": {"version": "0.1.1.dev6"}},
+    }
+    calls = []
+
+    def run(argv: list[str], case: Path, **kwargs) -> SimpleNamespace:
+        calls.append(argv[-1])
+        return SimpleNamespace(returncode=0, stdout=f"agent-machines {reported_version}\n")
+
+    monkeypatch.setattr(fixture, "_run", run)
+    if reported_version == "0.1.1.dev6":
+        row = fixture._frontdoors(tmp_path, after)["agent-machines"]["agent-machines.cmd"]
+        assert row["routes_current"] is True
+    else:
+        with pytest.raises(RuntimeError, match="no actual V2 routing proof"):
+            fixture._frontdoors(tmp_path, after)
+    assert calls == ["--version"]
+
+
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Index role readers")
 def test_fixture_configures_host_for_native_and_dependency_free_index_readers(tmp_path: Path) -> None:
     from agent_procutil import no_window_kwargs
@@ -235,6 +263,11 @@ def test_bridge_incumbent_logs_are_captured_before_successor_truncation(
     root.mkdir(parents=True)
     stderr = root / "agent-bridge-err.log"
     stderr.write_text("incumbent failure", encoding="utf-8")
+    watchdog = root / "agent-bridge-watchdog.log"
+    watchdog.write_text("incumbent watchdog reason", encoding="utf-8")
+    application = root / "logs" / "diagnostics" / "daemon.jsonl"
+    application.parent.mkdir(parents=True)
+    application.write_text("incumbent application diagnostic", encoding="utf-8")
     control = tmp_path / "observers" / "agent-bridge"
     control.mkdir(parents=True)
     health = {"pid": 101, "version": "v1", "ready": True,
@@ -256,6 +289,10 @@ def test_bridge_incumbent_logs_are_captured_before_successor_truncation(
     retained = tmp_path / "resident-logs" / "agent-bridge"
     assert (retained / "incumbent-agent-bridge-err.log").read_text() == "incumbent failure"
     assert (retained / "agent-bridge-err.log").read_text() == "successor startup"
+    assert (retained / "incumbent-agent-bridge-watchdog.log").read_text() == "incumbent watchdog reason"
+    assert (retained / "logs" / "diagnostics" / "incumbent-daemon.jsonl").read_text() == (
+        "incumbent application diagnostic"
+    )
 
 
 def test_manager_fixture_subscriber_follows_route_and_releases_both_generations(

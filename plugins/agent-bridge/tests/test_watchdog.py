@@ -8,9 +8,64 @@ sockets, or process exit.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 
 from agent_bridge.watchdog import ServingWatchdog, _probe_host, _watchdog_enabled
+
+
+def test_watchdog_retains_probe_and_exit_reason_before_replacement_log_truncation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_bridge import config, service_process_cli, watchdog
+
+    monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
+    events = tmp_path / "agent-bridge-watchdog.log"
+    stderr = tmp_path / "agent-bridge-err.log"
+    stderr.write_text("incumbent", encoding="utf-8")
+    calls = []
+
+    def fail_probe(*args, **kwargs):
+        raise TimeoutError("synthetic health probe timed out")
+
+    def spawn(**kwargs) -> None:
+        rows = [json.loads(line) for line in events.read_text().splitlines()]
+        assert [row["event"] for row in rows] == ["probe-failed", "replacement-requested"]
+        assert rows[-1]["detail"] == "stopped serving for 15s"
+        stderr.write_text("replacement", encoding="utf-8")
+        calls.append("spawn")
+
+    monkeypatch.setattr(watchdog.urllib.request, "urlopen", fail_probe)
+    monkeypatch.setattr(watchdog.os, "_exit", lambda code: calls.append(code))
+    monkeypatch.setattr(service_process_cli, "_core", lambda: SimpleNamespace(
+        _spawn_watchdog_replacement=spawn,
+    ))
+    assert watchdog._make_health_probe("127.0.0.1", 1)() is False
+    service_process_cli._watchdog_dead("stopped serving for 15s")
+    rows = [json.loads(line) for line in events.read_text().splitlines()]
+    assert [row["event"] for row in rows] == ["probe-failed", "replacement-requested", "exit"]
+    assert rows[0]["detail"] == "TimeoutError: synthetic health probe timed out"
+    assert all(row["pid"] > 0 and row["time_ns"] > 0 for row in rows)
+    assert calls == ["spawn", 70]
+
+
+def test_unavailable_watchdog_diagnostic_path_does_not_prevent_terminal_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_bridge import config, service_process_cli, watchdog
+
+    monkeypatch.setattr(config, "config_dir", lambda: tmp_path / "absent")
+    calls = []
+    monkeypatch.setattr(service_process_cli, "_core", lambda: SimpleNamespace(
+        _spawn_watchdog_replacement=lambda **kwargs: calls.append("spawn"),
+    ))
+    monkeypatch.setattr(watchdog.os, "_exit", lambda code: calls.append(code))
+    service_process_cli._watchdog_dead("stopped serving")
+    assert calls == ["spawn", 70]
+    assert not (tmp_path / "absent").exists()
 
 
 class _Clock:

@@ -256,7 +256,8 @@ def retain_driver_logs(case: Path, output: str) -> None:
 def retain_resident_logs(case: Path, *, incumbent: bool = False) -> None:
     """Keep only known fixture daemon outputs, never scan durable application data."""
     for component, names in {
-        "agent-bridge": ("agent-bridge.log", "agent-bridge-err.log"),
+        "agent-bridge": ("agent-bridge.log", "agent-bridge-err.log", "agent-bridge-watchdog.log",
+                         "logs/diagnostics/daemon.jsonl"),
         "agent-codespaces": ("logs/owner.log", "logs/owner-stdio.log"),
     }.items():
         for name in names:

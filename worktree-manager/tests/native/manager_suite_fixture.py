@@ -160,7 +160,8 @@ def _observe(case: Path, declared: dict[str, Any]) -> dict[str, Any]:
             invocation = _read(payload / "payload-invocation.json")
             commands = invocation.get("commands") or [invocation]
             commands = [{"command": row["command"], "module": row["module"],
-                         "variants": ["cmd", "ps1"]} for row in commands]
+                         "variants": ["cmd"] if name == "agent-machines" else ["cmd", "ps1"]}
+                        for row in commands]
         observed["commands"][name] = commands
     engine = roots["agent-index"] / "engine"
     selected = (engine / "current-version").read_text(encoding="utf-8").strip()
@@ -283,15 +284,15 @@ def _frontdoors(case: Path, after: dict[str, Any]) -> dict[str, Any]:
                 if not path.is_file():
                     raise RuntimeError(f"{name}: declared Windows frontdoor was not produced: {path}")
                 trace = traces / (basename + ".jsonl")
-                argv = ["--version"] if name == "worktree-manager" else ["--help"]
+                argv = ["--version"] if name in {"worktree-manager", "agent-machines"} else ["--help"]
                 invoked = _run(
                     _command(case, command, *argv, extension=extension), case, timeout=30,
                     extra_env={"COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH": str(trace)},
                 )
-                if name == "worktree-manager":
+                if name in {"worktree-manager", "agent-machines"}:
                     version = after["origins"][name]["version"].replace("-dev", ".dev")
-                    current = version in invoked.stdout.replace("-dev", ".dev")
-                    proof = {"kind": "installed Manager version command", "version": version}
+                    current = version in invoked.stdout.replace("-dev", ".dev").split()
+                    proof = {"kind": "installed version command", "version": version}
                 else:
                     emitted = [_read_line for _read_line in (
                         json.loads(line) for line in trace.read_text(encoding="utf-8-sig").splitlines()

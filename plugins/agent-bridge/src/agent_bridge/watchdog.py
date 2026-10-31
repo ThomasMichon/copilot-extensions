@@ -29,6 +29,7 @@ Disable with ``AGENT_BRIDGE_WATCHDOG=0`` (operational safety valve).
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -48,6 +49,19 @@ _DEFAULT_SHUTDOWN_GRACE = 120.0
 _WINDOWS_INTERVAL = 5.0
 _WINDOWS_SERVING_GRACE = 15.0
 _EXIT_CODE = 70  # EX_SOFTWARE -- distinguishable in logs/postmortems
+
+
+def _record_event(event: str, detail: str) -> None:
+    from .config import config_dir
+
+    try:
+        with (config_dir() / "agent-bridge-watchdog.log").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({
+                "time_ns": time.time_ns(), "pid": os.getpid(),
+                "event": event, "detail": detail,
+            }) + "\n")
+    except OSError:
+        pass
 
 
 class ServingWatchdog:
@@ -181,7 +195,8 @@ def _make_health_probe(bind: str, port: int, *, timeout: float = 2.0) -> Callabl
         try:
             with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 -- fixed loopback http
                 return resp.status == 200
-        except Exception:
+        except Exception as error:
+            _record_event("probe-failed", f"{type(error).__name__}: {error}")
             return False
 
     return _probe
@@ -189,6 +204,7 @@ def _make_health_probe(bind: str, port: int, *, timeout: float = 2.0) -> Callabl
 
 def _force_exit(reason: str) -> None:
     """Log a fatal line and hard-exit so the kernel frees the singleton lock."""
+    _record_event("exit", reason)
     log.error(
         "Self-watchdog: daemon wedged (%s) -- exiting so the singleton lock is "
         "freed for a clean restart (#166)",
