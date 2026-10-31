@@ -103,6 +103,10 @@ The source implementation continuation is admitted; operational effects are not.
   roles without retaining a parallel forge implementation.
 - [ ] Resolve the proposal's explicit architecture decisions and document
   capability discovery, supported peer behavior and expand/migrate/contract.
+  Next reviewed admission is the bounded
+  [existing-owner service/client integration](service-client-integration-slice.md):
+  optional existing-gateway routes, immutable framed materialization and the
+  same protected operations; no new transport or deployment owner.
 - [ ] Admit concrete implementation slices through their own reviewed plans
   and source claims; keep operational rollout separately authorized.
   The first bounded [read-generation slice](read-generation-slice.md) is claimed
@@ -145,14 +149,16 @@ extension of the existing `ReplayStore` envelope, not a second posting ledger.
   or effect authority is inferred from this admission.
 - [x] Realize the existing-store data portion: explicit v2 adoption, selected
   immutable intents, reserved growth, ordered fences and native receipt
-  preservation (#9731). Protected backend execution/freshness remains open.
-- [ ] Accept selected comments, owned-thread updates and a named verdict bound
+  preservation (#9731). Source executor realization is recorded below.
+- [x] Accept selected comments, owned-thread updates and a named verdict bound
   to the reviewed candidate; preserve caller/repository authority boundaries.
-- [ ] Perform fresh required checks and readback inside the operation, without
+  Source library and synthetic protected-owner validation merged in #9745;
+  actual installed owner/adopter qualification remains in Phase 4.
+- [x] Perform fresh required checks and readback inside the operation, without
   coupling review authorization to unrelated merge-readiness requirements.
-- [ ] Preserve completion settings and other reviewers' state; represent
+- [x] Preserve completion settings and other reviewers' state; represent
   confirmed, unattempted and unknown partial outcomes without blind replay.
-- [ ] Keep durable submission intent/receipts separate from rebuildable cache
+- [x] Keep durable submission intent/receipts separate from rebuildable cache
   data, even if they share an owning service or physical database.
 
 ### Phase 4 - Integrate and qualify the reviewer after admission
@@ -201,6 +207,24 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-10-31 - Protected source executor merged; integration remains open
+- #9745 merged as `eb6d6e3fe007aeb07582c31d8daa4e2604cfeb45`
+  from head `b547d14e2e56bf519c0bb68dc3c9fea78cbd5a80` after actual
+  current-head approval, all five published threads resolved and required CI
+  success. Unpublished overview findings were also assessed and fixed.
+- Final source consumer validation passed bounded packets of 24 new boundary,
+  36 original executor and 85 durable store/replay cases. The interrupted
+  combined packet is not passing evidence; no test or IO budget was widened.
+- Source-only Phase 3 realization is complete. The canonical effort remains
+  Active: service/client capability and materialization integration, existing
+  owner adoption, actual source acquisition, live eligible ADO end-to-end review,
+  concurrent reviewers, and separately authorized serving/release/rollout
+  qualification are unresolved. No backend call or installation was performed.
+- Next integration decision belongs with the existing PR service/resource and
+  adopter owners: qualify their real pinned write-context factory and running
+  v2 reader support before exposing these library operations. No operational
+  command, replacement transport, issuer or lifecycle owner is inferred.
 
 ### 2026-10-30 - Protected owner/provider executor source continuation
 - Implement the finite executor over the merged `ReplayStore`, not a new
