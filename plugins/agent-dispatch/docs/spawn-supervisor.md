@@ -170,6 +170,9 @@ source support does not establish installed adoption.
 The amendment's [pool scope and ordering](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md#selected-pool-scope-and-ordering)
 also remain implementation-pending: the current raw registration view does not
 carry the complete effective pool definitions required by atomic placement.
+The registrar's [pool-instance definitions](pool-instances.md) preserve priority
+and effective filters in-process; they do not yet publish or enforce that
+placement contract.
 
 ## Retained startup and process capacity
 

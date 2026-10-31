@@ -37,6 +37,7 @@ _KNOWN_KEYS = frozenset(
         "repos",
         "concurrency",
         "max_active_processes",
+        "priority",
         "interval",
         "max_attempts",
         "label_max_attempts",
@@ -265,6 +266,7 @@ class ProfileDeclaration:
     plugin_version: str | None = None
     activation_scopes: tuple[str, ...] = ()
     title: str | None = None
+    priority: int = 0
 
     def to_supervise_args(self) -> list[str]:
         """Render the equivalent ``agent-dispatch supervise`` args (lossless).
@@ -733,6 +735,8 @@ def load_declaration(
             raise RegistrarError(
                 f"{plugin_only_field}: only plugin-companion declarations may set it"
             )
+    if evaluator is not None and "priority" in data:
+        raise RegistrarError("priority: only worker-pool declarations may set it")
 
     legacy_concurrency = data.get("concurrency")
     process_cap = data.get(
@@ -762,6 +766,7 @@ def load_declaration(
             ),
             minimum=1,
         ),
+        priority=_as_int(data.get("priority", 0), key="priority"),
         interval=_as_float(data.get("interval", 30.0), key="interval", minimum=1.0),
         max_attempts=_as_int(data.get("max_attempts", 3), key="max_attempts", minimum=0),
         label_max_attempts=_load_label_max_attempts(data.get("label_max_attempts")),
