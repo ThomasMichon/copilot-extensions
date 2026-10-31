@@ -423,6 +423,8 @@ class KomodoRepairOwner:
                                      operation.original, ready=False)
                     selected_native = True
                     retained = operation.pending_outcome()
+                    if retained is not None and not native_set_matches(retained["native"], containers):
+                        raise PlanError("Komodo repair pending retained native evidence is unproved")
                     expected_network = (operation.original["network_before"]
                                         if retained is None else retained["network"])
                 else:

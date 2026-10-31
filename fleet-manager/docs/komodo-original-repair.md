@@ -128,6 +128,11 @@ second terminal outcome.
 Successful terminal retries, terminal status and interrupted pending-outcome
 retries/status bind the retained outcome's bridge, not the pre-apply attempt's
 network-before observation.
+Pending-outcome status also compares every current container with the retained
+native fingerprints before health. A replacement with the same fixed profile
+and bridge cannot be reported as the original installation; status retains
+UNKNOWN and reports unproved custody. Restoring the exact retained resources
+permits fresh verification of the same original decision.
 A missing or replaced bridge refuses before credentialed health, even when
 all current container attachments consistently point at the replacement.
 Only the original UNKNOWN's attributed creation path can recognize a bridge

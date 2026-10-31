@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
 from pathlib import Path
 from typing import Any
 
 from fleet_manager import komodo_repair
 from fleet_manager.komodo_profile import KomodoMaterialization
+from fleet_manager.komodo_evidence import native_fingerprint
 from fleet_manager.node_journal import NodeJournal
 
 
@@ -57,3 +59,17 @@ def late_material_drift(
             raise AssertionError("unexpected material drift control")
 
     return late_publication_drift(monkeypatch, change)
+
+
+def replace_pending_container(directory: Path) -> bytes:
+    path = directory / "live.json"
+    original = path.read_bytes()
+    containers = json.loads(original)
+    before = native_fingerprint(containers["core"])
+    containers["core"]["Id"] = "f" * 64
+    containers["core"]["State"].update(Pid=9999, StartedAt="replacement-fixture-start")
+    attachment = next(iter(containers["core"]["NetworkSettings"]["Networks"].values()))
+    attachment["EndpointID"] = "replacement-fixture-endpoint"
+    assert native_fingerprint(containers["core"]) != before
+    path.write_text(json.dumps(containers))
+    return original

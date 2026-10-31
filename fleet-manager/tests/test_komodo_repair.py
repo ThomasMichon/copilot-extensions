@@ -27,7 +27,7 @@ from fleet_manager.node_journal import NodeJournal
 from fleet_manager.planning import PlanError, canonical, decode, digest
 from fleet_manager.runtime_admission import AdmissionError, AdmissionAuthority, OperationGrant
 from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
-from komodo_repair_test_controls import late_material_drift, late_publication_drift
+from komodo_repair_test_controls import late_material_drift, late_publication_drift, replace_pending_container
 from test_komodo_declaration import intent
 from test_komodo_native import native_rig as native_rig
 from test_runtime_admission import Harness, actor, policy
@@ -35,12 +35,13 @@ from test_runtime_identity import keys as keys
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux original-owner repair")
 
+PENDING_REPLACED = ["pending-succeeded-replaced-container", "pending-failed-replaced-container"]
 CRASHES = [
     "native-before", "health-after", "retain-before", "retain-after", "save-before", "save-after",
     "journal-before", "journal-after", "clear-before", "clear-after",
     "complete-before", "complete-after", "journal-revoke", "append-revoke", "save-revoke",
     "pending-succeeded-replaced-network",
-]
+] + PENDING_REPLACED
 PARTIAL_SAVES = ["save-partial-renewed", "clear-partial-renewed"]
 TERMINAL_NETWORK = ["terminal-failed-network", "terminal-failed-attachment"]
 CLEANUP_DRIFTS = ["cleanup-key", "cleanup-endpoint"]
@@ -238,7 +239,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             uncertain = journal.inspect(original)
             assert uncertain.to_dict()["status"] == "unknown"
             assert uncertain.to_dict()["sequence"] == 2 and uncertain.to_dict()["result_ref"] is None
-            failed = mode == "failed" or mode.startswith("publication-late-failed-") or mode in TERMINAL_NETWORK or mode in (
+            failed = mode == "failed" or mode.startswith(("publication-late-failed-", "pending-failed-")) or mode in TERMINAL_NETWORK or mode in (
                 "status-failed-replaced-network", "terminal-failed-conflicting-attempt",
                 "status-failed-conflicting-attempt")
             original_health_failure[0] = failed
@@ -462,7 +463,8 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     selected = not fired
                     if name == "save":
                         value = args[0]
-                        selected = selected and type(value["good"]) is dict and "repair" in value["good"]
+                        outcome = value["failed" if failed else "good"]
+                        selected = selected and type(outcome) is dict and "repair" in outcome
                         selected = selected and ((value["attempt"] is None) == mode.startswith("clear"))
                     if name == "_append":
                         selected = selected and args[2].to_dict()["status"] == "succeeded"
@@ -478,7 +480,8 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                         fired.append(True)
                         transition["active"] = False
                     elif selected and (mode.endswith(("-after", "-after-health"))
-                                       or mode == "pending-succeeded-replaced-network"):
+                                       or mode == "pending-succeeded-replaced-network"
+                                       or mode in PENDING_REPLACED):
                         fired.append(True)
                         raise PlanError("fixture publication interrupted")
                     return result
@@ -595,6 +598,19 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     assert fired and not harness.owner._issued
                     assert journal.inspect(original).to_dict()["sequence"] in (2, 3)
                     transition["active"] = True
+                    if mode in PENDING_REPLACED:
+                        before_health = list(health_requests)
+                        original_native = replace_pending_container(rig["directory"])
+                        status = await asyncio.to_thread(call, status=True)
+                        assert status["accepted"] == "unknown" and status["unresolved_effects"]
+                        assert status["installed"] is status["currently_healthy"] is None
+                        assert "retained native" in status["health_error"]
+                        assert health_requests == before_health
+                        with pytest.raises(PlanError, match="pending outcome"):
+                            await asyncio.to_thread(call)
+                        assert journal.inspect(original) == uncertain
+                        assert decode((owner_root / "selection.json").read_bytes())["attempt"] == retained
+                        (rig["directory"] / "live.json").write_bytes(original_native)
                     if mode == "pending-succeeded-replaced-network":
                         before_health = list(health_requests)
                         original_network, original_native = replace_bridge()
