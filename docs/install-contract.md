@@ -2234,6 +2234,31 @@ worktrees self-installer retains its existing 600-second minimum, extended when
 a positive watchdog override plus cleanup grace exceeds it. Invalid deadline
 values fail explicitly before launching the installer.
 
+The receipt-owned Python installer runner interprets that allowance as **inactivity**, not a maximum
+elapsed installation duration. Newly read stdout or stderr bytes renew it,
+including partial lines. It relays raw native bytes to their original channels
+or the admitted human-output descriptor through finite cancellable relays.
+Acknowledged relay writes renew delivery inactivity, including after the
+installer exits; an undrained pipe cannot block timeout or owner-loss checks.
+Legacy Python log callbacks receive complete lines and a final partial line
+only after native process-tree and pipe settlement. Retiring the owned tree precedes output drain,
+so a root exit cannot leave a pipe-holding descendant writing a late slot.
+Receipt validation and watchdog exit `124` still determine the actual outcome.
+This does not change a native self-stage parent's separate watchdog policy or
+legacy non-receipt subprocess adapters.
+
+The read-only Windows consumer census refreshes an incomplete current-user
+candidate at most once by PID and checks that its creation identity is unchanged.
+When descendants are requested, potential roots are recovered before computing
+their closure, so a newly identified runtime-root process cannot hide an
+external child. Rooted descendants still require current-user ownership.
+Confirmed-exited candidates retain their original snapshot rooting and ancestry
+for descendant discovery, but are omitted from returned live observations.
+A disappeared observation is omitted only after native process absence/exit
+confirmation; live unknown, ambiguous and changed-identity observations still
+refuse inspection. The existing native birth check and retirement pins remain
+separate, and the census never signals a process.
+
 The shared command-lifecycle runner passes the caller's stdout and stderr
 explicitly to its native installer child, including the strict Windows Job
 containment path. On Windows, a hidden child with only implicit OS stream
@@ -2634,7 +2659,11 @@ Coverage cannot be narrowed to selected files to hide a new
 producer. A producer change must carry its manifest revision and delta;
 published history is compared with the local publication merge-base, PR base, or CI push
 parent rather than trusting a rewritten baseline. Source digests are omission
-checks, not a signing or runtime-authorization protocol. This initial data
+checks, not a signing or runtime-authorization protocol. The complete append-only
+manifest has a separate bounded 1 MiB reader; selectors, deployment evidence and
+completion markers retain their 64 KiB budget. Construction and the source guard
+use the same manifest reader, so valid history is not mistaken for one small
+runtime marker and an oversized publication is refused before rollout. This initial data
 provider alone neither executes effects nor grants update permission; native
 construction and process settlement consume the applicable parts separately.
 
@@ -3500,7 +3529,7 @@ presentation-gap notice. Such a producer is not reported as successfully
 captured or universally time-framed.
 
 The human-output adapter retains the updater's installer process-tree owner,
-deadline and deployed-version receipt judgment. Streaming output does not turn
+inactivity protection and deployed-version receipt judgment. Streaming output does not turn
 a zero exit with a missing target receipt, an expired deadline or a failed
 cutover into a successful operation.
 
@@ -4519,6 +4548,21 @@ acquisition, offline and total elapsed time on stderr; named phase transitions
 are flushed separately without altering result framing. Those counts describe
 local wheels, not completed runtime generations or the whole update duration.
 
+Ordinary source-wheel phases now renew their quiet allowance from actual child
+stdout/stderr and completed file, copy and verification units. The owned
+constructor relays child bytes immediately, including partial lines; its
+Windows retention guardian keeps the final completion JSON on stdout and
+relays progress separately on stderr. A silent child still times out and must
+settle every owned writer before construction or retention custody is released.
+Native relay errors preserve their error codes; failed strict Job confirmation
+retains the exact process and Job rather than treating handle closure as proof.
+Legacy Python observers run after settlement and cannot perform live stdio.
+Source-cache publication reads the phase's current allowance rather than a
+stale pre-build wall-clock limit. Explicit caller-supplied absolute deadlines
+for closed-wheel acquisition/inspection remain absolute, and all byte, file,
+identity, seasoning and publication checks remain unchanged. No supervisor
+generates periodic output to conceal an idle backend.
+
 Ordinary immutable source candidates request UV hardlinks from its extracted
 wheel cache, with UV's normal copy fallback when linking is unavailable.
 Mutable development refresh and the private build-tool environment retain
@@ -4823,6 +4867,13 @@ after caller death; release of the caller's construction byte lock alone does
 not admit destructive cleanup. The supplied runtime root, version and helper
 path must form a complete custody context. Child launch and settled-timeout
 outcomes retain their existing explicit error classes.
+The parent allows the guardian's existing startup grace only until its first
+output. Subsequent progress renews the configured child inactivity window,
+not the startup-plus-teardown allowance; a blocked output pipe cannot postpone
+hang detection by repeatedly borrowing that grace.
+If the parent's quiet window expires first, it closes its liveness pipe and
+continues draining the guardian's settled completion before propagating the
+timeout, preserving the child's original stdout and stderr channels.
 POSIX uses an owner-death pipe guardian retaining the construction descriptor,
 an unreaped process-group leader and verified process-group teardown. The
 canonical POSIX lease releases on final descriptor close, not an explicit

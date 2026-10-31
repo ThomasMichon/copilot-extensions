@@ -10,11 +10,16 @@ These tests run real child processes.
 from __future__ import annotations
 
 import os
+import errno
+import io
+import json
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -199,6 +204,33 @@ def test_captured_output_reaches_the_log_after_a_deadline_kill(tmp_path, stub):
     assert "stub installer running" in lines
 
 
+def test_legacy_log_failure_occurs_after_native_settlement(tmp_path, stub, monkeypatch):
+    original_spawn = installer_run._spawn
+    spawned = []
+
+    def spawn(*args, **kwargs):
+        result = original_spawn(*args, **kwargs)
+        spawned.append(result)
+        return result
+
+    failure = OSError("legacy log sink failed")
+
+    def log(_line):
+        proc, job = spawned[0]
+        assert proc.returncode is not None
+        assert job is None or job.handle is None
+        assert _wait_dead(int((tmp_path / "slot.pid").read_text()))
+        raise failure
+
+    monkeypatch.setattr(installer_run, "_spawn", spawn)
+    with pytest.raises(OSError) as caught:
+        installer_run.run_installer(
+            stub(delay=60), cwd=tmp_path, env=os.environ, deadline_s=10, log=log,
+            require_tree_exit=os.name == "nt",
+        )
+    assert caught.value is failure
+
+
 @pytest.mark.parametrize("deadline", [False, True])
 def test_live_output_fd_retains_deadline_and_receipt_judgment(tmp_path, stub, deadline):
     with (tmp_path / "output").open("wb") as stream:
@@ -219,6 +251,392 @@ def test_live_output_fd_cannot_silently_discard_log(tmp_path):
         installer_run.run_installer(
             [], cwd=tmp_path, env={}, deadline_s=1, log=lambda line: None, output_fd=1,
         )
+
+
+@pytest.mark.parametrize("sink", ["undrained", "closed"])
+def test_output_pipe_failure_cannot_starve_installer_supervision(tmp_path, monkeypatch, sink):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    script, ready = tmp_path / "flood.py", tmp_path / "child.pid"
+    script.write_text(textwrap.dedent("""
+        import os, pathlib, subprocess, sys
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+        pathlib.Path(sys.argv[1]).write_text(str(child.pid))
+        while True:
+            os.write(1, b"unbuffered-output " * 4096)
+            os.write(2, b"unbuffered-diagnostic " * 4096)
+    """), encoding="utf-8")
+    original_spawn = installer_run._spawn
+    original_capture = installer_run.SyncProcessOutput
+    spawned, captures = [], []
+
+    def spawn(command, *args, **kwargs):
+        result = _spawn_ready(original_spawn, command, *args, ready=ready, **kwargs)
+        spawned.append(result)
+        return result
+
+    monkeypatch.setattr(installer_run, "_spawn", spawn)
+    def capture(*args, **kwargs):
+        result = original_capture(*args, **kwargs)
+        captures.append(result)
+        return result
+
+    monkeypatch.setattr(installer_run, "SyncProcessOutput", capture)
+    reader, writer = os.pipe()
+    if sink == "closed":
+        os.close(reader)
+        reader = -1
+    try:
+        started = time.monotonic()
+        arguments = dict(
+            # Let a closed sink report its native error before the quiet watchdog.
+            cwd=tmp_path, env=os.environ, deadline_s=5 if sink == "closed" else 1,
+            output_fd=writer, require_tree_exit=os.name == "nt",
+        )
+        if sink == "closed":
+            with pytest.raises((OSError, installer_run.InstallerCleanupError)):
+                result = installer_run.run_installer(
+                    [sys.executable, str(script), str(ready)], **arguments,
+                )
+                pytest.fail(
+                    f"closed sink returned {result.status} after {result.duration_s:.2f}s "
+                    "instead of its native error",
+                )
+        else:
+            run = installer_run.run_installer([sys.executable, str(script), str(ready)], **arguments)
+            assert run.status.startswith("timed out")
+        assert time.monotonic() - started < 15
+        assert _wait_dead(int(ready.read_text()))
+        assert spawned[0][0].returncode is not None
+        assert all(not thread.is_alive() for thread in captures[0]._readers)
+        assert all(
+            relay.process.returncode is not None and not relay._writer.is_alive()
+            and not relay._reader.is_alive()
+            and relay.process.stdin.closed and relay.process.stderr.closed
+            for relay in captures[0]._relays.values()
+        )
+    finally:
+        os.close(writer)
+        if reader >= 0:
+            os.close(reader)
+        for proc, job in spawned:
+            if job is not None and job.handle:
+                job.terminate_and_wait(10)
+            elif proc.poll() is None:
+                installer_run._kill_tree(proc, job)
+            proc.wait(timeout=10)
+
+
+def test_slow_productive_sink_renews_delivery_after_installer_exit(tmp_path, monkeypatch):
+    quiet_window = 1
+    monkeypatch.setattr(installer_run, "_REAP_GRACE_S", quiet_window)
+    reader, writer = os.pipe()
+    received = bytearray()
+
+    def drain():
+        while chunk := os.read(reader, 4096):
+            received.extend(chunk)
+            time.sleep(.1)
+
+    consumer = threading.Thread(target=drain)
+    consumer.start()
+    try:
+        started = time.monotonic()
+        run = installer_run.run_installer(
+            [sys.executable, "-c", "import os;os.write(1,b'x'*163840)"],
+            cwd=tmp_path, env=os.environ, deadline_s=quiet_window, output_fd=writer,
+            require_tree_exit=os.name == "nt",
+        )
+        assert run.status == "OK"
+        assert time.monotonic() - started > quiet_window
+        assert os.get_blocking(writer), "a borrowed descriptor's flags must remain unchanged"
+    finally:
+        os.close(writer)
+        consumer.join(timeout=10)
+        os.close(reader)
+    assert not consumer.is_alive()
+    assert received == b"x" * 163840
+
+
+@pytest.mark.parametrize("backpressure", [False, True])
+def test_failed_sink_retains_inflight_output_once(tmp_path, monkeypatch, backpressure):
+    from agent_procutil._output_relay import ByteRelay
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    original_capture = installer_run.SyncProcessOutput
+    captures = []
+    failure = OSError("native output sink failed")
+    attempts = []
+
+    def capture(*args, **kwargs):
+        kwargs["capture"] = True
+        result = original_capture(*args, **kwargs)
+        captures.append(result)
+        return result
+
+    def offer(_relay, chunk):
+        attempts.append(chunk)
+        if backpressure and len(attempts) == 1:
+            return False
+        raise failure
+
+    monkeypatch.setattr(installer_run, "SyncProcessOutput", capture)
+    monkeypatch.setattr(ByteRelay, "offer", offer)
+    with (tmp_path / "output").open("wb") as output:
+        with pytest.raises(OSError) as caught:
+            installer_run.run_installer(
+                [sys.executable, "-c", "import os;os.write(1,b'inflight diagnostic')"],
+                cwd=tmp_path, env=os.environ, deadline_s=10, output_fd=output.fileno(),
+            )
+    assert caught.value is failure
+    assert len(attempts) == (2 if backpressure else 1)
+    assert captures[0].output()[0] == "inflight diagnostic"
+    assert all(not reader.is_alive() for reader in captures[0]._readers)
+
+
+@pytest.mark.parametrize("retirement_failures", [1, 2])
+def test_finish_retries_unverified_relay_retirement(tmp_path, monkeypatch, retirement_failures):
+    from agent_procutil._output_relay import OutputRelayCleanupError
+
+    reader, writer = os.pipe()
+    os.close(reader)
+    proc, job = installer_run._spawn(
+        [sys.executable, "-c", "import os;os.write(1,b'closed sink diagnostic')"],
+        tmp_path, os.environ, True, require_tree_exit=os.name == "nt",
+    )
+    capture = relay = original_abort = None
+    try:
+        capture = installer_run.SyncProcessOutput(proc, output_fds={"stdout": writer})
+        relay = capture._relays["stdout"]
+        original_abort = relay.abort
+        failure = OutputRelayCleanupError(relay)
+        attempts = []
+
+        def abort(timeout):
+            attempts.append(timeout)
+            if len(attempts) <= retirement_failures:
+                raise failure
+            original_abort(timeout)
+
+        monkeypatch.setattr(relay, "abort", abort)
+        with pytest.raises(OutputRelayCleanupError) as caught:
+            capture.wait(5)
+        assert caught.value is failure
+        assert not capture._finished and not relay._closed
+        if job is not None:
+            job.terminate_and_wait(10)
+        proc.wait(timeout=10)
+        if retirement_failures == 2:
+            with pytest.raises(OutputRelayCleanupError) as caught:
+                capture.finish(5)
+            assert caught.value is failure
+            assert not capture._finished and not relay._closed
+        capture.finish(5)
+        assert len(attempts) == retirement_failures + 1
+        assert capture._finished and relay._closed
+        assert not relay._writer.is_alive() and not relay._reader.is_alive()
+        assert relay.process.stdin.closed and relay.process.stderr.closed
+        assert capture.output()[0] == "closed sink diagnostic"
+    finally:
+        if original_abort is not None:
+            monkeypatch.setattr(relay, "abort", original_abort)
+        if job is not None and job.handle:
+            job.terminate_and_wait(10)
+        elif proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=10)
+        if relay is not None:
+            relay.abort(10)
+        if capture is not None:
+            capture.finish(10)
+        os.close(writer)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX high-numbered pipes")
+def test_capture_accepts_high_numbered_pipe_descriptors(tmp_path, monkeypatch):
+    import fcntl
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    proc, job = installer_run._spawn(
+        [sys.executable, "-c",
+         "import os;os.write(1,b'high output');os.write(2,b'high diagnostic')"],
+        tmp_path, os.environ, True,
+    )
+    capture = None
+    try:
+        descriptor = fcntl.fcntl(proc.stdout.fileno(), fcntl.F_DUPFD, 1024)
+        os.set_inheritable(descriptor, False)
+        stream = os.fdopen(descriptor, "r", encoding="utf-8", errors="replace")
+        proc.stdout.close()
+        proc.stdout = stream
+        assert stream.fileno() >= 1024
+        capture = installer_run.SyncProcessOutput(proc)
+        capture.wait(5)
+        assert capture.output() == ("high output", "high diagnostic")
+    finally:
+        installer_run._kill_tree(proc, job, capture)
+    assert all(not reader.is_alive() for reader in capture._readers)
+
+
+def test_output_relays_do_not_inherit_unrelated_pipe_handles(tmp_path):
+    from agent_procutil._output_relay import ByteRelay
+
+    reader, writer = os.pipe()
+    os.set_inheritable(writer, True)
+    eof = threading.Event()
+
+    def observe_eof():
+        if os.read(reader, 1) == b"":
+            eof.set()
+
+    observer = threading.Thread(target=observe_eof)
+    relays = []
+    try:
+        with (tmp_path / "stdout").open("wb") as stdout, (tmp_path / "stderr").open("wb") as stderr:
+            try:
+                for stream in (stdout, stderr):
+                    relays.append(ByteRelay(stream.fileno()))
+                os.close(writer)
+                writer = -1
+                observer.start()
+                assert eof.wait(5), "a live relay must not retain a foreign pipe's writer"
+                assert all(relay.process.poll() is None for relay in relays)
+            finally:
+                for relay in relays:
+                    relay.abort(10)
+    finally:
+        if writer >= 0:
+            os.close(writer)
+        if observer.ident is not None:
+            observer.join(timeout=10)
+        os.close(reader)
+    assert not observer.is_alive()
+
+
+def test_unicode_relay_error_receipt_preserves_native_error():
+    from agent_procutil._output_relay import ByteRelay
+
+    error = OSError(errno.EIO, "diagnostic " + "\U0001f600" * 512)
+    message = str(error)[:512]
+    receipt = json.dumps({"errno": error.errno, "message": message}).encode("ascii") + b"\n"
+    receiver = SimpleNamespace(
+        process=SimpleNamespace(stderr=io.BytesIO(receipt)), _native_error=None,
+        _errors=[], _reported=threading.Event(), last_progress=0,
+    )
+    ByteRelay._report(receiver)
+    assert not receiver._errors
+    assert receiver._native_error.errno == error.errno
+    assert receiver._native_error.strerror == message
+
+
+def test_output_relay_exits_when_its_caller_dies_with_an_undrained_sink(tmp_path, monkeypatch):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    ready = tmp_path / "relay.pid"
+    program = textwrap.dedent("""
+        import os, pathlib, sys, time
+        from agent_procutil._output_relay import ByteRelay
+        reader, writer = os.pipe()
+        relay = ByteRelay(writer)
+        for index in range(64):
+            relay.offer(b"x" * 4096)
+        pathlib.Path(sys.argv[1]).write_text(str(relay.process.pid))
+        time.sleep(120)
+    """)
+    proc, job = _spawn_ready(
+        installer_run._spawn,
+        [sys.executable, "-c", program, str(ready)],
+        tmp_path, os.environ, True, ready=ready,
+        require_tree_exit=os.name == "nt",
+    )
+    try:
+        relay_pid = int(ready.read_text())
+        assert _alive(relay_pid)
+        proc.kill()
+        proc.wait(timeout=10)
+        assert _wait_dead(relay_pid), "parent loss must interrupt even a blocked native output write"
+    finally:
+        installer_run._kill_tree(proc, job)
+
+
+def test_inherited_output_keeps_native_bytes_and_channels(tmp_path, monkeypatch):
+    with (tmp_path / "stdout").open("w", encoding="utf-8") as stdout, (
+        tmp_path / "stderr"
+    ).open("w", encoding="utf-8") as stderr, monkeypatch.context() as patched:
+        patched.setattr(installer_run.sys, "stdout", stdout)
+        patched.setattr(installer_run.sys, "stderr", stderr)
+        run = installer_run.run_installer(
+            [sys.executable, "-c", "import os;os.write(1,b'\\xffout');os.write(2,b'\\xfeerr')"],
+            cwd=tmp_path, env=os.environ, deadline_s=10,
+        )
+    assert run.status == "OK"
+    assert (tmp_path / "stdout").read_bytes() == b"\xffout"
+    assert (tmp_path / "stderr").read_bytes() == b"\xfeerr"
+
+
+@pytest.mark.parametrize("output", ["log", "fd"])
+def test_productive_installer_renews_inactivity_timeout(tmp_path, monkeypatch, output):
+    script = tmp_path / "progress.py"
+    ready = tmp_path / "progress.ready"
+    script.write_text(textwrap.dedent("""
+        import pathlib, sys, time
+        pathlib.Path(sys.argv[1]).write_text("ready")
+        for index in range(20):
+            stream = sys.stdout if index % 2 == 0 else sys.stderr
+            stream.write(f"progress{index:02d} ")
+            stream.flush()
+            time.sleep(.25)
+    """), encoding="utf-8")
+    original_spawn = installer_run._spawn
+    monkeypatch.setattr(
+        installer_run, "_spawn",
+        lambda command, *args, **kwargs: _spawn_ready(
+            original_spawn, command, *args, ready=ready, **kwargs,
+        ),
+    )
+    lines = []
+    with (tmp_path / "output").open("wb") as stream:
+        run = installer_run.run_installer(
+            [sys.executable, str(script), str(ready)],
+            cwd=tmp_path, env=os.environ, deadline_s=2,
+            target_version="2.0.0", receipt=lambda: "2.0.0",
+            **({"log": lines.append} if output == "log" else {"output_fd": stream.fileno()}),
+        )
+    assert run.status == "OK" and run.receipt_complete
+    assert run.duration_s > 4
+    text = " ".join(lines) if output == "log" else (tmp_path / "output").read_text()
+    assert all(f"progress{index:02d}" in text for index in range(20))
+
+
+@pytest.mark.parametrize("stall", [False, True])
+def test_startup_grace_ends_when_real_output_begins(tmp_path, stall):
+    ready = tmp_path / "first-output"
+    program = textwrap.dedent("""
+        import pathlib, sys, time
+        time.sleep(1.5)
+        pathlib.Path(sys.argv[1]).write_text(str(time.monotonic()))
+        print("started", flush=True)
+        if sys.argv[2] == "stall":
+            time.sleep(60)
+        else:
+            for index in range(6):
+                time.sleep(.3)
+                print("progress", flush=True)
+    """)
+    proc, job = installer_run._spawn(
+        [sys.executable, "-c", program, str(ready), "stall" if stall else "progress"],
+        tmp_path, os.environ, True, require_tree_exit=os.name == "nt",
+    )
+    capture = installer_run.SyncProcessOutput(proc)
+    try:
+        if stall:
+            with pytest.raises(subprocess.TimeoutExpired):
+                capture.wait(1, startup_timeout=10)
+            assert time.monotonic() - float(ready.read_text()) < 5
+        else:
+            capture.wait(1, startup_timeout=10)
+            assert capture.output()[0].count("progress") == 6
+    finally:
+        installer_run._kill_tree(proc, job, capture)
+    assert all(not reader.is_alive() for reader in capture._readers)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
@@ -345,6 +763,104 @@ def test_strict_job_exit_kills_and_reaps_every_descendant(tmp_path, stub, exit_m
     assert _wait_dead(int((tmp_path / "slot.pid").read_text()))
     time.sleep(4)
     assert not (tmp_path / "slot").exists(), "confirmed cleanup precedes all late writes"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="confirmed Windows Job exit")
+@pytest.mark.parametrize("output", ["log", "fd"])
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+def test_strict_capture_error_settles_job_and_readers(
+    tmp_path, monkeypatch, output, cleanup_failure,
+):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    script, ready = tmp_path / "flood.py", tmp_path / "child.pid"
+    script.write_text(textwrap.dedent("""
+        import os, pathlib, subprocess, sys, time
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(120)"],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        pathlib.Path(sys.argv[1]).write_text(str(child.pid))
+        while True:
+            os.write(1, b"output\\n" * 4096)
+            os.write(2, b"diagnostic\\n" * 4096)
+    """), encoding="utf-8")
+    original_spawn, original_capture = installer_run._spawn, installer_run.SyncProcessOutput
+    spawned, captures, settled, finished, terminators = [], [], [], [], []
+
+    def spawn(command, *args, **kwargs):
+        proc, job = _spawn_ready(original_spawn, command, *args, ready=ready, **kwargs)
+        spawned.append((proc, job))
+        terminate = job.terminate_and_wait
+        terminators.append(terminate)
+
+        def terminate_and_wait(timeout):
+            if cleanup_failure:
+                raise OSError("fixture Job accounting refused")
+            terminate(timeout)
+            settled.append(True)
+
+        monkeypatch.setattr(job, "terminate_and_wait", terminate_and_wait)
+        return proc, job
+
+    def capture(*args, **kwargs):
+        result = original_capture(*args, **kwargs)
+        captures.append(result)
+        finish = result.finish
+
+        def finish_capture(*args, **kwargs):
+            assert settled, "confirm the Job is empty before draining inherited pipes"
+            result = finish(*args, **kwargs)
+            finished.append(True)
+            return result
+
+        monkeypatch.setattr(result, "finish", finish_capture)
+        wait = result.wait
+        failed = False
+
+        def fail_wait(*args, **kwargs):
+            nonlocal failed
+            if not failed:
+                failed = True
+                assert _wait_for(lambda: result._events.full())
+                raise sink_error
+            return wait(*args, **kwargs)
+
+        monkeypatch.setattr(result, "wait", fail_wait)
+        return result
+
+    sink_error = OSError("output sink refused bytes")
+
+    monkeypatch.setattr(installer_run, "_spawn", spawn)
+    monkeypatch.setattr(installer_run, "SyncProcessOutput", capture)
+    try:
+        with (tmp_path / "output").open("wb") as stream:
+            with pytest.raises(installer_run.InstallerCleanupError) as caught:
+                installer_run.run_installer(
+                    [sys.executable, str(script), str(ready)],
+                    cwd=tmp_path, env=os.environ, deadline_s=10, require_tree_exit=True,
+                    **({"log": lambda _line: None} if output == "log"
+                       else {"output_fd": stream.fileno()}),
+                )
+        assert caught.value.__cause__ is sink_error
+        if cleanup_failure:
+            assert not settled and not finished
+            assert caught.value.process is spawned[0][0]
+            assert caught.value.job is spawned[0][1] and caught.value.job.handle
+            assert "fixture Job accounting refused" in str(caught.value)
+            assert any("output sink refused bytes" in note for note in caught.value.__notes__)
+        else:
+            assert settled and finished, "sink failure must not skip verified teardown"
+            assert spawned[0][0].returncode is not None
+            assert _wait_dead(int(ready.read_text()))
+            assert all(not thread.is_alive() for thread in captures[0]._readers)
+            assert all(pipe.closed for pipe in captures[0]._streams.values())
+    finally:
+        for (proc, job), terminate in zip(spawned, terminators):
+            if job.handle:
+                terminate(10)
+            proc.wait(timeout=10)
+        for result in captures:
+            original_capture.finish(result, 10)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="verified Windows payload timeout recovery")

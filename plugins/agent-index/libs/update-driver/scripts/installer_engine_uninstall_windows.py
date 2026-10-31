@@ -19,7 +19,82 @@ def inspect_processes(
     script += r"""
 $ErrorActionPreference='Stop'
 $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+function Test-CensusProcessExited([int]$processId) {
+    try { $process=[Diagnostics.Process]::GetProcessById($processId) } catch {
+        if ($_.Exception.InnerException -is [ArgumentException]) { return $true }
+        throw
+    }
+    try { return $process.HasExited } finally { $process.Dispose() }
+}
+function Get-CensusProcessOwner($row) {
+    try { $owner=Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid -ErrorAction Stop } catch {
+        if (-not (Get-Process -Id $row.ProcessId -ErrorAction SilentlyContinue)) { return }; throw
+    }
+    if ($owner.ReturnValue -ne 0) { throw 'Cannot attribute candidate process ownership' }
+    return $owner
+}
+function Get-CensusProcessMetadata($row) {
+    $image=([string]$row.ExecutablePath).Replace('\','/').ToLowerInvariant()
+    $command=([string]$row.CommandLine).Replace('\','/').ToLowerInvariant()
+    if (-not $image -or -not $command) {
+        $fresh=@(Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $row.ProcessId) -ErrorAction Stop)
+        if ($fresh.Count -gt 1) { throw 'Candidate process refresh is ambiguous' }
+        if ($fresh.Count -eq 1) {
+            if ($fresh[0].ProcessId -ne $row.ProcessId -or
+                ([datetime]$fresh[0].CreationDate).ToFileTimeUtc() -ne
+                    ([datetime]$row.CreationDate).ToFileTimeUtc()) {
+                throw 'Process identity changed during inspection'
+            }
+            $row=$fresh[0]
+            $image=([string]$row.ExecutablePath).Replace('\','/').ToLowerInvariant()
+            $command=([string]$row.CommandLine).Replace('\','/').ToLowerInvariant()
+        }
+        if (-not $image -or -not $command) {
+            if (Test-CensusProcessExited $row.ProcessId) { return }
+            throw ("Cannot inspect a current-user candidate process (pid={0})" -f $row.ProcessId)
+        }
+    }
+    return $row
+}
+function Test-CensusCandidate($row,$ancestors,$rooted) {
+    $image=([string]$row.ExecutablePath).Replace('\','/').ToLowerInvariant()
+    $command=([string]$row.CommandLine).Replace('\','/').ToLowerInvariant()
+    return ($row.ProcessId -in $ancestors -or $row.ProcessId -in $rooted -or
+        $row.Name -match '^(bash|sh)(\.exe)?$' -or
+        ($row.ParentProcessId -in $ancestors -and $row.Name -match '^(bash|sh)(\.exe)?$') -or
+        $image.StartsWith($prefix+'/') -or
+        $command.Contains($prefix) -or $command.Contains($module) -or
+        ($row.Name -match '^(python|pythonw|pypy)[0-9.]*\.exe$' -and (-not $image -or -not $command)))
+}
 $raw=@(Get-CimInstance Win32_Process -ErrorAction Stop)
+$ancestors=@($inspector)
+$current=$inspector
+foreach ($level in 1..4) {
+    $parent=@($raw | Where-Object ProcessId -eq $current)
+    if ($parent.Count -ne 1) { break }
+    $current=$parent[0].ParentProcessId
+    $ancestors+=@($current)
+}
+$rooted=@()
+$exited=@{}
+if ($descendants) {
+    # Recover roots before closure; exited rows remain as ancestry evidence.
+    $raw=@($raw | ForEach-Object {
+        $row=$_
+        if (Test-CensusCandidate $row $ancestors $rooted) {
+            if (-not $row.ExecutablePath -or -not $row.CommandLine) {
+                $owner=Get-CensusProcessOwner $row
+                if (-not $owner) {
+                    $exited[$row.ProcessId]=$true
+                } elseif ($owner.Sid -eq $sid) {
+                    $fresh=Get-CensusProcessMetadata $row
+                    if ($fresh) { $row=$fresh } else { $exited[$row.ProcessId]=$true }
+                }
+            }
+        }
+        $row
+    })
+}
 $rooted=@($raw | Where-Object {
     ([string]$_.ExecutablePath).Replace('\','/').ToLowerInvariant().StartsWith($prefix+'/') -or
     ([string]$_.CommandLine).Replace('\','/').ToLowerInvariant().Contains($prefix)
@@ -34,34 +109,18 @@ if ($descendants) {
         if ($level -eq 64) { throw 'Rooted process descendants exceed the inspection budget' }
     }
 }
-$ancestors=@($inspector)
-$current=$inspector
-foreach ($level in 1..4) {
-    $parent=@($raw | Where-Object ProcessId -eq $current)
-    if ($parent.Count -ne 1) { break }
-    $current=$parent[0].ParentProcessId
-    $ancestors+=@($current)
-}
 $rows=@($raw | ForEach-Object {
-    $image=([string]$_.ExecutablePath).Replace('\','/').ToLowerInvariant()
-    $command=([string]$_.CommandLine).Replace('\','/').ToLowerInvariant()
-    $candidate=($_.ProcessId -in $ancestors -or $_.ProcessId -in $rooted -or
-        $_.Name -match '^(bash|sh)(\.exe)?$' -or
-        ($_.ParentProcessId -in $ancestors -and $_.Name -match '^(bash|sh)(\.exe)?$') -or
-        $image.StartsWith($prefix+'/') -or
-        $command.Contains($prefix) -or $command.Contains($module) -or
-        ($_.Name -match '^(python|pythonw|pypy)[0-9.]*\.exe$' -and (-not $image -or -not $command)))
-    if (-not $candidate) { return }
     $row=$_
-    try { $owner=Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid -ErrorAction Stop } catch {
-        if (-not (Get-Process -Id $row.ProcessId -ErrorAction SilentlyContinue)) { return }; throw
-    }
-    if ($owner.ReturnValue -ne 0) { throw 'Cannot attribute candidate process ownership' }
+    if ($exited.ContainsKey($row.ProcessId)) { return }
+    if (-not (Test-CensusCandidate $row $ancestors $rooted)) { return }
+    $owner=Get-CensusProcessOwner $row
+    if (-not $owner) { return }
     if ($descendants -and $row.ProcessId -in $rooted -and $owner.Sid -ne $sid) {
         throw 'A rooted descendant belongs to another user'
     }
     if ($owner.Sid -eq $sid) {
-        if (-not $image -or -not $command) { throw 'Cannot inspect a current-user candidate process' }
+        $row=Get-CensusProcessMetadata $row
+        if (-not $row) { return }
         $created=$null
         if ($descendants) {
             try {
