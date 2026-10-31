@@ -7,6 +7,7 @@ ordinary isolated-build path.
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -22,6 +23,8 @@ import stat
 import sys
 import time
 import tomllib
+from types import ModuleType
+from typing import TYPE_CHECKING
 
 from installer_dependency_policy import (
     _argument_pairs, _native_retained_path, _private_retained_root, _temporary_inputs,
@@ -32,6 +35,95 @@ from installer_wheel_inputs import (
     WheelDeadlineError, WheelError, WheelLimits, _check_deadline, inspect_archive,
 )
 from installer_wheel_snapshot import _digest, _open, _ordinary, _unchanged
+
+if TYPE_CHECKING:
+    from installer_engine import FrozenInputs
+
+
+@contextmanager
+def retained_input_graph(
+    inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool,
+    on_progress: Callable[[], None], engine: ModuleType,
+) -> Iterator[FrozenInputs]:
+    if isinstance(inputs.wheel_inputs, engine.WheelReuseInputs):
+        raise ValueError("Existing wheel evidence cannot construct a runtime")
+    if inputs.wheel_inputs is not None:
+        if refresh:
+            raise ValueError("Closed wheels require immutable numbered construction")
+        with engine._temporary_inputs(None) as temporary:
+            root = engine._private_retained_root(Path(temporary)).resolve()
+            frozen = engine.freeze_inputs(
+                inputs.plugin, root / "source", deadline=inputs.wheel_inputs.deadline,
+                on_progress=on_progress,
+            )
+            if engine._wheel_construction_hash(
+                engine._construction_hash(
+                    engine._source_files(frozen.packages, on_progress=on_progress), inputs.extras,
+                    inputs.local_packages, on_progress=on_progress,
+                ),
+                inputs.wheel_inputs,
+            ) != inputs.payload_hash:
+                raise RuntimeError("Runtime source changed before closed wheel construction")
+            with engine.retain_closed_wheel_install(
+                str(uv), inputs.wheel_inputs.snapshot, python=python,
+            ) as transaction:
+                yield engine.FrozenInputs(
+                    frozen.plugin, frozen.packages, inputs.payload_hash, transaction,
+                    frozen.payload_hash, inputs.extras, inputs.local_packages, inputs.wheel_inputs,
+                )
+        return
+    files = engine._source_files(inputs.packages, on_progress=on_progress)
+    environment = dict(os.environ)
+    for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
+        environment.pop(name, None)
+    selected = engine._installed_packages(inputs)
+    with engine.retain_uv_install(
+        str(Path(engine._select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)),
+        ["--python", str(python), "--no-editable", "--link-mode", "copy" if refresh else "hardlink",
+         *(["--reinstall"] if refresh else []),
+         *(argument for package in selected
+           for argument in ("-r", str(package / "pyproject.toml"))),
+         *(str(package) + (
+             f"[{','.join(inputs.extras)}]" if package == inputs.plugin and inputs.extras else ""
+         ) for package in selected)],
+        env=environment, cwd=inputs.plugin,
+        trusted_source_roots=inputs.packages,
+        excluded_local_packages=tuple(engine._excluded_packages(inputs)),
+        on_progress=on_progress,
+    ) as transaction:
+        if set(transaction.sources) != set(inputs.packages):
+            raise RuntimeError("Retained UV inputs differ from the runtime dependency graph")
+        if (
+            engine._package_roots(inputs.plugin) != inputs.packages
+            or engine._source_files(inputs.packages, on_progress=on_progress) != files
+            or engine._construction_hash(
+                files, inputs.extras, inputs.local_packages, on_progress=on_progress,
+            ) != inputs.payload_hash
+        ):
+            raise RuntimeError("Runtime inputs changed while retaining UV inputs")
+        if not set(files) <= set(transaction.source_hashes):
+            raise RuntimeError("Retained UV inputs do not cover the runtime source files")
+        changed = []
+        for path in files:
+            if hashlib.sha256(path.read_bytes()).hexdigest() != transaction.source_hashes[path]:
+                changed.append(path)
+            else:
+                on_progress()
+        if changed:
+            raise RuntimeError(
+                "Retained UV inputs differ from the admitted source content: "
+                + ", ".join(str(path) for path in changed[:10])
+            )
+        packages = tuple(transaction.sources[path] for path in inputs.packages)
+        plugin = transaction.sources[inputs.plugin]
+        yield engine.FrozenInputs(
+            plugin, packages, inputs.payload_hash, transaction,
+            engine.runtime.fingerprint_source(
+                engine._source_files(packages, on_progress=on_progress), on_progress=on_progress,
+            ),
+            inputs.extras,
+            inputs.local_packages,
+        )
 
 
 _LIMITS = WheelLimits(64 << 20, 256 << 20, 64 << 20, 4 << 20, 20_000, 100, 1 << 20)

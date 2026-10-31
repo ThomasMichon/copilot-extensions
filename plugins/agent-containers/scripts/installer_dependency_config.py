@@ -52,6 +52,31 @@ def copy_retained_file(source, destination, *, native_path, deadline, error_type
     return result
 
 
+def verify_retained_sources(
+    projects, mirror, *, native_path, check_time, error_type, on_progress=None,
+):
+    source_hashes = {}
+    verified_pairs = set()
+    for project in projects:
+        destination = Path(native_path(mirror(project)))
+        for path in destination.rglob("*"):
+            check_time()
+            if path.is_file():
+                original_path = project / path.relative_to(destination)
+                # Preserve exact names even where Path equality folds case.
+                pair = (str(original_path), str(path))
+                if pair in verified_pairs:
+                    continue
+                retained_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+                if hashlib.sha256(Path(native_path(original_path)).read_bytes()).hexdigest() != retained_hash:
+                    raise error_type("source content changed while retaining UV inputs")
+                source_hashes[original_path] = retained_hash
+                verified_pairs.add(pair)
+                if on_progress is not None:
+                    on_progress()
+    return source_hashes
+
+
 def prepare_uv_install(
     uv, arguments, *, environment, cwd, now, trusted_source_roots, projection,
     operation, deadline, native_target, compile_inputs, source_inputs, select_uv,

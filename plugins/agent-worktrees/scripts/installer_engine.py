@@ -25,14 +25,15 @@ import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 from installer_dependency_policy import (
     DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, _file_uri, _native_retained_path,
-    _private_retained_root, _select_uv_executable, _temporary_inputs,
-    retain_closed_wheel_install, retain_uv_install,
+    _private_retained_root as _private_retained_root, _select_uv_executable,
+    _temporary_inputs as _temporary_inputs,
+    retain_closed_wheel_install as retain_closed_wheel_install, retain_uv_install as retain_uv_install,
 )
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
 from installer_wheel_inputs import _check_deadline, _ordinary
 from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs, _digest, _open, _unchanged
 from installer_source_build import (
-    SourceWheelInputs, _source_deadline, _source_phase, retained_source_wheels,
+    SourceWheelInputs, _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
 )
 
 _GENERATED_DIRECTORIES = {
@@ -367,83 +368,11 @@ def _retained_input_graph(
     inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool,
     on_progress: Callable[[], None],
 ):
-    if isinstance(inputs.wheel_inputs, WheelReuseInputs):
-        raise ValueError("Existing wheel evidence cannot construct a runtime")
-    if inputs.wheel_inputs is not None:
-        if refresh:
-            raise ValueError("Closed wheels require immutable numbered construction")
-        with _temporary_inputs(None) as temporary:
-            root = _private_retained_root(Path(temporary)).resolve()
-            frozen = freeze_inputs(
-                inputs.plugin, root / "source", deadline=inputs.wheel_inputs.deadline,
-                on_progress=on_progress,
-            )
-            if _wheel_construction_hash(
-                _construction_hash(
-                    _source_files(frozen.packages, on_progress=on_progress), inputs.extras,
-                    inputs.local_packages, on_progress=on_progress,
-                ),
-                inputs.wheel_inputs,
-            ) != inputs.payload_hash:
-                raise RuntimeError("Runtime source changed before closed wheel construction")
-            with retain_closed_wheel_install(str(uv), inputs.wheel_inputs.snapshot, python=python) as transaction:
-                yield FrozenInputs(
-                    frozen.plugin, frozen.packages, inputs.payload_hash, transaction,
-                    frozen.payload_hash, inputs.extras, inputs.local_packages, inputs.wheel_inputs,
-                )
-        return
-    files = _source_files(inputs.packages, on_progress=on_progress)
-    environment = dict(os.environ)
-    for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
-        environment.pop(name, None)
-    selected = _installed_packages(inputs)
-    with retain_uv_install(
-        str(Path(_select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)),
-        ["--python", str(python), "--no-editable", "--link-mode", "copy" if refresh else "hardlink",
-         *(["--reinstall"] if refresh else []),
-         *(argument for package in selected
-           for argument in ("-r", str(package / "pyproject.toml"))),
-         *(str(package) + (
-             f"[{','.join(inputs.extras)}]" if package == inputs.plugin and inputs.extras else ""
-         ) for package in selected)],
-        env=environment, cwd=inputs.plugin,
-        trusted_source_roots=inputs.packages,
-        excluded_local_packages=tuple(_excluded_packages(inputs)),
-        on_progress=on_progress,
-    ) as transaction:
-        if set(transaction.sources) != set(inputs.packages):
-            raise RuntimeError("Retained UV inputs differ from the runtime dependency graph")
-        if (
-            _package_roots(inputs.plugin) != inputs.packages
-            or _source_files(inputs.packages, on_progress=on_progress) != files
-            or _construction_hash(
-                files, inputs.extras, inputs.local_packages, on_progress=on_progress,
-            ) != inputs.payload_hash
-        ):
-            raise RuntimeError("Runtime inputs changed while retaining UV inputs")
-        if not set(files) <= set(transaction.source_hashes):
-            raise RuntimeError("Retained UV inputs do not cover the runtime source files")
-        changed = []
-        for path in files:
-            if hashlib.sha256(path.read_bytes()).hexdigest() != transaction.source_hashes[path]:
-                changed.append(path)
-            else:
-                on_progress()
-        if changed:
-            raise RuntimeError(
-                "Retained UV inputs differ from the admitted source content: "
-                + ", ".join(str(path) for path in changed[:10])
-            )
-        packages = tuple(transaction.sources[path] for path in inputs.packages)
-        plugin = transaction.sources[inputs.plugin]
-        yield FrozenInputs(
-            plugin, packages, inputs.payload_hash, transaction,
-            runtime.fingerprint_source(
-                _source_files(packages, on_progress=on_progress), on_progress=on_progress,
-            ),
-            inputs.extras,
-            inputs.local_packages,
-        )
+    with retained_input_graph(
+        inputs, uv, python, refresh=refresh, on_progress=on_progress,
+        engine=sys.modules[__name__],
+    ) as frozen:
+        yield frozen
 
 
 def _child(

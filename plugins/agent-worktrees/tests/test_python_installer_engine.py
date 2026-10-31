@@ -500,8 +500,15 @@ def test_source_phase_initial_retention_progress_crosses_real_quiet_window(
         f"pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n"
         "packages=engine._package_roots(plugin)\n"
         "inputs=engine.FrozenInputs(plugin,packages,engine.runtime.fingerprint_source(engine._source_files(packages)))\n"
+        "prepare=policy.prepare_uv_install\n"
+        "def measured_prepare(*args,**kwargs):\n"
+        f" time.sleep({1 if condition == 'silent' else 0})\n"
+        " return prepare(*args,**kwargs)\n"
+        "policy.prepare_uv_install=measured_prepare\n"
         "copy=policy._copy_retained_file\n"
         "def measured_copy(*args,**kwargs):\n"
+        f" if {condition == 'silent'}:\n"
+        "  print('retention-copy-entered',file=sys.stderr,flush=True)\n"
         f" time.sleep({.35 if condition == 'progress' else 20})\n"
         " return copy(*args,**kwargs)\n"
         "policy._copy_retained_file=measured_copy\n"
@@ -530,7 +537,10 @@ def test_source_phase_initial_retention_progress_crosses_real_quiet_window(
                 engine.run_owned([sys.executable, "-I", "-B", "-c", actor], **options)
             assert time.monotonic() - started < 13
             assert "phase=retention state=starting" in failure.value.stderr
-            assert "Source wheel progress: phase=retention" not in failure.value.stderr
+            preparation, entered, stalled = failure.value.stderr.partition("retention-copy-entered\n")
+            assert entered and "Source wheel progress: phase=retention" in preparation
+            assert "Source wheel progress: phase=retention" not in stalled
+            assert "phase=retention state=completed" not in failure.value.stderr
     assert marker.is_file()
     _assert_writers_dead(engine, [int(marker.read_text())])
     assert engine.runtime.fingerprint_source(engine._source_files((plugin,))) == before
