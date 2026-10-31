@@ -1182,10 +1182,22 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
-    if (Test-Path $LinkPython) {
+    $stopPython = $LinkPython
+    $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+    if (Test-Path -LiteralPath $resolver) {
+        $previousRoot = $env:AGENT_RT_ROOT
+        try {
+            $env:AGENT_RT_ROOT = $InstallDir
+            . $resolver -TraceMode read-only
+            $stopPython = $AgentRtPy
+        } finally {
+            $env:AGENT_RT_ROOT = $previousRoot
+        }
+    }
+    if ($stopPython -and (Test-Path -LiteralPath $stopPython)) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & $LinkPython -m agent_vault.service --stop 2>$null | Out-Null
+        & $stopPython -m agent_vault.service --stop 2>$null | Out-Null
         $ErrorActionPreference = $prevEAP
     }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {

@@ -69,7 +69,7 @@ def _record(root: Path, name: str) -> tuple[dict[str, Any], int]:
 
         route = read_active_endpoint(root / {
             "worktree-manager": "mux-daemon-routing", "agent-worktrees": "status-monitor-routing",
-        }.get(name, ""))
+        }.get(name, ""), verify_listener=False)
         if route is None:
             raise FileNotFoundError(f"{name}: published resident route missing at {root}")
         return {"pid": route.pid}, 0

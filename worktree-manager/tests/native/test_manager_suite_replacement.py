@@ -61,26 +61,27 @@ def test_baseline_owner_demand_uses_the_installed_startup_contract(monkeypatch):
 
 
 @pytest.mark.parametrize("reported_version", ("0.1.1.dev6", "0.1.1.dev5", "0.1.1.dev60"))
-def test_machines_frontdoor_qualifies_its_actual_version_without_a_resolver_trace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reported_version: str,
+@pytest.mark.parametrize("component", ("agent-machines", "agent-mcp"))
+def test_stdio_frontdoor_qualifies_its_actual_version_without_a_resolver_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reported_version: str, component: str,
 ) -> None:
-    command = tmp_path / "h" / ".local" / "bin" / "agent-machines.cmd"
+    command = tmp_path / "h" / ".local" / "bin" / (component + ".cmd")
     command.parent.mkdir(parents=True)
     command.write_text("fixture", encoding="utf-8")
     after = {
-        "commands": {"agent-machines": [{"command": "agent-machines",
-                                        "module": "agent_machines", "variants": ["cmd"]}]},
-        "origins": {"agent-machines": {"version": "0.1.1.dev6"}},
+        "commands": {component: [{"command": component,
+                                 "module": component.replace("-", "_"), "variants": ["cmd"]}]},
+        "origins": {component: {"version": "0.1.1.dev6"}},
     }
     calls = []
 
     def run(argv: list[str], case: Path, **kwargs) -> SimpleNamespace:
         calls.append(argv[-1])
-        return SimpleNamespace(returncode=0, stdout=f"agent-machines {reported_version}\n")
+        return SimpleNamespace(returncode=0, stdout=f"{component} {reported_version}\n")
 
     monkeypatch.setattr(fixture, "_run", run)
     if reported_version == "0.1.1.dev6":
-        row = fixture._frontdoors(tmp_path, after)["agent-machines"]["agent-machines.cmd"]
+        row = fixture._frontdoors(tmp_path, after)[component][component + ".cmd"]
         assert row["routes_current"] is True
     else:
         with pytest.raises(RuntimeError, match="no actual V2 routing proof"):
@@ -138,7 +139,7 @@ def test_fixture_configures_host_for_native_and_dependency_free_index_readers(tm
     ("agent-index", "", "running-version.json"),
 ))
 def test_observer_follows_successor_before_incumbent_releases_work_lease(
-    tmp_path: Path, name: str, routing_name: str, lock_name: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, routing_name: str, lock_name: str,
 ) -> None:
     from zdd import routing
 
@@ -146,8 +147,121 @@ def test_observer_follows_successor_before_incumbent_releases_work_lease(
     routing.publish_active(
         tmp_path / routing_name, bind="127.0.0.1", port=12345, pid=os.getpid(), version="successor",
     )
+
+    def refuse_redundant_probe(*args, **kwargs):
+        raise AssertionError("Metadata polling must not allocate another TCP socket")
+
+    monkeypatch.setattr(routing, "_listening", refuse_redundant_probe)
     assert _record(tmp_path, name)[0]["pid"] == os.getpid()
     assert json.loads((tmp_path / lock_name).read_text(encoding="utf-8"))["pid"] == 101
+
+
+@pytest.mark.parametrize("requested", ("payload-example", "foreign-example"))
+def test_controlled_delivery_admits_catalog_payloads_without_relaxing_unknown_sources(
+    tmp_path: Path, requested: str,
+) -> None:
+    from agent_procutil import no_window_kwargs
+    from manager_suite_artifacts import _DELIVERY
+
+    published = tmp_path / "published"
+    catalog = published / ".github" / "plugin" / "marketplace.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text(json.dumps({"plugins": [
+        {"name": name, "source": "./plugins/" + name}
+        for name in ("runtime-example", "payload-example")
+    ]}), encoding="utf-8")
+    for name in ("runtime-example", "payload-example"):
+        payload = published / "plugins" / name
+        payload.mkdir(parents=True)
+        (payload / "plugin.json").write_text(json.dumps({"name": name, "version": "2.0.0"}))
+    (tmp_path / "setup.json").write_text(json.dumps({
+        "declared": {"runtime-example": {"scope": "global", "version": "2.0.0"}},
+    }))
+    env = fixture._env(tmp_path)
+    config = Path(env["HOME"]) / ".copilot" / "config.json"
+    config.parent.mkdir()
+    config.write_text(json.dumps({"installedPlugins": [
+        {"name": "runtime-example", "marketplace": "copilot-extensions", "version": "2.0.0"},
+    ]}))
+    result = subprocess.run(
+        [sys.executable, "-I", "-X", "utf8", "-B", "-c", _DELIVERY,
+         "copilot", "plugin", "install", requested + "@copilot-extensions"],
+        env=env, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    installed = json.loads(config.read_text())["installedPlugins"]
+    if requested == "payload-example":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert installed[-1] == {
+            "name": requested, "marketplace": "copilot-extensions", "version": "2.0.0", "enabled": True,
+        }
+        assert (config.parent / "installed-plugins" / "copilot-extensions" / requested / "plugin.json").is_file()
+    else:
+        assert result.returncode != 0
+        assert len(installed) == 1
+        assert not (config.parent / "installed-plugins").exists()
+
+
+@pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Windows stop selection")
+@pytest.mark.parametrize("component", ("agent-index", "agent-vault"))
+def test_native_stop_uses_installed_selection_when_payload_generation_is_not_installed(
+    tmp_path: Path, component: str,
+) -> None:
+    from agent_procutil import no_window_kwargs
+
+    root = tmp_path / "runtime"
+    slot = root / "versions" / "1.0.0"
+    prepared = subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(slot)],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert prepared.returncode == 0, prepared.stdout + prepared.stderr
+    (root / "current-version").write_text("1.0.0", encoding="utf-8")
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": "1.0.0", "completed_at": "2026-01-01T00:00:00Z", "pid": 0,
+    }))
+    scripts = fixture.REPO / "plugins" / component / "scripts"
+    (root / "bin").mkdir()
+    shutil.copyfile(scripts / "resolve-runtime.ps1", root / "bin" / "resolve-runtime.ps1")
+    package = slot / "Lib" / "site-packages" / component.replace("-", "_")
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    record = tmp_path / "stop-calls.jsonl"
+    code = (
+        "import json,sys;from pathlib import Path;"
+        f"p=Path({str(record)!r});"
+        "p.open('a',encoding='utf-8').write(json.dumps("
+        "{'prefix':sys.prefix,'args':sys.argv[1:]})+'\\n')"
+    )
+    (package / ("service.py" if component == "agent-vault" else "__main__.py")).write_text(code)
+
+    def quote(value: object) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+
+    script = (
+        "$ErrorActionPreference='Stop';$tokens=$null;$errors=$null;"
+        "$ast=[System.Management.Automation.Language.Parser]::ParseFile("
+        f"{quote(scripts / 'install.ps1')},[ref]$tokens,[ref]$errors);"
+        "foreach($name in @('Get-ActiveSlotPython','Invoke-Stop')){"
+        "$function=$ast.Find({param($node)"
+        "$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and "
+        "$node.Name -eq $name},$true);"
+        "if($function){. ([scriptblock]::Create($function.Extent.Text))}};"
+        f"$InstallDir={quote(root)};$LinkPython={quote(root / 'versions' / '2.0.0' / 'Scripts' / 'python.exe')};"
+        "$TaskName='fixture-service';$EngineTaskName='fixture-engine';"
+        "function Get-ScheduledTask {return $null};function Stop-ScheduledTask {throw 'Unexpected native task action'};"
+        "function Write-Ok {};function Write-Skip {};Invoke-Stop"
+    )
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert record.is_file(), "The uninstalled payload generation prevented installed-owner shutdown"
+    calls = [json.loads(line) for line in record.read_text().splitlines()]
+    assert all(Path(call["prefix"]) == slot for call in calls)
+    assert [call["args"] for call in calls] == (
+        [["stop"], ["engine", "stop"]] if component == "agent-index" else [["--stop"]]
+    )
 
 
 @pytest.mark.parametrize("exit_code", (259, 0))
