@@ -1,8 +1,11 @@
 # Pool-owned assignment startup and retry eligibility
 
-Status: **reviewed design; implementation and native qualification pending**.
+Status: **reviewed design; due-time admission source merged; atomic placement
+and native qualification pending**.
 The documentation/design slice merged in
 [#9710](https://github.com/ThomasMichon/copilot-extensions/pull/9710).
+The existing due-time reservation check merged separately in
+[#9755](https://github.com/ThomasMichon/copilot-extensions/pull/9755).
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
 Parent: [monitor and confirmed-state effort](README.md).
 Standing intent: [Dispatch vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup).
@@ -20,8 +23,9 @@ workspace creation and Copilot startup follow.
 
 Dispatch and the selected pool supervisor retain the reservation through a
 bounded number of startup attempts. Once a worker is reachable, keep nudging
-that same worker on the existing supervision cadence until it explicitly
-accepts or declines. Exhaustion returns the task to `QUEUED`; startup failure
+that same worker through the existing supervision owner until it explicitly
+accepts or declines, within the selected decision budget below.
+Exhaustion returns the task to `QUEUED`; startup failure
 is a supervisor outcome, distinct from a worker's "not me".
 
 A decline must carry objective machine-readable worktree, pool or machine
@@ -31,6 +35,27 @@ up. Consider explicit Retry-After eligibility for unresponsive startup after
 nudges and repeated same-pool rejection. Revise intent and architecture before
 behavioral implementation; the mismatch is a repair hypothesis, not proof of
 an operational root cause.
+
+### Selected startup and retry policy
+
+**Operator-selected policy, 2026-10-31; implementation pending:**
+
+- Allow **3 startup attempts** per claim episode, retaining the same assignment
+  and reservation while those attempts remain accountable.
+- Once the worker is reachable, nudge the same worker every **5 minutes** and
+  allow up to **30 minutes** for an explicit accept/decline decision. This
+  selected interval supersedes the earlier unspecified cadence; the existing
+  supervision owner performs it, not a new timer or agent-owned schedule.
+- Retry cooldown is **task-wide**: successive cooldowns are **1 hour, 3 hours,
+  6 hours, then 12 hours**, capped at **12 hours**. Preserve retained pool
+  assignment and any independently scheduled later due time.
+- A successful transition to **`STARTED` resets both the cooldown escalation
+  and startup-attempt count**. Reachability, a delivered prompt or an unrelated
+  receipt does not perform that reset.
+
+This policy selects budgets and backoff, not an installed capability or a
+release. It does not resolve result-rejection reassignment or terminal-worktree
+closeout policy.
 
 ## Current foundations and discrepancy
 
@@ -85,28 +110,26 @@ they implement the requested guarantees without claiming these APIs exist.
 5. Advertise stable pool identity consistently and enforce declined
    worktree/pool/machine exclusions during selection, reservation and claiming.
    Recording an exclusion that a later boundary ignores is not conformance.
-6. Resolve retry policy before implementation. Prefer composing a task-wide
-   retry time with existing `not_before`, preserving any later scheduled due
-   time, if the selected policy is task-wide. A pool-specific policy needs
-   scoped eligibility without delaying other eligible pools; do not pretend
-   the scalar timestamp can express it. Keep retry time separate from wake
-   delivery backoff and monitored suspension.
+6. Implement the selected task-wide cooldown through the existing scheduling
+   authority, preserving any independently scheduled later `not_before`.
+   Persist the escalation stage and the active startup-attempt budget; reset
+   both only on the successful current `STARTED` transition. Do not reset
+   reservation keys/revisions or erase historical attempts, outcomes and
+   attachments. Keep retry eligibility separate from wake-delivery backoff
+   and monitored suspension. A reset clears this retry policy's counters,
+   not another owner's scheduled deadline or unresolved effect custody.
 
-## Open policy choices
+## Remaining policy choices
 
-- Startup-attempt cap and the acceptance-nudge interval; neither has a selected
-  numeric default. Reuse the existing supervising owners and their cadence.
-- Retry duration, fixed versus escalating backoff, reset conditions and
-  task-wide versus pool-specific scope, including precedence with retained
-  pool assignment. Unsatisfiable routing must be visible, not silently unpinned.
 - Result rejection from `SUBMITTED`: returning work to its retained worker
   versus explicit fenced reassignment or assignment reconsideration.
 - Terminal worktree closeout and whether submission should require closeout
   readiness. This amendment does not impose finalize-before-submission or
   reopen completed tasks for housekeeping.
 
-These are not implementation defaults. The last two remain independent policy
-decisions; neither is resolved by this amendment.
+These remain independent policy decisions; neither is resolved by the selected
+startup/cooldown policy. Unsatisfiable retained routing must remain visible,
+not silently unpinned.
 
 ## Compatibility and ownership
 
@@ -125,9 +148,19 @@ or the existing submission/conversation implementation ownership.
 
 ## Validation Plan
 
+The existing scalar `not_before` reservation boundary and preserved
+active/suspended paths have source coverage in #9755 (13 new controls and
+100 total passing reservation cases). This is partial credit only; it does
+not resolve the selected retry scope, atomic placement or mixed-runtime matrix.
+
 - [ ] Fake-clock selection and admission before, exactly at and after retry
   eligibility; direct reservation/claim bypass attempts refuse early work.
   Preserve later scheduled due times and cover the selected retry scope.
+- [ ] Prove the exact three-attempt budget, five-minute nudge cadence and
+  thirty-minute decision limit through the existing supervisor. Task-wide
+  cooldown advances through 1/3/6/12 hours and remains at 12; successful
+  current `STARTED` resets both counters. Restart/replay, prompt delivery,
+  failed/stale `STARTED` and unanswered nudges cannot manufacture a reset.
 - [ ] Ordered all-pool selection, mismatching filters, no-capacity waiting,
   retained-pool waiting and unsatisfiable retained assignment are observable.
 - [ ] Concurrent allocators cannot overconsume a pool or assign one task

@@ -14,8 +14,10 @@
 **Continuing direction (2026-10-30):** the
 [assignment/startup amendment](assignment-startup-amendment.md) distinguishes
 pool-owned placement before embodiment from worker acceptance, and adds bounded
-startup, scoped decline routing/closeout and retry-eligibility design. This is a
-documentation/review slice, not implementation or installed qualification.
+startup, scoped decline routing/closeout and retry-eligibility design. The existing
+queued due-time admission fix merged in
+[#9755](https://github.com/ThomasMichon/copilot-extensions/pull/9755);
+atomic placement and the remaining design are not implemented or installed-qualified.
 Existing submission/conversation phases and their custodians remain unchanged.
 
 **Current direction (2026-10-08):** extend the existing lifecycle, result
@@ -206,8 +208,12 @@ live claim token. No new blanket ACK or executor appointment is created.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
       reservation admission; preserve active replay and suspended re-embodiment.
       This bounded admission fix does not complete atomic pool placement,
-      retry-policy selection or installed qualification.
-- [ ] Resolve the amendment's policy choices and complete its validation matrix
+      retry-policy selection or installed qualification. Reviewed and merged in
+      [#9755](https://github.com/ThomasMichon/copilot-extensions/pull/9755).
+- [x] Select the [startup and retry budgets](assignment-startup-amendment.md#selected-startup-and-retry-policy),
+      including reset of both counters on successful `STARTED`; source
+      implementation and qualification remain separate.
+- [ ] Resolve the amendment's remaining policy choices and complete its validation matrix
       at the stated source, mixed-version and installed/native evidence tiers.
 
 ### Phase 1 — The monitor vocabulary only (data only, no `Status`/table change)
@@ -1205,3 +1211,20 @@ four new refusal controls failed against the prior source. Active/exclusive
 replay, suspended owned-workspace reuse and retry allocation identity remain
 unchanged. Source review/merge, release and installed qualification remain
 separate; no retry duration, startup cap or pool-placement policy was selected.
+
+The bounded source fix merged in #9755 as
+`921b945df694404e80ca225412c87673b0abc3c1` after current-head Copilot
+approval and required checks. Managed pull-forward reached that exact merge
+with no surviving diff or replayed paragraph. The next stretch is atomic
+pool-owned placement; numerical startup/retry policy still requires a decision.
+The complete parent and amendment validation matrices remain open.
+
+### 2026-10-31 - Startup and cooldown policy selected
+
+Captured the operator's startup/decision budgets, task-wide escalating cooldown
+and successful-`STARTED` reset of both counters in the
+[canonical amendment](assignment-startup-amendment.md#selected-startup-and-retry-policy).
+The existing supervisor owns cadence; scheduling and historical custody remain
+separate. This amendment is reviewed before affected behavior is implemented.
+Atomic placement, decline closeout, remaining independent policies and the
+complete source/mixed-version/installed validation gates stay open.
