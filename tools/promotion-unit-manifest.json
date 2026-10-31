@@ -3720,7 +3720,7 @@
         "fleet-manager/tests/test_client_diagnostics.py": "84eb14d24bc2c62e166e0ac9478ae6d7d60925d0c8f5363c13cc2b5d8a24a089",
         "tools/promotion_unit_tests/test_client_guardian_resources.py": "f6e6f99014df400e8b2b1efe3e51812fdfccf2425ff74703a5dbe60b65e93d28",
         "tools/native_qualification_receiver.py": "d205fdde05e3f2c179c5ce7aaeb96d12b6c27ee9b0bfe88e20ecff979ebb4a77",
-        "tools/promotion_unit_tests/test_native_qualification_receiver.py": "271646bf8bbb20598d050cff99097adeefe275bed49baad8a74bbe808decf6f6"
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py": "0d1a0b4e58eeff69ee9bd6aa388defe0c339d69796096ac1ba7327c8de6a2db2"
     },
     "coverage_targets": [
         "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py",

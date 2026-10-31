@@ -8,7 +8,7 @@ import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
@@ -129,6 +129,24 @@ def prepared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str]
     return command, digest, launcher
 
 
+def inert_readers(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Reader:
+        def __init__(self, *, target: Callable[..., None], args: tuple[Any, ...], daemon: bool) -> None:
+            assert daemon is True
+            self.target, self.args = target, args
+
+        def start(self) -> None:
+            self.target(*self.args)
+
+        def join(self, timeout: float) -> None:
+            assert timeout >= 0
+
+        def is_alive(self) -> bool:
+            return False
+
+    monkeypatch.setattr(receiver, "threading", SimpleNamespace(Thread=Reader))
+
+
 def test_receiver_checks_whole_prepared_closure_before_inserting_one_clock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -163,6 +181,7 @@ def test_receiver_settles_capture_and_handles_before_acceptance_without_new_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     command, digest, _ = prepared(tmp_path, monkeypatch)
+    inert_readers(monkeypatch)
     events = []
     monkeypatch.setattr(receiver, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(receiver, "_require_existing_job", lambda: events.append("existing-job"))
@@ -187,7 +206,7 @@ def test_receiver_settles_capture_and_handles_before_acceptance_without_new_job(
     monkeypatch.setattr(receiver, "verify_artifacts", artifacts)
     times = iter([10.0, *([20.0] * 100)])
     report = receiver.receive(command, scope=7, cwd=tmp_path, manifest_sha256=digest, clock=lambda: next(times))
-    assert report["passed"] is True and report["native_exit"] == 0
+    assert report["passed"] is True and report["native_exit"] == 0, report
     assert report["post_capture_monotonic"] == report["post_artifact_verification_monotonic"] == 20
     assert report["captured_streams"]["stdout"]["sha256"] == hashlib.sha256(wire()).hexdigest()
     assert report["captured_streams"]["stderr"]["complete"] is True
@@ -198,6 +217,7 @@ def test_receiver_refuses_late_settlement_and_does_not_kill_or_replay(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     command, digest, _ = prepared(tmp_path, monkeypatch)
+    inert_readers(monkeypatch)
     monkeypatch.setattr(receiver, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(receiver, "_require_existing_job", lambda: None)
     now = [10.0]
