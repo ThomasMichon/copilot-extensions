@@ -303,6 +303,23 @@ def environment(tmp_path: Path) -> dict[str, str]:
     return env
 
 
+def bind_posix_account_home(scripts: Path) -> None:
+    """Bind only the copied SDK's POSIX account-home lookup before freezing."""
+    relative = Path("installation-context") / "_installation_context_resolution.py"
+    helper = scripts / relative
+    text = helper.read_text(encoding="utf-8")
+    canonical = (SCRIPTS / relative).read_text(encoding="utf-8")
+    assert text == canonical, "fixture home binding requires the unchanged canonical SDK fragment"
+    original = (
+        "            import pwd\n\n"
+        "            profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)"
+    )
+    assert canonical.count(original) == 1, "canonical POSIX account-home lookup changed"
+    helper.write_bytes(text.replace(
+        original, '            profile_value = Path(environment["HOME"])',
+    ).encode("utf-8"))
+
+
 def stage(tmp_path: Path, *, broken_b: bool = False):
     started = time.monotonic()
     print("publication fixture: staging begin", file=sys.stderr, flush=True)
@@ -336,11 +353,7 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
             shutil.copy2(SCRIPTS / relative, scripts / relative)
         shutil.copytree(SCRIPTS / "installation-context", scripts / "installation-context")
         if os.name != "nt":
-            helper = scripts / "installation-context/installation-context.ps1"
-            text = helper.read_text(encoding="utf-8")
-            original = "$passwdHome = [CePosixAccount]::Home()"
-            assert text.count(original) == 1
-            helper.write_text(text.replace(original, "$passwdHome = $env:HOME"), encoding="utf-8")
+            bind_posix_account_home(scripts)
         for ext in ("sh", "ps1"):
             (scripts / f"install.{ext}").write_bytes(script(ext).encode("utf-8"))
         package = payload / "src" / "agent_dispatch"

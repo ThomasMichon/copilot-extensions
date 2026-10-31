@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import os
 import json
+import importlib.util
 import shutil
 import shlex
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -90,6 +92,52 @@ def snapshot(paths: list[Path]) -> dict[Path, tuple[bytes, int] | None]:
         path: (path.read_bytes(), stat.S_IMODE(path.stat().st_mode)) if path.exists() else None
         for path in paths
     }
+
+
+@pytest.mark.parametrize("home", ["fixture", "relative", "missing"])
+def test_fixture_posix_home_binding_preserves_canonical_input_guards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: str,
+) -> None:
+    scripts = tmp_path / "scripts"
+    copied = scripts / "installation-context"
+    shutil.copytree(fixture.SCRIPTS / "installation-context", copied)
+    adapter = (copied / "installation-context.ps1").read_bytes()
+    canonical = (fixture.SCRIPTS / "installation-context" / "_installation_context_resolution.py").read_bytes()
+    fixture.bind_posix_account_home(scripts)
+    assert (copied / "installation-context.ps1").read_bytes() == adapter
+    assert (fixture.SCRIPTS / "installation-context" / "_installation_context_resolution.py").read_bytes() == canonical
+    spec = importlib.util.spec_from_file_location(
+        "_dispatch_fixture_posix_home_sdk", copied / "installation_context.py",
+    )
+    assert spec and spec.loader
+    sdk = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, sdk)
+    spec.loader.exec_module(sdk)
+    env = fixture.environment(tmp_path)
+    expected = Path(env["HOME"]).resolve()
+    if home != "fixture":
+        env["HOME"] = "relative-home" if home == "relative" else str(tmp_path / "missing-home")
+        message = "must be absolute" if home == "relative" else "Cannot resolve path|Path does not exist"
+        with pytest.raises(sdk.InstallationContextError, match=message):
+            sdk._current_environment(environment=env, os_profile=None, platform="posix", wsl_distro=None)
+    else:
+        record, profile = sdk._current_environment(
+            environment=env, os_profile=None, platform="posix", wsl_distro=None,
+        )
+        assert profile == expected
+        assert record == {"platform": "posix", "homeRealPath": str(expected), "wslDistro": None}
+
+
+def test_fixture_posix_home_binding_rejects_modified_canonical_input(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    copied = scripts / "installation-context"
+    shutil.copytree(fixture.SCRIPTS / "installation-context", copied)
+    helper = copied / "_installation_context_resolution.py"
+    foreign = helper.read_bytes() + b"\n# foreign fixture modification\n"
+    helper.write_bytes(foreign)
+    with pytest.raises(AssertionError, match="unchanged canonical SDK fragment"):
+        fixture.bind_posix_account_home(scripts)
+    assert helper.read_bytes() == foreign
 
 
 def _admission_source(tmp_path: Path, missing: str | None = None) -> Path:
