@@ -22,6 +22,7 @@ class NativeReviewResponse:
     status: int
     body: dict
     continuation: str = ""
+    late: bool = False
 
 
 @dataclass(frozen=True)
@@ -105,7 +106,12 @@ class AdoReviewContext:
         if len(json.dumps(result.body, allow_nan=False).encode()) > MAX_RESPONSE_BYTES:
             raise ReviewContextUnavailable("native review response exceeds its byte bound")
         self.check()
-        self.remaining()
+        try:
+            self.remaining()
+        except TimeoutError:
+            if method == "GET":
+                raise
+            return NativeReviewResponse(result.status, result.body, result.continuation, late=True)
         return result
 
     def read_state(self):
@@ -178,9 +184,10 @@ class AdoReviewContext:
             verified = False
             if comments and isinstance(comments[0], dict):
                 ids["comment_id"] = comments[0].get("id")
+                author = comments[0].get("author")
                 verified = (
                     len(comments) == 1 and comments[0].get("content") == action["body"]
-                    and (comments[0].get("author") or {}).get("id") == self.scope["principal_id"]
+                    and isinstance(author, dict) and author.get("id") == self.scope["principal_id"]
                     and not comments[0].get("isDeleted")
                 )
         elif kind in ("reply", "edit_owned_comment"):
@@ -193,9 +200,10 @@ class AdoReviewContext:
                 body.update(parentCommentId=0, commentType=1)
             result = self.call(method, base + suffix + "?api-version=7.1", body)
             ids = {"thread_id": action["thread_id"], "comment_id": result.body.get("id")}
+            author = result.body.get("author")
             verified = (
                 result.body.get("content") == action["body"]
-                and (result.body.get("author") or {}).get("id") == self.scope["principal_id"]
+                and isinstance(author, dict) and author.get("id") == self.scope["principal_id"]
                 and not result.body.get("isDeleted")
             )
         else:
@@ -212,7 +220,7 @@ class AdoReviewContext:
         if result.status not in (200, 201):
             raise ReviewContextUnavailable("native review effect reply is not confirmed")
         ids = {key: value for key, value in ids.items() if value is not None}
-        return NativeActionOutcome({"origin": "response", "platform_ids": ids, "proof": None}, verified)
+        return NativeActionOutcome({"origin": "response", "platform_ids": ids, "proof": None}, verified and not result.late)
 
     def reconcile(self, operation, action):
         """Native create-thread markers only; current vote/content is never proof."""
@@ -234,7 +242,8 @@ class AdoReviewContext:
                 if (
                     not thread.get("isDeleted") and len(comments) == 1
                     and comments[0].get("content") == action["body"]
-                    and (comments[0].get("author") or {}).get("id") == self.scope["principal_id"]
+                    and isinstance(comments[0].get("author"), dict)
+                    and comments[0]["author"].get("id") == self.scope["principal_id"]
                     and not comments[0].get("isDeleted")
                 ):
                     matches.append((thread, comments[0]))

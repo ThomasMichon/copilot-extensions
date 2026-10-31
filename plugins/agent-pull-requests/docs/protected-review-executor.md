@@ -95,6 +95,10 @@ For an already confirmed vote response, one new native `VoteUpdate` system threa
 with the same native voter/result may be included per confirmed vote. Other
 voters/results, extra events or user comments are not silently ignored. This
 expected-delta handling is never used to confirm an unknown vote.
+Vote identity is resolved from the raw native identity map by the existing
+observation parser before normalization discards optional fields. Conflicting
+legacy/indexed identities are unavailable; both numeric and string native system
+comment representations are supported.
 
 There is no atomic multi-action or head-CAS guarantee. Post-effect readback can
 report candidate drift while retaining a confirmed native effect; no compensating
@@ -104,6 +108,10 @@ vote, rollback or duplicate comment is inferred.
 
 Once a write path is entered, transport loss, malformed/partial response or
 owner loss preserves its original unknown attempt and stops later actions.
+If a bounded native write reply arrives after the work deadline while the owner
+still permits settlement, its known IDs are persisted unconfirmed; no success
+or subsequent write is permitted. Malformed response authors likewise fail
+verification without discarding otherwise known native IDs.
 Actual owner denials/cancellation propagate through the existing path. A denial
 is not proof an already-admitted effect or atomic store commit was absent.
 

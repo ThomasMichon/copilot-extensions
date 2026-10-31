@@ -64,6 +64,9 @@ def environment(tmp_path, monkeypatch):
         emit_vote_thread = False
         vote_reply = "complete"
         vote_thread_actor = None
+        vote_identity_mode = "legacy"
+        system_comment_type = 2
+        malformed_author_reply = False
 
         def __init__(self):
             self.pr = copy.deepcopy(evidence["sections"]["pull_request"]["data"])
@@ -116,15 +119,26 @@ def environment(tmp_path, monkeypatch):
             if method == "PUT":
                 self.vote = body["vote"]
                 if self.emit_vote_thread:
-                    self.threads.append({
+                    actor = self.vote_thread_actor or scope["principal_id"]
+                    event = {
                         "id": 200 + len(self.threads), "status": 1,
+                        "publishedDate": "2026-10-30T00:01:00Z",
                         "properties": {
                             "CodeReviewThreadType": {"$value": "VoteUpdate"},
                             "CodeReviewVoteResult": {"$value": str(self.vote)},
-                            "CodeReviewVotedByTfId": {"$value": self.vote_thread_actor or scope["principal_id"]},
+                            "CodeReviewVotedByTfId": {"$value": actor},
                         },
-                        "comments": [{"id": 1, "commentType": 2, "content": "Synthetic vote system event"}],
-                    })
+                        "comments": [{"id": 1, "commentType": self.system_comment_type,
+                                      "content": "Synthetic vote system event"}],
+                    }
+                    if self.vote_identity_mode in ("indexed", "conflict"):
+                        event["properties"]["CodeReviewVotedByIdentity"] = {"$value": "voter"}
+                        event["identities"] = {"voter": {"id": actor if self.vote_identity_mode == "indexed" else "conflicting-actor"}}
+                        if self.vote_identity_mode == "indexed":
+                            del event["properties"]["CodeReviewVotedByTfId"]
+                    self.threads.append(event)
+                if self.after_write is not None:
+                    self.after_write(self)
                 if self.vote_reply == "missing":
                     return NativeReviewResponse(200, {"id": scope["principal_id"]})
                 if self.vote_reply == "contradictory":
@@ -149,6 +163,10 @@ def environment(tmp_path, monkeypatch):
                     mismatched = copy.deepcopy(thread)
                     mismatched["comments"][0]["content"] = "Different response content"
                     return NativeReviewResponse(201, mismatched)
+                if self.malformed_author_reply:
+                    malformed = copy.deepcopy(thread)
+                    malformed["comments"][0]["author"] = "not-an-author-object"
+                    return NativeReviewResponse(201, malformed)
                 return NativeReviewResponse(201, copy.deepcopy(thread))
             thread_id = int(re.search(r"/threads/(\d+)/", url)[1])
             thread = next(row for row in self.threads if row["id"] == thread_id)
@@ -160,7 +178,10 @@ def environment(tmp_path, monkeypatch):
                 comment = {"id": len(thread["comments"]) + 1, "parentCommentId": 0, "commentType": 1,
                            "content": body["content"], "author": {"id": scope["principal_id"]}}
                 thread["comments"].append(comment)
-            return NativeReviewResponse(200, copy.deepcopy(comment))
+            reply = copy.deepcopy(comment)
+            if self.malformed_author_reply:
+                reply["author"] = "not-an-author-object"
+            return NativeReviewResponse(200, reply)
 
         @contextmanager
         def context(self):
@@ -407,16 +428,21 @@ def test_ambiguous_native_marker_matches_remain_unknown_without_new_writes(envir
     assert result["status"] == "unknown" and len(writes(backend)) == before
 
 
-def test_late_native_reply_does_not_report_success_or_repeat_a_write(environment):
+@pytest.mark.parametrize("vote_first", [False, True])
+def test_late_native_reply_does_not_report_success_or_repeat_a_write(environment, vote_first):
     store, selected, generation, attachment, backend, _ = environment
     now = [1.0]
+    if vote_first:
+        selected["actions"].reverse()
     backend.after_write = lambda value: now.__setitem__(0, 200.0)
     result = execute_review(store, selected, generation, attachment, context_factory=backend.context,
                             checkpoint=backend.checkpoint, expires_at=int(time.time()) + 600,
                             budget_seconds=120, clock=lambda: now[0])
     assert result["status"] == "unknown"
     assert result["actions"][0]["state"] == "unknown"
-    assert len(writes(backend)) == 1 and backend.vote is None
+    expected = {"reviewer_id": selected["scope"]["principal_id"]} if vote_first else {"thread_id": 100, "comment_id": 1}
+    assert result["actions"][0]["receipt"]["platform_ids"] == expected
+    assert len(writes(backend)) == 1
 
 
 @pytest.mark.parametrize("other_actor", [False, True])
@@ -447,3 +473,39 @@ def test_unverified_vote_reply_keeps_native_reviewer_id_without_value_based_conf
     assert backend.vote == 10
     count = len(writes(backend))
     assert run(environment)["status"] == "unknown" and len(writes(backend)) == count
+
+
+@pytest.mark.parametrize("identity_mode,system_type", [("indexed", 2), ("indexed", "system"), ("conflict", 2)])
+def test_native_indexed_vote_identity_and_system_enum_are_resolved_before_normalization(environment, identity_mode, system_type):
+    _, selected, _, _, backend, _ = environment
+    selected["actions"].reverse()
+    backend.emit_vote_thread = True
+    backend.vote_identity_mode, backend.system_comment_type = identity_mode, system_type
+    result = run(environment)
+    assert result["status"] == ("unknown" if identity_mode == "conflict" else "complete"), result
+    assert len(writes(backend)) == (1 if identity_mode == "conflict" else 2)
+
+
+@pytest.mark.parametrize("kind", ["comment", "reply", "edit_owned_comment"])
+def test_malformed_native_author_retains_known_ids_as_unconfirmed(environment, kind):
+    from agent_pull_requests.review_workspace import _record
+    _, selected, generation, attachment, backend, _ = environment
+    if kind != "comment":
+        thread = {"id": 50, "status": 1, "comments": [
+            {"id": 1, "content": "Original", "parentCommentId": 0, "commentType": 1,
+             "author": {"id": selected["scope"]["principal_id"]}}]}
+        backend.threads = [copy.deepcopy(thread)]
+        generation["sections"]["discussions"]["data"] = [_record("discussions", thread)]
+        generation["id"] = _digest({key: value for key, value in generation.items() if key != "id"})
+        selected["generation_id"] = attachment["generation_id"] = generation["id"]
+        action = {"id": "finding", "kind": kind, "thread_id": 50, "body": "Selected update"}
+        if kind == "edit_owned_comment":
+            action.update(comment_id=1, expected_content_id=_digest("Original"))
+        selected["actions"][0] = action
+    backend.malformed_author_reply = True
+    result = run(environment)
+    assert result["status"] == "unknown"
+    expected = {"thread_id": 100 if kind == "comment" else 50,
+                "comment_id": 2 if kind == "reply" else 1}
+    assert result["actions"][0]["receipt"]["platform_ids"] == expected
+    assert backend.vote is None

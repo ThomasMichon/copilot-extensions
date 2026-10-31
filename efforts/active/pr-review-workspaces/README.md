@@ -222,6 +222,10 @@ contract.
   and retention of known reviewer IDs from incomplete/contradictory vote replies.
   Twenty-nine source transport cases pass, including other-voter rejection and
   no attribution/replay of an unknown vote despite matching current values.
+- Reuse canonical raw native vote identity resolution before normalization,
+  accepting indexed-only identity evidence and string system-comment enums while
+  rejecting conflicts. Retain bounded write-reply IDs unconfirmed after a late
+  response or malformed author, without reporting success or dispatching again.
 
 ### 2026-10-30 - Existing-store Phase 3 data realization
 - Merged #9731 as `5b4e8770cf18e0fb3cab202dc3fca12ada28640c`

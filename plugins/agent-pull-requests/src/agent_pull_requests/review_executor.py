@@ -34,7 +34,7 @@ def _threads(values):
     return result
 
 
-def _expected_discussions(baseline, actual, operation):
+def _expected_discussions(baseline, actual, operation, raw_discussions):
     """Accept only exactly verified prior self-effects, never arbitrary fresh state."""
     expected = copy.deepcopy(baseline)
     principal = operation["intent"]["scope"]["principal_id"]
@@ -98,27 +98,21 @@ def _expected_discussions(baseline, actual, operation):
         for action, state in zip(operation["intent"]["actions"], operation["actions"])
         if action["kind"] == "verdict" and state["state"] == "confirmed"
     )
+    from agent_worktrees.providers.azure_observation import identity as native_identity, property_value, thread_evidence
+    raw = {thread.get("id"): thread for thread in raw_discussions}
     for identity, thread in actual.items():
         if identity in expected:
             continue
-        properties = thread.get("properties") or {}
-
-        def property_value(name):
-            value = properties.get(name)
-            return value.get("$value") if isinstance(value, dict) else value
-
-        vote = property_value("CodeReviewVoteResult")
-        if isinstance(vote, str) and vote in ("10", "-10"):
-            vote = int(vote)
-        if (
-            property_value("CodeReviewThreadType") == "VoteUpdate"
-            and property_value("CodeReviewVotedByTfId") == principal
-            and type(vote) is int and votes[vote] > 0
-            and not thread.get("isDeleted")
-            and thread["comments"] and all(comment.get("commentType") == 2 for comment in thread["comments"])
-        ):
+        native = raw[identity]
+        properties = native.get("properties") or {}
+        if property_value(properties, "CodeReviewThreadType") != "VoteUpdate":
+            continue
+        _, events = thread_evidence([native], principal)
+        if (len(events) == 1 and events[0].actor_id == native_identity(principal)
+                and votes[events[0].vote] > 0 and thread["comments"]
+                and all(comment.get("commentType") in (2, "system") for comment in thread["comments"])):
             expected[identity] = copy.deepcopy(thread)
-            votes[vote] -= 1
+            votes[events[0].vote] -= 1
     return expected
 
 
@@ -126,7 +120,7 @@ def _check_candidate(current, operation, baseline):
     if current["revision"] != operation["intent"]["revision"]:
         raise ReviewCandidateChanged("native source range changed")
     actual = _threads(current["discussions"])
-    expected = _expected_discussions(baseline, actual, operation)
+    expected = _expected_discussions(baseline, actual, operation, current["discussions"])
     if actual != expected:
         raise ReviewCandidateChanged("discussion/decision inputs changed")
     return actual
