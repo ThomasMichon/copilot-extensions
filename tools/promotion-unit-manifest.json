@@ -3167,7 +3167,14 @@
         "tools/promotion_unit_tests/test_related_acquisition.py::test_control_plane_caller_qualifies_actual_selected_callback[self-restoring]",
         "tools/promotion_unit_tests/test_related_acquisition.py::test_control_plane_caller_qualifies_actual_selected_callback[nested-original]",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_control_cleanup_deadline_uses_observer_epoch_not_host_clock[early-host-epoch]",
-        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_control_cleanup_deadline_uses_observer_epoch_not_host_clock[late-host-epoch]"
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_control_cleanup_deadline_uses_observer_epoch_not_host_clock[late-host-epoch]",
+        "tools/promotion_unit_tests/test_creation_diagnostics.py::test_successful_advisory_calls_once_without_diagnostic",
+        "tools/promotion_unit_tests/test_creation_diagnostics.py::test_failed_advisory_records_only_sanitized_numeric_evidence",
+        "tools/promotion_unit_tests/test_creation_diagnostics.py::test_non_io_callback_failure_remains_the_original_error",
+        "tools/promotion_unit_tests/test_creation_diagnostics.py::test_claim_acceptance_follows_persistence_before_failed_notice",
+        "tools/promotion_unit_tests/test_creation_diagnostics.py::test_persistence_rejection_stays_distinct_from_notice_failure",
+        "tools/promotion_unit_tests/test_creation_diagnostics.py::test_creation_progress_notice_failure_preserves_original_work_error",
+        "tools/promotion_unit_tests/test_creation_diagnostics.py::test_default_progress_still_refuses_failed_initial_output"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3542,7 +3549,11 @@
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_records.py": "722d48c76e5a9ac285f09868bd83291ba448fa1aa8a66c8e7854e9354e4fe4d4",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "e8a7e27c1e80d04b175d0ee782fc7f790b50ecc30cf18ef4f0cb2bf782c1fb88",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4",
-        "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py": "5824b9349a74795f99deb7c078ab2179362ff9bbd9a7f8e488e8dd2e29464e89"
+        "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py": "5824b9349a74795f99deb7c078ab2179362ff9bbd9a7f8e488e8dd2e29464e89",
+        "tools/promotion_unit_tests/test_creation_diagnostics.py": "d4061059850bb6d429ac7f2e221a0ea8d6715f030c5e97221d193f6463f7df27",
+        "plugins/agent-worktrees/src/agent_worktrees/creation_diagnostics.py": "9e9df2522173fa739ada6c7201d37e63c17d19c9a75de215eb176304a86e8940",
+        "plugins/agent-worktrees/src/agent_worktrees/creation_owner_claim.py": "aea9f0de14e962099fb1c70b139d9c62a0ae0051c6cd3174683fe13d534acffa",
+        "plugins/agent-worktrees/src/agent_worktrees/launch_progress.py": "b44ba6207d319af74ecbf40a0324ad0126a7415573b15b564b107002f16431c8"
     },
     "coverage_targets": [
         "tools/core_runtime_profile.py",
@@ -3717,7 +3728,10 @@
         "plugins/agent-worktrees/src/agent_worktrees/projects_registry.py",
         "plugins/agent-worktrees/src/agent_worktrees/strict_yaml.py",
         "plugins/agent-worktrees/src/agent_worktrees/config.py",
-        "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py"
+        "plugins/agent-worktrees/src/agent_worktrees/registry_paths.py",
+        "plugins/agent-worktrees/src/agent_worktrees/creation_diagnostics.py",
+        "plugins/agent-worktrees/src/agent_worktrees/creation_owner_claim.py",
+        "plugins/agent-worktrees/src/agent_worktrees/launch_progress.py"
     ],
     "max_seconds": 300
 }

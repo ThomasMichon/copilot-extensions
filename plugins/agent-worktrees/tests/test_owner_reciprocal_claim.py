@@ -10,6 +10,7 @@ from __future__ import annotations
 import types
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -281,3 +282,196 @@ def test_ownerless_create_reaches_source_preparation_when_unready(
             owner_ref=None,
             launch_preflight=m.LaunchPreflight(),
         )
+
+
+class _FailingCreationNotice:
+    def __init__(self, fail):
+        self.fail = fail
+
+    def write(self, text):
+        if self.fail(text):
+            raise OSError(19, "diagnostic-sink-private-marker secret-value-marker", "private-diagnostic-path")
+        return len(text)
+
+    def flush(self):
+        pass
+
+
+def _creation_activity(tmp_path, monkeypatch, *, available=True):
+    from agent_worktrees import activity
+
+    path = tmp_path / "creation-activity.jsonl"
+    if not available:
+        path.mkdir()
+    monkeypatch.setattr(activity, "log_path", lambda: path)
+    monkeypatch.setattr(activity, "_maybe_prune", lambda _path: None)
+    return path, activity.log_event_failure_count()
+
+
+def _assert_creation_diagnostic(path, *, errno):
+    events = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert any(
+        event.get("error_type") == "OSError"
+        and event.get("os_errno", event.get("errno")) == errno
+        for event in events
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "diagnostic-sink-private-marker" not in text
+    assert "storage-private-marker" not in text
+    assert "secret-value-marker" not in text
+    assert "private-diagnostic-path" not in text
+    assert "private-storage-path" not in text
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("logger_available", [True, False])
+def test_persisted_owner_claim_survives_advisory_stderr_failure(
+    tmp_path, monkeypatch, capsys, logger_available,
+):
+    from agent_worktrees import activity
+
+    owner_dir = _seed_owner(tmp_path, monkeypatch)
+    path, failures = _creation_activity(tmp_path, monkeypatch, available=logger_available)
+    monkeypatch.setattr(sys, "stderr", _FailingCreationNotice(lambda _text: True))
+
+    accepted = m._journal_owner_reciprocal_claim(
+        _config(), "wt-child", "anomalous-potato/example-web/wt-owner",
+    )
+
+    assert accepted is True
+    owner = tracking.load_record(owner_dir / "wt-owner.yaml")
+    assert len(owner.resources) == 1
+    assert owner.resources[0].ref == "anomalous-potato/copilot-extensions/wt-child"
+    assert owner.resources[0].is_unsettled
+    assert capsys.readouterr().out == ""
+    if logger_available:
+        _assert_creation_diagnostic(path, errno=19)
+        assert activity.log_event_failure_count() == failures
+    else:
+        assert activity.log_event_failure_count() > failures
+
+
+@pytest.mark.guard
+def test_owner_claim_persistence_failure_is_not_masked_by_advisory_stderr(
+    tmp_path, monkeypatch, capsys,
+):
+    owner_dir = _seed_owner(tmp_path, monkeypatch)
+    owner_path = owner_dir / "wt-owner.yaml"
+    before = owner_path.read_bytes()
+    path, _ = _creation_activity(tmp_path, monkeypatch)
+
+    def fail_save(record, target=None, **kwargs):
+        assert target == owner_path
+        raise OSError(28, "storage-private-marker", "private-storage-path")
+
+    monkeypatch.setattr(tracking, "save_record", fail_save)
+    monkeypatch.setattr(sys, "stderr", _FailingCreationNotice(lambda _text: True))
+
+    accepted = m._journal_owner_reciprocal_claim(
+        _config(), "wt-child", "anomalous-potato/example-web/wt-owner",
+    )
+
+    assert accepted is False
+    assert owner_path.read_bytes() == before
+    assert tracking.load_record(owner_path).resources == []
+    _assert_creation_diagnostic(path, errno=28)
+    _assert_creation_diagnostic(path, errno=19)
+    assert capsys.readouterr().out == ""
+
+
+def _owned_diagnostic_creation(tmp_path, monkeypatch):
+    from agent_worktrees import activity
+    from test_worktree_creation_seed import (
+        _create_config, _stub_create_worktree_core_internals,
+    )
+
+    monkeypatch.setattr(
+        cfg, "project_dir", lambda name=None: tmp_path / "state" / (name or "demo-repo"),
+    )
+    config = _create_config(tmp_path)
+    records = cfg.project_dir(config.repo_name) / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda _name=None: records)
+    log_event = activity.log_event
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    monkeypatch.setattr(activity, "log_event", log_event)
+    monkeypatch.setattr(cfg, "load_project_config", lambda _name, **_kwargs: config)
+    owner_checkout = Path(config.default_repo.worktree_root) / "wt-owner"
+    owner_checkout.mkdir(parents=True)
+    owner = tracking.create_new_record(
+        "wt-owner", "worktree/wt-owner", str(owner_checkout), config.repo_name,
+        config.machine, config.platform, records,
+    )
+    path, _ = _creation_activity(tmp_path, monkeypatch)
+    order = []
+    save_record = tracking.save_record
+
+    def observe_save(record, target=None, **kwargs):
+        save_record(record, target, **kwargs)
+        order.append("claim" if record.worktree_id == owner.worktree_id else "record")
+
+    monkeypatch.setattr(tracking, "save_record", observe_save)
+    return config, owner, path, order
+
+
+@pytest.mark.guard
+def test_owned_creation_branch_notice_failure_preserves_git_and_first_record(
+    tmp_path, monkeypatch, capsys,
+):
+    from agent_worktrees import creation_requests
+
+    config, owner, path, order = _owned_diagnostic_creation(tmp_path, monkeypatch)
+
+    def create_git(_anchor, checkout, *_args):
+        assert tracking.load_record(owner.yaml_path).resources[0].is_unsettled
+        order.append("git")
+        Path(checkout).mkdir()
+
+    monkeypatch.setattr(m.git_ops, "create_worktree", create_git)
+    monkeypatch.setattr(sys, "stderr", _FailingCreationNotice(
+        lambda text: "Creating worktree on branch" in text,
+    ))
+    result = m._create_worktree_core(
+        config, owner_ref=f"{config.machine}/{config.repo_name}/wt-owner",
+        creation_key="creation-notice", build_launch_plan=False,
+        inherit_parent_session=False, no_pair=True,
+    )
+
+    assert order == ["claim", "git", "record"]
+    record = tracking.load_record(cfg.tracking_dir() / f"{result['worktree']['id']}.yaml")
+    assert record.owner_ref == f"{config.machine}/{config.repo_name}/wt-owner"
+    assert creation_requests.inspect(config, "creation-notice")["status"] == "complete"
+    _assert_creation_diagnostic(path, errno=19)
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.guard
+def test_owned_creation_git_failure_is_not_replaced_by_diagnostic_io(
+    tmp_path, monkeypatch,
+):
+    from agent_worktrees import creation_requests
+
+    config, owner, path, order = _owned_diagnostic_creation(tmp_path, monkeypatch)
+    failure = OSError(28, "storage-private-marker", "private-storage-path")
+
+    def fail_git(_anchor, _checkout, *_args):
+        assert tracking.load_record(owner.yaml_path).resources[0].is_unsettled
+        order.append("git")
+        raise failure
+
+    monkeypatch.setattr(m.git_ops, "create_worktree", fail_git)
+    monkeypatch.setattr(sys, "stderr", _FailingCreationNotice(
+        lambda text: "Creating worktree on branch" in text or " failed " in text,
+    ))
+    with pytest.raises(OSError) as caught:
+        m._create_worktree_core(
+            config, owner_ref=f"{config.machine}/{config.repo_name}/wt-owner",
+            creation_key="creation-fault", build_launch_plan=False,
+            inherit_parent_session=False, no_pair=True,
+        )
+
+    assert caught.value is failure
+    assert order == ["claim", "git"]
+    assert creation_requests.inspect(config, "creation-fault")["status"] == "pending"
+    assert len(tracking.list_records(cfg.tracking_dir())) == 1
+    assert tracking.load_record(owner.yaml_path).resources[0].is_unsettled
+    _assert_creation_diagnostic(path, errno=19)
