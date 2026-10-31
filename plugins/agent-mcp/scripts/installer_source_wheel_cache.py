@@ -167,7 +167,25 @@ def cached_source_wheel(
                 "schema": _SCHEMA, "version": 1, "key": key, "filename": wheel.name,
                 "sha256": expected, "size": size,
             }, sort_keys=True, separators=(",", ":")) + "\n", encoding="ascii")
-            current_deadline()
-            candidate.rename(entry)
+            for attempt in range(runtime._AV_RETRY_ATTEMPTS):
+                current_deadline()
+                if os.path.lexists(entry):
+                    raise WheelError("source wheel publication destination appeared during construction")
+                try:
+                    candidate.rename(entry)
+                    break
+                except OSError as error:
+                    if (
+                        getattr(error, "winerror", None) not in (5, 32, 33)
+                        or attempt == runtime._AV_RETRY_ATTEMPTS - 1
+                    ):
+                        raise
+                    time.sleep(min(
+                        runtime._AV_RETRY_BACKOFF * (attempt + 1),
+                        max(0, current_deadline() - time.monotonic()),
+                    ))
+                    if _read_receipt(candidate, key, max_archive_bytes) != (wheel, expected, size):
+                        raise WheelError("source wheel cache candidate changed during publication")
+                    _copy_wheel(wheel, None, expected, size, current_deadline())
         wheel, expected, size = _read_receipt(entry, key, max_archive_bytes)
         return _copy_wheel(wheel, output, expected, size, current_deadline())
