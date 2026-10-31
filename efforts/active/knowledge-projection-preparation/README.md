@@ -210,6 +210,21 @@ into the harness.
 - Phase 2 is complete. Phase 3 owns the remaining review, required CI,
   source delivery, release-status recording, and archival gates.
 
+### 2026-10-30 - Exclude append boundary correction
+
+- Review identified that appending a rule could grow a valid exclude past its
+  2 MiB read limit. The shared owner now checks the final UTF-8 byte size before
+  effects and appends explicit platform-newline bytes, without text translation.
+- Eight new regressions cover LF/CRLF, an exact-fit append and one-byte overflow,
+  multibyte existing contents, both companion preparation and native publication,
+  unchanged bytes on refusal, and a valid subsequent preparation.
+- The changed-owner run passed 218 tests with 10 platform skips; its only
+  failure was the permission fixture intercepting text append instead of the
+  new binary append. The fixture now intercepts every append mode.
+- All 14 boundary/denial cases subsequently passed through the contained runner.
+  No unresolved test failure remains; touched Python lint and staged patch
+  checks passed. Required CI and review must be refreshed for the new head.
+
 ### 2026-10-30 - Fix-forward for cross-drive fixture qualification
 
 - Corrected the earlier stopping decision: an encountered, untracked fixture

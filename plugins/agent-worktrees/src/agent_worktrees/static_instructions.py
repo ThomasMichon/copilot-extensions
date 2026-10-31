@@ -23,6 +23,7 @@ from plugin_activation.state import _reject_duplicates, _split_jsonc_header
 from . import static_preparation as preparation
 
 NAMESPACE = ".github/instructions/agent-worktrees-generated"
+_MAX_EXCLUDE_BYTES = 2 * 1024 * 1024
 _RESERVED_NAMES = {
     "con", "prn", "aux", "nul",
     *(f"com{index}" for index in range(1, 10)),
@@ -373,12 +374,11 @@ def _read_exclude(exclude: Path) -> str:
     info = exclude.stat()
     if not stat.S_ISREG(info.st_mode):
         raise ValueError(f"instruction input is not a regular file: {exclude}")
-    limit = 2 * 1024 * 1024
-    if info.st_size > limit:
+    if info.st_size > _MAX_EXCLUDE_BYTES:
         raise ValueError("instruction exclude exceeds the 2 MiB limit")
     with exclude.open("rb") as handle:
-        content = handle.read(limit + 1)
-    if len(content) > limit:
+        content = handle.read(_MAX_EXCLUDE_BYTES + 1)
+    if len(content) > _MAX_EXCLUDE_BYTES:
         raise ValueError("instruction exclude exceeds the 2 MiB limit")
     return content.decode("utf-8")
 
@@ -416,10 +416,13 @@ def _ensure_output_ignored(
     rule = f"/{NAMESPACE}/"
     previous = _read_exclude(exclude)
     if rule not in previous.splitlines():
+        addition = f"{os.linesep}{rule}{os.linesep}".encode("utf-8")
+        if len(previous.encode("utf-8")) + len(addition) > _MAX_EXCLUDE_BYTES:
+            raise ValueError("instruction exclude would exceed the 2 MiB limit")
         _remaining(deadline)
         exclude.parent.mkdir(parents=True, exist_ok=True)
-        with exclude.open("a", encoding="utf-8") as handle:
-            handle.write(f"\n{rule}\n")
+        with exclude.open("ab") as handle:
+            handle.write(addition)
         for path in validated_git:
             if Path(path).resolve() == exclude.resolve():
                 validated_git[path] = preparation.stamp(Path(path), deadline=deadline)

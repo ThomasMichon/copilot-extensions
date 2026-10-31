@@ -1505,6 +1505,44 @@ def test_paired_preparation_ignores_companion_before_publication(
     assert git(knowledge, "status", "--porcelain") == before
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("overflow", [False, True])
+@pytest.mark.parametrize("publication", [False, True])
+def test_exclude_append_near_limit_never_invalidates_next_preparation(
+    copy_workspace, monkeypatch, newline, overflow, publication,
+):
+    root, home = copy_workspace
+    _, output = provider(root, home)
+    monkeypatch.setattr(static.os, "linesep", newline)
+    max_bytes = 2 * 1024 * 1024
+    addition = f"{newline}/{static.NAMESPACE}/{newline}".encode("utf-8")
+    length = max_bytes - len(addition) + int(overflow)
+    previous = b"#" + b"\xc3\xa9" * ((length - 1) // 2) + b"x" * ((length - 1) % 2)
+    exclude = root / ".git" / "info" / "exclude"
+    exclude.write_bytes(previous)
+
+    if publication:
+        result = lcr.refresh_local_cache(root, home=home)
+        assert result.status == ("failed" if overflow else "ready")
+        if overflow:
+            assert "would exceed" in result.detail
+            assert not output.exists()
+    elif overflow:
+        with pytest.raises(ValueError, match="would exceed"):
+            static.prepare_output_namespace(root)
+    else:
+        static.prepare_output_namespace(root)
+
+    if overflow:
+        assert exclude.read_bytes() == previous
+    else:
+        expected = previous + addition
+        assert len(expected) == max_bytes
+        assert exclude.read_bytes() == expected
+        static.prepare_output_namespace(root)
+        assert exclude.read_bytes() == expected
+
+
 @pytest.mark.parametrize("fault", ["directory", "oversize", "unwritable", "indirect", "tracked", "negated"])
 def test_companion_ignore_failure_is_visible_pending_and_retryable(
     copy_workspace, tmp_path, monkeypatch, fault,
@@ -1540,7 +1578,7 @@ def test_companion_ignore_failure_is_visible_pending_and_retryable(
             native_open = Path.open
 
             def open_path(path, mode="r", *args, **kwargs):
-                if path == exclude and mode == "a":
+                if path == exclude and mode.startswith("a"):
                     raise PermissionError("exclude write refused")
                 return native_open(path, mode, *args, **kwargs)
 
