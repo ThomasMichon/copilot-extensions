@@ -535,16 +535,41 @@ def _assert_writers_dead(engine, pids: list[int]):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         live = [pid for pid in pids if engine.runtime._pid_alive(pid)]
-        if os.name != "nt":
-            live = [
-                pid for pid in live
-                if not (Path(f"/proc/{pid}/stat").is_file()
-                        and Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1][0] == "Z")
-            ]
+        if sys.platform.startswith("linux"):
+            observed = []
+            for pid in live:
+                try:
+                    state = Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1][0]
+                except FileNotFoundError:
+                    continue
+                if state != "Z":
+                    observed.append(pid)
+            live = observed
         if not live:
             return
         time.sleep(0.02)
     pytest.fail(f"installer writers survived ownership settlement: {live}")
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux proc observation")
+@pytest.mark.parametrize("error", [FileNotFoundError, PermissionError])
+def test_owned_child_observation_handles_exit_but_not_unreadable_state(monkeypatch, error):
+    subject = SimpleNamespace(runtime=SimpleNamespace(_pid_alive=lambda pid: True))
+    stat_path = Path("/proc/12345/stat")
+    original_is_file, original_read_text = Path.is_file, Path.read_text
+
+    def read_text(path, *args, **kwargs):
+        if path == stat_path:
+            raise error("native process observation unavailable")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", lambda path: path == stat_path or original_is_file(path))
+    monkeypatch.setattr(Path, "read_text", read_text)
+    if error is FileNotFoundError:
+        _assert_writers_dead(subject, [12345])
+    else:
+        with pytest.raises(PermissionError):
+            _assert_writers_dead(subject, [12345])
 
 
 @pytest.mark.parametrize("retained", [False, True])

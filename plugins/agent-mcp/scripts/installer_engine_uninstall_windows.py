@@ -76,17 +76,19 @@ foreach ($level in 1..4) {
     $ancestors+=@($current)
 }
 $rooted=@()
+$exited=@{}
 if ($descendants) {
-    # Recover potential roots before their descendant closure is derived.
+    # Recover roots before closure; exited rows remain as ancestry evidence.
     $raw=@($raw | ForEach-Object {
         $row=$_
         if (Test-CensusCandidate $row $ancestors $rooted) {
             if (-not $row.ExecutablePath -or -not $row.CommandLine) {
                 $owner=Get-CensusProcessOwner $row
-                if (-not $owner) { return }
-                if ($owner.Sid -eq $sid) {
-                    Get-CensusProcessMetadata $row
-                    return
+                if (-not $owner) {
+                    $exited[$row.ProcessId]=$true
+                } elseif ($owner.Sid -eq $sid) {
+                    $fresh=Get-CensusProcessMetadata $row
+                    if ($fresh) { $row=$fresh } else { $exited[$row.ProcessId]=$true }
                 }
             }
         }
@@ -109,6 +111,7 @@ if ($descendants) {
 }
 $rows=@($raw | ForEach-Object {
     $row=$_
+    if ($exited.ContainsKey($row.ProcessId)) { return }
     if (-not (Test-CensusCandidate $row $ancestors $rooted)) { return }
     $owner=Get-CensusProcessOwner $row
     if (-not $owner) { return }

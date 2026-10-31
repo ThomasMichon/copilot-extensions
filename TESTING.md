@@ -14,7 +14,9 @@ installer exit. Legacy log/observer failures occur only after owned writers have
 settled; native relays retain original byte channels and explicit error receipts.
 The MCP retirement packet adds native Windows controls for one birth-checked
 incomplete-census refresh, completed processes and retained live-unknown/identity
-refusals. Its actual fresh-settlement fixture owns its complete child scope with
+refusals. An actual native parent exits during either ownership inspection or
+metadata refresh while its child stays alive; snapshot ancestry must retain
+that child and the foreign-owner refusal. Its actual fresh-settlement fixture owns its complete child scope with
 the existing 60-second child bound; that case's 90-second outer guard allows
 owned timeout cleanup and reporting instead of preempting them.
 
@@ -45,8 +47,10 @@ but exceeded the default 30-second item guard. That native tree fixture uses
 the same 90-second guard as fresh settlement, retaining its 60-second children,
 full census, identity checks and owned cleanup. Production deadlines, unit-only
 packet policy, non-Windows item and aggregate runner budgets are unchanged.
-Native pause/rollback
-and both shell adapters' fresh-failure propagation are distinct controls.
+Native pause/rollback and both shell adapters' fresh-failure propagation are
+distinct controls. The Linux writer-exit observer treats a disappearing proc
+stat file as completed exit, but still propagates an unreadable observation;
+the hard-owner-death controls retain their original process settlement bounds.
 Abrupt caller death after its first native pause must resume the original target,
 settle the finite custodian, and leave the observing parent alive. A separate
 hosted Linux control in `tools/retirement_custody_acceptance.py` closes an actual

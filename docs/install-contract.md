@@ -2252,6 +2252,8 @@ candidate at most once by PID and checks that its creation identity is unchanged
 When descendants are requested, potential roots are recovered before computing
 their closure, so a newly identified runtime-root process cannot hide an
 external child. Rooted descendants still require current-user ownership.
+Confirmed-exited candidates retain their original snapshot rooting and ancestry
+for descendant discovery, but are omitted from returned live observations.
 A disappeared observation is omitted only after native process absence/exit
 confirmation; live unknown, ambiguous and changed-identity observations still
 refuse inspection. The existing native birth check and retirement pins remain
