@@ -66,6 +66,12 @@ placement is an explicit requirement; no option is a mandatory core dependency.
   Generic Taking is not a new ACK ceremony, and responsibility does not expire
   by age. Normal reviewed delivery and full receiving readback precede any
   separately supported source judgment.
+  #9735 continues that same substrate appointment with focused identity,
+  native-observation and same-original SDK repair. Its
+  [repair amendment](komodo-substrate-lifecycle.md#original-attempt-sdk-repair-amendment)
+  is proposed before implementation; it does not transfer journal, admission,
+  client-release, credential or workload ownership. Original UNKNOWN custody
+  and actual adopter qualification remain open.
 - **Logging slice:** `spinning-sprocket` owns Dispatch application diagnostics,
   local discovery and existing-owner idle maintenance under #8377. It does not
   modify #8370's installer-attempt capture or #6812's progress formatter.
