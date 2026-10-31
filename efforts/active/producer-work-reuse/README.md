@@ -108,10 +108,10 @@ authorized runtime behavior.
 - [x] Admit history-preserving removal of only the draft's production wave wiring,
   retaining the existing production consumer and the unwired foundations.
 - [x] Validate the retained model/protocol/authority and legacy-consumer contracts
-  (299 targeted tests; Ruff, install-contract, module-size and docs guards).
-- [ ] Obtain current-head review, resolve the removed-path performance thread,
+  (306 targeted tests; Ruff, install-contract, module-size and docs guards).
+- [x] Obtain current-head review, resolve the removed-path performance thread,
   pass required CI and merge existing #8143.
-- [ ] Journal the source-only result; keep the R1b/provider/transport and native
+- [x] Journal the source-only result; keep the R1b/provider/transport and native
   qualification gates below open under #7949/#5761.
 
 ### S3 inventory freshness amendment — plan/review only
@@ -183,6 +183,25 @@ on changing a cross-plugin revision contract. S1 requires provider-capability
 admission; S2 health requires schema/lifecycle coordination.
 
 ## Journal
+
+### 2026-10-31 — Bounded unwired source foundation merged
+
+- Existing #8143 merged to Dev at
+  `b7fe91c7316d7698e39827b8e24295379c2a838c`, from reviewed head
+  `4ee799239f2d0ed762d2c15e3cf5921c00ddb4ee`.
+- Fresh Copilot Approve identified no active issues; every review thread was
+  resolved and required CI passed. The normal authorized Maintainer completion
+  profile omitted the additional CODEOWNER vote, not review or CI.
+- Retained only unwired inventory/protocol/authority foundations, additive
+  candidate provenance and optional heartbeat fencing. Production session/probe,
+  credential, scheduling and cleanup behavior remains the existing Dev behavior.
+  Latest targeted selection: 306 passed; all four source guards passed.
+- The bounded source increment is complete, not this effort. Exact R1b
+  consumer/path/producer/provider and transport admission, selected-effect/
+  Option-F integration, N2/native performance and rollout remain open under
+  #7949/#5761. Both trackers were verified open after merge.
+- Post-merge source journaling is retained locally for the next authorized
+  source publication; no new PR, finalization, release or activation is implied.
 
 ### 2026-10-23 — Explicit S3 authority amendment
 

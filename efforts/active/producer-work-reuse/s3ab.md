@@ -2,7 +2,7 @@
 
 [Parent effort](README.md) · [Reviewed design](codespaces.md)
 
-- **Status:** Active — bounded foundation publication; integration blocked
+- **Status:** Active — bounded foundation merged; integration blocked
 - **Tracker:** #7949
 - **Participant:** placid-battery, source implementation and PR owner.
 - **Scope:** qualified owner-wave inventory, batched mux checks, bounded venue
@@ -13,7 +13,7 @@
   policy and full Option-F control publication are recorded. Exact R1b
   consumer/path/reconcile/owner admission remains pending. The private prototype
   stays unwired; N2/performance/activation/full-integration gates are not complete.
-  #8143 now publishes only the separable source foundation, not the production
+  #8143 merged only the separable source foundation, not the production
   owner-wave consumer. The existing production session/probe paths are retained.
   The additive candidate seam has narrow explicit user authorization, not an
   owner release. The previous multi-mux cost conflict is historical analysis,
@@ -64,9 +64,10 @@ launch/recovery, production deployment or live venue probes.
   not a prerequisite for this design work.
 - [x] Implement immutable inventory and batch protocol with explicit wave adapter.
 - [x] Implement bounded concurrent probes, cancellation and atomic renewal fence.
-- [ ] Validate and independently review the unwired foundation; publish and merge
+- [x] Validate and independently review the unwired foundation; publish and merge
   existing #8143 through normal gates without claiming production integration.
-- [ ] Reconcile source outcome and retained #7949 qualification after merge.
+- [x] Reconcile the bounded foundation outcome after merge; retain the remaining
+  #7949/#5761 integration and qualification gates above.
 
 ## Validation Plan
 
@@ -412,7 +413,7 @@ and no historical count is reused as current-source performance qualification.
 
 | Cell | State |
 |------|-------|
-| Source tests | Historical 223-case integration and 128-case model receipts retained; fresh foundation/legacy-consumer review and CI pending |
+| Source tests | 306 current foundation/legacy-consumer tests and four guards pass; current-head approval, resolved threads and required CI; #8143 source-only merged |
 | Release | Pending source merge and ordinary promotion; no release claim |
 | Installed/native venue | Unavailable by scope; no updater or live CodeSpace probe |
 | CPU/whole-wave metadata/latency tails | CPU/tails unmeasured; repeated authority CLI fanout blocks deferred production integration retained by #7949/#5761 |
@@ -541,6 +542,26 @@ another A/N1 native run):
   10.30 seconds in pytest, 59.14 seconds including preparation/cleanup. Ruff,
   install-contract, module-size and docs guards pass. Prior 299/303 and original
   A/N1 evidence remain retained separately. Fresh current-head review is pending.
+
+### Confirmed source-only merge
+
+- #8143 is provider-confirmed MERGED at
+  `b7fe91c7316d7698e39827b8e24295379c2a838c` on 2026-10-31, from exact
+  head `4ee799239f2d0ed762d2c15e3cf5921c00ddb4ee`.
+- Review `5725489867` is a fresh Copilot Approve at that head, with no active
+  issues; every discussion thread is resolved. Required source CI passed.
+  Native completion verified the merge under the repository's normal
+  authorized Maintainer profile. No CI or finding bypass was used.
+- Re-read the canonical effort after merge and closed only its bounded
+  foundation Plan items. #7949/#5761 remain open; no R1b, N2, native performance,
+  release, installation or activation completion is recorded.
+- Backup and published PR history preserve the removed draft integration.
+  Original accepted A/N1 and historical accounting are unchanged. Production
+  `session_forwards.py` and its legacy tests were verified equal to Dev before
+  merge. No worktree is finalized or discarded.
+- This post-merge journal is committed locally pending its next authorized
+  source publication. The parent source tracking retains that publication
+  obligation; no additional PR is created to publish it.
   `units.stdout.log`:
   `1280256ba9c23c5b470ebc28f71ce94be687935270e393e0ae73d34bcfa5bf21`.
   Unit stderr is empty; individual guard hashes are in the closed index.
