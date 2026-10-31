@@ -63,8 +63,13 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
     if args[:2] == ["network", "inspect"]:
         network = json.loads((root / "network.json").read_text())
         live = json.loads((root / "live.json").read_text()) if (root / "live.json").exists() else {}
+        overrides = root / "endpoint-overrides.json"
+        endpoints = json.loads(overrides.read_text()) if overrides.exists() else {}
+        excluded = root / "excluded-endpoints.json"
+        exclusions = json.loads(excluded.read_text()) if excluded.exists() else []
         network["Containers"].update({
-            item["Id"]: {"Name": name} for name, item in live.items() if item["State"]["Running"]
+            item["Id"]: {"Name": name, **endpoints.get(item["Id"], {})}
+            for name, item in live.items() if item["State"]["Running"] and item["Id"] not in exclusions
         })
         return 0, json.dumps([network])
     if args[:2] == ["container", "ls"]:

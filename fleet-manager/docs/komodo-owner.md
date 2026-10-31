@@ -194,12 +194,15 @@ Public identity accepts validated SubjectPublicKeyInfo `PUBLIC KEY` PEM
 key. Malformed, private, non-SPKI, trailing or different key material refuses.
 Only health comparison normalizes presentation: retained text/key fingerprints
 are unchanged, so changing a retained file's encoding still changes its custody
-evidence. An empty per-server `info.public_key` is accepted only when inspected
-Core configuration proves its selected global trust, the authenticated server
+evidence. An empty per-server `info.public_key` is accepted only when the server
+has an explicitly empty `config.address` selecting Periphery-to-Core mode,
+inspected Core configuration proves its selected global trust, the authenticated server
 connection is `Ok`, and the live Periphery key equals the retained selected key.
 The fixed `file:/config/keys/periphery.pub` reference must resolve through the
 actual selected keys bind mount; explicit inline global keys are validated too.
-A missing or unproved global setting is not a fallback to trust the live key.
+A missing or nonempty server address, or a missing or unproved global setting,
+is not a fallback to trust the live key. Core-to-Periphery mode requires the
+explicit retained per-server key.
 Current native identity/network are checked again after readiness.
 Convergence, successful repeats and status use the same final observation:
 all three services must still be running, unpaused and non-restarting with

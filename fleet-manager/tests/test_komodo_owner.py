@@ -105,7 +105,7 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 "/read/GetVersion": {"version": "9.0.0" if health_failure[0]
                                     else core_version},
                 "/read/GetServer": {
-                    "id": "server-a", "name": "example-host", "config": {"enabled": True},
+                    "id": "server-a", "name": "example-host", "config": {"enabled": True, "address": ""},
                     "info": {"public_key": "" if scenario == "global-trust" else PUBLIC_DER["periphery"]},
                 },
                 "/read/GetServerState": {"status": "Ok"},

@@ -124,6 +124,8 @@ async def current_health(declaration: KomodoDeclaration, material: KomodoMateria
                 keys = public_keys(material)
                 override = info.get("public_key")
                 if override == "":
+                    if config.get("address") != "":
+                        raise PlanError("Komodo Core global trust requires an explicit reverse connection")
                     if core is None:
                         raise PlanError("Komodo Core global public identity custody is unproved")
                     override = effective_global_key(core, material, keys["periphery"])

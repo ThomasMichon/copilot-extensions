@@ -59,6 +59,15 @@ terminal receipt requires complete current readiness. Explicit failed settlement
 requires attributable selected/retained native results and unavailable readiness;
 it retains the failed data candidate and never rolls back.
 
+The final paired container/process observation, network fingerprint and complete
+endpoint membership/attachments remain in memory only. Publication checkpoints reread and compare them across
+immutable retention, state publication and the journal transaction before append
+and commit, within the original deadline. Current authority is revalidated
+after those reads. Pre-commit drift preserves UNKNOWN and rolls back an attempted
+terminal append; any pending immutable/state outcome retains the original
+attempt for fresh verification. Post-commit cleanup resumes only the already
+recorded terminal decision and does not append another receipt.
+
 Outcome evidence keeps `deployment` and `selection.release` as the original
 candidate, adds the immutable `original_attempt`, links exact existing
 `prior_outcomes` (including a prior failed candidate), and adds separate

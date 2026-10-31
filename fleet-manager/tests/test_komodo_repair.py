@@ -37,6 +37,11 @@ CRASHES = [
     "journal-before", "journal-after", "clear-before", "clear-after",
     "complete-before", "complete-after", "journal-revoke", "append-revoke", "save-revoke",
 ]
+DRIFTS = [
+    f"publication-drift-{stage}-{change}"
+    for stage in ("retain", "save", "append")
+    for change in ("stop", "restart", "resource", "network", "endpoint", "attachment", "disconnect")
+]
 REFUSALS = [
     "different-request", "different-generation", "changed-candidate", "changed-executor", "same-executor",
     "changed-material", "inode-material", "wrong-fleet", "expired-transition", "expired-candidate", "revoked-transition",
@@ -45,7 +50,7 @@ REFUSALS = [
     "unsettled", "not-fixed", "changed-profile", "changed-native", "wrong-journal",
     "revoke-after-health", "grant-after-health", "expiry-after-health", "key-after-health",
     "process-after-health", "state-after-health", "executor-after-health", "runtime-after-health",
-]
+] + DRIFTS
 
 
 @pytest.mark.parametrize("mode", [
@@ -89,7 +94,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             result = {
                 "/read/GetVersion": {"version": "9.0.0" if original_health_failure[0] else "2.0.0"},
                 "/read/GetServer": {
-                    "id": "server-a", "name": "example-host", "config": {"enabled": True},
+                    "id": "server-a", "name": "example-host", "config": {"enabled": True, "address": ""},
                     "info": {"public_key": ""},
                 },
                 "/read/GetServerState": {"status": "Ok"},
@@ -328,6 +333,49 @@ def test_original_unknown_uses_current_repair_without_native_replay(
 
                 monkeypatch.setattr(target, name, interrupted)
 
+            if mode in DRIFTS:
+                _, _, stage, change = mode.split("-")
+                target, name = ((NodeJournal, "_append") if stage == "append"
+                                else (KomodoState, stage))
+                original_method = getattr(target, name)
+
+                def drifted(instance: Any, *args: Any, **kwargs: Any) -> Any:
+                    selected = not fired
+                    if name == "save":
+                        selected = selected and type(args[0]["good"]) is dict and "repair" in args[0]["good"]
+                    elif name == "_append":
+                        selected = selected and args[2].to_dict()["status"] == "succeeded"
+                    result = (original_method(*args, **kwargs) if name == "_append"
+                              else original_method(instance, *args, **kwargs))
+                    if selected:
+                        fired.append(True)
+                        if change in ("attachment", "disconnect"):
+                            identity = live()["core"]["Id"]
+                            path = rig["directory"] / (
+                                "endpoint-overrides.json" if change == "attachment" else "excluded-endpoints.json")
+                            changed = ({identity: {"EndpointID": "changed-endpoint"}}
+                                       if change == "attachment" else [identity])
+                        elif change in ("network", "endpoint"):
+                            path = rig["directory"] / "network.json"
+                            changed = json.loads(path.read_text())
+                            if change == "network":
+                                changed["IPAM"]["Driver"] = "changed-network"
+                            else:
+                                changed["Containers"]["f" * 64] = {"Name": "foreign-endpoint"}
+                        else:
+                            path = rig["directory"] / "live.json"
+                            changed = live()
+                            if change == "stop":
+                                changed["core"]["State"].update(Status="exited", Running=False)
+                            elif change == "restart":
+                                changed["core"]["State"].update(Pid=9999, StartedAt="changed-process")
+                            else:
+                                changed["core"]["Mounts"][0]["Source"] = "/unselected"
+                        path.write_text(json.dumps(changed))
+                    return result
+
+                monkeypatch.setattr(target, name, drifted)
+
             if mode in REFUSALS:
                 if mode == "busy-owner":
                     with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]):
@@ -339,6 +387,9 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 assert not harness.owner._issued
                 if mode not in ("missing-owner", "missing-journal", "wrong-journal"):
                     assert journal.inspect(original) == uncertain
+                if mode in DRIFTS:
+                    assert fired and len(journal.results()) == 2
+                    assert decode((owner_root / "selection.json").read_bytes())["attempt"] == retained
                 if mode == "missing-owner":
                     assert not owner_root.exists()
                 elif mode == "missing-journal":
@@ -382,7 +433,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
             assert sentinel.read_text() == "original-data"
             assert (rig["directory"] / "effects").read_text() == expected_effects
             assert not (rig["directory"] / "retire-effects").exists()
-            if mode not in ("mount-order", "changed-native", "process-after-health"):
+            if mode not in ("mount-order", "changed-native", "process-after-health", *DRIFTS):
                 assert live() == native_before
             if mode not in ("revoked-transition",):
                 assert resolver_calls

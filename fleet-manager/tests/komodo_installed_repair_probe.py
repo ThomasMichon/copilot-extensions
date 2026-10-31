@@ -117,7 +117,7 @@ else:
     assert status["executor_runtime"] == executor_runtime
     assert status["accepted"] == ("succeeded" if resuming and mode == "journal-after" else "unknown")
     assert status["unresolved_effects"] is (status["accepted"] == "unknown")
-    assert status["installed"] and status["currently_healthy"]
+    assert status["installed"] and status["currently_healthy"], status
     assert not status["converged"] and not status["native_mutations_performed"]
     baseline = KomodoOwner(current=lambda: executor, admission=admission, authority="gateway-a", clock=clock)
     try:

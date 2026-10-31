@@ -175,7 +175,7 @@ def test_noneditable_host_bootstrap_uses_common_verified_identity_and_fixed_nati
             return web.json_response({
                 "/read/GetVersion": {"version": "2.0.0"},
                 "/read/GetServer": {
-                    "id": "server-a", "name": "example-host", "config": {"enabled": True},
+                    "id": "server-a", "name": "example-host", "config": {"enabled": True, "address": ""},
                     "info": {"public_key": PUBLIC_DER["periphery"]},
                 },
                 "/read/GetServerState": {"status": "Ok"},
@@ -253,7 +253,7 @@ def test_installed_current_executor_repairs_retained_baseline_original_without_r
             return web.json_response({
                 "/read/GetVersion": {"version": "9.0.0" if health_failure[0] else "2.0.0"},
                 "/read/GetServer": {
-                    "id": "server-a", "name": "example-host", "config": {"enabled": True},
+                    "id": "server-a", "name": "example-host", "config": {"enabled": True, "address": ""},
                     "info": {"public_key": ""},
                 },
                 "/read/GetServerState": {"status": "Ok"},

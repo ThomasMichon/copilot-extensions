@@ -27,6 +27,8 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
     None, "credentials", "version", "key", "disconnected", "payload", "missing-core", "missing-periphery",
     "global", "global-inline", "global-missing", "global-wrong", "global-mount", "missing-override",
     "live-key", "retained-key",
+    "global-address-nonempty", "global-address-missing", "global-address-null", "global-address-whitespace",
+    "override-address-nonempty", "override-address-missing",
 ])
 def test_real_authenticated_current_core_and_periphery_health(
     native_rig: Any, failure: str | None,
@@ -48,6 +50,15 @@ def test_real_authenticated_current_core_and_periphery_health(
         core["Config"]["Env"] = []
     elif failure == "global-mount":
         core["Mounts"][0]["Source"] = str(rig["root"] / "foreign-keys")
+    server_config = {"enabled": True, "address": ""}
+    if failure in ("global-address-nonempty", "override-address-nonempty"):
+        server_config["address"] = "https://periphery.example.com"
+    elif failure in ("global-address-missing", "override-address-missing"):
+        del server_config["address"]
+    elif failure == "global-address-null":
+        server_config["address"] = None
+    elif failure == "global-address-whitespace":
+        server_config["address"] = " "
 
     async def exercise() -> None:
         token = "local-fixture-session-token"
@@ -75,7 +86,7 @@ def test_real_authenticated_current_core_and_periphery_health(
             responses = {
                 "/read/GetVersion": {"version": "2.0.1" if failure == "version" else "2.0.0"},
                 "/read/GetServer": {
-                    "id": "server-a", "name": "example-host", "config": {"enabled": True},
+                    "id": "server-a", "name": "example-host", "config": server_config,
                     "info": ({} if failure == "missing-override" else {
                         "public_key": PUBLIC_DER["core"] if failure == "key"
                         else "" if failure and failure.startswith("global")
@@ -99,7 +110,7 @@ def test_real_authenticated_current_core_and_periphery_health(
             declaration["core_port"] = server.port
             selected = KomodoDeclaration.from_dict(declaration)
             deadline = time.monotonic() + (0.15 if failure in ("disconnected", "payload") else 3)
-            if failure in (None, "global", "global-inline"):
+            if failure in (None, "global", "global-inline", "override-address-nonempty", "override-address-missing"):
                 result = await current_health(selected, rig["material"], deadline=deadline, core=core)
                 assert result["core_version"] == result["periphery_version"] == "2.0.0"
                 assert result["server"] == "server-a"
@@ -114,6 +125,10 @@ def test_real_authenticated_current_core_and_periphery_health(
                 assert token not in str(caught.value) and "fixture-material" not in str(caught.value)
                 if failure in ("missing-core", "missing-periphery"):
                     assert str(caught.value) == "Komodo retained public identity is unavailable"
+                if failure and failure.startswith("global-address"):
+                    assert requests == [
+                        "/auth/login/LoginLocalUser", "/read/GetVersion", "/read/GetServer",
+                    ]
                 assert requests.count("/auth/login/LoginLocalUser") == 1
 
     asyncio.run(exercise())
