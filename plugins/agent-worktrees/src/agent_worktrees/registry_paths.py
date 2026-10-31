@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
@@ -25,7 +26,23 @@ def _payload_root() -> Path:
         raw = os.environ.get(key, "").strip()
         if raw:
             return Path(raw)
-    return Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[2]
+    if "COPILOT_EXTENSIONS_CONTEXT" in os.environ or (root / "plugin.json").is_file():
+        return root
+    # A stamped payload-dir can name a single-plugin snapshot, not its marketplace.
+    manifest_path = _legacy_root() / "deploy-manifest.json"
+    if not manifest_path.exists():
+        return root
+    if manifest_path.is_symlink():
+        raise ValueError("agent-worktrees deploy manifest is a symlink")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    if not isinstance(manifest, dict) or manifest.get("service") != "agent-worktrees":
+        raise ValueError("agent-worktrees deploy manifest belongs to another plugin")
+    source = manifest.get("source")
+    payload = source.get("path") if isinstance(source, dict) else None
+    if not isinstance(payload, str) or not Path(payload).is_absolute():
+        raise ValueError("agent-worktrees deployed payload path must be absolute")
+    return Path(payload)
 
 
 def _helper() -> ModuleType:
