@@ -133,6 +133,7 @@ def _retire_posix_group(
 def _communicate_unreaped(
     process: subprocess.Popen, *, input_text: str | None, deadline: float,
     argv: list[str], timeout: float, capture_limits: tuple[int, int] | None = None,
+    binary: bool = False,
 ) -> tuple[str | None, str | None]:
     streams = (process.stdout, process.stderr)
     output = (bytearray(), bytearray())
@@ -180,7 +181,7 @@ def _communicate_unreaped(
     while _observe_unreaped(process) is None:
         time.sleep(min(.01, _remaining(deadline, argv, timeout)))
     return tuple(
-        data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        (bytes(data) if binary else data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"))
         if stream is not None else None
         for data, stream in zip(output, streams)
     )
@@ -251,6 +252,7 @@ def _communicate_windows(
 def _communicate_windows_bounded(
     process: subprocess.Popen, job, *, input_text: str | None, deadline: float,
     argv: list[str], timeout: float, capture_limits: tuple[int, int],
+    binary: bool = False,
 ) -> tuple[str | None, str | None]:
     if job is None:
         raise RuntimeError("native child Windows Job custody is unavailable")
@@ -396,7 +398,7 @@ def _communicate_windows_bounded(
             primary[0].stderr = bytes(output[1]) if process.stderr is not None else None
         raise primary[0]
     return tuple(
-        data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        (bytes(data) if binary else data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"))
         if stream is not None else None
         for data, stream in zip(output, (process.stdout, process.stderr))
     )
@@ -411,12 +413,15 @@ def _run_owned(
     cwd: str | os.PathLike | None = None,
     env: dict[str, str] | None = None,
     allow_daemon_breakaway: bool = False,
+    binary: bool = False,
 ) -> subprocess.CompletedProcess:
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("native child timeout must be finite and positive")
     windows = os.name == "nt"
     if type(inherit_process_group) is not bool:
         raise ValueError("inherit_process_group must be a boolean")
+    if type(binary) is not bool or binary and capture_limits is None:
+        raise ValueError("binary capture requires explicit stream limits")
     if type(allow_daemon_breakaway) is not bool:
         raise ValueError("allow_daemon_breakaway must be a boolean")
     if inherit_process_group:
@@ -451,6 +456,7 @@ def _run_owned(
             stdout, stderr = _communicate_windows_bounded(
                 process, job, input_text=input_text, deadline=deadline,
                 argv=argv, timeout=timeout, capture_limits=capture_limits,
+                binary=binary,
             )
         elif windows:
             stdout, stderr = _communicate_windows(
@@ -460,6 +466,7 @@ def _run_owned(
             stdout, stderr = _communicate_unreaped(
                 process, input_text=input_text, deadline=deadline, argv=argv, timeout=timeout,
                 capture_limits=capture_limits,
+                binary=binary,
             )
     except OwnedCleanupError:
         retained = True
@@ -543,8 +550,9 @@ def run_caller_owned(
     on_settled: Callable[[], None] | None = None,
     cwd: str | os.PathLike | None = None,
     env: dict[str, str] | None = None,
+    binary: bool = False,
 ) -> subprocess.CompletedProcess:
-    """Execute with caller-lifetime ownership and explicit, separate raw-byte budgets."""
+    """Execute with caller lifetime/stream budgets; binary capture preserves exact bytes."""
     from agent_procutil._caller_owned import run
 
     return run(
@@ -553,6 +561,7 @@ def run_caller_owned(
         on_settled=on_settled,
         **({"cwd": cwd} if cwd is not None else {}),
         **({"env": env} if env is not None else {}),
+        **({"binary": binary} if binary is not False else {}),
     )
 
 

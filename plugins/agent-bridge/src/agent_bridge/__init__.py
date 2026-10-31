@@ -1,7 +1,7 @@
 """Agent Bridge -- persistent inter-agent communication service."""
 
 # Fallback only for running from a source tree with no installed distribution.
-_FALLBACK_VERSION = "0.9.231-dev1"
+_FALLBACK_VERSION = "0.9.232-dev1"
 
 
 def __getattr__(name: str) -> str:

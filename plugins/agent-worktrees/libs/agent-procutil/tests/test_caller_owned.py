@@ -39,6 +39,25 @@ def _run(code: str, *, timeout: float = 5, stdout: int = 4096, stderr: int = 409
     )
 
 
+@native_execution
+@pytest.mark.parametrize("capture", [True, False])
+def test_binary_capture_preserves_non_utf8_and_exact_newline_bytes(capture):
+    stdout, stderr = b"\xff\x00\r\n\r\n", b"\xfe\rdiagnostic"
+    result = _run(
+        f"import sys;sys.stdout.buffer.write({stdout!r});sys.stderr.buffer.write({stderr!r})",
+        binary=True, capture=capture,
+    )
+    assert result.stdout == (stdout if capture else None)
+    assert result.stderr == (stderr if capture else None)
+
+
+@native_execution
+def test_binary_capture_still_enforces_raw_byte_limits_and_settles():
+    with pytest.raises(OutputLimitExceeded):
+        _run("import sys;sys.stdout.buffer.write(b'\\xff'*33)", binary=True, stdout=32)
+    assert _run("import sys;sys.stdout.buffer.write(b'settled\\n')", binary=True).stdout == b"settled\n"
+
+
 @pytest.mark.parametrize("contained", [False, True])
 def test_installation_exception_preserves_contained_tests_and_strict_tools(monkeypatch, contained):
     observed = []
