@@ -203,6 +203,10 @@ live claim token. No new blanket ACK or executor appointment is created.
 - [ ] Execute the amendment's implementation/compatibility plan only through
       separately claimed, reviewed source slices, preserving incumbent startup,
       idle-worker, pool-capacity and submission owners.
+- [x] Implement and source-test existing queued `not_before` enforcement at fresh
+      reservation admission; preserve active replay and suspended re-embodiment.
+      This bounded admission fix does not complete atomic pool placement,
+      retry-policy selection or installed qualification.
 - [ ] Resolve the amendment's policy choices and complete its validation matrix
       at the stated source, mixed-version and installed/native evidence tiers.
 
@@ -1191,3 +1195,13 @@ research. Normal review, actual merge and complete current readback remain
 separate publication gates; no future delivery or disposition is claimed.
 
 Credited existing monitor/review/result/history/delivery foundations while retaining the complete long-term semantic-reason, age, clarification and GENERAL per-session viewer direction.
+
+### 2026-10-31 - Fresh reservation due-time admission
+
+Claimed the bounded #9709 source slice and enforced the stored queued-task
+deadline under the existing reservation write transaction. Thirteen fake-clock
+and HTTP controls plus the incumbent reservation packet pass (100 cases);
+four new refusal controls failed against the prior source. Active/exclusive
+replay, suspended owned-workspace reuse and retry allocation identity remain
+unchanged. Source review/merge, release and installed qualification remain
+separate; no retry duration, startup cap or pool-placement policy was selected.
