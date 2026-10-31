@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-29
+- **Last revised:** 2026-10-30
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -50,11 +50,16 @@ thing, and it never spawns one just to be sure.
 
 ### Reversible automatic-update inhibition
 
-An automatic-update KillSwitch prevents pending normal installation work from
-starting, without retaining inert jobs in the execution queue. Such jobs leave
-with an explicit non-success outcome stating that nothing ran. Clearing the
-switch permits new normal work without per-job provenance approval; trusted
-source selection and ordinary execution admission still apply.
+An automatic-update KillSwitch blocks only update requests explicitly classified
+by `--auto`, without retaining inert jobs in the execution queue. Such jobs leave
+with an explicit inhibited outcome stating that nothing ran. Manual update
+without `--auto`, raw self-install, setup/install-source, doctor/list and ordinary
+launch are not vetoed by that switch. Launch can skip its nested automatic update
+without failing to use an admitted healthy runtime.
+
+Request parsing and propagation preserve automatic versus manual classification.
+Clearing the switch permits new automatic work; trusted source selection and
+ordinary execution admission still apply.
 
 Explicit operator-authorized repair remains available while automatic updates
 are inhibited. One designated install driver can carry repair-as-needed
@@ -336,7 +341,7 @@ Consolidated fronts retain independently owned endpoints, routing, drain and
 rollback even when execution resources are shared.
 
 ### self-contained-runtime
-Every runtime plugin's installer establishes a complete, standalone installation
+Every runtime's installation owner establishes a complete, standalone installation
 (runtime, invocation surface and any service), including all dependencies and
 their durable lifetime. A required helper may be a private runtime or an
 explicitly managed compatible helper reused over the process boundary described
@@ -349,8 +354,9 @@ git checkout of this repo or an unowned ambient helper.
 ### immutable-versioned-runtime
 A runtime install is **immutable**: once a version's venv is built it is never
 edited in place. A new version is installed **beside** the old one (its own
-directory), and the active version is selected **atomically** (a `current`
-junction/symlink swap), never by mutating a shared venv. Switching versions —
+directory), and the active version is selected **atomically** through a stable
+redirect, never by mutating a shared venv or rewriting an executing global
+launcher. Switching versions —
 forward or a rollback — is a selection, not a rewrite; a running service keeps
 serving its own immutable files until it is cut over or retired, and two live
 versions are reconciled by best-effort handoff or cold takeover + shared routing/port state rather
@@ -366,9 +372,10 @@ running version is governed by *zero-downtime-cutover* below.
 
 Development and released deployments share this immutable-generation contract.
 Dev identifies the selected source, not a mutable environment. Every deployed
-venv contains frozen, non-editable code and dependencies; its identity binds
-the hash of the complete source and admitted assembly inputs, separately from
-the package version. Identical healthy input can reuse its exact generation;
+venv contains frozen, non-editable code and dependencies; native Git source,
+the selected package versions and exact uv/dependency inputs remain observable
+without adding a separate whole-source fingerprint framework. Existing release
+integrity and admission remain authoritative. Identical healthy input can reuse its exact generation;
 changed input builds beside it, never rewrites it or follows live checkout
 edits. Installed code remains usable without its source checkout.
 
@@ -381,9 +388,10 @@ Clean merged Dev deployment uses the same lifecycle without impersonating an
 interactive worktree claim or a promoted release.
 
 A failed selected-dependency installation never publishes a completed runtime,
-active selection or service cutover. Construction cleans up only its owned,
-incomplete candidate and preserves the previous healthy runtime, completed
-slots and concurrent owners. An interrupted or unreclaimed candidate remains
+active selection or service cutover. Construction preserves the previous healthy runtime, completed slots and
+concurrent owners. An owned incomplete candidate can be isolated and replaced
+by fresh construction; inspection and authorized disposition govern cleanup.
+An interrupted or unreclaimed candidate remains
 nonselectable, with a visible failure rather than a success-shaped fallback.
 
 ### discoverable-local-endpoint
@@ -393,9 +401,12 @@ sync by hand. Installing, moving, or rebinding a service does not require editin
 its clients.
 
 ### a-la-carte-installability
-Any subset of plugins is a supported configuration. A single-plugin install is
-fully functional; adding or removing a plugin never breaks an unrelated one and
-never requires reconfiguring the survivors.
+Any subset of connectors and independently installed components is supported.
+Each component can establish its own complete runtime without a mandatory
+Manager or central coordinator. Enabling a connector alone does not claim that
+its backend is installed; an absent backend has an honest readiness outcome.
+Adding or removing one component never breaks an unrelated one or requires
+reconfiguring the survivors.
 
 ### platform-native-lifecycle
 A service's declared availability is realized by the host's native lifecycle
@@ -426,62 +437,39 @@ of the same portable service contract, not a dependency of the plugin's
 standalone host installation.
 
 ### self-provisioning-runtime
-**Enabling** a runtime plugin is the whole action a user takes — its runtime
-then **provisions itself**, driven by the plugin's **own** installer and **no
-particular sibling, launcher, or control-plane**. Provisioning is reached by a
-**layered, launcher-independent bootstrap**, so it fires in whatever the host
-offers: (1) the plugin's **binstub provisions on first use** — the broadest path,
-needing only a shell and the binstub on disk, so the runtime comes up the first
-time an agent (or a human) *calls the tool*, even in a confined host (the Copilot
-app, a cloud agent) where no launch-wrapper and no session hooks exist; (2) where
-session-start hooks fire, a cheap **stamp** lays the binstub ahead of first use as
-an optimization; (3) each plugin's **skills open with a fail-closed readiness
-check** that, if the runtime is absent, tells the agent the one command to bring
-it up — so the reach extends anywhere the plugin's skills load. Whenever a session
-starts on a machine where the plugin is enabled (and, for a machine-scoped
-runtime, *permitted*), an absent runtime is installed and a drifted one is
-**reconciled to match its enabled payload version** — with **no manual install
-step**. Because agents start sessions **out of order, concurrently, and ad-hoc**,
-provisioning is **idempotent, version-keyed** (a no-op once already matched),
-**throttled**, **lock-serialized** against concurrent first-callers, and **gated**
-to the machines a runtime belongs on — and it **never blocks or slows** a session
-already current. It is also **self-sufficient in acquiring its own toolchain**:
-where the venv/package manager it needs is missing, it obtains a private copy
-rather than dead-ending. "Enabled" is the user's whole intent; "installed,
-running, and version-matched" is the model's job — the same self-healing that
-keeps a runtime immutable-versioned (above) also brings a *missing* runtime into
-existence. None of this depends on the optional installer/configurator
-control-plane being present: it is a **convenience that can update the whole set
-and true-up alignment**, but a plugin **provisions and reconciles itself — and
-supervises its own daemon (see *platform-native-lifecycle*) — with that app
-entirely absent**.
+Runtime provisioning belongs to the independently invoked installation owner,
+not to Copilot plugin loading. Plugins are connectors and knowledge: first-use
+commands, session-start hooks and skills do not install, update, repair or stamp
+backend runtimes, and do not reconcile them to the plugin payload's version.
+They resolve a compatible installed command or report a bounded missing-backend
+outcome with the supported independent installation path.
 
-Self-provisioning is conditional on current deployment authority and the absence
-of an applicable [maintenance hold](disposable-runtimes/README.md#maintenance-aware-automatic-admission).
-Enabling a plugin does not override an intentional outage or authorize automatic
-recreation of a deliberately removed runtime.
+The suite installer obtains complete application projects and their associated
+artifacts from its trusted source, independently of replaceable plugin content.
+It secures toolchain/dependency inputs, prepares immutable generations and
+publishes installed commands through one installation owner per scope.
+Independently installable components remain self-contained and supervise their
+own declared lifetime without requiring Manager to remain running.
 
-This is the contract of a **standalone addon**, where the plugin's own
-installer is the installer. On a host that adopts the integrated profile, the
-same layered entry points (first-use binstub, session stamp, skill readiness
-check) remain the triggers, but they **delegate** to that product's installer
-and per-user supervisor (see *installer-owned-lifecycle-plugin-owned-knowledge*
-and *one-authority-per-lifecycle-decision*): they request convergence to the
-selected release lock rather than reconciling to their own payload version,
-and they never install, activate, or supervise a runtime themselves. Either
-way there is exactly one installer and one supervisor per runtime on a host.
+Preparation and activation are separable. Background preparation happens under
+an admitted maintenance owner, after foreground load; a subsequent launch can
+select already-ready tools rather than rebuilding environments as a user starts
+work. An optional notification can report a prepared update once, without
+claiming activation or starting another updater. Current dependency, ownership
+and maintenance admission govern every operation; enabling a plugin never
+overrides an intentional outage or recreates a removed runtime.
 
 ### managed-runtime-deployment
-An adopter can explicitly reserve runtime deployment to a managed installation
-flow while retaining ordinary Copilot marketplace delivery of plugin content.
-This local choice controls copying runtime payloads into immutable generations
+Runtime deployment uses an independently managed installation flow while
+retaining ordinary Copilot marketplace delivery of connector content.
+The installation authority controls copying complete application inputs into immutable generations
 and publishing their installed command redirects; it does not disable hooks,
 extensions, session guidance, registration, or ordinary interaction with the
 installed services. Indirect bootstrap and first-use paths honor the same
 choice, so a newer plugin cannot silently replace a pinned runtime.
 
-The standalone self-provisioning behavior remains the default. Managed
-deployment preserves existing installation provenance and supervision
+This is the ordinary runtime installation path, not a requirement to adopt a
+mandatory central coordinator. Managed deployment preserves existing installation provenance and supervision
 ownership, and does not by itself adopt the integrated coordination profile.
 A missing or incompatible managed runtime yields an explicit readiness
 outcome rather than falling back to another deployment owner.
@@ -498,19 +486,24 @@ independent reconcile (see the
 fails open to
 "reconcile proceeds normally" on a missing or corrupt switch; and carries no
 automatic expiry, so turning it back off is the operator's own responsibility.
-It changes *when* self-reconcile is allowed to run, never *whether* an enabled
-runtime's payload-vs-deployed drift is itself detected or resolved once
-reconcile resumes.
+It changes *when* admitted automatic preparation is allowed to run, not the
+installation source or the independent operation required to prepare a missing
+runtime. Explicit manual rescue can enter its addressed owner's admission
+without clearing the switch, stealing another transaction or overriding
+authentication, integrity or destructive-action boundaries.
 
 That narrow bootstrap switch is not the suite's
 [shared maintenance banner](disposable-runtimes/README.md#shared-maintenance-banner).
 The latter combines an explained operator hold with automatic-update admission
 across its explicitly addressed local suite scope, including Manager. A
 bootstrap-switch default or namespaced-installation exception cannot bypass an
-applicable maintenance hold; unrelated marketplace ownership stays independent.
+an applicable automatic hold for an explicitly automatic update; it is not a
+switch veto of manual installation or ordinary launch. Native ownership and
+unsettled-effect fences remain independent, and unrelated marketplace ownership
+stays independent.
 
 ### delegated-heavy-companion-runtime
-The self-provisioning contract has one narrow exception: an explicitly
+An explicitly
 configured **optional companion capability** whose dependency footprint is too
 heavy or invasive for ordinary plugin first-use and session-start paths may
 delegate runtime materialization to an already-running trusted supervisor. The
@@ -524,8 +517,8 @@ explicit capability configuration and the owning supervisor, the contribution
 is inert and the capability is honestly unavailable; an agent-facing command
 cannot install it as a fallback. The plugin's remaining lightweight surfaces
 continue to work independently where meaningful. A normal runtime plugin or
-service still follows `self-provisioning-runtime`; delegation is an explicit
-capability boundary, not a way to centralize routine plugin installation.
+service still follows the independent installation contract; delegation is an
+explicit capability boundary, not a plugin-driven installation fallback.
 On a host that adopts the integrated coordination profile, an optional heavy
 environment is instead a selectable closure of the coordinated release. That
 host's installer assembles it through the shared admission path like any
@@ -664,9 +657,10 @@ cells' *provenance-safe-transition*.
 Acquiring, assembling, activating, and recovering a runtime is installer
 work. For a standalone addon that is the addon's own installer. For a host
 that adopts the integrated profile it is that product's installer. The
-first-use, session-stamp, and readiness entry points of
-*self-provisioning-runtime* are triggers for that one installer, not a second
-installer. A Copilot
+independently invoked setup/update entry points reach that one installer.
+First-use connector calls, session stamps and readiness checks only discover
+or describe installed capability; they do not trigger runtime construction.
+A Copilot
 plugin supplies knowledge (skills and guidance), connection surfaces (hooks,
 extension entry points, typed invocation), and bounded, attributable
 declarations of what it needs from a runtime. Plugin content never assembles

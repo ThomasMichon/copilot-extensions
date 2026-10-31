@@ -1,5 +1,15 @@
 # Pattern: runtime-self-provisioning
 
+**Legacy transition scope.** This page records the existing first-use/session
+provisioning realization, not the revised target for new runtime installation.
+The independent installer transition in
+[`source-managed-runtime-installs`](../../efforts/active/source-managed-runtime-installs/README.md)
+removes plugin-triggered runtime installation/stamping after its reviewed
+replacement is qualified. Preserve current integrity, ownership, state and
+working consumers during that migration; do not treat this historical pattern
+as a requirement to add new first-use installation. Independent components and
+an optional Manager remain supported.
+
 **Serves:** *Vision plugin-services* §Features/`self-provisioning-runtime`,
 `self-contained-runtime`; §Behaviors/`standalone-reachability`; and the binding
 invariant **"Enabling a runtime provisions it"** (`docs/patterns/README.md`) — this

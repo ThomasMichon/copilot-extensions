@@ -231,23 +231,19 @@ core of the principles above; a reviewer checks a change against these.
   same PR (see `docs/pipelines.md`); the promotion pipeline applies the actual
   version bump when it consumes that changefile. An un-changefiled plugin
   change is silently ignored by the marketplace.
-- **Enabling a runtime provisions it.** A runtime plugin that a repo/session
-  **enables** is installed, started, and kept **version-matched to its enabled
-  payload automatically at session start** — idempotent, version-keyed, throttled,
-  and **gated to the machines it belongs on** — with **no manual install step**.
-  A user's only action is enabling; provisioning and version reconciliation are the
-  model's job and must never require hand-running an installer, nor depend on one
-  *particular* sibling being the session launcher. (Serves *Vision plugin-services
-  §Features/self-provisioning-runtime*; the convenience realization is `runtimeScope` +
-  `agent-worktrees reconcile-plugins`, see
-  [`../install-contract.md`](../install-contract.md) § "Automatic reconciliation at
-  launch" — but that path must not be a *dependency*: the sibling-independent,
-  confined-env realization (self-provisioning binstub + `stamp` + skill readiness
-  self-check) is [`runtime-self-provisioning.md`](runtime-self-provisioning.md).)
+- **Runtime installation is independent of plugin loading.** Explicit
+  installation/maintenance selects and prepares the runtime; session-start,
+  first-use and skill readiness paths discover compatible installed capability
+  or report its absence, not install or stamp it. Components remain independently
+  installable without a mandatory Manager. (Serves *Vision plugin-services
+  §Features/self-provisioning-runtime*.) The old
+  [`runtime-self-provisioning`](runtime-self-provisioning.md) realization remains
+  documented as legacy transition until the independent installer is qualified;
+  this revised invariant does not claim current code has already migrated.
   An explicitly configured optional
-  [`managed-companion-runtime`](managed-companion-runtime.md) is the narrow
-  exception: enabling the lightweight plugin does not provision that heavyweight
-  capability, and only its already-running trusted supervisor may do so.
+  [`managed-companion-runtime`](managed-companion-runtime.md) retains its
+  delegated installation authority: enabling the lightweight connector does
+  not provision the capability, and only its trusted owning supervisor may do so.
 - **Every runtime command is payload-attributable.** Every runtime-bearing
   marketplace plugin declares all agent-facing commands in
   `payload-invocation.json`, commits the generated POSIX/PowerShell/CMD shims,
