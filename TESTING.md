@@ -3289,7 +3289,7 @@ wheel's exact bytes. The full development extra remains broader than the
 dependency-free client; selected source distributions can still require a
 platform's native build prerequisites.
 
-`fleet-manager/tests/test_client_guardian_resources.py` exercises the real
+`tools/promotion_unit_tests/test_client_guardian_resources.py` exercises the real
 client-to-guardian caller boundary with process value doubles and the actual
 stdin bootstrap. It replaces each admitted executable member after snapshot,
 checks the private runtime/procutil namespaces and preserved uncertain custody,
