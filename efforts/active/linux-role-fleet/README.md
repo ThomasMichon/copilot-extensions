@@ -73,6 +73,10 @@ placement is an explicit requirement; no option is a mandatory core dependency.
   not transfer journal, admission, client-release, credential or workload
   ownership. Release/acquisition, original UNKNOWN custody and actual adopter
   qualification remain open.
+  The [fresh checkpoint-authorization proposal](komodo-repair-checkpoint-authorization.md)
+  continues #9735 within those same owners. Distinct freshly authenticated
+  permits must retain each 30-second ceiling and exact-original custody; no
+  common-admission change or ordinary convergence fallback is proposed.
 - **Logging slice:** `spinning-sprocket` owns Dispatch application diagnostics,
   local discovery and existing-owner idle maintenance under #8377. It does not
   modify #8370's installer-attempt capture or #6812's progress formatter.
