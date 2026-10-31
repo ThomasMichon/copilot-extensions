@@ -14,9 +14,27 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from test_client_diagnostics import installed as installed  # noqa: F401
-from test_client_diagnostics import installed_procutil
-from test_client_diagnostics import installed_runtime
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load_source(name: str, path: Path) -> ModuleType:
+    specification = importlib.util.spec_from_file_location(name, path)
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[name] = module
+    specification.loader.exec_module(module)
+    return module
+
+
+if "fleet_manager" not in sys.modules:
+    _load_source("fleet_manager", ROOT / "fleet-manager/src/fleet_manager/__init__.py")
+_diagnostics = _load_source(
+    "promotion_original_client_diagnostics",
+    ROOT / "fleet-manager/tests/test_client_diagnostics.py",
+)
+installed = _diagnostics.installed
+installed_procutil = _diagnostics.installed_procutil
+installed_runtime = _diagnostics.installed_runtime
 
 
 class _ValueStructure:
@@ -34,6 +52,17 @@ def _inert_native_import() -> ModuleType:
 
     module.__getattr__ = native_access
     return module
+
+
+@pytest.mark.parametrize("platform", ["posix", "nt"])
+@pytest.mark.parametrize("failed", [False, True])
+def test_construction_owner_call_keeps_pair_available_and_preserves_failure_custody(
+    installed, monkeypatch, tmp_path, failed, platform,
+):
+    monkeypatch.setitem(sys.modules, "ctypes", _inert_native_import())
+    _diagnostics.test_construction_owner_call_keeps_pair_available_and_preserves_failure_custody(
+        installed, monkeypatch, tmp_path, failed, platform,
+    )
 
 
 @pytest.mark.parametrize("failed", [False, True])

@@ -3223,6 +3223,10 @@
         "tools/promotion_unit_tests/test_daemon_fixture_publication.py::test_daemon_admitted_read_error_is_not_retried[error0]",
         "tools/promotion_unit_tests/test_daemon_fixture_publication.py::test_daemon_admitted_read_error_is_not_retried[error1]",
         "tools/promotion_unit_tests/test_daemon_fixture_publication.py::test_daemon_lifetime_wait_uses_actual_closed_publication_reader",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_construction_owner_call_keeps_pair_available_and_preserves_failure_custody[False-posix]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_construction_owner_call_keeps_pair_available_and_preserves_failure_custody[False-nt]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_construction_owner_call_keeps_pair_available_and_preserves_failure_custody[True-posix]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_construction_owner_call_keeps_pair_available_and_preserves_failure_custody[True-nt]",
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_guardian_receives_admitted_pair_after_disk_replacement[_construction_procutil/__init__.py-False]",
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_guardian_receives_admitted_pair_after_disk_replacement[_construction_procutil/__init__.py-True]",
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_guardian_receives_admitted_pair_after_disk_replacement[_construction_procutil/_job_scopes.py-False]",
@@ -3657,8 +3661,8 @@
         "fleet-manager/src/fleet_manager/artifact_staging.py": "3ba4bf484fdfbb6d4016a4df3a781b2ae6b04e1bc4b3f48e2e3cbab02aded454",
         "fleet-manager/src/fleet_manager/release_auth.py": "ed2ba53fdc3e988af3bfb56bf7e4eb9578cbc6107118ea327dbda1281ab648bc",
         "fleet-manager/src/fleet_manager/client_deactivation.py": "b4dc9e2cc10ff8f6b11097f45463cf572d3b27a5d6e11a197dc2fa976fef77d6",
-        "fleet-manager/tests/test_client_diagnostics.py": "8da4a6a7119cdd90f840b6cd63ef44232c9f3c46e58ac80e1e16be8b66764e9a",
-        "tools/promotion_unit_tests/test_client_guardian_resources.py": "e27274a79be7d0d4e2849fdbe5786f57ad6cc7f46286d5ccf985ef8bc8748229"
+        "fleet-manager/tests/test_client_diagnostics.py": "84eb14d24bc2c62e166e0ac9478ae6d7d60925d0c8f5363c13cc2b5d8a24a089",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py": "d35fa3da1bd14582d417eb1cb2cde83c42f00064a48f19e1903e9f3ee2aa1dc5"
     },
     "coverage_targets": [
         "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py",

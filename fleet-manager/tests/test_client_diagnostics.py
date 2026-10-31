@@ -140,13 +140,19 @@ def test_process_resource_rejects_path_escape_before_read(installed, monkeypatch
         construction._process_resource(name, evidence={"runtime_resource_sha256s": {name: "0" * 64}})
 
 
+@pytest.mark.parametrize("platform", ["posix", "nt"])
 @pytest.mark.parametrize("failed", [False, True])
 def test_construction_owner_call_keeps_pair_available_and_preserves_failure_custody(
-    installed, monkeypatch, tmp_path, failed,
+    installed, monkeypatch, tmp_path, failed, platform,
 ):
+    import os
     import sys
 
     construction, _package, evidence = installed_procutil(installed, monkeypatch)
+    installed_runtime(installed, monkeypatch)
+    evidence = construction.artifact_staging.diagnose_client()
+    retained = construction._process_resource_data("_installer_process.py", evidence=evidence)[1]
+    monkeypatch.setattr(construction, "os", SimpleNamespace(**{**vars(os), "name": platform}))
     failure = RuntimeError("native ownership is unconfirmed")
     failure.process, failure.job = object(), object()
     custody = failure.process, failure.job
@@ -157,13 +163,27 @@ def test_construction_owner_call_keeps_pair_available_and_preserves_failure_cust
         observed.append(module.__name__)
         assert sys.modules[module.__name__] is module
         assert module._job_child_environment({}, inherit_current=False) == {}
+        sources = options["guardian_sources"]
+        if platform == "nt":
+            assert sources == {
+                name: construction._process_resource_data(name, evidence=evidence)[1]
+                for name in (
+                    "_installer_process.py", "_construction_procutil/__init__.py",
+                    "_construction_procutil/_job_scopes.py", "_versioned_runtime.py",
+                    "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+                    "versioned_runtime_source.py", "versioned_runtime_publication.py",
+                )
+            }
+            assert sources["_installer_process.py"] == retained
+        else:
+            assert sources is None
         if failed:
             raise failure
         return SimpleNamespace(stdout="complete", stderr="")
 
     def owner(name, *, evidence):
         assert name == "_installer_process.py"
-        return SimpleNamespace(run_owned=run_owned)
+        return SimpleNamespace(run_owned=run_owned, _retained_source_bytes=retained)
 
     monkeypatch.setattr(construction, "_process_resource", owner)
     slot = tmp_path / "runtime" / "versions" / "fixture"
