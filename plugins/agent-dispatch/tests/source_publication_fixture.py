@@ -449,7 +449,7 @@ def run(
     )
     result = run_background_capture(
         [executable, *prefix, str(entry), *args], env=env, cwd=cwd, timeout=90,
-        max_output=65536,
+        max_output=512 * 1024,
     )
     assert result is not None, "publication fixture exceeded 90s or could not start"
     print(

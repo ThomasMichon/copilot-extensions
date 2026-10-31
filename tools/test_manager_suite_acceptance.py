@@ -11,6 +11,7 @@ import sys
 import time
 
 import pytest
+import yaml
 
 _SPEC = importlib.util.spec_from_file_location(
     "manager_suite_acceptance", Path(__file__).with_name("run-manager-suite-acceptance.py"),
@@ -131,6 +132,18 @@ def test_process_observer_failure_cannot_enter_qualification(
         with runner._observe_processes(tmp_path, "normal", lambda *args: "controlled-observer"):
             pytest.fail("Failed process observation cannot qualify a native run")
     assert (tmp_path / "normal-process-trace.stop").exists()
+
+
+def test_process_observer_report_is_retained_by_the_actual_native_job() -> None:
+    workflow = yaml.safe_load((runner.REPO / ".github" / "workflows" / "installation-context-full.yml").read_text(
+        encoding="utf-8",
+    ))
+    upload = next(step for step in workflow["jobs"]["manager-suite-windows"]["steps"]
+                  if step.get("name") == "Retain synthetic qualification diagnostics")
+    paths = upload["with"]["path"].splitlines()
+    for mode in ("normal", "repair"):
+        report = Path(".v") / f"{mode}-process-trace.json"
+        assert any(report.match(pattern.strip()) for pattern in paths), str(report)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows legacy pipe encoding")

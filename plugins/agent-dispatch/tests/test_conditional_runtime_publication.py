@@ -140,6 +140,38 @@ def test_fixture_posix_home_binding_rejects_modified_canonical_input(tmp_path: P
     assert helper.read_bytes() == foreign
 
 
+@pytest.mark.parametrize("units", (2000, 10000))
+def test_fixture_captures_genuine_source_progress_and_still_bounds_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, units: int,
+) -> None:
+    from agent_dispatch import procutil
+
+    captured = procutil.run_background_capture
+    program = (
+        "import sys;sys.path.insert(0,sys.argv[1]);"
+        "import installer_source_build as builds;"
+        "progress=builds._SourceProgress('source-selection',180,0);"
+        f"[progress.renew() for _ in range({units})];"
+        "print('settled')"
+    )
+
+    def execute(_argv, **options):
+        return captured(
+            [sys.executable, "-I", "-B", "-c", program, str(fixture.SCRIPTS)], **options,
+        )
+
+    monkeypatch.setattr(procutil, "run_background_capture", execute)
+    if units == 10000:
+        with pytest.raises(procutil.OutputLimitExceeded):
+            fixture.run("ps1", tmp_path / "controlled.ps1", [], fixture.environment(tmp_path))
+    else:
+        result = fixture.run("ps1", tmp_path / "controlled.ps1", [], fixture.environment(tmp_path))
+        assert result.returncode == 0 and result.stdout == "settled\n"
+        assert len(result.stderr) > 65536
+        assert result.stderr.count("Source wheel progress:") == units
+        assert f"completed-units={units}\n" in result.stderr
+
+
 def _admission_source(tmp_path: Path, missing: str | None = None) -> Path:
     scripts = tmp_path / "payload" / "scripts"
     scripts.mkdir(parents=True)

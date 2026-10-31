@@ -258,6 +258,11 @@ and `test_install_sh_activation_guard.py` through the bounded plugin runner.
 This includes ownership-aware rollback cases skipped on Windows. It does not
 expand the required unit packet or replace native Windows/whole-suite evidence;
 read its actual exits, containment cleanup and skips separately.
+The installer fixture keeps a 524,288-character combined-output bound so genuine
+per-unit source progress is retained. A real-child regression verifies progress
+above the former 64 KiB bound and confirms excessive output still fails; the
+standalone publication-helper bound and production inactivity renewal stay
+unchanged.
 
 Fleet-manager's `test_komodo_*` packet exercises strict declaration/current
 grant checks, real caller-owned synthetic Docker protocol processes, physical

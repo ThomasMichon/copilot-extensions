@@ -567,6 +567,7 @@ jobs:
           name: manager-suite-${{ matrix.mode }}
           path: |
             .v/*-runner.json
+            .v/*-process-trace.json
             .v/*/result.json
             .v/*/preparation-error.json
             .v/*/settlement.json
