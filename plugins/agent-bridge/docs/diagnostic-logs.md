@@ -104,6 +104,11 @@ has no automatic age retention. It creates no missing parent and a write error
 does not change the watchdog's decision. Discovery through `logs` includes it;
 its existence does not establish a stall's cause or successful recovery.
 
+The generated Windows `start-agent-bridge.ps1 -ResolveOnly` prints its actual
+selected interpreter and exits before PID handling, CWD/environment changes,
+log setup or process startup. Default scheduled startup is unchanged. This
+read-only selection observation does not prove service health.
+
 ## Deliberate retained-spool adoption
 
 The direct Python `telemetry.make_retained_spool_sink(directory)` is an explicit

@@ -316,6 +316,42 @@ def _registration_routes(case: Path, before: dict[str, Any], after: dict[str, An
         xml = ElementTree.fromstring(task["xml"])
         arguments = " ".join(node.text or "" for node in xml.iter()
                              if node.tag.rsplit("}", 1)[-1] in {"Arguments", "WorkingDirectory"})
+        if task["name"].startswith("CE-LaunchBroker-"):
+            fields = {node.tag.rsplit("}", 1)[-1]: node.text or "" for node in xml.iter()}
+            matches = [name for name, root in after["roots"].items()
+                       if Path(fields["WorkingDirectory"]).resolve() == Path(root).resolve()]
+            if len(matches) != 1:
+                raise RuntimeError(f"{task['name']}: broker task has no unique installed root")
+            name = matches[0]
+            root = Path(after["roots"][name])
+            native = _run([
+                _python(root), "-I", "-X", "utf8", "-B", "-c",
+                "import json,sys;from pathlib import Path;"
+                "from agent_procutil.windows_task_broker import _metadata,load;"
+                "p=Path(sys.argv[1]);c=load(p,_metadata(p)['installation']);"
+                "print(json.dumps({'task':c.task(),'entrypoint':c.entrypoint,'root':c.root}))",
+                root / "windows-launch-broker.json",
+            ], case, timeout=30)
+            metadata = json.loads(native.stdout)
+            expected = metadata["task"]
+            entrypoint = Path(metadata["entrypoint"])
+            prefix = Path(after["origins"][name]["prefix"]).resolve()
+            if (not entrypoint.resolve().is_relative_to(prefix) or Path(metadata["root"]).resolve() != root.resolve()
+                    or expected["task_name"] != task["name"] or expected["arguments"] != fields["Arguments"]
+                    or Path(expected["pythonw"]) != Path(fields["Command"])
+                    or Path(expected["cwd"]) != Path(fields["WorkingDirectory"])
+                    or expected["principal"] != fields.get("UserId")):
+                raise RuntimeError(f"{task['name']}: broker action differs from current owned registration")
+            checked = _run([
+                str(Path(expected["pythonw"]).with_name("python.exe")), "-I", "-X", "utf8", "-B",
+                str(entrypoint), "--check-runtime",
+            ], case, timeout=30)
+            if checked.stdout.strip() != "agent-procutil.windows-launch-broker.runtime-ready.v1":
+                raise RuntimeError(f"{task['name']}: actual broker runtime did not qualify")
+            rows.append({"name": task["name"], "xml": task["xml"], "routes_current": True,
+                         "resolver_proofs": [{"component": name, "entrypoint": str(entrypoint),
+                                              "prefix": str(prefix), "registration": expected}]})
+            continue
         match = re.search(r"""(?i)-File\s+["']?([^"']+?\.ps1)""", arguments)
         if match is None:
             raise RuntimeError(f"{task['name']}: scheduled producer has no recognized owned launcher")
@@ -347,7 +383,11 @@ def _registration_routes(case: Path, before: dict[str, Any], after: dict[str, An
                              {"component": "agent-index/engine", "python": str(resolved), "prefix": str(prefix)},
                          ]})
             continue
-        if not matches or "resolve-runtime.ps1" not in body:
+        bridge_probe = (
+            matches == ["agent-bridge"] and launcher.name == "start-agent-bridge.ps1"
+            and "param([switch]$ResolveOnly)" in body
+        )
+        if not matches or ("resolve-runtime.ps1" not in body and not bridge_probe):
             raise RuntimeError(f"{task['name']}: no recognized canonical task runtime resolver")
         # A scheduler definition pointing at a stable launcher is not proof.
         # Execute its actual canonical resolver read-only and compare V2 prefix.
@@ -361,7 +401,10 @@ def _registration_routes(case: Path, before: dict[str, Any], after: dict[str, An
                 f"$env:AGENT_RT_ROOT='{quoted_root}'; . '{quoted_resolver}' -TraceMode read-only;"
                 "if(-not $AgentRtPy){throw 'Task runtime unresolved'}; Write-Output $AgentRtPy"
             )
-            native = _run([shutil.which("pwsh"), "-NoProfile", "-Command", code], case, timeout=30)
+            command = ([shutil.which("pwsh"), "-NoProfile", "-NonInteractive",
+                        "-File", str(launcher), "-ResolveOnly"] if bridge_probe else
+                       [shutil.which("pwsh"), "-NoProfile", "-Command", code])
+            native = _run(command, case, timeout=30)
             resolved = Path(native.stdout.strip()).resolve()
             prefix = Path(after["origins"][name]["prefix"]).resolve()
             if not resolved.is_relative_to(prefix):
