@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid inheriting Git provenance from staged payloads beneath repository metadata while preserving working-tree lookup failures.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
