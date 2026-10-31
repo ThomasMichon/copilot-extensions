@@ -96,6 +96,19 @@ def mark_failed_pair_composition(resolution: StatePair) -> None:
         mark_pair_pending(root)
 
 
+def prepare_companion_instructions(knowledge: Path) -> None:
+    from .static_instructions import prepare_output_namespace
+
+    try:
+        prepare_output_namespace(knowledge)
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        from .knowledge_plugins import KnowledgePluginError
+
+        raise KnowledgePluginError(
+            f"cannot prepare paired knowledge instructions; repair and retry preparation: {exc}"
+        ) from exc
+
+
 def complete_pair_composition(repo_root: str | Path, summary: dict) -> None:
     if not summary.get("paired") or summary.get("action") not in ("composed", "disabled"):
         return

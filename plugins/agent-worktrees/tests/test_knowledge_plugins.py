@@ -12,6 +12,14 @@ import agent_worktrees.__main__ as main
 from agent_worktrees import knowledge_plugins as kp
 
 
+@pytest.fixture(autouse=True)
+def isolate_instruction_namespace_preparation(monkeypatch):
+    # Real Git companion preparation is covered by test_local_cache_refresh.
+    from agent_worktrees import local_cache_refresh
+
+    monkeypatch.setattr(local_cache_refresh, "prepare_companion_instructions", lambda knowledge: None)
+
+
 def _concurrent_compose_worker(
     harness_path: str,
     knowledge_path: str,
