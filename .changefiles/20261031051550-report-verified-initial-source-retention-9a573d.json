@@ -72,6 +72,14 @@
     {
       "plugin": "libs/agent-procutil",
       "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
     }
   ]
 }
