@@ -1,0 +1,9 @@
+{
+  "comment": "Execute selected reviews through existing pinned owner transport and ReplayStore with fresh source/discussion checks and conservative native receipts",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

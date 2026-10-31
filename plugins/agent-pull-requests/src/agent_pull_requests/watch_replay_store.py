@@ -297,9 +297,12 @@ class ReplayStore:
 
     def record_review_receipt(
         self, operation_id, scope, action_id, attempt_id, value, *, expires_at: int, checkpoint=None,
+        confirm: bool = True,
     ) -> dict:
         """Existing sender-only receipt transition; no serving authorization or backend call."""
         value = copy.deepcopy(value)
+        if type(confirm) is not bool:
+            raise ValueError("receipt confirmation disposition must be boolean")
         def record(document):
             operation = self._review_operation(document, operation_id, scope)
             action = next((row for row in operation["actions"] if row["id"] == action_id), None)
@@ -328,7 +331,7 @@ class ReplayStore:
             # No-send evidence is retained conservatively; this data primitive
             # cannot establish retirement of a still-admitted effect owner.
             chosen = next(row for row in operation["intent"]["actions"] if row["id"] == action_id)
-            action["state"] = "confirmed" if review_intent.confirms(
+            action["state"] = "confirmed" if confirm and review_intent.confirms(
                 validated, chosen, operation["intent"]["scope"],
             ) else "unknown"
             return action
