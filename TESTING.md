@@ -5128,7 +5128,7 @@ Worktrees' V1 monitor is explicitly ensured through its installed on-demand API;
 installation alone intentionally need not start an absent monitor. A
 fixture-owned Codespaces tenant hold, periodic Worktrees list demand and an
 authenticated Manager subscriber keep these on-demand residents needed through
-the final observation without changing their idle policy. The Manager subscriber
+the final routing and exclusive-work probes without changing their idle policy. The Manager subscriber
 follows the current route and releases the prior and final generations.
 This synthetic demand does not qualify a real remote SSH channel.
 Settlement releases the fixture tenant,
@@ -5142,9 +5142,14 @@ include bounded tails of the fixture's known Bridge and Codespaces daemon logs;
 durable application data and unrelated files are not collected.
 Bridge's first observed incumbent exit also snapshots those bounded logs before
 successor startup can truncate the shared output files.
+Strict V1 snapshots retain hashes, size, modification time and native file
+identity for every file. Failure diagnostics name added, removed and changed
+paths after update and after settlement, with exact counts and bounded metadata
+samples rather than file contents. No cache-file exemption or resealing converts
+a changed immutable slot into retained evidence.
 
-Cold preparation and exercise each have a 900-second owned-process deadline;
-assertions retain a separate 300-second runner boundary and the usual pytest
+Cold preparation has an 1800-second owned-process deadline; exercise has 900 seconds.
+Assertions retain a separate 300-second runner boundary and the usual pytest
 item limit. Settlement runs independently after success, stage failure or
 timeout. The disposable VM owns the outer scheduled-registration and explicit
 product-daemon lifetime boundary; this flow does not run inside a restrictive

@@ -200,6 +200,21 @@ def _snapshot(path: Path) -> dict[str, Any]:
             for item in sorted(path.rglob("*")) if item.is_file() and not item.is_symlink()}
 
 
+def _snapshot_difference(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    added = sorted(after.keys() - before.keys())
+    removed = sorted(before.keys() - after.keys())
+    changed = sorted(name for name in before.keys() & after.keys() if before[name] != after[name])
+    limit = 128
+    return {
+        "unchanged": before == after,
+        "counts": {"added": len(added), "removed": len(removed), "changed": len(changed)},
+        "added": {name: after[name] for name in added[:limit]},
+        "removed": {name: before[name] for name in removed[:limit]},
+        "changed": {name: {"before": before[name], "after": after[name]} for name in changed[:limit]},
+        "truncated": any(len(names) > limit for names in (added, removed, changed)),
+    }
+
+
 def _engine_probe() -> dict[str, Any]:
     import agent_worktrees
     from agent_worktrees import config, reconcile, update_runtime, update_runtime_plan
