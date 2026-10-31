@@ -154,6 +154,114 @@ above is requested; these implementation choices remain reviewable.
 
 ## Plan
 
+### Original-attempt SDK repair amendment
+
+Tracked by #9735 under the existing #8860 appointment and #6030 campaign.
+This closes `bounded-desired-state-control` and the original-attempt recovery
+requirements above; the version-skew boundary follows
+[service-contract evolution](../../../docs/patterns/service-contract-evolution.md).
+The operator selected design, review and implementation of focused SDK fixes
+and same-original recovery. The following mechanisms are **agent-recommended**
+and remain subject to this plan's review before runtime edits.
+
+#### Identity and native-observation corrections
+
+- Compare documented PEM SubjectPublicKeyInfo and base64-DER public-key
+  representations by their validated key payload, not raw presentation text.
+  Malformed, missing, private-key-shaped or different key material must refuse.
+  Preserve existing retained file/key fingerprints and secret custody; health
+  normalization must not silently migrate stored identity evidence.
+- Accept an empty per-server key override only for a currently authenticated
+  connection whose live key matches the retained selected key and whose native
+  fixed configuration proves the selected global trust. A populated override
+  must match too. Preserve current Core/Periphery versions, selected server,
+  connection state, Docker connection and post-health native/process checks.
+  Never change enrollment, keys, trust settings or workloads to pass health.
+- Treat Docker mount array ordering as incidental for paired native
+  observations. Preserve every mount field, multiplicity and destination;
+  duplicate/ambiguous mounts refuse. Container ID, image, configuration,
+  storage/read-write bindings, network and process identity remain exact.
+- Any new persisted native-fingerprint form must have an explicit format
+  distinction. Retain legacy evidence and support exact legacy comparisons;
+  never treat a historical opaque digest as a canonical mount-set proof.
+  If semantic equivalence cannot be established from retained evidence, refuse
+  explicitly rather than refreshing a baseline from the current resource.
+  Paired-read normalization alone must not silently reinterpret old receipts.
+
+#### Original candidate and current repair executor
+
+- Add an opt-in installed SDK repair contract, separately discoverable from
+  the existing `fleet-manager.komodo-substrate-owner.v1` baseline. Keep ordinary
+  convergence, its strict current-deployment binding and existing Gateway
+  routes unchanged. Older SDKs retain baseline behavior; unsupported repair
+  refuses before effects, with no manual-installer or weaker-grant fallback.
+- A code-registered current repair resolver authenticates two distinct subjects:
+  the retained original candidate selection and the current released executor.
+  The exact original request/deployment/generation remains immutable. The
+  executor's newer release/runtime identity is separately retained, never
+  substituted into that request or reported as the installed candidate.
+  Configuration cannot select a callback, arbitrary module or historical code.
+- Require a current exact-original-request permit and an explicit current
+  repair-only transition appointment from the existing authority. Bind that
+  appointment to the original request digest, original candidate, selected
+  executor and same physical resource. Renew it through its owner at each
+  admission/publication checkpoint; a self-supplied DTO or compatibility list
+  is not authorization. The transition permits verification and journal
+  settlement only, not convergence or another native apply.
+- Resolve both subjects from existing configuration/release/runtime/host/
+  credential/storage owners. Revalidate finite currentness, actor/account,
+  fleet, installation, target and generation. The selected declaration,
+  profile, native tooling, material paths/device/inodes, credentials,
+  compatibility, adoption and physical owner must remain the original
+  candidate's. Only an explicitly authenticated executor-code repair may
+  differ. Do not execute an old runtime or label new code with its digest.
+- Enter the original physical lock and same NodeJournal. Require the exact
+  retained original UNKNOWN receipt, original profile and settled whole-process
+  attempt evidence. Missing/corrupt evidence, another request, unresolved
+  process custody, foreign replacement or changed material refuses. Never
+  create another journal, claim, operation ID or generation, clear uncertainty,
+  or invoke apply/stop/remove/enrollment from this repair path.
+- Inspect using the retained original fixed profile, images, public keys,
+  network and compatibility decisions. Repeat admission, native/process and
+  material checks across current authenticated health and final publication.
+  Publish the original succeeded receipt only when complete current readiness
+  is established; supported explicit failed settlement retains the actual
+  failed candidate and data-compatibility decision without rollback.
+- Retain original history and executor/transition provenance in additive
+  outcome evidence. Interrupted publication must resume the same original
+  settlement idempotently or preserve UNKNOWN; no success-shaped fallback.
+  Status must distinguish the original installed candidate, current desired
+  selection and verifier release. Repair does not publish a new deployment
+  as installed or automatically authorize a later update.
+
+#### Repair plan and validation obligations
+
+- [ ] Review this amendment before identity, native-observation or repair edits.
+- [ ] Implement the focused corrections and installed, code-registered
+  original-attempt repair seam; preserve normal convergence and prior readers.
+- [ ] Test PEM/DER equivalence, populated/global trust, malformed/private/
+  different keys, unproved configuration and unsuccessful connection controls.
+- [ ] Test mount-order equality and actual field/multiplicity/config/process
+  changes; test versioned new fingerprints, exact legacy readback and explicit
+  refusal when legacy semantic equivalence is unprovable.
+- [ ] Exercise the actual same-journal owner with an older retained UNKNOWN
+  candidate and newer authenticated executor: exact original settlement,
+  no native write, current request/transition admission and distinct outcome
+  identities. Include wrong request/resource/generation/release/material,
+  expired/revoked appointments, unsettled process and changed native controls.
+- [ ] Interrupt before/after health and each publication boundary, then
+  restart through the installed repair seam. Preserve original custody and
+  show no apply replay, double terminal receipt or lost original evidence.
+- [ ] Exercise old caller/new SDK, new repair caller/unsupported SDK and
+  supported provider rollback; discover support from the executing immutable
+  SDK rather than a newer payload or package version alone.
+- [ ] Publish current operating/support docs and qualify an authorized actual
+  original attempt after normal release/acquisition. Synthetic and installed
+  fixture tests do not close official-image/adopter acceptance or authorize
+  production changes. Continue the existing parent Plan and Validation Plan.
+
+### Substrate delivery
+
 - [x] Review this source appointment and lifecycle contract (#8872).
 - [x] Implement strict declaration/resolution, fixed native substrate owner,
   operation custody and installed-package entry seam, with focused tests.
