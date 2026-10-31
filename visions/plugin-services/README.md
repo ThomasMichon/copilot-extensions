@@ -657,9 +657,10 @@ cells' *provenance-safe-transition*.
 Acquiring, assembling, activating, and recovering a runtime is installer
 work. For a standalone addon that is the addon's own installer. For a host
 that adopts the integrated profile it is that product's installer. The
-first-use, session-stamp, and readiness entry points of
-*self-provisioning-runtime* are triggers for that one installer, not a second
-installer. A Copilot
+independently invoked setup/update entry points reach that one installer.
+First-use connector calls, session stamps and readiness checks only discover
+or describe installed capability; they do not trigger runtime construction.
+A Copilot
 plugin supplies knowledge (skills and guidance), connection surfaces (hooks,
 extension entry points, typed invocation), and bounded, attributable
 declarations of what it needs from a runtime. Plugin content never assembles

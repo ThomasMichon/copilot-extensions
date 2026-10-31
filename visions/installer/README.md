@@ -337,12 +337,13 @@ lightweight plugin carries or assumes any of these dependencies.
 
 ### plugin-updating-and-alignment
 Keeps the installed plugin set **current and mutually consistent** — updates
-plugins and their user-global runtimes, and checks that versions, shared
+connector content and independently installed runtimes, and checks that capabilities, shared
 contracts, and configuration across plugins **align**, offering to reconcile
-drift or a half-upgraded set. It **complements** each plugin's own
-self-provisioning/self-reconciliation rather than replacing it: a plugin still
-keeps *itself* healthy alone; the configurator is the place a human can see and
-true-up the *whole set* at once. On a host that adopts the integrated
+drift or a half-upgraded set. Runtime installation is independently invoked;
+plugin discovery does not construct or reconcile it. Each independently
+installed component keeps its declared daemon healthy without requiring Manager.
+The configurator presents the whole set and requests work from its owner.
+On a host that adopts the integrated
 coordination product, the app is a client of that product's release authority
 and installer. It shows what is selected, ready, and serving, and it can
 request an update. It does not keep its own record of which release the host
@@ -695,9 +696,10 @@ the plugins' prerequisites and interop, never to be a thing they are wired to.
 ### control-plane-is-optional-plugins-are-self-sufficient
 The worktree/agent **control-plane** (picker and provider-backed session launch)
 is a convenience layer, not a foundation. With it absent, every plugin still
-**provisions and manages itself — its runtime *and* its daemons — and exposes the
-in-session tools an agent needs**, driven by the plugins' own self-provisioning
-model (see [plugin-services](../plugin-services/README.md)). The control-plane
+resolves independently installed tools, while each runtime's own installation
+and supervision owner remains sufficient without Manager. Missing backends
+remain explicit rather than being installed by plugin loading
+(see [plugin-services](../plugin-services/README.md)). The control-plane
 makes the fleet *legible and launchable by a human*; it never becomes a
 precondition for a plugin — or an agent using that plugin's tools — to function.
 This is the same one-way, dependency-free rule as *knows-the-plugins*, applied to
@@ -710,8 +712,10 @@ session and from the plugin pipe**. It never relies on a session, an agent, or a
 plugin to install or refresh the launcher; a plugin, conversely, never relies on
 the app to keep *itself* current.
 
-Out-of-band self-maintenance still honors the shared maintenance hold. It is not
-an exemption that recreates Manager during an operator's intentional removal.
+Out-of-band automatic self-maintenance carries the explicit automatic-update
+classification and honors its hold. Manual setup/update is not vetoed solely
+by that hold, but still respects actual installation authority, live native
+ownership and unsettled effects.
 
 ## Non-Goals / Boundaries
 
@@ -726,16 +730,17 @@ an exemption that recreates Manager during an operator's intentional removal.
   the same as being one.
 - **Its control-plane role is optional and additive, never a foundation.** The
   picker / provider-backed session-launch surface is a convenience for a human
-  running the fleet. The plugins provide the in-session tools agents use and
-  **self-provision and self-manage — daemons included — with this app absent**;
+  running the fleet. Plugins provide bounded in-session connection/knowledge
+  surfaces, and independently installed runtimes supervise their own daemons
+  with this app absent;
   the app must never become a prerequisite for a plugin (or an agent using its
   tools) to work. (The launcher-half of the worktree runtime relocating *into*
   this app must not smuggle in such a dependency.)
-- **It does not replace per-plugin installers or own their runtimes.** It
-  *orchestrates and guarantees* the harness's real install flows and each
-  plugin's prerequisites, and can **update the set and true-up cross-plugin
-  alignment**; it does not reimplement plugin runtime logic, and each plugin still
-  keeps *itself* provisioned and reconciled alone. The relationship carries **no
+- **It does not duplicate per-component installation or supervision owners.** It
+  coordinates the real application install flows and their prerequisites, and
+  can update the selected set and true-up compatibility. It does not reimplement
+  runtime logic or turn plugin loading into installation; independent component
+  setup remains available. The relationship carries **no
   dependency in either direction**: a plugin never requires the installer to be
   present, and the installer never becomes a link in a plugin's dependency chain —
   it is a knowing outsider, not a layer in the graph.
