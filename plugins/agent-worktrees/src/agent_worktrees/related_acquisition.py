@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -64,6 +65,7 @@ def parse_file(path: Path, observations: list[SourceObservation] | None = None, 
                     ai_attribution=r._parse_ai_attribution(entry.get("ai_attribution")),
                     plugins=r._parse_plugins(entry.get("plugins")),
                     pr=r._parse_related_pr(entry.get("pr")),
+                    pr_declared="pr" in entry,
                     doc_root=str(path.parent),
                 )
             except AttributeError as exc:
@@ -118,6 +120,12 @@ def overlay_path(anchor: Path, observations: list[SourceObservation] | None = No
     return None
 
 
+def _overlay_entry(previous, entry):
+    if previous is not None and not entry.pr_declared and not entry.pr:
+        return replace(entry, pr=dict(previous.pr), pr_declared=previous.pr_declared)
+    return entry
+
+
 def read(anchor, observations: list[SourceObservation] | None = None):
     from . import related as r
 
@@ -147,7 +155,8 @@ def read(anchor, observations: list[SourceObservation] | None = None):
         loaded = parse_file(path, observations, selected=True)
         if loaded.primary:
             merged.primary = loaded.primary
-        merged.related.update(loaded.related)
+        for name, entry in loaded.related.items():
+            merged.related[name] = _overlay_entry(merged.related.get(name), entry)
     return merged
 
 
@@ -251,6 +260,7 @@ def grafted(anchors, observations=None):
         if rc.primary and not plugin_anchor:
             merged.primary = rc.primary
         for name, entry in rc.related.items():
+            entry = _overlay_entry(merged.related.get(name), entry)
             origin = (anchor if isinstance(anchor, r._PluginContributionAnchor) else
                       r._PluginContributionAnchor(str(anchor), r._plugin_manifest_name(Path(str(anchor))) if observations is None else plugin_manifest_name(Path(str(anchor)), observations))
                       if plugin_anchor else str(anchor))

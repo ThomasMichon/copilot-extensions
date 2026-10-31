@@ -94,6 +94,12 @@ related:
     (often *not* the venue `repo` name).
 - **`delegate.via`** -- how to hand work to the agent that owns the repo:
   `agent-bridge`, `agent-codespaces`, `agent-containers`, or `none`.
+- **`pr`** -- the related repository's portable PR binding and observation
+  policy; see `docs/pr-observation.md` in this plugin. A higher entry that
+  omits `pr` inherits contributed PR defaults even when it replaces relationship
+  metadata. An explicit `pr` block replaces the lower related PR block, including
+  an empty block or disablement; explicit retargets never inherit old credentials
+  or hosting identity.
 - **`plugins`** -- plugins staged into the related repo's dispatched agent.
   For CodeSpace/container venues, the dispatch path copies each plugin from the
   host's installed payload and passes the extracted destination as

@@ -3524,7 +3524,7 @@
         "libs/versioned-runtime/versioned_runtime_construction.py": "df703e23675c232079f28c74eb85977b3460aef252e2bb2079bbf9081ad1480d",
         "tools/promotion_unit_tests/test_related_acquisition.py": "2b3eaa28edf9d4a7bbb935de5961d924b98391b93d61134331fd97d14b39338e",
         "plugins/agent-worktrees/src/agent_worktrees/acquisition_report.py": "a83793221939d9744aa1be72c839bf631d279cee1fc2bb67601ca8fe68c8deed",
-        "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py": "085a6a6745c793e781dbf8db9c56c14c140e0f379550af8fd3d34b32770139c9",
+        "plugins/agent-worktrees/src/agent_worktrees/related_acquisition.py": "1e0cd3516504aee4bbbb768e69f4ce74cf7b4435d5758cec7c5fdff2fbb4d2b0",
         "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "52694e0aa66929aa9be40c07407fe177344162d3772d2ec5bf0a21c48be68ba8",
         "plugins/agent-worktrees/src/agent_worktrees/machine_config.py": "5b5d263e95ccb49725e25d1eaa3b529df5f37050fffd14f16160fc3d5798ea33",
         "plugins/agent-worktrees/src/agent_worktrees/source_probes.py": "6d3a171db77782d50137e61ede48df22bab040eb0f5c3c18391675a11306a9a8",
