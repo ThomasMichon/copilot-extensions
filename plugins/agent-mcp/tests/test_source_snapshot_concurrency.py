@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import time
 from contextlib import ExitStack
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -109,6 +110,7 @@ def test_concurrent_native_stampers_publish_one_immutable_snapshot(
     # absent-target checks: removing shared publication reproduces nested moves.
     # The new CLI reports at lease acquisition; no lease is replaced or mocked.
     with ExitStack() as processes:
+        capture = processes.enter_context(ThreadPoolExecutor(max_workers=2))
         with IDENTITY._runtime().construction_lease(snapshots, selected):
             children = [
                 processes.enter_context(subprocess.Popen(
@@ -118,6 +120,7 @@ def test_concurrent_native_stampers_publish_one_immutable_snapshot(
                 ))
                 for _ in range(2)
             ]
+            output = [capture.submit(child.communicate, timeout=40) for child in children]
             deadline = time.monotonic() + 20
             while len(list(gate.glob("attempt-*"))) < 2 and time.monotonic() < deadline:
                 if any(child.poll() is not None for child in children):
@@ -125,9 +128,9 @@ def test_concurrent_native_stampers_publish_one_immutable_snapshot(
                 time.sleep(0.05)
             ready = len(list(gate.glob("attempt-*"))) == 2
             (gate / "release").write_text("release", encoding="utf-8")
-        for child in children:
-            output, error = child.communicate(timeout=40)
-            results.append((child.returncode, output, error))
+        for child, pending in zip(children, output):
+            stdout, stderr = pending.result()
+            results.append((child.returncode, stdout, stderr))
     assert ready, results
     assert any(code == 0 for code, _, _ in results), results
     for code, _, error in results:

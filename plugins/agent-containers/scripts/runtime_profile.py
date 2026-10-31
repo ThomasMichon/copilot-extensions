@@ -17,7 +17,7 @@ import uuid
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 _runtime_spec = importlib.util.spec_from_file_location(
     "containers_profile_runtime", Path(__file__).with_name(
@@ -311,8 +311,10 @@ def _package_version(payload: Path) -> str:
     return match.group(1)
 
 
-def _check_source(payload: Path, version: str, identity) -> None:
-    if source.read_source_identity(payload, version, plugin="agent-containers") != identity:
+def _check_source(payload: Path, version: str, identity, *, on_progress=None) -> None:
+    if source.read_source_identity(
+        payload, version, plugin="agent-containers", on_progress=on_progress,
+    ) != identity:
         raise RuntimeError("Containers source identity changed after runtime selection")
 
 
@@ -374,25 +376,36 @@ def plan_source(
 
 def stamp_source(
     root: Path, payload: Path, expected_version: str, *, expected_identity: str | None = None,
+    on_progress: Callable[[], None] | None = None,
 ) -> Path:
     """Preserve the exact prepared closure for deferred first-use provisioning."""
     version = _package_version(payload)
-    identity = source.read_source_identity(payload, version, plugin="agent-containers")
+    identity = source.read_source_identity(
+        payload, version, plugin="agent-containers", on_progress=on_progress,
+    )
     if identity is None or identity.runtime_version != expected_version:
         raise RuntimeError("Containers stamped source changed after runtime selection")
     _check_selected_source(identity, expected_identity)
     snapshots = root / "snapshots"
     snapshot = snapshots / expected_version
     if snapshot.exists():
-        _check_source(snapshot, version, identity)
-        _check_source(payload, version, identity)
+        _check_source(snapshot, version, identity, on_progress=on_progress)
+        _check_source(payload, version, identity, on_progress=on_progress)
         return snapshot
     snapshots.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".source-", dir=snapshots) as temporary:
         candidate = Path(temporary) / "payload"
-        shutil.copytree(payload, candidate)
-        _check_source(candidate, version, identity)
-        _check_source(payload, version, identity)
+        def copy(origin, destination):
+            result = shutil.copy2(origin, destination)
+            if on_progress is not None:
+                on_progress()
+            return result
+
+        shutil.copytree(
+            payload, candidate, **({"copy_function": copy} if on_progress is not None else {}),
+        )
+        _check_source(candidate, version, identity, on_progress=on_progress)
+        _check_source(payload, version, identity, on_progress=on_progress)
         candidate.rename(snapshot)
     return snapshot
 
@@ -567,6 +580,9 @@ def main() -> int:
             print(stamp_source(
                 args.root, args.payload, args.expected_source_version,
                 expected_identity=args.expected_source_identity,
+                on_progress=lambda: print(
+                    "source-runtime: completed source work", file=sys.stderr, flush=True,
+                ),
             ))
             return 0
         if not args.python:

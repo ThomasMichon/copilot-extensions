@@ -356,7 +356,7 @@ function Get-SourceRuntimeVersion {
         '--format', $Format)
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
     $nativeError = ''
-    $result = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $result = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     $code = $LASTEXITCODE
     if ($code -ne 0) { throw "Source runtime validation failed (exit ${code}): $result$nativeError" }
     return $result.Trim()
@@ -640,7 +640,7 @@ function Invoke-Stamp {
             '--root', $InstallDir, '--payload', $PluginDir, '--stamp-source',
             '--expected-source-version', $SrcVersion,
             '--expected-source-identity', $SourceRuntimeIdentity
-        ) -ErrorOutput ([ref]$nativeError)
+        ) -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
         if ($LASTEXITCODE -ne 0) {
             throw "Source snapshot validation failed; redirects were not published: $snapshot$nativeError"
         }
