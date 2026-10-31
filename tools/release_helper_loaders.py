@@ -5,6 +5,7 @@ import ast
 import hashlib
 import sys
 from collections import Counter
+from copy import deepcopy
 from pathlib import PurePosixPath
 
 from promotion_unit_contract import UnitEvidenceError, relative_file
@@ -28,7 +29,7 @@ _ADAPTER = ast.parse(
 ).body[0]
 _TOOL_ROOT = ast.parse('tool_root = (trusted_source or scratch) / "tools"').body[0]
 _ACTOR_SOURCE = "libs/installer-engine/installer_engine_process.py"
-_RETAINED_ACTOR_SHA256 = "7d746c75e7cd475ed4110f47bfa5c7bb39b52503a6b36bfceb3004225faeebda"
+_RETAINED_ACTOR_SHA256 = "689db795d0e738890462073d22aa6dac2a31f93be1c74b1d2fe483d1513ec4e7"
 _RESOURCE_ADAPTER = ast.parse(
     "def _load_resource(name, path):\n"
     "    spec = importlib.util.spec_from_file_location(name, path)\n"
@@ -77,11 +78,22 @@ _INSTALLED_ACTORS = {
 }
 
 
-def _actor_digest(function: ast.FunctionDef) -> str:
-    # Python 3.13 changed dump's empty-list default; fingerprints retain them.
+def _dump_ast(tree: ast.AST) -> str:
+    normalized = deepcopy(tree)
+    for node in ast.walk(normalized):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and getattr(node, "type_params", None) == []
+        ):
+            # Python 3.12 added this empty field; nonempty type parameters stay pinned.
+            node._fields = tuple(field for field in node._fields if field != "type_params")
     options = {"show_empty": True} if sys.version_info >= (3, 13) else {}
-    signature = ast.dump(function.args, **options)
-    body = ast.dump(ast.Module(body=function.body, type_ignores=[]), **options)
+    return ast.dump(normalized, **options)
+
+
+def _actor_digest(function: ast.FunctionDef) -> str:
+    signature = _dump_ast(function.args)
+    body = _dump_ast(ast.Module(body=function.body, type_ignores=[]))
     return hashlib.sha256((signature + "\n" + body).encode("utf-8")).hexdigest()
 
 
@@ -159,9 +171,8 @@ class _Discovery:
             isinstance(node, ast.FunctionDef) and node.name == "_load_guardian_resources"
             for node in self.tree.body
         ):
-            options = {"show_empty": True} if sys.version_info >= (3, 13) else {}
             fingerprint = hashlib.sha256(
-                ast.dump(self.tree, **options).encode("utf-8"),
+                _dump_ast(self.tree).encode("utf-8"),
             ).hexdigest()
             if fingerprint != _RETAINED_ACTOR_SHA256:
                 self.fail(self.tree, "retained runtime actor source shape changed")
