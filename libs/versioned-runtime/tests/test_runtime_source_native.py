@@ -150,7 +150,17 @@ if ($LASTEXITCODE -ne 7 -or $output -cne 'payload-result') {{ throw 'native resu
     else:
         with pytest.raises(subprocess.TimeoutExpired) as caught:
             _run_progress(host, script, tmp_path)
-        assert caught.value.stderr == "entered"
+        stderr = caught.value.stderr
+        if stderr == "entered":
+            return
+        progress, traceback = stderr.split("Traceback (most recent call last):\n", 1)
+        assert os.name != "nt" and progress == "entered"
+        assert traceback.endswith("RuntimeError: Installer owner exited during child construction\n")
+        frames = re.findall(r'  File "([^"\n]+)", line \d+, in ([^\n]+)', traceback)
+        assert [(Path(path).name, function) for path, function in frames] == [
+            ("installer_engine_process.py", "<module>"),
+            ("installer_engine_process.py", "_supervise"),
+        ]
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
@@ -212,18 +222,27 @@ Invoke-Hidden -FilePath {_quote(sys.executable)} `
     assert settled and all(handle is None for handle in settled)
 
 
-@pytest.mark.parametrize("phase", ["hash", "copy", "silent-copy"])
-def test_native_source_wrapper_reports_completed_hash_and_copy_work(tmp_path, phase):
+@pytest.mark.parametrize(("plugin", "phase"), [
+    ("agent-worktrees", "hash"),
+    ("agent-worktrees", "copy"),
+    ("agent-worktrees", "silent-copy"),
+    ("agent-bridge", "hash"),
+    ("agent-bridge", "copy"),
+    ("agent-ssh", "hash"),
+    ("agent-pull-requests", "hash"),
+    ("budget-guidance", "hash"),
+])
+def test_native_source_wrapper_reports_completed_hash_and_copy_work(tmp_path, plugin, phase):
     payload = tmp_path / "payload"
     payload.mkdir()
     (payload / "plugin.json").write_text(
-        json.dumps({"name": "agent-worktrees", "version": "1.2.3"}), encoding="utf-8",
+        json.dumps({"name": plugin, "version": "1.2.3"}), encoding="utf-8",
     )
     for index in range(4):
         (payload / f"input-{index}.txt").write_text(str(index), encoding="utf-8")
     digest = identity.assembly_hash(payload)
     selected = identity.SourceIdentity(
-        "agent-worktrees", "1.2.3", "a" * 40, "b" * 40, digest,
+        plugin, "1.2.3", "a" * 40, "b" * 40, digest,
         identity.runtime_version("1.2.3", "a" * 40, digest),
     )
     (payload / identity.SOURCE_FILE).write_text(json.dumps(selected.document()), encoding="utf-8")
@@ -254,8 +273,29 @@ raise SystemExit(source.main())
     (helpers / "versioned_runtime_source.py").write_text(actor, encoding="utf-8")
     expected = json.dumps(identity.manifest_fields(selected), sort_keys=True)
     root = tmp_path / "runtime"
+    caller = "(Get-SourceRuntimeIdentity)" if phase == "hash" else "(Publish-SourceSnapshot)"
+    if plugin == "agent-worktrees":
+        setup = f". {_quote(REPOSITORY / 'plugins' / plugin / 'scripts' / 'source-runtime.ps1')}"
+    else:
+        text = (REPOSITORY / "plugins" / plugin / "scripts" / "install.ps1").read_text(encoding="utf-8")
+        name = "Get-SourceRuntimeIdentity" if phase == "hash" else "Invoke-Stamp"
+        function = re.search(rf"^function {name} \{{.*?^\}}", text, re.M | re.S)
+        assert function is not None
+        setup = function.group().replace("$PSScriptRoot", "$ScriptDir")
+        if phase == "copy":
+            caller = "Invoke-Stamp"
+            setup += """
+function Write-Step {}
+function Test-PayloadUnchangedSinceAdmission { param([switch]$SourceIdentityOnly) }
+function Publish-LegacySnapshotSource {
+    param($SnapshotDir, $HelperDirectory, $PayloadRoot, $PluginId,
+          $RuntimeRoot, $ProjectRoot, $SnapshotId, $PayloadVersion)
+    [Console]::Out.Write($SnapshotDir)
+    exit 0
+}
+"""
     script = f"""
-. {_quote(REPOSITORY / 'plugins' / 'agent-worktrees' / 'scripts' / 'source-runtime.ps1')}
+{setup}
 function Get-BootstrapPython {{ param([switch]$ExcludeRuntimeRoot); return {_quote(sys.executable)} }}
 $PluginDir = {_quote(payload)}
 $ScriptDir = {_quote(helpers)}
@@ -263,7 +303,8 @@ $PackageVersion = '1.2.3'
 $SrcVersion = {_quote(selected.runtime_version)}
 $SourceRuntimeIdentity = {_quote(expected)}
 $InstallDir = {_quote(root)}
-[Console]::Out.Write({'(Get-SourceRuntimeIdentity)' if phase == 'hash' else '(Publish-SourceSnapshot)'})
+$publishGlobalBinstubs = $false
+{'Invoke-Stamp' if caller == 'Invoke-Stamp' else f'[Console]::Out.Write({caller})'}
 """
     if phase == "silent-copy":
         with pytest.raises(subprocess.TimeoutExpired):

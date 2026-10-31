@@ -588,7 +588,7 @@ function Get-SourceRuntimeIdentity {
         '--plugin', 'agent-bridge', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
     $nativeError = ''
-    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     $code = $LASTEXITCODE
     if ($code -ne 0) { throw "${FailureContext} (exit ${code}): $detail$nativeError" }
     return $detail.Trim()
@@ -2431,7 +2431,7 @@ function Invoke-Stamp {
             '--payload', $PluginDir, '--package-version', $PackageVersion, '--plugin', 'agent-bridge',
             '--expected-runtime-version', $SrcVersion, '--expected-source-identity', $SourceRuntimeIdentity,
             '--snapshot-root', $InstallDir
-        ) -ErrorOutput ([ref]$nativeError)
+        ) -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
         if ($LASTEXITCODE -ne 0) {
             throw "Source snapshot publication failed (exit ${LASTEXITCODE}): $snapshot$nativeError"
         }
