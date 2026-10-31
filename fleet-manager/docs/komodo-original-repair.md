@@ -80,7 +80,10 @@ work and after all work. The existing common owner issues a distinct permit
 with its unchanged 30-second ceiling. Nested baseline checkpoint sites do not
 repeat the phase owner's paired checks or mint another proof. A completed fresh
 phase uses two resolver calls during authorization and two at each paired
-boundary; initialization uses four in total.
+boundary; initialization uses four in total. The final phase always closes
+with full custody validation before consuming its exact permit through the
+common completion boundary, which performs two further resolver calls.
+Completing authority never suppresses the phase's closing custody checks.
 
 Only after the preceding phase's final validation succeeds may the SDK discard
 that exact local handle and reacquire. Expiry between completed phases is

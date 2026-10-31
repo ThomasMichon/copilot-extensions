@@ -155,7 +155,8 @@ All 131 opt-in synthetic native/HTTP/journal controls pass, including advancing
 full status and terminal publication, expiry between completed phases,
 late pre-commit withdrawal and interrupted terminal cleanup. The 28 separate
 real-machine-proof/common-admission controls pass. Deterministic composition
-checks require exactly four initial resolver calls and six per fresh phase.
+checks require exactly four initial resolver calls and six per fresh phase,
+followed by two calls for common completion after the final full custody boundary.
 The positively admitted unit-only packet adds one dependency-light work-count
 case. Its complete canonical packet passes all 3,175 admitted units with
 9,525 successful phase reports, no actor effects and one coverage capture,
@@ -168,3 +169,23 @@ Source review, normal release/acquisition, installed mixed-version witnesses,
 the existing embedding's producer integration and actual cold/warm adopter
 qualification remain open. No actual original terminal repair or broader
 delivery is credited. Keep the complete parent Plan and Validation Plan active.
+
+### 2026-10-31 - Final completion custody correction
+
+#9791's review identified that completing authority inside the final phase
+suppressed its closing full custody check. Common completion validates
+authority, not the original journal, immutable evidence, native resources or
+material. Finish and status now close their full custody phase before
+consuming its retained permit; completion cannot suppress that final check.
+
+Eight late final-phase key, native-process, credential and profile drift
+controls cover status and terminal publication. Refusal retains UNKNOWN or
+the single committed terminal receipt; exact restoration permits supported
+verification without another apply or terminal row. The focused 40-case
+packet passes, including those controls, advancing composed paths and real
+machine proofs. Final common completion adds two current resolver calls;
+the original permit ceiling and selected native deadline stay unchanged.
+
+Normal current-head review, required CI, release, installed compatibility and
+actual embedding/adopter qualification remain open. This correction is source
+work, not an actual original repair or broader delivery credit.

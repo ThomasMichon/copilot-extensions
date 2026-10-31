@@ -31,7 +31,8 @@ from fleet_manager.planning import PlanError, canonical, decode, digest
 from fleet_manager.runtime_admission import AdmissionError, AdmissionAuthority, OperationGrant
 from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
 from komodo_repair_test_controls import (
-    AdvancingRepairClock, late_material_drift, late_publication_drift, replace_pending_container,
+    AdvancingRepairClock, completion_phase_drift, late_material_drift, late_publication_drift,
+    replace_pending_container,
 )
 from test_komodo_declaration import intent
 from test_komodo_native import native_rig as native_rig
@@ -69,6 +70,11 @@ LATE_PUBLICATION = [
     for decision in ("succeeded", "failed")
     for change in ("transition", "grant", "expiry", "reconnect", "disconnect")
 ]
+COMPLETION_DRIFTS = [
+    f"completion-{action}-{change}"
+    for action in ("status", "terminal")
+    for change in ("key", "native", "material", "profile")
+]
 DRIFTS = [
     f"publication-drift-{stage}-{change}"
     for stage in ("retain", "save", "append")
@@ -104,7 +110,7 @@ REPAIR_MODES = ("success", "failed", "mount-order", "renewed", "prior-failed",
     for mode in REPAIR_MODES
 ] + [
     pytest.param(mode, True, id="checkpoint-" + mode, marks=pytest.mark.client_distribution_full)
-    for mode in (*REPAIR_MODES, "advancing", "gap-expiry")
+    for mode in (*REPAIR_MODES, "advancing", "gap-expiry", *COMPLETION_DRIFTS)
 ])
 def test_original_unknown_uses_current_repair_without_native_replay(
     native_rig: Any, keys: Any, monkeypatch: Any, mode: str, checkpoint_auth: bool,
@@ -314,7 +320,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     role="client", installation="client-a",
                     **({} if status else {"failed": failed}))
                 if checkpoint_auth:
-                    assert len(resolver_calls) - before_resolves == 4 + 6 * (
+                    assert len(resolver_calls) - before_resolves == 6 + 6 * (
                         len(fresh_calls) - before_proofs)
                 if advancing:
                     elapsed = harness.clock() - started
@@ -426,7 +432,32 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 monkeypatch.setattr(KomodoOwner, "_ready", change_after_health)
 
             fired: list[bool] = []
-            if mode in LATE_MATERIAL:
+            if mode in COMPLETION_DRIFTS:
+                change = mode.rsplit("-", 1)[1]
+                completion_status = mode.startswith("completion-status-")
+                completion_path = {
+                    "key": rig["material"].keys / "core.pub",
+                    "native": rig["directory"] / "live.json",
+                    "material": rig["material"].admin_password,
+                    "profile": Path(retained["profile"]),
+                }[change]
+                completion_original = completion_path.read_bytes()
+
+                def change_before_completion() -> None:
+                    if change == "key":
+                        completion_path.write_text(PUBLIC_PEM["periphery"])
+                    elif change == "native":
+                        changed = live()
+                        changed["core"]["State"].update(Pid=9999, StartedAt="completion-drift")
+                        completion_path.write_text(json.dumps(changed))
+                    elif change == "material":
+                        completion_path.write_text("changed-completion-fixture-password")
+                    else:
+                        completion_path.write_bytes(completion_original + b"\n")
+
+                fired = completion_phase_drift(
+                    monkeypatch, change_before_completion, status=completion_status)
+            elif mode in LATE_MATERIAL:
                 fired = late_material_drift(monkeypatch, rig["material"], mode)
             elif mode in LATE_PUBLICATION:
                 def late_change() -> None:
@@ -615,7 +646,24 @@ def test_original_unknown_uses_current_repair_without_native_replay(
 
                 monkeypatch.setattr(target, name, drifted)
 
-            if mode == "status-late-network":
+            if mode in COMPLETION_DRIFTS:
+                with pytest.raises((PlanError, AdmissionError)):
+                    await asyncio.to_thread(call, status=completion_status)
+                assert fired and not harness.owner._issued
+                completion_receipt = journal.inspect(original)
+                rows = journal.results()
+                assert completion_receipt.to_dict()["status"] == (
+                    "unknown" if completion_status else "succeeded")
+                assert completion_receipt.to_dict()["sequence"] == (2 if completion_status else 3)
+                assert len(rows) == (2 if completion_status else 3)
+                completion_path.write_bytes(completion_original)
+                if completion_status:
+                    status = await asyncio.to_thread(call, status=True)
+                    assert status["accepted"] == "unknown" and status["currently_healthy"]
+                else:
+                    assert await asyncio.to_thread(call) == completion_receipt
+                assert journal.inspect(original) == completion_receipt and journal.results() == rows
+            elif mode == "status-late-network":
                 with pytest.raises(PlanError, match="native.*network"):
                     await asyncio.to_thread(call, status=True)
                 assert fired and journal.inspect(original) == uncertain and not harness.owner._issued

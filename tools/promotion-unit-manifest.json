@@ -1,7 +1,7 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
-        "tools/promotion_unit_tests/test_komodo_repair_authorization.py::test_one_producer_and_six_current_resolutions_per_completed_phase",
+        "tools/promotion_unit_tests/test_komodo_repair_authorization.py::test_phase_work_count_and_final_completion_boundary",
         "tools/promotion_unit_tests/test_core_profile_candidate.py::test_candidate_inspects_exact_external_bytes_and_binds_manifest",
         "tools/promotion_unit_tests/test_core_profile_candidate.py::test_candidate_cannot_repair_or_drop_selected_inputs[metadata]",
         "tools/promotion_unit_tests/test_core_profile_candidate.py::test_candidate_cannot_repair_or_drop_selected_inputs[digest]",
@@ -3203,7 +3203,7 @@
         "fleet-manager/src/fleet_manager/operations.py": "bfdb591ecea896a07c8895ff394b99393ea256de9608c81ff51e352f5ba46719",
         "fleet-manager/src/fleet_manager/runtime_admission.py": "8b5f3f1c67dbdf03ec3c2c3757195ff6029aac171b560ab4c9d59d563818c5cf",
         "fleet-manager/src/fleet_manager/runtime_identity.py": "0cf830e3a861f3cf36585383012da358943444aa125a4f4361063d2e0d3da73b",
-        "tools/promotion_unit_tests/test_komodo_repair_authorization.py": "74546786c2310876b9e9cd2436edf1f0965d602c3a72d4754635c681c753081f",
+        "tools/promotion_unit_tests/test_komodo_repair_authorization.py": "b23393a8b2f9343f7c1004bc98b7f0fbc1030139655376f88a169951d2c209f7",
         "fleet-manager/src/fleet_manager/trusted_systemd_profile.py": "ff6090d2fb2eaba4c58ca3210a9653803290e92a14f904cb43fb0b0d7905e4ec",
         "fleet-manager/tests/test_host_profile.py": "37448c7b4dc138a8234556cee32872b4d4ddbb123ab5ef4dba6cc47b497eb298",
         "fleet-manager/tests/test_trusted_systemd_profile.py": "f5e02393ac409efd446073d68c36bc56930f9522fb14d0d7d40c975987609354",

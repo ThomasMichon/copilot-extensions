@@ -21,7 +21,7 @@ finally:
     sys.path[:] = before
 
 
-def test_one_producer_and_six_current_resolutions_per_completed_phase() -> None:
+def test_phase_work_count_and_final_completion_boundary() -> None:
     now = [1000]
     resolved, produced = [], []
     request = OperationIntent.from_dict({
@@ -74,5 +74,11 @@ def test_one_producer_and_six_current_resolutions_per_completed_phase() -> None:
         assert len(resolved) - before_resolved == 6
         assert len(produced) - before_produced == 1
         assert authorization.permit.expires_at == current.expires_at == current.issued_at + 30
-    authorization.abort()
+    authorization.begin()
+    authorization.revalidate()
+    authorization.revalidate()
+    authorization.end()
+    before_complete = len(resolved)
+    authorization.complete()
+    assert len(resolved) - before_complete == 2
     assert not admission._issued and permit.expires_at == permit.issued_at + 30

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, Iterator
 
 from fleet_manager import komodo_repair
 from fleet_manager.komodo_profile import KomodoMaterialization
@@ -35,6 +36,29 @@ class AdvancingRepairClock:
     @value.setter
     def value(self, value: int) -> None:
         self.offset += value - self()
+
+
+def completion_phase_drift(
+    monkeypatch: Any, change: Callable[[], None], *, status: bool,
+) -> list[bool]:
+    phase = komodo_repair._Attempt.phase
+    entered = 0
+    fired: list[bool] = []
+
+    @contextmanager
+    def after_work(instance: Any) -> Iterator[None]:
+        nonlocal entered
+        with phase(instance):
+            entered += 1
+            current = entered
+            yield
+            if current == (5 if status else 9) and not fired:
+                assert not instance.authorization.completed
+                fired.append(True)
+                change()
+
+    monkeypatch.setattr(komodo_repair._Attempt, "phase", after_work)
+    return fired
 
 
 def late_publication_drift(monkeypatch: Any, change: Callable[[], None]) -> list[bool]:

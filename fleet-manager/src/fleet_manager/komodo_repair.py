@@ -171,8 +171,7 @@ class _Attempt:
             authorization.begin()
             self._custody_checkpoint()
             yield
-            if not authorization.completed:
-                self._custody_checkpoint()
+            self._custody_checkpoint()
         except BaseException:
             authorization.abort()
             raise
@@ -403,7 +402,8 @@ class _Attempt:
                 self.saved = canonical(self.record)
                 self.checkpoint()
         with self.phase():
-            self.authorization.complete()
+            pass
+        self.authorization.complete()
 
 
 class KomodoRepairOwner:
@@ -568,5 +568,5 @@ class KomodoRepairOwner:
                     "blockers": blockers, "health_error": error,
                     "native_mutations_performed": False,
                 }
-                operation.authorization.complete()
+            operation.authorization.complete()
             return result

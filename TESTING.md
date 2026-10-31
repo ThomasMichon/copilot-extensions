@@ -2637,7 +2637,8 @@ the new constructor must not repair it.
 repair phase controller with synthetic verified-identity records and the real
 common admission owner. It counts one producer and six current resolutions per
 completed phase, checks the unchanged individual permit ceilings and retires
-only the retained exact handle. It starts no actor and needs no cryptographic
+only the retained exact handle. Final common completion follows the closed
+custody phase and contributes two further current resolutions. It starts no actor and needs no cryptographic
 or HTTP tooling. This is work-count evidence, not signature verification.
 The separate Fleet Manager authorization tests use real machine proofs; its
 opt-in `client_distribution_full` repair matrix retains actual subprocess,
