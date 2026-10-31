@@ -244,8 +244,9 @@ def test_native_adopters_wire_source_redirects_without_replacing_legacy(
     shell = (
         scripts / ("source-runtime.sh" if plugin in native.PLUGINS else f"{entry}.sh")
     ).read_text(encoding="utf-8")
-    assert 'publish-redirects --payload-dir "' in shell
-    assert '--version "$SRC_VERSION"' in shell
+    assert re.search(r'publish-redirects\s+--payload-dir "', shell)
+    version = "SOURCE_RUNTIME_VERSION" if plugin == "agent-mcp" else "SRC_VERSION"
+    assert f'--version "${version}"' in shell
     assert '--expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || ' in shell
     if plugin == "agent-machines":
         assert "'--version', $SrcVersion, '--payload-origin', $probePayload" in powershell

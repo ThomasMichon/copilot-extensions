@@ -183,6 +183,24 @@ def test_incomplete_copy_is_never_published(selected, tmp_path, monkeypatch):
     assert [path.name for path in (root / "snapshots").iterdir()] == [".construction-leases"]
 
 
+def test_copy_progress_sink_failure_cleans_candidate_before_publication(selected, tmp_path):
+    payload, identity = selected
+    root = tmp_path / "runtime"
+    before = _contents(payload)
+
+    def progress():
+        if list((root / "snapshots").glob(".source-*/payload/plugin.json")):
+            raise OSError("progress sink failed after completed copy")
+
+    with pytest.raises(source.shutil.Error, match="progress sink failed"):
+        source.publish_source_snapshot(payload, root, identity, on_progress=progress)
+    assert _contents(payload) == before
+    assert not (root / "snapshots" / identity.runtime_version).exists()
+    assert not list((root / "snapshots").glob(".source-*"))
+    with source._runtime().construction_lease(root / "snapshots", identity.runtime_version):
+        assert source.read_source_identity(payload, identity.package_version) == identity
+
+
 def test_publication_refuses_to_write_inside_the_source(selected):
     payload, identity = selected
     before = _contents(payload)

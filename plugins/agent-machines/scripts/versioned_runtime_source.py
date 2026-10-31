@@ -397,7 +397,7 @@ def _runtime() -> ModuleType:
     return module
 
 
-def assembly_hash(payload: Path) -> str:
+def assembly_hash(payload: Path, *, on_progress=None) -> str:
     files: list[Path] = []
 
     def scan_error(error: OSError) -> None:
@@ -431,9 +431,13 @@ def assembly_hash(payload: Path) -> str:
             if path == payload / "snapshot-provenance.json":
                 continue
             files.append(path)
+            if on_progress is not None:
+                on_progress()
     if not files:
         raise SourceIdentityError("Materialized runtime payload is empty")
-    return _runtime().fingerprint_source(files)
+    return _runtime().fingerprint_source(
+        files, **({"on_progress": on_progress} if on_progress is not None else {}),
+    )
 
 
 def payload_package_version(payload: Path, plugin: str) -> str:
@@ -464,6 +468,7 @@ def payload_package_version(payload: Path, plugin: str) -> str:
 
 def read_source_identity(
     payload: Path, package_version: str, *, plugin: str | None = None,
+    on_progress=None,
 ) -> SourceIdentity | None:
     path = payload / SOURCE_FILE
     try:
@@ -498,7 +503,7 @@ def read_source_identity(
     expected = runtime_version(package_version, data["source_commit"], data["assembly_hash"])
     if data["runtime_version"] != expected:
         raise SourceIdentityError("Source runtime version does not match its immutable inputs")
-    if assembly_hash(payload) != data["assembly_hash"]:
+    if assembly_hash(payload, on_progress=on_progress) != data["assembly_hash"]:
         raise SourceIdentityError("Materialized payload bytes do not match the source identity")
     return SourceIdentity(
         plugin=data["plugin"],
@@ -519,7 +524,9 @@ def manifest_fields(identity: SourceIdentity | None) -> dict[str, object]:
     }
 
 
-def publish_source_snapshot(payload: Path, root: Path, identity: SourceIdentity) -> Path:
+def publish_source_snapshot(
+    payload: Path, root: Path, identity: SourceIdentity, *, on_progress=None,
+) -> Path:
     """Serialize complete source publication without directory-nesting moves."""
     payload = Path(os.path.abspath(payload))
     root = Path(os.path.abspath(root.expanduser()))
@@ -533,7 +540,9 @@ def publish_source_snapshot(payload: Path, root: Path, identity: SourceIdentity)
             & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
         ):
             raise SourceIdentityError("Source snapshot inputs must be ordinary directories")
-        if read_source_identity(path, identity.package_version, plugin=identity.plugin) != identity:
+        if read_source_identity(
+            path, identity.package_version, plugin=identity.plugin, on_progress=on_progress,
+        ) != identity:
             raise SourceIdentityError("Source snapshot identity changed after runtime selection")
 
     verify(payload)
@@ -542,6 +551,7 @@ def publish_source_snapshot(payload: Path, root: Path, identity: SourceIdentity)
     runtime = _runtime()
     return runtime._runtime_component("versioned_runtime_construction").publish_source_snapshot(
         payload, snapshots, identity.runtime_version, runtime=runtime, verify=verify,
+        on_progress=on_progress,
     )
 
 
@@ -555,10 +565,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--snapshot-root", type=Path)
     parser.add_argument("--format", choices=("version", "json", "shell-fields"), default="version")
     args = parser.parse_args(argv)
+    on_progress = lambda: print("source-runtime: completed source work", file=sys.stderr, flush=True)
     try:
         if not _PACKAGE_VERSION.fullmatch(args.package_version):
             raise SourceIdentityError("Source deployment requires a supported package version")
-        identity = read_source_identity(args.payload, args.package_version, plugin=args.plugin)
+        identity = read_source_identity(
+            args.payload, args.package_version, plugin=args.plugin, on_progress=on_progress,
+        )
         selected_version = identity.runtime_version if identity else args.package_version
         if args.expected_runtime_version is not None and args.expected_runtime_version != selected_version:
             raise SourceIdentityError("Source identity changed after runtime selection")
@@ -575,7 +588,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.snapshot_root is not None:
             if identity is None or args.format != "version":
                 raise SourceIdentityError("Source snapshot publication requires a source receipt and path output")
-            print(publish_source_snapshot(args.payload, args.snapshot_root, identity))
+            print(publish_source_snapshot(
+                args.payload, args.snapshot_root, identity, on_progress=on_progress,
+            ))
             return 0
         if args.format == "version":
             print(selected_version)

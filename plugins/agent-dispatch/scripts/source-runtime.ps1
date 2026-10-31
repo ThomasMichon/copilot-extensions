@@ -9,7 +9,7 @@ function Get-SourceRuntimeIdentity {
         '--plugin', 'agent-dispatch', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
     $nativeError = ''
-    $result = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $result = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     if ($LASTEXITCODE -ne 0) {
         throw "Source runtime identity validation failed (exit ${LASTEXITCODE}): $result$nativeError"
     }
@@ -69,7 +69,7 @@ function Publish-SourceSnapshot {
         '--expected-source-identity', $script:SourceRuntimeIdentity,
         '--snapshot-root', $InstallDir)
     $nativeError = ''
-    $snapshot = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $snapshot = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     if ($LASTEXITCODE -ne 0) {
         throw "Source snapshot publication failed (exit ${LASTEXITCODE}): $snapshot$nativeError"
     }

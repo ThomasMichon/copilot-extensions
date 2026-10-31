@@ -253,8 +253,10 @@ def test_native_source_recovery_matches_explicit_python_selection(
             "[Console]::Out.Write($AgentRtPy)"
         )
         argv = [executable, "-NoProfile", "-Command", command]
+    # The Git Bash bridge includes cold native interpreter discovery on Windows.
+    timeout = 30 if os.name == "nt" and host == "bash" else 15
     result = subprocess.run(
-        argv, capture_output=True, text=True, timeout=15,
+        argv, capture_output=True, text=True, timeout=timeout,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
