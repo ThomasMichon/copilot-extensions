@@ -120,6 +120,14 @@ def declaration_to_registration(
         "source": DECLARED_ID_PREFIX,
         "owner": decl.owner,
     }
+    if kind == RegistrationKind.SUPERVISED_LANE and machine and machine.strip() and env and env.strip():
+        from .pool_instances import PoolInstanceDefinition
+
+        registration["pool_definition"] = PoolInstanceDefinition(
+            registration_id=registration["id"], machine=machine, env=env,
+            priority=decl.priority, max_concurrent=decl.concurrency,
+            filters=decl.effective_filters(),
+        ).to_dict()
     if decl.kind == RegistrationKind.PLUGIN_COMPANION:
         if decl.transition_group:
             registration["transition_group"] = decl.transition_group

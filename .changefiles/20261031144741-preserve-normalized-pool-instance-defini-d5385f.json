@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve normalized pool-instance definitions and configurable priority",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
