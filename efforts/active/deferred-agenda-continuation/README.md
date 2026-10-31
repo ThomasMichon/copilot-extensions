@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Managed proposal and implementation PRs to `dev`
 - **Created:** 2026-10-31
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `plugins/efforts` deferred agenda branches and `harness-guidance` unattended decision preparation
 - **Umbrella issue:** #9777
 
@@ -84,27 +84,27 @@ is not an approval.
 
 ### Phase 1 - Reviewed branch and decision contract
 
-- [ ] Land the standing-intent and canonical proposal through normal review.
-- [ ] Specify reversible parking, original root/stack/return and budget
+- [x] Land the standing-intent and canonical proposal through normal review.
+- [x] Specify reversible parking, original root/stack/return and budget
   preservation, source freshness, scoped tree growth and due-or-response
   rechecks without treating a branch as completed.
 
 ### Phase 2 - Agenda frontier and read-only inspection
 
-- [ ] Extend manual state with deferred branches, real attempt/check timestamps,
+- [x] Extend manual state with deferred branches, real attempt/check timestamps,
   proposal/decision references and explicit revisit times.
-- [ ] Preserve legacy cursors; prevent older helpers from silently ignoring
+- [x] Preserve legacy cursors; prevent older helpers from silently ignoring
   required deferred state through a compatible versioned opt-in.
-- [ ] Validate saved frame chains, definitions, finite budgets, times and
+- [x] Validate saved frame chains, definitions, finite budgets, times and
   unresolved work; report due rechecks and next safe choices without mutation.
-- [ ] Keep branch restoration deliberate: revalidate current authority and
+- [x] Keep branch restoration deliberate: revalidate current authority and
   merge current evidence/visits without resetting limits or replaying effects.
 
 ### Phase 3 - Guidance, validation and completion
 
-- [ ] Place the ambient safe-work-first rule with conduct guidance, packet
+- [x] Place the ambient safe-work-first rule with conduct guidance, packet
   quality with its procedure and branch movement with the agenda owner.
-- [ ] Preserve active/deferred references and current decisions/times through
+- [x] Preserve active/deferred references and current decisions/times through
   existing checkpoints/handoffs, without duplicating canonical effort state.
 - [ ] Run focused compatibility/scenario tests and independent review, add
   changefiles, then merge the implementation and archive the completed effort.
@@ -113,17 +113,17 @@ is not an approval.
 
 ## Validation Plan
 
-- [ ] Legacy behavior remains valid; unsupported new-state versions fail
+- [x] Legacy behavior remains valid; unsupported new-state versions fail
   explicitly instead of appearing complete.
-- [ ] A saved blocked chain retains its original source, root/return action,
+- [x] A saved blocked chain retains its original source, root/return action,
   evidence and finite visit/depth/detour budgets.
-- [ ] Actual early-response references and due times permit only condition
+- [x] Actual early-response references and due times permit only condition
   reinspection; future times, expiry, holds and unknown effects grant nothing.
-- [ ] Active authorized work and another queued root remain usable while a
+- [x] Active authorized work and another queued root remain usable while a
   branch waits; deferred work cannot vanish into a false complete cursor.
-- [ ] Invalid times/references, wrong ownership/revisions, exceeded bounds and
+- [x] Invalid times/references, wrong ownership/revisions, exceeded bounds and
   malformed/oversized input fail without writes or effect execution.
-- [ ] Decision-packet and prompt-deferral guidance preserves all-work holds,
+- [x] Decision-packet and prompt-deferral guidance preserves all-work holds,
   privacy/resource limits, original approvals and no-busywork boundaries.
 - [ ] Public artifacts are generic, required review/CI pass, all merged gates
   are journaled and remaining responsibility is resolved or explicitly tracked.
@@ -136,6 +136,36 @@ The four-hour interval is an operator example, not a universal polling cadence,
 permission renewal or promise that this helper can originate an agent turn.
 
 ## Journal
+
+### 2026-10-31 - Implementation ready for review
+
+- Implemented required deferred cursor version 2, bounded read-only due/response
+  reporting and deliberate re-entry preserving original chains and limits.
+  Version-1 boards/cursors remain supported; the installed version-1-only
+  inspector explicitly refused the new fixture without modifying input.
+- Added decision-preparation guidance with its existing conduct owner and
+  carried branch/packet/return references through effort and continuity
+  procedures. No runtime rollout or real data effects occurred.
+- Focused validation: efforts 118 passed/one existing platform skip, conduct
+  41 passed and continuity 19 passed. Actual synthetic before/due examples
+  retained authorized research; the due point added condition reinspection only.
+- Independent critique found no blocking agenda/guidance defect. Its native
+  test detour exposed a Linux-unsupported Windows .NET exception constructor
+  in a fake identity lookup. Restricted that one test to Windows with
+  PowerShell, retaining production behavior and portable boundary controls;
+  the focused native packet passed one control and skipped the Windows test.
+- Ruff, install contract, module-size, documentation and customization checks
+  passed with zero blocking findings. Review, required CI, merge and final
+  archival remain open gates; synthetic contracts do not prove agent compliance
+  or originate an unattended turn.
+
+### 2026-10-31 - Reviewed implementation admission
+
+- Proposal #9779 merged after current-head Copilot approval, no open findings
+  and required green CI. The same source workspace advanced onto the plan.
+- Began the versioned deferred-state inspector, inert timing/response reporting,
+  reversible parking procedure and decision-preparation guidance. Existing
+  effect authority and all-work holds remain intact.
 
 ### 2026-10-31 - Proposal
 

@@ -5,12 +5,15 @@ description: >
   exit criteria, advance a coarse work graph, and preserve a bounded work stack
   through prerequisite detours and serendipity. Use when an operator or effort
   opts into an agenda companion, asks "what do I do next?", or needs to resume
-  an agenda cursor or return from a child effort. Does not enable itself for
+  an agenda cursor or return from a child effort. Supports explicitly parked
+  blocked branches and timed/response rechecks, not approval. Does not enable itself for
   ordinary efforts or replace planning-efforts, review, claims, or safety gates.
   Trigger phrases include:
   - 'drive an effort agenda'
   - 'resume the agenda cursor'
   - 'return from a child effort'
+  - 'park a blocked agenda branch'
+  - 'revisit a deferred agenda node'
 ---
 
 # Driving Effort Agendas
@@ -71,7 +74,10 @@ Then: <allowed outcome -> next node, or saved parent return>
 If the next action is uncertain, make it a bounded investigation that resolves
 the uncertainty. Do not invent completion or ask the operator to restate a
 known goal. Ask for steering only when an actual decision, permission or
-unavailable prerequisite requires it.
+unavailable prerequisite requires it. A missing effect approval should first
+become bounded decision preparation and a preserved deferred branch, not a
+blocking question while useful authorized work remains. Explicit all-work
+holds and resource/privacy limits remain stronger.
 
 Work on the action, record the result and answer again. A completed phase,
 message, pull request or child is **not** a stopping point while authorized
@@ -90,7 +96,10 @@ successful and no-progress cycles**. Record the cursor revision, node visit and
 next action after a completed work unit. A limit requires an explicit
 stop/replan/steering outcome, not another loop or silent completion.
 
-Ordinary investigation within a node remains flexible. Failed validation may
+Ordinary investigation within a node remains flexible. Refine trees within
+accepted scope with source references, exits, edges and an explicit definition
+revision; do not create unrelated objectives or treat a new fingerprint as
+new consent. Failed validation may
 take a declared retry edge; it does not license unrelated work. Reset means
 an explicit agenda transition with a reason, never a Git reset, service
 restart, discarded obligation or replay of an uncertain external effect.
@@ -120,8 +129,12 @@ blocking stack frame.
 ## 5. Return and continue
 
 Check the child's own effort/task acceptance gate, not merely its PR or worktree
-state. Preserve a blocked/failed child on the stack with a concrete next action
-or steering need; do not silently pop it.
+state. Preserve a blocked/failed child on the active stack, or explicitly park
+its complete chain, original return, evidence and budgets in the version-2
+deferred frontier before selecting another permitted avenue. Parking is not a
+successful return, source completion or permission to reset limits. Use
+[the deferred-branch procedure](references/deferred-branches.md) for movement,
+decision packets, actual attempt/revisit times and due-or-response rechecks.
 
 On successful return, record the child's result, pop it once, restore the saved
 parent node/action, and **revalidate against current reality**. Child changes
@@ -141,7 +154,8 @@ are resolved, or preserve the open stack through a real blocker or handoff.
 
 ## Resume, reminders and manual limitations
 
-Carry the cursor path, active agenda identity, root objective and immediate
+Carry the cursor path, active/deferred agenda identities, root/return state,
+decision-packet references, current attempted/revisit times and immediate
 next action in a compact handoff; canonical detail stays in the effort.
 On resumption compare the saved agenda/plan references with current sources.
 Journal-only changes need not invalidate execution position. A changed node,
@@ -163,6 +177,11 @@ recorded root, stack, next action, exit criteria and declared outcomes.
 `check --state-home <journal-home>` performs the same structural inspection.
 Add `--json` for structured output, `--expected-revision <n>` to reject a changed
 snapshot, or `--worktree <identity>` to reject the wrong lane.
+Version-2 cursors preserve deferred branches; `--now <timezone-aware ISO time>`
+controls reproducible due inspection, not a scheduled wake or approval.
+The report lists due rechecks and the next revisit; a distinct actual response
+can make reinspection eligible early. Neither automatically restores a stack
+or permits its saved effect. Legacy version-1 cursors remain supported.
 JSON output is an inspection report, not replacement cursor state; never
 redirect it over `cursor.json`.
 
@@ -186,3 +205,6 @@ the safety of a later write or the authority of its caller.
 - [Agenda example](assets/agenda.example.json)
 - [Lane cursor example](assets/cursor.example.json)
 - [Optional read-only next/check helper](scripts/agenda.py)
+- [Deferred branches, decision packets and revisit points](references/deferred-branches.md)
+- [Deferred board example](assets/agenda.deferred.example.json)
+- [Version-2 deferred cursor example](assets/cursor.deferred.example.json)

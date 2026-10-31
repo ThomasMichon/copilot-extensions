@@ -33,6 +33,14 @@ using an existing Python 3 interpreter and an explicit journal/state-home path.
 It reads and diagnoses; it never creates or mutates agenda state, executes tasks,
 starts services or proves source completion. Manual use needs no helper.
 
+Its optional version-2 cursor preserves full deferred branch/return state,
+original budgets, pending decision packets and real attempt/revisit times.
+Due or actual-response signals permit condition reinspection—not consent or
+automatic restoration—while another authorized branch can continue. The
+[deferred-branch procedure](skills/driving-effort-agendas/references/deferred-branches.md)
+owns the format and examples. Version-1 cursors remain valid; no daemon,
+scheduler or per-node presence-poll loop is introduced.
+
 An adopting repository commits
 `.copilot-extensions/efforts/config.json` with the exact version 1 policy:
 
