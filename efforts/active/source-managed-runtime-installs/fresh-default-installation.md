@@ -102,6 +102,12 @@ remain with their existing owners. Historical compatibility can select a
 reviewed incremental transition or fresh replacement. A maintained old reset
 descriptor may remain valid even when its incremental contract is unsupported.
 
+The [intentional schema-evolution refinement](footprint-contract-evolution.md)
+supersedes unconditional append-only source snapshots: maintain the current
+contract and explicit supported legacy transitions, and retire obsolete support
+deliberately. Historical implementation instructions to append every producer
+revision below are not a permanent format requirement.
+
 ### One transaction, two construction paths
 
 Resolve the exact source, installation and desired target once. The existing

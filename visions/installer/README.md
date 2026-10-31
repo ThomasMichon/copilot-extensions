@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-30
+- **Last revised:** 2026-10-31
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -438,8 +438,14 @@ may reset, and describe the markers and supported version/contract ranges that
 permit incremental or zero-downtime updating. An incremental-compatibility
 receipt is evidence of ability to reuse, never permission to install.
 
-Changes to installed artifacts carry the corresponding manifest and historical
-footprint transitions, just as a product schema change carries its migrations.
+Changes to installed artifacts carry the corresponding current manifest and
+supported footprint transitions, just as a product schema change carries its
+migrations. Schema and mandatory semantic changes are intentional; useful
+backward compatibility is maintained where practical, and obsolete support can
+retire through an explicit upgrade and rollback decision. Source-only changes
+do not require another runtime footprint revision or an unlimited snapshot
+history. Compatibility does not impose a permanent sequential migration chain
+or make an unsupported old footprint veto independent fresh installation.
 Validation detects omitted artifacts, unsupported incremental reuse and unsafe
 reset boundaries. The inventory includes generated commands, runtime state and
 process or registration effects rather than only package files. Durable data
