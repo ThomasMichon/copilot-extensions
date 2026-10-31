@@ -718,7 +718,7 @@ def test_installed_engine_command_validates_manifest(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("AGENT_HOME", raising=False)
     assert ec.installed_engine_command() == [
-        str(python), "-m", "agent_worktrees"
+        str(python), *ec.agent_plugin_runtime.python_cache_args(root), "-m", "agent_worktrees"
     ]
 
 
@@ -755,7 +755,7 @@ def test_installed_engine_command_allows_manifest_version_skew(monkeypatch, tmp_
     python.parent.mkdir(parents=True, exist_ok=True)
     python.write_text("", encoding="utf-8")
     assert ec.installed_engine_command() == [
-        str(python), "-m", "agent_worktrees"
+        str(python), *ec.agent_plugin_runtime.python_cache_args(root), "-m", "agent_worktrees"
     ]
 
 
@@ -781,7 +781,7 @@ def test_installed_engine_command_falls_back_to_last_known_good(
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("AGENT_HOME", raising=False)
     assert ec.installed_engine_command() == [
-        str(python), "-m", "agent_worktrees"
+        str(python), *ec.agent_plugin_runtime.python_cache_args(root), "-m", "agent_worktrees"
     ]
 
 
@@ -802,7 +802,7 @@ def test_installed_engine_command_honors_agent_home(monkeypatch, tmp_path):
     )
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     assert ec.installed_engine_command() == [
-        str(python), "-m", "agent_worktrees"
+        str(python), *ec.agent_plugin_runtime.python_cache_args(root), "-m", "agent_worktrees"
     ]
 
 
@@ -838,7 +838,7 @@ def test_installed_engine_command_rejects_marker_path_escape(
     )
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     assert ec.installed_engine_command() == [
-        str(legit_python), "-m", "agent_worktrees"
+        str(legit_python), *ec.agent_plugin_runtime.python_cache_args(root), "-m", "agent_worktrees"
     ]
 
 
@@ -873,7 +873,7 @@ def test_installed_engine_command_prefers_versions_over_stray_directories(
     )
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     assert ec.installed_engine_command() == [
-        str(legit_python), "-m", "agent_worktrees"
+        str(legit_python), *ec.agent_plugin_runtime.python_cache_args(root), "-m", "agent_worktrees"
     ]
 
 

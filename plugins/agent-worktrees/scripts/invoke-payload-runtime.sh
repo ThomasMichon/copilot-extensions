@@ -252,7 +252,16 @@ run_runtime() {
     else
         unset COPILOT_EXTENSIONS_CONTEXT
     fi
-    exec "$AGENT_RT_PY" -m agent_worktrees "$@"
+    local python_cache="$RUNTIME_ROOT/cache/python"
+    if [[ "$AGENT_RT_PY" == *.exe ]]; then
+        python_cache="$(cygpath -aw "$python_cache")"
+        case "$python_cache" in
+            '\\?\'*) ;;
+            '\\'*) python_cache='\\?\UNC\'"${python_cache#'\\'}" ;;
+            *) python_cache='\\?\'"$python_cache" ;;
+        esac
+    fi
+    exec "$AGENT_RT_PY" -X "pycache_prefix=$python_cache" -m agent_worktrees "$@"
 }
 
 [[ -f "$MODE_RUNNER" && -f "$JSON_QUERY" && -f "$RUNTIME_RESOLVER" &&

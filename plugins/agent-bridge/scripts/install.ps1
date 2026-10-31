@@ -1956,7 +1956,12 @@ if (Test-Path `$pidFile) {
     }
 }
 
-`$proc = Start-Process -FilePath `$launchPy -ArgumentList '-m','agent_bridge','start' ``
+`$cache = [IO.Path]::GetFullPath((Join-Path `$runtimeHome 'cache\python'))
+if (-not `$cache.StartsWith('\\?\')) {
+    `$cache = if (`$cache.StartsWith('\\')) { '\\?\UNC\' + `$cache.Substring(2) } else { '\\?\' + `$cache }
+}
+`$cacheOption = '"pycache_prefix=' + `$cache + '"'
+`$proc = Start-Process -FilePath `$launchPy -ArgumentList '-X',`$cacheOption,'-m','agent_bridge','start' ``
     -WorkingDirectory `$runtimeHome ``
     -NoNewWindow -PassThru ``
     -RedirectStandardOutput `$logFile ``

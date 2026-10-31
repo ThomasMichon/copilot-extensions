@@ -137,6 +137,9 @@ new reconcile cycles, but does not alone end process lifetime. Retirement and
 cleanup wait for a fresh, principal- and process-birth-verified passive or active
 beacon matching the different selected full identity. Missing, stale, foreign
 or unprovable successor readiness does not authorize retirement.
+Its isolated startup explicitly selects the
+[external Python bytecode cache](../../libs/agent-procutil/README.md#managed-python-bytecode-cache)
+under the existing durable owner HOME, without moving existing bytecode or state.
 The selected process publishes additive `runtime_identity`, `state` and
 `work_lease_version: 1` beacon fields. `passive` readiness has empty serving sets:
 it is process readiness, not proof of relay service. One OS-held work lease in

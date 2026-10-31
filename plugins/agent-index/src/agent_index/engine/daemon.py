@@ -28,6 +28,7 @@ import time
 from pathlib import Path
 
 from agent_procutil import (
+    python_cache_args,
     spawn_daemon,
     windowless_python,
     windowless_python_env,
@@ -173,8 +174,9 @@ _LOG_LEVEL_BOOTSTRAP = (
 
 
 def _with_log_level_bootstrap(cmd: list[str]) -> list[str]:
-    if cmd[1:3] == ["-m", "agent_index_engine.app"]:
-        return [cmd[0], "-c", _LOG_LEVEL_BOOTSTRAP, *cmd[3:]]
+    offset = 3 if len(cmd) > 2 and cmd[1] == "-X" and cmd[2].startswith("pycache_prefix=") else 1
+    if cmd[offset:offset + 2] == ["-m", "agent_index_engine.app"]:
+        return [*cmd[:offset], "-c", _LOG_LEVEL_BOOTSTRAP, *cmd[offset + 2:]]
     return list(cmd)
 
 
@@ -222,6 +224,7 @@ def engine_command(home: Path | None = None) -> list[str]:
     py = engine_venv_python(home)
     return [
         windowless_python(str(py)),
+        *python_cache_args(os.path.abspath(home or engine_home())),
         "-m",
         "agent_index_engine.app",
         "--host",

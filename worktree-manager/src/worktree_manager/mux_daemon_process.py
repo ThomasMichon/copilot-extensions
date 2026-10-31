@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from agent_procutil import direct_python, spawn_daemon
+from agent_procutil import direct_python, python_cache_args, spawn_daemon
 from agent_procutil.daemon_instances import DaemonInstanceSpec
 from work_coalescing_singleton import client as wcs_client
 
@@ -111,7 +111,10 @@ def spawn_detached(argv: list[str], *, cwd: Path | None = None) -> bool:
 
 
 def detached_child_argv(root: Path | None = None) -> list[str]:
-    argv = [sys.executable, "-B", "-m", "worktree_manager", "mux-daemon", "run"]
+    argv = [
+        sys.executable, *python_cache_args(selected_root(root)),
+        "-m", "worktree_manager", "mux-daemon", "run",
+    ]
     if root is not None:
         argv.append(f"--root={root}")
     return argv

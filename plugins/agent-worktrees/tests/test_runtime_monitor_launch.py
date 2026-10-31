@@ -28,7 +28,7 @@ def runtime():
 
 
 @pytest.mark.parametrize("complete,owner_dies", [(False, False), (True, False), (True, True)])
-def test_retained_bootstrap_pins_before_pth_or_application_imports(
+def test_retained_bootstrap_pins_before_application_imports(
     runtime, tmp_path, complete, owner_dies,
 ):
     from zdd import diagnostics
@@ -66,8 +66,8 @@ def test_retained_bootstrap_pins_before_pth_or_application_imports(
         f"    pathlib.Path({str(ready)!r}).write_text(json.dumps({{'prefix':sys.prefix}}))\n",
         encoding="utf-8",
     )
-    (site_packages / "retention.pth").write_text("import retention_probe\n", encoding="utf-8")
     (site_packages / "retention_application.py").write_text(
+        "import retention_probe\n"
         "import pathlib,time\n"
         f"stop=pathlib.Path({str(stop)!r})\n"
         "while not stop.exists(): time.sleep(0.05)\n",

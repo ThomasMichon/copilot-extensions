@@ -18,8 +18,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
+import venv
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from worktree_manager import agent_plugin_runtime as apr
 
@@ -51,6 +55,68 @@ def _write_policy(profile: Path, *, enabled: bool) -> None:
     )
 
 
+def test_resolved_installed_engine_caches_outside_selected_slot(monkeypatch, tmp_path):
+    from worktree_manager import engine_client
+
+    root = tmp_path / ".agent-worktrees"
+    slot = root / "versions" / "1.2.3"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    (root / "current-version").write_text(slot.name, encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(json.dumps({
+        "service": "agent-worktrees", "source": {"plugin": "agent-worktrees"},
+    }), encoding="utf-8")
+    site = slot / (
+        "Lib/site-packages" if os.name == "nt"
+        else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    )
+    package = site / "agent_worktrees"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("VALUE = 42\n", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import agent_worktrees, json, sys\n"
+        "print(json.dumps([agent_worktrees.VALUE, agent_worktrees.__cached__, sys.argv[1:]]))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    invocation = apr.resolve_installed_plugin_invocation("agent-worktrees")
+    assert invocation is not None and invocation[1] == root
+    command = engine_client.installed_engine_command()
+    assert command == invocation[0]
+    environment = dict(os.environ)
+    child_env = dict(environment)
+    child_env.pop("PYTHONDONTWRITEBYTECODE", None)
+    child_env.pop("PYTHONPYCACHEPREFIX", None)
+
+    def snapshot():
+        return {
+            str(path.relative_to(slot)): (
+                path.read_bytes() if path.is_file() else None,
+                path.stat().st_mtime_ns, path.stat().st_ctime_ns, path.stat().st_ino,
+            )
+            for path in (slot, *slot.rglob("*"))
+        }
+
+    before = snapshot()
+    cached_before = None
+    for _ in range(2):
+        result = subprocess.run(
+            [*command, "argument with spaces"], env=child_env, cwd=tmp_path,
+            capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout)
+        assert output[0] == 42 and output[2] == ["argument with spaces"]
+        cached = Path(output[1])
+        assert cached.is_relative_to(Path(apr.python_cache_args(root)[1].split("=", 1)[1]))
+        current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
+        if cached_before is not None:
+            assert current == cached_before
+        cached_before = current
+        assert snapshot() == before
+    assert dict(os.environ) == environment
+
+
 @pytest.fixture(autouse=True)
 def _clean_context(monkeypatch):
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -72,7 +138,7 @@ def test_legacy_resolution_is_generic_over_plugin_id(monkeypatch, tmp_path):
     )
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     assert apr.resolve_installed_plugin_command("agent-bridge") == [
-        str(python), "-m", "agent_bridge"
+        str(python), *apr.python_cache_args(root), "-m", "agent_bridge"
     ]
 
 
@@ -101,7 +167,7 @@ def test_legacy_resolution_skips_a_complete_slot_missing_its_interpreter(
     )
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     assert apr.resolve_installed_plugin_command("agent-bridge") == [
-        str(good_python), "-m", "agent_bridge"
+        str(good_python), *apr.python_cache_args(root), "-m", "agent_bridge"
     ]
 
 
@@ -183,7 +249,7 @@ def test_namespaced_root_used_when_policy_enabled_and_context_matches(
     # coincidental legacy hit.
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "no-legacy-here"))
     assert apr.resolve_installed_plugin_command("agent-worktrees") == [
-        str(python), "-m", "agent_worktrees"
+        str(python), *apr.python_cache_args(python.parents[3]), "-m", "agent_worktrees"
     ]
 
 
@@ -207,7 +273,7 @@ def test_call_scoped_context_is_authoritative_without_changing_process_environme
     }
     assert apr.resolve_installed_plugin_command(
         "agent-worktrees", environment=environment,
-    ) == [str(python), "-m", "agent_worktrees"]
+    ) == [str(python), *apr.python_cache_args(python.parents[3]), "-m", "agent_worktrees"]
     environment["COPILOT_EXTENSIONS_CONTEXT"] = str(home / "missing/install.json")
     assert apr.resolve_installed_plugin_command(
         "agent-worktrees", environment=environment,
@@ -307,7 +373,7 @@ def test_runtime_inspection_uses_real_read_only_primitive(
         namespaced_python if selection == "namespaced" else legacy_python
     )
     expected_command = (
-        [str(selected_python), "-m", "agent_worktrees"]
+        [str(selected_python), *apr.python_cache_args(selected_python.parents[3]), "-m", "agent_worktrees"]
         if selection is not None else None
     )
     for _ in range(2):
@@ -443,7 +509,7 @@ def test_namespaced_context_falls_back_to_legacy_when_both_present(
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "legacy"))
     assert apr.resolve_installed_plugin_command("agent-worktrees") == [
-        str(namespaced_python), "-m", "agent_worktrees"
+        str(namespaced_python), *apr.python_cache_args(namespaced_python.parents[3]), "-m", "agent_worktrees"
     ]
 
 

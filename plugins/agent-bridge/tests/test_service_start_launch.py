@@ -11,11 +11,16 @@ never routes through the ``.cmd`` shim.
 
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
+import subprocess
 import sys
 
 import pytest
 
 from agent_bridge import __main__ as m
+from agent_procutil import no_window_kwargs, python_cache_args
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +34,7 @@ def test_launch_argv_uses_interpreter_not_bare_name():
     assert argv != ["agent-bridge", "start"]
     # Runs the daemon as a module through a resolved interpreter.
     assert argv[0] == sys.executable
-    assert argv[1:] == ["-m", "agent_bridge", "start"]
+    assert argv[1:] == [*python_cache_args(m._INSTALL_DIR), "-m", "agent_bridge", "start"]
 
 
 def test_launch_argv_falls_back_to_venv_python(monkeypatch, tmp_path):
@@ -43,13 +48,13 @@ def test_launch_argv_falls_back_to_venv_python(monkeypatch, tmp_path):
     py.write_text("")
     monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
     argv = m._daemon_launch_argv()
-    assert argv == [str(py), "-m", "agent_bridge", "start"]
+    assert argv == [str(py), *python_cache_args(tmp_path), "-m", "agent_bridge", "start"]
 
 
 def test_launch_argv_uses_console_interpreter_for_descendant_containment(monkeypatch):
     monkeypatch.setattr(m.sys, "executable", "PYTHON")
     argv = m._daemon_launch_argv()
-    assert argv == ["PYTHON", "-m", "agent_bridge", "start"]
+    assert argv == ["PYTHON", *python_cache_args(m._INSTALL_DIR), "-m", "agent_bridge", "start"]
 
 
 def test_launch_argv_falls_back_to_binstub_on_path(monkeypatch, tmp_path):
@@ -60,6 +65,44 @@ def test_launch_argv_falls_back_to_binstub_on_path(monkeypatch, tmp_path):
     monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/agent-bridge")
     argv = m._daemon_launch_argv()
     assert argv == ["/usr/bin/agent-bridge", "start"]
+
+
+def test_daemon_python_prefix_caches_cold_and_warm_imports_outside_the_slot(monkeypatch, tmp_path):
+    root = tmp_path / "runtime with spaces"
+    slot = root / "versions" / "1.0.0"
+    slot.mkdir(parents=True)
+    source = slot / "cache_probe.py"
+    source.write_text("value = 42\n", encoding="utf-8")
+    before = source.read_bytes(), source.stat().st_mtime_ns, source.stat().st_ino
+    monkeypatch.setattr(m, "_INSTALL_DIR", str(root))
+    caller_env = dict(os.environ)
+    command = m._daemon_launch_argv()
+    program = (
+        "import json,sys;sys.path.insert(0,sys.argv[1]);import cache_probe;"
+        "print(json.dumps({'cached':cache_probe.__cached__,'prefix':sys.pycache_prefix,"
+        "'enabled':not sys.dont_write_bytecode,'value':cache_probe.value}))"
+    )
+    command = [*command[:command.index("-m")], "-c", program, str(slot)]
+    env = {key: value for key, value in os.environ.items() if key != "PYTHONDONTWRITEBYTECODE"}
+    env["PYTHONPYCACHEPREFIX"] = str(tmp_path / "wrong ambient cache")
+    previous = None
+    for _cycle in range(2):
+        result = subprocess.run(
+            command, env=env, capture_output=True, text=True, check=True, timeout=30,
+            **no_window_kwargs(),
+        )
+        observed = json.loads(result.stdout)
+        cache = Path(observed["cached"])
+        assert observed["enabled"] and observed["value"] == 42
+        assert cache.is_relative_to(Path(observed["prefix"])) and cache.is_file()
+        assert observed["prefix"] == python_cache_args(root)[1].partition("=")[2]
+        current = cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino
+        if previous is not None:
+            assert current == previous
+        previous = current
+    assert not list(slot.rglob("*.pyc"))
+    assert (source.read_bytes(), source.stat().st_mtime_ns, source.stat().st_ino) == before
+    assert dict(os.environ) == caller_env
 
 
 def test_cmd_start_imports_cleanly_on_this_platform(monkeypatch, tmp_path):

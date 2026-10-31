@@ -311,6 +311,10 @@ Mux routes and target readiness use the constructed slot's immutable generation,
 including repair/source qualifiers. Health preserves the semantic package
 `version` and separately reports `runtime_generation` from its own interpreter
 prefix, never from the mutable selected marker.
+Normal mux-daemon startup uses the
+[external Python bytecode cache](../libs/agent-procutil/README.md#managed-python-bytecode-cache)
+under Manager's durable root. Explicitly read-only retention/bootstrap controls
+keep their separate no-bytecode contract.
 The retained launch-session registration and pane-wrapper removal callbacks
 also use that payload's constructed interpreter and retention bootstrap, without
 requiring `uv`. Their bounded metadata work is dispatched through the existing
