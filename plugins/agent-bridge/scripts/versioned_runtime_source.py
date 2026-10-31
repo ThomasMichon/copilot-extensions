@@ -9,11 +9,11 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
+import shutil as shutil
 import stat
 import sys
 import tempfile
-import time
+import time as time
 from types import ModuleType
 from typing import Any
 
@@ -538,32 +538,11 @@ def publish_source_snapshot(payload: Path, root: Path, identity: SourceIdentity)
 
     verify(payload)
     snapshots = root / "snapshots"
-    snapshot = snapshots / identity.runtime_version
     snapshots.mkdir(parents=True, exist_ok=True)
     runtime = _runtime()
-    with runtime.construction_lease(snapshots, identity.runtime_version):
-        verify(payload)
-        if snapshot.exists() or snapshot.is_symlink():
-            verify(snapshot)
-            verify(payload)
-            return snapshot
-        with tempfile.TemporaryDirectory(prefix=".source-", dir=snapshots) as temporary:
-            candidate = Path(temporary) / "payload"
-            shutil.copytree(payload, candidate, symlinks=True)
-            for attempt in range(runtime._AV_RETRY_ATTEMPTS):
-                verify(candidate)
-                verify(payload)
-                try:
-                    candidate.rename(snapshot)
-                    break
-                except OSError as error:
-                    if (
-                        getattr(error, "winerror", None) not in (5, 32, 33)
-                        or attempt == runtime._AV_RETRY_ATTEMPTS - 1
-                    ):
-                        raise
-                    time.sleep(runtime._AV_RETRY_BACKOFF * (attempt + 1))
-        return snapshot
+    return runtime._runtime_component("versioned_runtime_construction").publish_source_snapshot(
+        payload, snapshots, identity.runtime_version, runtime=runtime, verify=verify,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -616,7 +595,7 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-def fingerprint_source(paths, *, _normalize_windows_extended_path) -> str:
+def fingerprint_source(paths, *, _normalize_windows_extended_path, on_progress=None) -> str:
     """Return a stable sha256 fingerprint over a frozen set of source paths.
 
     Covers the FULL attributable runtime install input, not just one
@@ -975,6 +954,8 @@ def fingerprint_source(paths, *, _normalize_windows_extended_path) -> str:
         # only by unframed leading bytes.
         digest.update(_frame(entries[f].encode("utf-8")))
         digest.update(_frame(data))
+        if on_progress is not None:
+            on_progress()
 
     ordered = sorted(entries, key=_label)
     if len(ordered) < 2:

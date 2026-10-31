@@ -4,11 +4,45 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import stat
 import sys
+import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Callable, ContextManager
+
+
+def publish_source_snapshot(
+    payload: Path, snapshots: Path, version: str, *, runtime: ModuleType,
+    verify: Callable[[Path], None],
+) -> Path:
+    snapshot = snapshots / version
+    with runtime.construction_lease(snapshots, version):
+        verify(payload)
+        if snapshot.exists() or snapshot.is_symlink():
+            verify(snapshot)
+            verify(payload)
+            return snapshot
+        with tempfile.TemporaryDirectory(prefix=".source-", dir=snapshots) as temporary:
+            candidate = Path(temporary) / "payload"
+            shutil.copytree(payload, candidate, symlinks=True)
+            for attempt in range(runtime._AV_RETRY_ATTEMPTS):
+                verify(candidate)
+                verify(payload)
+                try:
+                    candidate.rename(snapshot)
+                    break
+                except OSError as error:
+                    if (
+                        getattr(error, "winerror", None) not in (5, 32, 33)
+                        or attempt == runtime._AV_RETRY_ATTEMPTS - 1
+                    ):
+                        raise
+                    time.sleep(runtime._AV_RETRY_BACKOFF * (attempt + 1))
+        return snapshot
 
 
 def read_completion(path: Path, *, object_pairs_hook: Callable) -> object:

@@ -25,13 +25,16 @@ import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 from installer_dependency_policy import (
     DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, _file_uri, _native_retained_path,
-    _private_retained_root, _select_uv_executable, _temporary_inputs,
-    retain_closed_wheel_install, retain_uv_install,
+    _private_retained_root as _private_retained_root, _select_uv_executable,
+    _temporary_inputs as _temporary_inputs,
+    retain_closed_wheel_install as retain_closed_wheel_install, retain_uv_install as retain_uv_install,
 )
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
 from installer_wheel_inputs import _check_deadline, _ordinary
 from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs, _digest, _open, _unchanged
-from installer_source_build import SourceWheelInputs, retained_source_wheels
+from installer_source_build import (
+    SourceWheelInputs, _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
+)
 
 _GENERATED_DIRECTORIES = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs",
@@ -109,8 +112,11 @@ def _selected_extras(plugin: Path, extras: tuple[str, ...]) -> tuple[str, ...]:
 def _construction_hash(
     files: tuple[Path, ...], extras: tuple[str, ...],
     local_packages: tuple[str, ...] | None = None,
+    *, on_progress: Callable[[], None] | None = None,
 ) -> str:
-    source_hash = runtime.fingerprint_source(files)
+    source_hash = runtime.fingerprint_source(
+        files, **({"on_progress": on_progress} if on_progress is not None else {}),
+    )
     if not extras and local_packages is None:
         return source_hash
     profile: dict[str, object] = {"source_hash": source_hash, "extras": extras}
@@ -225,7 +231,9 @@ def _excluded_packages(inputs: FrozenInputs) -> list[str]:
     return sorted({_package_name(package) for package in inputs.packages} - set(inputs.local_packages))
 
 
-def _source_files(roots: tuple[Path, ...]) -> tuple[Path, ...]:
+def _source_files(
+    roots: tuple[Path, ...], *, on_progress: Callable[[], None] | None = None,
+) -> tuple[Path, ...]:
     files: set[Path] = set()
 
     def scan_error(error: OSError) -> None:
@@ -247,10 +255,15 @@ def _source_files(roots: tuple[Path, ...]) -> tuple[Path, ...]:
                     raise ValueError(f"Runtime input file is not ordinary: {path}")
                 if not name.endswith((".pyc", ".pyo")):
                     files.add(path)
+            if on_progress is not None:
+                on_progress()
     return tuple(sorted(files))
 
 
-def freeze_inputs(plugin: Path, destination: Path, *, deadline: float | None = None) -> FrozenInputs:
+def freeze_inputs(
+    plugin: Path, destination: Path, *, deadline: float | None = None,
+    on_progress: Callable[[], None] | None = None,
+) -> FrozenInputs:
     """Copy and verify all local package inputs before admitting a numbered build.
 
     The caller owns a fresh destination outside the input trees. Relative package
@@ -266,8 +279,9 @@ def freeze_inputs(plugin: Path, destination: Path, *, deadline: float | None = N
     for root in roots:
         if destination == root or destination.is_relative_to(root):
             raise ValueError(f"Frozen input destination is inside runtime source: {destination}")
-    files = _source_files(roots)
-    before = runtime.fingerprint_source(files)
+    progress = {"on_progress": on_progress} if on_progress is not None else {}
+    files = _source_files(roots, **progress)
+    before = runtime.fingerprint_source(files, **progress)
     destination.mkdir(parents=True, exist_ok=False)
     try:
         for source in files:
@@ -288,17 +302,21 @@ def freeze_inputs(plugin: Path, destination: Path, *, deadline: float | None = N
                 _native_retained_path(target) if deadline is not None else target,
                 follow_symlinks=False,
             )
+            if deadline is not None:
+                _check_deadline(deadline)
+            if on_progress is not None:
+                on_progress()
         frozen_roots = tuple(destination / root.relative_to(common) for root in roots)
         frozen_plugin = destination / plugin.relative_to(common)
         if _package_roots(frozen_plugin) != tuple(sorted(frozen_roots)):
             raise RuntimeError("Runtime dependency graph changed while freezing inputs")
-        after_files = _source_files(roots)
+        after_files = _source_files(roots, **progress)
         if after_files != files:
             changed = sorted(set(after_files).symmetric_difference(files))
             detail = ", ".join(str(path.relative_to(common)) for path in changed[:10])
             raise RuntimeError(f"Runtime input file set changed while freezing inputs: {detail}")
-        after = runtime.fingerprint_source(files)
-        frozen_hash = runtime.fingerprint_source(_source_files(frozen_roots))
+        after = runtime.fingerprint_source(files, **progress)
+        frozen_hash = runtime.fingerprint_source(_source_files(frozen_roots, **progress), **progress)
         if before != after or before != frozen_hash:
             raise RuntimeError("Runtime input content changed while freezing inputs")
         if deadline is not None:
@@ -330,71 +348,31 @@ def _procutil(inputs: FrozenInputs) -> ModuleType:
 
 
 @contextmanager
-def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool):
-    if isinstance(inputs.wheel_inputs, WheelReuseInputs):
-        raise ValueError("Existing wheel evidence cannot construct a runtime")
-    if inputs.wheel_inputs is not None:
-        if refresh:
-            raise ValueError("Closed wheels require immutable numbered construction")
-        with _temporary_inputs(None) as temporary:
-            root = _private_retained_root(Path(temporary)).resolve()
-            frozen = freeze_inputs(inputs.plugin, root / "source", deadline=inputs.wheel_inputs.deadline)
-            if _wheel_construction_hash(
-                _construction_hash(_source_files(frozen.packages), inputs.extras, inputs.local_packages),
-                inputs.wheel_inputs,
-            ) != inputs.payload_hash:
-                raise RuntimeError("Runtime source changed before closed wheel construction")
-            with retain_closed_wheel_install(str(uv), inputs.wheel_inputs.snapshot, python=python) as transaction:
-                yield FrozenInputs(
-                    frozen.plugin, frozen.packages, inputs.payload_hash, transaction,
-                    frozen.payload_hash, inputs.extras, inputs.local_packages, inputs.wheel_inputs,
-                )
-        return
-    files = _source_files(inputs.packages)
-    environment = dict(os.environ)
-    for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
-        environment.pop(name, None)
-    selected = _installed_packages(inputs)
-    with retain_uv_install(
-        str(Path(_select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)),
-        ["--python", str(python), "--no-editable", "--link-mode", "copy" if refresh else "hardlink",
-         *(["--reinstall"] if refresh else []),
-         *(argument for package in selected
-           for argument in ("-r", str(package / "pyproject.toml"))),
-         *(str(package) + (
-             f"[{','.join(inputs.extras)}]" if package == inputs.plugin and inputs.extras else ""
-         ) for package in selected)],
-        env=environment, cwd=inputs.plugin,
-        trusted_source_roots=inputs.packages,
-        excluded_local_packages=tuple(_excluded_packages(inputs)),
-    ) as transaction:
-        if set(transaction.sources) != set(inputs.packages):
-            raise RuntimeError("Retained UV inputs differ from the runtime dependency graph")
-        if (
-            _package_roots(inputs.plugin) != inputs.packages
-            or _source_files(inputs.packages) != files
-            or _construction_hash(files, inputs.extras, inputs.local_packages) != inputs.payload_hash
-        ):
-            raise RuntimeError("Runtime inputs changed while retaining UV inputs")
-        if not set(files) <= set(transaction.source_hashes):
-            raise RuntimeError("Retained UV inputs do not cover the runtime source files")
-        changed = [
-            path for path in files
-            if hashlib.sha256(path.read_bytes()).hexdigest() != transaction.source_hashes[path]
-        ]
-        if changed:
-            raise RuntimeError(
-                "Retained UV inputs differ from the admitted source content: "
-                + ", ".join(str(path) for path in changed[:10])
-            )
-        packages = tuple(transaction.sources[path] for path in inputs.packages)
-        plugin = transaction.sources[inputs.plugin]
-        yield FrozenInputs(
-            plugin, packages, inputs.payload_hash, transaction,
-            runtime.fingerprint_source(_source_files(packages)),
-            inputs.extras,
-            inputs.local_packages,
-        )
+def _retained_inputs(
+    inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool, timeout: float = 180,
+):
+    with ExitStack() as owner:
+        with _source_phase("retention", timeout, {}) as progress:
+            def completed() -> None:
+                _source_deadline(progress)
+                progress.renew()
+
+            frozen = owner.enter_context(_retained_input_graph(
+                inputs, uv, python, refresh=refresh, on_progress=completed,
+            ))
+        yield frozen
+
+
+@contextmanager
+def _retained_input_graph(
+    inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool,
+    on_progress: Callable[[], None],
+):
+    with retained_input_graph(
+        inputs, uv, python, refresh=refresh, on_progress=on_progress,
+        engine=sys.modules[__name__],
+    ) as frozen:
+        yield frozen
 
 
 def _child(
@@ -834,13 +812,21 @@ def _candidate(
         if not selected <= installed or (included - selected) & installed:
             raise ValueError("Inspected wheels differ from the selected local dependency graph")
     (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
-    inputs = FrozenInputs(
-        plugin.resolve(strict=True), packages,
-        _wheel_construction_hash(
-            _construction_hash(_source_files(packages), extras, local_packages), wheel_inputs,
-        ),
-        extras=extras, local_packages=local_packages, wheel_inputs=wheel_inputs,
-    )
+    with _source_phase("source-selection", child_timeout, {}) as progress:
+        def selected() -> None:
+            _source_deadline(progress)
+            progress.renew()
+
+        inputs = FrozenInputs(
+            plugin.resolve(strict=True), packages,
+            _wheel_construction_hash(
+                _construction_hash(
+                    _source_files(packages, on_progress=selected), extras, local_packages,
+                    on_progress=selected,
+                ), wheel_inputs,
+            ),
+            extras=extras, local_packages=local_packages, wheel_inputs=wheel_inputs,
+        )
     with ExitStack() as retained:
         if dev_owner is not None:
             _check_dev_owner(root, dev_owner)
@@ -904,7 +890,7 @@ def _candidate(
                         runtime.marker_path(root, version).unlink(missing_ok=True)
                     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
                     inputs = retained.enter_context(_retained_inputs(
-                        inputs, uv, python, refresh=dev_owner is not None,
+                        inputs, uv, python, refresh=dev_owner is not None, timeout=child_timeout,
                     ))
                     if dev_owner is None and wheel_inputs is None:
                         def run_source_build(argv, **options):
