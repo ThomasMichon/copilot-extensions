@@ -4,7 +4,7 @@
   for multi-session, multi-wave work.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-30
+- **Last revised:** 2026-10-31
 - **Reality docs:** [`efforts/README.md`](../../../efforts/README.md) ·
   [`docs/harness-runbook.md`](../../../docs/harness-runbook.md) ·
   [`plugins/efforts/README.md`](../../../plugins/efforts/README.md) ·
@@ -137,6 +137,20 @@ A prerequisite detour has a saved parent return point, not just another effort
 binding. Nested children can finish and unwind to the correct parent agenda
 without losing the root objective. Returning refreshes relevant state and
 validation instead of blindly repeating external effects.
+
+### reversible-deferred-agenda-branches
+
+An adopted agenda can preserve a genuinely blocked branch with its original
+root, work stack, return action, evidence and limits while the agent advances
+another authorized avenue. Agents can refine trees within their accepted scope
+without inventing unrelated assignments or losing unresolved responsibility.
+
+### decision-ready-revisits
+
+A deferred node can retain real attempt/check times, the pending proposal or
+decision and an explicit revisit point. A due time or an actual response prompts
+current-condition reinspection, not consent, effect replay or false completion.
+Active and deferred work remains legible across checkpoints and handoffs.
 
 ## Behaviors
 
