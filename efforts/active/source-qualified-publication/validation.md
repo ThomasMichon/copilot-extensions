@@ -2,6 +2,26 @@
 
 ## Existing checkpoint current-base validation (2026-10-31)
 
+### Fresh-review correction
+
+Current-head review of `145f5f2dae` found two Medium private-model defects.
+Four focused regressions ran fail-first against unchanged source:
+**4 failed, 58 deselected in 1.08s**, exit 1. Snapshot and feed absence for
+never-retained IDs could not settle a covered `not-found` intent; equal-healthy
+and older-stale point interleavings bypassed partition-admitted availability
+in returned records.
+
+The correction consults committed complete-roster absence only when an identity
+is absent from both the published roster and retained point rows. Returned
+records now expose the partition's already-admitted availability. The expanded
+same two-file contained packet reports **87 passed in 3.03s**, exit 0.
+It also proves a retained newer point prevents old absence confirmation and a
+later authoritative absence confirms again. Existing heartbeat/order controls
+remain selected. No shared parser, public API or production importer changed.
+Captured fail-first/passing streams and real JUnit are retained separately.
+
+### Reconciled unchanged-source packet
+
 The supported owned-branch sync preserved `9e84151644` and reconciled onto
 current `dev`, producing `9ccc1381f2`. The reducer and focused test bytes are
 unchanged by reconciliation. The existing changefile remains present; production

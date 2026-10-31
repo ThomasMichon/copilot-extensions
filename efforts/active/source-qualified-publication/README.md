@@ -191,6 +191,11 @@ it does not expand F1 into launch, installer or owner-side effects.
 ## Journal
 
 ### 2026-10-31 — Existing private checkpoint reconciled for source review
+- Fresh review of `145f5f2dae` identified two Medium private-model defects:
+  unseen-ID absence receipts remained pending, and row-local availability
+  bypassed the partition's revision/freshness admission. Four new cases fail
+  against unchanged source; the surgical correction passes the complete
+  87-case reducer/F1 packet. No production or shared parser files changed.
 - Source-only checkpoint acceptance now permits driving existing #8530 through
   its normal current-head review, required CI and managed merge gates.
   This does not admit production F3 wiring, F2 receipts, F4 maintenance,

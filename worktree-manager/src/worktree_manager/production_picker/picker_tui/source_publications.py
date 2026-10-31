@@ -207,7 +207,10 @@ class _Partition:
         if receipt.status not in {"published", "not-found"}:
             return receipt.status
         if receipt.status == "not-found":
-            return ("confirmed" if self.tombstones.get(receipt.worktree_id, 0)
+            wid = receipt.worktree_id
+            absence = (self.absence_revision if wid not in self.published_ids
+                       and wid not in self.rows else 0)
+            return ("confirmed" if max(self.tombstones.get(wid, 0), absence)
                     >= receipt.revision else "pending")
         row = self.rows.get(receipt.worktree_id)
         facts = {} if row is None else row["_observations"]
@@ -396,7 +399,9 @@ class _SourcePublications:
 
     def records(self, source: str | None = None):
         return _freeze({
-            (selected, project, wid): deepcopy(partition.rows[wid])
+            (selected, project, wid): deepcopy({
+                **partition.rows[wid], "_availability": partition.availability,
+            })
             for (selected, project), partition in self._partitions.items()
             if source is None or selected == source
             for wid in partition.order if wid in partition.rows

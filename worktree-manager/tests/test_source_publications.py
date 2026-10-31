@@ -759,3 +759,45 @@ def test_full_roster_order_work_has_no_per_row_linear_membership(size, monkeypat
     assert [key[2] for key in store.records()] == [str(i) for i in range(size)]
     print(f"order-work rows={size} fresh={fresh} refresh={refreshed}")
     assert fresh == refreshed == {"membership_calls": 0, "equality_checks": 0}
+
+
+@pytest.mark.parametrize("kind", ["snapshot", "feed"])
+def test_unseen_absence_receipt_uses_complete_roster_but_not_retained_point(kind):
+    store, epoch = seeded(items=[])
+    receipt = _Receipt("unseen", PROJECT, "tree", G, "not-found", 12)
+    assert store.note_receipt(SOURCE, epoch, receipt)
+    assert state(store)["receipts"]["tree", "unseen"] == "pending"
+    if kind == "snapshot":
+        assert snapshot(store, epoch, envelope(13, []))
+    else:
+        assert feed(store, epoch, update(13, order=(), base=10))
+    assert state(store)["receipts"]["tree", "unseen"] == "confirmed"
+    assert point(store, epoch, envelope(14, [row(revision=14)]))
+    assert state(store)["receipts"]["tree", "unseen"] == "pending"
+    assert snapshot(store, epoch, envelope(13, []))
+    assert record(store)["semantic_revision"] == 14
+    assert state(store)["receipts"]["tree", "unseen"] == "pending"
+    assert snapshot(store, epoch, envelope(15, []))
+    assert state(store)["receipts"]["tree", "unseen"] == "confirmed"
+
+
+@pytest.mark.parametrize("interleaving", ["equal-healthy", "older-stale"])
+def test_records_use_revision_admitted_partition_availability(interleaving):
+    store, epoch = seeded([row(), row("other")])
+    warning = {"status": "stale", "reason": "owner publication failed"}
+    if interleaving == "equal-healthy":
+        control = availability_control(value=warning)
+        control["projection"] = envelope(items=[row(), row("other")])["projection"]
+        assert feed(store, epoch, [control])
+        assert point(store, epoch, envelope(count=2))
+        assert state(store)["stale"]
+        assert all(dict(value["_availability"]) == warning
+                   for value in store.records().values())
+        assert snapshot(store, epoch, envelope(items=[row(), row("other")]))
+    else:
+        assert point(store, epoch, envelope(12, [row(revision=12)], count=2))
+        delayed = envelope(11, [row("other", revision=11)], count=2)
+        delayed["availability"] = warning
+        assert point(store, epoch, delayed, wid="other")
+    assert not state(store)["stale"]
+    assert all(value["_availability"] is None for value in store.records().values())

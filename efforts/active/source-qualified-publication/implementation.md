@@ -326,6 +326,8 @@ generation-reset staleness. Older availability cannot override newer evidence;
 at equal revision a warning is conservative until an explicitly fresh snapshot
 or canonical current-epoch availability control clears it. A healthy point or
 feed cannot clear a pending snapshot/reset fence.
+Returned records use that partition-admitted availability, not a row-local
+warning that can bypass the source revision/freshness decision.
 
 A lone validated heartbeat delegates to the existing receiver's read-only
 heartbeat checks without copying the partition, feed, frames or rows. Epoch,
@@ -361,7 +363,11 @@ larger project cursor or heartbeat; pending/degraded intents prove nothing.
 Pending/degraded intents may receive a later confirmed intent for the same
 request; conflicting confirmed intents require a new request. Generation
 replacement invalidates old intents. There is no effect execution or replay
-path. Absence confirmation requires a committed revision-qualified tombstone.
+path. Absence confirmation requires committed revision-qualified deletion or
+complete-roster absence.
+Complete-roster absence also confirms an unseen identity once its committed
+absence revision covers the receipt fence; an identity still present in the
+roster or retained newer point rows cannot use that absence evidence.
 Returned records/status are recursively read-only detached values.
 
 These are model admission choices for review, not production wiring admission.
