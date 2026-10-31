@@ -18,6 +18,7 @@ from typing import Callable, ContextManager
 def publish_source_snapshot(
     payload: Path, snapshots: Path, version: str, *, runtime: ModuleType,
     verify: Callable[[Path], None],
+    on_progress: Callable[[], None] | None = None,
 ) -> Path:
     snapshot = snapshots / version
     with runtime.construction_lease(snapshots, version):
@@ -28,7 +29,16 @@ def publish_source_snapshot(
             return snapshot
         with tempfile.TemporaryDirectory(prefix=".source-", dir=snapshots) as temporary:
             candidate = Path(temporary) / "payload"
-            shutil.copytree(payload, candidate, symlinks=True)
+            def copy(origin, destination):
+                result = shutil.copy2(origin, destination)
+                if on_progress is not None:
+                    on_progress()
+                return result
+
+            shutil.copytree(
+                payload, candidate, symlinks=True,
+                **({"copy_function": copy} if on_progress is not None else {}),
+            )
             for attempt in range(runtime._AV_RETRY_ATTEMPTS):
                 verify(candidate)
                 verify(payload)

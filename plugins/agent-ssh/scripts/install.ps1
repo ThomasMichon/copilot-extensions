@@ -636,7 +636,7 @@ function Get-SourceRuntimeIdentity {
         '--plugin', 'agent-ssh', '--format', 'json')
     if ($ExpectedVersion) { $arguments += @('--expected-runtime-version', $ExpectedVersion) }
     $nativeError = ''
-    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+    $detail = Invoke-Hidden -FilePath $py -ArgList $arguments -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
     $code = $LASTEXITCODE
     if ($code -ne 0) { throw "Source runtime identity validation failed: $detail$nativeError" }
     return $detail.Trim()

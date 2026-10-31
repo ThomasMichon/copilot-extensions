@@ -15,8 +15,26 @@ reaches the native observer before a subsequent near-allowance copy finishes;
 no periodic or fixture heartbeat keeps that productive sequence alive.
 Deterministic controls separately refuse late completed work and changed source,
 and closed-wheel deadline controls retain their absolute bounds. These checks
-do not qualify deferred source stamping, every native self-stage watchdog or
-an installed whole-update footprint.
+do not qualify every native self-stage watchdog or an installed whole-update
+footprint.
+
+`libs/versioned-runtime/tests/test_runtime_source_native.py` separately exercises
+stderr-only streaming through both native PowerShell hosts. Actual no-newline
+output outlives the quiet allowance while captured stdout, diagnostics, stdin
+and nonzero exit results remain unchanged. Native byte relays preserve BOM,
+invalid UTF-8 and line-ending bytes independently of the original text decoder.
+A failed native sink must finish the original producer and relay Jobs' real
+empty-process checks before returning an error. The actual Worktrees source
+wrapper advances through delayed hashing and snapshot copies; a silent copy
+is stopped by that same owner without changing the source or publishing a
+candidate. Snapshot units independently refuse a failed progress sink and
+reacquire the original publication lease after cleanup. Containers' fresh stamp
+uses its declared `python` installation-context prerequisite and creates only a
+snapshot and front door, not a runtime. Separate launcher-only probes still
+cover source selection without a direct Python command. The Windows Git Bash
+resolver fixture has a 30-second outer guard for cold native discovery; other
+hosts and production allowances are unchanged. Git Bash with Windows Python
+does not qualify native POSIX behavior or an installed whole-update footprint.
 An open undrained pipe must not starve supervision. A slow draining pipe
 separately proves acknowledged native writes renew the delivery allowance after
 installer exit. Legacy log/observer failures occur only after owned writers have
