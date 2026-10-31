@@ -867,6 +867,10 @@ The [review owner-store data APIs](docs/review-owner-store.md) explicitly extend
 the same durable replay owner with selected review intents and fenced native
 receipts. They are not a backend executor or serving authorization.
 
+The [protected review executor](docs/protected-review-executor.md) orchestrates
+selected actions over those same records and the actual existing owner's pinned
+write transport. Source support is not installed backend authority or adoption.
+
 The [explicit generation cache](docs/generation-cache.md) stores retained
 immutable views with CAS publication; it starts no provider read or service
 and is separate from replay state and submission receipts.
