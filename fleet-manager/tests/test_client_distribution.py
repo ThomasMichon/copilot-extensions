@@ -368,6 +368,63 @@ def test_real_client_install_doctor_and_package_manager_removal_preserve_config(
     assert not list(state.glob("*komodo*"))
 
 
+def gateway_context_inputs(recipe: Path) -> tuple[set[str], list[str]]:
+    copied = set()
+    for line in (recipe / "Dockerfile").read_text(encoding="utf-8").replace("\\\n", " ").splitlines():
+        if not line.startswith("COPY "):
+            continue
+        words = shlex.split(line)
+        copied.update(name for name in words[1:-1] if name.startswith("libs/"))
+    patterns = (recipe / "Dockerfile.dockerignore").read_text(encoding="utf-8").splitlines()
+    return copied, patterns
+
+
+def gateway_context_supplies(name: str, copied: set[str], patterns: list[str]) -> bool:
+    included = True
+    for pattern in patterns:
+        if pattern and not pattern.startswith("#"):
+            allow = pattern.startswith("!")
+            if fnmatch.fnmatchcase(name, pattern.removeprefix("!").rstrip("/")):
+                included = allow
+    return included and (
+        name in copied or any(source.endswith("/") and name.startswith(source) for source in copied)
+    )
+
+
+def test_gateway_docker_context_delivers_complete_procutil_source_closure(tmp_path):
+    repository = PROJECT.parent
+    path = repository / "tools" / "clean-room" / "gateway-role-tunnels" / "source.py"
+    spec = importlib.util.spec_from_file_location("gateway_procutil_source", path)
+    assert spec and spec.loader
+    source = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(source)
+    prefix = "libs/agent-procutil/src/agent_procutil/"
+    declared = {name for name in source.REQUIRED if name.startswith(prefix)}
+    actual = {
+        module.relative_to(repository).as_posix()
+        for module in (repository / prefix).glob("*.py")
+    }
+    assert {name for name in declared if name.endswith(".py")} == actual
+    copied, patterns = gateway_context_inputs(PROJECT / "containers" / "gateway")
+    missing = {name for name in declared if not gateway_context_supplies(name, copied, patterns)}
+    assert not missing, f"Gateway Docker context excludes procutil source: {sorted(missing)}"
+    inputs = {name for name in source.REQUIRED if name.startswith("libs/agent-procutil/")}
+    context = tmp_path / "context"
+    for name in inputs:
+        assert gateway_context_supplies(name, copied, patterns), name
+        target = context / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(repository / name, target)
+    output = tmp_path / "procutil-wheel"
+    result = build(context / "libs" / "agent-procutil", output)
+    assert result.returncode == 0, result.stderr
+    with zipfile.ZipFile(next(output.glob("*.whl"))) as artifact:
+        for name in declared:
+            member = "agent_procutil/" + name.removeprefix(prefix)
+            assert artifact.namelist().count(member) == 1, member
+            assert artifact.read(member) == (repository / name).read_bytes(), member
+
+
 @pytest.mark.parametrize("context_kind", ["repository", "pinned"])
 def test_gateway_build_inputs_deliver_the_complete_runtime_family(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, context_kind: str,
@@ -417,13 +474,7 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
         project, library = context / "fleet-manager", context / "libs" / "versioned-runtime"
         recipe = context / "fleet-manager" / "containers" / "gateway"
 
-    copied = set()
-    for line in (recipe / "Dockerfile").read_text(encoding="utf-8").replace("\\\n", " ").splitlines():
-        if not line.startswith("COPY "):
-            continue
-        words = shlex.split(line)
-        copied.update(name for name in words[1:-1] if name.startswith("libs/"))
-    patterns = (recipe / "Dockerfile.dockerignore").read_text(encoding="utf-8").splitlines()
+    copied, patterns = gateway_context_inputs(recipe)
     resources = {
         f"libs/versioned-runtime/{resource.name}": resource
         for resource in library.iterdir()
@@ -433,16 +484,7 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
         for relative in PROCESS_RESOURCES.values()
     })
     for name, resource in resources.items():
-        included = True
-        for pattern in patterns:
-            if pattern and not pattern.startswith("#"):
-                allow = pattern.startswith("!")
-                if fnmatch.fnmatchcase(name, pattern.removeprefix("!").rstrip("/")):
-                    included = allow
-        supplied = name in copied or any(
-            source.endswith("/") and name.startswith(source) for source in copied
-        )
-        if not supplied or not included:
+        if not gateway_context_supplies(name, copied, patterns):
             resource.unlink()
 
     output = tmp_path / "artifacts"
