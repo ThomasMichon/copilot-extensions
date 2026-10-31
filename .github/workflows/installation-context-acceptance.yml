@@ -95,6 +95,10 @@ on:
         description: Normal native Job lifetime, cold Worktrees and Manager recovery without Task adoption
         type: boolean
         default: false
+      native_daemon_exit:
+        description: Qualify native daemon status, application cleanup and refusal without other runtime consumers
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -248,7 +252,7 @@ jobs:
           --timeout 120 --plugin-timeout 240 --test-timeout 30
 
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -269,7 +273,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -1116,6 +1120,30 @@ jobs:
             ${{ runner.temp }}/ce-broker-probe-*/result.json
             ${{ runner.temp }}/ce-broker-probe-*/protocol-result.json
           if-no-files-found: error
+
+  native-daemon-exit-windows:
+    if: ${{ inputs.native_daemon_exit }}
+    name: Native daemon exit and custody (disposable Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      PROCUTIL_NATIVE_DAEMON_LIFETIME: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Qualify native target status, application finally and retained custody
+        shell: pwsh
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_native_daemon_cleanup.py
+          --test-file tests/test_native_daemon.py
+          --test-timeout 60 --timeout 600 --plugin-timeout 720
 
   windows-native-process:
     if: ${{ inputs.windows_broker_consumers && !inputs.watch_owner && !inputs.dispatch_delegation }}
