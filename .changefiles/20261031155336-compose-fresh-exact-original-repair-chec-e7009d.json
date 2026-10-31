@@ -1,0 +1,9 @@
+{
+  "comment": "Compose fresh exact-original repair checkpoint authorization without extending permits",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

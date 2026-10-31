@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 CONTRACT = "fleet-manager.komodo-substrate-owner.v1"
 REPAIR_CONTRACT = "fleet-manager.komodo-original-repair.v1"
+CHECKPOINT_REPAIR_CONTRACT = "fleet-manager.komodo-original-repair-checkpoint-auth.v1"
 
 
 def repair_bootstrap(owner: KomodoRepairOwner, identity: RepairIdentity, request: OperationIntent,

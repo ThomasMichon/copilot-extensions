@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 import inspect
 import json
@@ -11,7 +12,7 @@ import socket
 import subprocess
 import sys
 import time
-from typing import Any
+from typing import Any, Iterator
 
 import pytest
 
@@ -200,6 +201,17 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
     return 8, "unsupported-protocol-command"
 
 
+@contextmanager
+def _private_docker_socket() -> Iterator[Path]:
+    from tempfile import TemporaryDirectory
+
+    with TemporaryDirectory(prefix="s") as directory:
+        path = Path(directory) / "s"
+        with socket.socket(socket.AF_UNIX) as bound:
+            bound.bind(str(path))
+            yield path
+
+
 @pytest.fixture
 def native_rig(tmp_path: Path, monkeypatch: Any) -> Any:
     root = Path(__file__).absolute().parents[2]
@@ -220,27 +232,22 @@ def native_rig(tmp_path: Path, monkeypatch: Any) -> Any:
         paths[name] = tmp_path / name
         paths[name].write_bytes((name + "-fixture-material").encode())
         paths[name].chmod(0o600)
-    bound = socket.socket(socket.AF_UNIX)
-    socket_path = tmp_path / "docker.sock"
-    bound.bind(str(socket_path))
-    material = KomodoMaterialization(docker_socket=socket_path, **paths)
-    selected = KomodoDeclaration.from_dict(declaration())
-    script = tmp_path / "docker-fixture.py"
-    script.write_text(
-        "import sys\nPUBLIC_PEM = " + repr(PUBLIC_PEM) + "\n" + inspect.getsource(_docker_protocol)
-        + "\ncode, output = _docker_protocol(sys.argv[1:], "
-        + repr(str(directory)) + ")\nprint(output, end='')\nraise SystemExit(code)\n")
-    executable = Path(sys.executable).resolve()
+    with _private_docker_socket() as socket_path:
+        material = KomodoMaterialization(docker_socket=socket_path, **paths)
+        selected = KomodoDeclaration.from_dict(declaration())
+        script = tmp_path / "docker-fixture.py"
+        script.write_text(
+            "import sys\nPUBLIC_PEM = " + repr(PUBLIC_PEM) + "\n" + inspect.getsource(_docker_protocol)
+            + "\ncode, output = _docker_protocol(sys.argv[1:], "
+            + repr(str(directory)) + ")\nprint(output, end='')\nraise SystemExit(code)\n")
+        executable = Path(sys.executable).resolve()
 
-    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
-        return run_caller_owned([str(executable), str(script), *argv[1:]], **kwargs)
+        def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+            return run_caller_owned([str(executable), str(script), *argv[1:]], **kwargs)
 
-    tooling = KomodoTooling(executable, client_config, "daemon-a", run)
-    try:
+        tooling = KomodoTooling(executable, client_config, "daemon-a", run)
         yield {"native": KomodoNative(tooling), "tooling": tooling, "material": material,
                "selected": selected, "root": tmp_path, "directory": directory}
-    finally:
-        bound.close()
 
 
 def test_fixed_profile_uses_only_official_pinned_images_and_borrowed_secret_files(native_rig: Any) -> None:
