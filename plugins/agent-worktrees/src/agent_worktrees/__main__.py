@@ -6042,6 +6042,7 @@ def _load_full_command_surface() -> None:
         "finalize": cmd_finalize,
         "push-changes": cmd_push_changes,
         "create-pr": cmd_create_pr,
+        "pr-publication-labels": finalize_cli.cmd_publication_labels,
         "pr-create": cmd_create_pr,  # pr-* family alias (also rewritten pre-argparse)
         "attribution-audit": cmd_attribution_audit,
         "attribution-prepare": __import__(f"{__package__}.attribution_prepare_cli", fromlist=["cmd_attribution_prepare"]).cmd_attribution_prepare,
