@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import stat
 import sys
+import uuid
 from typing import Any, Iterator
 
 from .komodo_profile import ordinary_path
@@ -168,11 +169,16 @@ class KomodoState:
         self.check()
         content = canonical(value)
         pending = self.root / "selection.pending"
+        if not pending.exists() and not pending.is_symlink():
+            # An unpublished partial write must not pin a later admitted revision.
+            pending = self.root / (".selection.write-" + uuid.uuid4().hex)
         _complete_pending(pending, content)
         current = self.root / "selection.json"
         if current.exists():
             read_private_file(current, 1024 * 1024)
         self.check()
+        if read_private_file(pending, 1024 * 1024) != content:
+            raise PlanError("Komodo pending selection changed before publication")
         os.replace(pending, current)
         _flush(self.root)
 

@@ -14,6 +14,7 @@ REPAIR_PROBE = r"""
 from dataclasses import replace
 from agent_procutil.owned_process import run_caller_owned
 import fleet_manager.komodo_control as control
+import fleet_manager.komodo_state as state_module
 from fleet_manager.komodo_declaration import KomodoDeclaration
 from fleet_manager.komodo_native import KomodoTooling
 from fleet_manager.komodo_owner import KomodoOwner
@@ -68,8 +69,9 @@ def identity():
         kind="caller", resource="bootstrap", content_digest=request.request_digest)
     assert actual.proof_key != context["original_proof_key"]
     return actual
+revision = 2 if context.get("resume") and context["mode"] == "save-partial-renewed" else 1
 snapshot = AuthoritySnapshot(
-    "gateway-a", "fleet-a", PROFILE, "manager-owner", 1, now - 1, now + 600, now + 600,
+    "gateway-a", "fleet-a", PROFILE, "manager-owner", revision, now - 1, now + 600, now + 600,
     (Enrollment(
         "operator-a", "actor-a", "account-a", "operator", "client", "client-a", 1, "active",
         operations=(OperationGrant(
@@ -87,7 +89,7 @@ def resolve(actual, original, role, installation):
     resolutions.append(actual.evidence)
     return KomodoRepairSelection(
         candidate, executor, request.request_digest, executor_runtime,
-        "current-installed-repair", 1, context["valid_until"])
+        "current-installed-repair", revision, context["valid_until"])
 owner = KomodoRepairOwner(resolve=resolve, admission=admission, authority="gateway-a", clock=clock)
 root = Path(context["host_runtime"]) / candidate.resource
 journal = NodeJournal(
@@ -109,7 +111,7 @@ except (PlanError, AdmissionError) as error:
     assert journal.inspect(request) == before and tuple(journal.results()) == original_rows
     result = "repair-refused"
 else:
-    assert mode in ("success", "save-after", "journal-after")
+    assert mode in ("success", "save-after", "journal-after", "save-partial-renewed")
     assert status["candidate"] == status["observed"] == candidate.deployment_digest
     assert status["desired"] == executor.deployment_digest != status["candidate"]
     assert status["candidate_release"] == context["candidate_release"]
@@ -139,6 +141,18 @@ else:
             fired.append(True)
             raise PlanError("installed publication interrupted")
         return value
+    partial = []
+    if mode == "save-partial-renewed":
+        target, name = state_module, "_complete_pending"
+        method = getattr(target, name)
+        def interrupt(path, content):
+            value = decode(content)
+            if not fired and path.parent == root and isinstance(value.get("good"), dict):
+                fired.append(True)
+                method(path, content[:-1])
+                partial.append((str(path), digest(value["good"])))
+                raise PlanError("installed publication interrupted")
+            return method(path, content)
     if mode != "success" and not resuming:
         setattr(target, name, interrupt)
         try:
@@ -149,9 +163,12 @@ else:
             raise AssertionError("publication control did not interrupt")
         finally:
             setattr(target, name, method)
-        assert journal.inspect(request).to_dict()["sequence"] == (2 if mode == "save-after" else 3)
+        assert journal.inspect(request).to_dict()["sequence"] == (3 if mode == "journal-after" else 2)
         assert not admission._issued
-        print(json.dumps({"result": "publication-interrupted", "source_denied": True}))
+        print(json.dumps({
+            "result": "publication-interrupted", "source_denied": True,
+            **({"pending_path": partial[0][0], "pending_ref": partial[0][1]} if partial else {}),
+        }))
         raise SystemExit(0)
     receipt = control.repair_bootstrap(owner, identity(), request, role="client", installation="client-a")
     assert receipt.to_dict()["status"] == "succeeded" and receipt.to_dict()["sequence"] == 3
@@ -167,6 +184,8 @@ else:
     assert retained["repair"]["executor_runtime"] == executor_runtime
     assert retained["repair"]["transition_reference"] == "current-installed-repair"
     assert retained["repair"]["native_mutations_performed"] is False
+    if mode == "save-partial-renewed":
+        assert retained["repair"]["transition_revision"] == retained["repair"]["admission_revision"] == 2
     assert decode((root / "selection.json").read_bytes())["attempt"] is None
     final = control.repair_status(owner, identity(), request, role="client", installation="client-a")
     assert final["accepted"] == "succeeded" and not final["unresolved_effects"]

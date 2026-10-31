@@ -104,6 +104,15 @@ in the immutable outcome. There is no second terminal row, new claim or new
 deployment advertised as installed. These are attributable observed checkpoints,
 not a distributed transaction or a promise of permanent future health.
 
+Mutable selection saves use unique owner-private write staging and atomically
+replace the selected record only after complete content and custody checks.
+An interrupted unpublished write remains retained evidence, not a shared retry
+prerequisite: a renewed transition/admission revision can produce a fresh
+verified outcome while the original UNKNOWN remains selected. After terminal
+publication, renewal reuses the exact immutable outcome and receipt instead.
+Legacy `selection.pending` content still requires exact prefix completion;
+foreign or conflicting pending content is never overwritten or ignored.
+
 ## Status, support and rollout
 
 `repair_status` reports schema `fleet-manager.komodo-repair-status`, version 1,

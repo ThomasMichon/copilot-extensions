@@ -266,6 +266,12 @@ convergence with a substituted release. It retains the original request and
 candidate while separately admitting the current verifier; baseline bootstrap
 and Gateway routes remain unchanged.
 
+Mutable selection publication uses unique private staging and replaces the
+selected record atomically only after a complete checked write. Interrupted
+unpublished staging remains evidence without blocking a freshly admitted save.
+Existing legacy `selection.pending` files still require exact prefix completion;
+conflicting or foreign pending content refuses rather than being overwritten.
+
 ## Status, withdrawal and Gateway binding
 
 `owner.inspect(original_intent, permit)` reports desired, accepted, observed,

@@ -219,7 +219,7 @@ def test_noneditable_host_bootstrap_uses_common_verified_identity_and_fixed_nati
 
 @pytest.mark.parametrize("mode", [
     "success", "changed-grant", "withdrawn-transition", "executor-skew",
-    "save-after", "journal-after",
+    "save-after", "journal-after", "save-partial-renewed",
 ])
 def test_installed_current_executor_repairs_retained_baseline_original_without_replay(
     tmp_path: Path, sdk_runtime: Any, baseline_sdk_runtime: Any, native_rig: Any, mode: str,
@@ -309,19 +309,31 @@ def test_installed_current_executor_repairs_retained_baseline_original_without_r
                 "original_proof_key": original["proof_key"],
             }
             result = await probe(sdk_runtime, SDK_GUARD + REPAIR_PROBE, repair_context)
-            if mode in ("save-after", "journal-after"):
+            if mode in ("save-after", "journal-after", "save-partial-renewed"):
                 assert result["result"] == "publication-interrupted"
-                pending = json.loads(owner_roots[0].read_bytes())["good"]
-                reference = owner_root / "receipts" / (digest(pending) + ".json")
+                partial = None
+                if mode == "save-partial-renewed":
+                    assert owner_roots[0].read_bytes() == original_state
+                    partial = Path(result["pending_path"])
+                    assert partial.parent == owner_root and partial.name.startswith(".selection.write-")
+                    partial_bytes, partial_identity = partial.read_bytes(), partial.stat()
+                    reference = owner_root / "receipts" / (result["pending_ref"] + ".json")
+                else:
+                    pending = json.loads(owner_roots[0].read_bytes())["good"]
+                    reference = owner_root / "receipts" / (digest(pending) + ".json")
                 immutable = reference.read_bytes()
                 assert (rig["directory"] / "effects").read_text() == "one\n"
                 assert (rig["directory"] / "live.json").read_bytes() == native_before
                 result = await probe(
                     sdk_runtime, SDK_GUARD + REPAIR_PROBE, {**repair_context, "resume": True})
                 assert reference.read_bytes() == immutable
+                if partial is not None:
+                    assert partial.read_bytes() == partial_bytes
+                    assert (partial.stat().st_dev, partial.stat().st_ino) == (
+                        partial_identity.st_dev, partial_identity.st_ino)
             assert result["source_denied"] is True and result["distinct_identity"] is True
             assert result["result"] == ("original-repaired" if mode in (
-                "success", "save-after", "journal-after") else "repair-refused")
+                "success", "save-after", "journal-after", "save-partial-renewed") else "repair-refused")
             if result["result"] == "repair-refused":
                 assert owner_roots[0].read_bytes() == original_state
             assert result["baseline_contract"] == "fleet-manager.komodo-substrate-owner.v1"

@@ -13,6 +13,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 import pytest
 
+from fleet_manager import komodo_state
 from fleet_manager.komodo_control import CONTRACT, REPAIR_CONTRACT, repair_bootstrap, repair_status
 from fleet_manager.komodo_declaration import KomodoDeclaration
 from fleet_manager.komodo_native import KomodoNative
@@ -37,6 +38,7 @@ CRASHES = [
     "journal-before", "journal-after", "clear-before", "clear-after",
     "complete-before", "complete-after", "journal-revoke", "append-revoke", "save-revoke",
 ]
+PARTIAL_SAVES = ["save-partial-renewed", "clear-partial-renewed"]
 DRIFTS = [
     f"publication-drift-{stage}-{change}"
     for stage in ("retain", "save", "append")
@@ -64,7 +66,7 @@ REFUSALS = [
     ) else [pytest.mark.client_distribution_full])
     for mode in ("success", "failed", "mount-order", "renewed", "prior-failed",
                  "status-endpoint-drift", "status-missing-network-membership",
-                 "status-mismatched-network-attachment", *REFUSALS, *CRASHES)
+                 "status-mismatched-network-attachment", *REFUSALS, *CRASHES, *PARTIAL_SAVES)
 ])
 def test_original_unknown_uses_current_repair_without_native_replay(
     native_rig: Any, keys: Any, monkeypatch: Any, mode: str,
@@ -314,6 +316,7 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 monkeypatch.setattr(KomodoOwner, "_ready", change_after_health)
 
             fired: list[bool] = []
+            partial_save: list[tuple[Path, bytes, int, int]] = []
             late_key = [False]
             if mode.endswith("key-during-native"):
                 original_network = KomodoNative.network
@@ -326,6 +329,24 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                     return result
 
                 monkeypatch.setattr(KomodoNative, "network", changed_after_network)
+            if mode in PARTIAL_SAVES:
+                complete_pending = komodo_state._complete_pending
+
+                def interrupted_pending(path: Path, content: bytes) -> None:
+                    value = decode(content)
+                    selected = not fired and path.parent == owner_root
+                    selected = selected and type(value.get("good")) is dict and "repair" in value["good"]
+                    selected = selected and ((value["attempt"] is None) == mode.startswith("clear"))
+                    if selected:
+                        fired.append(True)
+                        prefix = content[:-1]
+                        complete_pending(path, prefix)
+                        info = path.stat()
+                        partial_save.append((path, prefix, info.st_dev, info.st_ino))
+                        raise PlanError("fixture state write interrupted")
+                    complete_pending(path, content)
+
+                monkeypatch.setattr(komodo_state, "_complete_pending", interrupted_pending)
             if mode in CRASHES:
                 if mode.startswith("native"):
                     target, name = KomodoNative, "prerequisites"
@@ -464,12 +485,22 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 elif mode == "missing-selection":
                     assert not (owner_root / "selection.json").exists()
             else:
-                if mode in CRASHES:
+                if mode in (*CRASHES, *PARTIAL_SAVES):
                     with pytest.raises((PlanError, AdmissionError)):
                         await asyncio.to_thread(call)
                     assert fired and not harness.owner._issued
                     assert journal.inspect(original).to_dict()["sequence"] in (2, 3)
                     transition["active"] = True
+                    if mode in PARTIAL_SAVES:
+                        before_retry = journal.inspect(original)
+                        rows_before_retry = journal.results()
+                        state_before_retry = decode((owner_root / "selection.json").read_bytes())
+                        assert state_before_retry["attempt"] == retained
+                        assert before_retry.to_dict()["sequence"] == (3 if mode.startswith("clear") else 2)
+                        harness.current = policy(revision=2, enrollments=(actor(operations=(
+                            OperationGrant("manager.converge", "host-a", generation, original.request_digest),
+                        )),))
+                        transition["revision"] = 2
                 receipt = await asyncio.to_thread(call)
                 assert receipt.to_dict()["status"] == ("failed" if mode == "failed" else "succeeded")
                 assert receipt.to_dict()["sequence"] == 3
@@ -491,8 +522,16 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 else:
                     assert value["prior_outcomes"] == {}
                 assert decode((owner_root / "selection.json").read_bytes())["attempt"] is None
-                if mode == "renewed":
+                if mode in ("renewed", "save-partial-renewed"):
                     assert value["repair"]["transition_revision"] == value["repair"]["admission_revision"] == 2
+                if mode in PARTIAL_SAVES:
+                    if mode.startswith("clear"):
+                        assert receipt == before_retry and journal.results() == rows_before_retry
+                        assert value == state_before_retry["good"]
+                    assert partial_save
+                    path, prefix, device, inode = partial_save[0]
+                    if path.exists():
+                        assert path.read_bytes() == prefix and (path.stat().st_dev, path.stat().st_ino) == (device, inode)
             assert CONTRACT == "fleet-manager.komodo-substrate-owner.v1"
             assert REPAIR_CONTRACT == "fleet-manager.komodo-original-repair.v1"
             assert sentinel.read_text() == "original-data"
