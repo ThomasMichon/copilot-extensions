@@ -25,6 +25,11 @@ make the entire collection unavailable. Inspecting the retained snapshot does
 not perform I/O or renew freshness; unsuccessful attempts do not expose a partial
 definition tuple. The catalog storage owner retains earlier published evidence.
 
+Declaration metadata confirmation must match this attempt's complete publishable
+ID set and every current target. Settling an unknown older write is not confirmation
+of a changed or removed declaration. An exhausted publication budget cannot
+renew a complete snapshot from a previously confirmed ledger.
+
 Ordinary supervisor declaration discovery consumes the registrar's actual
 refresh report in the same bounded source call. Indeterminate trusted/plugin
 scans and any plugin finding conservatively withhold complete publication,

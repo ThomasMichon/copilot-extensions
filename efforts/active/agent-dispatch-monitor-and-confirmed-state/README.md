@@ -1341,3 +1341,9 @@ registrar corruption retains legacy declarations without complete pool evidence;
 recovery requires a fresh report. Delayed and prewithdrawal observations refuse
 complete collection. Focused lint/type and packaging/documentation checks pass.
 These source controls do not resolve the full assignment/startup matrix.
+
+The final bounded packet passes 203 collection/incumbent-supervisor/override
+controls. Metadata completion now compares the complete current target set,
+not just each ledger entry's confirmation state: settling an older unknown
+write or exhausting the publication budget cannot confirm a changed, removed
+or newly added declaration. Five controls cover those cases and fresh recovery.

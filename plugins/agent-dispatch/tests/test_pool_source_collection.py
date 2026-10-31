@@ -445,3 +445,61 @@ def test_registry_failure_invalidates_complete_snapshot_without_becoming_empty(m
         assert daemon.pool_source_snapshot().attempt == 2
     finally:
         daemon.shutdown()
+
+
+@pytest.mark.parametrize("change", ["changed", "removed"])
+def test_unknown_write_confirmation_must_match_current_declarations(change: str) -> None:
+    original = _declaration()
+    prior = _registration()
+    current = [_declaration(concurrency=3)] if change == "changed" else []
+    daemon = _daemon([prior], declared_source=lambda: DeclarationRead(tuple(current), True))
+    publisher = BoundedDeclarationPublisher()
+    publisher.records[prior["id"]] = {"state": "unknown", "target": prior}
+    publisher.seen_ids.add(prior["id"])
+    daemon._declaration_publisher = publisher
+    try:
+        desired = daemon._desired()
+        assert bool(desired) == (change == "changed")
+        assert publisher.records[prior["id"]] == {"state": "confirmed", "target": prior}
+        assert publisher.confirmed_for([declaration_to_registration(original, machine="host-a")])
+        assert "declaration-publication-unconfirmed" in daemon.pool_source_snapshot().reasons
+        daemon._desired()
+        if change == "removed":
+            assert not daemon.pool_source_snapshot().complete
+            daemon._desired()
+        assert daemon.pool_source_snapshot().complete
+        assert len(daemon.pool_source_snapshot().definitions) == (1 if current else 0)
+        if current:
+            assert daemon.pool_source_snapshot().definitions[0].max_concurrent == 3
+    finally:
+        daemon.shutdown()
+
+
+@pytest.mark.parametrize("change", ["changed", "removed", "added"])
+def test_expired_publication_budget_cannot_reuse_confirmed_prior_target(change: str) -> None:
+    current = [_declaration()]
+    daemon = _daemon(declared_source=lambda: DeclarationRead(tuple(current), True))
+    daemon._read_executor = Executor()
+    try:
+        daemon._desired()
+        assert daemon.pool_source_snapshot().complete
+        prior_records = copy.deepcopy(daemon._declaration_publisher.records)
+        if change == "changed":
+            current[:] = [_declaration(concurrency=3)]
+        elif change == "removed":
+            current.clear()
+        else:
+            current.append(_declaration("new"))
+        daemon._reconcile_deadline = time.monotonic()
+        desired = daemon._desired()
+        assert len(desired) == len(current)
+        assert daemon._declaration_publisher.records == prior_records
+        assert "declaration-publication-unconfirmed" in daemon.pool_source_snapshot().reasons
+        assert not daemon.pool_source_snapshot().definitions
+        daemon._reconcile_deadline = None
+        daemon._desired()
+        if change == "removed":
+            daemon._desired()
+        assert daemon.pool_source_snapshot().complete
+    finally:
+        daemon.shutdown()

@@ -226,10 +226,7 @@ class SupervisorSources:
             if any(len({r["id"] for r in values}) != len(values) for values in (regs, declared)):
                 reasons.append("duplicate-source-registration")
             publisher = self._declaration_publisher
-            if publisher is not None and (
-                publisher.future is not None or publisher.withdrawn_ids
-                or any(record["state"] != "confirmed" for record in publisher.records.values())
-            ):
+            if publisher is not None and not publisher.confirmed_for(declared):
                 reasons.append("declaration-publication-unconfirmed")
             return desired
         finally:
