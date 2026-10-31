@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import ExitStack
 import csv
 import fnmatch
 import hashlib
@@ -448,7 +449,10 @@ def test_standalone_construction_resource_preserves_package_relative_job_scopes(
         names = {
             name for name in archive.namelist()
             if name.startswith("fleet_manager/_construction_procutil")
-            or name == "fleet_manager/_installer_process.py"
+            or name in {
+                "fleet_manager/_installer_process.py", "fleet_manager/_versioned_runtime.py",
+                *("fleet_manager/" + member for member in COMPANIONS),
+            }
         }
         for name in names:
             target = extracted / name
@@ -462,14 +466,26 @@ def test_standalone_construction_resource_preserves_package_relative_job_scopes(
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    try:
+    with ExitStack() as retained:
+        retained.callback(
+            lambda: [sys.modules.pop(key, None) for key in tuple(sys.modules)
+                     if key == name or key.startswith(name + ".")],
+        )
         if loader == "guardian":
             guardian_path = extracted / "fleet_manager/_installer_process.py"
             guardian_spec = importlib.util.spec_from_file_location("construction_guardian_fixture", guardian_path)
             assert guardian_spec and guardian_spec.loader
             guardian = importlib.util.module_from_spec(guardian_spec)
             guardian_spec.loader.exec_module(guardian)
-            module = guardian._load_resource(name, entry)
+            sources = {
+                member: (extracted / "fleet_manager" / member).read_bytes()
+                for member in guardian._GUARDIAN_MEMBERS
+            }
+            for member in sources:
+                (extracted / "fleet_manager" / member).write_text(
+                    "raise AssertionError('late guardian source executed')\n",
+                )
+            _runtime, module = retained.enter_context(guardian._load_guardian_resources(sources))
         else:
             spec.loader.exec_module(module)
         original, appended = "Local\\ce-owned-job-" + "1" * 32, "Local\\ce-owned-job-" + "2" * 32
@@ -477,10 +493,6 @@ def test_standalone_construction_resource_preserves_package_relative_job_scopes(
             {module._JOB_SCOPES_ENV: original}, append=appended, inherit_current=False,
         )
         assert result[module._JOB_SCOPES_ENV] == original + ";" + appended
-    finally:
-        for key in tuple(sys.modules):
-            if key == name or key.startswith(name + "."):
-                del sys.modules[key]
 
 
 @pytest.mark.parametrize("context_kind", ["repository", "pinned"])
