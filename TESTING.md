@@ -369,7 +369,8 @@ use that same origin for every existing 165-second work, 150-second worker and
 receipt remains provisional until the receiver observes the actual launcher
 exit, settles both bounded streams, closes its process handle, verifies every
 final indexed artifact and records fresh post-capture/post-verification times.
-The receiver preserves raw captured bytes and refuses an expired bound,
+The receiver rechecks its complete prepared source after native exit, preserves
+raw captured bytes and refuses an expired bound,
 uncertain cleanup, mismatched scope, changed source, duplicate evidence or
 unindexed file. It never kills, retries, creates a Job, inspects the foreground
 or upgrades functional evidence to desktop acceptance. Pure/fake-process

@@ -210,6 +210,7 @@ def test_receiver_settles_capture_and_handles_before_acceptance_without_new_job(
     assert report["post_capture_monotonic"] == report["post_artifact_verification_monotonic"] == 20
     assert report["captured_streams"]["stdout"]["sha256"] == hashlib.sha256(wire()).hexdigest()
     assert report["captured_streams"]["stderr"]["complete"] is True
+    assert report["preparation_sources_unchanged_after"] is True
     assert events == ["existing-job", "spawn", "native-exit", "handle-close", "artifact-check"]
 
 
@@ -238,3 +239,24 @@ def test_receiver_refuses_late_settlement_and_does_not_kill_or_replay(
     report = receiver.receive(command, scope=7, cwd=tmp_path, manifest_sha256=digest, clock=lambda: now[0])
     assert report["passed"] is False and report["errors"]
     assert starts == [True] and report["native_exit"] == 0
+
+
+def test_receiver_rechecks_prepared_source_after_native_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    command, digest, launcher = prepared(tmp_path, monkeypatch)
+    inert_readers(monkeypatch)
+    monkeypatch.setattr(receiver, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(receiver, "_require_existing_job", lambda: None)
+    process = SimpleNamespace(
+        stdout=io.BytesIO(wire()), stderr=io.BytesIO(),
+        _handle=SimpleNamespace(Close=lambda: None),
+    )
+    def wait(**kwargs: Any) -> int:
+        launcher.write_bytes(b"changed after native creation\n")
+        return 0
+    process.wait = wait
+    monkeypatch.setattr(receiver.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(receiver.subprocess, "Popen", lambda *args, **kwargs: process)
+    times = iter([10.0, *([20.0] * 100)])
+    report = receiver.receive(command, scope=7, cwd=tmp_path, manifest_sha256=digest, clock=lambda: next(times))
+    assert report["native_exit"] == 0 and report["passed"] is False
+    assert any("source closure changed" in error for error in report["errors"])

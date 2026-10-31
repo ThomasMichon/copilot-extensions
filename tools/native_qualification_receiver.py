@@ -334,6 +334,8 @@ def receive(
             bytes(streams[0].data), boundary=boundary, scope=scope,
             native_exit=report["native_exit"], captured_at=captured_at,
         )
+        _command(command, scope, manifest_sha256, boundary, clock)
+        report["preparation_sources_unchanged_after"] = True
         verify_artifacts(value, parent=cwd, manifest_sha256=manifest_sha256, boundary=boundary, clock=clock)
         report["terminal"] = value
         report["post_artifact_verification_monotonic"] = boundary.require(clock)

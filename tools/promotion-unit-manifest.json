@@ -3319,7 +3319,8 @@
         "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_command_substitution_before_creation[command]",
         "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_command_substitution_before_creation[clock]",
         "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_settles_capture_and_handles_before_acceptance_without_new_job",
-        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_late_settlement_and_does_not_kill_or_replay"
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_refuses_late_settlement_and_does_not_kill_or_replay",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py::test_receiver_rechecks_prepared_source_after_native_exit"
     ],
     "sources": {
         "libs/versioned-runtime/versioned_runtime_publication.py": "070c9db612246d8722e3f2c94487bfb63177a78e2485a7f14c5d38ed8060b79d",
@@ -3719,8 +3720,8 @@
         "fleet-manager/src/fleet_manager/client_deactivation.py": "b4dc9e2cc10ff8f6b11097f45463cf572d3b27a5d6e11a197dc2fa976fef77d6",
         "fleet-manager/tests/test_client_diagnostics.py": "84eb14d24bc2c62e166e0ac9478ae6d7d60925d0c8f5363c13cc2b5d8a24a089",
         "tools/promotion_unit_tests/test_client_guardian_resources.py": "f6e6f99014df400e8b2b1efe3e51812fdfccf2425ff74703a5dbe60b65e93d28",
-        "tools/native_qualification_receiver.py": "d205fdde05e3f2c179c5ce7aaeb96d12b6c27ee9b0bfe88e20ecff979ebb4a77",
-        "tools/promotion_unit_tests/test_native_qualification_receiver.py": "0d1a0b4e58eeff69ee9bd6aa388defe0c339d69796096ac1ba7327c8de6a2db2"
+        "tools/native_qualification_receiver.py": "318a607dc357176440d47b73ba86766e3f80b872dc5cde2b0a66ccbba93a88e2",
+        "tools/promotion_unit_tests/test_native_qualification_receiver.py": "2012206c92156f971e6073a1360ba40c3028a32df81f2f42ddd58ed6e7bdc53f"
     },
     "coverage_targets": [
         "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py",
