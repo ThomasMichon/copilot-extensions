@@ -109,7 +109,15 @@ their canonical sources. Process resource names must be canonical relative
 POSIX paths on every platform; rooted or drive-qualified paths, backslashes
 and alternate data streams refuse before reading resources.
 POSIX retains the construction descriptor in its existing guardian.
-On Windows a finite guardian independently retains the candidate until its
+On Windows the private guardian's stdin carries the complete eight-member
+retained executable closure: the supervisor itself, the runtime and its four
+companions, and both procutil members. A fixed standard-library bootstrap
+validates the exact bounded bundle before executing its retained supervisor.
+The guardian loads only those bytes into private operation-owned modules; it
+does not reopen executable resources or resolve relative imports from disk.
+Ordinary source-install callers snapshot the same bounded closure before
+launching; this is not installed-wheel RECORD authentication.
+The finite guardian independently retains the candidate until its
 native Job settles, including after caller death. Losing a caller's
 construction lock alone therefore does not admit destructive cleanup while
 that guardian still owns retention. This is finite caller-owned supervision,

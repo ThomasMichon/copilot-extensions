@@ -3289,6 +3289,15 @@ wheel's exact bytes. The full development extra remains broader than the
 dependency-free client; selected source distributions can still require a
 platform's native build prerequisites.
 
+`fleet-manager/tests/test_client_guardian_resources.py` exercises the real
+client-to-guardian caller boundary with process value doubles and the actual
+stdin bootstrap. It replaces each admitted executable member after snapshot,
+checks the private runtime/procutil namespaces and preserved uncertain custody,
+and refuses incomplete, malformed or oversized bundles before execution.
+These are portable unit controls, not native Windows process, Job, lifetime
+or desktop qualification. The release-helper verifier pins the retained
+guardian's complete source shape without executing that actor during discovery.
+
 ## The turn-key runner
 
 Agent MCP's focused home-binding lane is:

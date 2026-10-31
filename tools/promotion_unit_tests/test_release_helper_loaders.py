@@ -232,6 +232,33 @@ def test_existing_loader_files_enroll_exact_paths_without_importing_them(relativ
     assert dynamic_loads(tree, relative) == expected
 
 
+@pytest.mark.parametrize("fault", ["bundle", "bootstrap", "supervisor", "main"])
+def test_retained_guardian_actor_changes_require_fresh_source_qualification(fault):
+    root = Path(__file__).resolve().parents[2]
+    source = (root / _ACTOR_SOURCE).read_text()
+    before, after = {
+        "bundle": ('"_construction_procutil/_job_scopes.py"', '"foreign.py"'),
+        "bootstrap": ("base64.b64decode(v,validate=True)", "base64.b64decode(v)"),
+        "supervisor": ("allow_breakaway=False", "allow_breakaway=True"),
+        "main": ("_supervise_windows(args, args.command[1:])", "_supervise_windows(other, args.command[1:])"),
+    }[fault]
+    assert before in source
+    with pytest.raises(UnitEvidenceError, match="retained runtime actor source shape changed"):
+        dynamic_loads(ast.parse(source.replace(before, after)), _ACTOR_SOURCE)
+
+
+@pytest.mark.parametrize("source", [
+    "from installer_engine_process import _guardian_packet",
+    "from installer_engine_process import _load_guardian_resources as load",
+    "from installer_engine_process import _run_guardian_child",
+    "import installer_engine_process as process\nprocess._load_guardian_resources(sources)",
+    "import installer_engine_process as process\nloader = process._guardian_packet",
+])
+def test_retained_guardian_private_seams_cannot_become_release_helper_edges(source):
+    with pytest.raises(UnitEvidenceError):
+        _discover(source)
+
+
 def test_inert_source_is_not_executed_by_discovery():
     source = "raise RuntimeError('source must never execute')\n" + _IMPORTS
     source += _CHAIN.replace("PATH", 'Path(__file__).parent / "new_helper.py"')

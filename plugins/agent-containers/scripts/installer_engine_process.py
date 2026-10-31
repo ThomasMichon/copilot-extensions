@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+from contextlib import contextmanager
 import logging
-import importlib.util
 import json
 import math
 import os
@@ -12,9 +13,40 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
+import uuid
+
+
+_GUARDIAN_MEMBERS = (
+    "_installer_process.py", "_versioned_runtime.py",
+    "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    "versioned_runtime_source.py", "versioned_runtime_publication.py",
+    "_construction_procutil/__init__.py", "_construction_procutil/_job_scopes.py",
+)
+_GUARDIAN_SOURCE_LIMIT = 1024 * 1024
+_GUARDIAN_PACKET_LIMIT = 12 * 1024 * 1024
+_guardian_sources: dict[str, bytes] | None = globals().get("_guardian_sources")
+_GUARDIAN_BOOTSTRAP = (
+    "import base64,json,sys\n"
+    "def _pairs(values):\n"
+    "    result=dict(values)\n"
+    "    if len(result)!=len(values): raise ValueError('duplicate guardian input member')\n"
+    "    return result\n"
+    f"_raw=sys.stdin.buffer.read({_GUARDIAN_PACKET_LIMIT + 1})\n"
+    f"if len(_raw)>{_GUARDIAN_PACKET_LIMIT}: raise ValueError('guardian input exceeds bound')\n"
+    "_encoded=json.loads(_raw,object_pairs_hook=_pairs)\n"
+    f"if type(_encoded) is not dict or set(_encoded)!=set({_GUARDIAN_MEMBERS!r}): "
+    "raise ValueError('guardian input has invalid members')\n"
+    "if any(type(v) is not str for v in _encoded.values()): "
+    "raise ValueError('guardian input has invalid values')\n"
+    "_guardian_sources={k:base64.b64decode(v,validate=True) for k,v in _encoded.items()}\n"
+    f"if any(not 0<len(v)<={_GUARDIAN_SOURCE_LIMIT} for v in _guardian_sources.values()): "
+    "raise ValueError('guardian source exceeds bound')\n"
+    "__file__='_installer_process.py'\n"
+    "exec(compile(_guardian_sources[__file__],__file__,'exec'))\n"
+)
 
 
 class ChildLaunchError(RuntimeError):
@@ -49,6 +81,7 @@ def run_owned(
     runtime_root: Path | None = None, runtime_version: str | None = None,
     runtime_path: Path | None = None,
     deadline: float | None = None,
+    guardian_sources: dict[str, bytes] | None = None,
 ) -> subprocess.CompletedProcess:
     """Settle owned writers before returning or propagating a timeout.
 
@@ -74,6 +107,7 @@ def run_owned(
             return _retained_windows(
                 argv, cwd=cwd, env=env, timeout=timeout, procutil=procutil,
                 root=runtime_root, version=runtime_version, runtime_path=runtime_path,
+                guardian_sources=guardian_sources,
                 **({"deadline": deadline} if deadline is not None else {}),
             )
     options = dict(cwd=cwd, env=env, stdin=subprocess.DEVNULL,
@@ -145,9 +179,87 @@ def run_owned(
     return result
 
 
-def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runtime_path, deadline=None):
+def _guardian_packet(
+    procutil: ModuleType, runtime_path: Path, sources: dict[str, bytes] | None,
+) -> str:
+    if sources is None:
+        paths = {
+            "_installer_process.py": Path(__file__),
+            "_versioned_runtime.py": runtime_path,
+            **{name: runtime_path.with_name(name) for name in _GUARDIAN_MEMBERS[2:6]},
+            "_construction_procutil/__init__.py": Path(procutil.__file__),
+            "_construction_procutil/_job_scopes.py": Path(procutil.__file__).with_name("_job_scopes.py"),
+        }
+        sources = {}
+        for name, path in paths.items():
+            with path.open("rb") as incoming:
+                sources[name] = incoming.read(_GUARDIAN_SOURCE_LIMIT + 1)
+    if (
+        type(sources) is not dict or set(sources) != set(_GUARDIAN_MEMBERS)
+        or any(type(value) is not bytes or not 0 < len(value) <= _GUARDIAN_SOURCE_LIMIT
+               for value in sources.values())
+    ):
+        raise ValueError("installer guardian requires the exact bounded source closure")
+    return json.dumps({name: base64.b64encode(value).decode("ascii") for name, value in sources.items()})
+
+
+@contextmanager
+def _load_guardian_resources(
+    sources: dict[str, bytes],
+) -> Iterator[tuple[ModuleType, ModuleType]]:
+    if (
+        type(sources) is not dict or set(sources) != set(_GUARDIAN_MEMBERS)
+        or any(type(value) is not bytes or not 0 < len(value) <= _GUARDIAN_SOURCE_LIMIT
+               for value in sources.values())
+    ):
+        raise ValueError("installer guardian requires the exact bounded source closure")
+    prefix = "installer_guardian_" + uuid.uuid4().hex
+    runtime = ModuleType(prefix + "_runtime")
+    procutil = ModuleType(prefix + "_procutil")
+    scopes = ModuleType(procutil.__name__ + "._job_scopes")
+    registered: list[ModuleType] = []
+
+    def register(module: ModuleType, member: str) -> None:
+        module.__file__ = member
+        sys.modules[module.__name__] = module
+        registered.append(module)
+
+    def execute(module: ModuleType, member: str) -> None:
+        exec(compile(sources[member], member, "exec"), module.__dict__)
+
+    try:
+        register(runtime, "_versioned_runtime.py")
+        runtime._retained_runtime_components = {}
+        for member in _GUARDIAN_MEMBERS[2:6]:
+            component = member.removesuffix(".py")
+            module = ModuleType(runtime.__name__ + "_" + component)
+            register(module, member)
+            execute(module, member)
+            runtime._retained_runtime_components[component] = module
+        runtime._retained_runtime_components["versioned_runtime_publication"]._leases = (
+            runtime._retained_runtime_components["versioned_runtime_leases"]
+        )
+        execute(runtime, "_versioned_runtime.py")
+        procutil.__package__, procutil.__path__ = procutil.__name__, []
+        scopes.__package__ = procutil.__name__
+        register(procutil, "_construction_procutil/__init__.py")
+        execute(procutil, "_construction_procutil/__init__.py")
+        register(scopes, "_construction_procutil/_job_scopes.py")
+        execute(scopes, "_construction_procutil/_job_scopes.py")
+        yield runtime, procutil
+    finally:
+        for module in reversed(registered):
+            if sys.modules.get(module.__name__) is module:
+                del sys.modules[module.__name__]
+
+
+def _retained_windows(
+    argv, *, cwd, env, timeout, procutil, root, version, runtime_path,
+    deadline=None, guardian_sources=None,
+):
     import msvcrt
 
+    packet = _guardian_packet(procutil, runtime_path, guardian_sources)
     reader, writer = os.pipe()
     process = None
     try:
@@ -158,13 +270,12 @@ def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runti
         try:
             try:
                 process = subprocess.Popen(
-                    [sys.executable, "-I", "-B", str(Path(__file__).resolve()),
+                    [sys.executable, "-I", "-B", "-c", _GUARDIAN_BOOTSTRAP,
                      "--owner-handle", str(handle), "--runtime-root", str(root),
-                     "--runtime-version", version, "--runtime-path", str(runtime_path),
-                     "--procutil-path", str(Path(procutil.__file__).resolve()),
+                     "--runtime-version", version,
                      "--timeout", str(timeout),
                      *(["--deadline", str(deadline)] if deadline is not None else []), "--", *argv],
-                    cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                     startupinfo=startup, close_fds=True, executable=sys.executable,
                     **procutil.no_window_kwargs(),
@@ -176,7 +287,7 @@ def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runti
         os.close(reader)
         reader = -1
         try:
-            stdout, stderr = process.communicate(timeout=timeout + 30)
+            stdout, stderr = process.communicate(input=packet, timeout=timeout + 30)
         finally:
             os.close(writer)
             writer = -1
@@ -216,16 +327,6 @@ def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runti
             os.close(writer)
 
 
-def _load_resource(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise ImportError("installer guardian resource could not be loaded")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def _supervise_windows(args, argv):
     import ctypes
     from ctypes import wintypes
@@ -249,55 +350,58 @@ def _supervise_windows(args, argv):
     absolute_deadline = getattr(args, "deadline", None)
     expired = {"returncode": 1, "stdout": "", "stderr": "", "timed_out": True, "launch_error": None}
     try:
-        runtime = _load_resource("installer_guardian_runtime", args.runtime_path)
-        procutil = _load_resource("installer_guardian_procutil", args.procutil_path)
-        if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
-            return expired
-        with runtime.retention_lease(Path(args.runtime_root), args.runtime_version):
-            if disconnected():
-                raise RuntimeError("installer caller exited before child execution")
+        with _load_guardian_resources(_guardian_sources) as (runtime, procutil):
             if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
                 return expired
-            try:
-                process, job = procutil.spawn_sync_in_kill_on_close_job(
-                    argv, require_job=True, allow_breakaway=False, executable=argv[0],
-                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    text=True, encoding="utf-8", errors="replace", **procutil.no_window_kwargs(),
-                )
-            except procutil.SyncProcessLaunchError as error:
-                return {
-                    "returncode": 1, "stdout": "", "stderr": "",
-                    "timed_out": False, "launch_error": str(error),
-                }
-            deadline = time.monotonic() + args.timeout
-            if absolute_deadline is not None:
-                deadline = min(deadline, absolute_deadline)
-            timed_out = False
-            try:
-                while True:
-                    if disconnected():
-                        raise RuntimeError("installer caller exited during child execution")
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        timed_out = True
-                        break
-                    try:
-                        stdout, stderr = process.communicate(timeout=min(remaining, 0.1))
-                        break
-                    except subprocess.TimeoutExpired:
-                        continue
-            finally:
-                try:
-                    _settle(lambda: job.terminate_and_wait(10))
-                finally:
-                    _settle(lambda: process.wait(timeout=10))
-            stdout, stderr = process.communicate(timeout=10)
-            return {
-                "returncode": process.returncode, "stdout": stdout,
-                "stderr": stderr, "timed_out": timed_out, "launch_error": None,
-            }
+            with runtime.retention_lease(Path(args.runtime_root), args.runtime_version):
+                return _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, expired)
     finally:
         kernel.CloseHandle(args.owner_handle)
+
+
+def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, expired):
+    if disconnected():
+        raise RuntimeError("installer caller exited before child execution")
+    if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
+        return expired
+    try:
+        process, job = procutil.spawn_sync_in_kill_on_close_job(
+            argv, require_job=True, allow_breakaway=False, executable=argv[0],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", **procutil.no_window_kwargs(),
+        )
+    except procutil.SyncProcessLaunchError as error:
+        return {
+            "returncode": 1, "stdout": "", "stderr": "",
+            "timed_out": False, "launch_error": str(error),
+        }
+    deadline = time.monotonic() + args.timeout
+    if absolute_deadline is not None:
+        deadline = min(deadline, absolute_deadline)
+    timed_out = False
+    try:
+        while True:
+            if disconnected():
+                raise RuntimeError("installer caller exited during child execution")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            try:
+                stdout, stderr = process.communicate(timeout=min(remaining, 0.1))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    finally:
+        try:
+            _settle(lambda: job.terminate_and_wait(10))
+        finally:
+            _settle(lambda: process.wait(timeout=10))
+    stdout, stderr = process.communicate(timeout=10)
+    return {
+        "returncode": process.returncode, "stdout": stdout,
+        "stderr": stderr, "timed_out": timed_out, "launch_error": None,
+    }
 
 
 def _terminate_group(process: subprocess.Popen) -> None:
@@ -378,8 +482,6 @@ if __name__ == "__main__":
     ownership.add_argument("--owner-handle", type=int)
     parser.add_argument("--runtime-root")
     parser.add_argument("--runtime-version")
-    parser.add_argument("--runtime-path")
-    parser.add_argument("--procutil-path")
     parser.add_argument("--timeout", type=float)
     parser.add_argument("--deadline", type=float)
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -390,7 +492,7 @@ if __name__ == "__main__":
         parser.error("a finite positive monotonic deadline is required")
     if args.owner_handle is not None:
         if os.name != "nt" or not all((
-            args.runtime_root, args.runtime_version, args.runtime_path, args.procutil_path,
+            args.runtime_root, args.runtime_version,
         )) or args.timeout is None or not math.isfinite(args.timeout) or args.timeout <= 0:
             parser.error("Windows guardian requires complete runtime custody and a finite timeout")
         print(json.dumps(_supervise_windows(args, args.command[1:])), flush=True)

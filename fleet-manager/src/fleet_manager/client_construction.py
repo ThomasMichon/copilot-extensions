@@ -197,6 +197,7 @@ def _process_resource(name, *, evidence=None):
         raise PlanError("client construction process resource could not be loaded")
     module = importlib.util.module_from_spec(spec)
     exec(compile(content, str(path), "exec"), module.__dict__)
+    module._retained_source_bytes = content
     return module
 
 
@@ -212,6 +213,7 @@ def _procutil_resource(evidence):
     module, child = ModuleType(name), ModuleType(name + "._job_scopes")
     module.__file__, module.__package__, module.__path__ = str(parent_path), name, []
     child.__file__, child.__package__ = str(child_path), name
+    module._retained_source_pair = (parent_bytes, child_bytes)
     sys.modules[name] = module
     try:
         exec(compile(parent_bytes, str(parent_path), "exec"), module.__dict__)
@@ -231,11 +233,22 @@ def _run(argv, slot, phase, *, descriptor, resource_evidence=None):
     owner = _process_resource("_installer_process.py", evidence=evidence)
     try:
         with _procutil_resource(evidence) as procutil:
+            sources = {
+                "_installer_process.py": owner._retained_source_bytes,
+                "_construction_procutil/__init__.py": procutil._retained_source_pair[0],
+                "_construction_procutil/_job_scopes.py": procutil._retained_source_pair[1],
+                **{name: _process_resource_data(name, evidence=evidence)[1] for name in (
+                    "_versioned_runtime.py", "versioned_runtime_leases.py",
+                    "versioned_runtime_construction.py", "versioned_runtime_source.py",
+                    "versioned_runtime_publication.py",
+                )},
+            } if os.name == "nt" else None
             result = owner.run_owned(
                 [str(value) for value in argv], cwd=slot, env=_environment(slot),
                 timeout=45, procutil=procutil, construction_fd=descriptor,
                 runtime_root=slot.parent.parent, runtime_version=slot.name,
                 runtime_path=Path(__file__).absolute().with_name("_versioned_runtime.py"),
+                guardian_sources=sources,
             )
     except subprocess.TimeoutExpired:
         raise PlanError(f"client {phase} timed out") from None

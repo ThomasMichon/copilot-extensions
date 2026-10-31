@@ -13,7 +13,9 @@ _SPEC = "importlib.util.spec_from_file_location"
 _MODULE = "importlib.util.module_from_spec"
 _UNSUPPORTED = {"SourceFileLoader", "SourcelessFileLoader", "load_module"}
 _ACTOR_PRIVATE = {"_load_resource", "_supervise_windows"}
-_SENSITIVE = _UNSUPPORTED | _ACTOR_PRIVATE | {
+_RETAINED_PRIVATE = {"_guardian_packet", "_load_guardian_resources", "_run_guardian_child"}
+_PRIVATE_BOUNDARIES = _ACTOR_PRIVATE | _RETAINED_PRIVATE
+_SENSITIVE = _UNSUPPORTED | _PRIVATE_BOUNDARIES | {
     "spec_from_file_location", "module_from_spec", "exec_module", "_load_module",
 }
 _ADAPTER = ast.parse(
@@ -26,6 +28,7 @@ _ADAPTER = ast.parse(
 ).body[0]
 _TOOL_ROOT = ast.parse('tool_root = (trusted_source or scratch) / "tools"').body[0]
 _ACTOR_SOURCE = "libs/installer-engine/installer_engine_process.py"
+_RETAINED_ACTOR_SHA256 = "8132d6856886a0a20c571166606a9df89a67c2ca66dc5dec805cc36e3a063812"
 _RESOURCE_ADAPTER = ast.parse(
     "def _load_resource(name, path):\n"
     "    spec = importlib.util.spec_from_file_location(name, path)\n"
@@ -151,6 +154,24 @@ class _Discovery:
     def runtime_boundary(self) -> None:
         """Admit only the existing owned Windows product/runtime actor seam."""
         if self.relative != _ACTOR_SOURCE:
+            return
+        if any(
+            isinstance(node, ast.FunctionDef) and node.name == "_load_guardian_resources"
+            for node in self.tree.body
+        ):
+            options = {"show_empty": True} if sys.version_info >= (3, 13) else {}
+            fingerprint = hashlib.sha256(
+                ast.dump(self.tree, **options).encode("utf-8"),
+            ).hexdigest()
+            if fingerprint != _RETAINED_ACTOR_SHA256:
+                self.fail(self.tree, "retained runtime actor source shape changed")
+            # This exact actor transports a complete source bundle, not file
+            # loader edges. Foreign modules still cannot access its private seams.
+            self.actor_calls.update(
+                node for node in ast.walk(self.tree)
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in _PRIVATE_BOUNDARIES
+            )
             return
         definitions = [
             node for node in ast.walk(self.tree)
@@ -397,12 +418,12 @@ class _Discovery:
             if isinstance(node, ast.Import):
                 for item in node.names:
                     local = item.asname or item.name.split(".")[0]
-                    if item.name.rsplit(".", 1)[-1] in _ACTOR_PRIVATE or local in _ACTOR_PRIVATE:
+                    if item.name.rsplit(".", 1)[-1] in _PRIVATE_BOUNDARIES or local in _PRIVATE_BOUNDARIES:
                         self.fail(node, "private runtime boundary cannot be imported")
                     imported(local, item.name if item.asname else local)
             elif isinstance(node, ast.ImportFrom):
                 for item in node.names:
-                    if item.name in _ACTOR_PRIVATE or item.asname in _ACTOR_PRIVATE:
+                    if item.name in _PRIVATE_BOUNDARIES or item.asname in _PRIVATE_BOUNDARIES:
                         self.fail(node, "private runtime boundary cannot be imported")
                     if item.name == "*" and node.module in ("importlib", "importlib.util", "importlib.machinery"):
                         self.fail(node, "wildcard loader import")
