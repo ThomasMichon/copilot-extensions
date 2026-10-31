@@ -31,6 +31,15 @@ class NativeActionOutcome:
     confirmed: bool
 
 
+def _native_id(value, *, numeric=False):
+    if type(value) is int:
+        return 0 < value <= 2**63 - 1
+    return (
+        not numeric and isinstance(value, str) and 0 < len(value) <= 256
+        and all(ord(character) >= 32 for character in value)
+    )
+
+
 class _BoundReader(AdoReader):
     def __init__(self, context):
         self.context = context
@@ -47,6 +56,11 @@ class _BoundReader(AdoReader):
         result = self.context.call("GET", url, None, query=query)
         if result.status != 200:
             raise ReviewContextUnavailable("native review read did not succeed")
+        if result.continuation and url in (
+            self.base + "?api-version=7.1",
+            self.api_base + "/_apis/connectionData?api-version=7.1-preview.1",
+        ):
+            raise ReviewContextUnavailable("singleton native review read has unexpected continuation")
         return copy.deepcopy(result.body), result.continuation
 
 
@@ -219,7 +233,9 @@ class AdoReviewContext:
             )
         if result.status not in (200, 201):
             raise ReviewContextUnavailable("native review effect reply is not confirmed")
-        ids = {key: value for key, value in ids.items() if value is not None}
+        usable = {key: value for key, value in ids.items() if _native_id(value, numeric=key != "reviewer_id")}
+        verified = verified and len(usable) == len(ids)
+        ids = usable
         return NativeActionOutcome({"origin": "response", "platform_ids": ids, "proof": None}, verified and not result.late)
 
     def reconcile(self, operation, action):
@@ -241,6 +257,8 @@ class AdoReviewContext:
             if isinstance(marker, dict) and marker.get("$value") == self.marker(operation, action):
                 if (
                     not thread.get("isDeleted") and len(comments) == 1
+                    and _native_id(thread.get("id"), numeric=True)
+                    and _native_id(comments[0].get("id"), numeric=True)
                     and comments[0].get("content") == action["body"]
                     and isinstance(comments[0].get("author"), dict)
                     and comments[0]["author"].get("id") == self.scope["principal_id"]

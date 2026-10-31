@@ -67,6 +67,8 @@ def environment(tmp_path, monkeypatch):
         vote_identity_mode = "legacy"
         system_comment_type = 2
         malformed_author_reply = False
+        singleton_continuation = None
+        response_ids = None
 
         def __init__(self):
             self.pr = copy.deepcopy(evidence["sections"]["pull_request"]["data"])
@@ -104,7 +106,8 @@ def environment(tmp_path, monkeypatch):
             if method == "GET":
                 if "connectionData" in url:
                     return NativeReviewResponse(200, {"authorizedUser": {"id": scope["principal_id"]},
-                                                     "authenticatedUser": {"id": "different-delegated-user"}})
+                                                     "authenticatedUser": {"id": "different-delegated-user"}},
+                                                "unexpected" if self.singleton_continuation == "identity" else "")
                 if "/iterations?" in url:
                     return NativeReviewResponse(200, {"value": copy.deepcopy(self.iterations)})
                 if "/threads?" in url:
@@ -112,7 +115,8 @@ def environment(tmp_path, monkeypatch):
                 if "/statuses?" in url or "/policy/evaluations?" in url:
                     values = [{"id": "synthetic-evaluation", "status": "failed"}] if self.policy_failed else []
                     return NativeReviewResponse(200, {"value": values})
-                return NativeReviewResponse(200, copy.deepcopy(self.pr))
+                return NativeReviewResponse(200, copy.deepcopy(self.pr),
+                                            "unexpected" if self.singleton_continuation == "pr" else "")
             retained = store.inspect_review(selected["operation_id"], scope, expires_at=int(time.time()) + 600)
             action = next(row for row in retained["actions"] if row["state"] == "unknown")
             assert action["attempt_id"], "backend entered before durable in-flight persistence"
@@ -159,6 +163,10 @@ def environment(tmp_path, monkeypatch):
                     self.after_write(self)
                 if self.partial_reply:
                     return NativeReviewResponse(201, {"id": thread["id"]})
+                if self.response_ids is not None:
+                    reply = copy.deepcopy(thread)
+                    reply["id"], reply["comments"][0]["id"] = self.response_ids
+                    return NativeReviewResponse(201, reply)
                 if self.mismatched_reply:
                     mismatched = copy.deepcopy(thread)
                     mismatched["comments"][0]["content"] = "Different response content"
@@ -201,6 +209,52 @@ def run(environment):
 
 def writes(backend):
     return [call for call in backend.calls if call[0] != "GET"]
+
+
+@pytest.mark.parametrize("endpoint", ["identity", "pr"])
+@pytest.mark.parametrize("after_effect", [False, True])
+def test_singleton_continuation_retains_structured_action_state(environment, endpoint, after_effect):
+    _, _, _, _, backend, _ = environment
+    if after_effect:
+        backend.after_write = lambda value: setattr(value, "singleton_continuation", endpoint)
+    else:
+        backend.singleton_continuation = endpoint
+    result = run(environment)
+    assert result["status"] == "unknown"
+    assert result["actions"][0]["state"] == ("confirmed" if after_effect else "unattempted")
+    assert len(writes(backend)) == int(after_effect)
+    assert backend.vote is None
+
+
+@pytest.mark.parametrize("ids,retained", [
+    ((100, 0), {"thread_id": 100}),
+    ((False, 1), {"comment_id": 1}),
+    ((100, 2**63), {"thread_id": 100}),
+])
+def test_invalid_response_id_does_not_discard_other_native_id(environment, ids, retained):
+    _, _, _, _, backend, _ = environment
+    backend.response_ids = ids
+    result = run(environment)
+    assert result["status"] == "unknown"
+    assert result["actions"][0]["state"] == "unknown"
+    assert result["actions"][0]["receipt"]["platform_ids"] == retained
+    assert len(writes(backend)) == 1 and backend.vote is None
+
+
+@pytest.mark.parametrize("target,value", [("thread", None), ("comment", None), ("thread", 0), ("comment", True)])
+def test_marked_readback_without_valid_native_ids_retains_unknown(environment, target, value):
+    _, _, _, _, backend, _ = environment
+    backend.lose_reply = True
+    assert run(environment)["status"] == "unknown"
+    backend.lose_reply = False
+    record = backend.threads[0] if target == "thread" else backend.threads[0]["comments"][0]
+    if value is None:
+        del record["id"]
+    else:
+        record["id"] = value
+    result = run(environment)
+    assert result["status"] == "unknown" and result["actions"][0]["state"] == "unknown"
+    assert len(writes(backend)) == 1 and backend.vote is None
 
 
 def test_real_store_and_bound_transport_complete_without_completion_or_other_reviewer_changes(environment):

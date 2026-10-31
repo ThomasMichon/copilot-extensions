@@ -112,6 +112,10 @@ If a bounded native write reply arrives after the work deadline while the owner
 still permits settlement, its known IDs are persisted unconfirmed; no success
 or subsequent write is permitted. Malformed response authors likewise fail
 verification without discarding otherwise known native IDs.
+Each returned native ID is validated independently, retaining usable partial IDs
+without confirming an incomplete response. Unexpected singleton-read continuations
+produce an unavailable structured outcome; malformed or missing readback IDs cannot
+establish attribution.
 Actual owner denials/cancellation propagate through the existing path. A denial
 is not proof an already-admitted effect or atomic store commit was absent.
 
