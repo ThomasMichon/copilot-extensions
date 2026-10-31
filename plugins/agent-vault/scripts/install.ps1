@@ -1330,6 +1330,7 @@ function Invoke-Uninstall {
     if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
     Write-Host ''
     . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    . (Join-Path $PSScriptRoot 'daemon_instances.ps1')
     $ownedProcesses = @(Get-VaultUninstallProcesses)
     if ($DryRun) {
         Write-Host '[dry-run] would stop agent-vault'
@@ -1338,18 +1339,7 @@ function Invoke-Uninstall {
             Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
         }
         foreach ($row in $ownedProcesses) {
-            $now = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
-            if ($now -and ($now.CreationDate -ne $row.CreationDate -or $now.CommandLine -cne $row.CommandLine)) {
-                throw 'Vault process identity changed; refusing uninstall'
-            }
-            if ($now) {
-                Stop-Process -Id $row.ProcessId -ErrorAction Stop
-                Wait-Process -Id $row.ProcessId -Timeout 15 -ErrorAction SilentlyContinue
-                $remaining = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
-                if ($remaining -and $remaining.CreationDate -eq $row.CreationDate) {
-                    throw 'Owned Vault daemon did not stop'
-                }
-            }
+            Stop-VaultUninstallProcess -Row $row
         }
     }
     if (-not $DryRun -and $env:OS -eq 'Windows_NT' -and
@@ -1380,6 +1370,93 @@ function Invoke-Uninstall {
         else { Write-Ok 'Venv removed (state kept; -Purge to delete)' }
     }
     if ($DryRun) { Write-Host 'agent-vault uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow }
+}
+
+function Stop-VaultUninstallProcess {
+    param($Row)
+    $now = Get-CimInstance Win32_Process -Filter "ProcessId=$($Row.ProcessId)" -ErrorAction Stop
+    if (-not $now) { return }
+    if ($now.CreationDate -ne $Row.CreationDate -or $now.CommandLine -cne $Row.CommandLine -or
+        $now.ExecutablePath -ine $Row.ExecutablePath -or $now.ParentProcessId -ne $Row.ParentProcessId -or
+        $Row.CreationDate -isnot [DateTime]) {
+        throw 'Vault process identity changed; refusing uninstall'
+    }
+    Initialize-DaemonInstanceNative
+    $process = [Diagnostics.Process]::GetProcessById([int]$Row.ProcessId)
+    try {
+        # Cache the native handle before validation; Kill and WaitForExit retain that identity.
+        [void]$process.Handle
+        $birth = [long]([CopilotExtensions.DaemonInstanceNative]::Birth($process) -replace '^windows:', '')
+        $captured = $Row.CreationDate.ToUniversalTime().ToFileTimeUtc()
+        if ($birth - ($birth % 10) -ne $captured - ($captured % 10) -or
+            [CopilotExtensions.DaemonInstanceNative]::FinalPath($process.Path) -ine
+            [CopilotExtensions.DaemonInstanceNative]::FinalPath($Row.ExecutablePath)) {
+            throw 'Vault process native identity changed; refusing uninstall'
+        }
+        $process.Kill()
+        if (-not $process.WaitForExit(15000)) { throw 'Owned Vault daemon did not stop' }
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Test-VaultUninstallRedirectorChild {
+    param($Parent, $Child, [string]$Root)
+    if ($Child.ParentProcessId -ne $Parent.ProcessId) { return $false }
+    $service = '^\s*(?:"(?<exe>[^"]+)"|(?<exe>\S+))\s+(?<args>-m\s+agent_vault\.service(?:\s+--foreground)?(?:\s+--persistent)?)\s*$'
+    $parentCommand = [regex]::Match([string]$Parent.CommandLine, $service)
+    $childCommand = [regex]::Match([string]$Child.CommandLine, $service)
+    if (-not $parentCommand.Success -or -not $childCommand.Success -or
+        ($parentCommand.Groups['args'].Value -replace '\s+', ' ') -cne
+        ($childCommand.Groups['args'].Value -replace '\s+', ' ')) { return $false }
+    if ((Split-Path -Leaf $Parent.ExecutablePath) -ine 'python.exe' -or
+        (Split-Path -Leaf (Split-Path -Parent $Parent.ExecutablePath)) -ine 'Scripts') { return $false }
+    Initialize-DaemonInstanceNative
+    $parentImage = [CopilotExtensions.DaemonInstanceNative]::FinalPath($Parent.ExecutablePath)
+    if (-not $parentImage.StartsWith($Root + '\', [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    $venv = Split-Path -Parent (Split-Path -Parent $parentImage)
+    $config = Join-Path $venv 'pyvenv.cfg'
+    if (-not (Test-Path -LiteralPath $config -PathType Leaf)) { return $false }
+    $item = Get-Item -LiteralPath $config -Force -ErrorAction Stop
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint -or
+        [CopilotExtensions.DaemonInstanceNative]::FinalPath($config) -ine $config) { return $false }
+    # CPython's Windows venv launcher selects its physical interpreter from this home.
+    $homes = @(Get-Content -LiteralPath $config -Encoding UTF8 -ErrorAction Stop |
+        Where-Object { $_ -cmatch '^home\s*=' } |
+        ForEach-Object { ($_ -split '=', 2)[1].Trim() })
+    if ($homes.Count -ne 1 -or -not [IO.Path]::IsPathRooted($homes[0])) { return $false }
+    $expected = [CopilotExtensions.DaemonInstanceNative]::FinalPath((Join-Path $homes[0] 'python.exe'))
+    $childImage = [CopilotExtensions.DaemonInstanceNative]::FinalPath($Child.ExecutablePath)
+    $childArgumentImage = [CopilotExtensions.DaemonInstanceNative]::FinalPath($childCommand.Groups['exe'].Value)
+    if ($childImage -ine $expected -or
+        [CopilotExtensions.DaemonInstanceNative]::FinalPath($parentCommand.Groups['exe'].Value) -ine $parentImage -or
+        ($childArgumentImage -ine $expected -and $childArgumentImage -ine $parentImage)) { return $false }
+    $owner = Invoke-CimMethod -InputObject $Child -MethodName GetOwnerSid -ErrorAction Stop
+    if ($owner.ReturnValue -ne 0 -or $owner.Sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+        return $false
+    }
+    $handles = @()
+    try {
+        foreach ($row in @($Parent, $Child)) {
+            if ($row.CreationDate -isnot [DateTime]) { return $false }
+            $process = [Diagnostics.Process]::GetProcessById([int]$row.ProcessId)
+            $handles += $process
+            $birth = [long]([CopilotExtensions.DaemonInstanceNative]::Birth($process) -replace '^windows:', '')
+            $captured = $row.CreationDate.ToUniversalTime().ToFileTimeUtc()
+            # CIM exposes microseconds; the native handle retains 100ns FILETIME precision.
+            if ($birth - ($birth % 10) -ne $captured - ($captured % 10) -or $process.HasExited -or
+                [CopilotExtensions.DaemonInstanceNative]::FinalPath($process.Path) -ine
+                [CopilotExtensions.DaemonInstanceNative]::FinalPath($row.ExecutablePath)) { return $false }
+            $actualFile = [CopilotExtensions.DaemonInstanceNative]::FileIdentity($process.Path)
+            $expectedFile = [CopilotExtensions.DaemonInstanceNative]::FileIdentity($row.ExecutablePath)
+            if ($actualFile[0] -ne $expectedFile[0] -or $actualFile[1] -ne $expectedFile[1]) { return $false }
+        }
+        $parentBirth = [long]([CopilotExtensions.DaemonInstanceNative]::Birth($handles[0]) -replace '^windows:', '')
+        $childBirth = [long]([CopilotExtensions.DaemonInstanceNative]::Birth($handles[1]) -replace '^windows:', '')
+        return $parentBirth -le $childBirth -and $childBirth -le [DateTime]::UtcNow.ToFileTimeUtc()
+    } finally {
+        foreach ($process in $handles) { $process.Dispose() }
+    }
 }
 
 function Get-VaultUninstallProcesses {
@@ -1430,6 +1507,16 @@ function Get-VaultUninstallProcesses {
             throw 'Vault daemon user ownership cannot be validated'
         }
         $owned += $row
+    }
+    $ownedIds = @($owned | ForEach-Object { [int]$_.ProcessId })
+    foreach ($parent in @($owned)) {
+        $children = @($rows | Where-Object {
+            $_.ParentProcessId -eq $parent.ProcessId -and $_.ProcessId -notin $ownedIds
+        })
+        if ($children.Count -eq 1 -and (Test-VaultUninstallRedirectorChild -Parent $parent -Child $children[0] -Root $root)) {
+            # Retire the physical interpreter before its waiting venv launcher.
+            $owned = @($children[0]) + $owned
+        }
     }
     $ownedIds = @($owned | ForEach-Object { [int]$_.ProcessId })
     foreach ($row in $rows) {

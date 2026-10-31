@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory)][string]$Root,
-    [Parameter(Mandatory)][string]$SourceHash
+    [Parameter(Mandatory)][string]$SourceHash,
+    [string]$AdmissionRuntimeRoot
 )
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT' -or $PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion -lt [version]'5.1') {
@@ -37,6 +38,34 @@ function Invoke-FoundationChild {
     }
 }
 
+function Get-ProductAdmissionRuntime {
+    param([string]$RuntimeRoot)
+    $selector = Join-Path $RuntimeRoot 'current-version'
+    $null = [CopilotExtensions.NativeFoundationState]::CheckPath($selector, $false, $false)
+    if ((Get-Item -LiteralPath $selector).Length -gt 257) { throw 'Malformed admission runtime selector.' }
+    $selected = [IO.File]::ReadAllText($selector).Trim()
+    if ($selected -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._+-]{0,254}\z' -or $selected -in @('.', '..')) {
+        throw 'Malformed admission runtime selector.'
+    }
+    $slot = Join-Path $RuntimeRoot ('versions\' + $selected)
+    $python = Join-Path $slot 'Scripts\python.exe'
+    $launcher = Join-Path $slot '.runtime-bootstrap\runtime_launcher.py'
+    foreach ($path in @($python, $launcher, (Join-Path $slot '.install-complete.json'))) {
+        $null = [CopilotExtensions.NativeFoundationState]::CheckPath($path, $false, $false)
+    }
+    $previousRoot = $env:AGENT_RT_ROOT
+    try {
+        $env:AGENT_RT_ROOT = $RuntimeRoot
+        . (Join-Path $plugin 'scripts\resolve-runtime.ps1') -TraceMode read-only
+        if ($AgentRtPy -cne $python) {
+            throw 'Admission requires the exact complete current runtime; recovery fallback is not permitted.'
+        }
+    } finally {
+        $env:AGENT_RT_ROOT = $previousRoot
+    }
+    return @{ selector = $selector; selected = $selected; python = $python; launcher = $launcher }
+}
+
 [CopilotExtensions.NativeFoundationState]::CheckExecutionRoot($Root, $plugin)
 New-NativeExecutionDirectory -Root $Root
 $waiting = [Diagnostics.Stopwatch]::StartNew()
@@ -64,6 +93,9 @@ try {
     }
     $assertion = $owned.CreateWitnessAssertion([IO.Path]::Combine($Root, 'execution.lock'))
     $prior = [CopilotExtensions.NativeFoundationState]::ReconcileLost($Root, $assertion)
+    if ($AdmissionRuntimeRoot -and $prior) {
+        throw 'Product runtime admission is only supported before the first retained foundation.'
+    }
     if ($prior) {
         $value = $prior | ConvertFrom-Json
         if ($value.state -eq 'completed' -and $value.source_hash -ceq $SourceHash) {
@@ -91,7 +123,8 @@ try {
     }
     $target = Join-Path $Root 'foundation'
     $selector = Join-Path $target 'current-version'
-    $queueAware = [CopilotExtensions.NativeFoundationState]::CheckPath($selector, $false, $true)
+    $hasSelector = [CopilotExtensions.NativeFoundationState]::CheckPath($selector, $false, $true)
+    $queueAware = $hasSelector
     foreach ($name in @('queue.sqlite3', 'queue.sqlite3-wal', 'queue.sqlite3-shm', 'queue.sqlite3-journal')) {
         if ([CopilotExtensions.NativeFoundationState]::CheckPath((Join-Path $Root $name), $false, $true)) {
             $queueAware = $true
@@ -99,15 +132,27 @@ try {
     }
     if ($queueAware) {
         $reason = 'queue_admission_unavailable'
-        $null = [CopilotExtensions.NativeFoundationState]::CheckPath($selector, $false, $false)
-        if ((Get-Item -LiteralPath $selector).Length -gt 128) { throw 'Malformed foundation selector.' }
-        $selected = [IO.File]::ReadAllText($selector).Trim()
-        if ($selected -cnotmatch '\Afoundation-[0-9a-f]{64}\z') { throw 'Malformed foundation selector.' }
-        $slot = Join-Path $target ('versions\' + $selected)
-        $python = Join-Path $slot 'Scripts\python.exe'
-        $launcher = Join-Path $slot '.runtime-bootstrap\runtime_launcher.py'
-        foreach ($path in @($python, $launcher, (Join-Path $slot '.install-complete.json'))) {
-            $null = [CopilotExtensions.NativeFoundationState]::CheckPath($path, $false, $false)
+        if ($AdmissionRuntimeRoot) {
+            if ($hasSelector -or $prior -or
+                [CopilotExtensions.NativeFoundationState]::CheckPath($target, $true, $true)) {
+                throw 'Product runtime admission is only supported before the first retained foundation.'
+            }
+            $runtime = Get-ProductAdmissionRuntime -RuntimeRoot $AdmissionRuntimeRoot
+            $selector = $runtime.selector
+            $selected = $runtime.selected
+            $python = $runtime.python
+            $launcher = $runtime.launcher
+        } else {
+            $null = [CopilotExtensions.NativeFoundationState]::CheckPath($selector, $false, $false)
+            if ((Get-Item -LiteralPath $selector).Length -gt 128) { throw 'Malformed foundation selector.' }
+            $selected = [IO.File]::ReadAllText($selector).Trim()
+            if ($selected -cnotmatch '\Afoundation-[0-9a-f]{64}\z') { throw 'Malformed foundation selector.' }
+            $slot = Join-Path $target ('versions\' + $selected)
+            $python = Join-Path $slot 'Scripts\python.exe'
+            $launcher = Join-Path $slot '.runtime-bootstrap\runtime_launcher.py'
+            foreach ($path in @($python, $launcher, (Join-Path $slot '.install-complete.json'))) {
+                $null = [CopilotExtensions.NativeFoundationState]::CheckPath($path, $false, $false)
+            }
         }
         $admissionLog = Join-Path $Root ('foundation-admission-' + [Guid]::NewGuid().ToString('N') + '.log')
         $witness = New-NativeParticipantWitness -Custody $owned -Root $Root -RequestId ([Guid]::NewGuid().ToString('N'))
@@ -128,9 +173,10 @@ try {
         $operation = Get-NativeFoundationProgress -Root $Root
         if (-not $operation) { throw 'Queue-aware foundation admission did not persist progress.' }
         if ([IO.File]::ReadAllText($selector).Trim() -cne $selected) {
-            throw 'Selected foundation changed during queue admission.'
+            throw 'Selected admission runtime changed during queue admission.'
         }
     } else {
+        if ($AdmissionRuntimeRoot) { throw 'Product runtime admission requires an existing installation queue.' }
         $operation = Start-NativeFoundationProgress -Custody $owned -Root $Root -Plugin $plugin -ExpectedSourceHash $SourceHash
     }
     $admitted = $operation | ConvertFrom-Json

@@ -15,7 +15,7 @@ import pytest
 
 import agent_procutil as pu
 from agent_procutil.daemon_broker import WindowsDaemonProcess
-from update_driver import RequestSpec, TrustedRunner, enqueue, foundation_status, wait
+from update_driver import RequestSpec, TrustedRunner, enqueue, foundation_status, status, wait
 from update_driver.foundation_inputs import GENERATED, PACKAGES, inspect
 
 pytestmark = pytest.mark.skipif(
@@ -168,6 +168,10 @@ def test_real_cold_callers_converge_after_submitter_job_loss_and_source_removal(
                 area=area, library=library, root=root, slot=slot, env=env,
                 parents=parents, diagnostics=diagnostics,
             )
+            qualify_first_foundation_from_installed_admission(
+                area=area, library=library, runtime=root / "foundation", env=env,
+                parents=parents,
+            )
         finally:
             for worker in workers:
                 try:
@@ -185,6 +189,54 @@ def test_real_cold_callers_converge_after_submitter_job_loss_and_source_removal(
                 parent.wait(timeout=10)
         assert observation.surfaced == {}
         assert observation.focus_changes == {}
+
+
+def qualify_first_foundation_from_installed_admission(*, area, library, runtime, env, parents):
+    """Use actual retained packages without borrowing their source or draining the new queue."""
+    from test_foundation_producer_process import command
+    from test_foundation_upgrade_process import logs
+
+    inputs = area / "first-foundation-inputs"
+    for name in PACKAGES:
+        shutil.copytree(
+            library / name, inputs / name,
+            ignore=shutil.ignore_patterns(*GENERATED, "*.egg-info", "*.dist-info", "*.pyc", "*.pyo"),
+        )
+    plugin = inputs / "update-driver"
+    root = area / "existing-queue"
+    pending = enqueue(
+        RequestSpec("installed-first-foundation-pending"), root=root,
+        runner=TrustedRunner((sys.executable, "-c", "raise SystemExit(29)"), str(area)),
+    )
+    before = (root / "queue.sqlite3").read_bytes()
+    selection = (runtime / "current-version").read_bytes()
+    assert foundation_status(root=root) is None
+    with (root / "processes.log").open("w") as log:
+        producer = subprocess.Popen(
+            [*command(plugin, root), "-AdmissionRuntimeRoot", str(runtime)],
+            env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log, **pu.no_window_kwargs(),
+        )
+        parents.append(producer)
+        assert producer.wait(timeout=600) == 0, logs(root)
+    completed = foundation_status(root=root)
+    digest = inspect(plugin).digest
+    assert completed.state == "completed" and completed.source_hash == digest
+    assert (root / "queue.sqlite3").read_bytes() == before
+    assert (runtime / "current-version").read_bytes() == selection
+    assert status(pending.id, root=root) == pending
+    inputs.rename(area / "removed-first-foundation-inputs")
+    (root / "bootstrap" / completed.operation_id / "inputs").rename(area / "removed-first-foundation-frozen")
+    target = root / "foundation"
+    version = "foundation-" + digest
+    assert (target / "current-version").read_text().strip() == version
+    slot = target / "versions" / version
+    result = subprocess.run(
+        [str(slot / "Scripts" / "python.exe"), "-I", "-S", "-B", "-X", "utf8",
+         str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
+         "-m", "update_driver.foundation_inputs"],
+        capture_output=True, text=True, timeout=30, **pu.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def qualify_real_upgrade(*, area, library, root, slot, env, parents, diagnostics):
