@@ -831,7 +831,7 @@ callback an implicit credential store.
 
 - #9033 merged as `9a6adc0dc3ad6704830729ecdec246feb507ea47` from
   head `0ac5d27621695193b2d402947319559c55517593`. Current-head Copilot
-  review `5725851700` approved without open findings, required CI
+  review `5725904092` approved without open findings, required CI
   `41261657361` passed, and the documentation-impact thread was resolved.
 - The rebase retained the newer per-origin keeper and incremental review
   contracts alongside the caller-driven intake proposal. The original
