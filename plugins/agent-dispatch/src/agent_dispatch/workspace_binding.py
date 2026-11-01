@@ -70,6 +70,8 @@ def record_prepared(
         "worktree": worktree, "worktree_ownership": ownership,
         "allocation_project": prepared.get("project"), "worktree_path": prepared.get("path"),
     }
+    if "execution_machine" in reservation and creating_host is not None:
+        facts["execution_machine"] = creating_host
     conflicting_project = (
         prepared.get("requested_project")
         and prepared["requested_project"] != facts["allocation_project"]
@@ -82,6 +84,7 @@ def record_prepared(
                 reservation["key"], worktree, ownership=ownership,
                 allocation_project=facts["allocation_project"], worktree_path=facts["worktree_path"],
                 creating_host=creating_host if ownership == "created" else None, driver=driver,
+                **({"execution_machine": creating_host} if "execution_machine" in facts else {}),
             )
         except DispatchError as exc:
             hold(f"workspace {worktree} could not be recorded; retained for repair: {exc}")

@@ -173,6 +173,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             type(allocation_revision) is not int or not 1 <= allocation_revision <= 2**63 - 1
         ):
             raise TaskError("allocation revision must be a positive integer")
+        if pool_catalog_revision is not None and driver != "cli":
+            raise TaskError("pool placement supports only the qualified cli startup driver")
         from .ci_repair_spawn import authority_snapshot, reservation_authorized
         admission = None
         with self._connect() as probe:
@@ -534,7 +536,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             if worktree is not None:
                 from .queue_pool_placement import require_pool_workspace
                 task = self._fetch(conn, row["task_id"])
-                require_pool_workspace(conn, task, worktree, row["creating_host"])
+                require_pool_workspace(conn, task, worktree, row["execution_machine"], driver=row["driver"])
             validate_cooling_publication(row, cooling_token, expected_startup_revision)
             if release_requested or to_state in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.RELEASING}:
                 require_no_wake_for_release(self, conn, row)
@@ -687,6 +689,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         *,
         ownership: str = "unknown",
         creating_host: str | None = None,
+        execution_machine: str | None = None,
         driver: str | None = None,
         allocation_project: str | None = None,
         worktree_path: str | None = None,
@@ -721,9 +724,18 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 )
             from .queue_pool_placement import require_pool_workspace
             task = self._fetch(conn, row["task_id"])
+            if execution_machine is not None and (
+                not isinstance(execution_machine, str) or not execution_machine.strip()
+            ):
+                raise TaskError("execution machine must be non-empty")
+            if (
+                row["execution_machine"] is not None and execution_machine is not None
+                and row["execution_machine"] != execution_machine
+            ):
+                raise TaskError("recorded execution machine cannot change")
+            execution_machine = execution_machine or row["execution_machine"]
             require_pool_workspace(
-                conn, task, worktree,
-                creating_host if ownership == "created" else row["creating_host"],
+                conn, task, worktree, execution_machine, driver=driver,
             )
             if row["allocation_project"] or row["worktree_path"]:
                 if (
@@ -758,13 +770,14 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 "WHEN inherited_worktree IS NOT NULL THEN inherited_worktree "
                 "WHEN worktree_ownership = 'reused' THEN worktree "
                 "ELSE inherited_worktree END, "
-                "worktree = ?, worktree_ownership = ?, creating_host = ?, "
+                "worktree = ?, worktree_ownership = ?, creating_host = ?, execution_machine = ?, "
                 "driver = ?, allocation_project = ?, worktree_path = ?, updated_at = ? WHERE key = ?",
                 (
                     worktree,
                     worktree,
                     ownership,
                     creating_host if ownership == "created" else row["creating_host"],
+                    execution_machine,
                     driver,
                     allocation_project,
                     worktree_path,

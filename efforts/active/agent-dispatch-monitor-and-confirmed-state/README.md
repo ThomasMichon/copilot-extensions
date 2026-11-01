@@ -1703,3 +1703,22 @@ This is pre-publication source evidence, not a merged or installed outcome.
 Admitted supervisor caller migration, startup/decision budgets, task-wide retry,
 suspended recovery and submission closeout remain open under the amendment.
 The parent and the active claim/start work unit remain **Active**.
+
+### 2026-11-01 - Atomic claim/start review revision prepared
+
+The #9859 revision addresses drain admission and in-flight accounting,
+historical pool capacity after failed native execution, positive CLI startup
+driver qualification, supplied-capability/repository exclusions and independent
+execution-machine recording for targeted/reused workspaces. Local review found
+an additional startup-closure gap in force-failed/rearmed retirement histories;
+capacity now independently requires completed or fenced startup, native
+retirement and reconciled transport custody.
+
+Final contained validation passed **915 controls** across thirteen lifecycle,
+workspace, native-owner, catalog and scoped-authority selectors. The exact
+controls preserve non-created ownership, wait through an in-flight drain,
+retain superseded native attempts and reject retirement-only startup release.
+Ruff, focused placement/catalog typing, the enforced admitted type scopes and
+all thirteen install contracts pass. This remains prepared source evidence:
+the current-head PR review/merge gate, admitted supervisor integration, retry
+budgets and all original parent/native qualification remain open.

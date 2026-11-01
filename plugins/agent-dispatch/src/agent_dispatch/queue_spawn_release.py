@@ -35,10 +35,15 @@ class SpawnReleaseMixin:
                 raise TaskError(f"no such reservation: {key}")
             require_no_cooling(row)
             require_no_wake_for_release(self, conn, row)
-            if row["state"] not in SpawnState.ACTIVE:
+            terminal_pool = row["state"] in {
+                SpawnState.FAILED, SpawnState.SETTLED, SpawnState.REARMED, SpawnState.DEFERRED,
+            } and conn.execute(
+                "SELECT 1 FROM pool_reservation_bindings WHERE reservation_key = ?", (key,),
+            ).fetchone() is not None
+            if row["state"] not in SpawnState.ACTIVE and not terminal_pool:
                 conn.execute("ROLLBACK")
                 raise TaskError(
-                    f"reservation {key} is {row['state']!r}, not active (cannot request release)"
+                    f"reservation {key} is {row['state']!r}, not active or a terminal pool attempt (cannot request release)"
                 )
             if worktree and row["worktree"] and row["worktree"] != worktree:
                 conn.execute("ROLLBACK")

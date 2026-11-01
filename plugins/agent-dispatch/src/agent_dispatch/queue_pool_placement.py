@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import sqlite3
 
 from .pool_instances import PoolInstanceDefinition
@@ -31,6 +32,20 @@ def migrate_pool_placement(conn: sqlite3.Connection) -> None:
         " machine TEXT NOT NULL, env TEXT NOT NULL, reservation_key TEXT NOT NULL UNIQUE,"
         " task_generation INTEGER NOT NULL, catalog_revision INTEGER NOT NULL)"
     )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS pool_reservation_bindings ("
+        " reservation_key TEXT PRIMARY KEY, registration_id TEXT NOT NULL,"
+        " machine TEXT NOT NULL, env TEXT NOT NULL, capabilities TEXT)"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO pool_reservation_bindings"
+        " (reservation_key, registration_id, machine, env)"
+        " SELECT reservation_key, registration_id, machine, env FROM task_pool_assignments"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pool_reservation_identity"
+        " ON pool_reservation_bindings(registration_id, machine, env)"
+    )
 
 
 def pool_assignment(conn: sqlite3.Connection, task_id: str) -> PoolAssignment | None:
@@ -41,12 +56,14 @@ def pool_assignment(conn: sqlite3.Connection, task_id: str) -> PoolAssignment | 
 
 
 def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
-    if not set(task.requires).issubset(pool.filters.permit.get("capabilities", frozenset())):
+    capabilities = pool.filters.permit.get("capabilities", frozenset())
+    if not set(task.requires).issubset(capabilities):
         return False
     if not machine_matches(task.target_machine, pool.machine):
         return False
     tokens = {
         f"pool:{pool.registration_id}", f"machine:{pool.machine}", f"env:{pool.env}",
+        f"repo:{task.repo}", *capabilities,
     }
     if tokens.intersection(task.excludes):
         return False
@@ -72,17 +89,41 @@ def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
     return pool.filters.permits(attrs)
 
 
+def reservation_accountable(conn: sqlite3.Connection, row: sqlite3.Row) -> bool:
+    """Terminal bookkeeping never substitutes for native or transport retirement."""
+    if row["state"] in SpawnState.ACTIVE:
+        return True
+    from .queue_execution_custody import ExecutionSendUnresolved, require_execution_send_reconciliation
+    try:
+        require_execution_send_reconciliation(conn, row["task_id"], exclusive_key=row["exclusive_key"])
+    except ExecutionSendUnresolved:
+        return True
+    from .ordinary_native_bindings import is_native_retired, native_bindings, reservation_native_identity
+    if not (row["startup_complete"] or row["startup_fenced"]):
+        return True
+    if is_native_retired(row):
+        return False
+    native = reservation_native_identity(conn, row)
+    if native:
+        task_row = conn.execute("SELECT * FROM tasks WHERE id = ?", (row["task_id"],)).fetchone()
+        if task_row is None:
+            raise TaskError("pool capacity has an orphaned reservation; reconcile its execution custody")
+        task = Task._from_row(task_row)
+        _, retired = native_bindings(conn, row, task)
+        return native not in retired
+    return bool(row["session_handle"])
+
+
 def select_pool(
     conn: sqlite3.Connection, task: Task, definitions: tuple[PoolInstanceDefinition, ...],
 ) -> PoolInstanceDefinition:
     """Recheck retained routing and count accountable reservations, never caller slots."""
     legacy = conn.execute(
-        "SELECT s.key FROM spawn_reservations s"
-        " LEFT JOIN task_pool_assignments a ON a.reservation_key = s.key"
-        " WHERE s.state IN (?, ?, ?, ?) AND a.task_id IS NULL LIMIT 1",
-        tuple(SpawnState.ACTIVE),
-    ).fetchone()
-    if legacy is not None:
+        "SELECT s.* FROM spawn_reservations s"
+        " LEFT JOIN pool_reservation_bindings a ON a.reservation_key = s.key"
+        " WHERE a.reservation_key IS NULL",
+    ).fetchall()
+    if any(reservation_accountable(conn, row) for row in legacy):
         raise TaskError("pool placement requires reconciliation of unaccounted legacy capacity")
     retained = pool_assignment(conn, task.id)
     candidates = definitions
@@ -96,13 +137,13 @@ def select_pool(
     for pool in candidates:
         if not _permits(pool, task):
             continue
-        count = conn.execute(
-            "SELECT COUNT(*) FROM task_pool_assignments a"
+        reservations = conn.execute(
+            "SELECT s.* FROM pool_reservation_bindings a"
             " JOIN spawn_reservations s ON s.key = a.reservation_key"
-            " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?"
-            " AND s.state IN (?, ?, ?, ?)",
-            (*pool.identity, *SpawnState.ACTIVE),
-        ).fetchone()[0]
+            " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?",
+            pool.identity,
+        ).fetchall()
+        count = sum(reservation_accountable(conn, row) for row in reservations)
         if count < pool.max_concurrent:
             return pool
     if retained is not None:
@@ -126,6 +167,10 @@ def record_pool_claim(
     if changed != 1:
         raise TaskError("pool placement task incarnation changed")
     conn.execute(
+        "INSERT INTO pool_reservation_bindings VALUES (?, ?, ?, ?, ?)",
+        (key, *pool.identity, json.dumps(sorted(pool.filters.permit.get("capabilities", frozenset())))),
+    )
+    conn.execute(
         "INSERT INTO task_pool_assignments VALUES (?, ?, ?, ?, ?, ?, ?)"
         " ON CONFLICT(task_id) DO UPDATE SET reservation_key = excluded.reservation_key,"
         " task_generation = excluded.task_generation, catalog_revision = excluded.catalog_revision",
@@ -134,23 +179,33 @@ def record_pool_claim(
 
 
 def require_pool_workspace(
-    conn: sqlite3.Connection, task: Task, worktree: str, creating_host: object,
+    conn: sqlite3.Connection, task: Task, worktree: str, execution_machine: object,
+    *, driver: object,
 ) -> None:
     assignment = pool_assignment(conn, task.id)
     if assignment is None:
         return
+    if driver != "cli":
+        raise TaskError("pool workspace supports only the qualified cli startup driver")
     from .bridge_remote import normalize_host
     if (
-        not isinstance(creating_host, str) or not creating_host.strip()
-        or normalize_host(creating_host) != normalize_host(assignment.machine)
+        not isinstance(execution_machine, str) or not execution_machine.strip()
+        or normalize_host(execution_machine) != normalize_host(assignment.machine)
         or not machine_matches(task.target_machine, assignment.machine)
     ):
         raise TaskError("pool workspace requires its recorded execution machine")
     if task.target_worktree is not None and task.target_worktree != worktree:
         raise TaskError("pool workspace conflicts with the task target worktree")
+    binding = conn.execute(
+        "SELECT capabilities FROM pool_reservation_bindings WHERE reservation_key = ?",
+        (assignment.reservation_key,),
+    ).fetchone()
+    if binding is None or binding["capabilities"] is None:
+        raise TaskError("pool workspace capability binding requires reconciliation")
     if {
         f"worktree:{worktree}", f"pool:{assignment.registration_id}",
         f"machine:{assignment.machine}", f"env:{assignment.env}",
+        f"repo:{task.repo}", *json.loads(binding["capabilities"]),
     }.intersection(task.excludes):
         raise TaskError("pool workspace is excluded by current task routing")
 
@@ -180,7 +235,7 @@ def require_pool_start(
         or task.owner not in (None, worker_id)
     ):
         raise TaskError("pool start requires the current reservation, worker and native incarnation")
-    require_pool_workspace(conn, task, row["worktree"], row["creating_host"])
+    require_pool_workspace(conn, task, row["worktree"], row["execution_machine"], driver=row["driver"])
     from .ordinary_native_bindings import reservation_native_identity
     if reservation_native_identity(conn, row) != native_id:
         raise TaskError("pool start native does not match retained startup identity")

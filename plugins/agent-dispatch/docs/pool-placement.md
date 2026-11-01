@@ -3,7 +3,10 @@
 The coordinator's explicit `POST /pool-placements` operation implements one
 allocator-owned claim transaction. It requires the configured control
 credential and accepts version `1`, `task_id`, `reserved_by`, `catalog_revision` and an
-optional existing spawn `driver`. It does not accept a preferred pool subset,
+optional `driver: "cli"` (the only qualified startup driver in this provider).
+Other drivers, including ordinary and restricted Bridge, are rejected before
+claiming; callers must inspect `supported_drivers` in the executing contract.
+It does not accept a preferred pool subset,
 winner or available-slot count.
 
 `GET /pool-placements/contract` describes this executing provider's
@@ -14,8 +17,12 @@ carries the same protocol/version.
 
 The queue rechecks due time, holds, producer admission, the complete configured
 catalog and its revision under the reservation's `BEGIN IMMEDIATE` transaction.
+HTTP placement uses the same in-flight claim/drain gate as direct claims: a
+draining provider refuses admission and drain waits for already-admitted writes.
 Hard task `requires` tokens must be explicitly supplied by the selected pool's
 capability predicate; an unconstrained filter does not invent worker capabilities.
+Exclusions match all supplied capabilities and the execution repo, machine,
+environment, pool and worktree selectors, not only the task's requirements.
 It selects the first matching instance in published priority order with free
 capacity, writes its reservation and retained pool assignment and changes the
 task to `CLAIMED`. The assignment contains the actual registration, execution
@@ -24,7 +31,13 @@ No workspace, worker or native identity is invented. Workspace preparation and
 startup must follow that commit through the existing allocation/startup owners.
 
 Capacity counts accountable `reserving`, `spawned`, `cold` and `releasing`
-reservations, not caller estimates or task status. An active replay returns
+reservations, failed native/startup effects and unresolved transport custody,
+not caller estimates or task status. Immutable per-reservation pool bindings
+retain older attempts even when the task's current assignment advances.
+A terminal pool attempt may enter the existing release/retirement path; failure,
+rearm and native retirement alone do not prove original startup closure.
+Capacity is released only after its startup is completed or fenced and its
+native and transport evidence permits that release. An active replay returns
 the same reservation with `reserved: false`; even an expired catalog cannot
 turn that observation into another spawn. A retained instance waits for its own
 slot or reports unsatisfiable routing instead of switching to another pool.
@@ -37,7 +50,11 @@ An affirmative `POST /tasks/{id}/start` supplies `worker_id`,
 worker machine/worktree, exact recorded native identity and assignment
 generation, rejects release/cooling/startup fences and applies the existing
 native acquisition authority. Only the successful transition binds the worker
-and native owner. A spawn record, reachability or delivery receipt is not an
+and native owner. Preparation records `execution_machine` independently of
+`creating_host`: targeted/reused workspaces retain their real ownership and
+creation provenance instead of being relabeled as newly created. Workspace
+recording and start both recheck that execution machine and current exclusions
+against the retained supplied capabilities. A spawn record, reachability or delivery receipt is not an
 acceptance. Failed or stale starts leave the claim and slot intact.
 
 ## Compatibility and remaining integration

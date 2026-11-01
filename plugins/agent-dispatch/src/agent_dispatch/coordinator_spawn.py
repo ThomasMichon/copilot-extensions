@@ -6,6 +6,7 @@ from dataclasses import asdict
 import logging
 import sqlite3
 import subprocess
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, FiniteFloat, Field
@@ -31,7 +32,7 @@ class PoolPlacementBody(BaseModel):
     version: int = Field(default=1, ge=1, le=1, strict=True)
     reserved_by: str = Field(min_length=1)
     catalog_revision: int = Field(ge=0, strict=True)
-    driver: str | None = None
+    driver: Literal["cli"] = "cli"
 
 
 class RoutingAssignmentBody(BaseModel):
@@ -94,6 +95,7 @@ class RecordSpawnWorktreeBody(BaseModel):
     worktree: str
     ownership: str = "unknown"
     creating_host: str | None = None
+    execution_machine: str | None = None
     driver: str | None = None
     allocation_project: str | None = None
     worktree_path: str | None = None
@@ -244,21 +246,26 @@ def register_spawn_routes(
     def pool_placement_contract() -> dict:
         return {
             "protocol": POOL_PLACEMENT_PROTOCOL, "supported_versions": [POOL_PLACEMENT_VERSION],
+            "supported_drivers": ["cli"],
             "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
             "automatic_lane_migration": False, "startup_retry_policy_complete": False,
         }
 
     @app.post("/pool-placements", dependencies=[Depends(pool_control)])
-    def place_pool_task(body: PoolPlacementBody) -> dict:
-        try:
-            reservation, reserved = queue.reserve_spawn(
-                body.task_id, reserved_by=body.reserved_by, driver=body.driver,
-                pool_catalog_revision=body.catalog_revision,
-            )
-        except WorkerAdmissionInhibited as exc:
-            raise HTTPException(409, detail=exc.detail()) from exc
-        except TaskError as exc:
-            raise HTTPException(409, detail=str(exc)) from exc
+    def place_pool_task(body: PoolPlacementBody, request: Request) -> dict:
+        gate = request.app.state.drain_gate
+        with gate.track_claim():
+            if gate.draining:
+                raise HTTPException(409, detail="pool placement is inhibited while draining")
+            try:
+                reservation, reserved = queue.reserve_spawn(
+                    body.task_id, reserved_by=body.reserved_by, driver=body.driver,
+                    pool_catalog_revision=body.catalog_revision,
+                )
+            except WorkerAdmissionInhibited as exc:
+                raise HTTPException(409, detail=exc.detail()) from exc
+            except TaskError as exc:
+                raise HTTPException(409, detail=str(exc)) from exc
         assignment = queue.task_pool_assignment(body.task_id)
         assert assignment is not None
         if reserved:
@@ -527,6 +534,7 @@ def register_spawn_routes(
                 body.worktree,
                 ownership=body.ownership,
                 creating_host=body.creating_host,
+                execution_machine=body.execution_machine,
                 driver=body.driver,
                 allocation_project=body.allocation_project,
                 worktree_path=body.worktree_path,

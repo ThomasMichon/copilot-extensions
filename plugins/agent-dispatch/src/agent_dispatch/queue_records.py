@@ -250,6 +250,7 @@ class SpawnReservation:
     inherited_worktree: str | None = None
     worktree_ownership: str | None = None
     creating_host: str | None = None
+    execution_machine: str | None = None
     driver: str | None = None
     agent_info: dict | None = None
     allocation_project: str | None = None
@@ -288,6 +289,7 @@ class SpawnReservation:
             inherited_worktree=row["inherited_worktree"],
             worktree_ownership=row["worktree_ownership"],
             creating_host=row["creating_host"],
+            execution_machine=row["execution_machine"] if "execution_machine" in row.keys() else None,
             driver=row["driver"],
             agent_info=json.loads(row["agent_info"]) if "agent_info" in row.keys() and row["agent_info"] else None,
             allocation_project=row["allocation_project"] if "allocation_project" in row.keys() else None,

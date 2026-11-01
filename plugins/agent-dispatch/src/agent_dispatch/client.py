@@ -236,7 +236,7 @@ class DispatchClient(TaskRecoveryClientMixin, CleanupRecoveryClientMixin, Catego
 
     def place_pool_task(
         self, task_id: str, *, reserved_by: str, catalog_revision: int,
-        driver: str | None = None,
+        driver: str = "cli",
     ) -> dict:
         """Explicit allocator transaction; no workspace or process is launched here."""
         return self._unwrap(self._http.post(
@@ -776,32 +776,6 @@ class DispatchClient(TaskRecoveryClientMixin, CleanupRecoveryClientMixin, Catego
     def routing_assignment_events(self, assignment_id: str) -> list[dict]:
         return self._unwrap(
             self._http.get(f"/routing-assignments/{assignment_id}/events")
-        )
-
-    def record_spawn_worktree(
-        self,
-        key: str,
-        worktree: str,
-        *,
-        ownership: str = "unknown",
-        creating_host: str | None = None,
-        driver: str | None = None,
-        allocation_project: str | None = None,
-        worktree_path: str | None = None,
-    ) -> dict:
-        """Record the reserved worktree before launching the worker session."""
-        return self._unwrap(
-            self._http.post(
-                f"/spawn-reservations/{key}/worktree",
-                json={
-                    "worktree": worktree,
-                    "ownership": ownership,
-                    "creating_host": creating_host,
-                    "driver": driver,
-                    "allocation_project": allocation_project,
-                    "worktree_path": worktree_path,
-                },
-            )
         )
 
     def request_spawn_release(

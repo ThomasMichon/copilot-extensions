@@ -1,10 +1,10 @@
 """Contained allocator claim/start transactions; no installed lane qualification."""
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
+from dataclasses import asdict, replace
 import hashlib
 import json
-from threading import Barrier
+from threading import Barrier, Event
 
 import pytest
 import httpx
@@ -17,6 +17,7 @@ from agent_dispatch.queue import Status, TaskError, TaskQueue
 from agent_dispatch.registrar import Filters
 from agent_dispatch.registrar_configuration import ConfiguredSupervisorCohort, SupervisorScopeIntent
 from agent_dispatch.queue_pool_placement import select_pool
+from agent_dispatch.workspace_binding import record_prepared
 
 
 @pytest.fixture
@@ -63,8 +64,11 @@ def task(q, **kw):
 
 
 def record_native(q, r, *, worktree="worktree", native="native"):
+    ownership = r.worktree_ownership or "created"
     q.record_spawn_worktree(
-        r.key, worktree, ownership="created", creating_host="host-a", driver="cli",
+        r.key, worktree, ownership=ownership,
+        creating_host="host-a" if ownership == "created" else None,
+        execution_machine="host-a", driver="cli",
     )
     return q.record_spawn(r.key, session_handle=native, worktree=worktree)
 
@@ -123,6 +127,7 @@ def test_machine_environment_instances_have_separate_capacity(q):
     {"not_before": 101}, {"target_machine": "other"},
     {"excludes": ["pool:worker"]}, {"excludes": ["machine:host-a"]},
     {"excludes": ["env:linux"]},
+    {"excludes": ["repo:example"]},
     {"target_worktree": "excluded", "excludes": ["worktree:excluded"]},
 ])
 def test_routing_and_due_time_refusals_leave_no_claim_or_slot(q, change):
@@ -322,6 +327,7 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q):
     assert contract.status_code == 200, contract.text
     assert contract.json() == {
         "protocol": "pool_placement/v1", "supported_versions": [1],
+        "supported_drivers": ["cli"],
         "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
         "automatic_lane_migration": False, "startup_retry_policy_complete": False,
     }
@@ -378,7 +384,8 @@ def test_recorded_execution_host_must_match_the_selected_pool(q):
     r, _ = place(q, t)
     with pytest.raises(TaskError, match="execution machine"):
         q.record_spawn_worktree(
-            r.key, "worktree", ownership="created", creating_host="host-b", driver="cli",
+            r.key, "worktree", ownership="created", creating_host="host-b",
+            execution_machine="host-b", driver="cli",
         )
     with pytest.raises(TaskError, match="execution machine"):
         q.record_spawn(r.key, session_handle="native-b", worktree="worktree")
@@ -474,3 +481,241 @@ def test_nonfinite_admission_time_cannot_create_a_claim(q):
     with pytest.raises(TaskError, match="finite admission"):
         place(q, t, revision, now=float("nan"))
     assert q.get(t.id).status == Status.QUEUED and q.task_pool_assignment(t.id) is None
+
+
+def test_draining_refuses_placement_before_any_claim_or_slot(q):
+    revision = publish(q, pool())
+    t = task(q)
+    app = create_app(q, token=None, control_token="control", enable_mcp=False,
+                     verification_interval=0)
+    client = TestClient(app)
+    assert client.post("/drain", json={"timeout": 1, "poll": .05}).json()["drained"]
+    response = client.post("/pool-placements", headers=headers(), json={
+        "task_id": t.id, "reserved_by": "allocator", "catalog_revision": revision,
+    })
+    assert response.status_code == 409 and "draining" in response.json()["detail"]
+    assert q.get(t.id).status == Status.QUEUED
+    assert q.task_pool_assignment(t.id) is None and q.list_reservations(task_id=t.id) == []
+
+
+def test_drain_waits_for_an_admitted_placement_transaction(q, monkeypatch):
+    revision = publish(q, pool())
+    t = task(q)
+    app = create_app(q, token=None, control_token="control", enable_mcp=False,
+                     verification_interval=0)
+    client = TestClient(app)
+    entered, release, draining = Event(), Event(), Event()
+    reserve = q.reserve_spawn
+    set_draining = app.state.drain_gate.set_draining
+
+    def blocked(*args, **kw):
+        entered.set()
+        assert release.wait(5)
+        return reserve(*args, **kw)
+
+    def observe(value):
+        set_draining(value)
+        if value:
+            draining.set()
+
+    monkeypatch.setattr(q, "reserve_spawn", blocked)
+    monkeypatch.setattr(app.state.drain_gate, "set_draining", observe)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        placement = executor.submit(client.post, "/pool-placements", headers=headers(), json={
+            "task_id": t.id, "reserved_by": "allocator", "catalog_revision": revision,
+        })
+        try:
+            assert entered.wait(5)
+            drain = executor.submit(client.post, "/drain", json={"timeout": 5, "poll": .05})
+            assert draining.wait(5)
+            assert app.state.drain_gate.claims == 1 and not drain.done()
+        finally:
+            release.set()
+        assert placement.result(timeout=5).status_code == 200
+        assert drain.result(timeout=5).json()["drained"]
+    assert app.state.drain_gate.claims == 0
+
+
+@pytest.mark.parametrize("driver", [None, "", "ordinary-bridge", "restricted-bridge", "unknown"])
+def test_unqualified_drivers_cannot_create_pool_claims(q, driver):
+    revision = publish(q, pool())
+    t = task(q)
+    with pytest.raises(TaskError, match="qualified cli"):
+        q.reserve_spawn(t.id, reserved_by="allocator", driver=driver, pool_catalog_revision=revision)
+    client = TestClient(create_app(q, token=None, control_token="control", enable_mcp=False,
+                                  verification_interval=0))
+    response = client.post("/pool-placements", headers=headers(), json={
+        "task_id": t.id, "reserved_by": "allocator", "catalog_revision": revision, "driver": driver,
+    })
+    assert response.status_code == 422
+    assert q.get(t.id).status == Status.QUEUED and q.task_pool_assignment(t.id) is None
+
+
+def test_excluded_supplied_capability_is_not_just_a_required_token(q):
+    publish(q, pool("gpu", priority=5, filters=Filters(
+        permit={"capabilities": frozenset({"gpu"})},
+    )), pool("cpu"))
+    t = task(q, excludes=["gpu"])
+    place(q, t)
+    assert q.task_pool_assignment(t.id).registration_id == "cpu"
+
+
+@pytest.mark.parametrize("excluded", ["gpu", "repo:example"])
+def test_new_exclusions_are_checked_at_workspace_and_start_boundaries(q, excluded):
+    publish(q, pool(filters=Filters(permit={"capabilities": frozenset({"gpu"})})))
+    t = task(q)
+    r, _ = place(q, t)
+    record_native(q, r)
+    with q._connect() as conn:
+        conn.execute("UPDATE tasks SET excludes = ? WHERE id = ?", (json.dumps([excluded]), t.id))
+    with pytest.raises(TaskError, match="excluded"):
+        q.record_spawn(r.key, session_handle="native", worktree="worktree")
+    with pytest.raises(TaskError, match="excluded"):
+        q.start(t.id, "host-a/worktree", owner_session_id="native",
+                expected_generation=q.get(t.id).generation)
+    assert q.get(t.id).status == Status.CLAIMED
+
+
+@pytest.mark.parametrize("with_native", [False, True])
+def test_failed_startup_holds_capacity_until_qualified_retirement(q, with_native):
+    publish(q, pool())
+    t = task(q)
+    r, _ = place(q, t)
+    if with_native:
+        record_native(q, r)
+    q.fail_spawn(r.key, detail="failed launch observation, not retirement")
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    q.request_spawn_release(r.key, finished_startup_revision=1)
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    q.retire_spawn(r.key, exact_absence=True)
+    assert place(q, task(q))[1]
+
+
+def test_failed_native_remains_counted_after_the_current_assignment_moves(q):
+    publish(q, pool(capacity=2))
+    t = task(q)
+    old, _ = place(q, t)
+    record_native(q, old)
+    q.start(t.id, "host-a/worktree", owner_session_id="native",
+            expected_generation=q.get(t.id).generation)
+    q.fail_spawn(old.key)
+    q.yield_task(t.id, "host-a/worktree")
+    current, _ = place(q, q.get(t.id))
+    assert current.key != old.key
+    assert q.task_pool_assignment(t.id).reservation_key == current.key
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    with q._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM pool_reservation_bindings").fetchone()[0] == 2
+
+
+def test_later_exact_same_native_retirement_releases_historical_completed_startup(q):
+    publish(q, pool(capacity=2))
+    t = task(q)
+    old, _ = place(q, t)
+    record_native(q, old)
+    q.record_spawn(old.key, session_handle="native", startup_complete=True, startup_revision=1)
+    q.start(t.id, "host-a/worktree", owner_session_id="native",
+            expected_generation=q.get(t.id).generation)
+    q.fail_spawn(old.key)
+    q.yield_task(t.id, "host-a/worktree")
+    current, _ = place(q, q.get(t.id))
+    record_native(q, current)
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    q.request_spawn_release(current.key, finished_startup_revision=1)
+    q.retire_spawn(current.key, exact_absence=True)
+    assert place(q, task(q))[1]
+    assert place(q, task(q))[1]
+
+
+def test_force_absence_failure_does_not_prove_original_startup_closure(q):
+    publish(q, pool())
+    t = task(q)
+    r, _ = place(q, t)
+    record_native(q, r)
+    q.request_spawn_release(r.key)
+    forced = q.fail_spawn(r.key, force=True, confirmed_absent=True)
+    assert forced.release_requested and not forced.startup_complete and not forced.startup_fenced
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    q.request_spawn_release(r.key, finished_startup_revision=1)
+    q.retire_spawn(r.key, exact_absence=True)
+    assert place(q, task(q))[1]
+
+
+def test_rearmed_retirement_marker_does_not_prove_original_startup_closure(q):
+    publish(q, pool())
+    t = task(q)
+    r, _ = place(q, t)
+    record_native(q, r)
+    q.fail_spawn(r.key)
+    with q._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET state = 'rearmed', conversation_retired = 1 WHERE key = ?",
+            (r.key,),
+        )
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    q.request_spawn_release(r.key, finished_startup_revision=1)
+    q.retire_spawn(r.key, exact_absence=True)
+    assert place(q, task(q))[1]
+
+
+def test_retired_native_with_unknown_transport_custody_still_holds_capacity(q):
+    publish(q, pool())
+    t = task(q, source="test-producer")
+    r, _ = place(q, t)
+    record_native(q, r)
+    q.request_spawn_release(r.key, finished_startup_revision=1)
+    q.retire_spawn(r.key, exact_absence=True)
+    with q._connect() as conn:
+        conn.execute(
+            "INSERT INTO execution_send_custody"
+            " (scope_key, send_id, repo, source, producer_generation, task_id, reservation_key,"
+            " task_generation, kind, identity, state, detail, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("scope", "send", t.repo, t.source, 1, t.id, r.key, q.get(t.id).generation,
+             "launch", "{}", "unknown", "unresolved transport outcome", 100, 100),
+        )
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    with q._connect() as conn:
+        conn.execute("UPDATE execution_send_custody SET state = 'sent' WHERE send_id = 'send'")
+    assert place(q, task(q))[1]
+
+
+@pytest.mark.parametrize("ownership", ["targeted", "reused"])
+def test_real_preparation_preserves_non_created_ownership_and_execution_machine(q, ownership):
+    publish(q, pool())
+    t = task(q, target_worktree="wanted")
+    r, _ = place(q, t)
+
+    class Client:
+        def record_spawn_worktree(self, key, worktree, **kw):
+            return asdict(q.record_spawn_worktree(key, worktree, **kw))
+
+    prepared = {
+        "worktree": "wanted", "ownership": ownership, "project": "example", "path": "/workspace",
+    }
+    record_prepared(Client(), asdict(r), prepared, driver="cli", creating_host="host-a")
+    bound = q.get_reservation(r.key)
+    assert bound.worktree_ownership == ownership and bound.creating_host is None
+    assert bound.execution_machine == "host-a"
+    q.record_spawn(r.key, session_handle="native", worktree="wanted")
+    assert q.start(t.id, "host-a/wanted", owner_session_id="native",
+                   expected_generation=q.get(t.id).generation).status == Status.STARTED
+
+
+@pytest.mark.parametrize("ownership", ["targeted", "reused"])
+def test_non_created_preparation_cannot_bind_the_wrong_execution_machine(q, ownership):
+    publish(q, pool())
+    t = task(q, target_worktree="wanted")
+    r, _ = place(q, t)
+    with pytest.raises(TaskError, match="execution machine"):
+        q.record_spawn_worktree(r.key, "wanted", ownership=ownership,
+                                execution_machine="host-b", driver="cli")
+    assert q.get_reservation(r.key).execution_machine is None
+    assert q.get_reservation(r.key).worktree_ownership == "targeted"

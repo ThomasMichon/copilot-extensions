@@ -497,7 +497,7 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         row["name"]
         for row in conn.execute("PRAGMA table_info(spawn_reservations)").fetchall()
     }
-    for column in ("worktree_ownership", "creating_host", "driver", "agent_info"):
+    for column in ("worktree_ownership", "creating_host", "execution_machine", "driver", "agent_info"):
         if column not in reservation_columns:
             try:
                 conn.execute(f"ALTER TABLE spawn_reservations ADD COLUMN {column} TEXT")

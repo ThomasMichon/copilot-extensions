@@ -35,6 +35,23 @@ class SpawnReservationClientMixin:
             f"/spawn-reservations/{key}/allocation", json={"project": project},
         ))
 
+    def record_spawn_worktree(
+        self, key: str, worktree: str, *, ownership: str = "unknown",
+        creating_host: str | None = None, execution_machine: str | None = None,
+        driver: str | None = None, allocation_project: str | None = None,
+        worktree_path: str | None = None,
+    ) -> dict:
+        """Retain workspace provenance and its independent execution machine."""
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/worktree",
+            json={
+                "worktree": worktree, "ownership": ownership,
+                "creating_host": creating_host, "driver": driver,
+                "allocation_project": allocation_project, "worktree_path": worktree_path,
+                **({"execution_machine": execution_machine} if execution_machine is not None else {}),
+            },
+        ))
+
     def record_created_agent(
         self, key: str, *, task_generation: int, agent_info: dict,
         worktree_record: dict | None = None, startup_invocation: dict | None = None,
