@@ -140,7 +140,21 @@ def test_actual_file_boundary_is_shared_by_local_reads_and_hosted_archive_admiss
     raw = prefix + b"x" * (limit - len(prefix) - len(suffix)) + suffix
     path = tmp_path / "coverage.json"
     path.write_bytes(raw)
-    observed, value = packet._read_file(tmp_path, "coverage.json")
+    with monkeypatch.context() as patch:
+        patch.setattr(packet.json, "dumps", lambda *_a, **_k: pytest.fail(
+            "packet reads must not serialize a second evidence-sized buffer",
+        ))
+        observed, value = packet._read_file(tmp_path, "coverage.json")
+        finite_path = tmp_path / "finite.json"
+        finite_path.write_bytes(b'{"nested":[{"number":1.25,"literal":"NaN"}]}')
+        assert packet._read_file(tmp_path, "finite.json")[1]["nested"][0] == {
+            "number": 1.25, "literal": "NaN",
+        }
+        for token in (b"NaN", b"Infinity", b"-Infinity", b"1e1000", b"-1e1000"):
+            finite_path.write_bytes(b'{"nested":[{"number":' + token + b'}]}')
+            with pytest.raises(ValueError, match="nonfinite"):
+                packet._read_file(tmp_path, "finite.json")
+        finite_path.unlink()
     assert observed == raw and len(value["padding"]) == limit - len(prefix) - len(suffix)
     del observed, value
     assert receipt_contract.regular_bytes(tmp_path, "coverage.json", max_bytes=limit) == raw
