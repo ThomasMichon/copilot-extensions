@@ -38,7 +38,8 @@ class AgendaRuntime:
         self._rows: dict[tuple[str, str], dict] = {}
         self._generation = None
         self._sequence = 0
-        self._error = None
+        self._activation_error = None
+        self._project_errors: dict[str, str] = {}
         self._paths = {}
         self._qualified = set()
         self._pending = set()
@@ -55,8 +56,8 @@ class AgendaRuntime:
                 raise contract.AgendaError("agenda admission closed", owner._reason)
             if expected is not None and expected != owner.store.generation:
                 raise contract.AgendaError("agenda generation changed", "superseded")
-        if self._error:
-            raise contract.AgendaError(self._error, "unavailable")
+        if self._activation_error:
+            raise contract.AgendaError(self._activation_error, "unavailable")
         if conn is not None:
             row = conn.execute(
                 "SELECT generation, writer_id FROM worktrees_projection_owner WHERE singleton=1",
@@ -74,7 +75,8 @@ class AgendaRuntime:
                     self._pending.clear()
                 self._sequence = 0
                 self._generation = self.owner.store.generation
-            self._error = None
+                self._project_errors.clear()
+            self._activation_error = None
             try:
                 with closing(sqlite3.connect(self.owner.store.db_path, timeout=0.2)) as conn, conn:
                     conn.execute("BEGIN IMMEDIATE")
@@ -82,7 +84,7 @@ class AgendaRuntime:
                     conn.execute(_SCHEMA)
                     conn.execute(_SOURCE_SCHEMA)
             except (contract.AgendaError, OSError, sqlite3.Error) as exc:
-                self._error = str(exc)[:1024]
+                self._activation_error = str(exc)[:1024]
             if self._unsubscribe is None:
                 from . import record_cache
 
@@ -139,12 +141,23 @@ class AgendaRuntime:
             self._fence(conn, expected)
 
     def roster_changed(self, project) -> None:
-        try:
-            self.reconcile(project)
-            self._error = None
-        except (OSError, sqlite3.Error, ValueError, ProjectionUnavailable) as exc:
-            self._error = str(exc)[:1024]
-            self.feed.changed(project)
+        with self._lock:
+            try:
+                self.reconcile(project)
+            except (OSError, sqlite3.Error, ValueError, ProjectionUnavailable) as exc:
+                if self._activation_error is None:
+                    self._project_errors[project] = str(exc)[:1024]
+                self.feed.changed(project)
+
+    def _request_project(self, project: str) -> None:
+        published = project in self.owner.store.published_projects()
+        self.owner.register_project_demand(project, unready=not published)
+        if not published:
+            self._fresh_fence(self._generation)
+            raise contract.AgendaError("resident project roster is not published", "unready")
+        if project in self._project_errors:
+            self._fresh_fence(self._generation)
+            raise contract.AgendaError(self._project_errors[project], "unavailable")
 
     def _advance(self) -> None:
         if self._sequence >= contract.MAX_SEQUENCE:
@@ -169,7 +182,6 @@ class AgendaRuntime:
         rows = self.owner.store.read(project)["worktrees"]
         keys = {(project, row["id"]) for row in rows}
         with self._lock:
-            self._error = None
             with closing(sqlite3.connect(self.owner.store.db_path, timeout=0.2)) as conn, conn:
                 conn.execute("BEGIN IMMEDIATE")
                 self._fence(conn)
@@ -223,7 +235,7 @@ class AgendaRuntime:
                 for key in (self._rows.keys() - old.keys()) | current.keys()
             }
             self._fresh_fence(self._generation)
-            if current != old:
+            if current != old or project in self._project_errors:
                 self._advance()
                 for key in old:
                     self._rows.pop(key)
@@ -233,6 +245,7 @@ class AgendaRuntime:
                     key for key, value in current.items() if value["body"] is not None
                 )
                 self._paths = paths
+                self._project_errors.pop(project, None)
                 self.feed.changed(project)
 
     def _reply(self, request) -> dict:
@@ -310,6 +323,7 @@ class AgendaRuntime:
             project, wid, _session = contract.selection(request)
             with self.owner._activation_lock, self._lock:
                 self._fence(expected=self._generation)
+                self._request_project(project)
                 pending, updates = self._refresh_pending()
                 key = project, wid
                 if refresh and key in self._rows:
@@ -346,6 +360,7 @@ class AgendaRuntime:
             key = project, wid
             with self.owner._activation_lock, self._lock:
                 self._fence(expected=expected)
+                self._request_project(project)
                 pending, updates = self._refresh_pending()
                 if key not in self._rows:
                     raise contract.AgendaError(

@@ -11,6 +11,7 @@ import socket
 import sys
 import time
 from threading import Event
+from textwrap import indent
 from typing import Any
 
 import pytest
@@ -58,7 +59,7 @@ with Path(configuration["trace"]).open("a",encoding="utf-8") as trace:
         "argv":sys.argv[2:]})+"\\n")
 
 if sys.argv[2:] == ["--resident-health"]:
-    print(json.dumps({"ok":True,"health":worktrees_client.read_health()}))
+    _HEALTH_PROBE_BODY
     sys.exit(0)
 
 project_parser=argparse.ArgumentParser(add_help=False,allow_abbrev=False)
@@ -118,7 +119,7 @@ async def eventually(pilot, predicate, *, detail: str) -> None:
 
 
 @pytest.fixture
-def chain(tmp_path: Path, monkeypatch):
+def chain(tmp_path: Path, monkeypatch, request):
     for source in reversed(SOURCE_PATHS):
         assert source.is_dir(), f"missing declared source closure: {source}"
         monkeypatch.syspath_prepend(str(source))
@@ -156,9 +157,14 @@ def chain(tmp_path: Path, monkeypatch):
     assert tracking.load_record(record_path).resolved_head_session == "head-a"
     assert record_path.with_suffix(".lock").exists(), "canonical record lock was not used"
 
-    owner = runtime.WorktreesRuntime(tmp_path / "resident.sqlite3", elected=lambda: True)
+    wake = Event()
+    owner = runtime.WorktreesRuntime(
+        tmp_path / "resident.sqlite3", elected=lambda: True, wake=wake,
+    )
     owner.activate()
-    owner.publish("example", [{"id": "selected"}], observed_at=1)
+    if getattr(request, "param", True):
+        owner.publish("example", [{"id": "selected"}], observed_at=1)
+    wake.clear()
     actions = []
 
     def handle(action, payload):
@@ -185,7 +191,10 @@ def chain(tmp_path: Path, monkeypatch):
 
     endpoint_discovery(endpoint)
     entry = tmp_path / "owned_provider.py"
-    entry.write_text(_ENTRY, encoding="utf-8")
+    entry.write_text(
+        _ENTRY.replace("    _HEALTH_PROBE_BODY", indent(agenda_transport._HEALTH_PROBE.strip(), "    ")),
+        encoding="utf-8",
+    )
     argv = [sys.executable, str(entry), str(configuration)]
     monkeypatch.setattr(engine_client, "engine_base_command", lambda: list(argv))
     monkeypatch.setattr(agenda_transport, "health_argv", lambda base: [*base, "--resident-health"])
@@ -216,7 +225,7 @@ def chain(tmp_path: Path, monkeypatch):
             "tracking": tracking, "record_path": record_path, "workdir": workdir,
             "owner": owner, "server": server, "argv": argv, "endpoint": endpoint,
             "endpoint_discovery": endpoint_discovery, "actions": actions,
-            "settled": settled, "trace": trace,
+            "settled": settled, "trace": trace, "wake": wake,
         }
     finally:
         owner.close_admission("closed")
@@ -395,7 +404,8 @@ def feed_invocations(chain) -> list[dict]:
     ]
 
 
-def test_actual_relay_disconnect_reconnects_to_current_snapshot(chain, monkeypatch):
+@pytest.mark.parametrize("offline_probe", [False, True])
+def test_actual_relay_disconnect_reconnects_to_current_snapshot(chain, monkeypatch, offline_probe):
     owner, server = chain["owner"], chain["server"]
     original_stream = server.stream_handle
     calls, disconnect = [], Event()
@@ -421,6 +431,7 @@ def test_actual_relay_disconnect_reconnects_to_current_snapshot(chain, monkeypat
 
     async def check():
         app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        offline = socket.socket() if offline_probe else None
         try:
             async with app.run_test() as pilot:
                 await eventually(
@@ -441,6 +452,9 @@ def test_actual_relay_disconnect_reconnects_to_current_snapshot(chain, monkeypat
                 )
                 assert delivery["state"] == "delivered"
                 assert data.agenda["availability"] == "not-published"
+                if offline is not None:
+                    offline.bind(("127.0.0.1", 0))
+                    chain["endpoint_discovery"](f"http://127.0.0.1:{offline.getsockname()[1]}")
                 disconnect.set()
                 await eventually(
                     pilot,
@@ -449,6 +463,14 @@ def test_actual_relay_disconnect_reconnects_to_current_snapshot(chain, monkeypat
                     detail=f"actual CLI structured disconnect did not enter bounded recovery: {widget(app)}",
                 )
                 assert data.agenda is None
+                if offline is not None:
+                    await eventually(
+                        pilot, lambda: "resident health is unavailable: disconnected:" in widget(app)
+                        and "reconnecting in 2s" in widget(app),
+                        detail=f"real offline reprobe discarded the remaining retry budget: {widget(app)}",
+                    )
+                    assert data.agenda is None
+                    chain["endpoint_discovery"](chain["endpoint"])
                 await eventually(
                     pilot, lambda: data.agenda is not None
                     and data.agenda["availability"] == "observed",
@@ -458,6 +480,11 @@ def test_actual_relay_disconnect_reconnects_to_current_snapshot(chain, monkeypat
                 assert data.agenda["observation"] == chain["store"].delivery_record(chain["home"])[1]
                 assert app._data is data and app._agenda_worker is worker
                 assert len(calls) == 2 and len(feed_invocations(chain)) == 2
+                probes = [
+                    child for child in map(json.loads, chain["trace"].read_text().splitlines())
+                    if child["argv"] == ["--resident-health"]
+                ]
+                assert len(probes) == (3 if offline_probe else 2)
                 await pilot.press("escape")
                 await eventually(
                     pilot, lambda: owner.agendas.feed.active_count() == 0 and chain["settled"](),
@@ -465,6 +492,8 @@ def test_actual_relay_disconnect_reconnects_to_current_snapshot(chain, monkeypat
                 )
         finally:
             disconnect.set()
+            if offline is not None:
+                offline.close()
 
     asyncio.run(check())
 
@@ -505,6 +534,134 @@ def test_actual_relay_disconnect_reconnects_at_most_three_times(chain, monkeypat
             assert app._data.agenda is None
             assert chain["owner"].agendas.feed.wait_closed(3)
             assert chain["settled"]()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("reason", ["draining", "unready", "unavailable"])
+def test_actual_undrain_reconnects_and_updates_same_generation(chain, reason):
+    owner = chain["owner"]
+    store, publisher, home = chain["store"], chain["publisher"], chain["home"]
+    argv = [*chain["argv"], "agenda-publish", "--project", "example", "--json"]
+
+    async def check():
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        async with app.run_test() as pilot:
+            await eventually(
+                pilot, lambda: app._data.agenda is not None,
+                detail=f"initial actual snapshot unavailable: {widget(app)}",
+            )
+            data, worker = app._data, app._agenda_worker
+            result, fresh = store.mutate(
+                home, request({"operation": "init", "documents": chain["documents"]}, 0, "init"),
+                session="head-a", actor="synthetic-test", publisher_configured=True,
+            )
+            assert fresh and result["revision"] == 1
+            assert (await asyncio.to_thread(publisher.publish, home, argv))["state"] == "delivered"
+            await eventually(
+                pilot, lambda: data.agenda is not None and data.agenda["availability"] == "observed",
+                detail="first actual publication unavailable",
+            )
+            generation, sequence = data.agenda["generation"], data.agenda["sequence"]
+            owner.close_admission(reason)
+            await eventually(
+                pilot, lambda: f"provider going away: {reason}" in widget(app),
+                detail=f"actual drain notice did not reach Manager: {widget(app)}",
+            )
+            assert data.agenda is None
+            owner.activate()
+            assert owner.store.generation == generation
+            await eventually(
+                pilot, lambda: data.agenda is not None and data.agenda["availability"] == "observed",
+                detail=f"same-generation undrain was incorrectly retired: {widget(app)}",
+            )
+            assert data.agenda["type"] == "snapshot"
+            assert data.agenda["generation"] == generation and data.agenda["sequence"] >= sequence
+            assert data.agenda["observation"] == store.delivery_record(home)[1]
+            result, fresh = store.mutate(
+                home, request({"operation": "park", "ref": "undrain", "reason": "nonblocking"}, 1, "park"),
+                session="head-a", actor="synthetic-test", publisher_configured=True,
+            )
+            assert fresh and result["revision"] == 2
+            assert (await asyncio.to_thread(publisher.publish, home, argv))["state"] == "delivered"
+            await eventually(
+                pilot, lambda: "Parked: 1" in widget(app),
+                detail="actual post-undrain update did not reach the same subscription",
+            )
+            assert data.agenda["type"] == "update" and data.agenda["generation"] == generation
+            assert data.agenda["sequence"] > sequence
+            assert data.agenda["observation"] == store.delivery_record(home)[1]
+            assert app._data is data and app._agenda_worker is worker
+            assert len(feed_invocations(chain)) == 2
+            await pilot.press("escape")
+            await eventually(
+                pilot, lambda: owner.agendas.feed.active_count() == 0 and chain["settled"](),
+                detail="actual undrain retained a child/subscriber after quit",
+            )
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("chain", [False], indirect=True)
+def test_actual_initial_unready_demand_becomes_first_snapshot(chain):
+    owner = chain["owner"]
+
+    async def check():
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        async with app.run_test() as pilot:
+            await eventually(
+                pilot, lambda: "unready" in widget(app) and "reconnecting in 1s" in widget(app),
+                detail=f"initial authenticated unready reply did not retain recovery: {widget(app)}",
+            )
+            assert app._data.agenda is None
+            data, worker = app._data, app._agenda_worker
+            assert chain["wake"].is_set(), "actual provider did not wake its existing bounded producer"
+            assert "example" in owner.demand_projects(), "actual provider did not retain project demand"
+            owner.publish("example", [{"id": "selected"}], observed_at=1)
+            await eventually(
+                pilot, lambda: data.agenda is not None,
+                detail=f"existing producer publication did not permit the first snapshot: {widget(app)}",
+            )
+            assert data.agenda["type"] == "snapshot"
+            assert data.agenda["availability"] == "not-published"
+            assert app._data is data and app._agenda_worker is worker
+            assert len(feed_invocations(chain)) == 2
+            await pilot.press("escape")
+            await eventually(
+                pilot, lambda: owner.agendas.feed.active_count() == 0 and chain["settled"](),
+                detail="initial-unready recovery retained children after quit",
+            )
+
+    asyncio.run(check())
+
+
+def test_actual_initial_health_unready_recovers_before_any_snapshot(chain):
+    owner = chain["owner"]
+    generation = owner.store.generation
+    owner.close_admission("unready")
+
+    async def check():
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        async with app.run_test() as pilot:
+            await eventually(
+                pilot, lambda: "authority is unready" in widget(app) and "reconnecting in 1s" in widget(app),
+                detail=f"authenticated health proof was lost before a first snapshot: {widget(app)}",
+            )
+            assert app._data.agenda is None and not feed_invocations(chain)
+            owner.activate()
+            assert owner.store.generation == generation
+            await eventually(
+                pilot, lambda: app._data.agenda is not None,
+                detail=f"actual ready authority did not produce a first snapshot: {widget(app)}",
+            )
+            assert app._data.agenda["type"] == "snapshot"
+            assert app._data.agenda["generation"] == generation
+            assert len(feed_invocations(chain)) == 1
+            await pilot.press("escape")
+            await eventually(
+                pilot, lambda: owner.agendas.feed.active_count() == 0 and chain["settled"](),
+                detail="initial health recovery retained children after quit",
+            )
 
     asyncio.run(check())
 

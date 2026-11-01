@@ -21,12 +21,14 @@ _REPLY_FIELDS = {
     "worktree_id", "session_id", "availability", "observation",
 }
 _TRANSIENT_ERRORS = {"disconnected", "unavailable", "unready", "draining", "superseded"}
+_TEMPORARY_CLOSURES = _TRANSIENT_ERRORS - {"superseded"}
 
 
 class AgendaUnavailable(ValueError):
-    def __init__(self, message: str, *, retry: bool = False) -> None:
+    def __init__(self, message: str, *, retry: bool = False, code: str | None = None) -> None:
         super().__init__(message)
         self.retry = retry
+        self.code = code
 
 
 def bounded_json(value, depth: int = 0) -> None:
@@ -147,6 +149,7 @@ class AgendaFeed:
         self.identity = (project, worktree, session)
         self.current: dict | None = None
         self.closed = False
+        self.retired_generation: str | None = None
 
     def receive(self, frame: dict) -> dict | None:
         bounded_json(frame)
@@ -166,8 +169,11 @@ class AgendaFeed:
                 or not isinstance(error.get("message"), str) or not error["message"]
             ):
                 raise ValueError("agenda feed omitted its structured error")
+            if error["code"] in {"superseded", "closed", "shutdown"} and self.current is not None:
+                self.retired_generation = self.current["generation"]
             raise AgendaUnavailable(
                 f"{error['code']}: {error['message']}", retry=error["code"] in _TRANSIENT_ERRORS,
+                code=error["code"],
             )
         if kind in {"heartbeat", "going-away"}:
             if (
@@ -182,7 +188,11 @@ class AgendaFeed:
                 if not isinstance(frame.get("reason"), str) or not frame["reason"]:
                     raise ValueError("agenda going-away omitted its reason")
                 self.closed = True
-                raise AgendaUnavailable(f"provider going away: {frame['reason']}", retry=True)
+                if frame["reason"] not in _TEMPORARY_CLOSURES:
+                    self.retired_generation = self.current["generation"]
+                raise AgendaUnavailable(
+                    f"provider going away: {frame['reason']}", retry=True, code=frame["reason"],
+                )
             return None
         if kind not in {"snapshot", "update"}:
             raise ValueError("agenda feed emitted an unknown frame type")

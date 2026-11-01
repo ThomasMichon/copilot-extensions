@@ -391,6 +391,62 @@ def test_preflight_keeps_the_same_resolved_provider_for_feed(monkeypatch, synthe
     asyncio.run(check())
 
 
+@pytest.mark.parametrize("statement,code,retry", [
+    ("raise ConnectionRefusedError('permission denied')", "disconnected", True),
+    ("raise TimeoutError('malformed response')", "timeout", True),
+    ("raise PermissionError('connection timed out')", "permission", False),
+    ("raise FileNotFoundError('connection refused')", "authentication", False),
+    ("raise ValueError('unready')", "malformed", False),
+    ("raise RuntimeError('connection timed out')", "probe-failed", False),
+    ("error=ValueError('temporary'); error.code='unready'; raise error", "unready", True),
+])
+def test_owned_health_probe_classifies_failures_without_message_guesses(
+    monkeypatch, tmp_path, statement, code, retry,
+):
+    package = tmp_path / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "worktrees_client.py").write_text(
+        "def read_health():\n    " + statement + "\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(transport, "_HEALTH_PROBE",
+        f"import sys; sys.path.insert(0, {str(tmp_path)!r})\n" + transport._HEALTH_PROBE)
+    admitted = []
+    with pytest.raises(AgendaUnavailable) as error:
+        transport.require_capability(
+            [sys.executable, "-m", "agent_worktrees"],
+            cancelled=Event(), cwd=str(tmp_path), on_supported=lambda: admitted.append(True),
+        )
+    assert error.value.code == code and error.value.retry is retry
+    assert not admitted
+
+
+@pytest.mark.parametrize("status", ["closed", "shutdown"])
+def test_known_terminal_health_states_are_not_malformed(monkeypatch, tmp_path, status):
+    package = tmp_path / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    health = {
+        "capabilities": ["worktree-agendas-v1"],
+        "worktrees": {"status": status, "generation": "a" * 32},
+    }
+    (package / "worktrees_client.py").write_text(
+        f"def read_health():\n    return {health!r}\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        transport, "_HEALTH_PROBE",
+        f"import sys; sys.path.insert(0, {str(tmp_path)!r})\n" + transport._HEALTH_PROBE,
+    )
+    admitted = []
+    with pytest.raises(AgendaUnavailable) as error:
+        transport.require_capability(
+            [sys.executable, "-m", "agent_worktrees"], cancelled=Event(),
+            cwd=str(tmp_path), on_supported=lambda: admitted.append(True),
+        )
+    assert error.value.code == status and not error.value.retry
+    assert admitted == [True]
+
+
 def test_reconnect_attempts_are_bounded_under_one_worker(synthetic_peer, tmp_path):
     async def check():
         app = companion.MuxCompanionApp(cwd=str(tmp_path))

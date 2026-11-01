@@ -163,6 +163,33 @@ proposal is claimed available merely because its intended name is described.
 
 ## Journal
 
+### 2026-11-01 - Project isolation and bounded recovery
+
+- Review identified four further recovery gaps. Resident-wide activation/schema
+  faults are now separate from project reconciliation failures; another project's
+  success cannot clear a failed project's latch or expose its old cached body.
+  Only successful reconciliation of that project clears the fault, including
+  across same-generation reactivation.
+- Agenda requests retain the existing owner's bounded project demand and coalesced
+  producer wake. An unpublished project returns unready rather than not-found;
+  failed initial subscriptions leave bounded demand for the existing producer.
+  A completed roster that genuinely lacks the worktree still returns not-found.
+- The Manager preserves typed health-probe connection/timeout and transient
+  authority errors, while unsupported, malformed, permission and authentication
+  failures remain terminal. Authenticated capability proof precedes first-snapshot
+  recovery without an extra probe per attempt or any resident autostart.
+- Known temporary closure states do not retire the generation. Real drain,
+  unready and unavailable reactivation tests preserve resident sequence/store
+  fences while accepting a fresh same-generation snapshot; actual supersession
+  and shutdown remain retirement boundaries.
+- The provider packet passed 115 cases with two real project records,
+  corruption/repair, generation qualification and demand controls. The final
+  Manager contract/connected/held-consumer packet passed 117 cases with cleanup
+  verified, including actual offline reprobe recovery, same-generation updates,
+  initial producer demand and prior cancellation/retirement behavior. Source
+  AST, lint, module and whitespace checks passed. Fresh review and merge remain
+  required; the source effort is still Active.
+
 ### 2026-11-01 - Relay rejection and new-head first publication
 
 - Further current-head review found two provider defects. The relay now validates

@@ -29,6 +29,13 @@ resident generation. Missing/offline/malformed/failed probes refuse without
 sending any agenda argv; the owning feed CLI rechecks capability afterward.
 Every reconnect reprobes, and the feed retains the exact argv captured before
 that probe rather than resolving a different provider afterward.
+The probe's internal error envelope retains typed codes: connection and timeout
+failures are retryable, while unsupported, malformed, authentication, permission
+and unclassified failures are terminal. Exception message text never determines
+retry policy. After authenticated capability and generation validation, the same
+probe passes its support proof internally to the worker, without an additional
+Manager probe/process. This permits bounded initial-unready recovery before any
+snapshot and continued recovery when a later reprobe temporarily goes offline.
 
 An unresolved or non-absolute executable refuses. The admitted normal argv
 shape ends in `-m agent_worktrees` or `-m agent_worktrees.current_roster_entry`.
@@ -68,13 +75,19 @@ partial bytes do not renew it. Stderr is drained separately and retains at most
 
 One owned Textual thread worker retains the subscription and reconnects. Each
 reconnect requires a new snapshot; previous presentation is cleared while
-unavailable. Once support has been observed, transient disconnect/deadline or
+unavailable. Once support has been authenticated, transient disconnect/deadline or
 going-away permits at most three retries, delayed 1, 2 and 4 seconds. Invalid
 data and unsupported errors are terminal. Structured relay errors retain that
 policy: `disconnected`, `unavailable`, `unready`, `draining` and `superseded`
 are transient after support was observed; malformed/unsupported errors do not
-retry. A going-away generation cannot be
-re-admitted on a subsequent route. No automatic rapid retry or timer/file poll
+retry. Known temporary closures (`draining`, `unready`, `unavailable` and
+`disconnected`) end that connection but do not retire its generation:
+a failed replacement or temporary fault can reactivate the same owner and
+re-admit a fresh snapshot without Refresh. Resident sequence and store revision
+fences remain in force.
+Other going-away notices conservatively retire the generation, including actual
+supersession/shutdown; a retired generation cannot be re-admitted.
+No automatic rapid retry or timer/file poll
 is used to obtain agenda data.
 
 Reload fences the local source generation and data object immediately, cancels

@@ -91,6 +91,236 @@ def owned(tmp_path, monkeypatch):
     owner.shutdown()
 
 
+def project_request(project, **values):
+    return request(
+        project=project,
+        worktree_id=f"{project}-lane",
+        session_id=f"head-{project}",
+        **values,
+    )
+
+
+def project_observation(project, revision=1):
+    body = observation(revision, session=f"head-{project}")
+    body["source"]["worktree"] = body["snapshot"]["worktree"] = f"{project}-lane"
+    return body
+
+
+@pytest.fixture
+def two_projects(tmp_path, monkeypatch):
+    directories = {}
+    for project in ("alpha", "beta"):
+        directory = tmp_path / project / "records"
+        directory.mkdir(parents=True)
+        directories[project] = directory
+        record = tracking.WorktreeRecord(
+            worktree_id=f"{project}-lane",
+            branch=f"worktree/{project}-lane",
+            worktree_path=str(directory),
+            repo=project,
+            machine="synthetic-machine",
+            platform="linux",
+            started_at="2026-11-01T00:00:00",
+            last_resumed_at=None,
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[tracking.SessionEntry(f"head-{project}", "2026-11-01T00:00:00")],
+        )
+        tracking.save_record(record, directory / f"{project}-lane.yaml")
+    monkeypatch.setattr(
+        tracking,
+        "_owning_tracking_dir",
+        lambda wid, repo=None: directories[repo],
+    )
+    clock = [10.0]
+    wakes = []
+    owner = WorktreesRuntime(
+        tmp_path / "current.sqlite3",
+        now=lambda: clock[0],
+        wake=SimpleNamespace(set=lambda: wakes.append(clock[0])),
+        elected=lambda: True,
+    )
+    owner.activate()
+    wakes.clear()
+    yield owner, clock, wakes
+    owner.shutdown()
+
+
+def test_project_reconciliation_error_isolated_and_retained_across_undrain(two_projects):
+    owner, _clock, _wakes = two_projects
+    bodies = {project: project_observation(project) for project in ("alpha", "beta")}
+    for project, body in bodies.items():
+        owner.publish(project, [{"id": f"{project}-lane"}], observed_at=1)
+        assert owner.agendas.publish(publication(owner, body, project=project))["ok"] is True
+    with sqlite3.connect(owner.store.db_path) as conn:
+        conn.execute(
+            "UPDATE worktrees_agenda_cache SET payload=? WHERE project=?",
+            ('{"invalid":true}', "alpha"),
+        )
+    owner.publish("alpha", [{"id": "alpha-lane"}], observed_at=2)
+    for at in (2, 3):
+        owner.publish("beta", [{"id": "beta-lane"}], observed_at=at)
+        failed = owner.agendas.read(project_request("alpha"))
+        assert failed["ok"] is False and failed["error"]["code"] == "unavailable"
+        assert "observation" not in failed
+        assert owner.agendas.read(project_request("beta"))["observation"] == bodies["beta"]
+    assert (
+        owner.agendas.publish(
+            publication(owner, project_observation("alpha", 2), project="alpha"),
+        )["error"]["code"]
+        == "unavailable"
+    )
+    generation = owner.store.generation
+    owner.close_admission("draining")
+    owner.activate()
+    assert owner.store.generation == generation
+    assert owner.agendas.read(project_request("alpha"))["error"]["code"] == "unavailable"
+    assert owner.agendas.read(project_request("beta"))["availability"] == "observed"
+    with sqlite3.connect(owner.store.db_path) as conn:
+        conn.execute(
+            "UPDATE worktrees_agenda_cache SET payload=? WHERE project=?",
+            (contract.observation(bodies["alpha"]), "alpha"),
+        )
+    owner.publish("alpha", [{"id": "alpha-lane"}], observed_at=4)
+    assert owner.agendas.read(project_request("alpha"))["observation"] == bodies["alpha"]
+    assert "alpha" not in owner.agendas._project_errors
+    with sqlite3.connect(owner.store.db_path) as conn:
+        assert conn.execute("SELECT count(*) FROM worktrees_agenda_source").fetchone()[0] == 2
+
+
+def test_project_failures_reset_for_new_generation_but_cache_requires_requalification(
+    two_projects,
+):
+    owner, _clock, _wakes = two_projects
+    for project in ("alpha", "beta"):
+        owner.publish(project, [{"id": f"{project}-lane"}], observed_at=1)
+        assert (
+            owner.agendas.publish(
+                publication(owner, project_observation(project), project=project),
+            )["ok"]
+            is True
+        )
+    with sqlite3.connect(owner.store.db_path) as conn:
+        conn.execute(
+            "UPDATE worktrees_agenda_cache SET payload=? WHERE project=?",
+            ('{"invalid":true}', "alpha"),
+        )
+    owner.publish("alpha", [{"id": "alpha-lane"}], observed_at=2)
+    assert "alpha" in owner.agendas._project_errors
+    owner.close_admission("superseded")
+    successor = WorktreesRuntime(owner.store.db_path)
+    successor.activate()
+    try:
+        assert successor.store.generation != owner.store.generation
+        assert successor.agendas._project_errors == {}
+        assert successor.agendas.read(project_request("alpha"))["error"]["code"] == "unready"
+        successor.publish("beta", [{"id": "beta-lane"}], observed_at=2)
+        assert successor.agendas.read(project_request("beta"))["availability"] == "observed"
+        successor.publish("alpha", [{"id": "alpha-lane"}], observed_at=2)
+        assert successor.agendas.read(project_request("alpha"))["error"]["code"] == "unavailable"
+    finally:
+        successor.shutdown()
+
+
+def test_schema_activation_fault_is_not_cleared_by_project_reconciliation(
+    two_projects, monkeypatch
+):
+    from agent_worktrees import agenda_runtime
+
+    owner, _clock, _wakes = two_projects
+    owner.publish("beta", [{"id": "beta-lane"}], observed_at=1)
+    schema = agenda_runtime._SCHEMA
+    monkeypatch.setattr(agenda_runtime, "_SCHEMA", "synthetic invalid SQL")
+    owner.close_admission("draining")
+    owner.activate()
+    assert owner.agendas._activation_error
+    owner.publish("beta", [{"id": "beta-lane"}], observed_at=2)
+    assert owner.agendas.read(project_request("beta"))["error"]["code"] == "unavailable"
+    assert owner.agendas._activation_error
+    assert "beta" not in owner.agendas._project_errors
+    monkeypatch.setattr(agenda_runtime, "_SCHEMA", schema)
+    owner.activate()
+    assert owner.agendas._activation_error is None
+    assert owner.agendas.read(project_request("beta"))["availability"] == "not-published"
+
+
+@pytest.mark.parametrize("operation", ["read", "publish", "feed"])
+def test_unpublished_project_demand_wakes_and_survives_initial_feed_failure(
+    two_projects,
+    monkeypatch,
+    operation,
+):
+    from agent_worktrees import status_monitor_runtime
+
+    owner, clock, wakes = two_projects
+    monkeypatch.setattr(
+        status_monitor_runtime,
+        "_ensure_status_monitor",
+        lambda: pytest.fail("agenda demand started another resident"),
+    )
+    owner.publish("beta", [{"id": "beta-lane"}], observed_at=1)
+    selected = project_request("alpha")
+    body = project_observation("alpha")
+    if operation == "read":
+        result = owner.agendas.read(selected)
+    elif operation == "publish":
+        result = owner.agendas.publish(publication(owner, body, project="alpha"))
+    else:
+        initial = owner.agendas.stream(selected, lambda: False)
+        result = next(initial)
+        assert result["type"] == "error"
+        with pytest.raises(StopIteration):
+            next(initial)
+        assert owner.agendas.feed.active_count() == 0
+    assert result["ok"] is False and result["error"]["code"] == "unready"
+    assert owner.demand_projects() == {"alpha"} and len(wakes) == 1
+    assert ("alpha", "alpha-lane") not in owner.agendas._rows
+    assert owner.agendas.read(selected)["error"]["code"] == "unready"
+    assert len(wakes) == 1
+    owner.publish("alpha", [{"id": "alpha-lane"}], observed_at=2)
+    if operation == "feed":
+        stream = owner.agendas.stream(selected, lambda: False)
+        try:
+            assert next(stream)["availability"] == "not-published"
+            assert owner.agendas.publish(publication(owner, body, project="alpha"))["ok"] is True
+            assert next(stream)["observation"] == body
+        finally:
+            stream.close()
+    else:
+        assert owner.agendas.read(selected)["availability"] == "not-published"
+        assert owner.agendas.publish(publication(owner, body, project="alpha"))["ok"] is True
+    assert owner.agendas.read(selected)["observation"] == body
+    assert len(wakes) == 1
+    demand = dict(owner._demand)
+    owner.close_admission("draining")
+    assert owner.agendas.read(selected)["error"]["code"] == "draining"
+    assert (
+        owner.agendas.publish(publication(owner, body, project="alpha"))["error"]["code"]
+        == "draining"
+    )
+    rejected = owner.agendas.stream(selected, lambda: False)
+    assert next(rejected)["error"]["code"] == "draining"
+    rejected.close()
+    assert owner._demand == demand and len(wakes) == 1
+    clock[0] += 30.001
+    assert owner.demand_projects() == set()
+
+
+def test_complete_project_absent_worktree_is_not_unready(two_projects):
+    owner, _clock, wakes = two_projects
+    owner.publish("alpha", [], observed_at=1)
+    assert owner.agendas.read(project_request("alpha"))["error"]["code"] == "not-found"
+    assert (
+        owner.agendas.publish(
+            publication(owner, project_observation("alpha"), project="alpha"),
+        )["error"]["code"]
+        == "not-found"
+    )
+    assert owner.demand_projects() == {"alpha"} and wakes == []
+
+
 def test_commit_duplicate_conflict_stale_and_immutable_projection(owned):
     owner, _head, _elected, _path = owned
     assert contract.CAPABILITY in owner.health()["capabilities"]
@@ -191,7 +421,7 @@ def test_final_fence_loss_never_exposes_or_notifies(owned, monkeypatch, operatio
 @pytest.mark.parametrize(
     "values,code",
     [
-        ({"project": "foreign"}, "not-found"),
+        ({"project": "foreign"}, "unready"),
         ({"expected_generation": "b" * 32}, "superseded"),
         ({"contract_version": True}, "invalid-request"),
         ({"extra": True}, "invalid-request"),
@@ -274,7 +504,7 @@ def test_new_owner_requalifies_committed_cache_only_after_current_roster(owned):
     successor = WorktreesRuntime(owner.store.db_path)
     successor.activate()
     try:
-        assert successor.agendas.read(request())["error"]["code"] == "not-found"
+        assert successor.agendas.read(request())["error"]["code"] == "unready"
         successor.publish("project", [{"id": "full-worktree-id"}], observed_at=2)
         replay = successor.agendas.read(request())
         assert replay["availability"] == "observed" and replay["generation"] != old_generation

@@ -52,6 +52,11 @@ def subscribe(
 ) -> None:
     """Keep reconnect admission inside one UI-owned, cancellable worker."""
     supported = False
+
+    def authenticated() -> None:
+        nonlocal supported
+        supported = True
+
     retired: set[str] = set()
     last: dict | None = None
     for attempt in range(4):
@@ -60,6 +65,7 @@ def subscribe(
         receiver = AgendaFeed(project, worktree, session)
         stream = agenda_transport.frames(
             project, worktree, session, cancelled=cancelled, cwd=cwd,
+            on_supported=authenticated,
         )
         try:
             with closing(stream):
@@ -97,8 +103,8 @@ def subscribe(
         except (AgendaUnavailable, engine_client.EngineError, ValueError, RecursionError) as exc:
             if cancelled.is_set():
                 return
-            if receiver.closed and receiver.current is not None:
-                retired.add(receiver.current["generation"])
+            if receiver.retired_generation is not None:
+                retired.add(receiver.retired_generation)
             retry = isinstance(exc, AgendaUnavailable) and exc.retry and supported and attempt < 3
             message = str(exc)
             if retry:

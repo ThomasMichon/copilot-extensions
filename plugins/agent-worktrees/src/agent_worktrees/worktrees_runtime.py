@@ -227,6 +227,24 @@ class WorktreesRuntime:
             "runtime_root": str(cfg.install_dir()), **result,
         }
 
+    def _record_demand_locked(self, project: str) -> None:
+        now = self._now()
+        previous = self._demand.get(project)
+        if previous is None or previous < now - _DEMAND_LINGER_SECONDS:
+            self._unready_demand.discard(project)
+        self._demand[project] = now
+
+    def register_project_demand(self, project: str, *, unready: bool = False) -> None:
+        """Renew admitted producer demand, coalescing wakes for unpublished projects."""
+        with self._lock:
+            if not self._admitting:
+                return
+            self._record_demand_locked(project)
+            if unready and project not in self._unready_demand:
+                self._unready_demand.add(project)
+                if self._wake is not None:
+                    self._wake.set()
+
     def handle(self, payload: dict) -> dict:
         try:
             project, selection = request_selection(payload)
@@ -239,22 +257,14 @@ class WorktreesRuntime:
                 return self._failure(
                     self._reason, self._error or "current-roster admission closed"
                 )
-            now = self._now()
-            previous = self._demand.get(project)
-            if previous is None or previous < now - _DEMAND_LINGER_SECONDS:
-                self._unready_demand.discard(project)
-            self._demand[project] = now
+            self._record_demand_locked(project)
             publication_error = self._publication_errors.get(project)
         try:
             result = self.store.read(
                 project, **selection, contract_version=payload["contract_version"],
             )
         except ProjectionUnavailable as exc:
-            with self._lock:
-                if self._admitting and project not in self._unready_demand:
-                    self._unready_demand.add(project)
-                    if self._wake is not None:
-                        self._wake.set()
+            self.register_project_demand(project, unready=True)
             return self._failure("unready", publication_error or str(exc))
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))

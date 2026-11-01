@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
@@ -20,12 +21,12 @@ from .companion_client import cancellable_read_runner
 from .agenda_contract import bounded_json
 from .engine_environment import _engine_environment
 from .engine_posix_process import _OWNER
-from .agenda_contract import AgendaUnavailable, MAX_FRAME_BYTES
+from .agenda_contract import AgendaUnavailable, MAX_FRAME_BYTES, _TRANSIENT_ERRORS
 
 STARTUP_TIMEOUT = 5.0
 IDLE_TIMEOUT = 5.0
 _HEALTH_PROBE = """
-import json,sys
+import errno,json,sys
 try:
     from agent_worktrees.worktrees_client import read_health
     health = read_health()
@@ -34,9 +35,28 @@ try:
     if len(raw.encode("utf-8")) > 35 * 1024:
         raise ValueError("resident health exceeds its response bound")
 except ImportError:
-    raw = json.dumps({"ok": False, "error": "owned resident health API is unsupported"})
+    raw = json.dumps({"ok": False, "error": {
+        "code": "unsupported", "message": "owned resident health API is unsupported"}})
 except (OSError, ValueError, RuntimeError, RecursionError) as error:
-    raw = json.dumps({"ok": False, "error": str(error)[:1024]})
+    if isinstance(error, PermissionError):
+        code = "permission"
+    elif isinstance(error, FileNotFoundError):
+        code = "authentication"
+    elif isinstance(error, TimeoutError):
+        code = "timeout"
+    elif isinstance(error, ConnectionError) or getattr(error,"errno",None) in {
+        errno.ECONNREFUSED,errno.ECONNRESET,errno.ECONNABORTED,errno.ENETUNREACH,
+        errno.ENETDOWN,errno.EHOSTUNREACH,errno.ETIMEDOUT,errno.EPIPE,
+    }:
+        code = "disconnected"
+    elif isinstance(getattr(error,"code",None),str):
+        code = error.code
+    elif isinstance(error,(ValueError,RecursionError)):
+        code = "malformed"
+    else:
+        code = "probe-failed"
+    raw = json.dumps({"ok": False, "error": {
+        "code": code, "message": str(error)[:1024] or type(error).__name__}})
 sys.stdout.write(raw + "\\n")
 sys.stdout.flush()
 """
@@ -67,12 +87,19 @@ def health_argv(base: list[str]) -> list[str]:
     return [*base[:-2], "-I", "-c", _HEALTH_PROBE]
 
 
-def require_capability(base: list[str], *, cancelled: Event, cwd: str) -> None:
+def require_capability(
+    base: list[str], *, cancelled: Event, cwd: str,
+    on_supported: Callable[[], None] | None = None,
+) -> None:
     argv = health_argv(base)
     try:
         result = cancellable_read_runner(cancelled, cwd=cwd)(argv, STARTUP_TIMEOUT)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise AgendaUnavailable(f"resident health probe is unavailable: {exc}") from exc
+    except (TimeoutError, subprocess.TimeoutExpired) as exc:
+        raise AgendaUnavailable(f"resident health probe timed out: {exc}", retry=True, code="timeout") from exc
+    except ConnectionError as exc:
+        raise AgendaUnavailable(f"resident health probe disconnected: {exc}", retry=True, code="disconnected") from exc
+    except OSError as exc:
+        raise AgendaUnavailable(f"resident health probe failed: {exc}", code="probe-failed") from exc
     if cancelled.is_set():
         raise InterruptedError("agenda health probe cancelled")
     if (
@@ -83,9 +110,22 @@ def require_capability(base: list[str], *, cancelled: Event, cwd: str) -> None:
         raise AgendaUnavailable("resident health probe failed or exceeded its response bound")
     value = json.loads(result.stdout, object_pairs_hook=_object)
     bounded_json(value)
-    if not isinstance(value, dict) or value.get("ok") is not True:
-        detail = value.get("error") if isinstance(value, dict) else None
-        raise AgendaUnavailable(f"resident health is unavailable: {detail or 'invalid response'}")
+    if not isinstance(value, dict):
+        raise AgendaUnavailable("resident health probe returned a non-object response", code="malformed")
+    if value.get("ok") is False:
+        error = value.get("error")
+        if (
+            set(value) != {"ok", "error"} or not isinstance(error, dict)
+            or set(error) != {"code", "message"}
+            or not all(isinstance(error.get(key), str) and error[key] for key in ("code", "message"))
+        ):
+            raise AgendaUnavailable("resident health probe returned a malformed error", code="malformed")
+        raise AgendaUnavailable(
+            f"resident health is unavailable: {error['code']}: {error['message']}",
+            retry=error["code"] in _TRANSIENT_ERRORS | {"timeout"}, code=error["code"],
+        )
+    if value.get("ok") is not True or set(value) != {"ok", "health"}:
+        raise AgendaUnavailable("resident health probe returned invalid fields", code="malformed")
     health = value.get("health")
     if (
         not isinstance(health, dict) or not isinstance(health.get("capabilities"), list)
@@ -94,14 +134,26 @@ def require_capability(base: list[str], *, cancelled: Event, cwd: str) -> None:
     ):
         raise AgendaUnavailable("resident lacks worktree-agendas-v1; agenda command was not invoked")
     state = health.get("worktrees")
-    if not isinstance(state, dict) or state.get("status") != "ready":
-        raise AgendaUnavailable("resident agenda authority is unavailable; no resident was started")
+    if not isinstance(state, dict) or not isinstance(state.get("status"), str):
+        raise AgendaUnavailable("resident health supplied an invalid authority state", code="malformed")
     generation = state.get("generation")
     if (
         not isinstance(generation, str) or len(generation) != 32
         or any(character not in "0123456789abcdef" for character in generation)
     ):
         raise AgendaUnavailable("resident health supplied an invalid generation")
+    status = state["status"]
+    if status != "ready" and status not in {
+        "draining", "unready", "unavailable", "superseded", "closed", "shutdown",
+    }:
+        raise AgendaUnavailable("resident health supplied an unknown authority state", code="malformed")
+    if on_supported is not None:
+        on_supported()
+    if status != "ready":
+        raise AgendaUnavailable(
+            f"resident agenda authority is {status}; no resident was started",
+            retry=status in _TRANSIENT_ERRORS, code=status,
+        )
 
 
 def feed_argv(
@@ -165,12 +217,15 @@ def _owned_process(argv: list[str], cwd: str):
             process.stderr.close()
 
 
-def frames(project: str, worktree: str, session: str, *, cancelled: Event, cwd: str):
+def frames(
+    project: str, worktree: str, session: str, *, cancelled: Event, cwd: str,
+    on_supported: Callable[[], None] | None = None,
+):
     """No route, token, filesystem-agenda scan, autostart or plugin imports."""
     if cancelled.is_set():
         return
     base = _resolved_engine()
-    require_capability(base, cancelled=cancelled, cwd=cwd)
+    require_capability(base, cancelled=cancelled, cwd=cwd, on_supported=on_supported)
     if cancelled.is_set():
         return
     argv = feed_argv(project, worktree, session, engine_command=base)

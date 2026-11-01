@@ -173,3 +173,17 @@ def test_structured_feed_errors_preserve_classified_retry_policy(code, retry):
             "error": {"code": code, "message": "provider-reported failure"},
         })
     assert failure.value.retry is retry
+
+
+@pytest.mark.parametrize("reason,retired", [
+    ("draining", None), ("unready", None), ("unavailable", None), ("disconnected", None),
+    ("superseded", "a" * 32), ("closed", "a" * 32), ("shutdown", "a" * 32),
+])
+def test_temporary_drain_does_not_permanently_retire_generation(reason, retired):
+    feed = AgendaFeed("example", "selected", "head-a")
+    feed.receive(publication())
+    with pytest.raises(AgendaUnavailable):
+        feed.receive({
+            "type": "going-away", "generation": "a" * 32, "sequence": 0, "reason": reason,
+        })
+    assert feed.closed and feed.retired_generation == retired

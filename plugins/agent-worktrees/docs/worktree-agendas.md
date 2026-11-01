@@ -24,6 +24,14 @@ against the existing authenticated resident health and its current
 `worktrees.generation`. Missing capability, credentials, route or readiness is a
 structured failure, not an empty successful projection. There is no advisory
 fallback, automatic ensure/provisioning or alternate runtime selection.
+Valid reads, publications and initial feed requests retain the existing owner's
+bounded project demand. An unpublished current project roster returns
+`error.code: "unready"` and coalesces a wake of the existing producer; demand
+survives an initial feed error and expires through the normal owner linger
+budget. Admission closure does not register demand. A worktree absent from an
+already published complete project roster instead returns `not-found`.
+Capability/readiness health therefore does not guarantee that every project's
+first snapshot is ready; consumers may receive an initial `unready` error.
 
 The new contract is additive. Existing version-1/2 roster contracts, rows and
 feeds retain their meanings. Older residents do not support the agenda actions;
@@ -143,6 +151,12 @@ out-of-process changes. Heartbeats do not poll files. A source should retry only
 publication of its committed latest body after notification loss, never repeat
 the canonical mutation. Corrupt/unavailable agenda cache state is explicit on
 agenda reads and feeds without breaking ordinary roster publication.
+Activation/schema failures are resident-wide. Reconciliation failures are
+project-local and remain unavailable until that same project successfully
+reconciles, including across same-generation drain/reactivation. Another
+project's success cannot clear the failure or expose the failed project's old
+body. A new generation resets these failure latches but must requalify its own
+current project rosters and committed cache data.
 
 ## Evidence and limits
 
