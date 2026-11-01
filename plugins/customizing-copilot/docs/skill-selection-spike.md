@@ -47,6 +47,24 @@ registered in this mode: that interceptor also refuses model-list requests.
 The report distinguishes vendor enumeration from zero-forwarding synthetic
 transport and cannot qualify a model's selection quality.
 
+For **discovery-only native catalog observation**, append `--catalog-only`
+and repeat `--skill-directory <absolute-root>` for the caller's canonical skill
+roots. Resolve enabled roots through existing configuration ownership rather
+than reconstructing a skill catalog. Roots must exist; this mode excludes model
+profiles and `--list-models`. It creates one owned session with explicit
+discovery-only roots, configuration/file-hook discovery disabled, no configured
+MCP servers, no custom agents and no tools. It never sends a prompt or starts a
+task, and retains the zero-forwarding interceptor as a guard. The output contains
+HTTP/WebSocket attempt counts recorded before ownership, parsing or transport
+refusals; even a caught refusal invalidates discovery-only behavior. Capture
+counts remain separate from attempt counts. It also contains
+counts, native source categories and a full-descriptor digest, not skill text
+or paths. Empty catalogs remain incomplete. Explicit roots need not preserve
+the foreground's plugin qualification, precedence or managed disables:
+`foregroundScopeEquivalent` stays unknown until separately witnessed. Do not
+treat a matching count as scope/identity proof or use this catalog as a silently
+substituted foreground authority.
+
 To witness an explicitly bound candidate configuration, supply `--model <id>`,
 `--reasoning-effort <level>` and `--context-tier <tier>`. The owned sessions
 restrict their allowed models to that ID, and native task dispatch passes it

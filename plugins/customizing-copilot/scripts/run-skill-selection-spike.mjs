@@ -1,14 +1,16 @@
 /** Opt-in owned SDK witness. Never load this file as a foreground extension. */
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { SENTINELS, bytes, spikeInputs, freezeCatalog, collectHistory, syntheticHandler,
     modelCatalogSummary, runtimeEnvironment, observeOwnTask, deadline, safeError,
-    spikeStatus, armStatus, catalogMatches, historyMatches } from "./skill-selection-spike.mjs";
+    spikeStatus, armStatus, catalogMatches, historyMatches, catalogSummary } from "./skill-selection-spike.mjs";
 
-let sdkDirectory, root, runtimePath, modelsOnly = false, profile = {}, home, workspace;
+let sdkDirectory, root, runtimePath, modelsOnly = false, catalogOnly = false;
+let skillDirectories = [], profile = {}, home, workspace;
 let sdk, client, config;
 const requests = [], sessions = [], taskOwners = [], owned = new Set();
+const requestAttempts = { http: 0, webSocket: 0 };
 let heldRequestResolve;
 const heldRequest = new Promise(resolve => { heldRequestResolve = resolve; });
 const report = {
@@ -44,10 +46,12 @@ const provider = {
 function sessionConfig() { return {
     ...profile, ...(profile.model ? { allowedModels: [profile.model] } : {}),
     workingDirectory: workspace, configDirectory: home, enableConfigDiscovery: false,
-    availableTools: ["synthetic_catalog_read"], enableSkills: true, skillProvider: provider,
-    disabledSkills: ["synthetic-disabled"], remoteSession: "off",
+    availableTools: catalogOnly ? [] : ["synthetic_catalog_read"], enableSkills: true,
+    ...(catalogOnly ? { skillDirectories, enableFileHooks: false, mcpServers: {}, tools: [], customAgents: [] }
+        : { skillProvider: provider, disabledSkills: ["synthetic-disabled"] }),
+    remoteSession: "off",
     infiniteSessions: { enabled: false }, requestExtensions: false,
-    tools: [{
+    ...(!catalogOnly ? { tools: [{
         name: "synthetic_catalog_read", description: "Read-only fixture catalog. No execution or delegation.",
         parameters: { type: "object", properties: {} },
         handler: () => "synthetic read-only fixture",
@@ -58,7 +62,7 @@ function sessionConfig() { return {
         tools: ["synthetic_catalog_read"], infer: false,
         ...(profile.model ? { model: profile.model } : {}),
         ...(profile.reasoningEffort ? { reasoningEffort: profile.reasoningEffort } : {}),
-    }],
+    }] } : {}),
 }; }
 async function create() {
     const session = await client.createSession(config);
@@ -81,10 +85,13 @@ async function attempt(name, action) {
     catch (error) { report.arms[name] = { status: "unavailable", error: safeError(error) }; }
 }
 try {
-    ({ sdkDirectory, root, runtimePath, modelsOnly, profile } = spikeInputs(process.argv.slice(2)));
+    ({ sdkDirectory, root, runtimePath, modelsOnly, catalogOnly, skillDirectories, profile } = spikeInputs(process.argv.slice(2)));
+    for (const directory of skillDirectories) {
+        if (!(await stat(directory)).isDirectory()) throw new Error("explicit skill root is not a directory");
+    }
     home = join(root, "owned-home"); workspace = join(root, "synthetic-workspace");
     config = sessionConfig();
-    report.mode = modelsOnly ? "model-enumeration" : "synthetic-transport";
+    report.mode = modelsOnly ? "model-enumeration" : catalogOnly ? "catalog-discovery" : "synthetic-transport";
     report.requestedProfile = profile;
     Object.assign(report, modelsOnly ? { vendorModelEnumeration: true } : { modelFree: true, forwardedModelRequests: 0 });
     await mkdir(root); // Refuse reuse of existing session state.
@@ -99,7 +106,8 @@ try {
             args: ["--no-auto-update", "--no-remote"],
         }),
         ...(!modelsOnly ? {
-            requestHandler: syntheticHandler(sdk.CopilotRequestHandler, owned, requests, heldRequestResolve),
+            requestHandler: syntheticHandler(sdk.CopilotRequestHandler, owned, requests, heldRequestResolve,
+                5000, kind => { requestAttempts[kind]++; }),
         } : {}),
         useLoggedInUser: true, logLevel: "none",
     });
@@ -113,6 +121,18 @@ try {
             status: "available", ...modelCatalogSummary(models),
         };
         report.status = "preflight-only";
+    } else if (catalogOnly) {
+        const parent = await create();
+        const catalog = freezeCatalog((await deadline(parent.rpc.skills.list())).skills);
+        report.native.catalog = {
+            status: catalog.length ? "observed" : "empty", ...catalogSummary(catalog),
+            explicitRootCount: skillDirectories.length,
+            foregroundScopeEquivalent: null,
+        };
+        report.native.agentIds = (await deadline(parent.rpc.agent.list())).agents.map(agent => agent.id);
+        report.native.capabilities = Object.fromEntries(Object.entries(parent.capabilities)
+            .filter(([, value]) => typeof value === "boolean"));
+        report.status = catalog.length ? "catalog-only" : "incomplete";
     } else {
         const parent = await create();
         report.native.capabilities = Object.fromEntries(Object.entries(parent.capabilities)
@@ -247,6 +267,7 @@ finally {
     }
     catch (error) { report.cleanup.runtimeStopErrors.push(safeError(error)); }
     report.native.interceptedRequests = requests.length;
+    if (!modelsOnly) report.native.requestAttempts = { ...requestAttempts };
     if (!modelsOnly) report.native.catalog.providerCalls = { ...providerCalls };
     report.status = spikeStatus(report);
     console.log(JSON.stringify(report, null, 2));
