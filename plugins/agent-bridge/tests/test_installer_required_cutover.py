@@ -173,11 +173,10 @@ def _update_script(tmp_path: Path, shell: str, strict: bool, outcome: str) -> st
         f"function Get-RunningProcess {{ {'return $null' if outcome == 'stopped' else 'return 1234'} }}",
         f"function Get-VersionedCurrent {{ return '{2 if outcome == 'same-slot' else 1}' }}",
         "function Test-RuntimeHealthy { return $true }; function Backup-Venv { return $true }",
-        "function Invoke-UpdateSlotBuild { Write-Host built }; function Invoke-VersionedMarkComplete { return $true }",
-        "function Ensure-RuntimeBrokerAdoption { Write-Host broker-reused }",
-        "function Invoke-RuntimeBrokerAdoption { Write-Host broker;",
-        "throw 'Broker adoption refused'" if outcome == "broker-failed" else "return",
-        "}",
+        "function Invoke-UpdateSlotBuild { Write-Host built }",
+        f"function Invoke-VersionedMarkComplete {{ return ${str(outcome != 'completion-failed').lower()} }}",
+        "function Ensure-RuntimeSlotRetention { Write-Host retained }",
+        "function Invoke-RuntimeBrokerAdoption { throw 'UNEXPECTED-BROKER-ADOPTION' }",
         "function Invoke-VersionedActivate { Write-Host selected; return $true }; function Remove-VenvBackup {}",
         "function Write-Binstubs {}; function Write-DeployManifest { Write-Host manifest }; function Ensure-ScheduledTask {}",
         "function FakePython {",
@@ -218,11 +217,35 @@ def test_update_preserves_required_cutover_and_legacy_fallback(tmp_path, shell, 
 
 
 @pytest.mark.parametrize("strict", [False, True])
-def test_windows_broker_adoption_failure_preserves_update_rollback(tmp_path, strict):
-    result = _run(tmp_path, "ps1", _update_script(tmp_path, "ps1", strict, "broker-failed"))
+def test_windows_completion_failure_preserves_update_rollback(tmp_path, strict):
+    result = _run(tmp_path, "ps1", _update_script(tmp_path, "ps1", strict, "completion-failed"))
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
-    assert "built" in output and "Broker adoption refused" in output, output
+    assert "built" in output and "Versioned completion publication failed" in output, output
     assert "kept the previous runtime" in output and "cleared" in output and "unlocked" in output, output
     for forbidden in ("selected", "manifest", "gc", "UNSAFE-"):
         assert forbidden not in output, output
+
+
+@pytest.mark.parametrize("reusable,complete", [(True, True), (False, True), (True, False)])
+def test_windows_reused_slot_retains_completion_without_broker(tmp_path, reusable, complete):
+    script = "\n".join([
+        "$ErrorActionPreference='Stop'",
+        "$env:OS='Windows_NT'; $env:COPILOT_EXTENSIONS_TEST_CONTAINED=''",
+        f"$script:RuntimeConstructionReuse=${str(reusable).lower()}",
+        "$script:Events=[Collections.Generic.List[string]]::new()",
+        "function Invoke-VersionedSlotClean { param($PayloadHash); $script:Events.Add('retain') }",
+        "function Invoke-VersionedMarkComplete { param($PayloadHash); $script:Events.Add('complete'); "
+        f"return ${str(complete).lower()} }}",
+        "function Invoke-RuntimeBrokerAdoption { throw 'UNEXPECTED-BROKER-ADOPTION' }",
+        _function("ps1", "Ensure-RuntimeSlotRetention"),
+        "try { Ensure-RuntimeSlotRetention -PayloadHash fixture; 'accepted' } catch { Write-Host $_; 'refused' }",
+        "$script:Events -join ','",
+    ])
+    result = _run(tmp_path, "ps1", script)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert "UNEXPECTED-BROKER" not in output
+    assert ("accepted" in output) is (reusable and complete), output
+    assert ("refused" in output) is not (reusable and complete), output
+    assert ("retain,complete" in output) is reusable, output

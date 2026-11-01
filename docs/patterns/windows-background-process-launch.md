@@ -91,6 +91,11 @@ of discarding it.
 ### Preferred path: normal creation and explicit Job ownership
 
 Ordinary native process creation is the default, not an OS-registered broker.
+Runtime construction and retained-slot activation do not adopt or register a
+broker, including healthy-slot no-op installation. They still retain completed
+slots through selection/publication and preserve the existing execution owner's
+custody. Explicit owned legacy broker removal remains separate and must finish
+before deleting the runtime it uses.
 Choose `CREATE_NO_WINDOW` or detached/GUI-subsystem execution for visibility,
 then select Job ownership independently. A deliberate durable launch may request
 `CREATE_BREAKAWAY_FROM_JOB` where the owning Jobs permit it. Jobs created by

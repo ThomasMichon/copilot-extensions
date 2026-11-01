@@ -1,0 +1,9 @@
+{
+  "comment": "Stop adopting legacy Windows brokers during native runtime construction; preserve completion custody and explicit owned removal.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
