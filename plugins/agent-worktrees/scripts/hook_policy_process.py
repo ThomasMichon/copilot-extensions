@@ -28,6 +28,16 @@ def _watch_caller() -> None:
 def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None, initial_decision=None) -> int:
     """Supervise the one strict policy worker before forwarding any decision."""
     settlement_deadline = settlement_deadline or time.monotonic() + 23.0
+
+    def failure(boundary, code):
+        if initial_decision is not None:
+            from hook_pre_policy import unavailable
+            from hook_client import _merge_pre_decisions
+
+            print(json.dumps(_merge_pre_decisions(initial_decision, unavailable(boundary))), end="")
+            return 0
+        return code
+
     try:
         from agent_procutil import direct_python
         from agent_procutil.owned_budget import OwnedExecutionBudget
@@ -38,17 +48,6 @@ def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None, ini
         )
 
         require_caller_owned_support()
-    except Exception:
-        if initial_decision is not None:
-            from hook_pre_policy import unavailable
-            from hook_client import _merge_pre_decisions
-
-            print(json.dumps(_merge_pre_decisions(initial_decision, unavailable("supersede native admission unavailable"))), end="")
-            return 0
-        sys.stderr.write("agent-worktrees resident policy: owned runtime unavailable\n")
-        return 3
-    settled = []
-    try:
         budget = OwnedExecutionBudget(settlement_deadline + 2.0, 2.0)
         python, overrides = direct_python(sys.executable)
         environment = dict(os.environ)
@@ -61,21 +60,24 @@ def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None, ini
         )
         if initial_decision is not None:
             frame = json.dumps({"event": json.loads(frame), "initial": initial_decision}).encode("utf-8")
+        input_text = frame.decode("utf-8")
+        cwd = Path.home()
+        command = [
+            python, "-X", "utf8", "-B", str(Path(__file__).with_name("hook_client.py")),
+            "preToolUseStrict", *(["--only-pr-observations"] if initial_decision is not None else []),
+        ]
+    except Exception:
+        sys.stderr.write("agent-worktrees resident policy: owned admission unavailable\n")
+        return failure("supersede native admission unavailable", 3)
+    settled = []
+    try:
         result = run_caller_owned(
-            [
-                python,
-                "-X",
-                "utf8",
-                "-B",
-                str(Path(__file__).with_name("hook_client.py")),
-                "preToolUseStrict",
-                *(["--only-pr-observations"] if initial_decision is not None else []),
-            ],
+            command,
             timeout=25.0,
             max_stdout_bytes=_MAX_OUTPUT,
             max_stderr_bytes=_MAX_OUTPUT,
-            input_text=frame.decode("utf-8"),
-            cwd=Path.home(),
+            input_text=input_text,
+            cwd=cwd,
             env=environment,
             budget=budget,
             on_settled=lambda: settled.append(True),
@@ -90,37 +92,43 @@ def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None, ini
         if settled and error.output:
             try:
                 envelope = json.loads(error.output)
-                pending = envelope["_ownedCleanupPending"]
-                if set(envelope) != {"_ownedCleanupPending"} or not isinstance(pending, dict):
-                    return 4
+                pending = envelope["_ownedCleanupPending"] if set(envelope) == {"_ownedCleanupPending"} else envelope
                 from hook_pre_policy import valid_decision
 
-                if not valid_decision(pending):
-                    return 4
+                if not isinstance(pending, dict) or not valid_decision(pending):
+                    raise ValueError("invalid settled policy output")
             except (ValueError, KeyError, TypeError):
-                return 4
-            sys.stdout.write(json.dumps(pending, separators=(",", ":")))
-            return 0
-        if settled and initial_decision is not None:
-            from hook_pre_policy import unavailable
-            from hook_client import _merge_pre_decisions
+                pass
+            else:
+                from hook_client import _merge_pre_decisions
 
-            print(json.dumps(_merge_pre_decisions(initial_decision, unavailable("supersede observation timeout"))), end="")
-            return 0
+                sys.stdout.write(json.dumps(_merge_pre_decisions(initial_decision or {}, pending), separators=(",", ":")))
+                return 0
+        if settled:
+            return failure("supersede observation timeout", 4)
         return 4
     except Exception:
         if initial_decision is not None:
             if settled:
-                from hook_pre_policy import unavailable
-                from hook_client import _merge_pre_decisions
-
-                print(json.dumps(_merge_pre_decisions(initial_decision, unavailable("supersede execution unavailable"))), end="")
-                return 0
+                return failure("supersede execution unavailable", 2)
             sys.stderr.write("agent-worktrees supersede: native custody unresolved\n")
             threading.Event().wait()
         return 2
     if result.returncode:
-        return 2
+        return failure("supersede worker exit unavailable", 2) if settled else 2
+    if initial_decision is not None and settled:
+        try:
+            decision = json.loads(result.stdout)
+            from hook_pre_policy import valid_decision
+
+            if not isinstance(decision, dict) or not valid_decision(decision):
+                raise ValueError("invalid supersede decision")
+        except (TypeError, ValueError):
+            return failure("supersede output unavailable", 2)
+        from hook_client import _merge_pre_decisions
+
+        print(json.dumps(_merge_pre_decisions(initial_decision, decision)), end="")
+        return 0
     if result.stdout and not (legacy and result.stdout.strip() == "{}"):
         sys.stdout.write(result.stdout)
     if result.stderr:

@@ -613,3 +613,67 @@ def test_legacy_main_keeps_cheap_guard_when_sdk_native_admission_unavailable(mon
     })))
     assert client.main(["preToolUse"]) == 0
     assert json.loads(capsys.readouterr().out)["permissionDecision"] == permission
+
+
+@pytest.mark.parametrize("fault", ["prepare", "timeout-garbage", "timeout-ask", "timeout-deny", "nonzero", "empty", "context"])
+def test_owned_legacy_retains_initial_after_preparation_or_settled_failure(monkeypatch, capsys, fault):
+    import importlib.util
+    from agent_procutil import owned_process
+    import agent_procutil
+
+    loaded = {}
+    for name in ("hook_client", "hook_pre_policy", "hook_policy_process"):
+        spec = importlib.util.spec_from_file_location(name, PLUGIN / "scripts" / (name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        monkeypatch.setitem(sys.modules, name, module)
+        loaded[name] = module
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
+    if fault == "prepare":
+        def refuse(python):
+            raise RuntimeError("fixture interpreter refused before launch")
+        monkeypatch.setattr(agent_procutil, "direct_python", refuse)
+
+    def invoke(argv, **kwargs):
+        assert fault != "prepare", "preparation refusal must not launch"
+        kwargs["on_settled"]()
+        if fault == "nonzero":
+            return subprocess.CompletedProcess(argv, 7, "unusable output", "")
+        if fault in ("empty", "context"):
+            return subprocess.CompletedProcess(argv, 0, "" if fault == "empty" else '{"additionalContext":"unavailable"}', "")
+        output = b"unusable output" if fault == "timeout-garbage" else json.dumps({
+            "permissionDecision": "deny" if fault == "timeout-deny" else "ask",
+            "permissionDecisionReason": "confirmed worker",
+        }).encode()
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output=output)
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", invoke)
+    result = loaded["hook_policy_process"].execute(
+        b"{}", legacy=True, initial_decision={
+            "permissionDecision": "ask", "permissionDecisionReason": "confirmed parent",
+        },
+    )
+    assert result == 0
+    decision = json.loads(capsys.readouterr().out)
+    assert decision["permissionDecision"] == ("deny" if fault == "timeout-deny" else "ask")
+
+
+@pytest.mark.parametrize("fault", ["missing", "invalid"])
+def test_deferred_context_refusal_preserves_initial_decision(monkeypatch, tmp_path, fault):
+    import importlib.util
+    from types import SimpleNamespace
+
+    spec = importlib.util.spec_from_file_location("fixture_policy", PLUGIN / "scripts" / "hook_pre_policy.py")
+    policy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(policy)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "fixture-context")
+    def refuse(**kwargs):
+        raise RuntimeError("fixture invalid context")
+    result = policy.decide(
+        {}, home=tmp_path, budget_seconds=25, only_observations=True,
+        initial_decision={"permissionDecision": "ask", "permissionDecisionReason": "confirmed parent"},
+        load_sibling=lambda name: None if fault == "missing" else SimpleNamespace(resolve_registry_root=refuse),
+        merge_decisions=lambda left, right: {**left, **right},
+    )
+    assert result["permissionDecision"] == "ask"
+    assert "unavailable" in result["additionalContext"] or "failed" in result["additionalContext"]

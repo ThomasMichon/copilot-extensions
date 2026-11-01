@@ -96,17 +96,18 @@ def decide(
     initial_decision: dict | None = None,
     settlement_deadline: float | None = None,
 ) -> dict:
+    combined: dict = dict(initial_decision or {})
     contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
     if contextual:
         helper = load_sibling("registry_root.py")
         if helper is None:
-            return unavailable("installation-context helper unavailable")
+            return merge_decisions(combined, unavailable("installation-context helper unavailable"))
         try:
             helper.resolve_registry_root(
                 legacy_root=home / ".agent-worktrees", environment=os.environ,
             )
         except Exception:
-            return unavailable("installation-context validation failed")
+            return merge_decisions(combined, unavailable("installation-context validation failed"))
     deadline = time.monotonic() + budget_seconds - 2.0
     if settlement_deadline is not None:
         deadline = min(deadline, settlement_deadline)
@@ -121,7 +122,6 @@ def decide(
         except ValueError:
             pass
     execution_deadline = deadline - 3.0
-    combined: dict = dict(initial_decision or {})
     for name in (
         "statelessness_guard.py", "cross_repo_guard.py",
         "anchor_write_guard.py", "pr_supersede_guard.py",
