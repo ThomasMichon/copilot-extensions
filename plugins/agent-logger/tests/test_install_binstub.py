@@ -91,6 +91,38 @@ def test_offline_uv_records_archive_origin_and_rejects_editable(tmp_path: Path) 
     for unsupported in ("--no-editable", "--editable"):
         refused = subprocess.run([*command, unsupported], **options)
         assert refused.returncode != 0
+    site = (
+        runtime / "Lib" / "site-packages" if os.name == "nt"
+        else runtime / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    )
+    shutil.copytree(tmp_path / "offline-uv" / "setuptools", site, dirs_exist_ok=True)
+    project = tmp_path / "build-project"
+    source = project / "src" / "built_fixture"
+    source.mkdir(parents=True)
+    (source / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
+    manifest = project / "pyproject.toml"
+    manifest.write_text(
+        '[project]\nname="built-fixture"\nversion="1.0"\ndependencies=[]\n',
+        encoding="utf-8",
+    )
+    destination = tmp_path / "built-wheels"
+    build_command = [
+        uv, "build", "--wheel", "--no-build-isolation", "--no-sources", "--offline",
+        "--python", str(python), "--out-dir", str(destination), str(project),
+    ]
+    built = subprocess.run(build_command, **options)
+    assert built.returncode == 0, built.stdout + built.stderr
+    with zipfile.ZipFile(destination / "built_fixture-1.0-py3-none-any.whl") as archive:
+        assert archive.read("built_fixture/__init__.py") == (source / "__init__.py").read_bytes()
+    calls = tmp_path / "offline-uv" / "installs.jsonl"
+    completed_builds = [json.loads(line) for line in calls.read_text().splitlines()
+                        if json.loads(line)[:1] == ["build"]]
+    assert completed_builds == [build_command[1:]]
+    before_failure = calls.read_bytes()
+    manifest.unlink()
+    failed = subprocess.run(build_command, **options)
+    assert failed.returncode != 0
+    assert calls.read_bytes() == before_failure
 
 
 def _offline_uv(tmp_path: Path, env: dict[str, str]) -> Path:
@@ -167,6 +199,8 @@ if args[:1] == ['build']:
         cwd=project, capture_output=True, text=True, check=True, timeout=60,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
     )
+    with (fixture / 'installs.jsonl').open('a') as log:
+        log.write(json.dumps(args) + '\\n')
     print(result.stdout, end='')
     raise SystemExit(0)
 if args[:1] == ['venv']:
