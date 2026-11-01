@@ -265,6 +265,8 @@ class WatchGateway:
             return _response(503, {"error": "workspace_request_disconnected"})
         except ReplayBindingMismatch:
             return _response(409, {"error": "workspace_binding_mismatch"})
+        except PermissionError:
+            return _response(403, {"error": "workspace_owner_refused"})
         except (WorkspaceUnavailable, OSError, RuntimeError):
             return _response(503, {"error": "workspace_owner_unavailable"})
         except (ValueError, OverflowError):

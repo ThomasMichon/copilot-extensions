@@ -54,7 +54,9 @@ class WorkspaceClient:
                                        outcome_unknown=operation == "submit" and error.code == "outcome-unknown") from None
         if response.status != 200:
             raise WorkspaceClientError(
-                "workspace_unsupported" if response.status == 404 else "workspace_unavailable",
+                "workspace_unsupported" if response.status == 404 else (
+                    "workspace_access_refused" if response.status == 403 else "workspace_unavailable"
+                ),
                 http_status=response.status, outcome_unknown=operation == "submit",
             )
         try:

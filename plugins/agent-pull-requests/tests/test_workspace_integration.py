@@ -200,6 +200,32 @@ def test_submit_preserves_actual_sdk_dispatch_stage_in_error_outcomes(environmen
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("after_effect", [False, True])
+def test_actual_owner_denial_is_not_a_temporary_outage_or_effect_rollback(environment, integration, after_effect):
+    store, selected, _, attachment, backend, _ = environment
+    gateway, client, _, _, _, _ = integration
+
+    async def scenario():
+        await client.capabilities()
+        denial = PermissionError("Synthetic current owner denial")
+        if after_effect:
+            backend.after_write = lambda value: setattr(value, "denied", denial)
+        else:
+            backend.denied = denial
+        with pytest.raises(WorkspaceClientError) as error:
+            await client.exchange("submit", {
+                "number": 42, "intent": selected, "source_attachment": attachment, "budget_seconds": 120,
+            })
+        assert error.value.http_status == 403 and error.value.code == "workspace_access_refused"
+        assert len(backend.threads) == int(after_effect) and backend.vote is None
+        if after_effect:
+            state = store.inspect_review(selected["operation_id"], selected["scope"], expires_at=int(time.time()) + 600)
+            assert state["actions"][0]["state"] == "unknown" and error.value.outcome_unknown
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("change", ["reply", "edit", "delete", "head", "target", "partial"])
 def test_real_read_owner_sync_preserves_deltas_and_incomplete_evidence(environment, integration, change):
     _, _, generation, _, backend, _ = environment

@@ -109,7 +109,9 @@ without changing legacy native callers or actual operation budgets.
 
 Executing capability support does not prove backend availability, actual pinned
 write-owner adoption or installed serving readiness. Missing owners return
-unavailable. Existing watch clients keep their exact strict capability shape.
+unavailable. Actual protected-owner permission denial returns 403/access-refused,
+not a temporary 503 outage; a denial after an admitted effect still preserves
+unknown receipts and is never rollback. Existing watch clients keep their exact strict capability shape.
 Neither package equality nor a new source library upgrades a running service.
 Expand the optional receiver first; migrate clients only after that running
 receiver advertises workspace/v1 and the requested operation. No watch form is
