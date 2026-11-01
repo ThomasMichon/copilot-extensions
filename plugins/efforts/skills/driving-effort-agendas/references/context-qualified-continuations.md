@@ -32,6 +32,11 @@ Equivalent numeric representations (`1` and `1.0`, or `0.0` and `-0.0`) are
 the same input; booleans remain distinct from numbers. Omitting a known fact
 and later restoring it is not newly learned context. Novelty must hold against
 the item's retained lineage, not merely its immediately preceding fact bundle.
+Declare raw source/configuration content as an `input` fact: its strings retain
+significant whitespace recursively, while prose facts normalize cosmetic
+formatting. Each subject keeps the policy established at its first lineage
+occurrence; changing its kind or omitting it cannot change that treatment.
+Exact input differences still require an attributable causal relevance judgment.
 Structural acceptance can check supplied lineage/evidence relationships; it
 cannot prove that a reasoning claim is meaningful or that an effect is approved.
 Keep the judgment attributable and its uncertainty explicit.

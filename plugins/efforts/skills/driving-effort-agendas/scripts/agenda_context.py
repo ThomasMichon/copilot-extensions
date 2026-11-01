@@ -19,15 +19,16 @@ METADATA = {"id", "uuid", "timestamp", "session", "revision", "definition_revisi
             "evidence_ref", "evidence_refs"}
 
 
-def semantic(value: Any) -> Any:
+def semantic(value: Any, *, raw_input: bool = False) -> Any:
     if isinstance(value, str):
-        return " ".join(unicodedata.normalize("NFC", value).split())
+        return value if raw_input else " ".join(unicodedata.normalize("NFC", value).split())
     if isinstance(value, dict):
         if any(not isinstance(key, str) for key in value):
             raise AgendaError("semantic value keys must be text")
-        return {key: semantic(item) for key, item in sorted(value.items()) if key not in METADATA}
+        return {key: semantic(item, raw_input=raw_input)
+                for key, item in sorted(value.items()) if key not in METADATA}
     if isinstance(value, list):
-        return [semantic(item) for item in value]
+        return [semantic(item, raw_input=raw_input) for item in value]
     if value is None or type(value) in (bool, int):
         return value
     if type(value) is float and math.isfinite(value):
@@ -36,6 +37,8 @@ def semantic(value: Any) -> Any:
 
 
 def nonempty(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
     if value is None or value == "" or value == {} or value == []:
         return False
     if isinstance(value, (list, dict)):
@@ -44,7 +47,8 @@ def nonempty(value: Any) -> bool:
     return True
 
 
-def facts(value: Any, subjects: set[str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def facts(value: Any, subjects: set[str], *,
+          input_policy: dict[str, bool] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if not isinstance(value, list) or not value:
         raise AgendaError("context facts must be a nonempty list")
     normalized: dict[str, Any] = {}
@@ -59,10 +63,11 @@ def facts(value: Any, subjects: set[str]) -> tuple[list[dict[str, Any]], dict[st
         if not isinstance(fact["kind"], str) or fact["kind"] not in KINDS:
             raise AgendaError("unsupported context fact kind")
         _text(fact["evidence_ref"], "context evidence reference")
-        content = semantic(fact["value"])
+        policy = input_policy if input_policy is not None else {}
+        content = semantic(fact["value"], raw_input=policy.get(subject, fact["kind"] == "input"))
         if not nonempty(content):
             raise AgendaError("context value is normalized-empty or metadata-only")
-        # A category label is attribution, not a substantive change to the input.
+        # A later category-label change cannot alter the original comparison policy.
         normalized[subject] = {"value": content}
         original.append(fact)
     return original, normalized
@@ -157,7 +162,37 @@ def qualification(
     return False, "previously-known-facts", delta
 
 
-def context_body(value: Any, subjects: set[str]) -> dict[str, Any]:
+def context_policy(records: dict[str, Any], identity: str) -> dict[str, bool]:
+    """Freeze each subject's input/prose treatment at its first lineage occurrence."""
+    from agenda_v2_schema import record
+
+    lineage: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    current: str | None = identity
+    while current is not None:
+        current = _text(current, "context lineage identity")
+        if current in seen:
+            raise AgendaError("context predecessor lineage is cyclic")
+        seen.add(current)
+        body = record(records, current, "context")
+        fields(body, {"facts", "semantic", "parent_context_id", "judgment"}, {"delta"})
+        if not isinstance(body.get("facts"), list):
+            raise AgendaError("context predecessor has no valid fact list")
+        lineage.append(body)
+        current = body["parent_context_id"]
+    policy: dict[str, bool] = {}
+    for body in reversed(lineage):
+        for fact in body["facts"]:
+            fields(fact, {"kind", "subject", "value", "evidence_ref"})
+            subject = _text(fact["subject"], "context subject")
+            if not isinstance(fact["kind"], str) or fact["kind"] not in KINDS:
+                raise AgendaError("unsupported context fact kind")
+            policy.setdefault(subject, fact["kind"] == "input")
+    return policy
+
+
+def context_body(value: Any, subjects: set[str], *,
+                 input_policy: dict[str, bool] | None = None) -> dict[str, Any]:
     fields(value, {"facts"})
-    original, normalized = facts(value["facts"], subjects)
+    original, normalized = facts(value["facts"], subjects, input_policy=input_policy)
     return {"facts": original, "semantic": normalized}

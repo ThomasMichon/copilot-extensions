@@ -527,3 +527,121 @@ def test_provider_isolated_child_ignores_cwd_and_pythonpath_shadow_modules(
     assert result["ok"] is True
     assert not touched.exists()
     assert provider_fixture["calls"].exists()
+
+
+@pytest.mark.parametrize(("initial", "replacement", "expected"), [
+    ("result = 0\nif False:\n    result = 1\nresult = 2\n",
+     "result = 0\nif False:\n    result = 1\n    result = 2\n", "source"),
+    ('{"label":"a b"}', '{"label":"a  b"}', "config"),
+])
+def test_context_input_preserves_behavior_changing_whitespace(
+    tmp_path: Path, initial: str, replacement: str, expected: str
+) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, revisit
+    if expected == "source":
+        before: dict[str, Any] = {}
+        after: dict[str, Any] = {}
+        exec(initial, before)
+        exec(replacement, after)
+        assert before["result"] == 2 and after["result"] == 0
+    else:
+        assert json.loads(initial)["label"] != json.loads(replacement)["label"]
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": context(initial), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    assert revisit(tmp_path, replacement)["transition"]["decision"] == "revisit-admitted"
+
+
+@pytest.mark.parametrize(("initial_kind", "next_kind", "initial", "replacement", "admitted"), [
+    ("observation", "observation", "condition ready", " condition \n ready ", False),
+    ("observation", "input", "condition ready", " condition \n ready ", False),
+    ("input", "observation", "same input", "same input", False),
+    ("input", "observation", "same input", "same  input", True),
+    ("input", "input", {"nested": ["a b"]}, {"nested": ["a  b"]}, True),
+    ("insight", "input", {"nested": ["a b"]}, {"nested": [" a  b "]}, False),
+])
+def test_context_subject_input_policy_is_anchored_against_kind_churn(
+    tmp_path: Path, initial_kind: str, next_kind: str, initial: Any,
+    replacement: Any, admitted: bool
+) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, current, update
+    baseline = context(initial)
+    baseline["facts"][0]["kind"] = initial_kind
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": board(), "baseline_context": baseline, "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    frame, item, attempt = current(tmp_path)
+    proposed = context(replacement)
+    proposed["facts"][0]["kind"] = next_kind
+    result = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": attempt, "context": proposed,
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["dataset"],
+                     "causal_change": "Input change matters only under its original subject policy.",
+                     "evidence_refs": ["actual-input"]},
+        "approach": {"action": "Run parent"}})
+    assert result["transition"]["decision"] == ("revisit-admitted" if admitted else "not-admitted")
+    state = STORE.read(tmp_path)
+    assert state["documents"]["cursor"]["item_state"][item]["visits"] == (2 if admitted else 1)
+
+
+def test_context_prose_policy_remains_anchored_after_subject_omission(tmp_path: Path) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, current, update
+    configured = board()
+    for definition in configured["items"].values():
+        definition["relevant_subjects"].append("condition")
+    baseline = context({"input": "A"})
+    baseline["facts"].append({"kind": "observation", "subject": "condition",
+        "value": "condition ready", "evidence_ref": "initial-prose"})
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": configured, "baseline_context": baseline, "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    frame, item, attempt = current(tmp_path)
+    changed = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": attempt, "context": context({"input": "B"}),
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["dataset"],
+                     "causal_change": "Input B changes feasible behavior.", "evidence_refs": ["input-B"]},
+        "approach": {"action": "Run parent"}})
+    assert changed["transition"]["decision"] == "revisit-admitted"
+    outcome(tmp_path)
+    proposed = context({"input": "B"})
+    proposed["facts"].append({"kind": "input", "subject": "condition",
+        "value": " condition \n ready ", "evidence_ref": "renamed-input-label"})
+    result = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": current(tmp_path)[2], "context": proposed,
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["condition"],
+                     "causal_change": "A changed label cannot redefine inherited prose as raw input.",
+                     "evidence_refs": ["renamed-label"]},
+        "approach": {"action": "Run parent"}})
+    assert result["transition"]["decision"] == "not-admitted"
+
+
+def test_context_raw_input_known_content_is_not_forgotten_after_omission(tmp_path: Path) -> None:
+    from test_agenda_v2_core import board, context, v2, CAPS, outcome, current, update
+    configured = board()
+    for definition in configured["items"].values():
+        definition["relevant_subjects"].append("source")
+    original_source = "if False:\n    result = 1\nresult = 2\n"
+    baseline = context({"input": "A"})
+    baseline["facts"].append({"kind": "input", "subject": "source",
+        "value": original_source, "evidence_ref": "original-source"})
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture",
+        "board": configured, "baseline_context": baseline, "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    frame, item, attempt = current(tmp_path)
+    changed = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": attempt, "context": context({"input": "B"}),
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["dataset"],
+                     "causal_change": "Changed B input.", "evidence_refs": ["input-B"]},
+        "approach": {"action": "Run parent"}})
+    assert changed["transition"]["decision"] == "revisit-admitted"
+    outcome(tmp_path)
+    proposed = context({"input": "B"})
+    proposed["facts"].append({"kind": "observation", "subject": "source",
+        "value": original_source, "evidence_ref": "same-source-new-kind"})
+    result = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": current(tmp_path)[2], "context": proposed,
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["source"],
+                     "causal_change": "Same preserved source cannot become novel by changing kind.",
+                     "evidence_refs": ["new-label"]},
+        "approach": {"action": "Run parent"}})
+    assert result["transition"]["decision"] == "not-admitted"

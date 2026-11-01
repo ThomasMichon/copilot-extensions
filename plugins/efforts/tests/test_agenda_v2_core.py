@@ -125,7 +125,7 @@ def test_v2_productive_same_command_exceeds_old_visit_threshold(lane: Path) -> N
 
 
 @pytest.mark.parametrize("value", [
-    {"content": "initial"}, {"content": " initial "},
+    {"content": "initial"},
     {"content": "initial", "uuid": "new", "timestamp": "later", "session": "new"},
 ])
 def test_v2_cosmetic_context_replans_without_a_new_attempt(lane: Path, value: Any) -> None:

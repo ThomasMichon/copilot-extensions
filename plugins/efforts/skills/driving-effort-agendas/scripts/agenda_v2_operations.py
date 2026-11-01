@@ -7,7 +7,7 @@ from typing import Any
 
 from agenda import AgendaError, _number, _text, _time
 from agenda_operations import fields, evidence
-from agenda_context import context_body, qualification
+from agenda_context import context_body, context_policy, qualification
 from agenda_queue import QueueState
 from agenda_v2_schema import definition, record
 
@@ -172,8 +172,9 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
         if any(result["transition"] == "advance" for result in state.results(change["predecessor_attempt_id"])):
             raise AgendaError("successful attempts cannot be resurrected")
         subjects = set(definition(state.documents, item)["relevant_subjects"])
-        proposed = context_body(change["context"], subjects)
         prior = record(state.records, previous["context_id"], "context")
+        proposed = context_body(change["context"], subjects,
+                                input_policy=context_policy(state.records, previous["context_id"]))
         used = [record(state.records, record(state.records, identity, "attempt")["context_id"], "context")["semantic"]
                 for identity in item["attempts"]]
         baseline = record(state.records, item["baseline_context_id"], "context")

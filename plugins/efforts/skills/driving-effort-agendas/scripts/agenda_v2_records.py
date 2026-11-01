@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agenda import AgendaError, _text, _time
-from agenda_context import canonical_equal, facts
+from agenda_context import canonical_equal, context_policy, facts
 from agenda_operations import evidence, fields
 from agenda_v2_schema import record
 
@@ -45,7 +45,7 @@ def validate(documents: dict[str, Any], records: dict[str, Any]) -> None:
         if "evidence" in body:
             evidence(body["evidence"])
         if kind == "context":
-            _, normalized = facts(body["facts"], subjects)
+            _, normalized = facts(body["facts"], subjects, input_policy=context_policy(records, identity))
             if not canonical_equal(normalized, body["semantic"]):
                 raise AgendaError("immutable context semantic facts were rewritten")
             visited = {identity}

@@ -176,12 +176,12 @@ def validate(documents: Any, records: dict[str, Any]) -> None:
     record(records, cursor["baseline_context_id"], "context")
     all_subjects = {subject for current in documents["boards"].values()
                     for value in current["items"].values() for subject in value["relevant_subjects"]}
-    from agenda_context import canonical_equal, facts
+    from agenda_context import canonical_equal, context_policy, facts
     for identity in records:
         value = records[identity]
         body = record(records, identity)
         if value["kind"] == "context":
-            _, expected = facts(body["facts"], all_subjects)
+            _, expected = facts(body["facts"], all_subjects, input_policy=context_policy(records, identity))
             if not canonical_equal(body["semantic"], expected):
                 raise AgendaError("immutable context semantic facts were rewritten")
             parent = body["parent_context_id"]

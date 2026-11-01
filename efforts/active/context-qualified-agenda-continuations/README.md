@@ -191,6 +191,25 @@ grants, native qualification or claims of implementation.
 
 ## Journal
 
+### 2026-11-01 - Significant input content correction
+
+- Current-head review accepted numeric normalization but identified another
+  coupled context-admission defect: recursively collapsing raw source or
+  configuration whitespace can erase behavior-changing edits. Input strings now
+  retain exact content recursively; prose retains cosmetic normalization.
+  The subject's first lineage occurrence fixes that policy across later kind
+  churn and omission, without adding schema fields.
+- Reproductions demonstrate an indentation edit changing the executed result
+  from 2 to 0 and a significant config-string edit. Both now admit a revisit;
+  prose whitespace, kind churn and restored known content retain no-progress
+  guards. The coordinator packet passed 283 cases with two explicit
+  dependency/platform skips; the actual isolated connected sequence passed five
+  cases without skips. Cleanup and Ruff passed. Fresh review, required CI, merge
+  and canonical completion remain open.
+- The already-corrected policy thread now has an explicit resolution backed by
+  its commit, test locations and passing producer packet; no redundant source
+  change or waived review finding is implied.
+
 ### 2026-11-01 - Context novelty review follow-up
 
 - The next current-head review exposed two additional novelty loopholes:
