@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 import shutil
@@ -68,11 +69,26 @@ def qualified(cell, monkeypatch):
         python.write_bytes(b"inert target, never executed")
         events.append("build")
 
-    def adopt(args, root, slot=None):
-        validated = windows_broker_cell.validate(root, slot, require_active=True)
-        assert validated["context"]["pluginRoot"] == str(root)
-        assert validated["completion"]["runtimeVersion"] == version
-        events.append("adopt")
+    original_helpers = adapter.runtime_helpers
+
+    def runtime_helpers(snapshot):
+        runtime = original_helpers(snapshot)
+        original_retention = runtime.retention_lease
+
+        @contextmanager
+        def retention(root, version, **kwargs):
+            with original_retention(root, version, **kwargs) as slot:
+                validated = windows_broker_cell.validate(root, slot, require_active=True)
+                assert validated["context"]["pluginRoot"] == str(root)
+                assert validated["completion"]["runtimeVersion"] == version
+                events.append("retain")
+                try:
+                    yield slot
+                finally:
+                    events.append("release")
+
+        runtime.retention_lease = retention
+        return runtime
 
     def activate(command):
         assert command[-4:] == [
@@ -83,17 +99,22 @@ def qualified(cell, monkeypatch):
         return {"status": "ready", "activated": True}
 
     monkeypatch.setattr(adapter, "build", build)
-    monkeypatch.setattr(adapter, "broker_operation", adopt)
+    monkeypatch.setattr(adapter, "runtime_helpers", runtime_helpers)
+    monkeypatch.setattr(
+        adapter, "remove_legacy_broker",
+        lambda *_: pytest.fail("Normal provisioning invoked legacy broker removal"),
+    )
     monkeypatch.setattr(adapter, "activate", activate)
     return adapter, api, receipt, arguments, events
 
 
 @pytest.mark.parametrize("action", ["install", "update", "provision"])
-def test_cell_completion_and_retention_precede_adoption_and_selection(qualified, action):
+def test_cell_completion_and_retention_precede_selection_without_adoption(qualified, action):
     adapter, api, _, arguments, events = qualified
     result = adapter.execute(adapter.parse([action, *arguments]), api)
     assert result["status"] == "ready"
-    assert events == ["build", "adopt", *(["activate"] if action != "provision" else [])]
+    assert events == ["build", "retain", *(["activate"] if action != "provision" else []), "release"]
+    assert not hasattr(adapter, "broker_operation")
 
 
 def test_completed_cell_reuse_verifies_helpers_without_rewriting(qualified):
@@ -103,7 +124,7 @@ def test_completed_cell_reuse_verifies_helpers_without_rewriting(qualified):
     before = {path.relative_to(slot): path.read_bytes() for path in slot.rglob("*") if path.is_file()}
     events.clear()
     adapter.execute(adapter.parse(["install", *arguments]), api)
-    assert events == ["adopt", "activate"]
+    assert events == ["retain", "activate", "release"]
     assert before == {path.relative_to(slot): path.read_bytes() for path in slot.rglob("*") if path.is_file()}
     assert not (Path(receipt["pluginRoot"]) / "current-version").exists()
 
@@ -171,15 +192,22 @@ def test_completed_cell_missing_helpers_refuses_without_retrofit_or_adoption(qua
     assert (slot / ".runtime-slot-completion.json").read_bytes() == marker
 
 
-def test_cell_adoption_refusal_precedes_selection(qualified, monkeypatch):
+def test_cell_retention_refusal_precedes_selection(qualified, monkeypatch):
     adapter, api, receipt, arguments, events = qualified
 
     def refuse(*args, **kwargs):
         events.append("refused")
-        raise RuntimeError("synthetic broker refusal")
+        raise RuntimeError("synthetic retention refusal")
 
-    monkeypatch.setattr(adapter, "broker_operation", refuse)
-    with pytest.raises(RuntimeError, match="synthetic broker refusal"):
+    original_helpers = adapter.runtime_helpers
+
+    def runtime_helpers(snapshot):
+        runtime = original_helpers(snapshot)
+        runtime.retention_lease = refuse
+        return runtime
+
+    monkeypatch.setattr(adapter, "runtime_helpers", runtime_helpers)
+    with pytest.raises(RuntimeError, match="synthetic retention refusal"):
         adapter.execute(adapter.parse(["install", *arguments]), api)
     assert events == ["build", "refused"]
     assert not (Path(receipt["pluginRoot"]) / "current-version").exists()

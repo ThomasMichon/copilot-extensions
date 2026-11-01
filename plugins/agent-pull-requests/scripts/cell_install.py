@@ -332,17 +332,12 @@ def runtime_helpers(snapshot):
     return runtime
 
 
-def broker_operation(args, installation_root, slot=None):
+def remove_legacy_broker(installation_root):
     if os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1":
-        if args.action == "broker-remove":
-            raise ValueError("Native cell broker removal is unavailable")
-        return
-    from update_driver.windows_broker import adopt, remove
+        raise ValueError("Native cell broker removal is unavailable")
+    from update_driver.windows_broker import remove
 
-    if args.action == "broker-remove":
-        remove(installation_root)
-    else:
-        adopt(installation_root, slot)
+    remove(installation_root)
 
 
 def execute(args, api):
@@ -375,7 +370,7 @@ def execute(args, api):
 
     admitted = bind_admission(args, api)
     if args.action == "broker-remove":
-        broker_operation(args, Path(admitted["pluginRoot"]))
+        remove_legacy_broker(Path(admitted["pluginRoot"]))
         bind_admission(args, api)
         return {"status": "ready", "action": "broker-remove", "removed": True}
 
@@ -443,8 +438,6 @@ def execute(args, api):
         python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         if not python.is_file():
             raise ValueError("Completed cell slot has no target Python; explicit repair required")
-        broker_operation(args, installation_root, slot)
-        bind_admission(args, api)
         if args.action == "provision":
             return completed
         return activate([

@@ -1119,23 +1119,6 @@ function Invoke-VersionedMarkComplete {
     return $true
 }
 
-function Invoke-RuntimeBrokerAdoption {
-    if ($NoService -or $env:OS -ne 'Windows_NT' -or
-        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
-    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
-        $script:RuntimeConstructionSession.Process.HasExited -or
-        $script:RuntimeConstructionSession.Key -cne "$InstallDir/$SrcVersion") {
-        throw 'Primary broker adoption requires attached complete-slot retention'
-    }
-    $diagnostic = ''
-    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
-        '--runtime-root', $InstallDir, '--slot', $VenvDir,
-        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
-        -ErrorOutput ([ref]$diagnostic)
-    if ($LASTEXITCODE -ne 0) { throw "Primary runtime broker adoption failed: $diagnostic" }
-    $receipt = $result | ConvertFrom-Json
-    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Primary runtime broker adoption returned no receipt' }
-}
 # === end install-contract:v4 marker/toss helpers ===
 
 function Get-SourceKind {
@@ -1785,7 +1768,6 @@ function Install-Runtime {
             Write-Fail "Runtime completion marker was not published for versions/$SrcVersion -- not activating"
             exit 1
         }
-        Invoke-RuntimeBrokerAdoption
     }
 
     if (-not (Publish-IndexRuntime)) {

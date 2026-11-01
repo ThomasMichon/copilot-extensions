@@ -1,4 +1,4 @@
-"""Inert primary-CLI adoption checks: never run installers or native registration."""
+"""Primary completion and legacy removal stay separate from native startup."""
 
 from __future__ import annotations
 
@@ -54,27 +54,10 @@ def test_completion_retains_helpers_without_retrofitting_completed_slots():
     assert "Copy-Item" not in completion
 
 
-def test_adoption_binds_only_retained_primary_slot_and_checks_receipt():
-    adoption = function("Invoke-RuntimeBrokerAdoption")
-    assert "$NoService -or $env:OS -ne 'Windows_NT'" in adoption
-    assert "$env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1'" in adoption
-    assert "$script:RuntimeConstructionSession.Complete" in adoption
-    assert "$script:RuntimeConstructionSession.Process.HasExited" in adoption
-    assert '$script:RuntimeConstructionSession.Key -cne "$InstallDir/$SrcVersion"' in adoption
-    assert "-FilePath $VenvPython" in adoption
-    assert "'--runtime-root', $InstallDir, '--slot', $VenvDir" in adoption
-    assert "'update_driver.windows_broker'" in adoption
-    assert "$receipt.adopted -ne $true" in adoption
-    assert "$LASTEXITCODE -ne 0" in adoption
-    assert "EngineHome" not in adoption
-
-
-def test_adoption_precedes_primary_selection_and_all_action_callbacks():
+def test_completion_precedes_primary_selection_and_all_action_callbacks():
     install = function("Install-Runtime")
-    assert install.index("Invoke-VersionedMarkComplete") < install.index(
-        "Invoke-RuntimeBrokerAdoption"
-    )
-    assert install.index("Invoke-RuntimeBrokerAdoption") < install.index("Publish-IndexRuntime")
+    assert install.index("Invoke-VersionedMarkComplete") < install.index("Publish-IndexRuntime")
+    assert "BrokerAdoption" not in INSTALL
     assert "Invoke-VersionedActivate" in function("Publish-IndexRuntime")
     actions = INSTALL.split("switch ($Action) {", 1)[1]
     for action in ("install", "update", "provision"):
@@ -87,7 +70,8 @@ def test_uninstall_removes_primary_broker_before_deleting_any_runtime():
     assert remove.index("return") < remove.index("Invoke-Stop")
     assert remove.index("Invoke-Stop") < remove.index("--remove-broker")
     assert remove.index("--remove-broker") < remove.index("Unregister-ScheduledTask")
-    assert remove.index("--remove-broker") < remove.index("Remove-Item $InstallDir")
+    assert remove.index("--remove-broker") < remove.index("-Mode '--remove-runtime'")
+    assert remove.index("--remove-broker") < remove.index("Remove-InstallRuntimeContent -InstallRoot $InstallDir")
     assert "throw 'Owned primary broker removal failed; runtimes preserved'" in remove
 
 
