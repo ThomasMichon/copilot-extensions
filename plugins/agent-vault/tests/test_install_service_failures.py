@@ -138,7 +138,7 @@ def test_conditional_service_publication_failure_blocks_reconcile_and_success(tm
     result, target, commands = _invoke(tmp_path, action, scenario)
     assert result.returncode == 19, result.stdout + result.stderr
     assert "FAIL: Vault service" in result.stderr
-    assert "complete ===" not in result.stdout
+    assert f"OK: agent-vault {action.removeprefix('do_')}\n" not in result.stdout
     assert all("--user is-active " in command for command in commands), commands
     if scenario not in ("mkdir", "unit-directory", "unit-symlink"):
         assert target.read_bytes() == b"previous healthy unit"
@@ -153,7 +153,7 @@ def test_conditional_service_publication_failure_blocks_reconcile_and_success(tm
 def test_conditional_service_publication_preserves_documented_best_effort(tmp_path, action, scenario):
     result, target, commands = _invoke(tmp_path, action, scenario)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "complete ===" in result.stdout
+    assert result.stdout.rstrip().endswith(f"OK: agent-vault {action.removeprefix('do_')}")
     if scenario in ("no-service", "missing-systemd"):
         assert not commands
         assert "SKIP:" in result.stdout
@@ -175,7 +175,7 @@ def test_conditional_service_publication_preserves_documented_best_effort(tmp_pa
 def test_conditional_runtime_publication_failure_stops_service_callers(tmp_path, action, scenario):
     result, target, commands = _invoke(tmp_path, action, scenario)
     assert result.returncode == 19, result.stdout + result.stderr
-    assert "complete ===" not in result.stdout
+    assert f"OK: agent-vault {action.removeprefix('do_')}\n" not in result.stdout
     assert not commands
     assert target.read_bytes() == b"previous healthy unit"
     askpass = tmp_path / "local-bin" / "vault-askpass"
