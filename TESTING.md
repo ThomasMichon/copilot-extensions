@@ -500,6 +500,11 @@ inherit that same Job and consume its unchanged process, memory and TEMP limits.
 The downstream stage never calls `run_contained` or creates another harness Job.
 Ordinary callers retain their existing relative-limit API.
 
+`tools/plugin_test_environment.py` owns the shared environment isolation and
+pure registry-value comparison. The containment module re-exports its public
+environment API in both package and standalone import modes; the registry
+reader, refusal errors and native Job lifecycle remain in the original owner.
+
 The qualified stage publishes source/scope/origin-bound work-completion evidence
 only after actual candidate and worker exits within the original work cutoff.
 That evidence permits report-only retirement until the original whole cutoff,

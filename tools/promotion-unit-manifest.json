@@ -3435,7 +3435,14 @@
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_streaming_packet_writer_settles_without_reopening_sources[True]",
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_relay_launch_uses_the_verified_bytes_not_its_file",
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_canonical_streaming_implementations_are_measured[streaming]",
-        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_canonical_streaming_implementations_are_measured[relay]"
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_canonical_streaming_implementations_are_measured[relay]",
+        "tools/promotion_unit_tests/test_test_environment.py::test_isolation_reexports_preserve_host_detachment[False]",
+        "tools/promotion_unit_tests/test_test_environment.py::test_isolation_reexports_preserve_host_detachment[True]",
+        "tools/promotion_unit_tests/test_test_environment.py::test_explicit_host_state_still_contains_temporary_storage",
+        "tools/promotion_unit_tests/test_test_environment.py::test_host_state_requires_explicit_tier_permission",
+        "tools/promotion_unit_tests/test_test_environment.py::test_registry_comparison_preserves_casefold_names_values_and_types",
+        "tools/promotion_unit_tests/test_test_environment.py::test_registry_wrapper_keeps_reader_patch_and_error_identity[False]",
+        "tools/promotion_unit_tests/test_test_environment.py::test_registry_wrapper_keeps_reader_patch_and_error_identity[True]"
     ],
     "sources": {
         "libs/configuration-layers/src/configuration_layers/__init__.py": "e522797fe6207e3648705759db4234936df60bcf255b36deb23f8d400b52a890",
@@ -3486,7 +3493,7 @@
         "fleet-manager/tests/test_host_profile.py": "37448c7b4dc138a8234556cee32872b4d4ddbb123ab5ef4dba6cc47b497eb298",
         "fleet-manager/tests/test_trusted_systemd_profile.py": "f5e02393ac409efd446073d68c36bc56930f9522fb14d0d7d40c975987609354",
         "libs/agent-procutil/setup.py": "fc307f6a4c180344b0f95a8f31d7db63747e56549d55bd32221f3185a89e39b1",
-        "libs/agent-procutil/src/agent_procutil/__init__.py": "b89c80a1f46e3f2d2e81c083aac7bb6d572220bf456423c7e81bf2a0f9ac5720",
+        "libs/agent-procutil/src/agent_procutil/__init__.py": "6aed9c0bb8cc64aa080090dab6e6c3ceacf6588b8d21034bd2ccdfb69a011e55",
         "libs/agent-procutil/src/agent_procutil/_async.py": "1f7bcc621579282062a2d5117daed8a9f0201f4d2c4b44105328a5cd71ccbd26",
         "libs/agent-procutil/src/agent_procutil/_caller_owned.py": "74b0e3832bd33d710feaa450112a967ee189d45853e7ccba907bf7e3dbaade1b",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_child.py": "081933f7f8512827ff9fe0800a3bf226b0d4a757114e9b7060b63081b5aea644",
@@ -3496,7 +3503,7 @@
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_records.py": "722d48c76e5a9ac285f09868bd83291ba448fa1aa8a66c8e7854e9354e4fe4d4",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py": "7d3b8b65af7d5281b22bb462503990e97cc699c73e4f90ce1e354b56b620fe1a",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py": "d75e1e2988b64d78cffe6ee13f78f27c52c2a300dede3d32ede5191734907aa4",
-        "libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py": "9990a0f47c3021da044ceb99d98f393c92ac23fa9e9fc8a3c65d3f2be3515b5a",
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py": "5844be6846e7bcb4e7539f0bc4cdbb920c28c64b0f6d4a2a98c41c66736751df",
         "libs/agent-procutil/src/agent_procutil/_darwin_caller_owned.py": "4dfafcc9944e429d3c1c83525d30379c2f02473d12c4031433cf7fe4f6906974",
         "libs/agent-procutil/src/agent_procutil/_interpreter.py": "0fe387814f80638c27f4d12c7bb1c2122abaeb2b4c71b75402d471e3940f92c7",
         "libs/agent-procutil/src/agent_procutil/_job_scopes.py": "c6a4509be12413ae0e24145486f1813917ab51a81b32db1bf778cb51f4326bc1",
@@ -3726,10 +3733,11 @@
         "tools/native_test_paths.py": "655925954c152703ac8a5cc2d959cd22e798dc9a0f0f92325b4b755384105fb0",
         "tools/nested_uv_editable_ref.py": "47051c113945e3b0c7eda0f95b681df53fb1bc36b98e338b9a7d352c34751a26",
         "tools/plugin_runtime_resources.py": "e0b89a0d1f230d73c53fbc9d6c9315a660130076e2af48726fef133bfa6c1824",
-        "tools/plugin_test_containment.py": "37945d5e351e0515cf36bfa253c71d26dc7ddc5b5909d19b1c1ce459dcf0b84e",
+        "tools/plugin_test_containment.py": "af3a6ff9e4c4b51115f6379cf77f686610947e364e18e3100e9e0698dc0580fe",
         "tools/plugin_test_containment_darwin.py": "451267248707ebf9479b7c8ebd31226dcb2c053fb820bd65b913179db188d5ba",
         "tools/plugin_test_containment_observation.py": "3a216c9051cccc4c1d4448638166651895621fe2fbeba350ff27c6ad86de78a0",
         "tools/plugin_test_containment_posix.py": "0d5fca39319742d34f858f1db3829172bd4541cbb6be6b39772f938f35ebeb19",
+        "tools/plugin_test_environment.py": "0f77d52bf5435b1a3d36f70998ce535911884ad3455ca59e667d859c5488ddbd",
         "tools/promote_release.py": "47821644abb9a9a39996949b7bcd86d7fb191051b2bc71c9c330525d5db915c1",
         "tools/promotion_admission_evidence.py": "fcfca78b764933b5d40e347eb296a3d4f471a4ec0c0e5c5eaa81136c75419365",
         "tools/promotion_artifact_readiness.py": "cd91d850b70c4e29a9567f84e94dc08d1220c867d226a3fad594fd31353182fc",
@@ -3838,6 +3846,7 @@
         "tools/promotion_unit_tests/test_wheel_inputs.py": "1668723fecac311b9be3f4f2e387b664df6e5067e24843e0c782562d8386c35b",
         "tools/promotion_unit_tests/test_windows_lease_acl.py": "d0b960fc15dc6ed369dcaa0b2b80aec35bcefbfec8adaafe7b51c0116c5e26f0",
         "tools/promotion_unit_tests/test_worktree_identity.py": "667c4cb239d7254cb4af7fa77faf4d1a711e1b01441bac48c3a01edcf279cecf",
+        "tools/promotion_unit_tests/test_test_environment.py": "03e9b44952472c30b993b02fd193d8343f435a194dc8b97b6b71f5dc975b73dd",
         "tools/public_toolchain_source.py": "a381855e01131577662f7ece2c80ab6942da3a90f3ced242ffc80cc95e14a62f",
         "tools/publish_python_artifacts.py": "ca70aaea60895bd96e160e055bf8c84662559b0a9cc78d9655fb50f87d83f74c",
         "tools/python_project_inventory.py": "6981a4cf50106c205847e5f946c23c09c5a0959cc5e2caf30920264c91c0b538",
@@ -4165,7 +4174,8 @@
         "libs/agent-procutil/src/agent_procutil/_windows_job_types.py",
         "libs/agent-procutil/src/agent_procutil/_output_relay.py",
         "libs/agent-procutil/src/agent_procutil/streaming.py",
-        "libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py"
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py",
+        "tools/plugin_test_environment.py"
     ],
     "max_seconds": 300
 }

@@ -111,9 +111,8 @@ def registry_root() -> Path:
         return Path(buffer.value) / "copilot-extensions" / "daemon-instances"
     import pwd
 
-    return Path(pwd.getpwuid(os.getuid()).pw_dir) / ".local" / "state" / (
-        "copilot-extensions"
-    ) / "daemon-instances"
+    state = Path(pwd.getpwuid(os.getuid()).pw_dir) / ".local" / "state"
+    return state / "copilot-extensions" / "daemon-instances"
 
 
 def _plain(path: Path, *, directory: bool = False, owned: bool = True) -> os.stat_result:

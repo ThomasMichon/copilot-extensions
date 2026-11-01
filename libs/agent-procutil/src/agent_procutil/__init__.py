@@ -445,26 +445,21 @@ def _resume_suspended_process(pid: int) -> bool:
 def __getattr__(name: str) -> Any:
     if name == "ctypes":
         import ctypes
-
-        globals()[name] = ctypes
-        return ctypes
-    if name == "_JobBasicAccountingInformation":
-        from ._windows_job_types import _JobBasicAccountingInformation
-
-        globals()[name] = _JobBasicAccountingInformation
-        return _JobBasicAccountingInformation
-    if name == "spawn_in_kill_on_close_job":
-        from ._async import asyncio, spawn_in_kill_on_close_job
-
-        globals().setdefault("asyncio", asyncio)
-        globals()[name] = spawn_in_kill_on_close_job
-        return spawn_in_kill_on_close_job
-    if name == "asyncio":
+        value = ctypes
+    elif name == "asyncio":
         import asyncio
-
-        globals()[name] = asyncio
-        return asyncio
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        value = asyncio
+    elif name == "_JobBasicAccountingInformation":
+        from ._windows_job_types import _JobBasicAccountingInformation
+        value = _JobBasicAccountingInformation
+    elif name == "spawn_in_kill_on_close_job":
+        from ._async import asyncio, spawn_in_kill_on_close_job
+        globals().setdefault("asyncio", asyncio)
+        value = spawn_in_kill_on_close_job
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    globals()[name] = value
+    return value
 
 
 def __dir__() -> list[str]:
