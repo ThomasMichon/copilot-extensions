@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit preserving-only Komodo incumbent observations without database conversion or native apply.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

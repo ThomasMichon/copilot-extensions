@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .komodo_declaration import KomodoDeclaration, fingerprint
 from .komodo_evidence import native_reference
+from .komodo_incumbent import KomodoIncumbentMaterialization
 from .komodo_native import KomodoTooling
 from .komodo_profile import DATA_NAMES, SECRET_NAMES, KomodoMaterialization, ordinary_path, render_profile
 from .planning import PlanError, digest, identifier, integer
@@ -31,7 +32,7 @@ class KomodoSelection:
     release_digest: str
     host_runtime: Path
     tooling: KomodoTooling
-    material: KomodoMaterialization
+    material: KomodoMaterialization | KomodoIncumbentMaterialization
     compatible_with: tuple[str, ...] = ()
     adoption: tuple[tuple[str, str], ...] = ()
     adopted_public_identity: str | None = None
@@ -39,7 +40,8 @@ class KomodoSelection:
 
     def __post_init__(self) -> None:
         if (type(self.declaration) is not KomodoDeclaration or type(self.tooling) is not KomodoTooling
-                or type(self.material) is not KomodoMaterialization):
+                or type(self.material) is not (
+                    KomodoIncumbentMaterialization if self.declaration.preserving else KomodoMaterialization)):
             raise PlanError("Komodo requires code-resolved selected owner records")
         for value in (self.fleet, self.installation, self.policy_revision):
             identifier(value, "Komodo current owner reference")
@@ -72,6 +74,8 @@ class KomodoSelection:
         if self.adopted_network is not None:
             fingerprint(self.adopted_network)
         object.__setattr__(self, "adoption", tuple(sorted(self.adoption)))
+        if self.declaration.preserving and not self.adoption:
+            raise PlanError("Komodo preserving profile requires exact incumbent adoption")
 
     @property
     def resource(self) -> str:
@@ -82,6 +86,8 @@ class KomodoSelection:
         return digest({"fleet": self.fleet, "installation": self.installation, "resource": self.resource})
 
     def material_evidence(self) -> dict:
+        if self.declaration.preserving:
+            return self.material.evidence()
         credentials = self.material.credential_bytes()
         paths = {name: getattr(self.material, name) for name in (*DATA_NAMES, *SECRET_NAMES)}
         storage = {}
@@ -107,6 +113,8 @@ class KomodoSelection:
         }
 
     def profile(self) -> bytes:
+        if self.declaration.preserving:
+            return self.material.profile()
         return render_profile(self.declaration, self.material, owner=self.owner,
                               network_external=self.adopted_network is not None)
 

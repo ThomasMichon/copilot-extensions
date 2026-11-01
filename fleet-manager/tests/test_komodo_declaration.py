@@ -126,6 +126,22 @@ def test_declaration_rejects_noncanonical_mutable_and_duplicate_key_bytes() -> N
             KomodoDeclaration(raw)
 
 
+def test_incumbent_mongo_series_is_explicit_and_cannot_select_effects() -> None:
+    value = declaration()
+    value["images"]["mongo"]["version"] = "7.0.45"
+    with pytest.raises(PlanError):
+        KomodoDeclaration.from_dict(value)
+    value["profile"] = "preserve-incumbent"
+    assert KomodoDeclaration.from_dict(value).preserving
+    for patch in ({"profile": "arbitrary"}, {"desired_state": "absent"}):
+        with pytest.raises(PlanError):
+            KomodoDeclaration.from_dict({**value, **patch})
+    value["images"]["mongo"]["version"] = "6.0.0"
+    with pytest.raises(PlanError):
+        KomodoDeclaration.from_dict(value)
+    assert not KomodoDeclaration.from_dict(declaration()).preserving
+
+
 def test_manager_admission_requires_exact_content_not_only_command_target_generation(keys: Any) -> None:
     harness = Harness(keys)
     first = intent()

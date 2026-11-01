@@ -43,9 +43,14 @@ class KomodoDeclaration:
             "provider", "instance", "target", "configuration_ref", "revision",
             "project", "architecture", "references", "images", "resources",
             "core_port", "server_name", "outfitting_seconds",
-        }, {"desired_state"})
+        }, {"desired_state", "profile"})
         if value.get("desired_state", "present") not in ("present", "absent"):
             raise PlanError("Komodo desired state is unsupported")
+        profile = value.get("profile", "fixed")
+        if profile not in ("fixed", "preserve-incumbent"):
+            raise PlanError("Komodo profile is unsupported")
+        if profile == "preserve-incumbent" and value.get("desired_state", "present") != "present":
+            raise PlanError("Komodo preserving profile cannot withdraw an incumbent")
         if canonical(value) != self.encoded:
             raise PlanError("Komodo declaration must be canonical")
         for name in ("provider", "instance", "target", "configuration_ref", "revision", "server_name"):
@@ -72,8 +77,9 @@ class KomodoDeclaration:
                 raise PlanError("Komodo requires explicit supported image versions")
             versions[service] = version
         if (versions["core"] != versions["periphery"] or not versions["core"].startswith("2.")
-                or not versions["mongo"].startswith("8.0.")):
-            raise PlanError("Komodo profile requires matching version 2 and MongoDB 8.0")
+                or not versions["mongo"].startswith(
+                    ("7.0.", "8.0.") if profile == "preserve-incumbent" else "8.0.")):
+            raise PlanError("Komodo profile requires matching version 2 and a supported MongoDB series")
         resources = fields(value["resources"], set(SERVICES))
         for limits in resources.values():
             fields(limits, {"cpu_millis", "memory_bytes"})
@@ -91,6 +97,10 @@ class KomodoDeclaration:
     @property
     def deployment_digest(self) -> str:
         return hashlib.sha256(self.encoded).hexdigest()
+
+    @property
+    def preserving(self) -> bool:
+        return self.to_dict().get("profile") == "preserve-incumbent"
 
     def check_provider(self, instance: ProviderInstance) -> None:
         value = self.to_dict()

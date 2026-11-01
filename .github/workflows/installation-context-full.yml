@@ -36,6 +36,7 @@ on:
           - promotion-controls
           - pane-argv
           - manager-uninstall
+          - komodo-recovery
         default: context
 
 permissions:
@@ -153,6 +154,83 @@ jobs:
     strategy: *path-capture-strategy
     timeout-minutes: 20
     steps: *path-capture-steps
+  komodo-recovery-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'komodo-recovery'
+    name: Komodo original recovery (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify exact source through the standalone containment owner
+        run: |
+          git rev-parse HEAD
+          python - <<'PY'
+          import importlib.util
+          import os
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = Path.cwd()
+          sys.path.insert(0, str(root / "tools"))
+          spec = importlib.util.spec_from_file_location("runner", root / "tools/run-standalone-tests.py")
+          runner = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(runner)
+          python = runner.default_python("fleet-manager")
+          environment = python.parent.parent
+          environment.mkdir(parents=True, exist_ok=True)
+          lease = runner.acquire(0, environment)
+          temporary = None
+          try:
+              temporary = runner.TestSandbox(prefix="komodo-recovery-")
+              if not python.is_file():
+                  print("Selected test interpreter is missing; preparing its declared dependencies.", flush=True)
+                  runner.prepare("fleet-manager", python)
+              sandbox = Path(temporary.name)
+              report = sandbox / "results.xml"
+              tests = root / "fleet-manager/tests"
+              selection = (
+                  "failed-retained-health or lost-failure-publication or lost-terminal-receipt or adoption-incumbent or "
+                  "native-failure-to-repair or repair-failure-to-native or physical_state or "
+                  "state_retains_failed or original_pending_prefix"
+              )
+              result = runner.run_contained(
+                  [str(python), "-I", "-m", "pytest", "-q", "--tb=short",
+                   str(tests / "test_komodo_owner.py"), str(tests / "test_komodo_repair.py"),
+                   str(tests / "test_komodo_health_state.py"), "-k", selection,
+                   "--basetemp", str(sandbox / "pytest"), "--junitxml", str(report)],
+                  cwd=root / "fleet-manager",
+                  env=runner.isolated_environment(os.environ, sandbox),
+                  sandbox=sandbox, limits=runner.Limits(wall_seconds=900),
+              )
+              if result == 0:
+                  suites = ET.parse(report).getroot().iter("testsuite")
+                  counts = [(int(item.get("tests", "0")), int(item.get("skipped", "0"))) for item in suites]
+                  if not counts or sum(item[0] for item in counts) == 0 or any(item[1] for item in counts):
+                      raise RuntimeError("Native recovery requires executed tests without skipped cases")
+          except runner.UnreapedProcessError:
+              if temporary is not None:
+                  temporary.retain()
+              raise
+          finally:
+              try:
+                  if temporary is not None and not temporary.retained:
+                      runner.cleanup_sandbox(temporary)
+              finally:
+                  lease.release()
+          raise SystemExit(result)
+          PY
   bridge-commands-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
     name: Bridge commands (Ubuntu, ${{ matrix.packet.name }})
