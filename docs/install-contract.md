@@ -1785,6 +1785,14 @@ this helper does not itself enroll an old shell installer's build lifetime.
 Installation-cell provenance/receipt governance and its receipt-only
 reservation release remain independently binding.
 
+PowerShell construction-pipe failures retain the original helper diagnostic.
+Completion and final settlement close the caller-owned input on error, drain
+both output channels and wait for the same helper before disposal. The error
+includes that helper's stderr and exit code, rather than replacing a failed
+completion with a later broken-pipe exception. Existing incomplete-candidate
+cleanup and completed-slot retention still own the runtime outcome; no helper
+deadline, installer replay or admission bypass is added.
+
 The attached PowerShell completion adapter accepts `-RetainHelpers` when an
 installer needs a source-independent installed launch component. It retains the
 canonical runtime companions and `runtime_launcher.py` inside
@@ -2756,6 +2764,11 @@ and product-verified session-stamped lifecycle-gate forms at the default root.
 Source-bearing legacy commands may also match the installed deployment's
 recorded artifact path, rendered through the current trusted writer. That path
 is literal template data, never a source to execute or project-command ownership.
+Logger also admits the complete byte-exact pre-queue global PowerShell writer
+family recorded at `bea4d7bb70c2ec727b2f38caeff9ec84eaca26c2`. These are
+read-only recognition templates, not programs to execute. Default-root and
+paired-CMD checks remain mandatory, edited siblings remain foreign, and this
+does not establish project-command or installation-cell ownership.
 
 Native Linux daemon STOP uses the separate co-packaged
 `installer_engine_stop.py`; the finite-removal helper still never stops a

@@ -848,6 +848,13 @@ registration adapters remain isolated from host tasks and units. Controls cover
 durable/unknown-byte preservation, retained lock identities, idle retry,
 construction/retention/publication contention, default nested-engine removal,
 managed/foreign-root refusal and live/reconnect transport negatives.
+The command packet includes the recorded pre-queue Logger global-command
+family, with exact recognition, edited main/auxiliary programs, a foreign
+root and a missing PowerShell peer. Worktrees' existing completion-publication
+packet additionally drives a real exited construction helper on PowerShell
+5 and 7: original stderr/exit survives both completion and final cleanup,
+an unfinished candidate is reclaimed, and a completed incumbent is unchanged.
+These native controls remain in the on-demand portfolio, not required unit CI.
 The command packet derives current native writer bodies from trusted sources
 and covers exact owned forms, custom/foreign roots, comments and modified
 programs, recorded unavailable publisher paths, independently executable cmd
