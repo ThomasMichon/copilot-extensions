@@ -39,6 +39,15 @@ test_client_resource_preparation_consumes_shared_startup_deadline = (
     _diagnostics.test_client_resource_preparation_consumes_shared_startup_deadline
 )
 
+@pytest.fixture(autouse=True)
+def portable_artifact_open(monkeypatch):
+    from fleet_manager import artifacts
+
+    monkeypatch.setattr(
+        artifacts, "_open_artifact",
+        lambda path: os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0)),
+    )
+
 
 @pytest.fixture(autouse=True)
 def _portable_artifact_open(tmp_path, monkeypatch):

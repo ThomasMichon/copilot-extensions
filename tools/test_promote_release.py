@@ -152,7 +152,15 @@ def test_tree_filter_uses_candidate_index_without_changing_checkout(
         assert (repo / paths[kind]).read_text(encoding="utf-8") == '{"generation": "old"}\n'
 
 
-def test_promote_creates_wholesale_replace_commit(repo: Path):
+@pytest.mark.parametrize("long_message", [False, True])
+def test_promote_creates_wholesale_replace_commit(repo: Path, monkeypatch, long_message: bool):
+    large_message = " typed \u00e9" * 8000
+    if long_message:
+        formatter = pr.format_promotion_message
+        monkeypatch.setattr(
+            pr, "format_promotion_message",
+            lambda **kwargs: formatter(**kwargs) + "\n" + large_message,
+        )
     _git(["checkout", "-q", "dev"], repo)
     changefile_dir = repo / ".changefiles"
     changefile_dir.mkdir()
@@ -175,6 +183,8 @@ def test_promote_creates_wholesale_replace_commit(repo: Path):
     assert report["pushed"] is False
 
     commit = report["commit"]
+    if long_message:
+        assert large_message.strip() in pr._git(["show", "-s", "--format=%B", commit], cwd=repo)
     parents = _git(["log", "-1", "--format=%P", commit], repo).split()
     assert parents == [main_before]
 
@@ -190,6 +200,10 @@ def test_promote_creates_wholesale_replace_commit(repo: Path):
     # Tag was created and points at the generated commit.
     tags = _git(["tag", "--points-at", commit], repo)
     assert report["tag"] in tags.splitlines()
+    if long_message:
+        assert large_message.strip() in pr._git(
+            ["for-each-ref", "--format=%(contents)", "refs/tags/" + report["tag"]], cwd=repo,
+        )
 
     # main's real ref was NOT moved (push=False).
     assert _git(["rev-parse", "main"], repo) == main_before
@@ -1101,7 +1115,8 @@ def test_promote_syncs_instruction_projections_after_a_version_bump(tmp_path: Pa
 
     commit = report["commit"]
     rendered = _git(["show", f"{commit}:{destination}"], root)
-    assert f"[owner: {plugin}@0.1.1-dev1]" in rendered
+    marker = rendered.partition("<!-- copilot-extension-instruction-projection ")[2].partition(" -->")[0]
+    assert json.loads(marker)["pluginVersion"] == "0.1.1-dev1"
     assert f"[owner: {plugin}@0.1.0-dev1]" not in rendered
 
 

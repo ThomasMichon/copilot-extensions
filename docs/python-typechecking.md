@@ -89,8 +89,29 @@ CI checks every admitted project, not only changed Python files. Checker,
 manifest, dependency or workflow changes therefore cannot quietly skip an
 activated consumer. Local `--enforced` uses the same pinned checker and target
 policy; `--changed` is an intentionally conservative local parity command.
-Additional project dependency contexts and exact-candidate release checking
-remain subsequent slices.
+Additional project dependency contexts remain subsequent slices.
+
+## Exact-candidate release proposal
+
+The source-controller proposal prepares and checks MyPy from the imported frozen
+candidate before emitting its unit evidence. The same candidate-local front
+door, pinned lock and project policies apply; checking Dev or recomposing a
+second candidate is not a substitute. Both steps are required and bounded inside
+the existing read-only source-qualification job, which gates signing and
+promotion. Unit selection, evidence and Main's independent lifecycle stay intact.
+
+`python tools/check-release-controller-compatibility.py --main-ref origin/main`
+validates this prepared sequence and reports `candidate_types_prepared`
+separately from `candidate_types_active`. A prepared source proposal does not
+activate Main's independently owned controller. Until its reviewed adoption and
+actual provider qualification, exact-candidate release enforcement remains open
+under #9862; no source-only pass claims it is live.
+
+For local checking of an already imported, owner-validated candidate, run the
+ordinary `--prepare` and `--enforced` commands **from that candidate checkout**,
+not the source checkout. Candidate creation, import and immutable identity
+validation belong to the existing frozen-candidate tools; this checker neither
+publishes nor releases one.
 
 ## Implementation checks
 

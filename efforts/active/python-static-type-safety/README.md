@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -55,13 +55,20 @@ Confirmed operator responses:
 
 - `effort_slug=python-static-type-safety, terminal_policy=strict-with-typed-boundaries`
 - `execution_scope=plan-and-execute`
+- `authorize_main_adoption=true`: after P3's source PR merges, add only the two
+  read-only candidate MyPy steps to Main's
+  `.github/workflows/validate-and-promote.yml` through its normal reviewed
+  workflow-only bootstrap flow. No pause/resume, runtime rollout or CI bypass.
 
 ## Scope Approvals
 
 - The operator authorized planning, normal reviewed implementation PRs, phased non-strict admission, eventual strict compliance and simple local pre-validation.
 - The confirmed terminal policy is every first-party file checked strictly, with typed dynamic boundaries and narrow reviewed third-party exceptions. It is not a literal ban on all `Any` expressions.
 - No blanket ignores, unchecked first-party substitutes or permanent pending/basic cohorts count as completion.
-- Normal PR/CI/review gates remain. No ruleset bypass, release-controller activation, dependency-policy relaxation, service restart or installed rollout is authorized by this effort.
+- Normal PR/CI/review gates remain. Main-controller adoption is limited to the
+  explicitly approved two-step workflow change above; no ruleset/CI bypass,
+  pause/resume, dependency-policy relaxation, service restart or installed
+  rollout is authorized.
 
 ## Plan
 
@@ -79,7 +86,8 @@ rewrite.
 
 - [x] Deliver the typed local front door, reproducible checker preparation, project manifest and complete tracked-Python coverage ledger.
 - [x] Activate the already-clean small libraries in strict mode and the checker infrastructure's own code/tests; verify actual negative MyPy controls.
-- [ ] Add required PR and candidate-release static checks using the same front door and project policies; preserve existing unit selection and Main control.
+- [x] Add required source-PR static checks using the same front door and project policies; preserve existing unit selection.
+- [ ] Add exact-candidate release static checks through the existing controller contract; preserve Main control.
 - [x] Document and validate local `--prepare`, per-project, `--enforced`, `--changed`, `--all` and inventory commands. Default checking never implicitly installs tooling.
 
 ### Phase 2 - Source and platform qualification
@@ -123,7 +131,9 @@ rewrite.
 - [ ] Composition and generated-copy controls reject omitted/reordered/changed fragments or stale source correspondence; no empty result can certify coverage.
 - [ ] Each typing change preserves behavior through the smallest existing focused tests plus directly relevant integration/native checks. Skips are explicitly justified in that PR.
 - [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
-- [ ] Required source and release gates actually reject a type regression on activated code; final strict gate rejects a newly unclassified Python file.
+- [x] Required source gate actually rejects a type regression on activated code.
+- [ ] Required exact-candidate release gate rejects a type regression on activated code.
+- [ ] Final strict gate rejects a newly unclassified Python file.
 - [ ] Final full inventory, all strict projects/targets, documented boundary exceptions and live PR/release qualification are green together.
 
 ## Proposal
@@ -193,3 +203,68 @@ composition prerequisites, and review/validation rules.
   controls, strict admitted checks and the full 3,184-node unit packet with
   coverage. The source-CI PR still requires a clean final head, review and
   merge; candidate-release qualification and the full campaign remain open.
+
+### 2026-11-01 - Required source enforcement merged
+
+- #9854 merged into `dev` after the accepted exact-head owner review, resolved
+  feedback and fresh required CI
+  [run 41286252336](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41286252336).
+  The source worktree is pulled forward; P2's source gate and conservative
+  local parity are complete. The temporary negative probe is absent.
+- The signing-independent fixture control passes and remains strict. The final
+  PR description records documentation/CLI impact and source-versus-release
+  scope. Unit nodes, coverage targets, budgets and exact-input reuse remain
+  unchanged; no failed check was bypassed.
+- P3 is next: qualify the admitted type contracts against the immutable
+  candidate actually released, preserving source correspondence, release
+  helper admission and independently owned Main control. The combined
+  source/release Plan and Validation obligations are split above so source
+  completion cannot masquerade as release qualification.
+- Four projects are strict and 63 are pending. The effort and #9807 remain
+  active; no all-Python compliance, Main activation or installed rollout is
+  claimed.
+
+### 2026-11-01 - Exact-candidate source contract selected
+
+- #9862 owns P3. The source controller proposes candidate-local preparation and
+  enforcement immediately after importing the frozen candidate, before unit
+  evidence and signing/promotion admission. It reuses the same front door and
+  existing read-only job rather than a parallel release path.
+- Data-only controls reject omitted/reordered/skipped checks and a replaced
+  frozen importer; legacy Main compatibility stays independent. The compatibility
+  command reports prepared candidate typing separately from active Main typing.
+- Actual Main-controller adoption and live candidate type-regression refusal
+  remain open requirements. This source proposal does not activate, resume,
+  publish or install anything, and cannot complete the campaign by itself.
+- The first real Windows freeze exposed CRLF output from version/promotion
+  writers, rejected by the repository's LF policy. Existing production-writer
+  controls reproduced the JSON/Python violations. The coupled fix explicitly
+  emits LF for LF-targeted outputs without weakening Git or changing TOML
+  behavior; the real freeze must be retried before source publication.
+- The related promotion suite exposed an outdated inline-body assertion after
+  the renderer moved to selectors. Its version-drift regression now verifies
+  the actual selector version metadata. No production guidance policy changed.
+- The operator separately approved the bounded Main workflow-only adoption
+  after source review and merge. That authority does not activate it yet;
+  implementation, review and actual candidate-gate qualification remain open.
+- The retry exposed the same LF violation in materialized installer metadata.
+  Its owned writer now emits and compares canonical UTF-8 bytes rather than
+  hiding CRLF through universal-newline reads. Both canonical and already
+  materialized consumer controls verify output and matching-CRLF repair.
+- A newer promoted source required a normal rebase before candidate preparation.
+  The replay preserves upstream helper admissions and removes one duplicate
+  manifest entry. Installer reference rewriting now emits the declared shell
+  newline policy (LF for Bash, CRLF for PowerShell);
+  the real consumer test failed before the repair and passes afterwards.
+  Current inventory is 7,313 physical Python files, four strict projects and
+  64 pending projects. The campaign remains active.
+- The current packet exposed a Windows native ownership probe in a lifecycle
+  outcome unit control. That test now isolates the unrelated native probe;
+  production ownership checking and the no-native-effects unit contract are
+  unchanged.
+- The next pure-unit control required isolating native artifact opening at its
+  fixture boundary while preserving actual byte reads and production fences.
+  The real freeze then reached commit creation and exposed Windows' command-line
+  length limit. Promotion commit and tag messages now use UTF-8 stdin, verified
+  by a real oversized non-ASCII message round trip. No message truncation,
+  alternative candidate, signing change or publication occurred.
