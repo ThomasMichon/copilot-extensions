@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "libs" / "installer-engine"))
 from tools._admission_protocol import acquire as acquire_environment  # noqa: E402
 from tools.cache_directory_paths import ordinary_cache_root  # noqa: E402
-from installer_dependency_policy import run_uv_install  # noqa: E402
+from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
 
 Level = Literal["pending", "basic", "strict"]
@@ -75,8 +75,8 @@ def _strings(value: object, field: str, *, allow_empty: bool = False) -> tuple[s
 
 def _relative(value: str) -> str:
     if (
-        not value or "\\" in value or ":" in value or "\x00" in value
-        or "\n" in value or "\r" in value or value.startswith("/")
+        not value or "\\" in value or ":" in value or value.startswith("/")
+        or any(ord(char) < 32 or 127 <= ord(char) < 160 or char in "\u2028\u2029" for char in value)
         or any(part in {"", ".", ".."} for part in value.split("/"))
     ):
         raise TypecheckError(f"Not a repository-relative path: {value!r}")
@@ -365,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     except AlreadyRunningError as exc:
         print(f"typecheck: checker environment is busy: {exc}", file=sys.stderr)
         return 3
-    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, DependencyPolicyError, subprocess.SubprocessError) as exc:
         print(f"typecheck: {exc}", file=sys.stderr)
         return 2
 

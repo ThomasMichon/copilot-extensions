@@ -10,6 +10,7 @@ import sys
 import pytest
 
 from tools import typecheck
+from installer_dependency_policy import DependencyPolicyError
 
 
 def project(name: str = "sample", level: typecheck.Level = "strict") -> typecheck.Project:
@@ -39,6 +40,14 @@ def test_directory_prefixes_do_not_claim_neighboring_components() -> None:
     assert item.owns("plugins/sample/src/nested/module.py")
     assert not item.owns("plugins/sample-other/module.py")
     assert not item.owns("plugins/sample/tests/test_module.py")
+
+
+def test_paths_cannot_inject_response_file_arguments() -> None:
+    """Git filename line separators cannot become MyPy options."""
+    for separator in ("\n", "\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"):
+        path = "libs/worktree-identity/src/benign.pyi" + separator + "--ignore-errors" + separator + "cache.py"
+        with pytest.raises(typecheck.TypecheckError, match="repository-relative path"):
+            typecheck._relative(path)
 
 
 def test_checker_bootstrap_does_not_require_python311_imports() -> None:
@@ -131,6 +140,30 @@ def test_pending_probe_never_certifies_admission(
     assert typecheck.main(["--all"]) == 1
     assert "do not certify admission" in capsys.readouterr().err
     assert typecheck.main(["--inventory", "--require-complete"]) == 2
+
+
+def test_dependency_policy_refusal_has_the_setup_error_contract(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A supported policy refusal returns an actionable error, not a traceback."""
+    item = project()
+
+    def load_projects() -> tuple[typecheck.Project, ...]:
+        return (item,)
+
+    def python_paths() -> tuple[str, ...]:
+        return ("sample.py",)
+
+    def prepare(_root: Path, _project: typecheck.Project) -> None:
+        raise DependencyPolicyError("unsupported UV configuration")
+
+    monkeypatch.setattr(typecheck, "load_projects", load_projects)
+    monkeypatch.setattr(typecheck, "python_paths", python_paths)
+    monkeypatch.setattr(typecheck, "prepare", prepare)
+    assert typecheck.main(["--prepare"]) == 2
+    stderr = capsys.readouterr().err
+    assert "typecheck: unsupported UV configuration" in stderr
+    assert "Traceback" not in stderr
 
 
 class Lease:
