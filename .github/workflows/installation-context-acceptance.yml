@@ -577,6 +577,13 @@ jobs:
       - name: Prepare isolated update test tooling
         id: tooling
         run: python tools/run-plugin-tests.py agent-worktrees --prepare-only
+      - name: Qualify native PowerShell cache paths and immutable cold/warm imports
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        shell: pwsh
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation --allow-explicit-tiers
+          --test-file tests/test_generate.py
+          -k generated_shim_external_cache_cold_and_warm
       - name: Qualify progress-renewed updater inactivity and tree settlement
         if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-

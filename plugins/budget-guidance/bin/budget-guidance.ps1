@@ -7,7 +7,7 @@ $_module = 'budget_guidance'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $_runtimeRoot = Join-Path $env:USERPROFILE '.budget-guidance'
 $_pythonCache = [IO.Path]::GetFullPath((Join-Path $_runtimeRoot 'cache\python'))
-if (-not $_pythonCache.StartsWith('\\?\')) {
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not $_pythonCache.StartsWith('\\?\')) {
     $_pythonCache = if ($_pythonCache.StartsWith('\\')) { '\\?\UNC\' + $_pythonCache.Substring(2) }
     else { '\\?\' + $_pythonCache }
 }

@@ -296,7 +296,7 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
         },
         "agent-mcp": {"tests/test_source_install_transactions.py"},
         "agent-procutil": {"tests/test_retirement_custody.py"},
-        "payload-invocation": {"tests/test_command_lifecycle.py"},
+        "payload-invocation": {"tests/test_command_lifecycle.py", "tests/test_generate.py"},
     }
     selected = {target: set() for target in required}
     for step in families:
@@ -329,6 +329,8 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
             "--test-timeout", "--timeout", "--plugin-timeout", "--allow-host-state",
         ))
     assert all(paths <= selected[target] for target, paths in required.items())
+    cache = next(step for step in families if "generated_shim_external_cache_cold_and_warm" in step["run"])
+    assert cache["shell"] == "pwsh"
     assert not any(step.get("continue-on-error", False) for step in job["steps"])
 
 

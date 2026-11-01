@@ -7,7 +7,7 @@ $_module = '@@MODULE@@'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '@@PAYLOAD_UP_PS@@')).Path
 $_runtimeRoot = Join-Path $env:USERPROFILE '@@RUNTIME_ROOT@@'
 $_pythonCache = [IO.Path]::GetFullPath((Join-Path $_runtimeRoot 'cache\python'))
-if (-not $_pythonCache.StartsWith('\\?\')) {
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not $_pythonCache.StartsWith('\\?\')) {
     $_pythonCache = if ($_pythonCache.StartsWith('\\')) { '\\?\UNC\' + $_pythonCache.Substring(2) }
     else { '\\?\' + $_pythonCache }
 }

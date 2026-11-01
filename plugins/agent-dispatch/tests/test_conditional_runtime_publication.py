@@ -162,7 +162,7 @@ def test_fixture_posix_home_binding_rejects_modified_canonical_input(tmp_path: P
     assert helper.read_bytes() == foreign
 
 
-@pytest.mark.parametrize("units", (2000, 10000))
+@pytest.mark.parametrize("units", (70000, 600000))
 def test_fixture_captures_genuine_source_progress_and_still_bounds_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, units: int,
 ) -> None:
@@ -170,11 +170,11 @@ def test_fixture_captures_genuine_source_progress_and_still_bounds_output(
 
     captured = procutil.run_background_capture
     program = (
-        "import sys;sys.path.insert(0,sys.argv[1]);"
-        "import installer_source_build as builds;"
-        "progress=builds._SourceProgress('source-selection',180,0);"
-        f"[progress.renew() for _ in range({units})];"
-        "print('settled')"
+        "import sys\nsys.path.insert(0,sys.argv[1])\n"
+        "import installer_source_build as builds\n"
+        "with builds._source_phase('source-selection',180,{}) as progress:\n"
+        f"    for _ in range({units}):\n        progress.renew()\n"
+        "print('settled')\n"
     )
 
     def execute(_argv, **options):
@@ -183,14 +183,15 @@ def test_fixture_captures_genuine_source_progress_and_still_bounds_output(
         )
 
     monkeypatch.setattr(procutil, "run_background_capture", execute)
-    if units == 10000:
+    if units == 600000:
         with pytest.raises(procutil.OutputLimitExceeded):
             fixture.run("ps1", tmp_path / "controlled.ps1", [], fixture.environment(tmp_path))
     else:
         result = fixture.run("ps1", tmp_path / "controlled.ps1", [], fixture.environment(tmp_path))
         assert result.returncode == 0 and result.stdout == "settled\n"
         assert len(result.stderr) > 65536
-        assert result.stderr.count("Source wheel progress:") == units
+        assert 0 < result.stderr.count("Source wheel progress:") < units
+        assert "state=completed" in result.stderr
         assert f"completed-units={units}\n" in result.stderr
 
 

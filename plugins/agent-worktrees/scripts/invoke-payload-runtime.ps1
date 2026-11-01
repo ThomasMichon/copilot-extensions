@@ -464,7 +464,7 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
     $ErrorActionPreference = 'Continue'
     try {
         $pythonCache = [IO.Path]::GetFullPath((Join-Path $runtimeRoot 'cache\python'))
-        if (-not $pythonCache.StartsWith('\\?\')) {
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not $pythonCache.StartsWith('\\?\')) {
             $pythonCache = if ($pythonCache.StartsWith('\\')) {
                 '\\?\UNC\' + $pythonCache.Substring(2)
             } else { '\\?\' + $pythonCache }

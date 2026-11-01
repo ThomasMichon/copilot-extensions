@@ -59,6 +59,16 @@ and closed-wheel deadline controls retain their absolute bounds. These checks
 do not qualify every native self-stage watchdog or an installed whole-update
 footprint.
 
+The same lane runs the real cold/warm cache control through native PowerShell
+on both Linux and Windows, including the generated payload shim and Worktrees'
+actual forwarding function. Cache files must remain beneath the durable root
+and reuse unchanged bytes and identity, while original slot snapshots and caller
+environment stay unchanged. Windows retains its extended-path form; POSIX keeps
+an ordinary absolute cache path. The workflow uses a native `pwsh` step, so a
+missing PowerShell prerequisite cannot be silently credited as POSIX acceptance.
+These are scoped cache-entry controls, not full dispatcher/adoption or macOS
+qualification.
+
 `libs/versioned-runtime/tests/test_runtime_source_native.py` separately exercises
 stderr-only streaming through both native PowerShell hosts. Actual no-newline
 output outlives the quiet allowance while captured stdout, diagnostics, stdin

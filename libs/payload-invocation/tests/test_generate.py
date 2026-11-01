@@ -62,7 +62,8 @@ def _manifest(tmp_path: Path) -> Path:
     return path
 
 
-@pytest.mark.parametrize("kind", ["ps1", "cmd"] if os.name == "nt" else ["sh"])
+@pytest.mark.parametrize("kind", ["ps1", "cmd", "dispatcher"] if os.name == "nt"
+                         else ["sh", "ps1", "dispatcher"])
 def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
     manifest = _manifest(tmp_path)
     (manifest.parent / "plugin.json").write_text('{"name":"agent-example"}', encoding="utf-8")
@@ -76,12 +77,13 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
         "Lib/site-packages" if os.name == "nt"
         else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
     )
-    package = site / "agent_example"
+    package_name = "agent_worktrees" if kind == "dispatcher" else "agent_example"
+    package = site / package_name
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("VALUE = 42\n", encoding="utf-8")
     (package / "__main__.py").write_text(
-        "import agent_example, json, sys\n"
-        "print(json.dumps([agent_example.VALUE, agent_example.__cached__, "
+        f"import {package_name} as package, json, sys\n"
+        "print(json.dumps([package.VALUE, package.__cached__, "
         "sys.dont_write_bytecode, sys.argv[1:]]))\n",
         encoding="utf-8",
     )
@@ -96,9 +98,26 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
     shim = manifest.parent / "bin" / ("agent-example" + ("" if kind == "sh" else "." + kind))
     if kind == "cmd":
         argv = [os.environ["COMSPEC"], "/d", "/c", str(shim)]
-    elif kind == "ps1":
+    elif kind in ("ps1", "dispatcher"):
         host = shutil.which("pwsh") or shutil.which("powershell")
+        if not host and os.name != "nt":
+            pytest.skip("PowerShell unavailable on this POSIX host")
         assert host, "native PowerShell is required"
+        if kind == "dispatcher":
+            source = (REPO / "plugins" / "agent-worktrees" / "scripts"
+                      / "invoke-payload-runtime.ps1").read_text(encoding="utf-8")
+            start = source.index("function Invoke-AgentWorktreesRuntime(")
+            end = source.index("$python = Resolve-AgentWorktreesRuntime", start)
+            shim = tmp_path / "dispatcher-cache.ps1"
+            shim.write_text(
+                "$ErrorActionPreference = 'Stop'\n"
+                "$context = $null\n"
+                "$forwardArgs = @('argument with spaces')\n"
+                "$runtimeRoot = '" + str(root).replace("'", "''") + "'\n"
+                + source[start:end]
+                + "\nInvoke-AgentWorktreesRuntime '" + str(python).replace("'", "''") + "'\n",
+                encoding="utf-8",
+            )
         argv = [host, "-NoProfile", "-NonInteractive", "-File", str(shim)]
     else:
         argv = ["sh", str(shim)]
