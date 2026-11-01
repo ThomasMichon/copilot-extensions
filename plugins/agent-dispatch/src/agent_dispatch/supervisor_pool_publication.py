@@ -90,7 +90,7 @@ class SupervisorPoolPublication:
         else:
             overrides = self.overrides_source()
             ov.validate_overrides(overrides)
-        return local_input_revision(copy.deepcopy(declarations), copy.deepcopy(overrides)), complete
+        return local_input_revision(copy.deepcopy(declarations), copy.deepcopy(dict(overrides))), complete
 
     def capture_pool_publication_inputs(self) -> PoolPublicationInputs:
         """Bounded optimistic source rechecks; never send an enrollment/write.

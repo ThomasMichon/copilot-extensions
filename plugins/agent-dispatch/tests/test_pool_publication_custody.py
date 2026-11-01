@@ -7,6 +7,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from threading import Event
+from types import MappingProxyType
 from typing import Any
 
 import httpx
@@ -447,3 +448,26 @@ def test_catalog_observation_refuses_duplicate_or_invalid_scope_without_subset()
     value["scopes"][0]["generation"] = True
     with pytest.raises(PoolPublicationError):
         PoolCatalogRead.from_dict(value)
+
+
+@pytest.mark.parametrize("copyable", [False, True])
+def test_valid_mapping_overrides_keep_veto_even_when_revision_copy_is_unavailable(
+    owner: Any, copyable: bool,
+) -> None:
+    daemon, queue, _calls = owner
+
+    class Uncopyable:
+        def __deepcopy__(self, _memo: Any) -> Any:
+            raise TypeError("uncopyable-private-value")
+
+    veto = MappingProxyType({
+        "logical:repo:example:worker": {
+            "disabled": True, "reason": "operator hold" if copyable else Uncopyable(),
+        },
+    })
+    daemon.overrides_source = lambda: veto
+    assert daemon._desired() == {}
+    inputs = daemon.capture_pool_publication_inputs()
+    assert inputs.coherent == copyable
+    assert not inputs.snapshot.definitions
+    assert queue.pool_catalog_snapshot().scopes == ()

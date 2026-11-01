@@ -192,7 +192,7 @@ class SupervisorSources(SupervisorPoolPublication):
                 from .config import overrides_path
 
                 data = ov.load_overrides(overrides_path(), strict=True)
-            return copy.deepcopy(data)
+            return {key: dict(record) for key, record in data.items()}
 
         try:
             data = self._bounded_read("overrides", read)
@@ -213,8 +213,12 @@ class SupervisorSources(SupervisorPoolPublication):
             self._observe_source("overrides", "unavailable")
             log.warning("failed to read operator overrides; treating as none: error_type=%s", type(exc).__name__)
             return set()
-        self._local_source_inputs["overrides"] = copy.deepcopy(data)
         self._last_override_veto = ov.overridden_off_ids(data)
+        try:
+            self._local_source_inputs["overrides"] = copy.deepcopy(data)
+        except Exception as exc:
+            self._observe_source("overrides", "unconfirmed", "override-input-revision-unavailable")
+            log.warning("override input revision unavailable; retaining vetoes: error_type=%s", type(exc).__name__)
         return set(self._last_override_veto)
 
     def _effective_registrations(self) -> dict[str, dict]:

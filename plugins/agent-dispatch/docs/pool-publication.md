@@ -136,6 +136,9 @@ Capture owns a context-local deadline shared by its reads and declaration
 publication; concurrent tick setup/cleanup cannot overwrite that budget.
 Completed discovery results are pruned at both capture boundaries through the
 existing future owner, preserving every still-pending operation.
+Valid outer override mappings are normalized without dropping vetoes.
+If a valid record cannot be copied into revision evidence, its veto still
+applies to legacy desired state while complete publication stays unavailable.
 
 This is **optimistic observed coherence**, not an atomic filesystem transaction
 or a remote attestation. The digest includes the entire observed declaration
