@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Python Static Type Safety](active/python-static-type-safety/README.md) | Draft; reviewed staged MyPy enforcement before incremental project activation | #9807; strict all-Python completion, common local/CI commands, existing dependency/source/release owners retained; no runtime rollout |
 | [Model-Guided Skill Selection](active/model-guided-skill-selection/README.md) | Draft; reviewed native-catalog/specialist contract and context-strategy spike before implementation | #9809; existing customization, SDK and model-policy owners; no parallel catalog or shared rollout |
 | [Agent Configuration Reference](active/agent-configuration-reference/README.md) | Draft; reviewed four-tier runtime convergence and complete owner references across all agent plugins | #9776; preserves #2350/#4205 broader ownership and external contributor work, no rollout |
 | [Startup-Only Guidance](active/startup-only-guidance/README.md) | Active; declarations released, approved adoption held on installer prerequisites | Bounded #5993 follow-up; preserves periodic sync, existing delivery/native owners and separately owned #9489 repair |
