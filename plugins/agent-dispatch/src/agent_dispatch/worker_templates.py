@@ -165,15 +165,9 @@ def _json_object(path: Path) -> dict:
         raw = stream.read(_MAX_BYTES + 1)
     if len(raw) > _MAX_BYTES:
         raise ValueError("template document exceeds 1 MiB")
-    def unique(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(f"duplicate JSON field {key!r}")
-            result[key] = value
-        return result
+    from .registrar_json import unique_json_fields
 
-    value = json.loads(raw, object_pairs_hook=unique)
+    value = json.loads(raw, object_pairs_hook=unique_json_fields)
     if not isinstance(value, dict):
         raise ValueError("template document must be a JSON object")
     return value

@@ -298,6 +298,62 @@ transaction, not rely on a preceding inspection response.
 
 ## Remaining integration gates
 
+### Configured cohort source
+
+The existing registrar pointer-registry owner now has an explicit read-only
+`RegistrarSources.configured_supervisor_cohort()` observation. An optional
+version-1 configuration envelope in its existing `pointers.json` contains
+the complete intended supervisor cohort, independent of publishers that have
+already enrolled or registrations that have already been reported:
+
+```json
+{
+  "version": 1,
+  "pointers": [],
+  "configured_supervisors": {
+    "revision": 0,
+    "members": [
+      {"machine": "host", "execution_machine": "host-linux", "env": "linux"},
+      {"machine": "host", "execution_machine": "host-windows", "env": "windows"}
+    ]
+  }
+}
+```
+
+The configuration authority must declare the **whole** cohort, not the currently
+reachable hosts or a caller's preferred pools. `machine` is logical identity;
+`execution_machine` and `env` identify the intended distinct execution scope.
+None is inferred from the observer's host, a label or a published registration.
+Duplicate execution scopes, missing identities and malformed members withhold
+the entire membership tuple. A valid explicit empty list means the configuration
+declares no supervisors; a missing file, legacy pointer list or omitted cohort
+does not prove that. These remain explicitly unconfirmed. Unreadable, malformed
+or unsupported configuration is unavailable, never a retained complete result.
+Duplicate JSON keys are rejected at every object level before selecting
+pointers or membership, so a later edit cannot erase hidden configuration.
+
+The observation retains the configured revision and a separate digest of the
+whole file's exact bytes, including pointer inputs. A fresh read does not modify
+either, and an earlier immutable observation cannot change when the file is
+replaced. The digest is optimistic input correlation, not a monotonic writer
+generation, an atomic external-file fence or runtime attestation.
+Existing pointer add/ensure/remove/save operations share the existing pointer
+lock and preserve the envelope, cohort revision and other configuration fields.
+An unchanged save does not rewrite the file. Invalid cohort metadata remains
+visible rather than being erased by an unrelated pointer edit.
+
+This is a **source-only provider expansion**. Legacy list readers cannot read
+the envelope, so no existing configuration is migrated or rewritten into it
+automatically. All configuration writers and running readers must be qualified
+before an authorized adoption; provider rollback must remain fenced rather than
+silently stripping membership metadata. No CLI setter, serve/tick caller,
+coordinator membership publication, enrollment, scope withdrawal or placement
+is enabled. The health descriptor still advertises
+`configured_scope_membership: false`. Configured intent is not evidence that
+the named runtime exists, holds its singleton or supports atomic placement.
+
+### Runtime and placement qualification
+
 The daemon's actual singleton is a crash-safe **local OS lock**, not a renewable
 coordinator schedule lease. Existing schedule leases are pin-not-failover;
 their `holder_session` is not a shared publisher-incarnation fence. Do not
@@ -318,9 +374,10 @@ original acquisition at the write boundary and recovers unknown outcomes before
 changing requests. External source atomicity and installed publisher activation
 remain unqualified.
 
-The controlling registration owner must also establish the complete expected
-scope membership. These primitives retain every scope it enrolls; an empty
-store does not prove there are no configured pools. Scope withdrawal and
+The controlling registration owner must still fence and publish the configured
+cohort observation through the coordinator's admission owner. These primitives
+retain every scope it enrolls; an empty store does not prove there are no
+configured pools. Scope withdrawal and
 mixed-cohort/rollback policy remain separate reviewed integration work; there
 is no automatic unenrollment or legacy identity backfill.
 
