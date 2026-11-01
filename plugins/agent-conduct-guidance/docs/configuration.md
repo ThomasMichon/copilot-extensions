@@ -27,6 +27,17 @@ that optional projection, the existing standalone repository/operator resolver
 remains usable. Invalid explicit binding/cell/projection data is an error,
 not a missing optional knowledge layer.
 
+Report-present extra tiers require a freshly qualified, already-installed
+Worktrees configuration owner from the same source. Conduct's canonical
+installation SDK reads actual mode/deployment and activation state; computed
+`resolve_context` placement is not activation. A completion-gated read uses the
+owner's existing runtime/environment helpers, never a PATH/bootstrap fallback.
+The current owner report supplies knowledge and exact roots; the input report's
+root cannot make a machine source trusted. Namespaced reports match the active
+owner cell; legacy reports match the actual legacy registry root, not a future
+cell target. Pending activation/migration/deactivation, unready runtimes and
+ownership refusals block extra tiers. Report-absent routing never loads this SDK.
+
 `~/.copilot/config.json` (`trustedFolders`, exact resolved path strings) is
 the **trust owner**, not an ordinary routing layer. JSONC comment handling
 there retains native semantics. Repository routing cannot grant itself trust

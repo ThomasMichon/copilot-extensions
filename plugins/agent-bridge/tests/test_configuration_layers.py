@@ -186,3 +186,39 @@ def test_native_empty_yaml_source_remains_valid(tmp_path, monkeypatch, text):
     source = write(base, {})
     source.write_text(text, encoding="utf-8")
     assert _effective_spawn_defaults(TopologyProfile(), load_repo_bridge_config(base)) == ([], {})
+
+
+@pytest.mark.parametrize("implicit", [False, True])
+@pytest.mark.parametrize("matching_cell", [False, True])
+def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkeypatch, implicit, matching_cell):
+    import json
+    from agent_bridge import _peer_launch, session_lifecycle_cli as native
+
+    report, base, knowledge, local = fixture_report(tmp_path)
+    write(knowledge, {"default_copilot_args": ["knowledge"]})
+    cell = tmp_path / "marketplaces" / "current-cell"
+    own_root = cell / "plugins" / "agent-bridge"
+    own_root.mkdir(parents=True)
+    report["context"]["installation_cell"] = str(cell if matching_cell else tmp_path / "foreign-cell")
+    calls = []
+
+    def validate(owner, root, raw):
+        calls.append((owner, root, raw))
+        assert root == own_root
+        assert raw == str(own_root / "install.json")
+        return {"cellRoot": str(cell), "pluginRoot": str(own_root)}
+
+    monkeypatch.setattr(_peer_launch, "validate_owner", validate)
+    monkeypatch.setattr(native, "_agent_bridge_owner_root", lambda: own_root)
+    monkeypatch.setattr(native, "_agent_worktrees_launch_prefix", lambda **kwargs: None)
+    if implicit:
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    else:
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own_root / "install.json"))
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    if matching_cell:
+        assert load_repo_bridge_config(base).default_copilot_args == ["knowledge"]
+    else:
+        with pytest.raises(ConfigurationError, match="another installation cell"):
+            load_repo_bridge_config(base)
+    assert calls

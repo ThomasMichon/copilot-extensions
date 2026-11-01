@@ -18,6 +18,10 @@ def configuration_report(root: Path) -> dict[str, Any] | None:
 
     import os
 
+    if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT"):
+        from .hosting_policy import selected_marketplace_id
+
+        selected_marketplace_id()
     delivered = delivered_context(repository_root=root)
     if delivered is not None:
         if os.environ.get("COPILOT_EXTENSIONS_CONTEXT"):
@@ -91,7 +95,7 @@ def read_registrar_layers(report, *, owner=None):
                     if declaration.name in names:
                         raise RegistrarError(f"duplicate profile name {declaration.name!r} under {directory}")
                     names.add(declaration.name)
-                    atomic[declaration.name] = declaration
+                    atomic[declaration.name] = declaration.with_owner(owner) if owner else declaration
                     records.pop(declaration.name, None)
                 continue
             name = document.get("name")

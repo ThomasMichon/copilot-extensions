@@ -294,6 +294,41 @@ def test_native_bound_knowledge_organization_without_base_file(tmp_path, monkeyp
     assert result.configuration_provenance["/log/note_marker"]["origin"] == "knowledge"
 
 
+@pytest.mark.parametrize("matching_cell", [True, False])
+def test_native_implicit_logger_cell_checked_before_projection(tmp_path, monkeypatch, matching_cell):
+    from agent_logger import configuration_layers
+
+    base = tmp_path / "base"
+    (base / ".git").mkdir(parents=True)
+    (base / ".agent-logger.yaml").write_text("log:\n  note_marker: scoped\n", encoding="utf-8")
+    own = tmp_path / "marketplaces" / "own-cell" / "plugins" / "agent-logger"
+    own.mkdir(parents=True)
+    cell = own.parent.parent
+    calls = []
+
+    def validate(owner, root, pointer):
+        calls.append((owner, root, pointer))
+        return {"cellRoot": str(cell), "pluginRoot": str(own)}
+
+    monkeypatch.setattr(configuration_layers._peer_launch, "validate_owner", validate)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "declared-repository", "execution_machine": "declared-machine",
+            "installation_cell": str(cell if matching_cell else tmp_path / "foreign-cell"),
+            "binding": "unbound", "base_root": str(base),
+        },
+        "repository_machine_root": str(tmp_path / "local"),
+    }))
+    if matching_cell:
+        assert load_config(home=own, repo_start=base).note_marker == "scoped"
+    else:
+        with pytest.raises(ValueError, match="another installation cell"):
+            load_config(home=own, repo_start=base)
+    assert calls == [("agent-logger", own, str(own / "install.json"))]
+
+
 def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()

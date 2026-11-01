@@ -849,21 +849,9 @@ def _apply_overlay(data: dict[str, Any], path: Path) -> dict[str, Any]:
 
 def load_config(name_or_path: str) -> BridgeConfig:
     """Resolve, read, apply any machine-local overlay, parse, and validate."""
-    path = resolve_config_path(name_or_path)
-    data = _read_file(path)
-    machine = _machine_overlay(data, path)
-    from .configuration import compose_preferences
+    from .configuration import load_native_config
 
-    ordinary = compose_preferences(data, path, machine)
-    data = _deep_merge(data, machine)
-    if ordinary is not None:
-        data.update(ordinary["values"])
-    name = path.stem
-    config = parse_config(data, name=name, source_path=path)
-    if ordinary is not None:
-        config.configuration_provenance = ordinary["provenance"]
-        config.configuration_selectors = ordinary.get("native_selectors", {})
-    return config
+    return load_native_config(name_or_path)
 
 
 # ---------------------------------------------------------------------------

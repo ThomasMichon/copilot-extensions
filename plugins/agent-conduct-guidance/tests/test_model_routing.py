@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import importlib.util
+import io
 import json
 import os
+import shutil
 import subprocess
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -67,6 +72,32 @@ def _repo(tmp_path: Path, *, trusted: bool = True) -> tuple[Path, Path]:
     return repo, home
 
 
+def _model_helper():
+    spec = importlib.util.spec_from_file_location(
+        "model_configuration", PLUGIN / "scripts" / "model_configuration.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_projected(repo, home, monkeypatch, *, owner_report=None):
+    monkeypatch.syspath_prepend(str(PLUGIN / "scripts"))
+    helper = _model_helper()
+    report = owner_report or json.loads(os.environ["AGENT_CONFIGURATION_CONTEXT"])
+    monkeypatch.setattr(helper, "qualified_owner_report", lambda *args: report)
+    spec = importlib.util.spec_from_file_location("projected_model_resolver", RESOLVER)
+    resolver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(resolver)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(sys, "argv", [str(RESOLVER), "--repo", str(repo)])
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert resolver.main() == 0
+    return json.loads(output.getvalue())
+
+
 @pytest.mark.parametrize("level", range(4))
 def test_native_routing_four_tiers_replace_whole_entries(tmp_path, monkeypatch, level):
     repo, home = _repo(tmp_path)
@@ -101,7 +132,7 @@ def test_native_routing_four_tiers_replace_whole_entries(tmp_path, monkeypatch, 
         "repository_machine_root": str(local),
     }))
 
-    payload = json.loads(_run(repo, home).stdout)
+    payload = _run_projected(repo, home, monkeypatch)
 
     entry = payload["purposes"]["coding"][0]
     assert entry["state"] == states[level]
@@ -132,7 +163,173 @@ def test_native_invalid_operator_suppresses_all_lower_and_local_choices(tmp_path
         },
         "repository_machine_root": str(local),
     }))
-    assert json.loads(_run(repo, home).stdout)["purposes"] == {}
+    assert _run_projected(repo, home, monkeypatch)["purposes"] == {}
+
+
+def test_projected_routing_uses_fresh_owner_root_not_input_root(tmp_path, monkeypatch):
+    repo, home = _repo(tmp_path)
+    injected = tmp_path / "injected"
+    actual = tmp_path / "actual"
+    for root, model in ((injected, "injected-model"), (actual, "actual-model")):
+        _write(root / ".github" / "copilot" / "model-routing.json", _config({
+            "coding": [{"model": model, "state": "candidate", "surfaces": ["task"]}],
+        }))
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "owner-repository", "execution_machine": "owner-machine",
+            "installation_cell": str(tmp_path / "owner-cell"), "binding": "unbound",
+            "base_root": str(repo),
+        },
+        "repository_machine_root": str(injected),
+    }
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    fresh = {**report, "repository_machine_root": str(actual)}
+    payload = _run_projected(repo, home, monkeypatch, owner_report=fresh)
+    assert payload["purposes"]["coding"][0]["model"] == "actual-model"
+
+
+def test_matching_repo_wrong_delivered_cell_is_refused(tmp_path, monkeypatch):
+    repo, home = _repo(tmp_path)
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "owner-repository", "execution_machine": "owner-machine",
+            "installation_cell": str(tmp_path / "foreign-cell"), "binding": "unbound",
+            "base_root": str(repo),
+        },
+        "repository_machine_root": str(tmp_path / "must-not-be-read"),
+    }
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    fresh = {
+        **report, "context": {**report["context"], "installation_cell": str(tmp_path / "actual-cell")},
+    }
+    with pytest.raises(ValueError, match="another current cell"):
+        _run_projected(repo, home, monkeypatch, owner_report=fresh)
+
+
+def test_report_absent_remains_inert_without_loading_sdk(tmp_path, monkeypatch):
+    repo, home = _repo(tmp_path)
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    helper = _model_helper()
+    monkeypatch.setattr(helper, "_installation_sdk", lambda *args: pytest.fail("SDK loaded"))
+    assert helper.compose_routing(
+        repo, home, {}, {}, "missing", None, None, [], lambda a, b: {},
+    ) == ({}, {}, {})
+
+
+def test_real_sdk_first_touch_missing_peer_does_not_create_runtime(tmp_path, monkeypatch):
+    helper = _model_helper()
+    repo, home = _repo(tmp_path)
+    with pytest.raises(ValueError, match="qualified installed configuration owner"):
+        helper.qualified_owner_report(repo, PLUGIN, home, {})
+    assert not (home / ".copilot-extensions").exists()
+    assert not (home / ".agent-worktrees").exists()
+
+
+@pytest.mark.parametrize("mode,matching", [
+    ("legacy", True), ("legacy", False), ("namespaced", True), ("namespaced", False),
+    ("unready", True), ("namespaced-inactive", True),
+])
+def test_native_owner_mode_cell_and_ready_read(tmp_path, monkeypatch, mode, matching):
+    helper = _model_helper()
+    monkeypatch.syspath_prepend(str(PLUGIN / "scripts" / "configuration-layers" / "src"))
+    repo, home = _repo(tmp_path)
+    payload = home / ".copilot" / "installed-plugins" / "declared" / "agent-worktrees"
+    for sub in ("scripts", "src/agent_worktrees"):
+        (payload / sub).mkdir(parents=True)
+    worktrees = PLUGIN.parent / "agent-worktrees"
+    shutil.copyfile(worktrees / "scripts" / "registry_root.py", payload / "scripts" / "registry_root.py")
+    shutil.copyfile(
+        worktrees / "src" / "agent_worktrees" / "_peer_launch.py",
+        payload / "src" / "agent_worktrees" / "_peer_launch.py",
+    )
+    cell = tmp_path / "active-cell"
+    effective_mode = "namespaced" if mode.startswith("namespaced") else "legacy"
+    runtime = cell / "plugins" / "agent-worktrees" if effective_mode == "namespaced" else home / ".agent-worktrees"
+    expected_cell = cell if effective_mode == "namespaced" else runtime
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "owner-repository", "execution_machine": "owner-machine",
+            "installation_cell": str(expected_cell if matching else tmp_path / "foreign-cell"),
+            "binding": "unbound", "base_root": str(repo),
+        },
+        "repository_machine_root": str(tmp_path / "owner-exact"),
+    }
+    owner_script = tmp_path / "read_owner.py"
+    owner_script.write_text("import json\nprint(" + repr(json.dumps(report)) + ")\n", encoding="utf-8")
+    context = {
+        "state": "inactive" if mode == "namespaced-inactive" else "active",
+        "pluginRoot": str(runtime), "cellRoot": str(cell),
+        "namespaceReceipt": str(cell / "namespace.json"), "pluginId": "agent-worktrees",
+        "installReceipt": str(runtime / "install.json"), "payloadRoot": str(payload),
+    }
+    calls = []
+
+    def resolve_context(**kwargs):
+        calls.append("active-context")
+        return context
+
+    sdk = SimpleNamespace(
+        resolve_payload_source=lambda **kwargs: {
+            "sourceFingerprint": "qualified-source", "marketplaceId": "declared",
+            "payloadRoot": str(payload), "locator": {"kind": "installed", "marketplaceKey": "declared"},
+        },
+        resolve_runtime_deployment=lambda **kwargs: {
+            "status": "ready", "reason": "namespaced-active" if effective_mode == "namespaced" else "policy-disabled",
+            "actualMode": effective_mode, "runtimeRoot": str(runtime), "context": context["installReceipt"],
+            "deployment": {"state": "valid"},
+        },
+        resolve_context=resolve_context,
+        validate_namespace_receipt=lambda *args: {"receipt": {"state": "active"}},
+        paths_equal=lambda a, b: Path(a) == Path(b),
+    )
+    monkeypatch.setattr(helper, "_installation_sdk", lambda *args: sdk)
+    monkeypatch.setattr(
+        helper, "_ready_owner_prefix",
+        lambda *args: [] if mode == "unready" else [sys.executable, str(owner_script)],
+    )
+    if mode == "unready":
+        from configuration_layers import ConfigurationError
+
+        with pytest.raises(ConfigurationError, match="required configuration owner"):
+            helper.qualified_owner_report(repo, PLUGIN, home, {})
+    elif mode == "namespaced-inactive":
+        with pytest.raises(ValueError, match="not currently active"):
+            helper.qualified_owner_report(repo, PLUGIN, home, {})
+    elif matching:
+        assert helper.qualified_owner_report(repo, PLUGIN, home, {}) == report
+    else:
+        with pytest.raises(ValueError, match="another current cell"):
+            helper.qualified_owner_report(repo, PLUGIN, home, {})
+    assert calls == (["active-context"] if effective_mode == "namespaced" else [])
+
+
+@pytest.mark.parametrize("status,reason", [
+    ("ready", "activation-required"), ("migration-required", "migration-required"),
+    ("deactivation-required", "deactivation-required"), ("invalid", "context-invalid"),
+])
+def test_owner_mode_refusal_never_reads_configuration(tmp_path, monkeypatch, status, reason):
+    helper = _model_helper()
+    monkeypatch.syspath_prepend(str(PLUGIN / "scripts" / "configuration-layers" / "src"))
+    repo, home = _repo(tmp_path)
+    peer = tmp_path / "qualified-peer"
+    monkeypatch.setattr(helper, "_qualified_peer_payload", lambda *args: {"payloadRoot": str(peer), "marketplaceId": "declared"})
+    sdk = SimpleNamespace(
+        resolve_payload_source=lambda **kwargs: {},
+        resolve_runtime_deployment=lambda **kwargs: {
+            "status": status, "reason": reason, "actualMode": "legacy",
+            "runtimeRoot": str(home / ".agent-worktrees"), "deployment": {"state": "valid"},
+        },
+    )
+    monkeypatch.setattr(helper, "_installation_sdk", lambda *args: sdk)
+    monkeypatch.setattr(helper, "_load_owned_module", lambda path, name: SimpleNamespace(
+        _legacy_home=lambda env: home,
+    ))
+    monkeypatch.setattr(helper, "_ready_owner_prefix", lambda *args: pytest.fail("unready owner invoked"))
+    with pytest.raises(ValueError, match="mode is unavailable"):
+        helper.qualified_owner_report(repo, PLUGIN, home, {})
 
 
 def test_schema_and_example_use_portable_placeholder_models() -> None:

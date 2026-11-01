@@ -644,7 +644,7 @@ def _configuration_report() -> dict[str, Any] | None:
     from configuration_layers import ConfigurationError
 
     own = _installation_owner()
-    delivered = delivered_context()
+    delivered = delivered_context(repository_root=Path.cwd())
     if delivered is not None:
         if own is not None and context_from_owner(delivered)["installation_cell"] != str(own["cellRoot"]):
             raise ConfigurationError("container configuration belongs to another installation cell")

@@ -39,6 +39,11 @@ def _legacy_owner_prefix():
 
 def _owner_report(root: Path, home: Path):
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+    if not raw and (
+        home.name == "agent-logger" and home.parent.name == "plugins"
+        and home.parent.parent.parent.name == "marketplaces"
+    ):
+        raw = str(home / "install.json")
     own = _peer_launch.validate_owner("agent-logger", home, raw) if raw else None
     report = delivered_context(repository_root=root)
     if report is not None:
@@ -124,3 +129,34 @@ def load_organization_layers(root, base_path, base_data, machine_data, home):
         })
     result = compose(context, layers)
     return result["values"], repository_data, result["provenance"]
+
+
+def validate_organization_local_path(data, repo_data, previous_path):
+    """Retain the deferred native-path guard for the effective organization value.
+
+    Every sync_path consumer reads this value. Raise for the local target;
+    otherwise restore the prior machine-owned path, never retain a foreign one.
+    """
+    from .config import RepositoryConfigError, _validate_native_absolute_path
+
+    local_path = repo_data.get("sync", {}).get("targets", {}).get("local", {}).get("path")
+    effective = (data.get("sync", {}).get("targets", {}).get("local") or {}).get("path")
+    if local_path is not None and effective == local_path:
+        try:
+            _validate_native_absolute_path(local_path, "sync.local_path")
+        except RepositoryConfigError:
+            if data["sync"]["target"] == "local":
+                raise
+            data["sync"]["targets"]["local"]["path"] = previous_path
+
+
+def acquire_organization_preferences(data, root, path, machine_data, home, *, include_repo):
+    from .config import DEFAULTS, _deep_merge, _load_repo_config
+
+    repo_data = {}
+    if path is not None:
+        repo_data = _load_repo_config(path)
+        data = _deep_merge(_deep_merge(DEFAULTS, repo_data), machine_data)
+    if include_repo and root is not None and not os.environ.get("AGENT_LOGGER_REPO_CONFIG"):
+        return load_organization_layers(root, path, repo_data, machine_data, home)
+    return data, repo_data, {}

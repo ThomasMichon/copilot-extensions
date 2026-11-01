@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 from configuration_context import context_from_owner, delivered_context, read_owner_context
-from configuration_layers import compose, read_source
+from configuration_layers import ConfigurationError, compose, read_source
 
 FIELDS = {"default_copilot_args", "default_env"}
 PROTECTED_ENV = {
@@ -35,11 +35,22 @@ def _ordinary(values: dict, *, portable=False) -> dict:
     return projected
 
 
+def _checked_report(report, own):
+    if report is not None and own is not None and (
+        context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
+    ):
+        raise ConfigurationError("Bridge configuration belongs to another installation cell")
+    return report
+
+
 def owner_report(root: Path) -> dict | None:
     from .session_lifecycle_cli import (
+        _agent_bridge_installation_context,
+        _agent_bridge_owner_root,
         _agent_worktrees_environment,
         _agent_worktrees_launch_prefix,
     )
+    from ._peer_launch import validate_owner
 
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
     # The pre-cell reader accepts an in-memory marketplace selector, not an
@@ -56,14 +67,16 @@ def owner_report(root: Path) -> dict | None:
             and uses_legacy_install_dir(install_dir())
         ):
             return delivered_context(repository_root=root)
+    raw = _agent_bridge_installation_context()
+    own = validate_owner("agent-bridge", _agent_bridge_owner_root(), raw) if raw else None
     prefix = _agent_worktrees_launch_prefix(allow_path_fallback=False)
     report = delivered_context(repository_root=root)
     if report is not None:
-        return report
-    return read_owner_context(
-        prefix, root, required=bool(prefix and os.environ.get("COPILOT_EXTENSIONS_CONTEXT")),
+        return _checked_report(report, own)
+    return _checked_report(read_owner_context(
+        prefix, root, required=bool(prefix and own is not None),
         environment=_agent_worktrees_environment(),
-    )
+    ), own)
 
 
 def ordinary_layers(root: Path) -> tuple[dict, list[dict]] | None:

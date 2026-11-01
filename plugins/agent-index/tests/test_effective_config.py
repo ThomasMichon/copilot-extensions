@@ -197,6 +197,41 @@ def test_native_projection_never_bypasses_installation_owner(tmp_path, monkeypat
             runtime.read_indexers(root)
 
 
+@pytest.mark.parametrize("matching_cell", [True, False])
+def test_native_implicit_index_cell_checked_before_projection(tmp_path, monkeypatch, matching_cell):
+    from agent_index import config as runtime
+
+    base = _repo(tmp_path / "base")
+    _write_active(base)
+    own = tmp_path / "marketplaces" / "own-cell" / "plugins" / "agent-index"
+    own.mkdir(parents=True)
+    cell = own.parent.parent
+    calls = []
+    peer = runtime._knowledge_overlay._load_peer_launch()
+
+    def validate(owner, root, pointer):
+        calls.append((owner, root, pointer))
+        return {"cellRoot": str(cell), "pluginRoot": str(own)}
+
+    monkeypatch.setattr(peer, "validate_owner", validate)
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(own))
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "declared-repository", "execution_machine": "declared-machine",
+            "installation_cell": str(cell if matching_cell else tmp_path / "foreign-cell"),
+            "binding": "unbound", "base_root": str(base),
+        },
+        "repository_machine_root": str(tmp_path / "local"),
+    }))
+    if matching_cell:
+        assert runtime.read_indexers(base)[0]["machine"] == "primary"
+    else:
+        with pytest.raises(ValueError, match="another installation cell"):
+            runtime.read_indexers(base)
+    assert calls == [("agent-index", own, str(own / "install.json"))]
+
+
 def test_absent_config_is_inactive(tmp_path: Path) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo")

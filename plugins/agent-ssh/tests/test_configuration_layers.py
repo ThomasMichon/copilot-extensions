@@ -135,3 +135,40 @@ def test_native_unready_legacy_owner_preserves_mesh_without_process(tmp_path, mo
     assert mesh.load_mesh(path, strict=True, preferences=True).machines[0].description == "native"
     assert (scripts / "versioned_runtime.py").is_file()
     assert configuration._legacy_report(tmp_path) is None
+
+
+@pytest.mark.parametrize("implicit", [False, True])
+@pytest.mark.parametrize("matching_cell", [False, True])
+def test_real_mesh_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkeypatch, implicit, matching_cell):
+    import json
+
+    real_report = configuration.owner_report
+    path, base, knowledge, machine, local = setup(tmp_path, monkeypatch)
+    report, machine_root = configuration.owner_report(base)
+    monkeypatch.setattr(configuration, "owner_report", real_report)
+    write(knowledge, {"machines": {"logical": {"description": "knowledge"}}})
+    cell = tmp_path / "marketplaces" / "current-cell"
+    own_root = cell / "plugins" / "agent-ssh"
+    own_root.mkdir(parents=True)
+    report["context"]["installation_cell"] = str(cell if matching_cell else tmp_path / "foreign-cell")
+    calls = []
+
+    def validate(owner, root, raw):
+        calls.append((owner, root, raw))
+        assert root == own_root
+        assert raw == str(own_root / "install.json")
+        return {"cellRoot": str(cell), "pluginRoot": str(own_root)}
+
+    monkeypatch.setattr(configuration._worktrees, "validate_owner", validate)
+    monkeypatch.setenv("AGENT_RT_ROOT", str(own_root))
+    if implicit:
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    else:
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own_root / "install.json"))
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    if matching_cell:
+        assert mesh.load_mesh(path, strict=True, preferences=True).machines[0].description == "knowledge"
+    else:
+        with pytest.raises(ConfigurationError, match="another installation cell"):
+            mesh.load_mesh(path, strict=True, preferences=True)
+    assert calls

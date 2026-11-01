@@ -740,12 +740,11 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
-    if args.configuration and (args.pair or args.conduct or args.repo or not args.json):
-        print(
-            "--configuration requires --json and excludes --pair/--conduct/--repo",
-            file=sys.stderr,
-        )
-        return 2
+    if args.configuration:
+        from .config_sources import configuration_request_valid
+
+        if not configuration_request_valid(args):
+            return 2
     if args.pair:
         return _state_root_pair(args.json)
 
@@ -754,15 +753,9 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
         include_knowledge_preferences=args.conduct,
     )
     if args.configuration:
-        from .config_sources import configuration_report
+        from .config_sources import emit_configuration_report
 
-        try:
-            report = configuration_report(config, cwd=os.getcwd())
-        except ValueError as error:
-            print(f"Configuration context unavailable: {error}", file=sys.stderr)
-            return 126 if config.knowledge_repo else 3
-        print(json.dumps(report, indent=2))
-        return 0
+        return emit_configuration_report(config, cwd=os.getcwd())
     res = state_root_mod.resolve_state_root(config, repo_override=args.repo)
 
     if args.conduct:

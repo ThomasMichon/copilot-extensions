@@ -24,6 +24,15 @@ def owner_report(root):
         own = cfg._knowledge_overlay._validate_index_owner_or_refuse(
             raw, cfg._load_installation_context,
         )
+    else:
+        installation = cfg.install_dir().absolute()
+        if (
+            installation.name == "agent-index" and installation.parent.name == "plugins"
+            and installation.parent.parent.parent.name == "marketplaces"
+        ):
+            raw = str(installation / "install.json")
+            peer = cfg._knowledge_overlay._load_peer_launch()
+            own = peer.validate_owner("agent-index", installation, raw)
     report = delivered_context(repository_root=root)
     if report is not None:
         reported_cell = context_from_owner(report)["installation_cell"]
@@ -146,3 +155,62 @@ def load_repository_layers(root, *, parser=None):
         if result["values"].get(key) is None:
             result["values"].pop(key, None)
     return result
+
+
+def load_repository_candidate(root, native, *, knowledge_root=None, compose_preferences=True):
+    """Keep native script readers and validators selected in their own namespace."""
+    layers = native["_repo_config_layers"](root, knowledge_root=knowledge_root)
+    if not layers:
+        return "absent", None, None
+    merged = {}
+    for owner, layer in layers:
+        state, safe_path = native["_safe_file"](layer, owner)
+        if state != "ready" or safe_path is None:
+            return state, layer, None
+        state, data = native["_load_yaml_mapping"](safe_path)
+        if state != "ready" or data is None:
+            return state, layer, None
+        merged = native["_merge_repo_config_dicts"](merged, data)
+    try:
+        primary = native["_primary_repo_config_path"](root) or layers[0][1]
+        native["_validate_config"](merged)  # Native activation veto precedes preferences.
+        if compose_preferences:
+            layered = load_repository_layers(root, parser=native["_parse_yaml_for_layers"])
+            if layered is not None:
+                merged = layered["values"]
+        return "ready", primary.resolve(), native["_validate_config"](merged)
+    except (ValueError, RuntimeError):
+        primary = native["_primary_repo_config_path"](root) or layers[0][1]
+        return "invalid", primary, None
+
+
+def knowledge_root_from_owner(root):
+    try:
+        report = owner_report(root)
+        if report is None:
+            return "unavailable", None
+        context = context_from_owner(report)
+        if context["binding"] != "bound":
+            return "unavailable", None
+        return "ready", Path(context["knowledge_root"])
+    except (ValueError, RuntimeError):
+        return "invalid", None
+
+
+def external_configuration_result(root, external_path, native):
+    """Apply preferences only after the caller qualified the external candidate."""
+    try:
+        layered = load_repository_layers(root, parser=native["_parse_yaml_for_layers"])
+        if layered is None:
+            raise native["ConfigError"]("configuration owner became unavailable")
+        external = native["_validate_config"](layered["values"])
+    except (ValueError, RuntimeError):
+        return native["_result"](
+            opted_in=False, source="external-state-root",
+            reason="external-state-root-config-invalid", config=external_path,
+            repo_root=root, requires_external=True,
+        )
+    return native["_result"](
+        opted_in=True, source="external-state-root", reason="external-state-root-config",
+        config=external_path, repo_root=root, requires_external=True, normalized=external,
+    )

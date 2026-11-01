@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
-from configuration_layers import compose, read_source
+from configuration_layers import ConfigurationError, compose, read_source
 
 from . import _peer_launch
 
@@ -38,27 +38,41 @@ def _legacy_report(root: Path) -> dict | None:
     )
 
 
+def _checked_report(report, own):
+    if report is not None and own is not None and (
+        context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
+    ):
+        raise ConfigurationError("Vault configuration belongs to another installation cell")
+    return report
+
+
 def owner_report(root: Path) -> dict | None:
     from .config import home_dir
 
+    own_root = Path(os.environ.get("AGENT_RT_ROOT") or home_dir())
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
+    if not raw and (
+        own_root.name == "agent-vault" and own_root.parent.name == "plugins"
+        and own_root.parent.parent.parent.name == "marketplaces"
+    ):
+        raw = str(own_root / "install.json")
     own = None
     if raw:
         own = _peer_launch.validate_owner(
-            "agent-vault", Path(os.environ.get("AGENT_RT_ROOT") or home_dir()), raw,
+            "agent-vault", own_root, raw,
         )
     report = delivered_context(repository_root=root)
     if report is not None:
-        return report
+        return _checked_report(report, own)
     if own is None:
         return _legacy_report(root)
     peer = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
     if not peer.exists() and not peer.is_symlink():
         return None
-    return read_owner_context(
+    return _checked_report(read_owner_context(
         _peer_launch.launch_prefix("agent-vault", Path(own["pluginRoot"]), raw, "agent-worktrees"),
         root, required=True, environment=os.environ.copy(),
-    )
+    ), own)
 
 
 def _ordinary(raw: dict) -> dict:

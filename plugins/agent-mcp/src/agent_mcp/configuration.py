@@ -7,13 +7,31 @@ from pathlib import Path
 
 import yaml
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
-from configuration_layers import compose, read_source
+from configuration_layers import ConfigurationError, compose, read_source
 
 from . import _peer_launch
 from .home import default_home_dir
 
 FIELDS = {"timeout", "retries", "idle_timeout"}
 RELPATH = Path(".copilot-extensions") / "agent-mcp" / "bridges"
+
+
+def load_native_config(name_or_path: str):
+    """Keep public loader callbacks native and late-bound during composition."""
+    from . import config as native
+
+    path = native.resolve_config_path(name_or_path)
+    data = native._read_file(path)
+    machine = native._machine_overlay(data, path)
+    ordinary = compose_preferences(data, path, machine)
+    data = native._deep_merge(data, machine)
+    if ordinary is not None:
+        data.update(ordinary["values"])
+    config = native.parse_config(data, name=path.stem, source_path=path)
+    if ordinary is not None:
+        config.configuration_provenance = ordinary["provenance"]
+        config.configuration_selectors = ordinary.get("native_selectors", {})
+    return config
 
 
 def _legacy_report(root: Path) -> dict | None:
@@ -39,24 +57,37 @@ def _legacy_report(root: Path) -> dict | None:
     )
 
 
+def _checked_report(report, own):
+    if report is not None and own is not None and (
+        context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
+    ):
+        raise ConfigurationError("MCP configuration belongs to another installation cell")
+    return report
+
+
 def owner_report(root: Path) -> dict | None:
+    own_root = Path(os.environ.get("AGENT_RT_ROOT") or default_home_dir())
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
+    if not raw and (
+        own_root.name == "agent-mcp" and own_root.parent.name == "plugins"
+        and own_root.parent.parent.parent.name == "marketplaces"
+    ):
+        raw = str(own_root / "install.json")
     own = None
     if raw:
-        own_root = Path(os.environ.get("AGENT_RT_ROOT") or default_home_dir())
         own = _peer_launch.validate_owner("agent-mcp", own_root, raw)
     report = delivered_context(repository_root=root)
     if report is not None:
-        return report
+        return _checked_report(report, own)
     if own is None:
         return _legacy_report(root)
     peer = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
     if not peer.exists() and not peer.is_symlink():
         return None
-    return read_owner_context(
+    return _checked_report(read_owner_context(
         _peer_launch.launch_prefix("agent-mcp", Path(own["pluginRoot"]), raw, "agent-worktrees"),
         root, required=True, environment=os.environ.copy(),
-    )
+    ), own)
 
 
 def _ordinary(raw: dict) -> dict:

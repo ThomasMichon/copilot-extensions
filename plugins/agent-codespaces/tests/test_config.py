@@ -160,6 +160,28 @@ def test_layered_codespace_absent_owner_preserves_standalone_defaults(tmp_path, 
     assert list(tmp_path.iterdir()) == []
 
 
+def test_layered_codespace_implicit_namespace_refuses_delivered_report(tmp_path, monkeypatch):
+    from agent_codespaces import config, worktrees
+
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "qualified-repository", "execution_machine": "worker",
+            "installation_cell": "foreign-cell", "binding": "unbound", "base_root": str(tmp_path),
+        },
+    }
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    monkeypatch.setenv(
+        "AGENT_CODESPACES_HOME",
+        str(tmp_path / "marketplaces" / "selected-cell" / "plugins" / "agent-codespaces"),
+    )
+    monkeypatch.setattr(config, "cwd_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(config, "load_adopted_repos", lambda: [])
+    with pytest.raises(worktrees.ContextRefused, match="context is missing"):
+        load_merged_config()
+
+
 def test_layered_codespace_first_touch_isolated_import_operation(tmp_path):
     base, knowledge, machine = (tmp_path / name for name in ("base", "knowledge", "machine"))
     for root in (base, knowledge, machine):

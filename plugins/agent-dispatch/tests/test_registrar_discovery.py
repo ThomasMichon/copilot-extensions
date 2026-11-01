@@ -104,6 +104,84 @@ def test_layered_registrar_cannot_hide_native_protected_refusal(layered_dispatch
         read_repo_location_layers(base)
 
 
+@pytest.mark.parametrize("document_type", ["resource", "recipe"])
+@pytest.mark.parametrize("explicit_owner", [None, "author:owner"])
+def test_layered_atomic_declaration_preserves_discovery_custody(
+    layered_dispatch_context, document_type, explicit_owner,
+):
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+    from agent_dispatch.registrar_reconcile import declared_registration_id
+
+    base, knowledge, machine, _ = layered_dispatch_context
+    _write_dispatch_layer(base, {"description": "must not survive atomic replacement"})
+    if document_type == "resource":
+        document = {
+            "kind": "emitter",
+            "spec": {
+                "id": "worker", "command": ["python", "worker.py"], "interval_seconds": 60,
+            },
+        }
+    else:
+        recipes = knowledge / "recipes"
+        recipes.mkdir()
+        (recipes / "lane.json").write_text(
+            json.dumps({"labels": ["recipe"], "concurrency": 2}), encoding="utf-8",
+        )
+        document = {"extends": "./recipes/lane.json"}
+    if explicit_owner is not None:
+        document["owner"] = explicit_owner
+    winning_path = _write_dispatch_layer(knowledge, document)
+    declaration, = read_repo_location_layers(base, owner="repo:qualified-repository")
+    expected_owner = explicit_owner or "repo:qualified-repository"
+    assert declaration.owner == expected_owner
+    assert declared_registration_id(declaration) == f"declared:{expected_owner}:worker"
+    assert declaration.description is None
+    assert declaration.source_path == str(winning_path)
+    assert list(machine.iterdir()) == []
+
+
+def test_layered_registrar_implicit_namespace_refuses_delivered_report(tmp_path, monkeypatch):
+    from agent_dispatch.bridge import BridgeUnavailable
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "qualified-repository", "execution_machine": "worker",
+            "installation_cell": "foreign-cell", "binding": "unbound", "base_root": str(tmp_path),
+        },
+    }
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv(
+        "AGENT_DISPATCH_INSTALL_DIR",
+        str(tmp_path / "marketplaces" / "selected-cell" / "plugins" / "agent-dispatch"),
+    )
+    with pytest.raises(BridgeUnavailable, match="context is missing"):
+        read_repo_location_layers(tmp_path)
+
+
+def test_layered_registrar_delivered_foreign_cell_refuses_before_discovery(tmp_path, monkeypatch):
+    from configuration_layers import ConfigurationError
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+
+    _write_dispatch_layer(tmp_path, {"concurrency": 99})
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "qualified-repository", "execution_machine": "worker",
+            "installation_cell": "foreign-cell", "binding": "unbound", "base_root": str(tmp_path),
+        },
+    }
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "admitted-native-owner")
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    monkeypatch.setattr(
+        "agent_dispatch.peer_launch.validate_owner", lambda *args: {"cellRoot": "selected-cell"},
+    )
+    with pytest.raises(ConfigurationError, match="another installation cell"):
+        read_repo_location_layers(tmp_path)
+
+
 def test_layered_identity_real_consumer_and_introspection(layered_dispatch_context):
     from agent_dispatch.worker_identities import load_worker_identity, describe_worker_identity
 

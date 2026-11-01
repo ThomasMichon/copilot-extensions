@@ -186,6 +186,7 @@ def test_layered_container_default_read_uses_delivered_context_and_rejects_forei
     }
     monkeypatch.setattr(config, "_installation_owner", lambda: None)
     monkeypatch.setattr(config, "RUNTIME_DIR", machine)
+    monkeypatch.chdir(base)
     monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
     monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
     assert load_config(strict=True).exec_user == "knowledge"
@@ -209,6 +210,57 @@ def test_layered_container_absent_owner_is_standalone_without_bootstrap(tmp_path
     monkeypatch.setattr(subprocess, "run", refuse_spawn)
     assert load_config(strict=True).exec_user == "vscode"
     assert list(tmp_path.iterdir()) == []
+
+
+def test_layered_container_foreign_repository_projection_keeps_selected_source(tmp_path, monkeypatch):
+    import json
+
+    from agent_containers import config
+
+    selected = tmp_path / "selected" / "repo"
+    foreign = tmp_path / "foreign" / "repo"
+    machine = tmp_path / "machine"
+    for root in (selected, foreign, machine):
+        root.mkdir(parents=True)
+    _write_container_layer(selected, {"exec_user": "selected"})
+    _write_container_layer(foreign, {"exec_user": "foreign"})
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "foreign-repository", "execution_machine": "worker",
+            "installation_cell": "cell-one", "binding": "unbound", "base_root": str(foreign),
+        },
+    }
+    monkeypatch.chdir(selected)
+    monkeypatch.setattr(config, "RUNTIME_DIR", machine)
+    monkeypatch.setattr(config, "_installation_owner", lambda: None)
+    monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    assert load_config(strict=True).exec_user == "selected"
+
+
+def test_layered_container_implicit_namespace_refuses_delivered_report(tmp_path, monkeypatch):
+    import json
+
+    from agent_containers import config
+
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "qualified-repository", "execution_machine": "worker",
+            "installation_cell": "foreign-cell", "binding": "unbound", "base_root": str(tmp_path),
+        },
+    }
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        config, "RUNTIME_DIR",
+        tmp_path / "marketplaces" / "selected-cell" / "plugins" / "agent-containers",
+    )
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    with pytest.raises(config._peer_launch.ContextRefused, match="context is missing"):
+        load_config(strict=True)
 
 
 def test_layered_container_first_touch_isolated_import_operation(tmp_path):

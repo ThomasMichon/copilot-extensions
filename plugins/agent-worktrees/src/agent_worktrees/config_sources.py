@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from dropin_registry import ScanAuthority
@@ -196,6 +196,53 @@ def compose_ordinary_preferences(
             }
         layers.append(layer)
     return compose(context, layers)
+
+
+def ordinary_preference_values(*layers):
+    """Defaults < repository/knowledge < machine < exact preferences.
+
+    Profile-assignment admission remains in its existing native policy parser.
+    """
+    merged = {}
+    for layer in layers:
+        merged = cfg._deep_merge(merged, {
+            key: layer[key] for key in cfg._KNOWLEDGE_OVERLAY_TOP_KEYS if key in layer
+        })
+    return merged
+
+
+def apply_scoped_preferences(config, scoped):
+    if scoped is None:
+        return config
+    values = scoped["values"]
+    return replace(
+        config, headless=bool(values.get("headless", False)),
+        auto_fast_forward=bool(values.get("auto_fast_forward", True)),
+        ordinary_provenance=scoped["provenance"],
+    )
+
+
+def configuration_request_valid(args):
+    import sys
+
+    if args.pair or args.conduct or args.repo or not args.json:
+        print("--configuration requires --json and excludes --pair/--conduct/--repo", file=sys.stderr)
+        return False
+    return True
+
+
+def emit_configuration_report(config, *, cwd=None):
+    """Emit the versioned read-data report with the existing refusal exit codes."""
+    import json
+    import sys
+
+    try:
+        report = configuration_report(config, cwd=cwd)
+    except ValueError as error:
+        print(f"Configuration context unavailable: {error}", file=sys.stderr)
+        return 126 if config.knowledge_repo else 3
+    print(json.dumps(report, indent=2))
+    return 0
 
 
 def _config_source_anchors(

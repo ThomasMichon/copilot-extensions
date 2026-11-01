@@ -1403,7 +1403,8 @@ def _control_plane_owner(api, monkeypatch):
              config_contribution_anchor=lambda anchor, origin: f"{origin}:{anchor}", read_related_grafted=graft)
     sources_module = api.stub("state_root", config_source_anchors=sources)
     owner = _knowledge_owner(api, monkeypatch).owner
-    api.stub("config_sources", compose_ordinary_preferences=lambda *args, **kwargs: None)
+    composition = api.load("config_sources")
+    monkeypatch.setattr(composition, "compose_ordinary_preferences", lambda *args, **kwargs: None)
     monkeypatch.setattr(sys.modules[owner.__package__ + ".repos"], "list_repos", registry, raising=False)
     monkeypatch.setattr(owner, "load_project_config", load_project)
     return SimpleNamespace(owner=owner, state=state, calls=calls, pr=pr, sources=sources, module=sources_module)

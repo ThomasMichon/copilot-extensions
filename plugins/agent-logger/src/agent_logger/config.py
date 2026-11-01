@@ -976,39 +976,22 @@ def load_config(
     data = _deep_merge(DEFAULTS, machine_data)
     repo_root = _find_repo_root(repo_start) if include_repo else None
     repo_config_path = find_repo_config(repo_start) if include_repo else None
-    repo_data: dict[str, Any] = {}
     pre_repo_local_path = (data["sync"]["targets"].get("local") or {}).get("path")
-    if repo_config_path:
-        repo_data = _load_repo_config(repo_config_path)
-        data = _deep_merge(_deep_merge(DEFAULTS, repo_data), machine_data)
-    if include_repo and repo_root is not None and not os.environ.get("AGENT_LOGGER_REPO_CONFIG"):
-        from .configuration_layers import load_organization_layers
+    from .configuration_layers import acquire_organization_preferences
 
-        data, repo_data, layer_provenance = load_organization_layers(
-            repo_root, repo_config_path, repo_data, machine_data, resolved_home,
-        )
-    else:
-        layer_provenance = {}
+    data, repo_data, layer_provenance = acquire_organization_preferences(
+        data, repo_root, repo_config_path, machine_data, resolved_home, include_repo=include_repo,
+    )
     # Environment overrides (flat, opt-in).
     if os.environ.get("AGENT_LOGGER_SYNC_TARGET"):
         data["sync"]["target"] = os.environ["AGENT_LOGGER_SYNC_TARGET"]
     if os.environ.get("AGENT_LOGGER_VOICE_PACK"):
         data["log"]["voice_pack"] = os.environ["AGENT_LOGGER_VOICE_PACK"]
 
-    # Deferred host-native check (see _validate_native_absolute_path). Every
-    # consumer of Config.sync_path reads it regardless of the active sync
-    # target, so a foreign value must never stay in data. Raise only when
-    # target is "local"; else restore whatever machine-local path preceded it.
-    repo_local_path = repo_data.get("sync", {}).get("targets", {}).get("local", {}).get("path")
-    if repo_local_path is not None and (
-        (data.get("sync", {}).get("targets", {}).get("local") or {}).get("path") == repo_local_path
-    ):
-        try:
-            _validate_native_absolute_path(repo_local_path, "sync.local_path")
-        except RepositoryConfigError:
-            if data["sync"]["target"] == "local":
-                raise
-            data["sync"]["targets"]["local"]["path"] = pre_repo_local_path
+    if repo_data:
+        from .configuration_layers import validate_organization_local_path
+
+        validate_organization_local_path(data, repo_data, pre_repo_local_path)
 
     origin = machine_config_origin(data, resolved_home, include_repo=include_repo)
     result = Config(data, origin.home if origin else resolved_home,

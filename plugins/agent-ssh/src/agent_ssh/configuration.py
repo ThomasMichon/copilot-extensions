@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
-from configuration_layers import compose, read_source
+from configuration_layers import ConfigurationError, compose, read_source
 
 from . import _peer_launch, _worktrees
 
@@ -43,6 +43,8 @@ def owner_report(root: Path) -> tuple[dict, Path] | None:
     own = _worktrees.validate_context()
     report = delivered_context(repository_root=root)
     if report is not None:
+        if own is not None and context_from_owner(report)["installation_cell"] != str(own["cellRoot"]):
+            raise ConfigurationError("SSH configuration belongs to another installation cell")
         machine_root = Path(own["pluginRoot"]) if own else (
             Path.home() / ".agent-ssh"
         )
@@ -54,9 +56,12 @@ def owner_report(root: Path) -> tuple[dict, Path] | None:
         return None
     prefix = _worktrees.launch_prefix(
         "agent-ssh", Path(own["pluginRoot"]),
-        os.environ["COPILOT_EXTENSIONS_CONTEXT"], "agent-worktrees",
+        os.environ.get("COPILOT_EXTENSIONS_CONTEXT") or str(Path(own["pluginRoot"]) / "install.json"),
+        "agent-worktrees",
     )
     report = read_owner_context(prefix, root, required=True, environment=os.environ.copy())
+    if context_from_owner(report)["installation_cell"] != str(own["cellRoot"]):
+        raise ConfigurationError("SSH configuration belongs to another installation cell")
     return report, Path(own["pluginRoot"])
 
 

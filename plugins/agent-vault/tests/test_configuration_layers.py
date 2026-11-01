@@ -143,3 +143,38 @@ def test_native_unready_legacy_owner_preserves_vault_defaults(tmp_path, monkeypa
     assert config.resolve_context(str(tmp_path), strict=True).kpdb is None
     assert (scripts / "versioned_runtime.py").is_file()
     assert configuration._legacy_report(tmp_path) is None
+
+
+@pytest.mark.parametrize("implicit", [False, True])
+@pytest.mark.parametrize("matching_cell", [False, True])
+def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkeypatch, implicit, matching_cell):
+    real_report = configuration.owner_report
+    base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(configuration, "owner_report", real_report)
+    write(base, {"vault": "base"})
+    write(knowledge, {"vault": "knowledge"})
+    cell = tmp_path / "marketplaces" / "current-cell"
+    own_root = cell / "plugins" / "agent-vault"
+    own_root.mkdir(parents=True)
+    report["context"]["installation_cell"] = str(cell if matching_cell else tmp_path / "foreign-cell")
+    calls = []
+
+    def validate(owner, root, raw):
+        calls.append((owner, root, raw))
+        assert root == own_root
+        assert raw == str(own_root / "install.json")
+        return {"cellRoot": str(cell), "pluginRoot": str(own_root)}
+
+    monkeypatch.setattr(configuration._peer_launch, "validate_owner", validate)
+    monkeypatch.setenv("AGENT_RT_ROOT", str(own_root))
+    if implicit:
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    else:
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own_root / "install.json"))
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    if matching_cell:
+        assert config.resolve_context(str(base), strict=True).vault_name == "knowledge"
+    else:
+        with pytest.raises(ConfigurationError, match="another installation cell"):
+            config.resolve_context(str(base), strict=True)
+    assert calls

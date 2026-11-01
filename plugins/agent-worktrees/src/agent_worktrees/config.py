@@ -1084,17 +1084,13 @@ def _load_config_uncached(
             "  pwsh -File <repo>/plugins/agent-worktrees/scripts/install.ps1 install"
         )
 
-    # Ordinary preferences: defaults < repository (+knowledge) < machine <
-    # selected repository+machine. Profile-assignment admission remains separate.
     base_preferences = inrepo_preferences.get(repo_name, {})
-    ordinary = {}
-    for layer in (
+    from .config_sources import ordinary_preference_values
+
+    ordinary = ordinary_preference_values(
         base_preferences, knowledge_raw, global_raw, machine_raw,
         machine_repos.get(repo_name) or {},
-    ):
-        ordinary = _deep_merge(ordinary, {
-            key: layer[key] for key in _KNOWLEDGE_OVERLAY_TOP_KEYS if key in layer
-        })
+    )
 
     # Profile pools retain their native atomic-list semantics.
     profiles_raw = ordinary.get("copilot_profiles", [])
@@ -1182,22 +1178,14 @@ def _load_config_uncached(
     else:
         if machine_raw.get("machine") or global_raw.get("machine"):
             config = replace(config, machine=detect_machine(value=config.machine))
-    from .config_sources import compose_ordinary_preferences
+    from .config_sources import apply_scoped_preferences, compose_ordinary_preferences
 
     scoped = compose_ordinary_preferences(
         config, base_preferences, knowledge_raw, global_raw, machine_raw,
         machine_repos.get(repo_name) or {},
         global_path=global_config_path(), local_path=path,
     ) if include_knowledge_preferences else None
-    if scoped is not None:
-        values = scoped["values"]
-        config = replace(
-            config,
-            headless=bool(values.get("headless", False)),
-            auto_fast_forward=bool(values.get("auto_fast_forward", True)),
-            ordinary_provenance=scoped["provenance"],
-        )
-    return config
+    return apply_scoped_preferences(config, scoped)
 
 
 def load_config(
