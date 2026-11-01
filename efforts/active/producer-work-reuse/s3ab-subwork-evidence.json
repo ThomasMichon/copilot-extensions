@@ -1,0 +1,33 @@
+{
+  "schema": "producer-work-reuse.retained-subwork-observations",
+  "version": 1,
+  "classification": "subwork-only-not-production-total-work",
+  "provenance": {
+    "source": "Count lines transcribed from retained tool stdout, not recovered fixture files",
+    "baseline": "35872e7ad67e1c0ef182a1f4401a49af69c4afb6",
+    "candidate": "Uncommitted development state; no immutable execution hash was recorded for these count lines",
+    "fixture": "tests/test_owner_wave_native.py",
+    "authority": "constant injected scope; excluded from measurement",
+    "registry": "identical synthetic in-memory backing",
+    "transport": "owned local command children and fake manager; no remote venue",
+    "original_disposable_event_files": "Removed by the test runner before the later preservation request; not reconstructed",
+    "cpu": "unmeasured",
+    "production_total_work": "not qualified",
+    "latency_tails": "insufficient samples"
+  },
+  "retained_count_lines": [
+    {"baseline_sha":"35872e7ad67e1c0ef182a1f4401a49af69c4afb6","implementation":"baseline","receipt":{"closes":0,"elapsed":0.0,"list":0,"mux":0,"opens":0,"pages_per_account_listing":0,"retries":0},"venues":0},
+    {"baseline_sha":"35872e7ad67e1c0ef182a1f4401a49af69c4afb6","implementation":"baseline","receipt":{"closes":1,"elapsed":1.25,"list":3,"mux":4,"opens":1,"pages_per_account_listing":1,"retries":0},"venues":1},
+    {"baseline_sha":"35872e7ad67e1c0ef182a1f4401a49af69c4afb6","implementation":"baseline","receipt":{"closes":10,"elapsed":13.093999999924563,"list":30,"mux":40,"opens":10,"pages_per_account_listing":1,"retries":0},"venues":10},
+    {"baseline_sha":"35872e7ad67e1c0ef182a1f4401a49af69c4afb6","implementation":"candidate","receipt":{"closes":0,"elapsed":0.0,"list":0,"mux":0,"opens":0,"pages_per_account_listing":0,"retries":0},"venues":0},
+    {"baseline_sha":"35872e7ad67e1c0ef182a1f4401a49af69c4afb6","implementation":"candidate","receipt":{"closes":1,"elapsed":0.4690000000409782,"list":3,"mux":1,"opens":1,"pages_per_account_listing":1,"retries":0},"venues":1},
+    {"baseline_sha":"35872e7ad67e1c0ef182a1f4401a49af69c4afb6","implementation":"candidate","receipt":{"closes":10,"elapsed":0.9690000000409782,"list":3,"mux":10,"opens":10,"pages_per_account_listing":1,"retries":0},"venues":10}
+  ],
+  "later_regression_result": {
+    "source_correspondence": "e3dc16dd0abfbd81bbcd6da510a33eb853db2954",
+    "command": "python tools/run-plugin-tests.py agent-codespaces --test-file tests/test_owner_wave.py --test-file tests/test_owner_wave_native.py --test-file tests/test_owner_never_blocks.py --test-file tests/test_session_forwards.py --test-file tests/test_lifecycle.py --test-file tests/test_transcript_mirror.py",
+    "retained_stdout_summary": "223 passed in 36.94s",
+    "runner_elapsed_including_preparation_cleanup_seconds": 46.89,
+    "meaning": "Regression result only; does not resolve authority-process fanout"
+  }
+}

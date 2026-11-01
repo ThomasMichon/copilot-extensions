@@ -524,6 +524,19 @@ default would hide or `403`/`404` the other org's CodeSpaces entirely.
   account when a CodeSpace uses ambient ownership. Each must be logged in with
   the `codespace` scope; the remedy is the account's recorded `accounts.yaml`
   login flow.
+- **Private observation foundations:** `owner_inventory` and `owner_mux_probe`
+  expose explicit qualified inventory and versioned mux-protocol operations.
+  They are not wired into the Connection Owner's default factories or session
+  consumer. Production retains its existing listing, probing and cleanup paths.
+  A qualified listing treats errors and the 50-row limit as incomplete; it is
+  not a complete inventory or fresh selected-authority API. Repeated full scope
+  resolution remains unqualified for production cost. Consumer integration,
+  selected-effect/full-publication scheduling and provider admission remain
+  tracked separately in #7949 and #5761.
+  The optional `heartbeat(..., generation=...)` fences renewal under the existing
+  lock; omitting it preserves the existing behavior and does not activate a wave.
+  Explicit probe cleanup errors produce unknown observations and retain caller
+  cancellation; they do not establish successful channel teardown.
 - **Fully additive:** with no `account_map` configured, everything collapses to
   a single ambient `gh` call — today's behavior.
 
@@ -600,6 +613,26 @@ provider after success.
 Authentication and inventory use one shared set of mapped, bound, configured,
 provider-authorized and active account candidates. A mapped-only account
 missing scope therefore offers Authorize even when another account has rows.
+
+The internal `account_candidates.read_candidates(*, on_account=None,
+concurrent=False)` seam returns a frozen `CandidateRead` containing that
+invocation's ordered accounts, routing inventory, effective configuration,
+actual configuration-provider reports and bound/provider/active selection
+observations. `candidates()` remains the ordered accounts tuple. The result
+contains no credentials and is not a cache or a currentness authority; nested
+source-owned configuration/routing values must not be mutated. Consumers make
+their own immutable projection. The unwired inventory foundation uses the actual
+reports to withhold authority when a provider is indeterminate, including when
+retained configuration would otherwise produce the same merged value.
+
+`inventory_store` is an **unwired internal JSON/storage prototype**, not an
+enabled inventory cache. Its caller supplies an absolute existing data parent,
+source identity, explicit limits and policy. It reuses existing operation
+custody/atomic-replace primitives and compares source, creation epoch and
+revision before replacement. Read failures remain unknown; snapshots contain
+no credentials or credential digests. Pure freshness results label status only
+and cannot authorize connection or tenant mutation. No runtime path, production
+defaults, timer, provider read, push transport or consumer is activated.
 
 No private broker, persistent authentication daemon, PAT or repository opt-out
 is required. A remote terminal without an available browser can still use the
