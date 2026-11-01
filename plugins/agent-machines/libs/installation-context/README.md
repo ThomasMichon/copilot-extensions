@@ -44,8 +44,12 @@ its whole working set rolled back.
   `probe-plugin-publication` and `probe-legacy` support stock macOS Bash 3.2;
   installation-management actions still require Bash 4.4+. Native dependencies
   include `awk`, `sh` and a SHA-256 command (`sha256sum`, `shasum`, or `openssl`).
-  Physical-path resolution uses `realpath -m`, `readlink -f` or the canonical
-  shell fallback. Directory-marketplace source lookup parses each catalog once,
+  Physical-path resolution uses `realpath -m`, `readlink -fn` or the canonical
+  shell fallback. Path captures preserve every trailing linefeed through
+  comparisons, receipt roots, directory source identities and emitted JSON.
+  Basename/dirname captures remove only their printer delimiter; dangling
+  symlink targets use `readlink -n` without a delimiter.
+  Directory-marketplace source lookup parses each catalog once,
   returning only hex-encoded candidate fields to the existing shell path checks.
   It still validates the entire JSON document, all inspected name fields and
   selected source fields; duplicate/ambiguous entries and containment violations
@@ -72,6 +76,9 @@ its whole working set rolled back.
   A required missing path retains the PowerShell `Path does not exist`
   diagnostic. Ordinary Python, optional-path and permission/other resolution
   diagnostics remain unchanged.
+  Windows physical-path comparisons equate ordinary and extended DOS/UNC
+  spellings without removing extended prefixes from I/O paths. Different
+  roots remain distinct; device-prefix spellings are not rewritten.
   Receipt identity, fully-qualified path admission, locking, atomic publication
   and cleanup remain owned by the shared Python implementation.
   Only `resolve`, `validate` and the four mode actions may select an ambient

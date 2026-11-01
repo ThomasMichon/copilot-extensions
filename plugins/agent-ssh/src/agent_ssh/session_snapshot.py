@@ -27,12 +27,14 @@ def capture(
     }
     try:
         own = _worktrees.validate_context()
+        selection_start = cwd
         selected = path if path is not None else mesh.find_machines_file(cwd)
         origin = "explicit" if path is not None else "caller"
         if selected is None:
             external, result["state_root"] = _worktrees.state_root(cwd, own)
             if external is not None:
                 selected = mesh._machines_file_at(external)
+                selection_start = external
                 origin = "external-state"
             elif result["state_root"] in {"unavailable", "unbound", "error"}:
                 result["topology"]["status"] = "unavailable"
@@ -40,7 +42,9 @@ def capture(
             result["topology"] = {
                 "status": "reading", "source": str(selected), "origin": origin,
             }
-            topology = mesh.load_mesh(selected, strict=True)
+            topology = mesh.load_mesh(
+                selected, strict=True, preferences=path is None, selection_start=selection_start,
+            )
             result["topology"]["status"] = "available"
         else:
             topology = mesh.Mesh()

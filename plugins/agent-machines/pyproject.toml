@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-machines"
-version = "0.3.25-dev1"
+version = "0.3.26-dev1"
 description = "Portable machine setup and restore for Copilot CLI."
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-configuration-layers",
     "pyyaml>=6.0.3",
     "agent-dropin-registry",
     "agent-plugin-activation",
@@ -28,6 +29,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agent-configuration-layers = { path = "libs/configuration-layers" }
 agent-remote-login-shell = { path = "libs/remote-login-shell" }
 agent-installer-readiness = { path = "libs/installer-readiness" }
 # Flat-module metadata must remain retained, not an unsupported live editable.

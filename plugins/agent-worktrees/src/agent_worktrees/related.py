@@ -63,18 +63,26 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 import yaml
-from plugin_activation import ActivationReport, resolve_active_plugins as resolve_active_plugins
+from plugin_activation import ActivationReport
+from plugin_activation import resolve_active_plugins as resolve_active_plugins
 
 from . import related_acquisition
 from .related_acquisition import (
     installed_plugin_related_anchors_report as installed_plugin_related_anchors_report,
+)
+from .related_acquisition import (
     read_related_grafted_report as read_related_grafted_report,
+)
+from .related_acquisition import (
     read_related_report as read_related_report,
 )
-
 from .related_availability import (
     MachineMatch,
+)
+from .related_availability import (
     locus_here as _availability_locus_here,
+)
+from .related_availability import (
     venue_machines as _availability_venue_machines,
 )
 from .related_editing import local_edit_steps
@@ -732,19 +740,23 @@ class _ConfigContributionAnchor(str):
     source_layer: str
 
     def __new__(
-        cls, value: str, source_layer: str,
+        cls, value: str, source_layer: str, *, directory_form=False, source_tier=None,
     ) -> "_ConfigContributionAnchor":
         marker = super().__new__(cls, value)
         marker.source_layer = source_layer
+        marker.directory_form = directory_form
+        marker.source_tier = source_tier
         return marker
 
 
 def config_contribution_anchor(
-    anchor: str | Path, source_layer: str,
+    anchor: str | Path, source_layer: str, *, directory_form=False, source_tier=None,
 ) -> str:
     """Tag one repository config anchor with its stable public source layer."""
     layer = source_layer if source_layer in {"harness", "machine", "knowledge"} else "repository"
-    return _ConfigContributionAnchor(str(anchor), layer)
+    return _ConfigContributionAnchor(
+        str(anchor), layer, directory_form=directory_form, source_tier=source_tier,
+    )
 
 
 def _plugin_manifest_name(plugin_root: Path) -> str:

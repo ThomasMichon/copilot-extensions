@@ -9,11 +9,18 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from plugin_activation import ActivationReport
+
     from .related import RelatedConfig
 
 from dropin_registry import EntryStatus, ScanAuthority
 
-from .acquisition_report import AcquisitionReport, SourceObservation, failed, observe, owner_findings
+from .acquisition_report import (
+    AcquisitionReport,
+    SourceObservation,
+    failed,
+    observe,
+    owner_findings,
+)
 from .source_probes import probe_source
 
 
@@ -130,6 +137,8 @@ def read(anchor, observations: list[SourceObservation] | None = None):
     from . import related as r
 
     root = Path(anchor)
+    if isinstance(anchor, r._ConfigContributionAnchor) and anchor.directory_form:
+        return parse_file(root / r.RELATED_FILENAME, observations, selected=True)
     try:
         plugin_anchor = r._looks_like_plugin_anchor(root) if observations is None else has_plugin_manifest(root, observations)
     except OSError as exc:
@@ -256,7 +265,11 @@ def grafted(anchors, observations=None):
     merged = r.RelatedConfig()
     for anchor in anchors:
         rc = r.read_related(anchor) if observations is None else read(anchor, observations)
-        plugin_anchor = r._is_installed_plugin_anchor(anchor) if observations is None else is_installed_plugin_anchor(anchor, observations)
+        direct = isinstance(anchor, r._ConfigContributionAnchor) and anchor.directory_form
+        plugin_anchor = False if direct else (
+            r._is_installed_plugin_anchor(anchor)
+            if observations is None else is_installed_plugin_anchor(anchor, observations)
+        )
         if rc.primary and not plugin_anchor:
             merged.primary = rc.primary
         for name, entry in rc.related.items():
@@ -284,18 +297,44 @@ def read_related_grafted_report(anchors: list[str | Path]) -> AcquisitionReport[
 
 
 def source_anchors(base_anchor, *, installed_anchors=None, observations=None):
-    from . import config_sources, related as r, related_cli as cli
+    from configuration_layers import ConfigurationError
+
+    from . import config_sources
+    from . import related as r
+    from . import related_cli as cli
 
     try:
-        config = cli.cfg.load_config(include_control_plane_related_pr=False)
+        config = cli.cfg.load_config(
+            include_control_plane_related_pr=False, include_knowledge_preferences=False,
+        )
         if observations is None:
             srcs = cli.state_root_mod.config_source_anchors(config, base_anchor=base_anchor)
         else:
-            source_report = config_sources.config_source_anchors_report(config, base_anchor=base_anchor)
+            source_report = config_sources.config_source_anchors_report(
+                config, base_anchor=base_anchor,
+            )
             srcs = source_report.value
             observations.extend(source_report.observations)
-        anchors = [r.config_contribution_anchor(s.anchor, s.origin) for s in srcs if s.anchor]
+        anchors = [
+            r.config_contribution_anchor(
+                s.anchor, s.origin, directory_form=getattr(s, "directory_form", False),
+                source_tier=getattr(s, "tier", None),
+            )
+            for s in srcs if s.anchor
+        ]
+    except ConfigurationError as exc:
+        if observations is None:
+            raise
+        failed(
+            observations, base_anchor, "related-sources", "source-selection-failed",
+            type(exc).__name__,
+        )
+        anchors = []
     except Exception as exc:
+        if observations is None and os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+            raise ConfigurationError(
+                "explicit installation configuration is unavailable"
+            ) from exc
         failed(observations, base_anchor, "related-sources", "source-selection-failed", type(exc).__name__)
         anchors = []
     if not anchors:
@@ -325,6 +364,10 @@ def source_anchors(base_anchor, *, installed_anchors=None, observations=None):
         for anchor in selected:
             observe(observations, str(anchor), "related-source-order", ScanAuthority.COMPLETE,
                     owner="plugin" if isinstance(anchor, r._PluginContributionAnchor) else getattr(anchor, "source_layer", "repository"))
+            tier = getattr(anchor, "source_tier", None)
+            if tier is not None:
+                observe(observations, str(anchor), "related-source-tier", ScanAuthority.COMPLETE,
+                        owner=tier)
     return selected
 
 

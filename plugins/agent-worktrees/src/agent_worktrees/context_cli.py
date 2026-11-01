@@ -730,11 +730,21 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
         "session-conduct hook. Always exits 0 (prints an unbound notice "
         "when no state repo is bound).",
     )
+    p.add_argument(
+        "--configuration",
+        action="store_true",
+        help="Read owner-qualified configuration identity, binding and source roots.",
+    )
     try:
         args = p.parse_args(argv)
     except SystemExit as exc:
         return int(exc.code or 0)
 
+    if args.configuration:
+        from .config_sources import configuration_request_valid
+
+        if not configuration_request_valid(args):
+            return 2
     if args.pair:
         return _state_root_pair(args.json)
 
@@ -742,6 +752,10 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
         include_control_plane_related_pr=False,
         include_knowledge_preferences=args.conduct,
     )
+    if args.configuration:
+        from .config_sources import emit_configuration_report
+
+        return emit_configuration_report(config, cwd=os.getcwd())
     res = state_root_mod.resolve_state_root(config, repo_override=args.repo)
 
     if args.conduct:

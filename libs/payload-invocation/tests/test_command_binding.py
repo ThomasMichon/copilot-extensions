@@ -738,7 +738,10 @@ class _PowerShellHost:
         def read_errors() -> None:
             assert self.process.stderr
             for line in self.process.stderr:
-                self.errors.append(line)
+                prefix, separator, suffix = line.rpartition("__fixture_stderr_complete__")
+                diagnostic = prefix if separator and suffix in {"\n", "\r\n"} else line
+                if diagnostic:
+                    self.errors.append(diagnostic)
                 self.native_errors.put(line)
             self.native_errors.put(None)
 

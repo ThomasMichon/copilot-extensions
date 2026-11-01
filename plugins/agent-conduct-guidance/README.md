@@ -193,6 +193,10 @@ not successful setup. See the skill for bounded waiting, resumption and cleanup.
 
 ## Model-routing configuration (delegation module)
 
+The complete [configuration reference](docs/configuration.md) links every
+field to its schema and documents trusted knowledge grafting, operator and
+repository+machine precedence without weakening demonstrated-model eligibility.
+
 The delegation module ships the portable strategy and schema, but no real
 preferred models. A trusted repository may provide
 `.github/copilot/model-routing.json`; the operator may provide

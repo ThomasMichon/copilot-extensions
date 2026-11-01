@@ -1,5 +1,8 @@
 # agent-dispatch
 
+See the [configuration reference](docs/configuration.md) for coordinator
+environment, reusable registrar/identity fields and configuration boundaries.
+
 Native `uninstall` removes named runtime slots, snapshots, selectors, generated
 helpers and service launchers while retaining task databases, supervisor
 profiles, environment configuration, endpoint receipts, logs and unknown files.

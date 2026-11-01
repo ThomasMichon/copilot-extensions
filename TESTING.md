@@ -2854,6 +2854,10 @@ whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
 or phase rejects the result. Each admitted file is collected once; an exact
 node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
+Its actor-free PowerShell SDK controls compare Windows physical-path spellings
+through a synthetic resolver boundary, including DOS/UNC aliases and unrelated
+roots. Native path reads and concurrent first publication remain separate
+integration controls.
 `test_materialized_local_sources.py` supplies bounded synthetic closure controls
 for missing/editable/escaping local sources, literal conditional paths, standalone
 manifests, and root/nested requirement declarations. Real Git promotion and
@@ -6103,6 +6107,62 @@ for external adapter parity instead of respawning every adapter for every
 fixture. Set
 `INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1` to restore the full CLI and
 exemplar cross-products when changing an adapter implementation:
+
+`test_posix_path_capture.py` covers lossless output assignment, comparison
+failures, fast/fallback resolution and native symlink targets. Its synthetic
+provider controls run under Git Bash too; native filename cases explicitly
+require POSIX. Directory resolution, receipt-root validation and helper
+bootstrap regressions in `test_installation_context_posix.py` compare actual
+CLI results with the Python reference for one or multiple trailing linefeeds.
+Windows skips those filename cases rather than claiming native qualification;
+the on-demand `context` portfolio below supplies the native adapter lane.
+The `path-captures` portfolio supplies bounded Linux/Windows path/reference,
+bootstrap, digest and exemplar diagnostics. The unchanged selectors are
+partitioned into `paths`, `producers` and `slots` jobs per OS, each with two
+pytest workers and the same 20-minute bound; no case is omitted or duplicated
+between those three families. Its POSIX receipt-validation
+control compares the contribution base with the candidate and retains both
+timings, so worker parallelism cannot silently substitute for investigating a
+candidate-specific slowdown. It does not replace the exhaustive collection.
+The complete `context` collection and manual-only `context-windows` collection
+each use two isolated pytest workers with the same exhaustive adapter setting
+and 90-minute bound. No test selector or failure limit shrinks those collections.
+Installed exemplar fixtures use the release materializer for canonical
+dependencies; completion controls hold real construction ownership and inject
+failure only at the actual marker writer, with a positive downstream control.
+Windows long-path controls exercise the shared Python owner's stable file
+reads, exclusive directory creation and no-replacement completion publication
+through the real PowerShell adapter, rather than resurrecting retired C# types.
+They retain the 259/260/280-unit file/publication and 247/248/260/280-unit
+directory boundaries, destination identity/content checks and long snapshot
+parity.
+Windows path comparisons separately cover ordinary and extended DOS/UNC
+representations returned during concurrent directory creation. Canonical I/O
+paths retain their extended spelling, while different roots stay distinct and
+device-prefix spellings are not rewritten.
+Concurrent slot controls retain the five-second lock-admission bound: a
+confirmed busy reply is checked explicitly and retried once after the competing
+publisher finishes, rather than assuming every contender must wait indefinitely.
+CAS-negative controls prepare completed versions through the reference CLI
+and exercise both actual native cutovers; native completion/cutover sequences
+remain covered by rollback and interoperability controls. The slots diagnostic
+also exercises the actual PowerShell cell-lock watchdog on POSIX.
+That lock-wait control first inspects its prepared slot through the actual native
+entry, then invokes the unchanged installer watchdog and kernel lock loop extracted
+from that entry. This separates source/receipt setup from the four-second
+lock-wait measurement, without mocking the process owner or native lock.
+The native watchdog result, waiting/entry witnesses and outer bound remain
+unchanged; the separate cell-transaction controls still exercise the whole entry.
+Regular-file capture controls retain the two-second blocking-open watchdog,
+settle its timer on cancellation and close inherited capture channels. Repeated
+native captures preserve trailing bytes without paying every watchdog deadline;
+the separate FIFO control still requires a bounded refusal.
+Its expiry control also refuses cancellation against a timer already reaped by
+the watchdog, retaining child custody only until the original wait settles.
+Bootstrap drift fixtures explicitly model the publication decision as well as
+context selection, including a denied-publication control. No-write PowerShell
+hook checks use the bounded initialized host and retain every fixture file in
+their byte comparison; console output is captured separately from its protocol.
 
 ```bash
 INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1 \

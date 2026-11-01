@@ -1,5 +1,7 @@
 # agent-ssh
 
+[Configuration reference](docs/configuration.md)
+
 The **SSH connectivity layer** for the agent fabric. It provides a standalone
 `agent-ssh` CLI that renders machine-name SSH profiles, verifies reachability,
 and defines the transport-provider contract used by direct and tunnel

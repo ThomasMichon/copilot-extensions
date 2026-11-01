@@ -824,6 +824,18 @@ def _overlay_id(data: dict[str, Any], path: Path) -> str:
     return stem
 
 
+def _machine_overlay(data: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Select the native override independently of portable preference composition."""
+    oid = _overlay_id(data, path)
+    if not oid:
+        return {}
+    for ext in (".yaml", ".yml", ".json"):
+        opath = OVERRIDES_DIR / f"{oid}{ext}"
+        if opath.exists():
+            return _read_file(opath)
+    return {}
+
+
 def _apply_overlay(data: dict[str, Any], path: Path) -> dict[str, Any]:
     """Deep-merge a machine-local overlay onto ``data`` if one exists.
 
@@ -832,24 +844,14 @@ def _apply_overlay(data: dict[str, Any], path: Path) -> dict[str, Any]:
     config so a single host can vary any field without editing the shared file
     or exporting an environment variable. No overlay file -> ``data`` unchanged.
     """
-    oid = _overlay_id(data, path)
-    if not oid:
-        return data
-    for ext in (".yaml", ".yml", ".json"):
-        opath = OVERRIDES_DIR / f"{oid}{ext}"
-        if opath.exists():
-            overlay = _read_file(opath)
-            return _deep_merge(data, overlay)
-    return data
+    return _deep_merge(data, _machine_overlay(data, path))
 
 
 def load_config(name_or_path: str) -> BridgeConfig:
     """Resolve, read, apply any machine-local overlay, parse, and validate."""
-    path = resolve_config_path(name_or_path)
-    data = _read_file(path)
-    data = _apply_overlay(data, path)
-    name = path.stem
-    return parse_config(data, name=name, source_path=path)
+    from .configuration import load_native_config
+
+    return load_native_config(name_or_path)
 
 
 # ---------------------------------------------------------------------------

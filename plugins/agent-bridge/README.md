@@ -1,5 +1,7 @@
 # Agent Bridge
 
+[Configuration reference](docs/configuration.md)
+
 Native `uninstall` removes explicitly named runtime slots, snapshots, selectors,
 generated resolver files and deployment metadata, rather than treating the
 installation root as disposable. Configuration, databases, authentication,

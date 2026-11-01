@@ -513,6 +513,8 @@ class ContainersConfig:
     # Host-owned restricted session-evidence retention and size limits.
     rescue: RescueConfig = field(default_factory=RescueConfig)
     fleets: dict[str, FleetConfig] = field(default_factory=dict)
+    configuration_provenance: dict[str, Any] = field(default_factory=dict)
+    configuration_layers: list[str] = field(default_factory=list)
 
     def effective_acp_command(
         self, workspace_folder: str | None = None, acp_command: str | None = None
@@ -603,86 +605,13 @@ def _installation_owner() -> dict[str, Any] | None:
 
 
 def _knowledge_overlay_config() -> Path | None:
-    """Resolve the bound knowledge repo's ``containers.yaml`` (the knowledge overlay).
+    """Read the native canonical/legacy knowledge source from qualified data."""
+    from .configuration_layers_adapter import selected_document
 
-    The citadel E1e **knowledge overlay** (config-graft, #947): when this machine
-    binds a **stateless harness** to a knowledge repo, personal reference config --
-    including the container fleet's ``containers.yaml`` -- lives in the knowledge
-    repo, not the shareable harness tree. This asks ``agent-worktrees state-root``
-    (run with the process cwd) only to LOCATE the knowledge checkout -- the
-    config-READ axis, distinct from where personal state is written -- and returns
-    its ``containers.yaml`` when present.
-
-    It is consulted only as a **fallback** after the
-    explicit env / cwd / machine-local locations miss (so a deliberate machine-local
-    ``~/.agent-containers/containers.yaml`` still wins), and a missing binstub /
-    non-stateless / unbound repo / any error yields ``None`` in legacy mode.
-    Explicit context admits only the same-cell peer; failed probes raise rather
-    than silently selecting defaults. A genuinely absent optional peer is allowed.
-    """
-    import json
-    import shutil
-    import subprocess
-
-    own = _installation_owner()
-    if own is not None:
-        peer = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
-        if not peer.exists() and not peer.is_symlink():
-            return None
-        prefix = _peer_launch.launch_prefix(
-            "agent-containers", Path(own["pluginRoot"]),
-            os.environ[_peer_launch.CONTEXT_ENV], "agent-worktrees",
-        )
-    else:
-        exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
-        if not exe:
-            return None
-        prefix = [exe]
-    try:
-        proc = subprocess.run(
-            [*prefix, "state-root", "--json"],
-            capture_output=True, text=True, timeout=20,
-            **_peer_launch.no_window_kwargs(),
-            **({"encoding": "utf-8"} if own else {}),
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        if own is not None:
-            raise _peer_launch.ContextRefused(
-                f"Same-cell worktrees config lookup failed: {error}"
-            ) from error
+    report = _configuration_report()
+    if report is None or report["context"]["binding"] != "bound":
         return None
-    if proc.returncode != 0 or not (proc.stdout or "").strip():
-        if own is not None:
-            raise _peer_launch.ContextRefused(
-                proc.stderr.strip() or "Same-cell worktrees config lookup failed"
-            )
-        return None
-    try:
-        data = json.loads(proc.stdout)
-        if not isinstance(data, dict):
-            raise ValueError("state-root response must be an object")
-    except ValueError as error:
-        if own is not None:
-            raise _peer_launch.ContextRefused(
-                f"Invalid same-cell worktrees config response: {error}"
-            ) from error
-        return None
-    if own is not None and (
-        not isinstance(data.get("requires_external"), bool)
-        or not isinstance(data.get("bound"), bool)
-        or (data["requires_external"] and not data["bound"])
-        or not isinstance(data.get("state_root"), str)
-        or not Path(data["state_root"]).is_absolute()
-        or not Path(data["state_root"]).is_dir()
-    ):
-        raise _peer_launch.ContextRefused("Same-cell worktrees state root is invalid or unbound")
-    if not data.get("requires_external") or not data.get("bound"):
-        return None
-    root = data.get("state_root")
-    if not root:
-        return None
-    candidate = Path(root) / CONFIG_FILENAME
-    return candidate if candidate.exists() else None
+    return selected_document(Path(report["context"]["knowledge_root"]))
 
 
 def _config_path() -> Path | None:
@@ -701,26 +630,72 @@ def _config_path() -> Path | None:
     runtime = RUNTIME_DIR / CONFIG_FILENAME
     if runtime.exists():
         return runtime
-    # E1e knowledge overlay: a stateless harness keeps its containers.yaml in the
-    # bound knowledge repo. Additive fallback only -- after the explicit locations
-    # above miss, before built-in defaults.
+    # Compatibility path callers use only a qualified optional projection;
+    # load_config's selected-context path composes the knowledge graft.
     overlay = _knowledge_overlay_config()
     if overlay is not None:
         return overlay
     return None
 
 
+def _configuration_report() -> dict[str, Any] | None:
+    """Read canonical identity/binding through the admitted same-cell owner."""
+    from configuration_context import context_from_owner, delivered_context, read_owner_context
+    from configuration_layers import ConfigurationError
+
+    own = _installation_owner()
+    delivered = delivered_context()
+    if delivered is not None:
+        if own is not None and context_from_owner(delivered)["installation_cell"] != str(own["cellRoot"]):
+            raise ConfigurationError("container configuration belongs to another installation cell")
+        if delivered_context(repository_root=Path.cwd()) is not None:
+            return delivered
+    if own is None:
+        return None
+    peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+    try:
+        peer_root.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise ConfigurationError("optional Worktrees installation could not be inspected") from error
+    prefix = _peer_launch.launch_prefix(
+        "agent-containers", Path(own["pluginRoot"]),
+        os.environ[_peer_launch.CONTEXT_ENV], "agent-worktrees",
+    )
+    report = read_owner_context(prefix, str(Path.cwd()))
+    if (
+        report is not None
+        and context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
+    ):
+        raise ConfigurationError("container configuration belongs to another installation cell")
+    return report
+
+
 def load_config(*, strict: bool = False) -> ContainersConfig:
     """Load configuration from containers.yaml, merged over defaults."""
     config = ContainersConfig()
-    path = _config_path()
+    report = None if os.environ.get("AGENT_CONTAINERS_CONFIG") else _configuration_report()
+    if report is not None:
+        from configuration_context import context_from_owner
+
+        context_from_owner(report)
+    path = _config_path() if report is None else Path(report["context"]["base_root"])
     if not path:
         log.debug("No containers.yaml found; using built-in defaults")
         return config
 
     try:
-        parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
+        if report is not None:
+            from .configuration_layers_adapter import compose_documents
+
+            result = compose_documents(report, RUNTIME_DIR)
+            parsed = result["values"]
+            config.configuration_provenance = result["provenance"]
+            config.configuration_layers = result["layers"]
+        else:
+            parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, yaml.YAMLError) as exc:
         if strict:
             raise RuntimeError(f"Failed to read {path}: {exc}") from exc
         log.warning("Failed to read %s: %s", path, exc)

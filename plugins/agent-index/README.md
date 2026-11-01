@@ -287,6 +287,10 @@ reindexing is an operator/runtime action, not something agents trigger.
 
 ## Corpus configuration
 
+See the complete [configuration reference](docs/configuration.md) for every
+file/field family, four-tier ordinary composition, native source-list merging,
+explicit selectors, activation boundaries and reload behavior.
+
 The runtime belongs to this plugin; scope is data/config:
 
 - With no corpus config, `agent-index index` indexes the current git checkout

@@ -3,11 +3,12 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
-
 
 PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPT = PLUGIN / "scripts" / "resolve_effective_config.py"
@@ -54,12 +55,244 @@ def _write_active(path: Path) -> Path:
     return config
 
 
+def _deliver_configuration(monkeypatch, repo: Path, knowledge: Path):
+    local = repo.parent / "configuration-local"
+    local.mkdir(exist_ok=True)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "declared-test-repository", "execution_machine": "declared-machine",
+            "installation_cell": "declared-cell", "binding": "bound",
+            "base_root": str(repo), "knowledge_root": str(knowledge),
+        },
+        "repository_machine_root": str(local),
+    }))
+
+
 @pytest.fixture(autouse=True)
 def _clean_activation_env(monkeypatch):
     monkeypatch.delenv("AGENT_INDEX_CONFIG_DATA_B64", raising=False)
     monkeypatch.delenv("AGENT_INDEX_REPO", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_COMMAND", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+
+
+@pytest.mark.parametrize("level", range(4))
+def test_native_runtime_consumer_four_tiers_and_source_identity(
+    tmp_path, monkeypatch, level, qualified_owner_reply,
+):
+    from agent_index import config as runtime
+
+    repo = _repo(tmp_path / "repo")
+    knowledge, home, local = (tmp_path / name for name in ("knowledge", "home", "local"))
+    for root in (knowledge, home, local):
+        root.mkdir()
+    base = repo / runtime.REPO_CONFIG_RELPATH
+    base.parent.mkdir(parents=True)
+    base.write_text(
+        "indexer: {machine: base}\ncorpus:\n  sources:\n"
+        "    - {name: 'git:shared', repo: base}\n"
+        "    - {name: 'git:base-only', repo: base-only}\n", encoding="utf-8",
+    )
+    canonical = repo / runtime.LEGACY_REPO_CONFIG_RELPATH
+    canonical.parent.mkdir(parents=True)
+    canonical.write_text("indexer: {machine: canonical}\n", encoding="utf-8")
+    if level >= 1:
+        path = knowledge / runtime.REPO_CONFIG_RELPATH
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            "indexer: {machine: knowledge}\ncorpus:\n  sources:\n"
+            "    - {name: 'git:shared', repo: knowledge}\n", encoding="utf-8",
+        )
+    if level >= 2:
+        (home / "config.yaml").write_text("indexer: {machine: machine}\n", encoding="utf-8")
+    if level >= 3:
+        path = local / runtime.REPO_CONFIG_RELPATH
+        path.parent.mkdir(parents=True)
+        path.write_text("indexers: [{machine: repository-machine}]\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(home))
+    monkeypatch.setenv("AGENT_INDEX_REPO", str(repo))
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "repo-registered", "execution_machine": "machine-a",
+            "installation_cell": "cell-a", "binding": "bound",
+            "base_root": str(repo), "knowledge_root": str(knowledge),
+        },
+        "repository_machine_root": str(local),
+    }))
+
+    selected = runtime.read_indexers(repo)
+    sources = runtime.read_corpus_sources()
+
+    expected = ("canonical", "knowledge", "machine", "repository-machine")[level]
+    assert selected[0]["machine"] == expected
+    shared = next(source for source in sources if source["name"] == "git:shared")
+    assert shared["repo"] == ("base" if level == 0 else "knowledge")
+    assert shared["_repo_path"] == str(repo if level == 0 else knowledge)
+    assert any(source["name"] == "git:base-only" for source in sources)
+
+
+def test_native_runtime_consumer_invalid_projection_is_not_absence(tmp_path, monkeypatch):
+    from configuration_layers import ConfigurationError
+
+    from agent_index import config as runtime
+
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 99, "context": {},
+    }))
+    with pytest.raises(ConfigurationError, match="invalid report"):
+        runtime.read_indexers(tmp_path)
+
+
+def test_native_standalone_unbound_index_never_bootstraps_owner(tmp_path, monkeypatch):
+    from agent_index import config as runtime
+
+    root = _repo(tmp_path / "repo")
+    path = root / runtime.REPO_CONFIG_RELPATH
+    path.parent.mkdir(parents=True)
+    path.write_text("indexer: {machine: standalone}\n", encoding="utf-8")
+    owner_root = tmp_path / "unprovisioned-owner"
+    monkeypatch.setenv("AGENT_WORKTREES_HOME", str(owner_root))
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail(
+        "an unready optional owner must not launch a bootstrap or command",
+    ))
+
+    assert runtime.read_indexers(root) == [{"machine": "standalone"}]
+    assert not owner_root.exists()
+
+
+@pytest.mark.parametrize(
+    "value, expected", [("true", ("ready", True)), ("nope", ("invalid", False))],
+)
+def test_native_canonical_state_policy_is_not_hidden_by_legacy_alias(
+    tmp_path, monkeypatch, value, expected,
+):
+    from agent_index import config as runtime
+
+    root = _repo(tmp_path / "repo")
+    path = root / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text(f"requires_external_state_root: {value}\n", encoding="utf-8")
+    assert runtime._requires_external(root) == expected
+    assert _module()._requires_external(root) == expected
+
+
+@pytest.mark.parametrize("foreign_cell", [False, True])
+def test_native_projection_never_bypasses_installation_owner(tmp_path, monkeypatch, foreign_cell):
+    from agent_index import config as runtime
+
+    root = _repo(tmp_path / "repo")
+    _write_active(root)
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    _deliver_configuration(monkeypatch, root, knowledge)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", '{"marketplaceId": "unqualified"}')
+    if foreign_cell:
+        monkeypatch.setattr(
+            runtime._knowledge_overlay, "_validate_index_owner_or_refuse",
+            lambda *args: {"cellRoot": str(tmp_path / "other-cell"), "pluginRoot": str(tmp_path)},
+        )
+        with pytest.raises(ValueError, match="another installation cell"):
+            runtime.read_indexers(root)
+    else:
+        with pytest.raises(RuntimeError, match="missing pluginRoot"):
+            runtime.read_indexers(root)
+
+
+@pytest.mark.parametrize("matching_cell", [True, False])
+def test_native_implicit_index_cell_checked_before_projection(
+    tmp_path, monkeypatch, matching_cell, qualified_owner_reply,
+):
+    from agent_index import config as runtime
+
+    base = _repo(tmp_path / "base")
+    _write_active(base)
+    own = tmp_path / "marketplaces" / "own-cell" / "plugins" / "agent-index"
+    own.mkdir(parents=True)
+    cell = own.parent.parent
+    calls = []
+    peer = runtime._knowledge_overlay._load_peer_launch()
+
+    def validate(owner, root, pointer):
+        calls.append((owner, root, pointer))
+        return {"cellRoot": str(cell), "pluginRoot": str(own)}
+
+    monkeypatch.setattr(peer, "validate_owner", validate)
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(own))
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "declared-repository", "execution_machine": "declared-machine",
+            "installation_cell": str(cell if matching_cell else tmp_path / "foreign-cell"),
+            "binding": "unbound", "base_root": str(base),
+        },
+        "repository_machine_root": str(tmp_path / "local"),
+    }))
+    if matching_cell:
+        assert runtime.read_indexers(base)[0]["machine"] == "primary"
+    else:
+        with pytest.raises(ValueError, match="another installation cell"):
+            runtime.read_indexers(base)
+    assert calls == [("agent-index", own, str(own / "install.json"))]
+
+
+@pytest.fixture
+def qualified_owner_reply(monkeypatch):
+    from agent_index import configuration_layers
+
+    monkeypatch.setattr(
+        configuration_layers, "read_owner_context",
+        lambda *args, **kwargs: json.loads(os.environ["AGENT_CONFIGURATION_CONTEXT"]),
+    )
+
+
+@pytest.mark.parametrize("peer", ["absent", "old", "refused"])
+@pytest.mark.parametrize("delivered", [False, True])
+def test_native_optional_namespaced_index_owner_compatibility(
+    tmp_path, monkeypatch, peer, delivered,
+):
+    from configuration_layers import ConfigurationError
+
+    from agent_index import config as runtime
+
+    base = _repo(tmp_path / "base")
+    _write_active(base)
+    own = tmp_path / "marketplaces" / "cell" / "plugins" / "agent-index"
+    own.mkdir(parents=True)
+    cell = own.parent.parent
+    boundary = runtime._knowledge_overlay._load_peer_launch()
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(own))
+    monkeypatch.setattr(boundary, "validate_owner", lambda *args: {
+        "cellRoot": str(cell), "pluginRoot": str(own),
+    })
+    if peer != "absent":
+        receipt = cell / "plugins" / "agent-worktrees" / "install.json"
+        receipt.parent.mkdir()
+        receipt.write_text("{}\n", encoding="utf-8")
+    code = (
+        "import sys; print('unrecognized arguments: --configuration', file=sys.stderr); sys.exit(2)"
+        if peer == "old" else "import sys; sys.exit(1)"
+    )
+    monkeypatch.setattr(boundary, "launch_prefix", lambda *args: [sys.executable, "-c", code])
+    monkeypatch.setattr(
+        runtime, "_knowledge_root_for_repo", lambda *args: pytest.fail("second owner lookup"),
+    )
+    if delivered:
+        monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+            "schema": "agent-worktrees.configuration", "version": 1,
+            "context": {
+                "repository_id": "declared-repository", "execution_machine": "declared-machine",
+                "installation_cell": str(cell), "binding": "unbound", "base_root": str(base),
+            },
+            "repository_machine_root": str(tmp_path / "untrusted-exact"),
+        }))
+    if delivered or peer == "refused":
+        with pytest.raises(ConfigurationError):
+            runtime.read_indexers(base)
+    else:
+        assert runtime.read_indexers(base)[0]["machine"] == "primary"
 
 
 def test_absent_config_is_inactive(tmp_path: Path) -> None:
@@ -139,7 +372,7 @@ def test_corpus_only_config_is_an_explicit_opt_in(tmp_path: Path) -> None:
     assert result["indexers"] == []
 
 
-def test_valid_local_config_wins_before_external_state_policy(
+def test_invalid_state_policy_is_not_bypassed_by_valid_local_preferences(
     tmp_path: Path,
 ) -> None:
     module = _module()
@@ -152,8 +385,8 @@ def test_valid_local_config_wins_before_external_state_policy(
 
     result = module.resolve(repo)
 
-    assert result["opted_in"] is True
-    assert result["source"] == "repository"
+    assert result["opted_in"] is False
+    assert result["reason"] == "repository-config-invalid"
 
 
 @pytest.mark.parametrize(
@@ -218,7 +451,7 @@ def test_present_unsafe_local_config_blocks_external_fallback(
     knowledge.mkdir()
     _write_active(knowledge)
     monkeypatch.setattr(
-        module, "_external_state_root", lambda _root: ("ready", knowledge)
+        module, "_configuration_knowledge_root", lambda _root: ("ready", knowledge)
     )
 
     result = module.resolve(repo)
@@ -228,7 +461,7 @@ def test_present_unsafe_local_config_blocks_external_fallback(
 
 
 def test_bound_external_state_config_is_effective(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, qualified_owner_reply,
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -236,8 +469,9 @@ def test_bound_external_state_config_is_effective(
     knowledge.mkdir()
     config = _write_active(knowledge)
     monkeypatch.setattr(
-        module, "_external_state_root", lambda _root: ("ready", knowledge)
+        module, "_configuration_knowledge_root", lambda _root: ("ready", knowledge)
     )
+    _deliver_configuration(monkeypatch, repo, knowledge)
 
     result = module.resolve(repo)
 
@@ -254,7 +488,7 @@ def test_required_external_state_resolution_fails_closed(
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
     monkeypatch.setattr(
-        module, "_external_state_root", lambda _root: (state, None)
+        module, "_configuration_knowledge_root", lambda _root: (state, None)
     )
 
     result = module.resolve(repo)
@@ -271,7 +505,7 @@ def test_required_external_state_without_config_is_inactive(
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
     monkeypatch.setattr(
-        module, "_external_state_root", lambda _root: ("ready", knowledge)
+        module, "_configuration_knowledge_root", lambda _root: ("ready", knowledge)
     )
 
     result = module.resolve(repo)
@@ -509,7 +743,7 @@ def test_invalid_local_config_never_falls_through(
         called = True
         return "ready", knowledge
 
-    monkeypatch.setattr(module, "_external_state_root", external)
+    monkeypatch.setattr(module, "_configuration_knowledge_root", external)
 
     result = module.resolve(repo)
 
@@ -678,7 +912,7 @@ def test_duplicate_source_name_uses_higher_precedence_machine_local_layer(
 
 
 def test_knowledge_overlay_beats_in_repo_base_for_duplicate_names(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, qualified_owner_reply,
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -704,8 +938,9 @@ def test_knowledge_overlay_beats_in_repo_base_for_duplicate_names(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        module, "_external_state_root", lambda _root: ("ready", knowledge)
+        module, "_configuration_knowledge_root", lambda _root: ("ready", knowledge)
     )
+    _deliver_configuration(monkeypatch, repo, knowledge)
 
     result = module.resolve(repo)
 
@@ -717,8 +952,8 @@ def test_knowledge_overlay_beats_in_repo_base_for_duplicate_names(
     ]
 
 
-def test_machine_local_overlay_beats_knowledge_overlay_for_duplicate_names(
-    tmp_path: Path, monkeypatch
+def test_knowledge_grafts_over_canonical_repository_namespace_for_duplicate_names(
+    tmp_path: Path, monkeypatch, qualified_owner_reply,
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -752,19 +987,21 @@ def test_machine_local_overlay_beats_knowledge_overlay_for_duplicate_names(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        module, "_external_state_root", lambda _root: ("ready", knowledge)
+        module, "_configuration_knowledge_root", lambda _root: ("ready", knowledge)
     )
+    _deliver_configuration(monkeypatch, repo, knowledge)
 
     result = module.resolve(repo)
 
     assert result["opted_in"] is True
-    assert result["sources"] == [{"name": "git:dotfiles", "repo": "machine-local"}]
+    assert result["sources"] == [{"name": "git:dotfiles", "repo": "knowledge"}]
 
 
 def test_marketplace_overlay_merges_on_top_of_base(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, qualified_owner_reply,
 ) -> None:
     module = _module()
+    from agent_index import config as runtime
     repo = _repo(tmp_path / "repo")
     config = _write_active(repo)
     overlay = (
@@ -789,6 +1026,19 @@ def test_marketplace_overlay_merges_on_top_of_base(
         "COPILOT_EXTENSIONS_CONTEXT",
         json.dumps({"marketplaceId": "example-marketplace"}),
     )
+    cell = tmp_path / "cell"
+    monkeypatch.setattr(
+        runtime._knowledge_overlay, "_validate_index_owner_or_refuse",
+        lambda *args: {"cellRoot": str(cell), "pluginRoot": str(cell / "plugins" / "agent-index")},
+    )
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "declared-repository", "execution_machine": "declared-machine",
+            "installation_cell": str(cell), "binding": "unbound", "base_root": str(repo),
+        },
+        "repository_machine_root": str(tmp_path / "unconfigured-project"),
+    }))
 
     result = module.resolve(repo)
 

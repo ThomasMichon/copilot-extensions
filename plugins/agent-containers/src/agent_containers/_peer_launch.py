@@ -30,7 +30,7 @@ PEERS = {
 OWNERS = {
     "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
     "agent-logger", "agent-index", "agent-machines", "agent-worktrees", "agent-pull-requests",
-    "agent-ssh",
+    "agent-ssh", "agent-mcp", "agent-vault",
 }
 
 
@@ -97,6 +97,7 @@ def legacy_peer_environment(inherited: dict[str, str]) -> dict[str, str]:
             "AGENT_RT_", "AGENT_DISPATCH_", "AGENT_CODESPACES_", "AGENT_CONTAINERS_",
             "AGENT_LOGGER_", "AGENT_WORKTREES_", "AGENT_BRIDGE_", "AGENT_INDEX_",
             "AGENT_MACHINES_", "AGENT_SSH_", "AGENT_PULL_REQUESTS_",
+            "AGENT_MCP_", "AGENT_VAULT_",
         )) or (
             upper.startswith("AGENT_")
             and upper.endswith(("_ROOT", "_DIR", "_HOME", "_INSTALLATION_ID"))

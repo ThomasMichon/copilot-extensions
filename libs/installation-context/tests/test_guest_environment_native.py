@@ -85,11 +85,11 @@ def test_powershell_platform_and_guest_actions_ignore_inherited_os_labels(
             assert Path(status["environment"]["homeRealPath"]) == profile.resolve()
             refused = initialized.run(registration_command)
             assert refused.returncode == 1
+            assert "requires a real WSL guest" in refused.stderr
             assert fixture._snapshot(profile) == before
     finally:
         initialized.close()
         assert fixture._snapshot(profile) == before
-    assert "requires a real WSL guest" in "".join(initialized.errors)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows reference parity")
