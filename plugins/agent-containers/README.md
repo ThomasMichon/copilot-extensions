@@ -1,5 +1,8 @@
 # agent-containers
 
+See the [configuration reference](docs/configuration.md) for native files,
+fields, precedence, migration and protected admission boundaries.
+
 Local Docker dev-container **fleet manager**, **lease broker**, and
 optional agent-bridge **`container:` namespace provider**.
 
@@ -83,7 +86,7 @@ stderr; `AGENT_CONTAINERS_NO_SELFPROVISION` remains an opt-out.
 
 On Windows, initial installation `status` and selected-context `validate`
 reads use the payload's canonical SDK in a fresh isolated, no-site Python
-process only after the [independent bootstrap selector](../../docs/install-contract.md#independent-windows-evaluator-bootstrap)
+process only after the [PATH Python bootstrap selector](../../docs/install-contract.md#path-python-evaluator-bootstrap)
 admits a registered signed CPython base. PATH and the addressed runtime do not
 establish admission. Unavailable optional support selects native PowerShell
 before evaluation; selected interpreter/SDK failures are terminal. The file

@@ -68,6 +68,7 @@ class Plan:
     removals: list[dict[str, Any]] = field(default_factory=list)
     authority_decisions: list[dict[str, Any]] = field(default_factory=list)
     managed_keys: dict[str, list[str]] = field(default_factory=dict)
+    ordinary_defaults: dict[str, Any] | None = None
 
 
 _RUNTIME_CHECK_TIMEOUT = 60
@@ -335,6 +336,11 @@ def manifest_hash(resolved: list[RequirementPackage]) -> str:
         }
         for pkg in sorted(resolved, key=lambda p: (p.source_repo, p.name))
     ]
+    from .configuration import selected_defaults
+
+    ordinary = selected_defaults(resolved)
+    if ordinary is not None:
+        payload.append({"ordinary_defaults": ordinary})
     blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()[:16]
 
@@ -543,11 +549,18 @@ def plan(
         ],
         authority_decisions=authority_decisions,
         managed_keys={"copilot.settings": sorted(settings_keys)},
+        ordinary_defaults=next(
+            (
+                {key: copy.deepcopy(pkg.ordinary_defaults[key]) for key in ("values", "provenance", "layers")}
+                for pkg in resolved if pkg.ordinary_defaults
+            ),
+            None,
+        ),
     )
 
 
 def plan_to_dict(p: Plan) -> dict[str, Any]:
-    return {
+    result = {
         "machine": p.machine,
         "drift_key": p.drift_key,
         "provenance_hash": p.provenance_hash,
@@ -561,6 +574,9 @@ def plan_to_dict(p: Plan) -> dict[str, Any]:
         "authority_decisions": p.authority_decisions,
         "managed_keys": p.managed_keys,
     }
+    if p.ordinary_defaults is not None:
+        result["ordinary_defaults"] = copy.deepcopy(p.ordinary_defaults)
+    return result
 
 
 @dataclass

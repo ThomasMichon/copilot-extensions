@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-worktrees"
-version = "1.24.384-dev1"
+version = "1.24.385-dev1"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-configuration-layers",
     "pyyaml>=6.0.3",
     "packaging>=23",
     "cryptography>=50.0.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'",
@@ -37,6 +38,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agent-configuration-layers = { path = "libs/configuration-layers" }
 agent-repository-policy = { path = "libs/repository-policy" }
 agent-worktree-identity = { path = "libs/worktree-identity" }
 # Always resolve the vendored config-schema-migration lib from the local path,

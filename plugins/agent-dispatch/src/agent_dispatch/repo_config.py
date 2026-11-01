@@ -48,10 +48,10 @@ def legacy_repo_surface_dir(repo_root: str | Path, relative: str) -> Path:
 def selected_repo_surface_dir(repo_root: str | Path, relative: str) -> Path:
     root = Path(repo_root).expanduser()
     canonical = canonical_repo_surface_dir(root, relative)
-    if canonical.exists():
+    if canonical.exists() or canonical.is_symlink():
         return canonical
     legacy = legacy_repo_surface_dir(root, relative)
-    if legacy.exists():
+    if legacy.exists() or legacy.is_symlink():
         return legacy
     return canonical
 
@@ -102,7 +102,7 @@ def layered_repo_surface_dirs(
                 layers.append(candidate)
     else:
         base = selected_repo_surface_dir(root, relative)
-        if base.exists():
+        if base.exists() or base.is_symlink():
             layers.append(base)
     overlay = overlay_repo_surface_dir(root, relative, include_unavailable=include_unavailable)
     if overlay is not None:

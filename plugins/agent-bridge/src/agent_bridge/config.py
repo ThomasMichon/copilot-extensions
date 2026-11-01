@@ -211,7 +211,10 @@ def load_repo_bridge_config(repo_root: Path) -> RepoBridgeConfig | None:
     """
     root = Path(repo_root).expanduser()
     layers = _repo_config_layers(root)
-    if not layers:
+    from .configuration import ordinary_layers
+
+    ordinary = ordinary_layers(root)
+    if not layers and ordinary is None:
         return None
     try:
         merged: dict[str, object] = {}
@@ -224,6 +227,19 @@ def load_repo_bridge_config(repo_root: Path) -> RepoBridgeConfig | None:
                 raise ValueError("repo preference policy belongs in default_env")
             merged = _deep_merge_dicts(merged, data)
         config = RepoBridgeConfig(**merged)
+        if ordinary is not None:
+            from configuration_layers import compose
+
+            context, records = ordinary
+            result = compose(context, records)
+            from .configuration import PROTECTED_ENV
+
+            result["values"]["default_env"].update({
+                key: value for key, value in config.default_env.items() if key in PROTECTED_ENV
+            })
+            config = config.model_copy(update=result["values"])
+            object.__setattr__(config, "_ordinary_layers", ordinary)
+            object.__setattr__(config, "_configuration_provenance", result["provenance"])
         from .session_preferences import SOURCE_ENV, SOURCES
 
         if SOURCE_ENV in config.default_env and config.default_env[SOURCE_ENV] not in SOURCES:

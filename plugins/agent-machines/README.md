@@ -1,5 +1,7 @@
 # agent-machines
 
+[Configuration reference](docs/configuration.md)
+
 Portable **`restore-machinestate`** for the Copilot CLI. `agent-machines`
 discovers machine-state **requirement packages** from adopted projects on the
 current machine and reconciles the machine-global `~/.copilot/` state to their

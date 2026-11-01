@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import stat
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -353,14 +354,26 @@ def _layer(
     allowed: bool,
     diagnostics: list[str],
 ) -> tuple[str, dict[str, list[dict[str, object]]]]:
-    if not path.exists():
+    if not path.exists() and not path.is_symlink():
         return "missing", {}
     if not allowed:
         diagnostics.append(f"{kind} config ignored because the repository is untrusted")
         return "untrusted", {}
     try:
+        root = path.parents[1] if kind == "operator" else path.parents[2]
+        current = root
+        for part in path.relative_to(root).parts:
+            current = current / part
+            metadata = current.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or (
+                getattr(metadata, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            ):
+                raise ConfigError("configuration traverses a link or reparse point")
+        if not path.resolve().is_relative_to(root.resolve()):
+            raise ConfigError("configuration escapes its source root")
         return "loaded", _load(path)
-    except ConfigError as exc:
+    except (ConfigError, OSError) as exc:
         diagnostics.append(f"{kind} config ignored: {exc}")
         return "invalid", {}
 
@@ -544,14 +557,21 @@ def main() -> int:
             "repository config suppressed because operator config is invalid"
         )
         repository = {}
+    from model_configuration import compose_routing
+
+    purposes, extra_sources, provenance = compose_routing(
+        repo, home, repository, operator, operator_status, _layer, _repo_is_trusted, diagnostics, _merge,
+    )
     result = {
         "schema": SCHEMA,
         "version": VERSION,
         "sources": {
             "repository": repo_status,
             "operator": operator_status,
+            **extra_sources,
         },
-        "purposes": _merge(repository, operator),
+        "purposes": _merge({}, purposes),
+        "provenance": provenance,
         "diagnostics": diagnostics,
     }
     selection_requested = any(
