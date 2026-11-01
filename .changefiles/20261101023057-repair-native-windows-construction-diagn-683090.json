@@ -1,5 +1,5 @@
 {
-  "comment": "Allow one bounded Windows ownership census to finish while retirement custody preserves its exact paused incumbents",
+  "comment": "Preserve Windows retirement custody through a bounded census, complete Dispatch standalone snapshot dependencies and align native qualification fixtures",
   "changes": [
     {
       "plugin": "agent-bridge",

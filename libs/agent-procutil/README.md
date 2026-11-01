@@ -54,7 +54,8 @@ outside the production caller's Windows Jobs or Linux process group. Windows
 uses the attributed native launch and authenticated private pipe; Linux
 inherits one anonymous socketpair and the original caller's pidfd. The worker
 never discovers targets or adds update authority. Caller death, a closed
-lifeline, or a 210-second idle deadline resumes all remaining originals before
+lifeline, or the idle deadline (210 seconds on Windows, unchanged 30 seconds on
+POSIX) resumes all remaining originals before
 worker exit. Normal close confirms kernel exit and settles the instance record.
 The idle grace includes a finite 180-second Windows ownership census between
 control requests. Peer-death checks remain active during that wait; per-request

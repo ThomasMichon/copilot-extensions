@@ -202,12 +202,13 @@ def test_ambiguous_resume_is_not_retried(monkeypatch):
     assert calls == ["close", "exit", "close"]
 
 
-@pytest.mark.parametrize("inspection_seconds", [60, 211])
-def test_native_inspection_grace_preserves_pins_but_bounds_a_stall(monkeypatch, inspection_seconds):
+@pytest.mark.parametrize(("platform", "inspection_seconds"), [("win32", 60), ("win32", 211), ("linux", 31)])
+def test_native_inspection_grace_preserves_pins_but_bounds_a_stall(monkeypatch, platform, inspection_seconds):
     from zdd.private_protocol import PrivateIPCError, Refusal
 
     from agent_procutil import _retirement_custodian as worker
 
+    monkeypatch.setattr(worker.sys, "platform", platform)
     clock, effects = [0], []
 
     class Deadline:
@@ -260,7 +261,7 @@ def test_native_inspection_grace_preserves_pins_but_bounds_a_stall(monkeypatch, 
     monkeypatch.setattr(worker, "write_frame", lambda *_: None)
     worker.serve(Channel(), 41)
     assert effects == (
-        ["pause", "terminate", "close"] if inspection_seconds == 60 else ["pause", "close"]
+        ["pause", "terminate", "close"] if platform == "win32" and inspection_seconds == 60 else ["pause", "close"]
     )
 
 
