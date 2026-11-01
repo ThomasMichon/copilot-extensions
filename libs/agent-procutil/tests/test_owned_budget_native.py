@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 import select
+import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -204,3 +206,113 @@ def test_short_aggregate_budget_does_not_charge_the_cleanup_reserve_twice():
     )
     assert result.stdout.strip() == "executed"
     assert time.monotonic() < budget.deadline
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="native POSIX legacy caller")
+@pytest.mark.parametrize("parent_watch", ["absent", "enabled"])
+def test_legacy_wrapper_exit_retires_unconfirmed_supervisor_without_settlement(tmp_path, parent_watch):
+    source = Path(__file__).resolve().parents[1] / "src"
+    policy_source = Path(__file__).resolve().parents[3] / "plugins/agent-worktrees/scripts"
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("hook_policy_process.py", "hook_process_identity.py"):
+        shutil.copyfile(policy_source / name, scripts / name)
+    (scripts / "hook_client.py").write_text("""
+import importlib.util,json,os,subprocess,sys,time
+from pathlib import Path
+def _load_sibling(name):
+    spec=importlib.util.spec_from_file_location('fixture_identity',Path(__file__).with_name(name))
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    return module
+if __name__=='__main__':
+    child=subprocess.Popen([sys.executable,'-I','-c','import time;time.sleep(60)'],
+                           stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    marker=Path(os.environ['LEGACY_NATIVE_ROOT'])/'lookup.json'
+    marker.with_suffix('.prepared').write_text(json.dumps({
+        'pid':os.getpid(),'child':child.pid,'group':os.getpgrp(),
+        'nonce':os.environ['LEGACY_NATIVE_NONCE']}))
+    marker.with_suffix('.prepared').replace(marker)
+    marker.with_suffix('.published').touch()
+    time.sleep(60)
+""")
+    supervisor = tmp_path / "supervisor.py"
+    supervisor.write_text("""
+import json,os,sys,time
+from pathlib import Path
+sys.path[:0]=[sys.argv[1],sys.argv[2]]
+from agent_procutil import _caller_owned,owned_process
+import hook_policy_process as policy
+root=Path(os.environ['LEGACY_NATIVE_ROOT'])
+if os.environ['LEGACY_NATIVE_WATCH']=='absent':
+    from types import SimpleNamespace
+    policy._watch_legacy_parent=lambda stop:SimpleNamespace(join=lambda **kwargs:None)
+real_run=owned_process.run_caller_owned
+def refuse_confirmation(process,**kwargs):
+    marker=root/'pending.json'
+    marker.with_suffix('.prepared').write_text(json.dumps({
+        'pid':os.getpid(),'group':os.getpgrp(),'caller':os.getppid(),
+        'nonce':os.environ['LEGACY_NATIVE_NONCE']}))
+    marker.with_suffix('.prepared').replace(marker)
+    marker.with_suffix('.published').touch()
+    raise owned_process.OwnedCleanupError(process)
+_caller_owned._confirm_group=refuse_confirmation
+def record_settlement(*args,**kwargs):
+    original=kwargs['on_settled']
+    def settled():
+        (root/'settled').touch();original()
+    kwargs['on_settled']=settled
+    return real_run(*args,**kwargs)
+owned_process.run_caller_owned=record_settlement
+policy.execute(b'{}',legacy=True,settlement_deadline=time.monotonic()+2,
+               initial_decision={'permissionDecision':'ask','permissionDecisionReason':'confirmed fixture'})
+raise AssertionError('unconfirmed cleanup must not return a decision')
+""")
+    nonce = uuid.uuid4().hex
+    environment = {
+        **os.environ, "LEGACY_NATIVE_ROOT": str(tmp_path), "LEGACY_NATIVE_NONCE": nonce,
+        "LEGACY_NATIVE_WATCH": parent_watch,
+    }
+    process = subprocess.Popen(
+        ["/bin/bash", "-c", '"$1" -I "$2" "$3" "$4"; status=$?; exit "$status"',
+         "fixture-wrapper", sys.executable, str(supervisor), str(source), str(scripts)],
+        env=environment, start_new_session=True,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    wrapper_pin = ExitPin(process.pid, process.pid)
+    pins = [wrapper_pin]
+    try:
+        deadline = time.monotonic() + 8
+        records = {}
+        for name in ("lookup", "pending"):
+            marker = tmp_path / (name + ".json")
+            while not marker.with_suffix(".published").is_file():
+                assert process.poll() is None, process.communicate(timeout=2)
+                assert time.monotonic() < deadline, "legacy custody witness never published"
+                time.sleep(.01)
+            record = records[name] = json.loads(marker.read_text())
+            assert record["nonce"] == nonce
+            pins.append(ExitPin(record["pid"], record["group"]))
+            if name == "lookup":
+                pins.append(ExitPin(record["child"], record["group"]))
+        assert records["pending"]["caller"] == process.pid
+        assert not pins[-1].gone(), "unconfirmed supervisor already exited"
+        assert not (tmp_path / "settled").exists()
+        # Keep the exact wrapper unreaped until its owned group cleanup is complete.
+        process.kill()
+        exit_deadline = time.monotonic() + 3
+        while not wrapper_pin.gone() or (parent_watch == "enabled" and not all(pin.gone() for pin in pins)):
+            assert time.monotonic() < exit_deadline, "legacy supervisor survived its Bash caller"
+            time.sleep(.01)
+        if parent_watch == "absent":
+            time.sleep(.1)
+            assert not pins[-1].gone(), "unwatched control did not retain the supervisor"
+        assert not (tmp_path / "settled").exists()
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate(timeout=5)
+        for pin in pins:
+            pin.close()

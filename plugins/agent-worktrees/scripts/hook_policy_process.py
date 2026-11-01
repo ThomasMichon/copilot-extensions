@@ -25,7 +25,47 @@ def _watch_caller() -> None:
         os._exit(3)
 
 
+def _watch_legacy_parent(stop):
+    from hook_client import _load_sibling
+
+    identity = _load_sibling("hook_process_identity.py")
+    birth_token = getattr(identity, "process_start_time", None)
+    active = getattr(identity, "process_is_alive", None)
+    parent = os.getppid()
+    birth = birth_token(parent) if callable(birth_token) else None
+    if parent <= 1 or birth is None or not callable(active) or not active(parent, birth) or os.getppid() != parent:
+        raise RuntimeError("legacy caller identity unavailable")
+
+    def watch():
+        while not stop.wait(.05):
+            try:
+                live = os.getppid() == parent and active(parent, birth)
+            except Exception:
+                live = False
+            if not live and not stop.is_set():
+                # Exit closes the SDK lifetime handles; it does not attest settlement.
+                os._exit(3)
+
+    watcher = threading.Thread(target=watch, name="legacy-policy-caller", daemon=True)
+    watcher.start()
+    return watcher
+
+
 def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None, initial_decision=None) -> int:
+    stop = threading.Event()
+    watcher = []
+    try:
+        return _execute(
+            frame, legacy=legacy, settlement_deadline=settlement_deadline,
+            initial_decision=initial_decision, stop=stop, watcher=watcher,
+        )
+    finally:
+        stop.set()
+        for thread in watcher:
+            thread.join(timeout=.05)
+
+
+def _execute(frame: bytes, *, legacy: bool, settlement_deadline, initial_decision, stop, watcher) -> int:
     """Supervise the one strict policy worker before forwarding any decision."""
     settlement_deadline = settlement_deadline or time.monotonic() + 23.0
 
@@ -48,6 +88,8 @@ def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None, ini
         )
 
         require_caller_owned_support()
+        if legacy:
+            watcher.append(_watch_legacy_parent(stop))
         budget = OwnedExecutionBudget(settlement_deadline + 2.0, 2.0)
         python, overrides = direct_python(sys.executable)
         environment = dict(os.environ)

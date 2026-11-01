@@ -624,7 +624,7 @@ def test_legacy_main_keeps_cheap_guard_when_sdk_native_admission_unavailable(mon
     assert json.loads(capsys.readouterr().out)["permissionDecision"] == permission
 
 
-@pytest.mark.parametrize("fault", ["prepare", "timeout-garbage", "timeout-ask", "timeout-deny", "nonzero", "empty", "context"])
+@pytest.mark.parametrize("fault", ["prepare", "parent", "timeout-garbage", "timeout-ask", "timeout-deny", "nonzero", "empty", "context"])
 def test_owned_legacy_retains_initial_after_preparation_or_settled_failure(monkeypatch, capsys, fault):
     import importlib.util
     from agent_procutil import owned_process
@@ -638,13 +638,16 @@ def test_owned_legacy_retains_initial_after_preparation_or_settled_failure(monke
         monkeypatch.setitem(sys.modules, name, module)
         loaded[name] = module
     monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
-    if fault == "prepare":
+    if fault in ("prepare", "parent"):
         def refuse(python):
             raise RuntimeError("fixture interpreter refused before launch")
-        monkeypatch.setattr(agent_procutil, "direct_python", refuse)
+        if fault == "prepare":
+            monkeypatch.setattr(agent_procutil, "direct_python", refuse)
+        else:
+            monkeypatch.setattr(loaded["hook_policy_process"], "_watch_legacy_parent", refuse)
 
     def invoke(argv, **kwargs):
-        assert fault != "prepare", "preparation refusal must not launch"
+        assert fault not in ("prepare", "parent"), "preparation refusal must not launch"
         kwargs["on_settled"]()
         if fault == "nonzero":
             return subprocess.CompletedProcess(argv, 7, "unusable output", "")
@@ -716,3 +719,29 @@ def test_successful_deferred_legacy_preserves_silent_noop_and_diagnostics(monkey
         assert json.loads(captured.out) == initial
     else:
         assert captured.out == ""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows parent exit state")
+def test_legacy_parent_watch_does_not_accept_exited_birth_identity():
+    import importlib.util
+    from agent_procutil import spawn_sync_in_kill_on_close_job
+
+    spec = importlib.util.spec_from_file_location("fixture_identity", PLUGIN / "scripts/hook_process_identity.py")
+    identity = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(identity)
+    process, job = spawn_sync_in_kill_on_close_job(
+        [sys.executable, "-c", "import time;time.sleep(5)"],
+        require_job=True, allow_breakaway=False,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    try:
+        birth = identity.process_start_time(process.pid)
+        assert birth is not None and identity.process_is_alive(process.pid, birth)
+        process.kill()
+        process.wait(timeout=3)
+        assert not identity.process_is_alive(process.pid, birth)
+        assert not identity.process_is_alive(process.pid, None)
+    finally:
+        job.terminate_and_wait(3)
+        process.wait(timeout=3)

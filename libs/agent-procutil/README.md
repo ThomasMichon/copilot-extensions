@@ -425,7 +425,9 @@ and individual timeout. POSIX passes that
 same clock through its finite guardian and retains unreaped group custody
 through native group confirmation and reaping. `OwnedCleanupError` still retains
 the exact process/Job when settlement cannot be confirmed; deadline expiry is
-not successful cleanup. The deadline bounds supervised waits, not arbitrary
+not successful cleanup. A pre-creation Job-close failure retains only the Job
+(`process is None`) and does not notify settlement. The deadline bounds
+supervised waits, not arbitrary
 blocking kernel calls or caller-supplied callbacks. Settlement callbacks remain
 synchronous bounded bookkeeping, never permission or execution-success proof.
 Consumers must reserve response/serialization time outside this budget.

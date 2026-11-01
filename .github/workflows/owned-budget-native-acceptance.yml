@@ -4,7 +4,9 @@ on:
   workflow_dispatch:
   push:
     branches: ["pr/**"]
-    paths: [".github/workflows/owned-budget-native-acceptance.yml"]
+    paths:
+      - ".github/workflows/owned-budget-native-acceptance.yml"
+      - "libs/agent-procutil/tests/test_owned_budget_native.py"
 
 permissions:
   contents: read

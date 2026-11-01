@@ -69,8 +69,12 @@ lookup timeout and enclosing caller death. Two cycles retain the same shared
 deadline; the packet does not activate a runtime, service or agent session.
 Its separate dispatch preserves all existing installation-context selectors
 within GitHub's 25-input limit.
-PR-branch changes to this workflow also run the same two jobs, allowing the
+PR-branch changes to this workflow or its packet tests also run the same two jobs, allowing the
 workflow itself to qualify before its first default-branch registration.
+The legacy-wrapper control separately removes only the parent watch to
+reproduce a retained supervisor after real Bash caller death. The corrected
+control confirms pinned exits without reporting unconfirmed SDK cleanup as
+settled. Fixture cleanup retains the original unreaped wrapper's group identity.
 
 The optional `update_diagnostics` lane runs the native installer inactivity
 packet separately from the focused constructor packet on Linux and Windows.

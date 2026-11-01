@@ -66,7 +66,16 @@ def _start_time_darwin(pid: int) -> str | None:
     return f"{info.start_seconds}:{info.start_microseconds}"
 
 
-def _start_time_windows(pid: int) -> str | None:
+def process_is_alive(pid: int, birth: str) -> bool:
+    """Require the original birth and native live state, not a retained dead PID."""
+    if not isinstance(birth, str) or not birth:
+        return False
+    if platform.system() == "Windows":
+        return _start_time_windows(pid, require_live=True) == birth
+    return process_start_time(pid) == birth
+
+
+def _start_time_windows(pid: int, *, require_live: bool = False) -> str | None:
     import ctypes
     from ctypes import wintypes
 
@@ -84,8 +93,12 @@ def _start_time_windows(pid: int) -> str | None:
         ctypes.POINTER(wintypes.FILETIME),
     ]
     k32.GetProcessTimes.restype = wintypes.BOOL
+    if require_live:
+        k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        k32.WaitForSingleObject.restype = wintypes.DWORD
 
-    handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    access = PROCESS_QUERY_LIMITED_INFORMATION | (0x100000 if require_live else 0)
+    handle = k32.OpenProcess(access, False, pid)
     if not handle:
         return None
     try:
@@ -98,6 +111,8 @@ def _start_time_windows(pid: int) -> str | None:
             ctypes.byref(kernel), ctypes.byref(user),
         )
         if not ok:
+            return None
+        if require_live and k32.WaitForSingleObject(handle, 0) != 0x102:
             return None
         ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
         return str(ticks)
