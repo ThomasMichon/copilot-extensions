@@ -39,9 +39,9 @@ positive receipt is required. There is no legacy-undrain fallback.
 
 The shared ZDD rollback checks predecessor identity during restoration and
 again before undrain. Those caller checks do not replace the receiver's atomic
-route fence. The two retained counterexamples now pass. Canonical and existing
-physical vendored rollback source remain identical; no dependency-layout
-migration or new ZDD API is part of this slice.
+route fence. The two retained counterexamples now pass. Guarded rollback changes
+remain in canonical ZDD source; the current base independently removed physical
+vendor copies. This slice adds no dependency-layout migration or new ZDD API.
 
 Separate opt-in native tests use only disposable, no-breakaway Job-owned
 fixtures. They exercise the real installer helper/orchestrator/client/parser/

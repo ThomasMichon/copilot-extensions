@@ -414,7 +414,7 @@ and no historical count is reused as current-source performance qualification.
 | Cell | State |
 |------|-------|
 | Source tests | 306 current foundation/legacy-consumer tests and four guards pass; current-head approval, resolved threads and required CI; #8143 source-only merged |
-| Release | Pending source merge and ordinary promotion; no release claim |
+| Release | Source #8143 merged; ordinary promotion and rollout remain open; no release claim |
 | Installed/native venue | Unavailable by scope; no updater or live CodeSpace probe |
 | CPU/whole-wave metadata/latency tails | CPU/tails unmeasured; repeated authority CLI fanout blocks deferred production integration retained by #7949/#5761 |
 | S3c transport reuse | Excluded and retained by #7949 |
