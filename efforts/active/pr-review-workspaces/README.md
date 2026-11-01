@@ -167,6 +167,8 @@ extension of the existing `ReplayStore` envelope, not a second posting ledger.
   data, even if they share an owning service or physical database.
 
 ### Phase 4 - Integrate and qualify the reviewer after admission
+The next source admission is the [existing-owner tool surface](tool-surface-slice.md),
+with explicit unavailable exact-source acquisition rather than a broad fetch fallback.
 - [ ] Let the reviewer own load/sync, local analysis and explicit submission
   without an ADO interpretation intermediary.
 - [ ] Preserve caller-owned rubric, consent and required independent finding
@@ -214,6 +216,10 @@ contract.
 ## Journal
 
 ### 2026-11-01 - Read completion disposition source boundary
+- #9822 merged as `a8bf25cf135cdf4f6a50df971fe13167464ff16b`
+  from head `0f5074866439cc09f08f003ca60aef2f8e19e253` after actual approval
+  and required CI success. Nine focused contained controls pass; no unrelated
+  settled suite was rerun. This is source publication, not legacy/live repair.
 - A synthetic source check found that an explicitly late native read DTO could
   still be parsed when the separate operation budget remained positive.
   Refuse that read at the existing owner boundary; buffered complete-looking
