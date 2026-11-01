@@ -311,6 +311,10 @@ def _load_yaml_mapping(path: Path) -> tuple[str, dict[str, Any] | None]:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return "invalid", None
+    return _yaml_text_mapping(text)
+
+
+def _yaml_text_mapping(text: str) -> tuple[str, dict[str, Any] | None]:
     try:
         import yaml
         from yaml.constructor import ConstructorError
@@ -573,10 +577,6 @@ def _repo_config_layers(
     base = root / BASE_CONFIG_RELATIVE
     if base.exists():
         layers.append((root, base))
-    if knowledge_root is not None:
-        knowledge = knowledge_root / BASE_CONFIG_RELATIVE
-        if knowledge.exists():
-            layers.append((knowledge_root, knowledge))
     overlay = root / OVERLAY_CONFIG_RELATIVE
     if overlay.exists():
         layers.append((root, overlay))
@@ -585,6 +585,10 @@ def _repo_config_layers(
         overlay = root / MARKETPLACE_OVERLAYS_DIR / marketplace_id / CONFIG_FILENAME
         if overlay.exists():
             layers.append((root, overlay))
+    if knowledge_root is not None:
+        knowledge = knowledge_root / BASE_CONFIG_RELATIVE
+        if knowledge.exists():
+            layers.append((knowledge_root, knowledge))
     return layers
 
 
@@ -596,7 +600,7 @@ def _primary_repo_config_path(root: Path) -> Path | None:
 
 
 def _load_repo_candidate(
-    root: Path, *, knowledge_root: Path | None = None
+    root: Path, *, knowledge_root: Path | None = None, compose_preferences: bool = True,
 ) -> tuple[str, Path | None, dict[str, Any] | None]:
     layers = _repo_config_layers(root, knowledge_root=knowledge_root)
     if not layers:
@@ -612,10 +616,52 @@ def _load_repo_candidate(
         merged = _merge_repo_config_dicts(merged, data)
     try:
         primary = _primary_repo_config_path(root) or layers[0][1]
+        _validate_config(merged)  # Existing local activation veto, before ordinary preferences.
+        bundled = Path(__file__).parent / "configuration-layers" / "src"
+        if bundled.is_dir():
+            sys.path.insert(0, str(bundled))
+        # This sibling is shipped in the payload, like the peer-launch boundary.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+        from agent_index.configuration_layers import load_repository_layers
+
+        if compose_preferences:
+            layered = load_repository_layers(root, parser=_parse_yaml_for_layers)
+            if layered is not None:
+                merged = layered["values"]
         return "ready", primary.resolve(), _validate_config(merged)
-    except ConfigError:
+    except (ConfigError, ValueError, RuntimeError):
         primary = _primary_repo_config_path(root) or layers[0][1]
         return "invalid", primary, None
+
+
+def _parse_yaml_for_layers(text):
+    """Use the same strict native parser on every projected preference source."""
+    state, value = _yaml_text_mapping(text)
+    if state != "ready" or value is None:
+        raise ConfigError("selected configuration is invalid YAML")
+    return value
+
+
+def _configuration_knowledge_root(root):
+    """Read the existing configuration owner, never a provisioning front door."""
+    bundled = Path(__file__).parent / "configuration-layers" / "src"
+    if bundled.is_dir():
+        sys.path.insert(0, str(bundled))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from configuration_context import context_from_owner
+
+    from agent_index.configuration_layers import owner_report
+
+    try:
+        report = owner_report(root)
+        if report is None:
+            return "unavailable", None
+        context = context_from_owner(report)
+        if context["binding"] != "bound":
+            return "unavailable", None
+        return "ready", Path(context["knowledge_root"])
+    except (ValueError, RuntimeError):
+        return "invalid", None
 
 
 def _run_git(git: str, start: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
@@ -670,7 +716,8 @@ def _git_root(start: Path) -> Path | None:
 
 
 def _requires_external(root: Path) -> tuple[str, bool]:
-    path = root / WORKTREES_CONFIG_RELATIVE
+    canonical = root / ".copilot-extensions" / "agent-worktrees" / CONFIG_FILENAME
+    path = canonical if os.path.lexists(canonical) else root / WORKTREES_CONFIG_RELATIVE
     state, safe_path = _safe_file(path, root)
     if state == "absent":
         return "ready", False
@@ -1036,14 +1083,6 @@ def resolve(cwd: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     local_state, local_path, local = _load_repo_candidate(root)
     if local_state == "ready" and local_path is not None and local is not None:
         policy_state, requires_external = _requires_external(root)
-        if policy_state == "ready" and requires_external:
-            state, state_root = _external_state_root(root)
-            if state == "ready" and state_root is not None:
-                layered_state, _, layered = _load_repo_candidate(
-                    root, knowledge_root=state_root
-                )
-                if layered_state == "ready" and layered is not None:
-                    local = layered
         return _result(
             opted_in=True,
             source="repository",
@@ -1085,7 +1124,7 @@ def resolve(cwd: str | os.PathLike[str] | None = None) -> dict[str, Any]:
             requires_external=False,
         )
 
-    state, state_root = _external_state_root(root)
+    state, state_root = _configuration_knowledge_root(root)
     if state != "ready" or state_root is None:
         return _result(
             opted_in=False,
@@ -1095,12 +1134,27 @@ def resolve(cwd: str | os.PathLike[str] | None = None) -> dict[str, Any]:
             repo_root=root,
             requires_external=True,
         )
-    external_state, external_path, external = _load_repo_candidate(state_root)
+    external_state, external_path, external = _load_repo_candidate(
+        state_root, compose_preferences=False,
+    )
     if (
         external_state == "ready"
         and external_path is not None
         and external is not None
     ):
+        from agent_index.configuration_layers import load_repository_layers
+
+        try:
+            layered = load_repository_layers(root, parser=_parse_yaml_for_layers)
+            if layered is None:
+                raise ConfigError("configuration owner became unavailable")
+            external = _validate_config(layered["values"])
+        except (ValueError, RuntimeError):
+            return _result(
+                opted_in=False, source="external-state-root",
+                reason="external-state-root-config-invalid", config=external_path,
+                repo_root=root, requires_external=True,
+            )
         return _result(
             opted_in=True,
             source="external-state-root",

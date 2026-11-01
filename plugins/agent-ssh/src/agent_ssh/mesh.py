@@ -187,7 +187,7 @@ def _load(path: Path, *, strict: bool = False) -> dict[str, Any]:
     return doc or {}
 
 
-def load_mesh(path: Path, *, strict: bool = False) -> Mesh:
+def load_mesh(path: Path, *, strict: bool = False, preferences: bool = False) -> Mesh:
     """Project topology; mutating callers must request strict input validation."""
     doc = _load(path, strict=strict)
     if not isinstance(doc, dict):
@@ -246,7 +246,12 @@ def load_mesh(path: Path, *, strict: bool = False) -> Mesh:
                     dtssh_best_effort=bool(dtssh.get("best_effort", False)),
                 )
             )
-    return Mesh(project=project, source=str(path), machines=machines)
+    result = Mesh(project=project, source=str(path), machines=machines)
+    if preferences:
+        from .configuration import apply_preferences
+
+        return apply_preferences(result, path.parent)
+    return result
 
 
 def summary_line(mesh: Mesh) -> str:

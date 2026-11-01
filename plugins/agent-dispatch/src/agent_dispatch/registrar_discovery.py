@@ -604,6 +604,11 @@ def read_repo_location_layers(
     An explicit marketplace overlay directory may then replace or add
     declarations by logical name.
     """
+    from .configuration_layers_adapter import configuration_report, read_registrar_layers
+
+    report = configuration_report(Path(repo_root))
+    if report is not None:
+        return read_registrar_layers(report, owner=owner)
     merged: dict[str, ProfileDeclaration] = {}
     for location in repo_config.layered_repo_surface_dirs(repo_root, "registrar"):
         layer: dict[str, ProfileDeclaration] = {}

@@ -577,6 +577,7 @@ class Config:
     copilot_identity_switch_enabled: bool = False
     """Master switch for :mod:`copilot_identity`; default false, config-file based. See docs/config-reference.md."""
     checkout_free_pr: dict[str, PRConfig] = field(default_factory=dict, kw_only=True)
+    ordinary_provenance: dict[str, Any] = field(default_factory=dict, kw_only=True)
 
     @property
     def default_repo(self) -> RepoConfig:
@@ -660,7 +661,9 @@ def _overlay_machines_yaml_path(
             str(repo_dir)
         ):
             return None
-        srcs = state_root.config_source_anchors(config, base_anchor=str(repo_dir))
+        srcs = state_root.config_source_anchors(
+            config, base_anchor=str(repo_dir), family="registry",
+        )
     except Exception:
         return None
     # Walk the overlay sources (everything past the base) for a machines.yaml;
@@ -989,12 +992,8 @@ def _load_config_uncached(
         or _project_name_safe()
     )
 
-    # E1e config.yaml knowledge overlay (#947): when the launch repo is a
-    # STATELESS harness bound to a knowledge repo, layer the knowledge repo's
-    # config.yaml as a tier BETWEEN the in-repo base and machine-local -- but only
-    # for portable operator-preference keys (never machine-specifics or the
-    # binding). Gated + fail-open -> ``{}`` for a normal (non-stateless) repo, so
-    # the hot config path is unchanged off the stateless track.
+    # A named binding selects portable repository-tier preferences, independent
+    # of the launch repo's protected personal-state write policy.
     knowledge_raw = config_acquisition.knowledge_call(
         _load_knowledge_overlay_config, _KNOWLEDGE_OVERLAY_OWNER,
         machine_raw, global_raw, repo_name, platform
@@ -1022,6 +1021,7 @@ def _load_config_uncached(
     repos: dict[str, RepoConfig] = {}
     checkout_free_pr: dict[str, PRConfig] = {}
     inrepo_profile_assignments: dict[str, Any] = {}
+    inrepo_preferences: dict[str, Any] = {}
     for name in names:
         machine_repo = machine_repos.get(name) or {}
         if not isinstance(machine_repo, dict):
@@ -1041,6 +1041,7 @@ def _load_config_uncached(
 
         # Tier 2: the repo's own in-repo flat settings (base for repo settings).
         inrepo_settings = _load_inrepo_config(anchor)
+        inrepo_preferences[name] = inrepo_settings
         inrepo_profile_assignments[name] = inrepo_settings.get(
             "profile_assignment"
         )
@@ -1083,13 +1084,20 @@ def _load_config_uncached(
             "  pwsh -File <repo>/plugins/agent-worktrees/scripts/install.ps1 install"
         )
 
-    # copilot_profiles: machine-local > knowledge overlay > global.
-    if "copilot_profiles" in machine_raw:
-        profiles_raw = machine_raw.get("copilot_profiles")
-    elif "copilot_profiles" in knowledge_raw:
-        profiles_raw = knowledge_raw.get("copilot_profiles")
-    else:
-        profiles_raw = global_raw.get("copilot_profiles", [])
+    # Ordinary preferences: defaults < repository (+knowledge) < machine <
+    # selected repository+machine. Profile-assignment admission remains separate.
+    base_preferences = inrepo_preferences.get(repo_name, {})
+    ordinary = {}
+    for layer in (
+        base_preferences, knowledge_raw, global_raw, machine_raw,
+        machine_repos.get(repo_name) or {},
+    ):
+        ordinary = _deep_merge(ordinary, {
+            key: layer[key] for key in _KNOWLEDGE_OVERLAY_TOP_KEYS if key in layer
+        })
+
+    # Profile pools retain their native atomic-list semantics.
+    profiles_raw = ordinary.get("copilot_profiles", [])
     parsed_profiles = _parse_profiles(profiles_raw or [])
 
     # Profile assignment has a deliberate trust-aware merge rather than the
@@ -1098,8 +1106,8 @@ def _load_config_uncached(
     # default-off template or intersect an already user-owned pool/lanes.
     user_assignment_raw: Any = {}
     for source in (
-        global_raw,
         knowledge_raw,
+        global_raw,
         machine_raw,
         machine_repos.get(repo_name) if isinstance(machine_repos, dict) else {},
     ):
@@ -1131,21 +1139,8 @@ def _load_config_uncached(
             repository_assignment_raw,
             parsed_profiles,
         ),
-        headless=bool(
-            machine_raw.get(
-                "headless",
-                knowledge_raw.get("headless", global_raw.get("headless", False)),
-            )
-        ),
-        auto_fast_forward=bool(
-            machine_raw.get(
-                "auto_fast_forward",
-                knowledge_raw.get(
-                    "auto_fast_forward",
-                    global_raw.get("auto_fast_forward", True),
-                ),
-            )
-        ),
+        headless=bool(ordinary.get("headless", False)),
+        auto_fast_forward=bool(ordinary.get("auto_fast_forward", True)),
         default_copilot_account=str(
             machine_raw.get(
                 "default_copilot_account",
@@ -1167,7 +1162,7 @@ def _load_config_uncached(
 
         identity_anchors = [
             source.anchor for source in state_root.config_source_anchors(
-                config, base_anchor=repo.anchor,
+                config, base_anchor=repo.anchor, family="registry",
             )
         ]
     for anchor in identity_anchors:
@@ -1177,15 +1172,31 @@ def _load_config_uncached(
         )):
             from .machine_identity import load_execution_registry, resolve_execution_machine
 
-            return replace(config, machine=resolve_execution_machine(
+            config = replace(config, machine=resolve_execution_machine(
                 configured_machine if configured_machine else socket.gethostname(),
                 guest=detect_platform() == "wsl", configured=bool(configured_machine),
                 load_entries=lambda: load_execution_registry(anchor, config=config),
                 preserve_native_hostname=True,
             ))
+            break
     else:
         if machine_raw.get("machine") or global_raw.get("machine"):
-            return replace(config, machine=detect_machine(value=config.machine))
+            config = replace(config, machine=detect_machine(value=config.machine))
+    from .config_sources import compose_ordinary_preferences
+
+    scoped = compose_ordinary_preferences(
+        config, base_preferences, knowledge_raw, global_raw, machine_raw,
+        machine_repos.get(repo_name) or {},
+        global_path=global_config_path(), local_path=path,
+    ) if include_knowledge_preferences else None
+    if scoped is not None:
+        values = scoped["values"]
+        config = replace(
+            config,
+            headless=bool(values.get("headless", False)),
+            auto_fast_forward=bool(values.get("auto_fast_forward", True)),
+            ordinary_provenance=scoped["provenance"],
+        )
     return config
 
 
@@ -1389,9 +1400,10 @@ def _load_knowledge_overlay_config(
 ) -> dict[str, Any]:
     """The E1e config.yaml **knowledge overlay** tier (portable operator prefs).
 
-    A bound stateless harness receives only ``_KNOWLEDGE_OVERLAY_TOP_KEYS``
-    between its in-repo and machine-local tiers. Other gates and errors yield
-    ``{}``. A completed owner decision does not certify child acquisition:
+    A bound project receives only ``_KNOWLEDGE_OVERLAY_TOP_KEYS`` at the
+    repository tier. This legacy acquisition helper remains tolerant; scoped
+    context acquisition separately refuses an unresolved explicit binding.
+    A completed owner decision does not certify child acquisition:
     child failures remain uncertain, and reports are never reusable input data.
     """
     with _config_owner_outcome("knowledge-preferences"):
@@ -1402,8 +1414,7 @@ def _load_knowledge_overlay_config(
         ).strip()
         if not knowledge_repo:
             return {}
-        # Gate on the LAUNCH repo declaring itself stateless (requires an external
-        # state root) -- read from its own in-repo config.
+        # Locate the selected launch source using its existing path registry.
         machine_repos = machine_raw.get("repos")
         launch_anchor = None
         if isinstance(machine_repos, dict):
@@ -1415,12 +1426,9 @@ def _load_knowledge_overlay_config(
         )
         if not launch_anchor:
             return {}
-        inrepo = config_acquisition.knowledge_call(
+        config_acquisition.knowledge_call(
             _load_inrepo_config, _KNOWLEDGE_READ_OWNER, launch_anchor,
         )
-        if not (inrepo.get("stateless")
-                or inrepo.get("requires_external_state_root")):
-            return {}
         kpath = config_acquisition.knowledge_call(
             _resolve_anchor_from_registry, _KNOWLEDGE_ANCHOR_OWNER, knowledge_repo, platform,
         )
@@ -1661,7 +1669,13 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
                 )
             if cp_sources:
                 anchors.extend(
-                    related.config_contribution_anchor(source.anchor, source.origin)
+                    related.config_contribution_anchor(
+                        source.anchor, source.origin,
+                        **({
+                            "directory_form": getattr(source, "directory_form", False),
+                            "source_tier": getattr(source, "tier", None),
+                        } if getattr(source, "directory_form", False) else {}),
+                    )
                     for source in cp_sources
                     if source.anchor
                 )

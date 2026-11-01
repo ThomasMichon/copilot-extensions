@@ -40,7 +40,7 @@ def capture(
             result["topology"] = {
                 "status": "reading", "source": str(selected), "origin": origin,
             }
-            topology = mesh.load_mesh(selected, strict=True)
+            topology = mesh.load_mesh(selected, strict=True, preferences=path is None)
             result["topology"]["status"] = "available"
         else:
             topology = mesh.Mesh()

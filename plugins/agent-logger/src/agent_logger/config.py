@@ -3,9 +3,10 @@
 Resolution order (lowest precedence first):
 
 1. Built-in defaults (:data:`DEFAULTS`).
-2. ``$AGENT_LOGGER_HOME/config.yaml`` (or ``~/.agent-logger/config.yaml``).
-3. Repository-local organization config (``.agent-logger.yaml`` by convention).
-4. Environment-variable overrides (``AGENT_LOGGER_*``).
+2. Trusted repository organization config, with bound knowledge grafted over it.
+3. ``$AGENT_LOGGER_HOME/config.yaml`` (or ``~/.agent-logger/config.yaml``).
+4. Owner-selected repository+machine organization config.
+5. Environment-variable overrides (``AGENT_LOGGER_*``).
 
 Everything that couples the reusable code to a particular multi-machine system -- the
 digest store location, the sync target, the voice pack, the output path
@@ -565,7 +566,10 @@ def _load_repo_config(path: Path) -> dict[str, Any]:
 
     if "root" in scoped:
         root = _validate_relative_path(scoped["root"], "log.root")
-        scoped["root"] = str((config_base / root).resolve())
+        resolved_root = (config_base / root).resolve()
+        if not resolved_root.is_relative_to(config_base.resolve()):
+            raise RepositoryConfigError("log.root must not escape its organization checkout")
+        scoped["root"] = str(resolved_root)
 
     if "path_template" in scoped:
         path_template = _validate_relative_path(
@@ -968,14 +972,23 @@ def load_config(
 ) -> Config:
     """Load layered configuration into a :class:`Config`."""
     resolved_home = home or home_dir()
-    data = _deep_merge(DEFAULTS, _load_user_config(resolved_home / "config.yaml"))
+    machine_data = _load_user_config(resolved_home / "config.yaml")
+    data = _deep_merge(DEFAULTS, machine_data)
     repo_root = _find_repo_root(repo_start) if include_repo else None
     repo_config_path = find_repo_config(repo_start) if include_repo else None
     repo_data: dict[str, Any] = {}
     pre_repo_local_path = (data["sync"]["targets"].get("local") or {}).get("path")
     if repo_config_path:
         repo_data = _load_repo_config(repo_config_path)
-        data = _deep_merge(data, repo_data)
+        data = _deep_merge(_deep_merge(DEFAULTS, repo_data), machine_data)
+    if include_repo and repo_root is not None and not os.environ.get("AGENT_LOGGER_REPO_CONFIG"):
+        from .configuration_layers import load_organization_layers
+
+        data, repo_data, layer_provenance = load_organization_layers(
+            repo_root, repo_config_path, repo_data, machine_data, resolved_home,
+        )
+    else:
+        layer_provenance = {}
     # Environment overrides (flat, opt-in).
     if os.environ.get("AGENT_LOGGER_SYNC_TARGET"):
         data["sync"]["target"] = os.environ["AGENT_LOGGER_SYNC_TARGET"]
@@ -987,7 +1000,9 @@ def load_config(
     # target, so a foreign value must never stay in data. Raise only when
     # target is "local"; else restore whatever machine-local path preceded it.
     repo_local_path = repo_data.get("sync", {}).get("targets", {}).get("local", {}).get("path")
-    if repo_local_path is not None:
+    if repo_local_path is not None and (
+        (data.get("sync", {}).get("targets", {}).get("local") or {}).get("path") == repo_local_path
+    ):
         try:
             _validate_native_absolute_path(repo_local_path, "sync.local_path")
         except RepositoryConfigError:
@@ -996,5 +1011,7 @@ def load_config(
             data["sync"]["targets"]["local"]["path"] = pre_repo_local_path
 
     origin = machine_config_origin(data, resolved_home, include_repo=include_repo)
-    return Config(data, origin.home if origin else resolved_home,
-                  repo_config_path, repo_root, _machine_origin=origin)
+    result = Config(data, origin.home if origin else resolved_home,
+                    repo_config_path, repo_root, _machine_origin=origin)
+    result.configuration_provenance = layer_provenance
+    return result

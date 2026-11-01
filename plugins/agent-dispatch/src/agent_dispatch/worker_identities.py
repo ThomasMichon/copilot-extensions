@@ -146,6 +146,31 @@ def _candidate_tiers(*, cwd: Path | None = None) -> list[tuple[str, Path]]:
     and the read-only ``list_worker_identities`` introspection.
     """
     base = cwd if cwd is not None else Path.cwd()
+    from .configuration_layers_adapter import configuration_report, surface_layers
+
+    report = configuration_report(base)
+    if report is not None:
+        from configuration_context import context_from_owner
+        from configuration_layers import plan_layers
+
+        from .configuration_layers_adapter import layer_record
+
+        # Identity body/rules are an atomic native document, not a mapping of
+        # capabilities. Introspection and execution share this exact plan.
+        context = context_from_owner(report)
+        records = []
+        for root, directory, tier, origin in surface_layers(report, "identities"):
+            record = layer_record(
+                context, root, directory / "_identity-plan", tier, origin,
+                {"directory": str(directory)},
+            )
+            record.pop("source")
+            records.append(record)
+        directories = [
+            (record["origin"], Path(record["values"]["directory"]))
+            for record in plan_layers(context, records)
+        ]
+        return [*reversed(directories), (SOURCE_PACKAGED, _BUILTIN_DIR)]
     overlay = repo_config.overlay_repo_surface_dir(base, "identities")
     tiers: list[tuple[str, Path]] = []
     if overlay is not None:

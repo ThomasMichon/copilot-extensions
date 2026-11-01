@@ -6,6 +6,7 @@ import json
 from dataclasses import replace
 
 import pytest
+import yaml
 
 from agent_dispatch.registrar import RegistrarError
 from agent_dispatch.registrar_reconcile import declared_registrations
@@ -26,6 +27,143 @@ from agent_dispatch.registrar_discovery import (
     repo_pointer,
     save_pointers,
 )
+
+
+@pytest.fixture
+def layered_dispatch_context(tmp_path, monkeypatch):
+    from agent_dispatch import configuration_layers_adapter as adapter
+
+    base, knowledge, machine = (tmp_path / name for name in ("base", "knowledge", "machine"))
+    for root in (base, knowledge, machine):
+        root.mkdir()
+    report = {
+        "schema": "agent-worktrees.configuration",
+        "version": 1,
+        "context": {
+            "repository_id": "repo-qualified", "execution_machine": "logical-worker",
+            "installation_cell": "cell-one", "binding": "bound",
+            "base_root": str(base), "knowledge_root": str(knowledge),
+        },
+    }
+    monkeypatch.setattr(adapter, "configuration_report", lambda root: report)
+    monkeypatch.setattr(adapter, "install_dir", lambda: machine)
+    return base, knowledge, machine, report
+
+
+def _write_dispatch_layer(root, data, *, local=False, machine=False):
+    directory = (
+        root / "config" / "registrar" if machine else
+        root / ".copilot-extensions" / "agent-dispatch" / ("registrar.local" if local else "registrar")
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "worker.yaml"
+    path.write_text(yaml.safe_dump({"name": "worker", **data}), encoding="utf-8")
+    return path
+
+
+def test_layered_registrar_real_discovery_preserves_scope_and_lists(layered_dispatch_context):
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+
+    base, knowledge, machine, _ = layered_dispatch_context
+    _write_dispatch_layer(base, {"concurrency": 2, "labels": ["base"], "body": {"agent": "portable"}})
+    _write_dispatch_layer(knowledge, {"concurrency": 3, "labels": ["knowledge"]})
+    _write_dispatch_layer(machine, {"max_active_processes": 4}, machine=True)
+    _write_dispatch_layer(base, {"concurrency": 5}, local=True)
+    declaration, = read_repo_location_layers(base, owner="repository-owner")
+    assert declaration.concurrency == 5
+    assert declaration.labels == ("knowledge",)
+    assert declaration.body.agent == "portable"
+    assert declaration.owner == "repository-owner"
+    assert len(declaration.configuration_layers) == 5
+    assert declaration.configuration_provenance["/labels"]["origin"] == "knowledge"
+    assert not (machine / "tasks.db").exists()
+
+
+def test_layered_registrar_unbound_and_malformed_binding(layered_dispatch_context):
+    from configuration_layers import ConfigurationError
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+
+    base, knowledge, _, report = layered_dispatch_context
+    _write_dispatch_layer(base, {"concurrency": 2})
+    _write_dispatch_layer(knowledge, {"concurrency": 3})
+    report["context"]["binding"] = "unbound"
+    del report["context"]["knowledge_root"]
+    assert read_repo_location_layers(base)[0].concurrency == 2
+    report["context"]["binding"] = "unresolved"
+    with pytest.raises(ConfigurationError):
+        read_repo_location_layers(base)
+
+
+def test_layered_registrar_cannot_hide_native_protected_refusal(layered_dispatch_context):
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+
+    base, knowledge, _, _ = layered_dispatch_context
+    _write_dispatch_layer(base, {"body": {"no_pair": "false"}})
+    _write_dispatch_layer(knowledge, {"body": {"no_pair": False}})
+    with pytest.raises(RegistrarError, match="true/false"):
+        read_repo_location_layers(base)
+
+
+def test_layered_identity_real_consumer_and_introspection(layered_dispatch_context):
+    from agent_dispatch.worker_identities import load_worker_identity, describe_worker_identity
+
+    base, knowledge, machine, _ = layered_dispatch_context
+    locations = [
+        (base / ".copilot-extensions" / "agent-dispatch" / "identities", "base"),
+        (knowledge / ".copilot-extensions" / "agent-dispatch" / "identities", "knowledge"),
+        (machine / "config" / "identities", "machine"),
+        (base / ".copilot-extensions" / "agent-dispatch" / "identities.local", "local"),
+    ]
+    for directory, rules in locations:
+        directory.mkdir(parents=True)
+        (directory / "worker.identity.md").write_text(
+            f"---\nname: worker\ndescription: reusable\n---\n{rules}\n", encoding="utf-8",
+        )
+    identity = load_worker_identity("worker", cwd=base)
+    assert identity.rules == "local"
+    assert describe_worker_identity("worker", cwd=base).path == identity.source_path
+
+
+def test_layered_registrar_default_delivered_context_has_exact_repository_scope(
+    tmp_path, monkeypatch,
+):
+    from agent_dispatch import configuration_layers_adapter as adapter
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+
+    first = tmp_path / "one" / "repo"
+    second = tmp_path / "two" / "repo"
+    machine = tmp_path / "machine"
+    for root in (first, second, machine):
+        root.mkdir(parents=True)
+    _write_dispatch_layer(first, {"concurrency": 2})
+    _write_dispatch_layer(second, {"concurrency": 3})
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "qualified-one", "execution_machine": "logical-worker",
+            "installation_cell": "cell-one", "binding": "unbound", "base_root": str(first),
+        },
+    }
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(adapter, "install_dir", lambda: machine)
+    monkeypatch.setattr("agent_dispatch.procutil.agent_worktrees_launch_prefix", lambda: None)
+    assert read_repo_location_layers(first)[0].concurrency == 2
+    assert read_repo_location_layers(second)[0].concurrency == 3
+
+
+def test_layered_registrar_absent_owner_does_not_bootstrap(tmp_path, monkeypatch):
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+
+    def refuse_lookup():
+        raise AssertionError("ordinary config read must not resolve a legacy front door")
+
+    monkeypatch.setattr("agent_dispatch.procutil.agent_worktrees_launch_prefix", refuse_lookup)
+    assert read_repo_location_layers(tmp_path) == []
+    assert list(tmp_path.iterdir()) == []
 
 # -- Pointer model -----------------------------------------------------------
 
@@ -764,6 +902,17 @@ def test_discover_repo_marketplace_overlay_replaces_base_declaration(tmp_path, m
     )
     (overlay / "extra.json").write_text(json.dumps({"name": "extra"}), encoding="utf-8")
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", '{"marketplaceId":"mp-test"}')
+    monkeypatch.setattr(
+        "agent_dispatch.configuration_layers_adapter.configuration_report",
+        lambda root: {
+            "schema": "agent-worktrees.configuration", "version": 1,
+            "context": {
+                "repository_id": "qualified-overlay-repository", "execution_machine": "worker",
+                "installation_cell": "qualified-overlay-cell", "binding": "unbound",
+                "base_root": str(root),
+            },
+        },
+    )
     decls = discover_repo(tmp_path)
     by_name = {decl.name: decl for decl in decls}
     assert set(by_name) == {"extra", "general"}

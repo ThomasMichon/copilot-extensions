@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,6 +26,167 @@ from agent_codespaces.config import (
     save_adopted_repos,
     validate_config,
 )
+
+
+@pytest.fixture
+def layered_codespace_context(tmp_path, monkeypatch):
+    from agent_codespaces import config, configuration_layers_adapter as adapter
+
+    base, knowledge, machine = (tmp_path / name for name in ("base", "knowledge", "machine"))
+    for root in (base, knowledge, machine):
+        root.mkdir()
+    report = {
+        "schema": "agent-worktrees.configuration",
+        "version": 1,
+        "context": {
+            "repository_id": "repo-qualified", "execution_machine": "logical-worker",
+            "installation_cell": "cell-one", "binding": "bound",
+            "base_root": str(base), "knowledge_root": str(knowledge),
+        },
+    }
+    monkeypatch.setattr(config, "cwd_repo_root", lambda: base)
+    monkeypatch.setattr(config, "load_adopted_repos", lambda: [])
+    monkeypatch.setattr(config, "RUNTIME_DIR", machine)
+    monkeypatch.setattr(adapter, "configuration_report", lambda root: report)
+    return base, knowledge, machine, report
+
+
+def _write_codespace_layer(root, data, *, local=False):
+    path = root / ".copilot-extensions" / "agent-codespaces"
+    path.mkdir(parents=True, exist_ok=True)
+    path = path / ("config.local.yaml" if local else "config.yaml")
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return path
+
+
+def test_layered_codespace_real_load_and_knowledge_file_ownership(layered_codespace_context):
+    base, knowledge, machine, _ = layered_codespace_context
+    _write_codespace_layer(base, {"defaults": {"machine_type": "base", "location": "base"}})
+    _write_codespace_layer(knowledge, {
+        "defaults": {"machine_type": "knowledge"},
+        "provision": {"files": [{"src": "assets/profile", "dest": "~/profile"}]},
+    })
+    (machine / "config.yaml").write_text("defaults:\n  machine_type: machine\n", encoding="utf-8")
+    _write_codespace_layer(base, {"defaults": {"machine_type": "local"}}, local=True)
+    effective = load_merged_config()
+    assert effective.default_machine_type == "local"
+    assert effective.default_location == "base"
+    assert effective.provision.files[0].src == str(knowledge / "assets" / "profile")
+    assert effective.source_paths == [base]
+    assert len(effective.configuration_layers) == 5
+    assert not (machine / "adopted-repos.yaml").exists()
+
+
+def test_layered_codespace_selected_context_not_shadowed_by_adoption(
+    layered_codespace_context, tmp_path, monkeypatch,
+):
+    from agent_codespaces import config
+
+    base, _, _, _ = layered_codespace_context
+    unrelated = tmp_path / "another" / "base"
+    unrelated.mkdir(parents=True)
+    _write_codespace_layer(base, {"defaults": {"machine_type": "selected"}})
+    _write_codespace_layer(unrelated, {"defaults": {"machine_type": "unrelated"}})
+    monkeypatch.setattr(config, "load_adopted_repos", lambda: [AdoptedRepo(unrelated)])
+    assert load_merged_config().default_machine_type == "selected"
+
+
+def test_layered_codespace_unbound_and_unresolved(layered_codespace_context):
+    from configuration_layers import ConfigurationError
+
+    _, knowledge, _, report = layered_codespace_context
+    _write_codespace_layer(knowledge, {"defaults": {"machine_type": "private"}})
+    report["context"]["binding"] = "unbound"
+    del report["context"]["knowledge_root"]
+    assert load_merged_config().default_machine_type == "largePremiumLinux"
+    report["context"]["binding"] = "unresolved"
+    with pytest.raises(ConfigurationError):
+        load_merged_config()
+
+
+def test_layered_codespace_preserves_native_credential_union(layered_codespace_context):
+    base, knowledge, _, _ = layered_codespace_context
+    _write_codespace_layer(base, {"credentials": {
+        "sources": {"git": {"enabled": True, "allowed_hosts": ["base.invalid"]}},
+    }})
+    _write_codespace_layer(knowledge, {"credentials": {
+        "sources": {"git": {"allowed_hosts": ["knowledge.invalid"]}},
+    }})
+    source = load_merged_config().credentials.sources["git"]
+    assert source.enabled
+    assert source.allowed_hosts == ["base.invalid", "knowledge.invalid"]
+
+
+def test_layered_codespace_default_delivered_context_is_cell_scoped(tmp_path, monkeypatch):
+    from configuration_layers import ConfigurationError
+    from agent_codespaces import config, worktrees
+
+    base, knowledge, machine = (tmp_path / name for name in ("base", "knowledge", "machine"))
+    for root in (base, knowledge, machine):
+        root.mkdir()
+    _write_codespace_layer(base, {"defaults": {"machine_type": "base"}})
+    _write_codespace_layer(knowledge, {"defaults": {"machine_type": "knowledge"}})
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "repo-qualified", "execution_machine": "logical-worker",
+            "installation_cell": "cell-one", "binding": "bound", "base_root": str(base),
+            "knowledge_root": str(knowledge),
+        },
+    }
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    monkeypatch.setattr(worktrees, "validate_context", lambda: None)
+    monkeypatch.setattr(config, "cwd_repo_root", lambda: base)
+    monkeypatch.setattr(config, "load_adopted_repos", lambda: [])
+    monkeypatch.setattr(config, "RUNTIME_DIR", machine)
+    assert load_merged_config().default_machine_type == "knowledge"
+    monkeypatch.setattr(worktrees, "validate_context", lambda: {"cellRoot": "other-cell"})
+    with pytest.raises(ConfigurationError, match="another installation cell"):
+        load_merged_config()
+
+
+def test_layered_codespace_absent_owner_preserves_standalone_defaults(tmp_path, monkeypatch):
+    from agent_codespaces import config, worktrees
+
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(worktrees, "validate_context", lambda: None)
+    monkeypatch.setattr(config, "cwd_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(config, "load_adopted_repos", lambda: [])
+    monkeypatch.setattr(config, "RUNTIME_DIR", tmp_path)
+    effective = load_merged_config()
+    assert effective.default_machine_type == "largePremiumLinux"
+    assert effective.source_paths == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_layered_codespace_first_touch_isolated_import_operation(tmp_path):
+    base, knowledge, machine = (tmp_path / name for name in ("base", "knowledge", "machine"))
+    for root in (base, knowledge, machine):
+        root.mkdir()
+    _write_codespace_layer(base, {"defaults": {"machine_type": "base"}})
+    _write_codespace_layer(knowledge, {"defaults": {"machine_type": "knowledge"}})
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "qualified-fixture-repository", "execution_machine": "fixture-worker",
+            "installation_cell": "fixture-cell", "binding": "bound",
+            "base_root": str(base), "knowledge_root": str(knowledge),
+        },
+    }
+    environment = dict(os.environ)
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment["AGENT_CODESPACES_HOME"] = str(machine)
+    environment["AGENT_CONFIGURATION_CONTEXT"] = json.dumps(report)
+    result = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "from agent_codespaces.config import load_merged_config; print(load_merged_config().default_machine_type)"],
+        cwd=base, env=environment, capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "knowledge"
+    assert list(machine.iterdir()) == []
 
 
 def test_cwd_repo_root_uses_linked_worktree_root(tmp_path, monkeypatch):
@@ -701,14 +865,20 @@ class TestKnowledgeOverlay:
 
 
 class TestStateRootConfigDir:
-    """_state_root_config_dir -- the resolver seam (mocked subprocess)."""
+    """_state_root_config_dir consumes the qualified owner-data seam."""
 
     def _mock(self, monkeypatch, payload, *, rc=0):
-        import types
-        monkeypatch.setattr("shutil.which", lambda name: "agent-worktrees")
-        proc = types.SimpleNamespace(returncode=rc, stdout=json.dumps(payload),
-                                     stderr="")
-        monkeypatch.setattr("subprocess.run", lambda *a, **k: proc)
+        bound = payload.get("requires_external") and payload.get("bound")
+        context = {
+            "repository_id": "qualified-test-repository", "execution_machine": "test-worker",
+            "installation_cell": "test-cell", "binding": "bound" if bound else "unbound",
+        }
+        if bound:
+            context["knowledge_root"] = payload["state_root"]
+        monkeypatch.setattr(
+            "agent_codespaces.configuration_layers_adapter.configuration_report",
+            lambda root: {"schema": "agent-worktrees.configuration", "version": 1, "context": context},
+        )
 
     def test_resolves_when_knowledge_has_codespaces_yaml(self, tmp_path, monkeypatch):
         from agent_codespaces.config import _state_root_config_dir

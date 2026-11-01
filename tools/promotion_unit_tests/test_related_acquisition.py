@@ -12,16 +12,31 @@ from dropin_registry import EntryDecision, EntryStatus, Finding, ScanAuthority, 
 from plugin_activation import ActivationReport, ActivePlugin
 
 SOURCE = Path(__file__).resolve().parents[2] / "plugins/agent-worktrees/src/agent_worktrees"
+_configuration_spec = importlib.util.spec_from_file_location(
+    "promotion_related_configuration_layers",
+    Path(__file__).resolve().parents[2]
+    / "libs/configuration-layers/src/configuration_layers/__init__.py",
+)
+assert _configuration_spec and _configuration_spec.loader
+_configuration_sdk = importlib.util.module_from_spec(_configuration_spec)
+sys.modules[_configuration_spec.name] = _configuration_sdk
+_configuration_spec.loader.exec_module(_configuration_sdk)
 
 
 @pytest.fixture
 def api(monkeypatch):
+    monkeypatch.setitem(sys.modules, "configuration_layers", _configuration_sdk)
     name = "promotion_related_acquisition"
     package = ModuleType(name)
     package.__path__ = []
     monkeypatch.setitem(sys.modules, name, package)
 
     def stub(child, **fields):
+        if child == "related":
+            fields.setdefault(
+                "_ConfigContributionAnchor",
+                type("ConfigContributionAnchor", (str,), {"directory_form": False}),
+            )
         module = ModuleType(f"{name}.{child}")
         module.__dict__.update(fields)
         monkeypatch.setitem(sys.modules, module.__name__, module)
@@ -397,6 +412,7 @@ def test_config_sources_uses_root_owner_once_and_preserves_explicit_bypass(api, 
     monkeypatch.setattr(owner.subprocess, "run", lookup)
     report = sources.config_source_anchors_report(
         config, base_anchor="explicit" if selection == "explicit" else None, cwd="synthetic-cwd",
+        family="registry",
     )
     assert [(s.anchor, s.origin) for s in report.value] == [("explicit" if selection == "explicit" else "fallback", "harness")]
     assert len(calls) == (0 if selection == "explicit" else 1)
@@ -1104,9 +1120,18 @@ def test_knowledge_preference_owner_gate_decisions(api, monkeypatch, mode):
     else:
         source.state.registered = False
     report = _knowledge_report(api, source)
-    assert report.value == {} and report.reusable is False
+    if mode == "stateful":
+        assert report.value["headless"] is True
+        assert report.value["copilot_profiles"] is source.state.parsed[source.knowledge]["copilot_profiles"]
+        assert "srcroot" not in report.value
+    else:
+        assert report.value == {}
+    assert report.reusable is False
     reads = [path for event, path in source.calls if event == "read"]
-    assert reads == ([] if mode in ("unbound", "invalid-binding") else [str(source.launch)])
+    expected_reads = [] if mode in ("unbound", "invalid-binding") else [str(source.launch)]
+    if mode == "stateful":
+        expected_reads.append(str(source.knowledge))
+    assert reads == expected_reads
     owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
     assert len(owned) == 1
     assert owned[0].authority is (
@@ -1351,10 +1376,12 @@ def _control_plane_owner(api, monkeypatch):
             monkeypatch.setattr(sources_module, "config_source_anchors", rebound)
         return project
 
-    def sources(config, *, base_anchor):
+    def sources(config, *, base_anchor, family="configuration"):
         if config is not project:
+            assert family == "registry"
             calls.append("execution-sources")
             return []
+        assert family == "configuration"
         assert base_anchor == "control"
         calls.append("sources")
         if state.error == "sources":
@@ -1376,6 +1403,7 @@ def _control_plane_owner(api, monkeypatch):
              config_contribution_anchor=lambda anchor, origin: f"{origin}:{anchor}", read_related_grafted=graft)
     sources_module = api.stub("state_root", config_source_anchors=sources)
     owner = _knowledge_owner(api, monkeypatch).owner
+    api.stub("config_sources", compose_ordinary_preferences=lambda *args, **kwargs: None)
     monkeypatch.setattr(sys.modules[owner.__package__ + ".repos"], "list_repos", registry, raising=False)
     monkeypatch.setattr(owner, "load_project_config", load_project)
     return SimpleNamespace(owner=owner, state=state, calls=calls, pr=pr, sources=sources, module=sources_module)

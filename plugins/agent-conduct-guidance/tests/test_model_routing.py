@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 PLUGIN = Path(__file__).resolve().parents[1]
 RESOLVER = PLUGIN / "scripts" / "resolve-model-routing.py"
 SCHEMA = PLUGIN / "schemas" / "model-routing.schema.json"
@@ -63,6 +65,74 @@ def _repo(tmp_path: Path, *, trusted: bool = True) -> tuple[Path, Path]:
             {"trustedFolders": [str(repo.resolve())]},
         )
     return repo, home
+
+
+@pytest.mark.parametrize("level", range(4))
+def test_native_routing_four_tiers_replace_whole_entries(tmp_path, monkeypatch, level):
+    repo, home = _repo(tmp_path)
+    knowledge, local = tmp_path / "knowledge", tmp_path / "local"
+    knowledge.mkdir()
+    local.mkdir()
+    _write(home / ".copilot" / "config.json", {
+        "trustedFolders": [str(repo), str(knowledge)],
+    })
+    paths = (
+        repo / ".github" / "copilot" / "model-routing.json",
+        knowledge / ".github" / "copilot" / "model-routing.json",
+        home / ".copilot" / "model-routing.json",
+        local / ".github" / "copilot" / "model-routing.json",
+    )
+    states = ("candidate", "held", "failed", "candidate")
+    for index, path in enumerate(paths[:level + 1]):
+        entry = {
+            "model": "shared-model", "state": states[index], "surfaces": ["task"],
+            "costRank": index,
+        }
+        if index == 0:
+            entry["constraints"] = ["base-only"]
+        _write(path, _config({"coding": [entry]}))
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "repo-registered", "execution_machine": "machine-a",
+            "installation_cell": "cell-a", "binding": "bound",
+            "base_root": str(repo), "knowledge_root": str(knowledge),
+        },
+        "repository_machine_root": str(local),
+    }))
+
+    payload = json.loads(_run(repo, home).stdout)
+
+    entry = payload["purposes"]["coding"][0]
+    assert entry["state"] == states[level]
+    assert entry["costRank"] == level
+    if level > 0:
+        assert "base-only" not in entry.get("constraints", [])
+    assert payload["provenance"]["/coding/shared-model"]["id"] == (
+        "repository", "knowledge", "operator", "repository-machine",
+    )[level]
+
+
+def test_native_invalid_operator_suppresses_all_lower_and_local_choices(tmp_path, monkeypatch):
+    repo, home = _repo(tmp_path)
+    local = tmp_path / "local"
+    local.mkdir()
+    _write(repo / ".github" / "copilot" / "model-routing.json", _config({
+        "coding": [{"model": "base", "state": "candidate", "surfaces": ["task"]}],
+    }))
+    _write(local / ".github" / "copilot" / "model-routing.json", _config({
+        "coding": [{"model": "local", "state": "candidate", "surfaces": ["task"]}],
+    }))
+    _write(home / ".copilot" / "model-routing.json", {"invalid": True})
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "repo-registered", "execution_machine": "machine-a",
+            "installation_cell": "cell-a", "binding": "unbound", "base_root": str(repo),
+        },
+        "repository_machine_root": str(local),
+    }))
+    assert json.loads(_run(repo, home).stdout)["purposes"] == {}
 
 
 def test_schema_and_example_use_portable_placeholder_models() -> None:

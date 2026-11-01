@@ -159,3 +159,8 @@ def _trust_repo_config_by_default(request: pytest.FixtureRequest, monkeypatch):
     monkeypatch.setattr(
         "agent_logger.tenancy.repo_config_is_trusted", lambda root: True
     )
+    # Fake legacy checkouts have no owner registration; native/projection tests
+    # separately supply their owner boundary without consulting the host.
+    monkeypatch.setattr(
+        "agent_logger.configuration_layers._legacy_owner_prefix", lambda: [],
+    )

@@ -119,6 +119,7 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
             "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
             "agent-logger", "agent-index", "agent-machines", "agent-worktrees",
             "agent-pull-requests", "agent-ssh",
+            "agent-mcp", "agent-vault",
         }
         for name in FILES
         if name.endswith(".py") and name != "_installation_context_worker.py"
