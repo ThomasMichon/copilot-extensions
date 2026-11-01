@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, FiniteFloat, Field
 from .events import EventBus
 from .queue import RoutingAssignment, SpawnReservation, TaskError, TaskQueue
 from .queue_records import WorkerAdmissionInhibited
+from .queue_pool_placement import POOL_PLACEMENT_PROTOCOL, POOL_PLACEMENT_VERSION
 
 
 class ReserveSpawnBody(BaseModel):
@@ -21,6 +22,16 @@ class ReserveSpawnBody(BaseModel):
     allow_suspended_reembodiment: bool = False
     driver: str | None = None
     allocation_revision: int | None = Field(default=None, ge=1, le=2**63 - 1, strict=True)
+
+
+class PoolPlacementBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    version: int = Field(default=1, ge=1, le=1, strict=True)
+    reserved_by: str = Field(min_length=1)
+    catalog_revision: int = Field(ge=0, strict=True)
+    driver: str | None = None
 
 
 class RoutingAssignmentBody(BaseModel):
@@ -221,6 +232,43 @@ def register_spawn_routes(
             msg = str(exc)
             status = 404 if msg.startswith("no such") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
+
+    pool_control = _make_control_auth(
+        control_token or None, rejected, operation="pool-placement",
+        code_prefix="pool_placement_control",
+        unavailable_message="pool placement requires configured control authority",
+        forbidden_message="pool placement requires control authority",
+    )
+
+    @app.get("/pool-placements/contract", dependencies=[Depends(pool_control)])
+    def pool_placement_contract() -> dict:
+        return {
+            "protocol": POOL_PLACEMENT_PROTOCOL, "supported_versions": [POOL_PLACEMENT_VERSION],
+            "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
+            "automatic_lane_migration": False, "startup_retry_policy_complete": False,
+        }
+
+    @app.post("/pool-placements", dependencies=[Depends(pool_control)])
+    def place_pool_task(body: PoolPlacementBody) -> dict:
+        try:
+            reservation, reserved = queue.reserve_spawn(
+                body.task_id, reserved_by=body.reserved_by, driver=body.driver,
+                pool_catalog_revision=body.catalog_revision,
+            )
+        except WorkerAdmissionInhibited as exc:
+            raise HTTPException(409, detail=exc.detail()) from exc
+        except TaskError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        assignment = queue.task_pool_assignment(body.task_id)
+        assert assignment is not None
+        if reserved:
+            bus.publish({"type": "task.claimed", "task_id": body.task_id})
+            bus.publish({"type": "spawn.reserved", "reservation": asdict(reservation)})
+        return {
+            "protocol": POOL_PLACEMENT_PROTOCOL, "version": POOL_PLACEMENT_VERSION,
+            "reserved": reserved, "reservation": asdict(reservation),
+            "assignment": asdict(assignment),
+        }
 
     @app.post("/spawn-reservations")
     @app.post("/spawn-reservations/revisions")

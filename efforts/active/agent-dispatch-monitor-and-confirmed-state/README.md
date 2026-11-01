@@ -1660,3 +1660,46 @@ No automatic publisher, config setter, ordinary caller, enrollment, activation,
 rollout, placement, unmanaged-writer adoption or protected reconciliation was
 enabled. External atomicity, mixed writers, executable rollback and every
 original Plan/Validation gate remain open; the parent remains **Active**.
+
+### 2026-10-31 - Prioritized lifecycle and agenda contract reviewed
+
+[#9848](https://github.com/ThomasMichon/copilot-extensions/pull/9848) actually
+merged as `0dcd78b31c5779c0c92357989282bc83ca8a0524` after current-head
+Copilot approval, a complete review with no active findings or inline threads,
+and all three required checks. The preceding #9843 journal was delivered.
+The amendment now prioritizes the five claim/start, failure/deadline, suspended
+recovery and submission-closeout outcomes. Finalize-before-submission is required
+for worktree-backed workers; automatic finalize-before-evaluators remains a
+separately qualified option.
+
+The worktree-owned agenda advanced through its declared reviewed-contract edge
+to claim/start implementation. This is design acceptance, not implementation or
+runtime adoption. Existing reservation/claim/start and wake/submission owners
+remain the integration seams. Nonblocking metadata identity hypotheses are
+parked rather than silently promoted into prerequisites. Every original
+Plan/Validation and installed/native gate remains open; the parent is **Active**.
+
+### 2026-11-01 - First atomic claim/start implementation prepared
+
+Prepared the explicit coordinator-owned pool placement transaction and its
+affirmative worker-start boundary. Complete configured catalog selection,
+instance capacity, retained assignment, reservation and `CLAIMED` now commit
+together in source before workspace/startup effects. A placed claim initially
+has no invented worker/native; spawn publication is not acceptance.
+Current worker start checks the recorded execution host, target worktree,
+native identity, assignment generation and existing startup/acquisition fences.
+
+Contained final validation passed **866 controls** across placement, real HTTP/client,
+reservation, queue, lifecycle, supervisor and native-owner wake tests.
+Independent source review found execution-host, target-worktree and sibling
+exclusive-contention gaps; all three were corrected with regression controls.
+Existing reset tests now preserve qualified native-retirement requirements
+instead of expecting reset to discard an accountable native or reservation.
+Ruff and all thirteen install contracts pass; the two new typed placement/catalog
+modules pass a focused type check. A broader legacy mixin/client type probe does
+not pass and is not presented as full type acceptance.
+
+This is pre-publication source evidence, not a merged or installed outcome.
+Admitted supervisor caller migration, startup/decision budgets, task-wide retry,
+suspended recovery and submission closeout remain open under the amendment.
+The parent and the active claim/start work unit remain **Active**.

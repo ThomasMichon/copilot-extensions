@@ -70,7 +70,8 @@ class Status:
     #: New liveness-cap exhaustion resolves to ``ABANDONED``.
     DEAD_LETTER = "dead_letter"
 
-    #: States a worker actively holds; recoverable by liveness GC (owner-gone).
+    #: Active worker states, including a pre-worker allocator claim. Owner-gone
+    #: GC applies only once an actual worker owns an allocator-placed claim.
     HELD = frozenset({CLAIMED, STARTED})
     #: Non-terminal states that retain an owner. Suspended tasks are deliberately
     #: excluded from HELD because they have no active lease or embodiment.

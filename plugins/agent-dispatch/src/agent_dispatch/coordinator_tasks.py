@@ -37,6 +37,7 @@ from .coordinator_task_models import (
     ResumeBody,
     SteerBody,
     SteerTakeBody,
+    StartBody,
     SuspendBody,
     UnexcludeBody,
     UnholdBody,
@@ -58,7 +59,9 @@ from .queue import (
     TaskQueue,
     worker_id_for,
 )
-from .task_authority import mint_task_token, register_task_grant_route, resolve_task_authority
+from .task_authority import (
+    mint_task_token, register_task_grant_route, resolve_task_authority, start_incarnation,
+)
 from .queue_dedup import DedupConflictError
 from .steering import SteeringError, steer_request_fingerprint, steer_wake_message
 
@@ -544,18 +547,16 @@ def register_task_routes(
         return {"adopted": False, "reason": "agent-dispatch has no relay"}
 
     @app.post("/tasks/{task_id}/start")
-    def start(task_id: str, body: WorkerBody, request: Request) -> dict:
+    def start(task_id: str, body: StartBody, request: Request) -> dict:
         worker_id, owner_session_id = _resolve_task_authority(
             request, task_id, body.worker_id, body.owner_session_id
         )
         owner_session_id = owner_session_id or resolve_owner_session_id(worker_id)
+        generation, expected_owner = start_incarnation(request, body, owner_session_id)
         result = _guard(
             lambda: queue.start(
                 task_id, worker_id, owner_session_id=owner_session_id,
-                expected_owner_session_id=(
-                    owner_session_id if getattr(request.state, "task_scope", None) is not None else None
-                ),
-                expected_generation=_scoped_generation(request),
+                expected_owner_session_id=expected_owner, expected_generation=generation,
             ),
             "task.started",
         )
