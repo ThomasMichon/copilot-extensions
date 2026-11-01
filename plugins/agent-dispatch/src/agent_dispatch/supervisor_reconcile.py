@@ -205,6 +205,7 @@ class BoundedReconciliation(SupervisorSources):
     def _drain_tracked_futures(self, timeout: float) -> None:
         from .supervisor_daemon import _wait_futures
 
+        self._close_pool_metadata_admission()
         deadline = time.monotonic() + timeout
         while True:
             self._prune_probe_inflight()

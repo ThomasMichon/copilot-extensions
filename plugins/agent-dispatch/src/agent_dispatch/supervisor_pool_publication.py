@@ -16,12 +16,13 @@ from .pool_publication_custody import (
 )
 from .pool_source_snapshot import DeclarationRead, local_input_revision
 from .single_instance import SingleInstance, SingletonAdmissionError, lock_path_for
+from .supervisor_pool_sender import SupervisorPoolSender
 
 log = logging.getLogger("agent-dispatch.supervisor-daemon")
 
 
-class SupervisorPoolPublication:
-    """No serve-loop caller, publisher enrollment or metadata write transport."""
+class SupervisorPoolPublication(SupervisorPoolSender):
+    """Explicit preparation/sending, never called by the serve loop."""
 
     if TYPE_CHECKING:
         machine: str | None
@@ -44,6 +45,7 @@ class SupervisorPoolPublication:
 
     def _init_pool_publication(self) -> None:
         self._pool_publisher_custody: PoolPublisherCustody | None = None
+        self._init_pool_sender()
 
     def _build_lock(self) -> SingleInstance:
         from .config import run_dir

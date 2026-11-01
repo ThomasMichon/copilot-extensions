@@ -1431,3 +1431,19 @@ The source resets the child mutex before entry, owns capture deadlines in the
 calling context and prunes completed futures without replacing pending custody.
 Real contained fork and deterministic concurrent-cleanup/pruning regressions
 cover these boundaries; they do not claim Windows/macOS runtime qualification.
+
+The preparation source actually merged in
+[#9804](https://github.com/ThomasMichon/copilot-extensions/pull/9804) as
+`67fa9e3a6d48d1be3ff1f3e0f5cddd2f0dffb218` after current-head independent
+approval and successful required checks. The final 260-case packet also covers
+deadline-bound admission, immutable override mappings, stateful/lazy reader
+serialization and old-result supersession across all three discovery sources.
+Addressed review threads retain their history. Managed post-merge reconciliation
+preserved the pre-completion backup and reached the exact squash merge cleanly.
+
+This closes the bounded preparation/custody source prerequisite, not the complete
+publisher, configured cohort or allocation transaction. The next source stretch
+is an explicitly invoked sender and original-request unknown-outcome recovery
+under the same singleton and bounded-future owner. No live enrollment, ordinary
+caller migration, activation, installed qualification or placement trial is
+authorized or claimed by this source merge; the parent remains Active.
