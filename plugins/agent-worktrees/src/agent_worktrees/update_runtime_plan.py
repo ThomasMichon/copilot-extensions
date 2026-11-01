@@ -11,7 +11,9 @@ from __future__ import annotations
 import dataclasses
 import json
 import shutil
+import socket
 import subprocess
+import sys
 from collections.abc import Collection, Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -57,9 +59,45 @@ class RuntimeUpdateStep:
         return self.source.payload if self.source is not None else self.payload
 
 
+def _index_repository(
+    payload: Path, project: Path | None, contexts: tuple[Path, ...],
+    environment: Mapping[str, str],
+) -> Path | None:
+    if environment.get("AGENT_INDEX_REPO"):
+        return project
+    candidates = tuple(dict.fromkeys(
+        path.resolve() for path in (*contexts, *((project,) if project is not None else ()))
+    ))
+    if len(candidates) < 2:
+        return candidates[0] if candidates else None
+    from agent_procutil import no_window_kwargs
+    resolver = payload / "scripts" / "resolve-activation-role.py"
+    if not resolver.is_file():
+        raise ValueError("Index repository-role resolver is unavailable")
+    configured = None
+    host = None
+    machine = environment.get("AGENT_INDEX_MACHINE") or socket.gethostname().split(".")[0]
+    for candidate in candidates:
+        result = subprocess.run(
+            [sys.executable, "-I", "-B", str(resolver), "--repo", str(candidate),
+             "--machine", machine],
+            cwd=payload, env=dict(environment), capture_output=True, text=True,
+            timeout=10, **no_window_kwargs(),
+        )
+        role = result.stdout.strip()
+        if result.returncode or role not in {"host", "client", "unconfigured"}:
+            raise ValueError("Index repository-role resolution failed")
+        if role == "host" and host is None:
+            host = candidate
+        if role != "unconfigured" and configured is None:
+            configured = candidate
+    return host or configured or project
+
+
 def _select_inputs(
     step: RuntimeUpdateStep, source: PreparedRuntimeSource | None,
     project: Path | None = None,
+    *, repository_contexts: tuple[Path, ...] = (),
 ) -> RuntimeUpdateStep:
     try:
         environment, root = reconcile.runtime_installer_environment(step.name, step.payload)
@@ -75,6 +113,11 @@ def _select_inputs(
             scope = reconcile.manifest_runtime_scope(source.payload)
             if scope not in {"universal", "machine-gated"}:
                 raise ValueError("Prepared payload does not declare an installable runtime scope")
+            if step.name == "agent-index":
+                source.validate(step.name, step.payload, environment)
+                project = _index_repository(source.payload, project, repository_contexts, environment)
+                if project is not None and not environment.get("AGENT_INDEX_REPO"):
+                    environment["AGENT_INDEX_REPO"] = str(project.resolve())
             try:
                 if runtime._machine_gate_blocks(step.name, scope, project):
                     return dataclasses.replace(
@@ -82,16 +125,19 @@ def _select_inputs(
                     )
             except runtime.MachineDetectionError as error:
                 return dataclasses.replace(step, status=f"machine detection failed: {error}")
-            source.validate(step.name, step.payload, environment)
+            if step.name != "agent-index":
+                source.validate(step.name, step.payload, environment)
+                project = (project or Path.cwd()).resolve()
             source_target = plan_target(source, step.name, step.payload, root, environment)
             if source_target is not None:
                 environment[TARGET_ENV] = source_target.document
-            project = (project or Path.cwd()).resolve()
             environment.update({
                 PIN_ENV: source.identity,
                 "COPILOT_PLUGIN_STAGED_FROM": str(step.payload.resolve()),
-                "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT": str(project),
+                "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT": str((project or Path.cwd()).resolve()),
             })
+        elif step.name == "agent-index":
+            project = _index_repository(step.payload, project, repository_contexts, environment)
         if step.name == "agent-index" and project is not None and not environment.get("AGENT_INDEX_REPO"):
             environment["AGENT_INDEX_REPO"] = str(project.resolve())
         return dataclasses.replace(
@@ -120,6 +166,7 @@ def _deployed_version(step: RuntimeUpdateStep) -> str | None:
 def plan_registered(
     name: str, platform_name: str, *, force: bool, gate_context: Path | None = None,
     source: PreparedRuntimeSource | None = None,
+    repository_contexts: tuple[Path, ...] = (),
 ) -> RuntimeUpdateStep:
     from . import update_runtime as runtime
 
@@ -131,14 +178,21 @@ def plan_registered(
     if scope == "none":
         return dataclasses.replace(step, status="payload-only")
     step = dataclasses.replace(step, eligible=True)
+    multi_index = name == "agent-index" and len(repository_contexts) > 1
     try:
-        if runtime._machine_gate_blocks(name, scope, gate_context):
+        if not multi_index and runtime._machine_gate_blocks(name, scope, gate_context):
             return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
     except runtime.MachineDetectionError as error:
         return dataclasses.replace(step, status=f"machine detection failed: {error}")
-    step = _select_inputs(step, source, gate_context)
+    step = _select_inputs(step, source, gate_context, repository_contexts=repository_contexts)
     if step.status:
         return step
+    if multi_index:
+        try:
+            if runtime._machine_gate_blocks(name, scope, step.project_root):
+                return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
+        except runtime.MachineDetectionError as error:
+            return dataclasses.replace(step, status=f"machine detection failed: {error}")
     pdir, environment, pver = step.artifact, step.environment, step.target_version
     try:
         dver = _deployed_version(step)
@@ -199,6 +253,7 @@ def plan_module(
     name: str, pdir: Path, platform_name: str, *, force: bool,
     gate_context: Path | None = None,
     source: PreparedRuntimeSource | None = None,
+    repository_contexts: tuple[Path, ...] = (),
 ) -> RuntimeUpdateStep:
     from . import update_runtime as runtime
 
@@ -211,14 +266,21 @@ def plan_module(
     if scope == "none":
         return dataclasses.replace(step, status="SKIPPED (payload-only)")
     step = dataclasses.replace(step, eligible=True)
+    multi_index = name == "agent-index" and len(repository_contexts) > 1
     try:
-        if runtime._machine_gate_blocks(name, scope, gate_context):
+        if not multi_index and runtime._machine_gate_blocks(name, scope, gate_context):
             return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
     except runtime.MachineDetectionError as error:
         return dataclasses.replace(step, status=f"machine detection failed: {error}")
-    step = _select_inputs(step, source, gate_context)
+    step = _select_inputs(step, source, gate_context, repository_contexts=repository_contexts)
     if step.status:
         return step
+    if multi_index:
+        try:
+            if runtime._machine_gate_blocks(name, scope, step.project_root):
+                return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
+        except runtime.MachineDetectionError as error:
+            return dataclasses.replace(step, status=f"machine detection failed: {error}")
     pdir, environment, pver = step.artifact, step.environment, step.target_version
     try:
         dver = _deployed_version(step)
@@ -291,6 +353,8 @@ def plan_modules(
             step = plan_module(
                 name, pdir, platform_name, force=force or name in force_runtimes,
                 gate_context=target.context if target else None,
+                **({"repository_contexts": target.repository_contexts}
+                   if target and name == "agent-index" else {}),
                 **({"source": sources.get(name)} if sources is not None else {}),
             )
         steps.append(step)
@@ -327,6 +391,7 @@ def plan_portfolio(
         plan_registered(
             name, platform_name, force=force or name in force_runtimes,
             gate_context=target.context,
+            **({"repository_contexts": target.repository_contexts} if name == "agent-index" else {}),
             **({"source": sources.get(name)} if sources is not None else {}),
         )
         for name, target in sorted(targets.items())

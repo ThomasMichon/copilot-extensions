@@ -85,6 +85,13 @@ def synthetic_runtime(root: Path, version: str, *, program: str | None = None) -
             package / "src", purelib, dirs_exist_ok=True,
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info"),
         )
+    if program is None:
+        import yaml
+
+        shutil.copytree(
+            Path(yaml.__file__).parent, purelib / "yaml",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
     if program is not None:
         (purelib / "worktree_manager" / "__main__.py").write_text(program, encoding="utf-8")
     bootstrap = slot / ".runtime-bootstrap"
