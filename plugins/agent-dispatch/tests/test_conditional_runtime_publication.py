@@ -15,6 +15,28 @@ import pytest
 
 from . import source_publication_fixture as fixture
 
+
+def test_fixture_reports_duration_when_parent_interrupts_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_dispatch import procutil
+
+    class Interrupted(BaseException):
+        pass
+
+    def interrupt(*args: object, **kwargs: object) -> None:
+        assert kwargs["timeout"] == 90
+        raise Interrupted
+
+    monkeypatch.setattr(fixture.shutil, "which", lambda *args, **kwargs: "fixture-shell")
+    monkeypatch.setattr(procutil, "run_background_capture", interrupt)
+    with pytest.raises(Interrupted):
+        fixture.run("sh", tmp_path / "entry", ["--version"], {})
+    diagnostics = capsys.readouterr().err
+    assert "publication fixture: begin sh" in diagnostics
+    assert "publication fixture: end code=unavailable, elapsed=" in diagnostics
+
+
 INJECTION = r'''
 if [[ -n "${FIXTURE_PEER_PYTHON:-}" ]]; then
     _bootstrap_python() { printf '%s' "$FIXTURE_PEER_PYTHON"; }

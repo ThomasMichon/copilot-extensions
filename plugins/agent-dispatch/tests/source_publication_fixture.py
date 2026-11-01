@@ -447,14 +447,18 @@ def run(
         f"py={shutil.which('py', path=env.get('PATH'))}",
         file=sys.stderr, flush=True,
     )
-    result = run_background_capture(
-        [executable, *prefix, str(entry), *args], env=env, cwd=cwd, timeout=90,
-        max_output=512 * 1024,
-    )
+    result = None
+    try:
+        result = run_background_capture(
+            [executable, *prefix, str(entry), *args], env=env, cwd=cwd, timeout=90,
+            max_output=512 * 1024,
+        )
+    finally:
+        print(
+            f"publication fixture: end code={result.returncode if result is not None else 'unavailable'}, "
+            f"elapsed={time.monotonic() - started:.3f}s\n"
+            + (result.stderr if result is not None else ""),
+            file=sys.stderr, flush=True,
+        )
     assert result is not None, "publication fixture exceeded 90s or could not start"
-    print(
-        f"publication fixture: end code={result.returncode}, elapsed={time.monotonic() - started:.3f}s\n"
-        + result.stderr,
-        file=sys.stderr, flush=True,
-    )
     return result
