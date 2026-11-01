@@ -3181,6 +3181,9 @@ native symlink/aliased-parent controls remain in the existing integration suites
 The runner rejects process, network, native-loader,
 Git-storage, thread and sleep effects, including attempted effects caught by a
 test. Test writes are confined to synthetic temporary storage.
+The retained client-resource units substitute fixture-confined artifact handles
+at the native open boundary. Resource framing, hashing and retention remain real;
+these units do not qualify Windows read-sharing fences.
 
 `tools/promotion_unit_tests/test_cell_installer.py` admits the original thirteen
 actor-free Machines release-payload and watchdog controls. The owned process
