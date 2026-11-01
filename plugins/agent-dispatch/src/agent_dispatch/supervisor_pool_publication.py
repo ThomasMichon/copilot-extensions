@@ -6,6 +6,7 @@ import copy
 import logging
 import time
 from collections.abc import Callable, Iterable, Mapping
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from .pool_publication_custody import (
@@ -29,12 +30,14 @@ class SupervisorPoolPublication:
         overrides_source: Callable[[], Mapping[str, dict]] | None
         _lock: Any
         _reconcile_deadline: float | None
+        _pool_capture_deadline: ContextVar[float | None]
         _reconcile_call_budget: float
         _source_collection_lock: Any
         _source_observations: dict
         _pool_source_snapshot: Any
         _effective_registrations: Callable[[], dict[str, dict]]
         _bounded_read: Callable[[str, Callable], Any]
+        _prune_probe_inflight: Callable[[], None]
 
     def _init_pool_publication(self) -> None:
         self._pool_publisher_custody: PoolPublisherCustody | None = None
@@ -98,12 +101,11 @@ class SupervisorPoolPublication:
         """
         lock, acquisition = self._pool_acquisition()
         with lock.guard_acquisition(acquisition), self._source_collection_lock:
-            previous_deadline = self._reconcile_deadline
-            if previous_deadline is None:
-                self._reconcile_deadline = time.monotonic() + self._reconcile_call_budget
+            capture_token = self._pool_capture_deadline.set(time.monotonic() + self._reconcile_call_budget)
             reasons = []
             catalog = None
             try:
+                self._prune_probe_inflight()
                 before = self._bounded_read("pool-catalog-before", self.client.pool_catalog_metadata)
                 before = PoolCatalogRead.from_dict(before)
                 if self._source_observations["pool-catalog-before"].state != "fresh":
@@ -131,7 +133,8 @@ class SupervisorPoolPublication:
                 log.warning("pool publication input capture unavailable: error_type=%s", type(exc).__name__)
                 reasons.append("coordinator-input-capture-unavailable")
             finally:
-                self._reconcile_deadline = previous_deadline
+                self._pool_capture_deadline.reset(capture_token)
+                self._prune_probe_inflight()
             if self._pool_acquisition() != (lock, acquisition):
                 raise SingletonAdmissionError("pool source capture changed the singleton scope")
             return PoolPublicationInputs(

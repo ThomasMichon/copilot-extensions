@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 import re
 import sys
-import threading
+from _thread import RLock
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -50,18 +50,27 @@ class SingleInstance:
         # both could observe the same fd and the second os.close() could close
         # a descriptor already reused elsewhere (review follow-up on
         # ThomasMichon/copilot-extensions#3066).
-        self._release_lock = threading.RLock()
+        self._release_lock = RLock()
+        self._mutex_pid = os.getpid()
+
+    def _process_mutex(self) -> RLock:
+        pid = os.getpid()
+        if self._mutex_pid != pid:
+            # Only the fork caller survives; another thread may own the inherited mutex.
+            self._release_lock = RLock()
+            self._mutex_pid = pid
+        return self._release_lock
 
     @property
     def acquisition(self) -> str | None:
         """An opaque incarnation of this process's actual lock acquisition."""
-        with self._release_lock:
+        with self._process_mutex():
             return self._acquisition if self._fd is not None and self._holder_pid == os.getpid() else None
 
     @contextmanager
     def guard_acquisition(self, acquisition: str) -> Iterator[None]:
         """Keep release serialized with a bounded, locally admitted operation."""
-        with self._release_lock:
+        with self._process_mutex():
             if not acquisition or self.acquisition != acquisition:
                 raise SingletonAdmissionError("supervisor singleton acquisition is not current")
             yield
@@ -83,7 +92,7 @@ class SingleInstance:
     def acquire(self) -> bool:
         """Try to take the lock. Returns ``True`` if acquired, ``False`` if another
         live process already holds it. Idempotent for the holding instance."""
-        with self._release_lock:
+        with self._process_mutex():
             return self._acquire()
 
     def _acquire(self) -> bool:
@@ -121,7 +130,7 @@ class SingleInstance:
         """Release the lock (best-effort, thread-safe/one-shot). The OS would
         release it on process exit anyway; this makes a clean shutdown
         immediate."""
-        with self._release_lock:
+        with self._process_mutex():
             fd = self._fd
             if fd is None:
                 return

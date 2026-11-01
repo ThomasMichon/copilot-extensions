@@ -117,6 +117,8 @@ its inherited descriptor. The acquisition guard serializes bounded local
 preparation with release. `SupervisorPoolPublication` accepts only the daemon's
 actual lock for its configured machine/environment scope, not an injected
 boolean-only lock or a live lock for a different scope.
+The child resets its inherited Python mutex before attempting to acquire it,
+including when another parent thread held that mutex at the fork.
 
 The explicit `capture_pool_publication_inputs()` seam brackets the existing
 effective-set collection and a fresh declaration/override recheck with two
@@ -130,6 +132,10 @@ discovery pool and remain in its existing future/shutdown accounting.
 The new timeout path retains confirmed vetoes; without a first confirmed veto
 snapshot it is indeterminate, not permission to start units against an unknown
 override. Completed older reads remain unqualified until a fresh attempt.
+Capture owns a context-local deadline shared by its reads and declaration
+publication; concurrent tick setup/cleanup cannot overwrite that budget.
+Completed discovery results are pruned at both capture boundaries through the
+existing future owner, preserving every still-pending operation.
 
 This is **optimistic observed coherence**, not an atomic filesystem transaction
 or a remote attestation. The digest includes the entire observed declaration

@@ -1081,7 +1081,9 @@ class SupervisorDaemon(BoundedReconciliation):
         return handled
 
     def _prune_probe_inflight(self) -> None:
-        self._probe_inflight = {f for f in self._probe_inflight if not f.done()}
+        for future in tuple(self._probe_inflight):
+            if future.done():
+                self._probe_inflight.discard(future)
 
     def _poll_managed_health(
         self, rid: str, snapshot: ManagedLaunchSnapshot, deadline: float

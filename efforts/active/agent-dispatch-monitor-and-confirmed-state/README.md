@@ -1423,3 +1423,11 @@ was enabled. The [publication reference](../../../plugins/agent-dispatch/docs/po
 records the boundary. Final effect-boundary source fencing, expected membership,
 mixed-version qualification and atomic placement remain open under #9709 and
 the original amendment matrix.
+
+Independent review exposed three coupled source defects: an inherited Python
+mutex could block before the child pid check, concurrent tick cleanup could
+remove a capture's timeout, and standalone captures retained completed results.
+The source resets the child mutex before entry, owns capture deadlines in the
+calling context and prunes completed futures without replacing pending custody.
+Real contained fork and deterministic concurrent-cleanup/pruning regressions
+cover these boundaries; they do not claim Windows/macOS runtime qualification.

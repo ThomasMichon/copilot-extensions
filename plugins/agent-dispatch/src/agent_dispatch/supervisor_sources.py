@@ -8,6 +8,7 @@ import time
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import CancelledError, Executor, Future, TimeoutError
+from contextvars import ContextVar
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -47,6 +48,7 @@ class SupervisorSources(SupervisorPoolPublication):
 
     def _init_source_collection(self) -> None:
         self._source_collection_lock = threading.RLock()
+        self._pool_capture_deadline: ContextVar[float | None] = ContextVar("pool_capture_deadline", default=None)
         self._local_source_inputs: dict[str, object] = {}
         self._last_override_veto: set[str] | None = None
         self._init_pool_publication()
@@ -66,9 +68,14 @@ class SupervisorSources(SupervisorPoolPublication):
     def _observe_source(self, source: str, state: SourceState, reason: str = "") -> None:
         self._source_observations[source] = SourceObservation(source, state, reason)
 
+    def _source_read_deadline(self) -> float | None:
+        captured = self._pool_capture_deadline.get()
+        return self._reconcile_deadline if captured is None else captured
+
     def _bounded_read(self, key: str, read: Callable[[], Any]) -> Any:
         self._observe_source(key, "pending")
-        if self._reconcile_deadline is None:
+        deadline = self._source_read_deadline()
+        if deadline is None:
             try:
                 result = read()
             except Exception:
@@ -83,7 +90,7 @@ class SupervisorSources(SupervisorPoolPublication):
             self._discovery_futures[key] = future
             self._probe_inflight.add(future)
         try:
-            result = future.result(timeout=max(0.0, self._reconcile_deadline - time.monotonic()))
+            result = future.result(timeout=max(0.0, deadline - time.monotonic()))
         except Exception:
             self._observe_source(key, "unavailable")
             raise
