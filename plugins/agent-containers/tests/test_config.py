@@ -140,7 +140,10 @@ def test_layered_container_native_owner_refusal_never_selects_defaults(
     monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
     monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "admitted-by-native-boundary")
-    monkeypatch.setattr(config, "_installation_owner", lambda: {"pluginRoot": str(tmp_path)})
+    (tmp_path / "plugins" / "agent-worktrees").mkdir(parents=True)
+    monkeypatch.setattr(config, "_installation_owner", lambda: {
+        "pluginRoot": str(tmp_path), "cellRoot": str(tmp_path),
+    })
     monkeypatch.setattr(config._peer_launch, "launch_prefix", lambda *args: ["qualified-owner"])
     report = {
         "schema": "agent-worktrees.configuration", "version": version,
@@ -261,6 +264,185 @@ def test_layered_container_implicit_namespace_refuses_delivered_report(tmp_path,
     monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
     with pytest.raises(config._peer_launch.ContextRefused, match="context is missing"):
         load_config(strict=True)
+
+
+@pytest.fixture
+def optional_containers_owner(tmp_path, monkeypatch):
+    from agent_containers import config
+
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    cell = tmp_path / "nested" / "marketplaces" / "selected-cell"
+    own_root = cell / "plugins" / "agent-containers"
+    own_root.mkdir(parents=True)
+    events = []
+
+    def qualify(*args):
+        events.append("qualify")
+        return {"cellRoot": str(cell), "pluginRoot": str(own_root)}
+
+    monkeypatch.chdir(repository)
+    monkeypatch.setattr(config, "RUNTIME_DIR", own_root)
+    monkeypatch.setattr(config._peer_launch, "validate_owner", qualify)
+    monkeypatch.setattr(config._peer_launch, "launch_prefix", lambda *args: ["qualified-owner"])
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "qualified-owner-receipt")
+    monkeypatch.setenv("AGENT_CONTAINERS_HOME", str(own_root))
+    monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    return repository, own_root, cell / "plugins" / "agent-worktrees", events
+
+
+@pytest.mark.parametrize("peer_state", ["missing", "older"])
+@pytest.mark.parametrize("native_file", [False, True])
+def test_optional_containers_owner_preserves_namespace_files_and_defaults(
+    optional_containers_owner, monkeypatch, peer_state, native_file,
+):
+    _, own_root, peer, events = optional_containers_owner
+    if peer_state == "older":
+        peer.mkdir()
+    if native_file:
+        (own_root / "containers.yaml").write_text(
+            "schema_version: 2\nexec_user: native\n", encoding="utf-8",
+        )
+
+    def run(argv, **kwargs):
+        assert peer_state == "older", "missing optional peer must not be launched"
+        events.append("query")
+        assert argv == ["qualified-owner", "state-root", "--configuration", "--json"]
+        return subprocess.CompletedProcess(
+            argv, 2, b"", b"unrecognized arguments: --configuration",
+        )
+
+    monkeypatch.setattr("configuration_context.subprocess.run", run)
+    assert load_config(strict=True).exec_user == ("native" if native_file else "vscode")
+    assert events[0] == "qualify"
+    assert ("query" in events) == (peer_state == "older")
+    assert {path.name for path in own_root.iterdir()} == ({"containers.yaml"} if native_file else set())
+
+
+@pytest.mark.parametrize("exit_code", [1, 3, 126, 2])
+def test_optional_containers_owner_present_refusal_never_falls_back(
+    optional_containers_owner, monkeypatch, exit_code,
+):
+    from configuration_layers import ConfigurationError
+
+    _, _, peer, events = optional_containers_owner
+    peer.mkdir()
+
+    def run(argv, **kwargs):
+        events.append("query")
+        return subprocess.CompletedProcess(
+            argv, exit_code, b"", b"configured binding or runtime admission refused",
+        )
+
+    monkeypatch.setattr("configuration_context.subprocess.run", run)
+    with pytest.raises(ConfigurationError, match="refused"):
+        load_config()
+    assert events == ["qualify", "query"]
+
+
+@pytest.mark.parametrize("invalid_report", ["foreign-cell", "foreign-cell-other-repo", "unresolved"])
+def test_optional_containers_owner_rejects_delivered_state_before_absence(
+    optional_containers_owner, monkeypatch, invalid_report,
+):
+    import json
+
+    from configuration_layers import ConfigurationError
+
+    repository, _, peer, events = optional_containers_owner
+    context = {
+        "repository_id": "qualified-repository", "execution_machine": "worker",
+        "installation_cell": str(peer.parent.parent), "binding": "unbound",
+        "base_root": str(repository),
+    }
+    if invalid_report.startswith("foreign-cell"):
+        context["installation_cell"] = "foreign-cell"
+    if invalid_report == "foreign-cell-other-repo":
+        context["base_root"] = str(repository.parent)
+    if invalid_report == "unresolved":
+        context["binding"] = "unresolved"
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1, "context": context,
+    }))
+    with pytest.raises(ConfigurationError):
+        load_config()
+    assert events == ["qualify"]
+    assert not peer.exists()
+
+
+@pytest.mark.parametrize("failure", ["owner", "inspection", "execution"])
+def test_optional_containers_owner_ambiguous_failure_never_selects_defaults(
+    optional_containers_owner, monkeypatch, failure,
+):
+    import json
+    from pathlib import Path
+
+    from configuration_layers import ConfigurationError
+    from agent_containers import config
+
+    repository, _, peer, events = optional_containers_owner
+    if failure == "owner":
+        monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+            "schema": "agent-worktrees.configuration", "version": 1,
+            "context": {
+                "repository_id": "qualified-repository", "execution_machine": "worker",
+                "installation_cell": str(peer.parent.parent), "binding": "unbound",
+                "base_root": str(repository),
+            },
+        }))
+
+        def refuse_owner(*args):
+            events.append("qualify")
+            raise ValueError("fresh owner qualification refused")
+
+        monkeypatch.setattr(config._peer_launch, "validate_owner", refuse_owner)
+    elif failure == "inspection":
+        original = Path.lstat
+
+        def deny_inspection(path, *args, **kwargs):
+            if path == peer:
+                raise PermissionError("optional peer directory is unreadable")
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "lstat", deny_inspection)
+    else:
+        peer.mkdir()
+
+        def refuse_execution(argv, **kwargs):
+            events.append("query")
+            raise PermissionError("qualified owner execution failed")
+
+        monkeypatch.setattr("configuration_context.subprocess.run", refuse_execution)
+    with pytest.raises((ConfigurationError, config._peer_launch.ContextRefused)):
+        load_config()
+    assert events == (["qualify", "query"] if failure == "execution" else ["qualify"])
+
+
+def test_optional_containers_owner_native_foreign_cell_is_not_accepted(
+    optional_containers_owner, monkeypatch,
+):
+    import json
+
+    from configuration_layers import ConfigurationError
+
+    repository, _, peer, events = optional_containers_owner
+    peer.mkdir()
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "qualified-repository", "execution_machine": "worker",
+            "installation_cell": "foreign-cell", "binding": "unbound", "base_root": str(repository),
+        },
+    }
+
+    def run(argv, **kwargs):
+        events.append("query")
+        return subprocess.CompletedProcess(argv, 0, json.dumps(report).encode("utf-8"), b"")
+
+    monkeypatch.setattr("configuration_context.subprocess.run", run)
+    with pytest.raises(ConfigurationError, match="another installation cell"):
+        load_config()
+    assert events == ["qualify", "query"]
 
 
 def test_layered_container_first_touch_isolated_import_operation(tmp_path):

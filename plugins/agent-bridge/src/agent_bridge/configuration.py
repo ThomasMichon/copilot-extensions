@@ -43,14 +43,26 @@ def _checked_report(report, own):
     return report
 
 
+def _checked_fresh(fresh, delivered):
+    if delivered is not None and (
+        fresh is None or any(
+            context_from_owner(fresh)[key] != context_from_owner(delivered)[key]
+            for key in ("repository_id", "installation_cell")
+        )
+    ):
+        raise ConfigurationError("delivered configuration has no matching qualified owner")
+    return fresh
+
+
 def owner_report(root: Path) -> dict | None:
     from .session_lifecycle_cli import (
         _agent_bridge_installation_context,
         _agent_bridge_owner_root,
         _agent_worktrees_environment,
         _agent_worktrees_launch_prefix,
+        _legacy_worktrees_launch_prefix,
     )
-    from ._peer_launch import validate_owner
+    from ._peer_launch import legacy_peer_environment, validate_owner
 
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
     # The pre-cell reader accepts an in-memory marketplace selector, not an
@@ -66,17 +78,34 @@ def owner_report(root: Path) -> dict | None:
             isinstance(selector, dict) and set(selector) == {"marketplaceId"}
             and uses_legacy_install_dir(install_dir())
         ):
-            return delivered_context(repository_root=root)
+            delivered = delivered_context(repository_root=root)
+            fresh = read_owner_context(
+                _legacy_worktrees_launch_prefix(install_dir()), root,
+                required=delivered is not None,
+                environment=legacy_peer_environment(_agent_worktrees_environment()),
+            )
+            return _checked_fresh(fresh, delivered)
     raw = _agent_bridge_installation_context()
     own = validate_owner("agent-bridge", _agent_bridge_owner_root(), raw) if raw else None
-    prefix = _agent_worktrees_launch_prefix(allow_path_fallback=False)
     report = delivered_context(repository_root=root)
-    if report is not None:
+    if report is not None and own is not None:
         return _checked_report(report, own)
-    return _checked_report(read_owner_context(
-        prefix, root, required=bool(prefix and own is not None),
-        environment=_agent_worktrees_environment(),
+    if own is not None:
+        peer = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+        try:
+            peer.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise ConfigurationError("optional Worktrees installation could not be inspected") from error
+    prefix = _agent_worktrees_launch_prefix(allow_path_fallback=False)
+    environment = _agent_worktrees_environment()
+    if own is None:
+        environment = legacy_peer_environment(environment)
+    fresh = _checked_report(read_owner_context(
+        prefix, root, required=report is not None, environment=environment,
     ), own)
+    return _checked_fresh(fresh, report)
 
 
 def ordinary_layers(root: Path) -> tuple[dict, list[dict]] | None:

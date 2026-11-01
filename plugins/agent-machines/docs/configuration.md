@@ -1,5 +1,10 @@
 # Machine requirement configuration
 
+The qualified Worktrees configuration report is optional: a recognized older
+peer without `--configuration` contributes no extra layer, preserving native
+files/defaults. Binding/refusal, malformed or unsafe data and wrong-cell reports
+still fail. Optional absence never qualifies an unvalidated delivered projection.
+
 Agent Machines has no monolithic runtime-preferences file. Its **human-authored
 requirement packages are configuration**, with native desired-state authority,
 resource admission and package discovery. They are not interchangeable ordinary

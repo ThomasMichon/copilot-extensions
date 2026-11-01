@@ -1,5 +1,10 @@
 # Vault configuration reference
 
+The qualified Worktrees configuration report is optional: a recognized older
+peer without `--configuration` contributes no extra layer, preserving native
+files/defaults. Binding/refusal, malformed or unsafe data and wrong-cell reports
+still fail. Optional absence never qualifies an unvalidated delivered projection.
+
 [`src/agent_vault/config.py`](../src/agent_vault/config.py) owns the human-authored
 JSON schema and `resolve_context`; configuration reads do not open a database,
 unlock a vault, start a daemon, fetch a credential, or install anything.

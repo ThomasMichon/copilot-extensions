@@ -207,3 +207,52 @@ def test_tier_null_keeps_native_fallback_and_does_not_claim_false_provenance(tmp
     assert "/vault" not in result.configuration_provenance
     assert "/group" not in result.configuration_provenance
     assert not (tmp_path / f"{expected_vault}.kdbx").exists()
+
+
+@pytest.mark.parametrize("code,diagnostic", [
+    (2, "unrecognized arguments: --configuration"),
+    (2, "unknown option: --configuration"),
+    (1, "binding refused"), (3, "binding unresolved"), (126, "owner refused"),
+    (2, "unrecognized arguments: --unrelated"), (0, "malformed"),
+])
+def test_optional_older_peer_preserves_native_vault_or_fails_real_refusal(tmp_path, monkeypatch, code, diagnostic):
+    import subprocess
+    real_report = configuration.owner_report
+    base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(configuration, "owner_report", real_report)
+    write(base, {"vault": "base"})
+    cell = tmp_path / "marketplaces" / "current-cell"
+    own = cell / "plugins" / "agent-vault"
+    (cell / "plugins" / "agent-worktrees").mkdir(parents=True)
+    monkeypatch.setenv("AGENT_RT_ROOT", str(own))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own / "install.json"))
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    monkeypatch.setattr(configuration._peer_launch, "validate_owner", lambda *args:
+                        {"cellRoot": str(cell), "pluginRoot": str(own)})
+    monkeypatch.setattr(configuration._peer_launch, "launch_prefix", lambda *args: ["qualified-peer"])
+    calls = []
+
+    def run(argv, **kwargs):
+        assert argv == ["qualified-peer", "state-root", "--configuration", "--json"]
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, code, b"{bad-json", diagnostic.encode())
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if code == 2 and diagnostic.endswith("--configuration"):
+        assert config.resolve_context(str(base), strict=True).vault_name == "base"
+    else:
+        with pytest.raises(ConfigurationError):
+            config.resolve_context(str(base), strict=True)
+    assert len(calls) == 1
+
+
+def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(tmp_path, monkeypatch):
+    real_report = configuration.owner_report
+    base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(configuration, "owner_report", real_report)
+    for name in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_RT_ROOT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    monkeypatch.setattr(configuration, "_legacy_report", lambda root: None)
+    with pytest.raises(ConfigurationError, match="matching qualified owner"):
+        config.resolve_context(str(base), strict=True)

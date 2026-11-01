@@ -209,6 +209,9 @@ def test_native_mesh_loader_keeps_repository_root_for_nested_conventional_source
     for name in ("AGENT_RT_ROOT", "COPILOT_EXTENSIONS_CONTEXT"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    monkeypatch.setattr(configuration._worktrees, "validate_context", lambda: {
+        "cellRoot": "legacy-cell", "pluginRoot": str(base),
+    })
     monkeypatch.chdir(path.parent if git_root else base)
 
     def selected_root(argv, **kwargs):
@@ -240,4 +243,56 @@ def test_preference_loader_refuses_an_unrelated_selection_root(tmp_path, monkeyp
     monkeypatch.setattr(mesh.subprocess, "run", lambda argv, **kwargs:
                         subprocess.CompletedProcess(argv, 0, str(unrelated), ""))
     with pytest.raises(ValueError, match="selected topology repository root"):
+        mesh.load_mesh(path, strict=True, preferences=True)
+
+
+@pytest.mark.parametrize("code,diagnostic", [
+    (2, "unrecognized arguments: --configuration"),
+    (2, "unknown option: --configuration"),
+    (1, "binding refused"), (3, "binding unresolved"), (126, "owner refused"),
+    (2, "unrecognized arguments: --unrelated"), (0, "malformed"),
+])
+def test_optional_older_peer_preserves_native_mesh_or_fails_real_refusal(tmp_path, monkeypatch, code, diagnostic):
+    import subprocess
+    real_report = configuration.owner_report
+    path, base, knowledge, machine, local = setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(configuration, "owner_report", real_report)
+    cell = tmp_path / "marketplaces" / "current-cell"
+    own = cell / "plugins" / "agent-ssh"
+    (cell / "plugins" / "agent-worktrees").mkdir(parents=True)
+    monkeypatch.setenv("AGENT_RT_ROOT", str(own))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own / "install.json"))
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    monkeypatch.setattr(configuration._worktrees, "validate_owner", lambda *args:
+                        {"cellRoot": str(cell), "pluginRoot": str(own)})
+    monkeypatch.setattr(configuration._worktrees, "launch_prefix", lambda *args: ["qualified-peer"])
+    calls = []
+
+    def run(argv, **kwargs):
+        if argv[0] == "git":
+            return subprocess.CompletedProcess(argv, 0, str(base), "")
+        assert argv == ["qualified-peer", "state-root", "--configuration", "--json"]
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, code, b"{bad-json", diagnostic.encode())
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if code == 2 and diagnostic.endswith("--configuration"):
+        assert mesh.load_mesh(path, strict=True, preferences=True).machines[0].description == "native"
+    else:
+        with pytest.raises(ConfigurationError):
+            mesh.load_mesh(path, strict=True, preferences=True)
+    assert len(calls) == 1
+
+
+def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(tmp_path, monkeypatch):
+    import json
+    real_report = configuration.owner_report
+    path, base, knowledge, machine, local = setup(tmp_path, monkeypatch)
+    report, machine_root = configuration.owner_report(base)
+    monkeypatch.setattr(configuration, "owner_report", real_report)
+    for name in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_RT_ROOT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    monkeypatch.setattr(configuration, "_legacy_report", lambda root: None)
+    with pytest.raises(ConfigurationError, match="matching qualified owner"):
         mesh.load_mesh(path, strict=True, preferences=True)

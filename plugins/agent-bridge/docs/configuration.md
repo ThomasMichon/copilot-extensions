@@ -1,5 +1,10 @@
 # Bridge configuration reference
 
+The qualified Worktrees configuration report is optional: a recognized older
+peer without `--configuration` contributes no extra layer, preserving native
+files/defaults. Binding/refusal, malformed or unsafe data and wrong-cell reports
+still fail. Optional absence never qualifies an unvalidated delivered projection.
+
 [`src/agent_bridge/config.py`](../src/agent_bridge/config.py) owns human-authored
 configuration loading. [`models.py`](../src/agent_bridge/models.py) defines
 `ServiceConfig`, `TopologyProfile`, `RepoBridgeConfig` and nested field schemas.

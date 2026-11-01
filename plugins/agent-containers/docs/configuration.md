@@ -32,6 +32,11 @@ Native launchers may deliver the version-1 owner report as
 ready-only same-cell peer boundary. A standalone read without that optional
 owner projection retains native local files/defaults and never invokes an
 ambient self-provisioning Worktrees front door.
+Fresh native caller qualification precedes every delivered report. A genuinely
+absent same-cell Worktrees sibling or recognized older `--configuration`
+rejection retains native files/defaults. Present invalid peers (including exit
+126), binding refusals, foreign-cell data and ambiguous inspection/execution
+errors remain blocking; they are never treated as optional absence.
 
 Mappings merge recursively; lists, scalars and null replace atomically. `{}` does
 not erase a map. Native parsing still determines whether null is meaningful for

@@ -644,18 +644,32 @@ def _configuration_report() -> dict[str, Any] | None:
     from configuration_layers import ConfigurationError
 
     own = _installation_owner()
-    delivered = delivered_context(repository_root=Path.cwd())
+    delivered = delivered_context()
     if delivered is not None:
         if own is not None and context_from_owner(delivered)["installation_cell"] != str(own["cellRoot"]):
             raise ConfigurationError("container configuration belongs to another installation cell")
-        return delivered
+        if delivered_context(repository_root=Path.cwd()) is not None:
+            return delivered
     if own is None:
         return None
+    peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+    try:
+        peer_root.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise ConfigurationError("optional Worktrees installation could not be inspected") from error
     prefix = _peer_launch.launch_prefix(
         "agent-containers", Path(own["pluginRoot"]),
         os.environ[_peer_launch.CONTEXT_ENV], "agent-worktrees",
     )
-    return read_owner_context(prefix, str(Path.cwd()), required=True)
+    report = read_owner_context(prefix, str(Path.cwd()))
+    if (
+        report is not None
+        and context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
+    ):
+        raise ConfigurationError("container configuration belongs to another installation cell")
+    return report
 
 
 def load_config(*, strict: bool = False) -> ContainersConfig:

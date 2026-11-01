@@ -1,5 +1,10 @@
 # MCP bridge configuration reference
 
+The qualified Worktrees configuration report is optional: a recognized older
+peer without `--configuration` contributes no extra layer, preserving native
+files/defaults. Binding/refusal, malformed or unsafe data and wrong-cell reports
+still fail. Optional absence never qualifies an unvalidated delivered projection.
+
 [`src/agent_mcp/config.py`](../src/agent_mcp/config.py) owns `_read_file`,
 `resolve_config_path`, `parse_config`, and `validate_config`. Read/validate never
 mints credentials, runs a command, installs, repairs, connects to an upstream or

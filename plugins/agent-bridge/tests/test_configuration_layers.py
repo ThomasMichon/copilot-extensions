@@ -222,3 +222,51 @@ def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkey
         with pytest.raises(ConfigurationError, match="another installation cell"):
             load_repo_bridge_config(base)
     assert calls
+
+
+@pytest.mark.parametrize("code,diagnostic", [
+    (2, "unrecognized arguments: --configuration"),
+    (2, "unknown option: --configuration"),
+    (1, "binding refused"), (3, "binding unresolved"), (126, "owner refused"),
+    (2, "unrecognized arguments: --unrelated"), (0, "malformed"),
+])
+def test_optional_older_peer_preserves_native_bridge_or_fails_real_refusal(tmp_path, monkeypatch, code, diagnostic):
+    import subprocess
+    from agent_bridge import _peer_launch, session_lifecycle_cli as native
+    report, base, knowledge, local = fixture_report(tmp_path)
+    write(base, {"default_copilot_args": ["native"]})
+    cell = tmp_path / "marketplaces" / "current-cell"
+    own = cell / "plugins" / "agent-bridge"
+    (cell / "plugins" / "agent-worktrees").mkdir(parents=True)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own / "install.json"))
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    monkeypatch.setattr(native, "_agent_bridge_owner_root", lambda: own)
+    monkeypatch.setattr(_peer_launch, "validate_owner", lambda *args:
+                        {"cellRoot": str(cell), "pluginRoot": str(own)})
+    monkeypatch.setattr(native, "_agent_worktrees_launch_prefix", lambda **kwargs: ["qualified-peer"])
+    calls = []
+
+    def run(argv, **kwargs):
+        assert argv == ["qualified-peer", "state-root", "--configuration", "--json"]
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, code, b"{bad-json", diagnostic.encode())
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if code == 2 and diagnostic.endswith("--configuration"):
+        assert load_repo_bridge_config(base).default_copilot_args == ["native"]
+    else:
+        with pytest.raises(ConfigurationError):
+            load_repo_bridge_config(base)
+    assert len(calls) == 1
+
+
+def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(tmp_path, monkeypatch):
+    import json
+    from agent_bridge import session_lifecycle_cli as native
+    report, base, knowledge, local = fixture_report(tmp_path)
+    for name in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_RT_ROOT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    monkeypatch.setattr(native, "_agent_worktrees_launch_prefix", lambda **kwargs: None)
+    with pytest.raises(ConfigurationError, match="configuration owner|qualified owner"):
+        load_repo_bridge_config(base)

@@ -62,15 +62,28 @@ def owner_report(root: Path) -> dict | None:
         )
     report = delivered_context(repository_root=root)
     if report is not None:
-        return _checked_report(report, own)
+        _checked_report(report, own)
+        if own is not None:
+            return report
+        fresh = _legacy_report(root)
+        if fresh is None or any(
+            context_from_owner(fresh)[key] != context_from_owner(report)[key]
+            for key in ("repository_id", "installation_cell")
+        ):
+            raise ConfigurationError("delivered configuration has no matching qualified owner")
+        return fresh
     if own is None:
         return _legacy_report(root)
     peer = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
-    if not peer.exists() and not peer.is_symlink():
+    try:
+        peer.lstat()
+    except FileNotFoundError:
         return None
+    except OSError as error:
+        raise ConfigurationError("optional Worktrees installation could not be inspected") from error
     return _checked_report(read_owner_context(
         _peer_launch.launch_prefix("agent-machines", Path(own["pluginRoot"]), raw, "agent-worktrees"),
-        root, required=True, environment=os.environ.copy(),
+        root, environment=os.environ.copy(),
     ), own)
 
 

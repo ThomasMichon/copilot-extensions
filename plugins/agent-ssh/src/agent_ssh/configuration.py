@@ -45,6 +45,14 @@ def owner_report(root: Path) -> tuple[dict, Path] | None:
     if report is not None:
         if own is not None and context_from_owner(report)["installation_cell"] != str(own["cellRoot"]):
             raise ConfigurationError("SSH configuration belongs to another installation cell")
+        if own is None:
+            fresh = _legacy_report(root)
+            if fresh is None or any(
+                context_from_owner(fresh[0])[key] != context_from_owner(report)[key]
+                for key in ("repository_id", "installation_cell")
+            ):
+                raise ConfigurationError("delivered configuration has no matching qualified owner")
+            return fresh
         machine_root = Path(own["pluginRoot"]) if own else (
             Path.home() / ".agent-ssh"
         )
@@ -52,17 +60,21 @@ def owner_report(root: Path) -> tuple[dict, Path] | None:
     if own is None:
         return _legacy_report(root)
     peer = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
-    if not peer.exists() and not peer.is_symlink():
+    try:
+        peer.lstat()
+    except FileNotFoundError:
         return None
+    except OSError as error:
+        raise ConfigurationError("optional Worktrees installation could not be inspected") from error
     prefix = _worktrees.launch_prefix(
         "agent-ssh", Path(own["pluginRoot"]),
         os.environ.get("COPILOT_EXTENSIONS_CONTEXT") or str(Path(own["pluginRoot"]) / "install.json"),
         "agent-worktrees",
     )
-    report = read_owner_context(prefix, root, required=True, environment=os.environ.copy())
-    if context_from_owner(report)["installation_cell"] != str(own["cellRoot"]):
+    report = read_owner_context(prefix, root, environment=os.environ.copy())
+    if report is not None and context_from_owner(report)["installation_cell"] != str(own["cellRoot"]):
         raise ConfigurationError("SSH configuration belongs to another installation cell")
-    return report, Path(own["pluginRoot"])
+    return (report, Path(own["pluginRoot"])) if report is not None else None
 
 
 def _values(raw: object) -> dict:

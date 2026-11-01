@@ -419,3 +419,20 @@ their implementation and validation gates actually pass.
 - Required current-head CI and accepted review, actual merge and archival
   remain open. No settings, installations, services or external venues were
   changed. Completed test artifacts were removed after recording results.
+
+### 2026-11-01 - Complete optional-peer compatibility
+
+- Current-head required CI passed after reconciliation with current `dev`.
+  Preserved independent effort rows and Dispatch publication changes;
+  refreshed MCP producer digests without changing footprint revision 36.
+  The rebased Dispatch consumer packet passed 149 cases.
+- A fresh review identified the remaining optional-peer seams in Containers,
+  Bridge, SSH, Machines and MCP. Completed the same qualification boundary
+  across those owners and Vault: genuine optional absence or a recognized
+  older API preserves native configuration; delivered reports require fresh
+  owner qualification and real owner, binding, cell and report failures
+  remain fatal. No lockstep runtime upgrade or bootstrap is introduced.
+- Independent checks passed Containers 21, Bridge 26, MCP 24, Vault 25,
+  Machines 19 and SSH 30 cases. The install contract, documentation and lint
+  passed. Source publication and a fresh accepted review still precede merge;
+  no installed-host behavior or rollout is claimed.

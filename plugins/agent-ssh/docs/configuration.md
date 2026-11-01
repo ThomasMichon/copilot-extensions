@@ -1,5 +1,10 @@
 # SSH configuration reference
 
+The qualified Worktrees configuration report is optional: a recognized older
+peer without `--configuration` contributes no extra layer, preserving native
+files/defaults. Binding/refusal, malformed or unsafe data and wrong-cell reports
+still fail. Optional absence never qualifies an unvalidated delivered projection.
+
 SSH has three distinct human-authored contracts: repository mesh metadata,
 transport modules, and normalized profile inputs. None grants transport
 installation, credential acquisition, profile mutation, or remote access on read.
