@@ -128,7 +128,10 @@ err() {{ printf '%s\\n' "$*" >&2; }}
 PATH={_sh(shadow)}:$PATH
 {_function("_deploy_python_runtime", "sh")}
 _deploy_python_runtime
-printf '%s\\n' "$BASH"
+case "${{OSTYPE:-}}" in
+    msys*|cygwin*) cygpath -w "$BASH" ;;
+    *) printf '%s\\n' "$BASH" ;;
+esac
 """
     completed = _run([str(_BASH), "-c", script], tmp_path)
     assert completed.returncode == 0, completed.stdout + completed.stderr
