@@ -8,7 +8,7 @@ import sqlite3
 
 from .pool_instances import PoolInstanceDefinition
 from .queue_common import Task, machine_matches, worker_id_for
-from .queue_records import SpawnState, Status, TaskError
+from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 
 POOL_PLACEMENT_PROTOCOL = "pool_placement/v1"
 POOL_PLACEMENT_VERSION = 1
@@ -23,6 +23,38 @@ class PoolAssignment:
     reservation_key: str
     task_generation: int
     catalog_revision: int
+
+
+@dataclass(frozen=True)
+class PoolPlacement:
+    reservation: SpawnReservation
+    reserved: bool
+    assignment: PoolAssignment
+
+
+_INTRINSIC_DIMS = frozenset({"machine", "repo", "env", "pool", "worktree"})
+
+
+def _routing_requirements(
+    task: Task, *, machine: str, env: str, registration_id: str,
+    capabilities: frozenset[str], worktree: str | None,
+) -> set[str] | None:
+    """Separate real execution selectors from explicitly supplied capabilities."""
+    intrinsic = {
+        "machine": machine, "repo": task.repo, "env": env,
+        "pool": registration_id, "worktree": worktree,
+    }
+    hard: set[str] = set()
+    for token in task.requires:
+        dim, separator, value = token.partition(":")
+        if separator and dim in _INTRINSIC_DIMS:
+            actual = intrinsic[dim]
+            matches = machine_matches(value, actual) if dim == "machine" else value == actual
+            if actual is None or not matches:
+                return None
+        else:
+            hard.add(token)
+    return hard if hard.issubset(capabilities) else None
 
 
 def migrate_pool_placement(conn: sqlite3.Connection) -> None:
@@ -57,7 +89,12 @@ def pool_assignment(conn: sqlite3.Connection, task_id: str) -> PoolAssignment | 
 
 def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
     capabilities = pool.filters.permit.get("capabilities", frozenset())
-    if not set(task.requires).issubset(capabilities):
+    worktree = task.target_worktree or task.affinity.get("worktree")
+    hard = _routing_requirements(
+        task, machine=pool.machine, env=pool.env, registration_id=pool.registration_id,
+        capabilities=capabilities, worktree=worktree,
+    )
+    if hard is None:
         return False
     if not machine_matches(task.target_machine, pool.machine):
         return False
@@ -67,11 +104,11 @@ def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
     }
     if tokens.intersection(task.excludes):
         return False
-    if task.target_worktree and f"worktree:{task.target_worktree}" in task.excludes:
+    if worktree and f"worktree:{worktree}" in task.excludes:
         return False
     attrs: dict[str, object] = {
-        "repo": task.repo, "machine": task.target_machine,
-        "worktree": task.target_worktree, "capabilities": task.requires,
+        "repo": task.repo, "machine": pool.machine, "env": pool.env,
+        "worktree": worktree, "capabilities": sorted(hard),
     }
     for dim in ("env", "role"):
         values = {token.split(":", 1)[1] for token in task.requires if token.startswith(dim + ":")}
@@ -101,16 +138,16 @@ def reservation_accountable(conn: sqlite3.Connection, row: sqlite3.Row) -> bool:
     from .ordinary_native_bindings import is_native_retired, native_bindings, reservation_native_identity
     if not (row["startup_complete"] or row["startup_fenced"]):
         return True
-    if is_native_retired(row):
-        return False
     native = reservation_native_identity(conn, row)
     if native:
         task_row = conn.execute("SELECT * FROM tasks WHERE id = ?", (row["task_id"],)).fetchone()
         if task_row is None:
             raise TaskError("pool capacity has an orphaned reservation; reconcile its execution custody")
         task = Task._from_row(task_row)
-        _, retired = native_bindings(conn, row, task)
+        _, retired = native_bindings(conn, row, task, require_owned_workspace=False)
         return native not in retired
+    if is_native_retired(row):
+        return False
     return bool(row["session_handle"])
 
 
@@ -202,12 +239,45 @@ def require_pool_workspace(
     ).fetchone()
     if binding is None or binding["capabilities"] is None:
         raise TaskError("pool workspace capability binding requires reconciliation")
+    capabilities = frozenset(json.loads(binding["capabilities"]))
+    if _routing_requirements(
+        task, machine=assignment.machine, env=assignment.env,
+        registration_id=assignment.registration_id, capabilities=capabilities, worktree=worktree,
+    ) is None:
+        raise TaskError("pool workspace conflicts with current task requirements")
     if {
         f"worktree:{worktree}", f"pool:{assignment.registration_id}",
         f"machine:{assignment.machine}", f"env:{assignment.env}",
-        f"repo:{task.repo}", *json.loads(binding["capabilities"]),
+        f"repo:{task.repo}", *capabilities,
     }.intersection(task.excludes):
         raise TaskError("pool workspace is excluded by current task routing")
+
+
+def pool_native_publication(
+    conn: sqlite3.Connection, task: Task, row: sqlite3.Row, session_handle: str,
+) -> bool:
+    """Clear only inherited retirement when publishing a distinct live native."""
+    if pool_assignment(conn, task.id) is None:
+        return False
+    if not row["worktree"]:
+        raise TaskError("pool publication requires its recorded workspace")
+    require_pool_workspace(
+        conn, task, row["worktree"], row["execution_machine"], driver=row["driver"],
+    )
+    from .ordinary_native_bindings import native_bindings, reservation_native_identity
+    _, retired = native_bindings(conn, row, task, require_owned_workspace=False)
+    candidate = {**dict(row), "session_handle": session_handle, "conversation_retired": 0}
+    native = reservation_native_identity(conn, candidate)
+    if native is not None and native in retired:
+        raise TaskError("pool publication cannot revive a retired native")
+    previous = reservation_native_identity(conn, row)
+    if previous is not None and previous != native:
+        raise TaskError("pool publication cannot replace its retained native identity")
+    if row["conversation_retired"]:
+        if not retired or native is None or row["session_handle"] or row["agent_info"]:
+            raise TaskError("pool publication requires a distinct proven replacement native")
+        return True
+    return False
 
 
 def require_pool_start(
@@ -236,7 +306,10 @@ def require_pool_start(
     ):
         raise TaskError("pool start requires the current reservation, worker and native incarnation")
     require_pool_workspace(conn, task, row["worktree"], row["execution_machine"], driver=row["driver"])
-    from .ordinary_native_bindings import reservation_native_identity
+    from .ordinary_native_bindings import native_bindings, reservation_native_identity
     if reservation_native_identity(conn, row) != native_id:
         raise TaskError("pool start native does not match retained startup identity")
+    _, retired = native_bindings(conn, row, task, require_owned_workspace=False)
+    if native_id in retired:
+        raise TaskError("pool start cannot accept a retired native")
     return True

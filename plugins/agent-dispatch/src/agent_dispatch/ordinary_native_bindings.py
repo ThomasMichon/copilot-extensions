@@ -81,10 +81,16 @@ def _validate_origin(conn: Any, row: Any, origin: str | None) -> None:
             raise TaskError("inherited workspace replay binding conflicts with its allocation")
 
 
-def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str]]:
-    """Classify handles using their producing driver, not the retry's driver."""
+def native_bindings(
+    conn: Any, row: Any, task: Any, *, require_owned_workspace: bool = True,
+) -> tuple[list[str], list[str]]:
+    """Classify driver identities; creation/recovery callers also require origin ownership.
+
+    Pool capacity and acceptance inspect history even for explicitly targeted
+    external workspaces. That classification does not grant allocation ownership.
+    """
     origin = row["allocation_reservation_key"]
-    if row["worktree_ownership"] == "reused" and row["inherited_worktree"]:
+    if require_owned_workspace and row["worktree_ownership"] == "reused" and row["inherited_worktree"]:
         _validate_origin(conn, row, origin)
     known = {task.owner_session_id} if task.owner_session_id else set()
     retired: set[str] = set()
@@ -121,7 +127,16 @@ def native_bindings(conn: Any, row: Any, task: Any) -> tuple[list[str], list[str
             if is_retired:
                 retired.add(native)
         elif is_retired and (handle or history["release_requested"]):
-            raise TaskError("retired conversation has no proven native identity")
+            inherited_marker = (
+                history["conversation_retired"] and not handle
+                and history["allocation_reservation_key"] not in (None, history["key"])
+                and any(
+                    other["key"] != history["key"] and other_native and is_native_retired(other)
+                    for other, other_native in evidence
+                )
+            )
+            if not inherited_marker:
+                raise TaskError("retired conversation has no proven native identity")
         elif handle and not handle.startswith("local-body:"):
             raise TaskError("retained bare session handle has no proven native identity")
     return sorted(known), sorted(retired)

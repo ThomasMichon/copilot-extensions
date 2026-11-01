@@ -1722,3 +1722,29 @@ Ruff, focused placement/catalog typing, the enforced admitted type scopes and
 all thirteen install contracts pass. This remains prepared source evidence:
 the current-head PR review/merge gate, admitted supervisor integration, retry
 budgets and all original parent/native qualification remain open.
+
+### 2026-11-01 - Transactional response and replacement-native revision prepared
+
+The next #9859 revision captures the reservation and matching assignment inside
+the existing allocation transaction, including replay. Exact HTTP interleavings
+advance the task to another attempt before response serialization without
+mixing reservation keys or assignment generations. The legacy two-value
+`reserve_spawn` result is preserved.
+
+Native publication and acceptance now use the shared driver-qualified retirement
+history. A distinct replacement clears only a proven handleless inherited marker;
+retired predecessors and retained-native overwrites are refused. Late replacement
+startup during release retains release intent and accountable capacity until its
+own qualified retirement. Intrinsic routing requirements match actual execution
+identities separately from hard capabilities and are rechecked at publication
+and acceptance. External targeted/reused history classification does not grant
+creation or disposal ownership.
+
+Final contained validation passed **941 controls** across the same thirteen
+lifecycle, workspace, native-owner, catalog and scoped-authority selectors.
+Ruff, focused placement/catalog typing, all admitted enforced type scopes,
+thirteen install contracts and documentation consistency pass. This is prepared
+source evidence, not current-head review approval, merge, release or running
+adoption. The claim/start work unit and canonical parent remain **Active**;
+caller migration, selected startup/retry policy and every remaining parent
+qualification gate remain open.

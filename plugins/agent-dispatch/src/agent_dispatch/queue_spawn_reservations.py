@@ -49,6 +49,8 @@ from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, 
 from .queue_spawn_deferral import SpawnDeferralMixin
 from .queue_spawn_completion import SpawnCompletionMixin
 from .queue_spawn_release import SpawnReleaseMixin
+from .queue_spawn_workspace import SpawnWorkspaceMixin
+from .queue_pool_placement import PoolAssignment, PoolPlacement, pool_assignment
 from .queue_spawn_cooling import require_no_cooling, validate_cooling_publication
 from .queue_execution_handoff import require_execution_admission
 from .queue_execution_custody import require_execution_send_reconciliation
@@ -111,7 +113,7 @@ def _newer_worktree_reservation(
     ).fetchone()
 
 
-class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnReleaseMixin):
+class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnReleaseMixin, SpawnWorkspaceMixin):
     """Spawn-reservation lifecycle methods for :class:`TaskQueue`."""
 
     # -- spawn reservations --------------------------------------------------
@@ -123,6 +125,32 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         allocation_revision: int | None = None,
         pool_catalog_revision: int | None = None,
     ) -> tuple[SpawnReservation, bool]:
+        """Reserve a spawn, preserving the historical two-value result."""
+        reservation, reserved, _ = self._reserve_spawn(
+            task_id, reserved_by=reserved_by, now=now,
+            allow_suspended_reembodiment=allow_suspended_reembodiment,
+            driver=driver, allocation_revision=allocation_revision,
+            pool_catalog_revision=pool_catalog_revision,
+        )
+        return reservation, reserved
+
+    def place_pool_task(
+        self, task_id: str, *, reserved_by: str, catalog_revision: int, driver: str = "cli",
+    ) -> PoolPlacement:
+        """Return the reservation and matching assignment captured under one lock."""
+        reservation, reserved, assignment = self._reserve_spawn(
+            task_id, reserved_by=reserved_by, driver=driver,
+            pool_catalog_revision=catalog_revision,
+        )
+        if assignment is None or assignment.reservation_key != reservation.key:
+            raise TaskError("pool placement has no matching transactional assignment")
+        return PoolPlacement(reservation, reserved, assignment)
+
+    def _reserve_spawn(
+        self, task_id: str, *, reserved_by: str | None = None, now: float | None = None,
+        allow_suspended_reembodiment: bool = False, driver: str | None = None,
+        allocation_revision: int | None = None, pool_catalog_revision: int | None = None,
+    ) -> tuple[SpawnReservation, bool, PoolAssignment | None]:
         """Atomically reserve the right to spawn an embody worker for ``task_id``.
 
         This is the primitive that makes "queued task -> exactly one host embody
@@ -132,6 +160,10 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         ``create --spawn`` CLI, or the supervisor loop) *before* launching
         embody, so a crash / re-poll / lease-expiry between observing a
         spawn-eligible task and actually spawning it can never double-spawn.
+
+        Explicit pool placement also binds the allocator-owned claim and
+        captures its matching assignment in this transaction. Legacy callers
+        retain the later worker-claim behavior.
 
         Semantics (all under one write lock):
 
@@ -203,7 +235,6 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt ASC",
                 (task_id,),
             ).fetchall()
-            from .queue_pool_placement import pool_assignment
             assigned_pool = pool_assignment(conn, task_id)
             if assigned_pool is not None and pool_catalog_revision is None:
                 raise TaskError("retained pool assignment requires the pool placement operation")
@@ -214,7 +245,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                         raise TaskError("legacy reservation cannot be adopted as a pool claim")
                     if allocation_revision is not None and allocation_revision != current["allocation_revision"]:
                         raise TaskError("active reservation conflicts with requested allocation revision")
-                    return SpawnReservation._from_row(current), False
+                    return SpawnReservation._from_row(current), False, assigned_pool
             identity = conn.execute(
                 "SELECT identity FROM workspace_queue_identity WHERE singleton = 1",
             ).fetchone()["identity"]
@@ -264,14 +295,14 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     if active["task_id"] == task_id and active["allocation_revision"] != revision:
                         raise TaskError("active reservation conflicts with requested allocation revision")
                     conn.execute("COMMIT")
-                    return SpawnReservation._from_row(active), False
+                    return SpawnReservation._from_row(active), False, assigned_pool
             else:
                 for row in rows:
                     if row["state"] in SpawnState.ACTIVE:
                         if row["allocation_revision"] != revision:
                             raise TaskError("active reservation conflicts with requested allocation revision")
                         conn.execute("COMMIT")
-                        return SpawnReservation._from_row(row), False
+                        return SpawnReservation._from_row(row), False, assigned_pool
             require_execution_send_reconciliation(
                 conn, task_id, exclusive_key=task.exclusive_key, creation_prefix=creation_prefix,
             )
@@ -502,8 +533,9 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     worker=reserved_by, note="pool placement: " + json.dumps(selected_pool.identity),
                 )
             row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
+            assigned_pool = pool_assignment(conn, task_id)
             conn.execute("COMMIT")
-        return SpawnReservation._from_row(row), True
+        return SpawnReservation._from_row(row), True, assigned_pool
 
     def _update_reservation(
         self,
@@ -623,6 +655,11 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                         f"worktree {worktree!r} has in-flight cleanup {cleanup_claim['key']}"
                     )
             changed_handle = session_handle is not None and session_handle != row["session_handle"]
+            clear_retirement = False
+            if session_handle is not None:
+                from .queue_pool_placement import pool_native_publication
+                task = self._fetch(conn, row["task_id"])
+                clear_retirement = pool_native_publication(conn, task, row, session_handle)
             completion = row["startup_complete"]
             revision = row["startup_revision"]
             if startup_complete is not None:
@@ -638,6 +675,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
                     "session_handle = CASE WHEN ? IS NOT NULL THEN ? ELSE session_handle END, "
                     "startup_complete = ?, startup_revision = ?, "
+                    "conversation_retired = CASE WHEN ? THEN 0 ELSE conversation_retired END, "
                     "cooling_token = CASE WHEN ? IS NOT NULL THEN NULL ELSE cooling_token END, "
                     "worktree = CASE WHEN ? IS NOT NULL THEN ? ELSE worktree END, "
                     "inherited_worktree = CASE "
@@ -657,6 +695,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     (
                         to_state, ts, session_handle, session_handle,
                         completion, revision,
+                        clear_retirement,
                         cooling_token,
                         worktree, worktree,
                         detail, conclusion_state, conclusion_state, conclusion_detail,
@@ -681,116 +720,6 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
             conn.execute("COMMIT")
         return SpawnReservation._from_row(row)
-
-    def record_spawn_worktree(
-        self,
-        key: str,
-        worktree: str,
-        *,
-        ownership: str = "unknown",
-        creating_host: str | None = None,
-        execution_machine: str | None = None,
-        driver: str | None = None,
-        allocation_project: str | None = None,
-        worktree_path: str | None = None,
-        now: float | None = None,
-    ) -> SpawnReservation:
-        """Record a reusable worktree while the reservation is still reserving.
-
-        Replacing a carried worktree clears its carried session handle: a
-        confirmed-missing worktree cannot safely retain a session binding from
-        the vanished checkout.
-        """
-        worktree = worktree.strip()
-        if not worktree:
-            raise TaskError("spawn worktree must be non-empty")
-        if ownership not in {"created", "targeted", "reused", "unknown"}:
-            raise TaskError(f"invalid spawn worktree ownership: {ownership!r}")
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT * "
-                "FROM spawn_reservations WHERE key = ?",
-                (key,),
-            ).fetchone()
-            if row is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such reservation: {key}")
-            if row["state"] != SpawnState.RESERVING:
-                conn.execute("COMMIT")
-                raise TaskError(
-                    f"reservation {key} is {row['state']!r}, not {SpawnState.RESERVING!r}"
-                )
-            from .queue_pool_placement import require_pool_workspace
-            task = self._fetch(conn, row["task_id"])
-            if execution_machine is not None and (
-                not isinstance(execution_machine, str) or not execution_machine.strip()
-            ):
-                raise TaskError("execution machine must be non-empty")
-            if (
-                row["execution_machine"] is not None and execution_machine is not None
-                and row["execution_machine"] != execution_machine
-            ):
-                raise TaskError("recorded execution machine cannot change")
-            execution_machine = execution_machine or row["execution_machine"]
-            require_pool_workspace(
-                conn, task, worktree, execution_machine, driver=driver,
-            )
-            if row["allocation_project"] or row["worktree_path"]:
-                if (
-                    row["worktree"] is not None and row["worktree"] != worktree
-                    or row["allocation_project"] is not None and row["allocation_project"] != allocation_project
-                    or row["worktree_path"] is not None and row["worktree_path"] != worktree_path
-                ):
-                    raise TaskError("recorded workspace identity cannot change")
-            cleanup_claims = conn.execute(
-                "SELECT key FROM spawn_reservations "
-                "WHERE key <> ? AND worktree = ? AND state IN (?, ?) "
-                "AND conclusion_state = ?",
-                (
-                    key,
-                    worktree,
-                    SpawnState.FAILED,
-                    SpawnState.SETTLED,
-                    "pending",
-                ),
-            ).fetchall()
-            for cleanup_claim in cleanup_claims:
-                conn.execute("COMMIT")
-                raise TaskError(
-                    f"worktree {worktree!r} has in-flight cleanup {cleanup_claim['key']}"
-                )
-            conn.execute(
-                "UPDATE spawn_reservations SET "
-                "session_handle = CASE "
-                "WHEN worktree IS NULL OR worktree <> ? THEN NULL "
-                "ELSE session_handle END, "
-                "inherited_worktree = CASE "
-                "WHEN inherited_worktree IS NOT NULL THEN inherited_worktree "
-                "WHEN worktree_ownership = 'reused' THEN worktree "
-                "ELSE inherited_worktree END, "
-                "worktree = ?, worktree_ownership = ?, creating_host = ?, execution_machine = ?, "
-                "driver = ?, allocation_project = ?, worktree_path = ?, updated_at = ? WHERE key = ?",
-                (
-                    worktree,
-                    worktree,
-                    ownership,
-                    creating_host if ownership == "created" else row["creating_host"],
-                    execution_machine,
-                    driver,
-                    allocation_project,
-                    worktree_path,
-                    ts,
-                    key,
-                ),
-            )
-            updated = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE key = ?",
-                (key,),
-            ).fetchone()
-            conn.execute("COMMIT")
-        return SpawnReservation._from_row(updated)
 
     def record_spawn_allocation(self, key: str, project: str) -> SpawnReservation:
         """Bind execution routing before the first non-transactional allocation."""

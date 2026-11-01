@@ -258,16 +258,15 @@ def register_spawn_routes(
             if gate.draining:
                 raise HTTPException(409, detail="pool placement is inhibited while draining")
             try:
-                reservation, reserved = queue.reserve_spawn(
+                placement = queue.place_pool_task(
                     body.task_id, reserved_by=body.reserved_by, driver=body.driver,
-                    pool_catalog_revision=body.catalog_revision,
+                    catalog_revision=body.catalog_revision,
                 )
             except WorkerAdmissionInhibited as exc:
                 raise HTTPException(409, detail=exc.detail()) from exc
             except TaskError as exc:
                 raise HTTPException(409, detail=str(exc)) from exc
-        assignment = queue.task_pool_assignment(body.task_id)
-        assert assignment is not None
+        reservation, reserved, assignment = placement.reservation, placement.reserved, placement.assignment
         if reserved:
             bus.publish({"type": "task.claimed", "task_id": body.task_id})
             bus.publish({"type": "spawn.reserved", "reservation": asdict(reservation)})

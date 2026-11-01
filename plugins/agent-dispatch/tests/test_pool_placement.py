@@ -505,7 +505,7 @@ def test_drain_waits_for_an_admitted_placement_transaction(q, monkeypatch):
                      verification_interval=0)
     client = TestClient(app)
     entered, release, draining = Event(), Event(), Event()
-    reserve = q.reserve_spawn
+    reserve = q.place_pool_task
     set_draining = app.state.drain_gate.set_draining
 
     def blocked(*args, **kw):
@@ -518,7 +518,7 @@ def test_drain_waits_for_an_admitted_placement_transaction(q, monkeypatch):
         if value:
             draining.set()
 
-    monkeypatch.setattr(q, "reserve_spawn", blocked)
+    monkeypatch.setattr(q, "place_pool_task", blocked)
     monkeypatch.setattr(app.state.drain_gate, "set_draining", observe)
     with ThreadPoolExecutor(max_workers=2) as executor:
         placement = executor.submit(client.post, "/pool-placements", headers=headers(), json={
@@ -719,3 +719,220 @@ def test_non_created_preparation_cannot_bind_the_wrong_execution_machine(q, owne
                                 execution_machine="host-b", driver="cli")
     assert q.get_reservation(r.key).execution_machine is None
     assert q.get_reservation(r.key).worktree_ownership == "targeted"
+
+
+@pytest.mark.parametrize("replay", [False, True])
+def test_http_response_retains_its_transactional_assignment_after_retry_advances(q, monkeypatch, replay):
+    revision = publish(q, pool(capacity=2))
+    t = task(q)
+    if replay:
+        place(q, t)
+    client = TestClient(create_app(q, token=None, control_token="control", enable_mcp=False,
+                                  verification_interval=0))
+    captured, release = Event(), Event()
+    placements = []
+    place_task = q.place_pool_task
+
+    def blocked(*args, **kw):
+        result = place_task(*args, **kw)
+        placements.append(result)
+        captured.set()
+        assert release.wait(5)
+        return result
+
+    monkeypatch.setattr(q, "place_pool_task", blocked)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        response = executor.submit(client.post, "/pool-placements", headers=headers(), json={
+            "task_id": t.id, "reserved_by": "allocator", "catalog_revision": revision,
+        })
+        try:
+            assert captured.wait(5)
+            original = placements[0]
+            record_native(q, original.reservation)
+            q.start(t.id, "host-a/worktree", owner_session_id="native",
+                    expected_generation=original.assignment.task_generation)
+            q.fail_spawn(original.reservation.key)
+            q.yield_task(t.id, "host-a/worktree")
+            q.request_spawn_release(original.reservation.key, finished_startup_revision=1)
+            q.retire_spawn(original.reservation.key, exact_absence=True, conclusion_state="skipped")
+            current = place_task(t.id, reserved_by="allocator", catalog_revision=revision)
+            assert current.assignment.task_generation > original.assignment.task_generation
+        finally:
+            release.set()
+        result = response.result(timeout=5)
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert body["reserved"] is not replay
+    assert body["reservation"] == asdict(original.reservation)
+    assert body["assignment"] == asdict(original.assignment)
+    assert body["assignment"]["reservation_key"] == body["reservation"]["key"]
+    assert current.reservation.key != body["reservation"]["key"]
+
+
+def retired_predecessor_retry(q):
+    publish(q, pool(capacity=2))
+    t = task(q)
+    old, _ = place(q, t)
+    record_native(q, old, native="old-native")
+    q.start(t.id, "host-a/worktree", owner_session_id="old-native",
+            expected_generation=q.get(t.id).generation)
+    q.fail_spawn(old.key)
+    q.yield_task(t.id, "host-a/worktree")
+    q.request_spawn_release(old.key, finished_startup_revision=1)
+    q.retire_spawn(old.key, exact_absence=True, conclusion_state="skipped")
+    retry, _ = place(q, q.get(t.id))
+    assert retry.conversation_retired and retry.session_handle is None
+    return t, old, retry
+
+
+def test_replacement_native_clears_only_inherited_retirement_and_can_start(q):
+    t, old, retry = retired_predecessor_retry(q)
+    recorded = record_native(q, retry, native="replacement")
+    assert not recorded.conversation_retired
+    assert q.get_reservation(old.key).release_requested
+    assert q.start(t.id, "host-a/worktree", owner_session_id="replacement",
+                   expected_generation=q.get(t.id).generation).status == Status.STARTED
+
+
+def test_completed_failed_replacement_holds_capacity_until_its_own_retirement(q):
+    t, old, retry = retired_predecessor_retry(q)
+    record_native(q, retry, native="replacement")
+    q.record_spawn(retry.key, session_handle="replacement", startup_complete=True, startup_revision=1)
+    q.fail_spawn(retry.key)
+    assert place(q, task(q))[1]
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    assert q.get_reservation(old.key).release_requested
+    q.request_spawn_release(retry.key)
+    q.retire_spawn(retry.key, exact_absence=True)
+    assert place(q, task(q))[1]
+
+
+def test_retired_predecessor_cannot_be_republished_as_a_replacement(q):
+    _, _, retry = retired_predecessor_retry(q)
+    before = q.get_reservation(retry.key)
+    q.record_spawn_worktree(retry.key, "worktree", ownership="reused",
+                            execution_machine="host-a", driver="cli")
+    with pytest.raises(TaskError, match="retired native"):
+        q.record_spawn(retry.key, session_handle="old-native", worktree="worktree")
+    current = q.get_reservation(retry.key)
+    assert current.conversation_retired and current.session_handle == before.session_handle
+    assert current.state == before.state and current.startup_revision == before.startup_revision
+
+
+def test_late_exact_retirement_of_a_carried_native_prevents_retry_acceptance(q):
+    publish(q, pool(capacity=2))
+    t = task(q)
+    old, _ = place(q, t)
+    record_native(q, old)
+    q.start(t.id, "host-a/worktree", owner_session_id="native",
+            expected_generation=q.get(t.id).generation)
+    q.fail_spawn(old.key)
+    q.yield_task(t.id, "host-a/worktree")
+    retry, _ = place(q, q.get(t.id))
+    record_native(q, retry)
+    assert not q.get_reservation(retry.key).conversation_retired
+    q.request_spawn_release(old.key, finished_startup_revision=1)
+    q.retire_spawn(old.key, exact_absence=True, conclusion_state="skipped")
+    with pytest.raises(TaskError, match="retired native"):
+        q.start(t.id, "host-a/worktree", owner_session_id="native",
+                expected_generation=q.get(t.id).generation)
+    with pytest.raises(TaskError, match="retired native"):
+        q.record_spawn(retry.key, session_handle="native")
+    assert q.get(t.id).status == Status.CLAIMED
+
+
+def test_live_native_identity_cannot_be_overwritten_without_preserved_history(q):
+    publish(q, pool())
+    t = task(q)
+    r, _ = place(q, t)
+    record_native(q, r)
+    before = q.get_reservation(r.key)
+    with pytest.raises(TaskError, match="retained native"):
+        q.record_spawn(r.key, session_handle="different-native")
+    assert q.get_reservation(r.key) == before
+
+
+def test_unproven_retirement_marker_cannot_authorize_a_replacement(q):
+    publish(q, pool())
+    t = task(q)
+    r, _ = place(q, t)
+    q.record_spawn_worktree(r.key, "worktree", ownership="created", creating_host="host-a",
+                            execution_machine="host-a", driver="cli")
+    with q._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET conversation_retired=1 WHERE key=?", (r.key,))
+    with pytest.raises(TaskError, match="proven replacement"):
+        q.record_spawn(r.key, session_handle="new-native")
+    assert q.get_reservation(r.key).conversation_retired
+    assert q.get_reservation(r.key).session_handle is None
+
+
+@pytest.mark.parametrize("selector", [
+    "machine:host-a", "repo:example", "env:linux", "pool:worker", "worktree:wanted",
+])
+def test_intrinsic_requirements_match_actual_execution_without_capability_declarations(q, selector):
+    publish(q, pool())
+    t = task(q, requires=[selector], target_worktree="wanted")
+    r, _ = place(q, t)
+    record_native(q, r, worktree="wanted")
+    assert q.start(t.id, "host-a/wanted", owner_session_id="native",
+                   expected_generation=q.get(t.id).generation).status == Status.STARTED
+
+
+@pytest.mark.parametrize("selector", [
+    "machine:wrong", "repo:wrong", "env:wrong", "pool:wrong", "worktree:wrong",
+])
+def test_declared_capabilities_cannot_impersonate_intrinsic_execution_identity(q, selector):
+    publish(q, pool(filters=Filters(permit={"capabilities": frozenset({selector})})))
+    t = task(q, requires=[selector], target_worktree="wanted")
+    with pytest.raises(TaskError, match="eligible"):
+        place(q, t)
+    assert q.get(t.id).status == Status.QUEUED and q.task_pool_assignment(t.id) is None
+
+
+def test_worktree_requirement_cannot_invent_a_future_workspace(q):
+    publish(q, pool())
+    t = task(q, requires=["worktree:future"])
+    with pytest.raises(TaskError, match="eligible"):
+        place(q, t)
+    assert q.list_reservations(task_id=t.id) == []
+
+
+@pytest.mark.parametrize("selector", [
+    "machine:wrong", "repo:wrong", "env:wrong", "pool:wrong", "worktree:wrong", "gpu",
+])
+def test_changed_requirements_are_rechecked_at_publication_and_acceptance(q, selector):
+    publish(q, pool())
+    t = task(q)
+    r, _ = place(q, t)
+    record_native(q, r)
+    with q._connect() as conn:
+        conn.execute("UPDATE tasks SET requires=? WHERE id=?", (json.dumps([selector]), t.id))
+    with pytest.raises(TaskError, match="requirements"):
+        q.record_spawn(r.key, session_handle="native", worktree="worktree")
+    with pytest.raises(TaskError, match="requirements"):
+        q.record_spawn(r.key, session_handle="native")
+    with pytest.raises(TaskError, match="requirements"):
+        q.start(t.id, "host-a/worktree", owner_session_id="native",
+                expected_generation=q.get(t.id).generation)
+    assert q.get(t.id).status == Status.CLAIMED
+
+
+def test_releasing_retry_records_a_late_replacement_without_inheriting_its_retirement(q):
+    t, _, retry = retired_predecessor_retry(q)
+    q.record_spawn_worktree(retry.key, "worktree", ownership="reused",
+                            execution_machine="host-a", driver="cli")
+    q.request_spawn_release(retry.key)
+    result = q.record_spawn(
+        retry.key, session_handle="late-replacement", startup_complete=True, startup_revision=1,
+    )
+    assert result.release_requested and result.state == "releasing"
+    assert result.session_handle == "late-replacement" and not result.conversation_retired
+    with pytest.raises(TaskError, match="pool start"):
+        q.start(t.id, "host-a/worktree", owner_session_id="late-replacement",
+                expected_generation=q.get(t.id).generation)
+    assert place(q, task(q))[1]
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    q.retire_spawn(retry.key, exact_absence=True)
+    assert place(q, task(q))[1]

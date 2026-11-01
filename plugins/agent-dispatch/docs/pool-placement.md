@@ -19,14 +19,23 @@ The queue rechecks due time, holds, producer admission, the complete configured
 catalog and its revision under the reservation's `BEGIN IMMEDIATE` transaction.
 HTTP placement uses the same in-flight claim/drain gate as direct claims: a
 draining provider refuses admission and drain waits for already-admitted writes.
-Hard task `requires` tokens must be explicitly supplied by the selected pool's
-capability predicate; an unconstrained filter does not invent worker capabilities.
+Intrinsic `requires` selectors (`machine:`, `repo:`, `env:`, `pool:` and
+`worktree:`) match the actual selected execution identity separately from hard
+capabilities. A worktree selector needs a known target or retained affinity;
+placement cannot invent a future workspace to satisfy it. Other requirements
+must be explicitly supplied by the selected pool's capability predicate;
+an unconstrained filter does not invent worker capabilities.
 Exclusions match all supplied capabilities and the execution repo, machine,
 environment, pool and worktree selectors, not only the task's requirements.
 It selects the first matching instance in published priority order with free
 capacity, writes its reservation and retained pool assignment and changes the
 task to `CLAIMED`. The assignment contains the actual registration, execution
 machine, environment, reservation key, catalog revision and task generation.
+The reservation and assignment response are captured inside that same
+transaction, including replay. A concurrent later retry cannot pair an older
+reservation with its newer assignment generation. The existing `reserve_spawn`
+queue surface retains its two-value result; the explicit pool operation returns
+the typed transactional placement.
 No workspace, worker or native identity is invented. Workspace preparation and
 startup must follow that commit through the existing allocation/startup owners.
 
@@ -54,7 +63,16 @@ and native owner. Preparation records `execution_machine` independently of
 `creating_host`: targeted/reused workspaces retain their real ownership and
 creation provenance instead of being relabeled as newly created. Workspace
 recording and start both recheck that execution machine and current exclusions
-against the retained supplied capabilities. A spawn record, reachability or delivery receipt is not an
+against the retained supplied capabilities and current intrinsic requirements.
+Native publication and start consult the shared driver-qualified retirement
+history. A distinct replacement native clears only a handleless inherited
+retirement marker; it cannot overwrite a retained native identity or revive a
+retired predecessor. A late original startup return during release records its
+replacement identity without clearing release intent. Capacity still waits for
+that replacement's own completed/fenced startup and retirement. History
+classification for targeted/reused external workspaces does not grant ownership
+to create, recover or dispose them.
+A spawn record, reachability or delivery receipt is not an
 acceptance. Failed or stale starts leave the claim and slot intact.
 
 ## Compatibility and remaining integration
