@@ -53,13 +53,21 @@ Nested indexing runs keep their own breakdowns, just as they keep aggregate
 counts. The vocabulary never records endpoints, item IDs, account identities
 or arbitrary caller-provided labels.
 
-`GoodCitizenSession.get_json`, `post_json`, `request_json` and
+`GoodCitizenSession.get_json`, `get_bytes`, `post_json`, `request_json` and
 `paginate_continuation` accept the optional local keyword `purpose`, defaulting
 to `unclassified`. It is not sent as an HTTP parameter/header or added to a
 provider protocol. An unsupported label refuses before any request, even
 outside a measured run. Existing callers retain the same HTTP behavior and
 aggregate counts. Consumers may ignore the additive result field; the
 work-count format remains version 1.
+
+`get_bytes` returns an `ApiResult` containing the response's decoded body bytes,
+without text or JSON parsing. It uses the same request, retry, rate-limit and
+purpose-accounting path as JSON requests. Raw responses contribute attempts,
+responses and decoded payload bytes, but not `json_results`. Parameters and
+headers are retained; ETag use is opt-in, and a 304 still returns
+`not_modified=True` with `data=None`, not an empty successful file. HTTP errors
+still raise. Callers retain their own content-size and decoding policies.
 
 The built-in GitHub connector classifies principal/installation probes as
 metadata, issue listings as identity pages, targeted issue/PR retrieval as item
