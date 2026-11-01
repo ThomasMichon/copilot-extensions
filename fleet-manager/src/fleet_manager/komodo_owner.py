@@ -298,6 +298,14 @@ class KomodoOwner:
             state.save(record)
 
     @staticmethod
+    def _require_native_reconciliation(record: dict[str, Any], request: OperationIntent) -> None:
+        for name in ("good", "failed"):
+            retained = record[name]
+            if (type(retained) is dict and type(retained.get("repair")) is dict
+                    and retained["repair"].get("request_digest") == request.request_digest):
+                raise PlanError("Komodo retained terminal decision requires original repair-owner reconciliation")
+
+    @staticmethod
     def _reconcile_failed(state: KomodoState, record: dict[str, Any],
                           journal: NodeJournal, request: OperationIntent) -> TargetReceipt:
         attempt = record["attempt"]
@@ -361,6 +369,8 @@ class KomodoOwner:
                                    retained_network(record, selected), pending=pending)
                 receipt = journal.accept_named_external(request, resource=selected.resource)
                 status = receipt.to_dict()["status"]
+                if status == "unknown":
+                    self._require_native_reconciliation(record, request)
                 profile = selected.profile()
                 if status in ("succeeded", "failed"):
                     self._preserved(record, selected, containers)
@@ -535,6 +545,7 @@ class KomodoOwner:
                 receipt = journal.accept_named_external(request, resource=selected.resource)
                 if receipt.to_dict()["status"] != "unknown":
                     raise PlanError("Komodo failed settlement requires the original uncertain attempt")
+                self._require_native_reconciliation(record, request)
                 permit = self.admission.revalidate(permit, request)
                 self.admission.complete(permit, request)
                 if "failure_outcome" in attempt:

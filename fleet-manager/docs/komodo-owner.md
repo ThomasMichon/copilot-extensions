@@ -242,6 +242,11 @@ of a never-started fixed-profile container, but not a foreign NetworkID.
 Success readiness retains its strict running-network requirements.
 Failed replay and status use the same pending-attachment semantics even when
 both public keys already exist; an unstarted service is not currently healthy.
+An interrupted terminal decision remains with the entry point that retained
+it. Native-owner reconciliation refuses a pending repair-owned outcome, and
+repair-owner reconciliation refuses a pending native-owned failure. Neither
+path converts the other's evidence or changes its decision; the original
+owner can finish its exact receipt under fresh authorization and custody.
 
 **Contract support:** this optional profile expands the source SDK's strict
 version-1 declaration reader; older readers reject the unknown `profile`

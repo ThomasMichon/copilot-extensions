@@ -23,6 +23,8 @@ from fleet_manager.komodo_health import identity_digest
 from fleet_manager.komodo_identity import effective_global_key
 from fleet_manager.komodo_network import network_fingerprint
 from fleet_manager.komodo_owner import KomodoOwner
+from fleet_manager.komodo_repair import KomodoRepairOwner
+from fleet_manager.komodo_repair_selection import KomodoRepairSelection
 from fleet_manager.komodo_profile import DATA_NAMES, SECRET_NAMES, KomodoMaterialization, render_profile
 from fleet_manager.komodo_selection import KomodoSelection
 from fleet_manager.komodo_state import KomodoState
@@ -336,6 +338,7 @@ def test_native_apply_refuses_incumbent_even_with_a_fixed_declaration(incumbent)
     "failed-unstarted-converge", "failed-unstarted-settle",
     "failed-unstarted-foreign-network",
     "failed-unstarted-keys-converge", "failed-unstarted-keys-settle",
+    "failed-unstarted-keys-native-to-repair", "failed-unstarted-keys-repair-to-native",
 ])
 def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
     incumbent, keys, monkeypatch, scenario,
@@ -371,14 +374,20 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
     state_record = [None]
 
     @contextmanager
-    def opened(host_runtime, *, daemon, project):
+    def opened(host_runtime, *, daemon, project, existing_only=False):
         from fleet_manager.planning import digest
 
         root = host_runtime / digest({"daemon": daemon, "project": project})
         private_directory(root)
 
         def profile(raw):
-            path = root / "incumbent-observation.json"
+            if "services" in decode(raw):
+                private_directory(root / "deployments")
+                slot = root / "deployments" / digest({"profile": raw.decode("utf-8")})
+                private_directory(slot)
+                path = slot / "compose.json"
+            else:
+                path = root / "incumbent-observation.json"
             if not path.exists():
                 descriptor = create_private_file(path)
                 with os.fdopen(descriptor, "wb") as stream:
@@ -386,10 +395,23 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
             assert path.read_bytes() == raw
             return path
 
+        def retain(value):
+            reference = digest(value)
+            directory = root / "receipts"
+            private_directory(directory)
+            path = directory / (reference + ".json")
+            raw = canonical(value)
+            if not path.exists():
+                descriptor = create_private_file(path)
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(raw)
+            assert path.read_bytes() == raw
+            return reference
+
         yield SimpleNamespace(
             root=root, read=lambda: deepcopy(state_record[0]),
             save=lambda value: state_record.__setitem__(0, deepcopy(value)),
-            check=lambda: None, profile=profile, retain=digest,
+            check=lambda: None, profile=profile, retain=retain,
         )
 
     monkeypatch.setattr(KomodoState, "open", opened)
@@ -554,6 +576,15 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
             owner.native = native
             revision = 0
 
+            def repair():
+                monkeypatch.setattr("fleet_manager.komodo_repair.KomodoNative", lambda tooling: native)
+                return KomodoRepairOwner(
+                    resolve=lambda *a: KomodoRepairSelection(
+                        selection, replace(selection, release_digest="f" * 64),
+                        request.request_digest, "9" * 64, "transition-a", 1, 1900001000),
+                    admission=harness.owner, authority="gateway-a", clock=harness.clock,
+                )
+
             async def invoke(request, status=False, failed=False):
                 nonlocal revision
                 revision += 1
@@ -580,19 +611,63 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                     "failed-unstarted-converge", "failed-unstarted-settle",
                     "failed-unstarted-foreign-network",
                     "failed-unstarted-keys-converge", "failed-unstarted-keys-settle",
+                    "failed-unstarted-keys-native-to-repair", "failed-unstarted-keys-repair-to-native",
                 ):
-                    def lost_failure(journal, original, outcome):
+                    def lost_failure(journal, original, outcome, **options):
                         if scenario == "failed-lost-terminal":
-                            settled.append(reconcile(journal, original, outcome))
+                            settled.append(reconcile(journal, original, outcome, **options))
                         raise PlanError("fixture-lost-failure-receipt")
 
                     monkeypatch.setattr(NodeJournal, "reconcile", lost_failure)
                     with pytest.raises(PlanError, match="fixture-lost-failure"):
-                        await invoke(request, failed=True)
+                        if scenario.endswith("repair-to-native"):
+                            await asyncio.to_thread(
+                                repair().reconcile, harness.identity(), request,
+                                role="client", installation="client-a", failed=True,
+                            )
+                        else:
+                            await invoke(request, failed=True)
                     assert state_record[0]["failed"] is not None
                     monkeypatch.setattr(NodeJournal, "reconcile", reconcile)
                 if unstarted:
                     original_failed = deepcopy(state_record[0]["failed"])
+                    if scenario.endswith(("native-to-repair", "repair-to-native")):
+                        before = deepcopy(state_record[0])
+                        for name, item in containers.items():
+                            item["State"].update(
+                                Status="running", Running=True, Pid=1, StartedAt="recovered-start")
+                            item["NetworkSettings"]["Networks"][project].update(
+                                NetworkID=network["Id"], EndpointID="endpoint-" + name)
+                        network["Containers"] = {
+                            item["Id"]: {"EndpointID": "endpoint-" + name}
+                            for name, item in containers.items()
+                        }
+                        recovered = True
+                        for failed in (False, True):
+                            with pytest.raises(PlanError, match="terminal decision.*owner"):
+                                if scenario.endswith("native-to-repair"):
+                                    await asyncio.to_thread(
+                                        repair().reconcile, harness.identity(), request,
+                                        role="client", installation="client-a", failed=failed,
+                                    )
+                                else:
+                                    await invoke(request, failed=failed)
+                            assert state_record[0] == before
+                        if scenario.endswith("repair-to-native"):
+                            receipt = await asyncio.to_thread(
+                                repair().reconcile, harness.identity(), request,
+                                role="client", installation="client-a", failed=True,
+                            )
+                        else:
+                            receipt = await invoke(request)
+                        assert receipt.to_dict()["status"] == "failed"
+                        from fleet_manager.planning import digest
+
+                        assert receipt.to_dict()["result_ref"] == digest(original_failed)
+                        assert state_record[0]["failed"] == original_failed
+                        assert state_record[0]["attempt"] is None
+                        assert native_calls == ["apply"] and not requests
+                        return
                     if scenario == "failed-unstarted-foreign-network":
                         containers["core"]["NetworkSettings"]["Networks"][project]["NetworkID"] = "9" * 64
                         for failed in (False, True):
