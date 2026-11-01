@@ -58,6 +58,19 @@ def read_pool_scope(value: object) -> PoolPublicationScope:
         or (value["state"] == "unavailable" and value["reason"] is None)
     ):
         raise PoolPublicationError("pool metadata response has inconsistent publication state")
+    generation = value["definitions_generation"]
+    revision = value["definitions_revision"]
+    if (generation is None) != (revision is None) or (
+        generation is not None and (
+            generation > value["generation"]
+            or (value["state"] == "pending" and generation >= value["generation"])
+            or (value["state"] == "unavailable" and generation == value["generation"]
+                and revision >= value["revision"])
+        )
+    ) or (value["state"] == "complete" and (
+        generation != value["generation"] or revision != value["revision"]
+    )):
+        raise PoolPublicationError("pool metadata response has inconsistent definition attribution")
     if not isinstance(value["definitions"], list):
         raise PoolPublicationError("pool metadata response lacks the full definition array")
     try:
@@ -68,6 +81,8 @@ def read_pool_scope(value: object) -> PoolPublicationScope:
         raise PoolPublicationError("pool metadata response has invalid definitions") from exc
     if any((item.machine, item.env) != (value["machine"], value["env"]) for item in definitions):
         raise PoolPublicationError("pool metadata response has foreign definitions")
+    if definitions and generation is None:
+        raise PoolPublicationError("pool metadata response has unattributed definitions")
     return PoolPublicationScope(
         value["machine"], value["env"], value["publisher_id"], value["generation"],
         value["revision"], value["state"], value["input_revision"],

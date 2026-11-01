@@ -709,6 +709,59 @@ def test_failed_flight_after_timeout_recovers_original_on_next_invocation(owner:
         finish.set()
 
 
+@pytest.mark.parametrize("replacement", [False, True])
+def test_pending_reply_cannot_change_original_definition_baseline(
+    owner: Any, replacement: bool,
+) -> None:
+    daemon, queue, _calls = owner
+    if replacement:
+        definitions = daemon.capture_pool_publication_inputs().snapshot.definitions
+        prior = queue.begin_pool_publication("host-a", "default", "earlier", expected_generation=0)
+        queue.publish_pool_catalog_scope(
+            "host-a", "default", "earlier", generation=prior.generation,
+            expected_revision=0, registration_revision=queue.pool_registration_revision(),
+            input_revision="earlier-input", definitions=definitions,
+        )
+    request = daemon.prepare_pool_metadata_request()
+
+    def wrong(request: Any, *, boundary: Any) -> Any:
+        with boundary():
+            result = _apply(queue, request)
+            return replace(result, definitions_generation=result.generation, definitions_revision=99)
+
+    daemon.client.send_pool_metadata = wrong
+    with pytest.raises(PoolPublicationError, match="original retained baseline"):
+        daemon.send_pool_metadata_request()
+    custody = daemon._pool_publisher_custody
+    assert custody.pending is request and custody.position is None and custody.settled is None
+    sent = _sender(daemon, queue)
+    enrolled = daemon.send_pool_metadata_request()
+    assert not sent and custody.settled == (request, enrolled)
+    published = daemon.prepare_pool_metadata_request()
+    result = daemon.send_pool_metadata_request()
+    assert result.definitions == published.inputs.snapshot.definitions
+    assert result.definitions_generation == result.generation
+    assert result.definitions_revision == result.revision
+
+
+@pytest.mark.parametrize("changes", [
+    {"definitions_generation": 1, "definitions_revision": 1},
+    {"definitions_generation": None, "definitions_revision": 1},
+    {"definitions_generation": 1, "definitions_revision": None},
+])
+def test_pending_wire_reply_refuses_impossible_or_partial_attribution(owner: Any, changes: dict) -> None:
+    daemon, queue, _calls = owner
+    request = daemon.prepare_pool_metadata_request()
+    result = _apply(queue, request)
+    body = {
+        "protocol": "pool_catalog_transport/v1", "version": 1,
+        "scope": {**_scope_payload(result), **changes},
+    }
+    with pytest.raises(PoolPublicationError, match="definition attribution"):
+        read_pool_metadata_result(body)
+    assert daemon._pool_publisher_custody.pending is request
+
+
 @pytest.mark.parametrize("field", [
     "version", "generation", "definitions_revision", "valid_until",
     "missing_freshness", "oversized_freshness", "definitions", "scope",

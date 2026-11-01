@@ -212,6 +212,13 @@ without another POST or freshness renewal. A successor or different result
 cannot rebase the pending request. Required response fields, scope, versions,
 integer revisions, finite freshness and lossless definitions are validated;
 additive response fields remain compatible.
+The original catalog read retains each complete scope, not just its position.
+Enrollment acknowledgment must preserve that original definition/freshness
+baseline exactly, including empty, unattributed initial enrollment.
+Pending replies cannot attribute definitions to their new, unpublished
+generation; complete and unavailable replies retain their respective
+current-versus-prior attribution rules. Malformed attribution cannot become
+the baseline for a later otherwise-valid acknowledgment.
 
 If the original result is not observable, the client negotiates the running
 peer again before POST. Its write boundary rechecks the actual original
