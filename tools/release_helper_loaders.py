@@ -32,6 +32,7 @@ _ACTOR_SOURCE = "libs/installer-engine/installer_engine_process.py"
 _RETAINED_ACTOR_SHA256 = "689db795d0e738890462073d22aa6dac2a31f93be1c74b1d2fe483d1513ec4e7"
 _RETAINED_ACCOUNTING_ACTOR_SHA256 = "cd63e0203c0625f6deab85cd795fb4fe96bbfd4f1112b4aba51537795be54f54"
 _RETAINED_STREAMING_ACTOR_SHA256 = "e35bbcb5168b98f4c2a9a1eaae287b6d671acf857135d84bf8325a1bfc89d067"
+_RETAINED_PROGRESS_ACTOR_SHA256 = "7023003b6250a95a222ddf8db8ebd0182ce3b5ab687141fe24fb7de9a9207e74"
 _RESOURCE_ADAPTER = ast.parse(
     "def _load_resource(name, path):\n"
     "    spec = importlib.util.spec_from_file_location(name, path)\n"
@@ -179,6 +180,7 @@ class _Discovery:
             if fingerprint not in {
                 _RETAINED_ACTOR_SHA256, _RETAINED_ACCOUNTING_ACTOR_SHA256,
                 _RETAINED_STREAMING_ACTOR_SHA256,
+                _RETAINED_PROGRESS_ACTOR_SHA256,
             }:
                 self.fail(self.tree, "retained runtime actor source shape changed")
             # This exact actor transports a complete source bundle, not file

@@ -3851,7 +3851,7 @@
         "tools/qualify_promotion_candidate.py": "b060a7656f88d32f6f3457d323f192e08af55b8d8a4d9a6c52a6530a17d11b80",
         "tools/release_controller_contract.py": "c7ae2b51563a37f4290ff1fe42f19ba337ae363c82ea5ed329eb63b078e20f78",
         "tools/release_controller_shell.py": "ee579b2867686ea3788e1c22ea9e9c796a3849683988197f87055bef6cce426f",
-        "tools/release_helper_loaders.py": "255cfbb0f2dcf78c28ca59449c75e89117602259d5eca5f1403f187d1cd4072f",
+        "tools/release_helper_loaders.py": "34da15b06376443d4ff3f63d72184da4f8fe603cfac1f6f3aaa3e829cee92182",
         "tools/reuse_promotion_artifacts.py": "4fbd66d0f624a6b3eaca3ffbaf3058a09d3236d6240ea1304eddf26d0daa2a74",
         "tools/run-promotion-unit-tests.py": "e0ca288cd47480fd123c9920e6be8a5a4745c72bcc61c276221d7b89d080b804",
         "tools/runtime_profile.py": "3e2a25c54d9767c1757e2f8a2db42abd2bb0e51765e230d77f5582a4116221d0",
@@ -3887,7 +3887,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/creation_owner_claim.py": "aea9f0de14e962099fb1c70b139d9c62a0ae0051c6cd3174683fe13d534acffa",
         "plugins/agent-worktrees/src/agent_worktrees/launch_progress.py": "b44ba6207d319af74ecbf40a0324ad0126a7415573b15b564b107002f16431c8",
         "libs/installer-engine/installer_engine_footprint.py": "d21294107d14486a23778e075497fec0fa145aff0631680fd9ace6ad7033455d",
-        "libs/agent-procutil/src/agent_procutil/python_cache.py": "a3951e6014f54d67a272195aed03cb6f73bb2830b7397349b987945ea1985d8d"
+        "libs/agent-procutil/src/agent_procutil/python_cache.py": "37e93017af90235d2ce668a98b97a65be18a39ae7ef2435b35d9a778d56c4df2"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_engine_footprint.py",
