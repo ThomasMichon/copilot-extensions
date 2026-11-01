@@ -6,7 +6,6 @@ from dataclasses import dataclass
 import hashlib
 from pathlib import Path, PurePosixPath
 import stat
-import tomllib
 
 from .artifact_staging import _bytes
 from .komodo_declaration import SERVICES
@@ -32,9 +31,16 @@ class KomodoConfigUsername:
     @staticmethod
     def value(raw: bytes) -> bytes:
         try:
-            settings = tomllib.loads(raw.decode("utf-8"))
+            import tomllib as parser
+        except ModuleNotFoundError:
+            try:
+                import tomli as parser
+            except ModuleNotFoundError:
+                raise PlanError("Komodo configured usernames require the komodo-host TOML extra") from None
+        try:
+            settings = parser.loads(raw.decode("utf-8"))
             value = settings["init_admin_username"]
-        except (KeyError, UnicodeError, tomllib.TOMLDecodeError):
+        except (KeyError, UnicodeError, parser.TOMLDecodeError):
             raise PlanError("Komodo incumbent configured username is unavailable") from None
         if type(value) is not str:
             raise PlanError("Komodo incumbent configured username is unsupported")

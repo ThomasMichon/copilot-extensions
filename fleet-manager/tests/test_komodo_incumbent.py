@@ -142,6 +142,39 @@ def test_incumbent_reads_username_from_retained_core_config_without_a_username_f
     assert not incumbent.files["admin_username"].exists()
 
 
+def test_python310_import_and_configured_username_use_declared_toml_fallback(incumbent):
+    from agent_procutil.owned_process import run_caller_owned
+
+    source = Path(__file__).resolve().parents[1] / "src"
+    code = """
+import builtins, sys
+sys.path.insert(0, sys.argv[1])
+original = builtins.__import__
+def without_stdlib_toml(name, *args, **options):
+    if name == "tomllib":
+        raise ModuleNotFoundError("Python 3.10 has no tomllib")
+    return original(name, *args, **options)
+builtins.__import__ = without_stdlib_toml
+from fleet_manager.komodo_selection import KomodoSelection
+from fleet_manager.komodo_native import KomodoNative
+from fleet_manager.komodo_incumbent import KomodoConfigUsername
+from fleet_manager.planning import PlanError
+assert KomodoConfigUsername.value(b'init_admin_username = "original-admin"') == b"original-admin"
+try:
+    KomodoConfigUsername.value(b'init_admin_username = "a"\\ninit_admin_username = "b"')
+except PlanError:
+    pass
+else:
+    raise AssertionError("duplicate TOML must refuse")
+"""
+    result = run_caller_owned(
+        [sys.executable, "-I", "-c", code, str(source)],
+        cwd=str(incumbent.material.keys.parent), timeout=10,
+        max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("content", [
     b"", b"invalid toml", b'init_admin_username = ""', b"init_admin_username = 123",
     b'init_admin_username = "a"\ninit_admin_username = "b"',

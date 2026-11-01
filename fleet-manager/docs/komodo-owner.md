@@ -234,6 +234,9 @@ a private username file. The exact file must be retained and mounted as Core's
 existing bounded private-file reader, rejects missing, duplicate or unsupported
 values, and binds the source file and effective login bytes to selection
 evidence. Login and recorded file bytes must agree within each observation.
+Python 3.10 uses the conditional `tomli` dependency in the `komodo-host` extra;
+newer interpreters use stdlib `tomllib`. Parsing is loaded only for configured
+usernames, so base/fixed-profile SDK imports remain dependency-free.
 The producer remains responsible for authenticating the incumbent's effective
 configuration, including environment overrides. No username file is generated,
 no credential is rotated, and fresh six-file materialization remains unchanged.
