@@ -42,6 +42,10 @@ def collect_contributions(
     packages: list[RequirementPackage], prefix: str
 ) -> list[tuple[str, dict[str, Any], str]]:
     """Gather ``(disposition, payload, package)`` under ``prefix``."""
+    from ..configuration import selected_defaults
+
+    packet = selected_defaults(packages) if prefix == "copilot.settings" else None
+    selected = {tuple(owner) for owner in packet["contributors"]} if packet else set()
     out: list[
         tuple[int, str, str, str, str, dict[str, Any]]
     ] = []
@@ -55,6 +59,11 @@ def collect_contributions(
                     else spec.get("values", spec.get("value"))
                 )
                 if isinstance(payload, dict):
+                    if disposition == "ensure-present" and selected:
+                        payload = {
+                            field: value for field, value in payload.items()
+                            if (str(pkg.source_path), key, field) not in selected
+                        }
                     order_authority = (
                         effective_authority(pkg, spec)
                         if disposition == "enforce"
@@ -69,7 +78,10 @@ def collect_contributions(
                         payload,
                     ))
     out.sort(key=lambda item: item[:4])
-    return [(disposition, payload, package) for _, _, package, _, disposition, payload in out]
+    result = [(disposition, payload, package) for _, _, package, _, disposition, payload in out]
+    if packet:
+        result.append(("ensure-present", packet["values"], "ordinary-defaults"))
+    return result
 
 
 def collect_specs(packages: list[RequirementPackage], prefix: str) -> list[dict[str, Any]]:

@@ -301,10 +301,15 @@ failures without echoing policy contents.
 
 ## Configuration
 
-Layered: built-in defaults → `$AGENT_LOGGER_HOME/config.yaml` → repo-local
+Complete files, options, scopes and protected boundaries:
+[configuration reference](docs/config-reference.md).
+
+Layered: built-in defaults → trusted repo-local
 organization config (`.agent-logger.yaml` / `.agent-logger.yml` /
 `.config/agent-logger.yaml` / `.config/agent-logger.yml`, `log:` block plus
 schema v3's single `sync.local_path` field)
+→ trusted bound knowledge organization → `$AGENT_LOGGER_HOME/config.yaml`
+→ owner-selected repository+machine organization
 → `AGENT_LOGGER_*` environment overrides. Repo-local config is only honored
 for a checkout that is both a project registered with `agent-worktrees` and
 currently on that project's registered default branch -- see

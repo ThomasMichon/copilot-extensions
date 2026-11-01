@@ -57,7 +57,7 @@ def _collect_all_packages(
     return packages
 
 
-def _collect_reconcile_packages(
+def _collect_native_reconcile_packages(
     args: argparse.Namespace,
     machine: str,
     accepted_machines: tuple[str, ...] | None = None,
@@ -127,6 +127,17 @@ def _collect_reconcile_packages(
         ),
         f"repo:{repo_name}",
     )
+
+
+def _collect_reconcile_packages(
+    args: argparse.Namespace,
+    machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> tuple[list[RequirementPackage], str]:
+    from .configuration import prepare_defaults
+
+    packages, scope = _collect_native_reconcile_packages(args, machine, accepted_machines)
+    return prepare_defaults(packages, machine, accepted_machines), scope
 
 
 def _resolve_machine_identity(args: argparse.Namespace) -> _identity.MachineIdentity:

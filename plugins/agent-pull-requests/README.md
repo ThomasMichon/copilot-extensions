@@ -3,6 +3,9 @@
 Cross-repository pull-request commands for Copilot CLI sessions that need to
 act on `owner/repo` targets **without** requiring a local checkout of that repo.
 
+Configuration: [canonical owner reference](docs/configuration.md). PR/provider
+preferences remain delegated to Worktrees; this plugin has no independent YAML.
+
 This plugin is the extraction from `agent-worktrees`' worktree-bound PR
 commands into a separate, API-first surface:
 

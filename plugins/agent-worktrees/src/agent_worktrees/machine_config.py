@@ -3,8 +3,9 @@
 A stateless harness keeps machine-specific entries out of its tree: its setup
 writes them under the machine-local project root (``agent-worktrees get
 config-dir``, e.g. ``~/.<project>/.agent-worktrees/related.yaml``). That root
-joins :func:`state_root.config_source_anchors` between the launch repo and the
-knowledge overlay, so a session in any checkout of the project resolves them.
+joins :func:`state_root.config_source_anchors` at the exact repository+machine
+tier, after repository knowledge and machine-wide preferences. Protected
+machine-identity readers retain their separate registry-source selection.
 """
 from __future__ import annotations
 
