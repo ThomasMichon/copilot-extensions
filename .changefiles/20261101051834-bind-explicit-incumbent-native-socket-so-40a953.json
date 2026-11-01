@@ -1,0 +1,9 @@
+{
+  "comment": "Bind explicit incumbent native socket sources without rewriting original mounts",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
