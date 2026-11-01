@@ -48,15 +48,6 @@
       "legacyMarkers": []
     },
     {
-      "id": "delegation-fallback",
-      "deliveryMode": "selector",
-      "template": "instructions/delegation-fallback.instructions.md",
-      "destination": ".github/instructions/agent-conduct-guidance/delegation-fallback.instructions.md",
-      "customizationKind": "instructions",
-      "applyTo": "**",
-      "legacyMarkers": []
-    },
-    {
       "id": "scratch-space-fallback",
       "deliveryMode": "selector",
       "template": "instructions/scratch-space-fallback.instructions.md",

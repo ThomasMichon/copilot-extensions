@@ -45,7 +45,7 @@ mechanics. Plugin-local guides and skills own their current commands.
 | WSL | [Windows/WSL setup guidance](../plugins/wsl-setup/README.md) |
 | Knowledge binding | [Optional private-state binding](../plugins/harness-knowledge/README.md) |
 | Attribution | [Publication guidance](../plugins/ai-attribution/README.md) |
-| Conduct | [Modular guidance](../plugins/agent-conduct-guidance/README.md), [deprecated delegation alias](../plugins/delegation-guidance/README.md) |
+| Conduct | [Modular guidance](../plugins/agent-conduct-guidance/README.md) |
 
 ## Customization and toolkit contribution
 

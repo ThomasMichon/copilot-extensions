@@ -6478,10 +6478,14 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   injection-shaped data, complete JSON control escaping, missing-script
   fallback, setup-skill structure, exact JSON and context size, and live
   Bash/PowerShell parity when `pwsh` is available.
-- **delegation-guidance:** payload-only hook tests covering owner/version
-  attribution, the 2 KB context budget, direct script fallback, missing-root
-  failure-open behavior, skill trigger boundaries, README inventory, and live
-  Bash/PowerShell parity when both shells are available.
+- **agent-conduct-guidance:** scoped conduct and projection tests, explicit
+  assignment discovery, and inert optional model resolver contracts. Actual
+  projection consumers omit the retired ambient delegation strategy; model
+  lookup remains independent of budget information.
+- **budget-guidance:** current usage/quota attribution, field freshness and
+  contradictions, monthly pace estimates, optional economy suggestions and
+  real CLI/session-cue consumers. Budget information neither selects models
+  or delegates nor blocks requested work.
 - **customizing-copilot:** payload-only scanner and plugin-state helper tests
   covering installed inventory vs. user/repository activation, dry-run-safe
   user deactivation, loaded-plugin

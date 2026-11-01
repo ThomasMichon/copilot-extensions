@@ -96,34 +96,34 @@ def estimate_provider_rate(
 
 
 def apply_pacing_advice(result: dict[str, Any]) -> None:
-    """Describe autonomous pacing without selecting models or changing workers."""
+    """Offer monthly economy information without choosing an execution strategy."""
     calculated = result["calculated"]
     advice = result["advice"]
-    advice["autonomous_recommendation"] = "unavailable"
+    advice["monthly_recommendation"] = "unavailable"
     advice["projection_kind"] = None
     advice["overrun_warning"] = None
     if calculated["projection_rate"] is None:
         advice["reason"] = "no attributable same-period rate evidence"
         if calculated["warning_band"] == "overspent":
-            advice["autonomous_recommendation"] = "reduce-aggressiveness"
+            advice["monthly_recommendation"] = "review-avoidable-spend"
             advice["overrun_warning"] = "observed-overspend"
-            advice["reason"] = "observed overspend; review autonomous parallelism without blocking operator work"
+            advice["reason"] = "observed overspend; consider avoiding repeated speculative work"
         return
     advice["projection_kind"] = "cycle-average-estimate"
     if calculated["warning_band"] in {"critical", "overspent", "warning"}:
-        advice["autonomous_recommendation"] = "reduce-aggressiveness"
+        advice["monthly_recommendation"] = "review-avoidable-spend"
         advice["overrun_warning"] = (
             "observed-overspend" if calculated["warning_band"] == "overspent"
             else "estimated-overrun"
         )
         advice["reason"] = (
-            "review autonomous parallelism and lower avoidable aggressiveness; "
-            "the estimate does not block operator work or authorize worker changes"
+            "consider reusing valid results and bounding speculative detours to stay on monthly track; "
+            "the estimate is not a prerequisite to honoring requests"
         )
     else:
-        advice["autonomous_recommendation"] = "maintain-with-caution"
+        advice["monthly_recommendation"] = "on-monthly-track"
         advice["overrun_warning"] = "none-estimated"
         advice["reason"] = (
-            "cycle-average estimate is within remaining pace; "
-            "it does not establish per-worker cost or justify increased concurrency"
+            "cycle-average estimate is within remaining monthly pace; "
+            "future usage and charge settlement may change the estimate"
         )

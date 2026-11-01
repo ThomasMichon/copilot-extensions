@@ -68,7 +68,7 @@ rate-limit signal, this adapter conservatively reports
 Transport, timeout, throttling, malformed, and other HTTP failures remain errors.
 It can be inspected or passed through
 an [explicit external reader](external-readers.md), but cannot manufacture a
-forecast or an actionable routing posture.
+forecast or confident monthly pace estimate.
 
 HTTP 401/403, inaccessible or unsupported endpoints, throttling, transport
 failures, invalid JSON, oversize responses, and timeout have explicit states

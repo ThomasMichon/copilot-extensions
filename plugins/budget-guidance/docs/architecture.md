@@ -14,10 +14,10 @@ layers:
    cue and atomically writes it to the requesting session's instruction folder.
    Its [delivery contract](session-guidance.md) owns the pointer, freshness,
    redaction, byte budget, and hook behavior.
-6. `routing_advice.py` issues optional point-in-time advice with an expiry
-   bounded by the selected fields and reset. The [contract](configuration.md#optional-routing-advice)
-   lets independent routing consumers use it without importing this runtime or
-   reimplementing its arithmetic.
+6. `economy_advice.py` offers optional monthly economy suggestions with an
+   expiry bounded by selected fields and reset. The
+   [contract](configuration.md#optional-monthly-economy-advice) carries current
+   evidence without selecting models, delegation strategies or worker counts.
 
 The static adapter is intentionally complete enough for offline operation and
 partial enough to exercise multi-source composition. It performs no I/O beyond
