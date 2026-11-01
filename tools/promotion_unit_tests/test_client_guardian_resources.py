@@ -155,7 +155,7 @@ def test_retained_relay_launch_uses_the_verified_bytes_not_its_file(
         relay = sys.modules[package.__name__ + "._output_relay"]
         retained = relay._retained_source_bytes
         monkeypatch.setattr(package, "spawn_sync_in_kill_on_close_job", launch)
-        monkeypatch.setattr(relay.Path, "resolve", lambda *_: pytest.fail("reopened relay path"))
+        monkeypatch.setattr(relay, "Path", lambda *_: pytest.fail("reopened relay path"))
         with pytest.raises(RuntimeError, match="fixture launch stopped"):
             relay.ByteRelay(3)
     assert len(calls) == 1
