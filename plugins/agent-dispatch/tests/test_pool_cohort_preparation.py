@@ -407,3 +407,39 @@ def test_settled_source_target_cannot_change_even_with_identical_bytes(owner):
     with pytest.raises(PoolPublicationError, match="target changed after settlement"):
         custody.prepare()
     assert custody.pending is None and custody.settled == (request, accepted)
+
+
+def test_acknowledgment_from_retargeted_coordinator_cannot_clear_unknown_original(owner):
+    base, _sources, queue, custody = owner
+    _write(base)
+    request = custody.prepare()
+    original_path = queue.db_path
+    other = TaskQueue(base.parent / "other-queue.db")
+    lookalike = _project(other, request)
+    queue.db_path = other.db_path
+    with pytest.raises(PoolPublicationError, match="acknowledgment lost the original coordinator"):
+        custody.acknowledge(request, lookalike)
+    assert custody.pending is request and custody.settled is None
+    queue.db_path = original_path
+    assert custody.recover() is None
+    assert queue.pool_configured_cohort().revision == 0
+    accepted = _project(queue, request)
+    custody.acknowledge(request, accepted)
+    assert custody.settled == (request, accepted)
+
+
+def test_coordinator_retarget_during_recovery_read_preserves_original_custody(owner, monkeypatch):
+    base, _sources, queue, custody = owner
+    _write(base)
+    request = custody.prepare()
+    accepted = _project(queue, request)
+    other = TaskQueue(base.parent / "other-queue.db")
+
+    def read(*_args, **_kwargs):
+        queue.db_path = other.db_path
+        return accepted
+
+    monkeypatch.setattr(queue, "recover_pool_configured_cohort", read)
+    with pytest.raises(PoolPublicationError, match="acknowledgment lost the original coordinator"):
+        custody.recover()
+    assert custody.pending is request and custody.settled is None

@@ -138,6 +138,10 @@ class PoolCohortPreparation:
     ) -> None:
         if self._pending is not request:
             raise PoolPublicationError("cohort result does not match the original request")
+        if Path(self._queue.db_path).absolute() != request.coordinator_path:
+            raise PoolPublicationError(
+                "cohort acknowledgment lost the original coordinator target"
+            )
         expected = request.expected_revision + (
             request.previous.observation != request.observation
         )

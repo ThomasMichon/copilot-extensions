@@ -231,7 +231,9 @@ source I/O. Returned dictionary copies cannot alter its original members,
 source digest, configured revision or coordinator CAS.
 
 Acknowledgment validates the complete original observation and its exact
-result revision, including an already-satisfied no-op. Unknown or mismatched
+result revision, including an already-satisfied no-op, and requires the
+original coordinator target even if another database returns identical data.
+Unknown or mismatched
 results retain custody. Recovery reads the existing coordinator cohort history
 for that original observation and CAS, including after a newer projection or
 queue reopen. It neither reads a newer source nor writes, advances clocks,
