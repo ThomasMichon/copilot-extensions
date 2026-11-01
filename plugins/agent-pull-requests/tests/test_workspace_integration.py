@@ -1,6 +1,7 @@
 """Real storage, handlers, protocol framing and protected synthetic transport."""
 
 import asyncio
+import base64
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -95,15 +96,29 @@ def integration(environment):
             if self.after_chunk is not None and target.endswith("/chunk"):
                 callback, self.after_chunk = self.after_chunk, None
                 callback()
-            if self.corrupt == "missing_descriptor" and target.endswith("/lookup"):
+            if self.corrupt in ("missing_descriptor", "scope", "id", "hash") and target.endswith("/lookup"):
                 from dataclasses import replace
                 value = json.loads(response.body)
-                value["result"].pop("descriptor", None)
+                if self.corrupt == "missing_descriptor":
+                    value["result"].pop("descriptor", None)
+                elif self.corrupt == "scope":
+                    value["scope"]["principal_id"] = "unselected-principal"
+                elif self.corrupt == "id":
+                    value["result"]["descriptor"]["id"] = "f" * 64
+                else:
+                    value["result"]["descriptor"]["sha256"] = "f" * 64
                 return replace(response, body=json.dumps(value).encode())
             if self.corrupt and target.endswith("/chunk"):
                 from dataclasses import replace
                 data = json.loads(response.body)
-                data["result"]["offset"] += 1
+                if self.corrupt == "hash":
+                    data["result"]["descriptor"]["sha256"] = "f" * 64
+                elif self.corrupt == "truncated":
+                    block = base64.b64decode(data["result"]["data"])
+                    block = block[:-1]
+                    data["result"]["data"] = base64.b64encode(block).decode()
+                else:
+                    data["result"]["offset"] += 1
                 response = replace(response, body=json.dumps(data).encode())
             return response
 
@@ -478,6 +493,27 @@ def test_missing_lookup_descriptor_is_a_structured_client_refusal(environment, i
         with pytest.raises(WorkspaceClientError, match="invalid_workspace_descriptor"):
             await client.materialize(42, generation["id"])
         assert backend.threads == []
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("corruption,code", [
+    ("scope", "workspace_scope_changed"), ("id", "invalid_workspace_descriptor"),
+    ("hash", "invalid_workspace_materialization"), ("truncated", "workspace_chunk_incomplete"),
+])
+def test_adversarial_frame_scope_identity_hash_and_truncation_never_materialize(environment, integration, corruption, code):
+    _, _, generation, _, backend, _ = environment
+    gateway, client, _, _, caller, _ = integration
+
+    async def scenario():
+        await client.capabilities()
+        caller.corrupt = corruption
+        with pytest.raises(WorkspaceClientError) as error:
+            await client.materialize(42, generation["id"])
+        assert error.value.code == code and not error.value.outcome_unknown and backend.threads == []
+        if corruption in ("scope", "id"):
+            assert not any(path.endswith("/chunk") for path in caller.calls)
         await gateway.drain(timeout=2)
 
     asyncio.run(scenario())
