@@ -561,3 +561,39 @@ The contained fail-first selection completed two failures with 13 deselected,
 `.venv-tools/r1a-sdk-native-cutoff-failfirst-20261031.log`. The existing #9578
 owner holds the SDK correction. No SDK source, deadline, assertion or admission
 gate was changed to make these tests pass.
+
+The owner corrected the native SDK cutoff in published
+`523694bbf2b7869d9a381bb3929e128b6f885c9b`. After preserving its command-only,
+budget and settlement-callback paths alongside the R1a explicit cleanup deadline,
+all 15 canonical launch cases pass in 0.26 seconds (18.20 including managed
+preparation/cleanup). The two fail-first SDK budget-only controls are included.
+Receipt: `.venv-tools/r1a-sdk-native-cutoff-green-20261031.log`.
+
+The exact local 3,184-node packet was also attempted at
+`24bf961599f8664d76efb138465fdd1b52d1c378`, using existing external Python 3.11
+dependencies and read-only cached coverage 7.16.2. No global dependency was
+installed or modified. Project-contained synthetic storage correctly triggered
+the source-read fence when the first-party-wheel license fixture wrote its
+synthetic `__init__.py`: **99 passed, one environment-fence failure, 14
+deselected**, 18.26 seconds. Receipt:
+`.venv-tools/r1a-unit-current-20261031.log`. This is not passing unit evidence.
+Do not suppress that fence or substitute historical packets. The existing
+required CI Eligible-units lane remains an authorized route to exact final
+canonical execution and its source-bound coverage/proof.
+
+The SDK owner reports existing-workflow run `41266343315` succeeding on Linux
+and macOS for accepted parent delegation, sequential timeouts, caller exit and
+the .75-second slow-settlement pending-output regression. Unrelated lanes were
+not selected. This is SDK qualification, not R1 POSIX observation implementation
+or broader campaign completion. SDK source acceptance and final current-base
+#8458 qualification/review/CI/merge remain independent gates.
+
+The complete owned packet was subsequently rerun at
+`24bf961599f8664d76efb138465fdd1b52d1c378` on the verified SDK523 base, adding
+`test_resident_pre_tool.py` to the original 15-file selection: **808 passed,
+zero failed/skipped**, 410.01 seconds pytest and 456.81 including managed
+preparation/cleanup. Receipt:
+`.venv-tools/r1a-complete-current-sdk-consumers-20261031.log`. Production
+15/5-second bounds and fixture assertions are unchanged. Later SDK successors,
+actual dependency merge, final current-base canonical CI and #8458 source
+review/merge still require qualification.

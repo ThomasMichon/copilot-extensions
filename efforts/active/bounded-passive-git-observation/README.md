@@ -536,3 +536,24 @@ review-gated platform slice, not disabling ordinary POSIX classification.
   only, not a competing SDK implementation, API, PR or timing relaxation.
   Final dependency merge, source qualification, review/CI and #8458 merge
   remain open.
+- The SDK owner corrected both native setup orderings in published
+  `523694bbf2b7869d9a381bb3929e128b6f885c9b`. The reconciled canonical launch file
+  now passes all 15 cases, including both fail-first budget-only controls.
+  Current source retains the SDK command-deadline/callback semantics alongside
+  the explicit R1a cleanup deadline; all module ceilings pass.
+- A local canonical unit attempt at
+  `24bf961599f8664d76efb138465fdd1b52d1c378` correctly refused synthetic Python
+  fixtures placed inside the checkout: 99 passed, one source-read-fence failure.
+  This is an environment-placement refusal, not a qualified packet or a waived
+  product test. Keep the fence intact and obtain exact current-source canonical
+  evidence through the existing required CI unit lane.
+- The SDK owner subsequently supplied scoped Linux/macOS native qualification,
+  including slow guardian settlement and pending-output preservation. That
+  qualifies the SDK delegation lane only, not this effort's unimplemented POSIX
+  observation slice. Its actual source merge and final #8458 qualification remain
+  outstanding; no source or runtime completion is inferred.
+- The complete 16-file owned consumer/native selection, including the SDK
+  resident-pre-tool consumer, passed 808 cases with zero failed/skipped at
+  `24bf961599f8664d76efb138465fdd1b52d1c378` (410.01 seconds pytest, 456.81 managed
+  total). This is current owned-code evidence on SDK523, not qualification of
+  its later successors or a source merge.
