@@ -608,46 +608,13 @@ def _local_pythonw(python: str) -> str | None:
 
 
 def _venv_home_python(python: str, filename: str) -> str | None:
-    venv_root = os.path.dirname(os.path.dirname(python))
-    cfg_path = os.path.join(venv_root, "pyvenv.cfg")
-    try:
-        with open(cfg_path, encoding="utf-8", errors="replace") as fh:
-            home = next(
-                (value.strip() for line in fh
-                 for key, _, value in [line.partition("=")] if key.strip() == "home"),
-                "",
-            )
-    except OSError:
-        return None
-    # Keep resolution outside the optional-config read: access errors, unreadable
-    # reparse points and cycles are not evidence that an interpreter is absent.
-    if not home:
-        return None
-    # CPython rereads this home through __PYVENV_LAUNCHER__, even if the
-    # requested executable is missing. Validate independently of selection.
-    try:
-        os.stat(home)
-    except (FileNotFoundError, NotADirectoryError):
-        return None
-    except OSError as exc:
-        if getattr(exc, "winerror", None) == 448:
-            raise RuntimeError(
-                "Cannot preserve the Windows venv: pyvenv.cfg home is blocked "
-                "by RedirectionGuard; rebuild the runtime with a physical Python home."
-            ) from exc
-        raise
-    return _physical_executable(os.path.join(home, filename))
+    from ._interpreter import venv_home_python
+
+    return venv_home_python(python, filename, resolve_executable=_physical_executable)
 
 
 def _venv_home_pythonw(python: str) -> str | None:
-    """Return the base ``pythonw.exe`` recorded by a venv's ``pyvenv.cfg``.
-
-    Relocatable Windows venv launchers (for example from ``uv venv``) can ship a
-    tiny local ``pythonw.exe`` trampoline that re-execs the base interpreter
-    named by ``pyvenv.cfg``'s ``home = ...`` entry. When that base install also
-    ships a genuine GUI-subsystem ``pythonw.exe``, prefer it over the local
-    trampoline so the detached daemon never re-enters a console interpreter.
-    """
+    """Prefer the venv's physical base GUI interpreter over its local trampoline."""
     return _venv_home_python(python, "pythonw.exe")
 
 
