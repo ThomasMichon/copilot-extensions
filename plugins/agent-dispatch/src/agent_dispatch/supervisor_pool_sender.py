@@ -83,6 +83,8 @@ class SupervisorPoolSender:
                 or "local-inputs-changed" in original.reasons
                 or original.snapshot.observation_revision is None
                 or current.snapshot.observation_revision != original.snapshot.observation_revision
+                or original.local_recheck_revision != original.snapshot.observation_revision
+                or current.local_recheck_revision != original.snapshot.observation_revision
                 or current.snapshot.input_revision != original.snapshot.input_revision
                 or current.snapshot.definitions != original.snapshot.definitions
                 or current.reasons != original.reasons
@@ -170,6 +172,16 @@ class SupervisorPoolSender:
                 raise PoolPublicationError("pool metadata send requires an original prepared request")
             request = custody.pending
             flight = self._pool_metadata_flight
+            if flight is not None and flight.future.done() and (
+                flight.future.cancelled() or flight.future.exception() is not None
+            ):
+                failure = None if flight.future.cancelled() else flight.future.exception()
+                log.warning(
+                    "completed pool metadata flight failed; recovering original request: error_type=%s",
+                    "CancelledError" if failure is None else type(failure).__name__,
+                )
+                self._pool_metadata_flight = None
+                flight = None
             if flight is None or flight.request is not request:
                 flight = self._new_pool_metadata_flight(request, deadline)
         try:

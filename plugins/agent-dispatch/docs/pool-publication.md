@@ -198,6 +198,9 @@ invocation recovers it, not a newer input revision.
 Successful completed flights stay retained until acknowledgment, including a
 timeout racing completion or an unavailable acknowledgment lock. They can
 settle after shutdown without needing another recovery read.
+A failed flight that finishes after a caller timeout is observed and logged
+on the next invocation, which recovers the same original request immediately
+rather than requiring another invocation to discard the old failure.
 Validated acknowledgment stays on that request-bound flight, so a delayed
 waiter cannot acknowledge an old result against a newer pending request.
 
@@ -215,8 +218,11 @@ peer again before POST. Its write boundary rechecks the actual original
 singleton acquisition and pending request, fresh complete local sources (or
 the same whole-scope unavailable observation), coordinator registration revision
 and every original publisher position. Changed sources, delayed observations,
-withdrawals, a changed publisher or closed admission refuse the write. The
-original capture deadline is checked again immediately before POST admission,
+withdrawals, a changed publisher or closed admission refuse the write.
+The original and current final local-read revisions are retained separately from
+the collection revision and must both match it. A repeated final-read failure
+cannot qualify merely because its reason and earlier collection stayed equal.
+The original capture deadline is checked again immediately before POST admission,
 after parsing and final comparisons, not just before source collection.
 That final closed-state/deadline decision shares the short shutdown admission
 guard, which is released before I/O; an admitted operation stays tracked even

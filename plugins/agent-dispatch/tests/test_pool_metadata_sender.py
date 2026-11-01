@@ -648,6 +648,67 @@ def test_final_admission_decision_serializes_close_without_holding_post(
             finish.set()
 
 
+def test_repeated_failed_final_read_cannot_qualify_unavailable_source_comparison(
+    owner: Any, monkeypatch: Any,
+) -> None:
+    daemon, queue, _calls = owner
+    _settle(daemon, queue)
+    _settle(daemon, queue)
+
+    def failed_recheck() -> Any:
+        raise PermissionError("synthetic final input unavailable")
+
+    monkeypatch.setattr(daemon, "_read_pool_local_inputs", failed_recheck)
+    request = daemon.prepare_pool_metadata_request()
+    assert request.reason and "local-input-capture-unavailable" in request.inputs.reasons
+    assert request.inputs.snapshot.observation_revision
+    assert request.inputs.local_recheck_revision is None
+    current = daemon.capture_pool_publication_inputs()
+    assert current.reasons == request.inputs.reasons
+    assert current.snapshot.observation_revision == request.inputs.snapshot.observation_revision
+    sent = _sender(daemon, queue)
+    before = queue.pool_catalog_snapshot()
+    with pytest.raises(PoolPublicationError, match="fences changed"):
+        daemon.send_pool_metadata_request()
+    assert not sent and queue.pool_catalog_snapshot() == before
+    assert daemon._pool_publisher_custody.pending is request
+
+
+def test_failed_flight_after_timeout_recovers_original_on_next_invocation(owner: Any) -> None:
+    daemon, queue, calls = owner
+    request = daemon.prepare_pool_metadata_request()
+    started, finish = Event(), Event()
+    sent = []
+
+    def lost(request: Any, *, boundary: Any) -> Any:
+        with boundary():
+            sent.append(request.to_dict())
+            _apply(queue, request)
+            started.set()
+            assert finish.wait(2)
+            raise httpx.ReadError("synthetic late lost acknowledgment")
+
+    daemon.client.send_pool_metadata = lost
+    daemon._reconcile_call_budget = 0.05
+    try:
+        with pytest.raises(TimeoutError):
+            daemon.send_pool_metadata_request()
+        assert started.is_set()
+        flight = daemon._pool_metadata_flight
+        finish.set()
+        with pytest.raises(httpx.ReadError):
+            flight.future.result(timeout=1)
+        assert daemon._pool_metadata_flight is flight
+        expected = queue.pool_catalog_snapshot().scopes[0]
+        calls_before = len(calls)
+        daemon._reconcile_call_budget = 1
+        assert daemon.send_pool_metadata_request() == expected
+        assert len(calls) == calls_before + 1 and sent == [request.to_dict()]
+        assert daemon._pool_publisher_custody.settled == (request, expected)
+    finally:
+        finish.set()
+
+
 @pytest.mark.parametrize("field", [
     "version", "generation", "definitions_revision", "valid_until",
     "missing_freshness", "oversized_freshness", "definitions", "scope",

@@ -70,12 +70,14 @@ class PoolPublicationInputs:
     snapshot: PoolSourceSnapshot
     catalog: PoolCatalogRead | None
     reasons: tuple[str, ...]
+    local_recheck_revision: str | None = None
 
     @property
     def coherent(self) -> bool:
         return (
             not self.reasons and self.snapshot.complete
             and self.snapshot.input_revision is not None and self.catalog is not None
+            and self.local_recheck_revision == self.snapshot.input_revision
         )
 
 

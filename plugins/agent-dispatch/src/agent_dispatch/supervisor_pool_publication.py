@@ -121,6 +121,7 @@ class SupervisorPoolPublication(SupervisorPoolSender):
         with self._pool_preparation_boundary() as (lock, acquisition):
             reasons = []
             catalog = None
+            local_recheck_revision = None
             try:
                 self._prune_probe_inflight()
                 before = self._bounded_read("pool-catalog-before", self.client.pool_catalog_metadata)
@@ -131,6 +132,8 @@ class SupervisorPoolPublication(SupervisorPoolSender):
                     self._effective_registrations()
                     snapshot = self._pool_source_snapshot
                     revision, complete = self._bounded_read("pool-local-recheck", self._read_pool_local_inputs)
+                    if self._source_observations["pool-local-recheck"].state == "fresh":
+                        local_recheck_revision = revision
                     if self._source_observations["pool-local-recheck"].state != "fresh" or not complete:
                         reasons.append("local-input-recheck-not-fresh")
                     if revision != snapshot.observation_revision:
@@ -155,7 +158,7 @@ class SupervisorPoolPublication(SupervisorPoolSender):
                 raise SingletonAdmissionError("pool source capture changed the singleton scope")
             return PoolPublicationInputs(
                 self.machine or "", self.env, acquisition, self._pool_source_snapshot,
-                catalog, tuple(sorted(set(reasons))),
+                catalog, tuple(sorted(set(reasons))), local_recheck_revision,
             )
 
     def prepare_pool_metadata_request(self) -> PoolMetadataRequest:
