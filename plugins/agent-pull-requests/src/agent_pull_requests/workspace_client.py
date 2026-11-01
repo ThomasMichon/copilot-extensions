@@ -36,6 +36,7 @@ class WorkspaceClient:
         self._path = route_prefix + "/v2/review/" + binding.target
         self._capabilities = None
         self._discovery_epoch = 0
+        self._ensure_lock = asyncio.Lock()
         if read_admission is not None and not callable(read_admission):
             raise ValueError("invalid existing transport read-admission callback")
         self._read_admission = read_admission
@@ -89,6 +90,13 @@ class WorkspaceClient:
             raise WorkspaceClientError("workspace_discovery_superseded")
         self._capabilities = copy.deepcopy(value)
         return value
+
+    async def ensure_capabilities(self):
+        """Share negotiation for overlapping tool calls; explicit refresh stays separate."""
+        async with self._ensure_lock:
+            if self._capabilities is None:
+                return await self.capabilities()
+            return copy.deepcopy(self._capabilities)
 
     async def exchange(self, operation, payload):
         if operation == "capabilities":

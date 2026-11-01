@@ -311,3 +311,61 @@ def test_file_directory_transitions_preserve_absent_file_sides(prepared, reverse
     files = {row["path"]: row for row in result["source"]["files"]}
     assert files["node"]["before" if reverse else "after"] is None
     assert files["node/child.txt"]["after" if reverse else "before"] is None
+    container_side = "before" if reverse else "after"
+    read = owner.read_retained(result["source"], "/node", container_side, budget=60)
+    assert read["classification"] == "container" and read["available"] is False
+
+
+@pytest.mark.parametrize("path,classification", [
+    ("/edit.txt", "text"), ("/empty.txt", "text"), ("/binary.dat", "binary"),
+    ("/link", "symlink"), ("/module", "gitlink"), ("/gone.txt", "absent"),
+])
+def test_retained_reader_preserves_special_object_and_absent_representation(prepared, path, classification):
+    owner, generation, _, _ = prepared
+    source = attach(owner, generation)["source"]
+    read = owner.read_retained(source, path, "after", budget=60)
+    assert read["classification"] == classification and read["effects"] == "none"
+    if path == "/empty.txt":
+        assert read["content"] == "" and read["size"] == 0
+    if classification in ("gitlink", "absent"):
+        assert read["content"] is None
+    if classification in ("symlink", "binary"):
+        assert read["encoding"] == "base64"
+
+
+@pytest.mark.parametrize("damage,reason", [
+    ("header", "invalid_source_blob_frame"), ("frame-size", "source_blob_size_mismatch"),
+    ("body", "source_blob_identity_mismatch"), ("metadata-size", "source_blob_size_mismatch"),
+    ("classification", "source_blob_classification_mismatch"),
+])
+def test_retained_reader_rejects_malformed_blob_frames_and_manifest_metadata(prepared, monkeypatch, damage, reason):
+    from agent_worktrees.pr_review_source import SourceIncomplete, _digest
+    from agent_worktrees import pr_review_source
+    owner, generation, _, _ = prepared
+    source = attach(owner, generation)["source"]
+    source = copy.deepcopy(source)
+    if damage in ("metadata-size", "classification"):
+        entry = next(row for row in source["files"] if row["path"] == "edit.txt")["after"]
+        if damage == "metadata-size":
+            entry["size"] += 1
+        else:
+            entry["classification"] = "binary"
+        source["id"] = _digest({key: value for key, value in source.items() if key != "id"})
+    else:
+        original = pr_review_source.run_caller_owned
+
+        def altered(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if "cat-file" in argv:
+                header, _, body = result.stdout.partition(b"\n")
+                if damage == "header":
+                    result.stdout = b"malformed blob header\n" + body
+                elif damage == "frame-size":
+                    result.stdout = header + b"\n" + body[:-1]
+                else:
+                    result.stdout = header + b"\n" + bytes([body[0] ^ 1]) + body[1:]
+            return result
+
+        monkeypatch.setattr(pr_review_source, "run_caller_owned", altered)
+    with pytest.raises(SourceIncomplete, match=reason):
+        owner.read_retained(source, "/edit.txt", "after", budget=60)
