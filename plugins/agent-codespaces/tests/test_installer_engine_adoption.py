@@ -955,10 +955,14 @@ def test_codespaces_stamp_reuses_native_directory_copy():
 def test_codespaces_stamp_cleanup_failure_precedes_copy_and_publication(tmp_path):
     if PWSH is None:
         pytest.skip("pwsh unavailable")
-    script = _prelude("ps1") + _function("ps1", "Invoke-Stamp") + """
+    fixture = tmp_path / "fixture 'quoted'"
+    install_dir = str(fixture / "runtime").replace("'", "''")
+    local_bin = str(fixture / "bin").replace("'", "''")
+    script = _prelude("ps1") + _function("ps1", "Invoke-Stamp") + f"""
+$InstallDir='{install_dir}'
+$LocalBin='{local_bin}'
+""" + """
 $SrcVersion='1.2.3'
-$InstallDir='C:\\fixture\\runtime'
-$LocalBin='C:\\fixture\\bin'
 $script:SourceRuntimeIdentity=$null
 function Write-ServiceErr { throw 'unexpected version refusal' }
 function Assert-SourceRuntime {}
