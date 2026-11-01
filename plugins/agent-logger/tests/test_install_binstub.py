@@ -47,19 +47,26 @@ def _offline_uv(tmp_path: Path, env: dict[str, str]) -> Path:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, destination)
         assert any(target.rglob("METADATA")), name
-    # The double copies local source instead of building wheels; setuptools is
-    # build-only here, while every runtime import still uses real package code.
+    # Reuse the source-constructor's test backend; package resolution stays offline.
     build_info = fixture / "setuptools" / "setuptools-83.0.0.dist-info"
     build_info.mkdir(parents=True)
     (build_info / "METADATA").write_text(
         "Metadata-Version: 2.1\nName: setuptools\nVersion: 83.0.0\n",
         encoding="utf-8",
     )
+    backend = fixture / "setuptools" / "setuptools"
+    backend.mkdir()
+    (backend / "__init__.py").write_text("", encoding="utf-8")
+    shutil.copyfile(
+        _PLUGIN_ROOT.parents[1] / "tools" / "fixtures" / "source-runtime-backend.py",
+        backend / "build_meta.py",
+    )
     calls = fixture / "installs.jsonl"
     driver = fixture / "driver.py"
     driver.write_text(
         f"""#!{sys._base_executable}
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -68,14 +75,37 @@ import sys
 import sysconfig
 import tomllib
 import venv
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 fixture = Path({str(fixture)!r})
 root = Path({str(tmp_path)!r})
 args = sys.argv[1:]
 if args == ['--version']:
     print('uv 0.12.5 (offline test fixture)')
+    raise SystemExit(0)
+if args[:2] == ['cache', 'dir']:
+    assert args[2:] == [] or len(args) == 4 and args[2] == '--cache-dir', args
+    cache = Path(args[3]) if len(args) == 4 else fixture / 'cache'
+    assert cache.resolve().is_relative_to(root.resolve())
+    cache.mkdir(parents=True, exist_ok=True)
+    print(cache)
+    raise SystemExit(0)
+if args[:1] == ['build']:
+    assert args[:6] == ['build', '--wheel', '--no-build-isolation', '--no-sources', '--offline', '--python'], args
+    assert len(args) == 10 and args[7] == '--out-dir', args
+    python, output, project = Path(args[6]), Path(args[8]), Path(args[9])
+    assert all(path.resolve().is_relative_to(root.resolve()) for path in (python, output, project))
+    output.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [str(python), '-I', '-B', '-c',
+         'import setuptools.build_meta as backend; print(backend.build_wheel(' + repr(str(output)) + '))'],
+        cwd=project, capture_output=True, text=True, check=True, timeout=60,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+    )
+    print(result.stdout, end='')
     raise SystemExit(0)
 if args[:1] == ['venv']:
     target = Path(args[1])
@@ -114,7 +144,9 @@ if '--show-settings' in args:
     exclude_newer: ExcludeNewer {{ global: None, package: ExcludeNewerPackage({{}}), }},
 }}, }}''')
     raise SystemExit(0)
-assert '--reinstall' in args
+wheel_arguments = [arg for arg in args if ' @ file:' in arg]
+build_tools = '--only-binary' in args
+assert '--reinstall' in args or build_tools or wheel_arguments, args
 assert '--no-deps' not in args and '--no-build-isolation' not in args
 cutoff = datetime.fromisoformat(args[args.index('--exclude-newer') + 1].replace('Z', '+00:00'))
 assert cutoff <= datetime.now(timezone.utc) - timedelta(days=7)
@@ -158,27 +190,49 @@ def install_local(project, installed):
         launcher.write_text('#!' + str(python) + '\\nfrom agent_logger.__main__ import main\\nraise SystemExit(main())\\n')
         launcher.chmod(0o755)
 
-if 'setuptools>=83.0.0' in args:
-    assert '--quiet' in args
+setuptools_arguments = [arg for arg in args if re.fullmatch(r'setuptools>=\\d+(?:\\.\\d+)*', arg)]
+sources = [Path(a) for a in args if (Path(a) / 'pyproject.toml').is_file()]
+assert setuptools_arguments or 'pyyaml>=6.0' in args or sources or wheel_arguments, args
+if setuptools_arguments:
+    if build_tools:
+        assert args[args.index('--only-binary') + 1] == ':all:'
+        assert args[args.index('--link-mode') + 1] == 'copy'
+    else:
+        assert '--quiet' in args
     shutil.copytree(fixture / 'setuptools', site, dirs_exist_ok=True)
 if 'pyyaml>=6.0' in args:
     assert '--quiet' in args
     shutil.copytree(fixture / 'PyYAML', site, dirs_exist_ok=True)
-else:
-    sources = [Path(a) for a in args if (Path(a) / 'pyproject.toml').is_file()]
+if sources or wheel_arguments:
+    for requirement in wheel_arguments:
+        origin = urlsplit(requirement.split(' @ ', 1)[1])
+        assert origin.scheme == 'file' and not origin.netloc
+        path = unquote(origin.path)
+        archive = Path(path[1:] if os.name == 'nt' and re.match(r'/[A-Za-z]:', path) else path)
+        assert archive.resolve().is_relative_to(root.resolve())
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        assert origin.fragment == 'sha256=' + digest
+        with zipfile.ZipFile(archive) as wheel:
+            assert all((site / name).resolve().is_relative_to(site.resolve()) for name in wheel.namelist())
+            info = next(name.rsplit('/', 1)[0] for name in wheel.namelist() if name.endswith('.dist-info/METADATA'))
+            wheel.extractall(site)
+        (site / info / 'direct_url.json').write_text(json.dumps({{
+            'url': urlunsplit(origin),
+            'archive_info': {{'hashes': {{'sha256': digest}}}},
+        }}))
     names = {{tomllib.loads((p / 'pyproject.toml').read_text())['project']['name'] for p in sources}}
     if names == {{'agent-procutil', 'agent-single-instance-lease', 'agent-update-driver'}}:
-        assert len(sources) == 3 and '--no-editable' in args and '--link-mode' in args
+        assert len(sources) == 3 and '--no-editable' not in args and '--link-mode' in args
         assert args[args.index('--link-mode') + 1] == 'copy'
     elif 'agent-logger' in names:
         expected = {{'agent-config-migrate', 'agent-procutil', 'agent-single-instance-lease',
                     'agent-update-driver', 'agent-dropin-registry', 'agent-plugin-resolve',
                     'agent-plugin-activation', 'agent-logger'}}
-        assert names == expected and len(sources) == 8 and '--no-editable' in args, args
+        assert names == expected and len(sources) == 8 and '--no-editable' not in args, args
         assert {{args[i + 1] for i, arg in enumerate(args) if arg == '--reinstall-package'}} == expected
         assert (site / 'setuptools-83.0.0.dist-info').is_dir()
         assert (site / 'yaml').is_dir()
-    else:
+    elif not wheel_arguments:
         assert len(sources) == 1 and '--quiet' in args, args
     installed = set()
     for project in sources:
@@ -281,6 +335,23 @@ def test_offline_uv_provides_private_interpreter_layout(tmp_path: Path, foundati
         assert Path(json.loads(result.stdout)) == managed
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Native Linux interpreter custody")
+def test_install_fixture_preserves_daemon_interpreter_custody(tmp_path, monkeypatch):
+    unsafe = tmp_path / "writable-python"
+    shutil.copyfile(sys._base_executable, unsafe)
+    unsafe.chmod(0o777)
+    monkeypatch.setattr(sys, "_base_executable", str(unsafe))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_DAEMON_PYTHON", str(unsafe))
+    env = _isolated_install_env(tmp_path / "home")
+    assert Path(env["COPILOT_EXTENSIONS_DAEMON_PYTHON"]).resolve() != unsafe.resolve()
+    result = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-c", '. "$1"; _di_lifecycle check',
+         "custody-proof", str(_PLUGIN_ROOT / "scripts" / "daemon_instances.sh")],
+        env=env, capture_output=True, text=True, check=False, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def _assert_complete_runtime(home: Path) -> None:
     root = home / ".agent-logger"
     version = (root / "current-version").read_text(encoding="utf-8").strip()
@@ -321,6 +392,27 @@ def _isolated_install_env(home: Path) -> dict[str, str]:
     env["COPILOT_PLUGIN_INSTALL_STAGED"] = "1"
     for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
         env.pop(name, None)
+    if sys.platform == "linux":
+        candidates = (
+            env.get("COPILOT_EXTENSIONS_DAEMON_PYTHON"),
+            sys._base_executable,
+            shutil.which("python3", path=os.defpath),
+        )
+        diagnostics = []
+        for candidate in dict.fromkeys(filter(None, candidates)):
+            probe = subprocess.run(
+                ["bash", "--noprofile", "--norc", "-c",
+                 '. "$1"; _di_lifecycle check >/dev/null && _di_python',
+                 "fixture-interpreter", str(_PLUGIN_ROOT / "scripts" / "daemon_instances.sh")],
+                env={**env, "COPILOT_EXTENSIONS_DAEMON_PYTHON": candidate},
+                capture_output=True, text=True, check=False, timeout=20,
+            )
+            if probe.returncode == 0:
+                env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = probe.stdout.strip()
+                break
+            diagnostics.append(probe.stderr.strip())
+        else:
+            raise RuntimeError("No custody-qualified daemon test interpreter: " + "; ".join(diagnostics))
     return env
 
 
@@ -345,6 +437,7 @@ def _stage_payload(tmp_path: Path) -> Path:
         "versioned-runtime",
         "config-migrate",
         "agent-procutil",
+        "zdd",
         "dropin-registry",
         "plugin-resolve",
         "single-instance-lease",

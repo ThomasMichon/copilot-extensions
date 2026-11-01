@@ -87,6 +87,39 @@ def test_source_phase_renews_from_verified_file_batches(monkeypatch, tmp_path, c
     assert "Source wheel progress: phase=offline" in capsys.readouterr().err
 
 
+def test_source_progress_coalesces_output_not_completed_work(monkeypatch, capsys):
+    import installer_wheel_inputs as wheels
+
+    now = [100.0]
+    clock = SimpleNamespace(monotonic=lambda: now[0])
+    monkeypatch.setattr(builds, "time", clock)
+    monkeypatch.setattr(wheels, "time", clock)
+    elapsed = {}
+    chunks = []
+    with builds._source_phase("offline", 10, elapsed) as progress:
+        chunks.append(capsys.readouterr().err)
+        for unit in range(1, 20001):
+            now[0] = 100 + unit / 1000
+            progress.renew()
+            assert progress.deadline == now[0] + 10
+            output = capsys.readouterr()
+            assert output.out == ""
+            assert output.err
+            chunks.append(output.err)
+    assert progress.units == 20000
+    assert elapsed["offline"] == 20
+    output = capsys.readouterr()
+    assert output.out == ""
+    chunks.append(output.err)
+    assert len("".join(chunks).encode("utf-8")) <= 65536
+    assert "".join(chunks).count("Source wheel progress:") <= 21
+    assert "completed-units=20000" in output.err
+    now[0] += 11
+    with pytest.raises(wheels.WheelDeadlineError):
+        builds._source_deadline(progress)
+    assert capsys.readouterr().err == ""
+
+
 @pytest.mark.parametrize("condition", ["progress", "silent", "mutation"])
 def test_initial_retention_renews_only_completed_work_and_preserves_source(
     engine, monkeypatch, tmp_path, capsys, condition,
@@ -109,8 +142,17 @@ def test_initial_retention_renews_only_completed_work_and_preserves_source(
     before = engine.runtime.fingerprint_source(engine._source_files(packages))
     inputs = engine.FrozenInputs(source, packages, before)
     policy = sys.modules[engine.retain_uv_install.__module__]
+    retain = engine.retain_uv_install
     copy = policy._copy_retained_file
     copies = []
+
+    def retain_inputs(uv, arguments, **options):
+        assert options.get("non_editable") is True
+        return retain(uv, arguments, **options)
+
+    def probe(command, **_options):
+        assert not {"--no-editable", "--editable", "-e"}.intersection(command)
+        return subprocess.CompletedProcess(command, 0, settings(), "")
 
     def measured_copy(original, destination, **options):
         copies.append(Path(destination))
@@ -126,10 +168,8 @@ def test_initial_retention_renews_only_completed_work_and_preserves_source(
 
     monkeypatch.setattr(policy, "_copy_retained_file", measured_copy)
     monkeypatch.setattr(policy, "_select_uv_executable", lambda _value: sys.executable)
-    monkeypatch.setattr(
-        policy.subprocess, "run",
-        lambda command, **_options: subprocess.CompletedProcess(command, 0, settings(), ""),
-    )
+    monkeypatch.setattr(engine, "retain_uv_install", retain_inputs)
+    monkeypatch.setattr(policy.subprocess, "run", probe)
     uv = Path(sys.executable)
     if condition == "progress":
         with engine._retained_inputs(inputs, uv, uv, refresh=False, timeout=10) as retained:

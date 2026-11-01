@@ -55,6 +55,10 @@ on:
         description: Qualify only source-wheel cache reuse and hardlinks with the pinned real backend
         type: boolean
         default: false
+      uv_deployment_compatibility:
+        description: Qualify retained deployment mappings and coupled native UV installers without host rollout
+        type: boolean
+        default: false
       candidate_profiles:
         description: Exercise role-selectable candidate construction and immutable reuse with real UV
         type: boolean
@@ -252,7 +256,7 @@ jobs:
           --timeout 120 --plugin-timeout 240 --test-timeout 30
 
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.uv_deployment_compatibility && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -273,7 +277,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit }}
+    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.uv_deployment_compatibility && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -1619,12 +1623,70 @@ jobs:
     if: ${{ inputs.source_cache }}
     name: Source wheel cache and hardlinks (Windows)
     runs-on: windows-latest
-    timeout-minutes: 6
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         suite: [normal]
     steps: *source-cache-steps
+
+  uv-deployment-compatibility-linux:
+    if: ${{ inputs.uv_deployment_compatibility }}
+    name: UV deployment compatibility (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      UV_PYTHON: "3.12"
+    steps: &uv-deployment-compatibility-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact qualification source
+        run: >-
+          python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['GITHUB_SHA']; print('source='+actual)"
+      - name: Prepare validator tooling
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml
+      - name: Qualify deployed mappings, explicit refusal and unchanged editable APIs
+        run: >-
+          python -m pytest -q tools/test_installer_dependency_policy.py
+          -k "native_local_dependency_requires_declared_source_attribution or deployment_cli or native_editable_retains_metadata_but_imports_live_source_after_cleanup or registry_only_cli"
+      - name: Qualify native Codespaces cold/warm installation and failure propagation
+        run: >-
+          python tools/run-plugin-tests.py agent-codespaces --allow-explicit-tiers
+          --test-file tests/test_installer_engine_adoption.py
+          -k "native_batch_installs or library_install_order_retry_and_errors"
+      - name: Qualify coupled Codespaces preinstall source-closure and reinstall contracts
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp --allow-explicit-tiers
+          --test-file tests/test_source_install_transactions.py
+          -k codespaces_native_preinstall_accepts_noneditable_local_sources
+      - name: Qualify Dispatch retry, extras, cutoff and materialized-source arguments
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch --allow-explicit-tiers
+          --test-file tests/test_installer_engine_adoption.py
+          -k "package_retry_keeps_optional_extra_and_exact_exit_code or materialized_snapshot_admits_install_without_authoring_checkout"
+      - name: Qualify the complete coupled Logger batch and offline first-use packet
+        run: >-
+          python tools/run-plugin-tests.py agent-logger --allow-explicit-tiers
+          --test-file tests/test_install_batch.py
+          --test-file tests/test_install_binstub.py
+          --timeout 1200 --plugin-timeout 1200
+
+  uv-deployment-compatibility-windows:
+    if: ${{ inputs.uv_deployment_compatibility }}
+    name: UV deployment compatibility (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      UV_PYTHON: "3.12"
+    steps: *uv-deployment-compatibility-steps
 
   packaging-seed-linux:
     if: ${{ inputs.dependency_compile }}

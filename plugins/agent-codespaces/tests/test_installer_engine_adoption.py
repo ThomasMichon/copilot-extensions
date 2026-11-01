@@ -151,7 +151,7 @@ def unseasoned(arguments):
     return result
 expected_sources = json.loads(os.environ.get("TEST_UV_EXPECTED_SOURCES", "{}"))
 if expected_sources and args[:2] == ["pip", "install"]:
-    assert "--no-editable" in args and "--editable" not in args
+    assert "--no-editable" not in args and "--editable" not in args
     config = Path(args[args.index("--config-file") + 1]).resolve()
     private_root = config.parent
     assert config.is_file() and not config.is_symlink()
@@ -163,7 +163,11 @@ if expected_sources and args[:2] == ["pip", "install"]:
         source = Path(argument)
         if not source.is_dir() or not (source / "pyproject.toml").is_file():
             continue
-        project = tomllib.loads((source / "pyproject.toml").read_text())["project"]
+        metadata = tomllib.loads((source / "pyproject.toml").read_text())
+        project = metadata["project"]
+        for entries in metadata.get("tool", {}).get("uv", {}).get("sources", {}).values():
+            assert all(entry.get("editable") is not True
+                       for entry in (entries if isinstance(entries, list) else [entries]))
         original = Path(expected_sources[project["name"]])
         assert source.resolve() != original.resolve()
         assert any(parent.samefile(private_root) for parent in source.resolve().parents)
@@ -243,7 +247,7 @@ raise SystemExit(2)
 
 def _without_policy_arguments(arguments):
     assert "--exclude-newer" in arguments and "--reinstall" in arguments
-    assert "--no-editable" in arguments and arguments[arguments.index("--link-mode") + 1] == "copy"
+    assert "--no-editable" not in arguments and arguments[arguments.index("--link-mode") + 1] == "copy"
     result = []
     items = iter(arguments)
     for argument in items:
@@ -745,13 +749,14 @@ def test_codespaces_library_install_order_retry_and_errors(
 
 @pytest.mark.timeout(180)
 @pytest.mark.portfolio_tier("T3")
-def test_codespaces_native_batch_installs_cold_and_refreshes_warm_local_sources(tmp_path):
+@pytest.mark.parametrize("editable", [False, True])
+def test_codespaces_native_batch_installs_cold_and_refreshes_warm_local_sources(tmp_path, editable):
     if PWSH is None:
         pytest.skip("pwsh unavailable")
     uv = shutil.which("uv")
     if not uv:
         pytest.skip("native UV unavailable")
-    engine, sources = _small_attributed_sources(tmp_path, editable=False, canonical=True)
+    engine, sources = _small_attributed_sources(tmp_path, editable=editable, canonical=True)
     backend = """
 import pathlib, tomllib, zipfile
 VALUE = 1
@@ -770,7 +775,14 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     return filename
 """
     for source in sources:
+        if editable:
+            manifest = source / "pyproject.toml"
+            manifest.write_text(manifest.read_text(encoding="utf-8").replace(
+                'requires=["setuptools>=83.0.0"]\nbuild-backend="setuptools.build_meta"',
+                'requires=[]\nbuild-backend="fixture_backend"\nbackend-path=["."]',
+            ), encoding="utf-8")
         (source / "fixture_backend.py").write_text(backend, encoding="utf-8")
+    original_manifests = {source: (source / "pyproject.toml").read_bytes() for source in sources}
     env = _env(tmp_path)
     env.update(UV_OFFLINE="1", UV_NO_INDEX="1", UV_PYTHON_DOWNLOADS="never",
                UV_CACHE_DIR=str(tmp_path / "cache"))
@@ -804,16 +816,21 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
         assert result.returncode == 0, result.stdout + result.stderr
         probe = tmp_path / "probe.py"
         probe.write_text(
-            "import importlib\nfrom importlib.metadata import distributions\n"
+            "import importlib, json\nfrom importlib.metadata import distributions\n"
             f"assert {{d.metadata['Name']:d.version for d in distributions()}} == "
             f"{dict.fromkeys(PACKAGES, '1.0')!r}\n"
-            f"assert importlib.import_module('agent_ssh_manager').VALUE == {expected}\n",
+            f"assert importlib.import_module('agent_ssh_manager').VALUE == {expected}\n"
+            "for distribution in distributions():\n"
+            "    direct_url = distribution.read_text('direct_url.json')\n"
+            "    assert direct_url is not None\n"
+            "    assert json.loads(direct_url)['dir_info'].get('editable') is not True\n",
             encoding="utf-8",
         )
         subprocess.run(
             [str(python), "-I", str(probe)], env=env, check=True, capture_output=True,
             timeout=15, creationflags=flags,
         )
+    assert {source: (source / "pyproject.toml").read_bytes() for source in sources} == original_manifests
 
 
 def test_codespaces_canonical_reference_registration_and_release_materialization(tmp_path):
