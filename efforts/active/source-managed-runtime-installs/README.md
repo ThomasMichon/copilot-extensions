@@ -446,11 +446,13 @@ transaction execution from the existing recurring-maintenance assignment.
 Completed items below retain earlier source evidence; their conservative
 reuse/admission behavior is not an exception to the fresh-default revision.
 
-- [ ] Review and implement [current footprint contracts and deliberate compatibility](footprint-contract-evolution.md):
+- [x] Review and implement [current footprint contracts and deliberate compatibility](footprint-contract-evolution.md):
   separate current source hashes from semantic footprint/schema changes, retain
   explicit supported legacy transitions and permit deliberate support retirement.
   The existing append-only provider below remains historical source evidence,
   not a requirement to ship every prior source snapshot indefinitely.
+  #9799 merged the bounded source implementation; native footprint/effect,
+  independent replacement and installed-adopter qualification remain open below.
 
 - [x] Review the [fresh-default upstream contract](fresh-default-installation.md) before changing
   its routing or recovery implementation: global update interception, upstream
