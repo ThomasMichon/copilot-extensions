@@ -141,6 +141,23 @@ class _ControlHandler(socketserver.StreamRequestHandler):
             ):
                 return
             action = str(request.get("action") or "health")
+            if action in {"agenda-read", "agenda-publish", "agenda-feed"}:
+                from . import agenda_contract
+
+                try:
+                    request = agenda_contract.decode(raw)
+                    agenda_contract.exact(request, {"version", "token", "action", "payload"})
+                    if not raw.endswith(b"\n") or (
+                        type(request["version"]) is not int or request["version"] != 1
+                    ):
+                        raise agenda_contract.AgendaError("invalid agenda control frame")
+                except agenda_contract.AgendaError as exc:
+                    error = agenda_contract.failure(exc.code, str(exc))
+                    reply = {"type": "error", **error} if action == "agenda-feed" else {
+                        "version": 1, "result": error,
+                    }
+                    self.wfile.write(agenda_contract.encode(reply).encode("utf-8") + b"\n")
+                    return
             if action == RECEIPT_ACTION and (
                 len(raw) > FRAME_BYTES or not raw.endswith(b"\n")
                 or set(request) != {"version", "token", "action", "payload"}
@@ -156,10 +173,11 @@ class _ControlHandler(socketserver.StreamRequestHandler):
             if not isinstance(payload, dict):
                 payload = {}
             owner = self.server.owner
-            if action in {"worktrees-read", "repos-map-read", "picker-bootstrap"}:
+            if action in {"worktrees-read", "repos-map-read", "picker-bootstrap",
+                          "agenda-read", "agenda-publish"}:
                 current_read = "worktrees-read" if action == "picker-bootstrap" else action
                 owner._on_current_read_started(current_read)
-            if owner.stream_handle is not None and action == "worktrees-feed":
+            if owner.stream_handle is not None and action in {"worktrees-feed", "agenda-feed"}:
                 def disconnected():
                     readable, _, _ = select.select([self.request], [], [], 0)
                     return bool(readable)
@@ -167,9 +185,16 @@ class _ControlHandler(socketserver.StreamRequestHandler):
                 frames = owner.stream_handle(action, payload, disconnected)
                 try:
                     for frame in frames:
+                        if action == "agenda-feed":
+                            from .agenda_contract import encode
+
+                            encoded = encode(frame).encode("utf-8") + b"\n"
+                        else:
+                            encoded = json.dumps(
+                                frame, separators=(",", ":"), ensure_ascii=False,
+                            ).encode("utf-8") + b"\n"
                         self.wfile.write(
-                            json.dumps(frame, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-                            + b"\n"
+                            encoded
                         )
                         self.wfile.flush()
                 finally:
@@ -286,10 +311,13 @@ class ControlClient:
         max_response_bytes: int | None = None, total_timeout: float | None = None,
         read_timeout: float | None = None,
     ) -> dict:
-        body = json.dumps(
-            {"version": 1, "token": self.token, "action": action, "payload": payload or {}},
-            separators=(",", ":"),
-        ).encode("utf-8") + b"\n"
+        envelope = {"version": 1, "token": self.token, "action": action, "payload": payload or {}}
+        if action in {"agenda-read", "agenda-publish"}:
+            from .agenda_contract import encode
+
+            body = encode(envelope).encode("utf-8") + b"\n"
+        else:
+            body = json.dumps(envelope, separators=(",", ":")).encode("utf-8") + b"\n"
         deadline = None if total_timeout is None else time.monotonic() + total_timeout
         with socket.create_connection((self.host, self.port), timeout=self.timeout) as sock:
             sock.settimeout(self.timeout if read_timeout is None else read_timeout)
@@ -313,7 +341,12 @@ class ControlClient:
                 if chunk.endswith(b"\n"):
                     break
         buf = b"".join(chunks)
-        response = json.loads(buf.decode("utf-8"))
+        if action in {"agenda-read", "agenda-publish"}:
+            from .agenda_contract import decode
+
+            response = decode(buf)
+        else:
+            response = json.loads(buf.decode("utf-8"))
         result = response.get("result")
         if not isinstance(result, dict):
             raise ValueError("status-monitor control response missing result")

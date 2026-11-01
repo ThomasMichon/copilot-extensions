@@ -2,8 +2,10 @@
 
 Companion to [driving-effort-agendas](../SKILL.md). This version 1 convention
 uses JSON so a reader can inspect it without installing dependencies.
-It is a manual format, not a promise of effect execution or stale-write
-enforcement. [Version-2 deferred branches](deferred-branches.md) extend the
+It remains the compatible board/cursor format, not a promise of effect execution.
+The [managed CLI/store](managed-agenda.md) now supplies transactional semantic
+updates and stale-write enforcement for explicitly initialized homes.
+[Version-2 deferred branches](deferred-branches.md) extend the
 cursor while preserving version-1 boards and legacy cursors.
 
 ## Reviewed definition
@@ -150,8 +152,9 @@ rejects required version-2 state rather than silently dropping the frontier.
 `--now` supplies a timezone-aware inspection time, not a scheduler. Deferred
 rechecks preserve active work; timestamps and response references grant nothing.
 
-No mutation is implemented: scaffolding stays a copy/edit of the examples,
-and transitions remain deliberate manual work. `--expected-revision` checks
+The legacy helper implements no mutation; unmanaged scaffolding stays a
+copy/edit of the examples. Prefer the [managed command path](managed-agenda.md)
+for adopted writable homes. The legacy `--expected-revision` checks
 only the read snapshot, not CAS for a subsequent write. A complete cursor with
 no active frames is a supported representation; completed roots/results may
 remain as optional history. No history field proves the real source gate.

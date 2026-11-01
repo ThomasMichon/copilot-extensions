@@ -7,6 +7,7 @@ import argparse
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 import sys
 from typing import Any, Callable
@@ -47,16 +48,33 @@ def _constant(value: str) -> Any:
     raise AgendaError(f"nonfinite JSON value: {value}")
 
 
+def _float(value: str) -> float:
+    result = float(value)
+    if not math.isfinite(result):
+        raise AgendaError("nonfinite JSON number")
+    return result
+
+
+def decode(raw: bytes, label: str = "document", *, limit: int = 131072) -> dict[str, Any]:
+    """Decode one bounded strict document, including overflowing JSON floats."""
+    if len(raw) > limit:
+        raise AgendaError(f"{label} exceeds {limit // 1024} KiB")
+    try:
+        return _object(json.loads(raw.decode("utf-8-sig"), object_pairs_hook=_pairs,
+                                  parse_constant=_constant, parse_float=_float), label)
+    except AgendaError:
+        raise
+    except (ValueError, RecursionError) as exc:
+        raise AgendaError(f"cannot decode {label}: {exc}") from exc
+
+
 def _read(path: Path) -> dict[str, Any]:
     try:
         with path.open("rb") as stream:
             raw = stream.read(131073)
         if len(raw) > 131072:
             raise AgendaError(f"{path.name} exceeds 128 KiB")
-        value = json.loads(
-            raw.decode("utf-8-sig"), object_pairs_hook=_pairs, parse_constant=_constant
-        )
-        return _object(value, path.name)
+        return decode(raw, path.name)
     except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise AgendaError(f"cannot read {path.name}: {exc}") from exc
 
@@ -78,6 +96,10 @@ def _local(home: Path, value: Any) -> Path:
 
 def _board(home: Path, name: Any) -> dict[str, Any]:
     board = _read(_local(home, name))
+    return validate_board(board)
+
+
+def validate_board(board: dict[str, Any]) -> dict[str, Any]:
     if type(board.get("version")) is not int or board["version"] != 1:
         raise AgendaError("unsupported agenda version")
     if "revision" in board:
@@ -310,7 +332,20 @@ def inspect(
         home = home.resolve()
     except (OSError, ValueError, RuntimeError) as exc:
         raise AgendaError("cannot resolve state home") from exc
+    if (home / "agenda.sqlite3").exists() or (home / "agenda.sqlite3").is_symlink():
+        raise AgendaError("managed state exists; use agenda_cli.py read/check, not legacy JSON")
     cursor = _read(home / "cursor.json")
+    return inspect_documents(home, cursor, lambda name: _board(home, name),
+                             expected_revision, worktree, now=now)
+
+
+def inspect_documents(
+    home: Path, cursor: dict[str, Any],
+    load_board: Callable[[Any], dict[str, Any]],
+    expected_revision: int | None = None, worktree: str | None = None,
+    *, now: datetime | None = None,
+) -> Snapshot:
+    """Inspect in-memory documents from one transaction without cached files."""
     version = cursor.get("version", 1)
     if type(version) is not int or version not in (1, 2):
         raise AgendaError("unsupported cursor version")
@@ -349,7 +384,7 @@ def inspect(
     def board_for(name: Any) -> dict[str, Any]:
         path = _local(home, name)
         if path not in boards:
-            boards[path] = _board(home, name)
+            boards[path] = validate_board(load_board(name))
         return boards[path]
 
     for name in queue:

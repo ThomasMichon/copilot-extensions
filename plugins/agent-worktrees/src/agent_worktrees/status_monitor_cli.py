@@ -660,6 +660,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("allocation-link")
         if worktrees_runtime.feed.active_count():
             reasons.append("worktrees-feed")
+        reasons.extend(worktrees_runtime.agenda_busy(control_server))
         if control_server.current_read_count():
             reasons.append("worktrees-read")
         if control_server.current_read_count(repository_map.READ_ACTION):
@@ -684,6 +685,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             "tracking-write-compute": int(tracking_write.has_inflight_write()),
             "allocation-link": allocation_linker.active_count(),
             "worktrees-feed": worktrees_runtime.feed.active_count(),
+            **worktrees_runtime.agenda_counts(control_server),
             "worktrees-read": control_server.current_read_count(),
             "repos-map-read": control_server.current_read_count(repository_map.READ_ACTION),
             "repos-map-producer": int(repositories_runtime.health()["repositories"]["refreshing"]),
@@ -694,9 +696,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     control_server = status_monitor_cutover.ControlServer(
         lambda action, payload: _handle_control(action, payload),
         port=getattr(args, "control_port", None),
-        stream_handle=lambda action, payload, disconnected: worktrees_runtime.feed.stream(
-            payload, disconnected
-        ),
+        stream_handle=worktrees_runtime.stream,
     )
     empty_strikes = 0
     max_empty_strikes = 3
@@ -714,6 +714,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             )
         if action == receipt_control.ACTION:
             return receipts.handle(payload)
+        if action in {"agenda-read", "agenda-publish"}:
+            return worktrees_runtime.agenda_handle(action, payload)
         if action == "picker-bootstrap":
             return worktrees_runtime.picker_bootstrap(payload)
         if action == READ_ACTION:

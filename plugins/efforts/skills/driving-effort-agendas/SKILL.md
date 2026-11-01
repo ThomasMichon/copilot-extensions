@@ -33,7 +33,7 @@ adopting a cursor does not reserve a different participant's work.
 
 Resolve the worktree journal's **worktree-specific state home** through its
 owner's published locator or an explicit assignment/adopter setting. Keep
-`agenda.json` and `cursor.json` together there, near the journal, without
+the managed store (or legacy `agenda.json` and `cursor.json`) there, near the journal, without
 rewriting its records or guessing an implementation-private path. A shared
 journal home needs an owner-allocated compartment for this worktree.
 There is no mandatory journal provider: when none is available, choose an
@@ -168,7 +168,45 @@ actual owner and priority; the cursor never overrides operator steering or
 safety. Optional projections can show this same position without introducing
 another owner of claims or completion.
 
-## Optional read-only helper
+## Managed command path (preferred for adopted writable homes)
+
+Use the payload's [scripts/agenda_cli.py](scripts/agenda_cli.py) through an
+existing Python interpreter:
+
+```text
+python <resolved-efforts-payload>/skills/driving-effort-agendas/scripts/agenda_cli.py next --state-home <explicit-lane-home>
+```
+
+This exact payload invocation is available to CLI/App/ACP sessions only where
+their tool host supports process execution and Python; it is not a global
+binstub or an inferred host feature. No sibling plugin or installed runtime
+is needed. Use `read`, `next`, `check`, `history`, `init`, `update` and `publish`
+as described in the [managed command contract](references/managed-agenda.md).
+Prefer semantic `update` submissions to hand-editing JSON: require a current
+expected revision, stable operation ID and criterion/evidence references.
+Transactions preserve roots, returns, all original evidence and finite limits.
+Never treat caller-asserted actor/session metadata as authentication.
+
+An existing manual home is adopted only through an explicit `init` while the
+lane is quiescent. Board files stay unchanged; original cursor bytes are durably
+preserved before its old path receives an unsupported-version refusal marker.
+This fences already-installed legacy inspectors too. Interrupted adoption may
+leave a fenced, unavailable lane; retry the saved initialization request using
+the [recovery contract](references/managed-agenda.md#interrupted-adoption-recovery),
+never restore stale JSON as live state. Missing historical entry timing remains unknown.
+Do not migrate another active agent automatically. After import, read the
+SQLite authority; old `agenda.py` refuses managed markers instead of reporting
+stale cursor files. Keep the managed store's explicit locator and revision in
+handoffs and reread after every transition.
+
+Optional trusted publisher argv receives only a bounded committed observation.
+Persisted success and pending/not-configured/delivered notification are distinct;
+delivery failure calls for `publish`, not replaying a mutation. Manager/head/
+generation fencing and actual presentation remain the adapter's responsibility.
+No agenda command executes work, proves external approval, starts a service or
+changes the canonical completion gate.
+
+## Legacy read-only helper and recovery
 
 The payload's [scripts/agenda.py](scripts/agenda.py) runs through an existing
 Python 3 interpreter; it needs no dependencies, installer or daemon.
@@ -192,7 +230,7 @@ completion. Code 0 means the inspected active/next snapshot is structurally
 consistent, **not** that exit criteria or source completion passed. Code 2 is a
 diagnostic requiring correction/reconciliation; source files remain unchanged.
 
-Manual JSON editing is cooperative and single-writer: it does not provide
+For unmanaged homes only, manual JSON editing is cooperative and single-writer: it does not provide
 atomic updates, crash transactions or stale-write enforcement. Read the latest
 cursor before editing, preserve a pending return until reconciled, and do not
 let parallel writers share it. This procedure does not prevent arbitrary
@@ -205,6 +243,7 @@ the safety of a later write or the authority of its caller.
 - [Agenda example](assets/agenda.example.json)
 - [Lane cursor example](assets/cursor.example.json)
 - [Optional read-only next/check helper](scripts/agenda.py)
+- [Managed CLI and transactional command contract](references/managed-agenda.md)
 - [Deferred branches, decision packets and revisit points](references/deferred-branches.md)
 - [Deferred board example](assets/agenda.deferred.example.json)
 - [Version-2 deferred cursor example](assets/cursor.deferred.example.json)
