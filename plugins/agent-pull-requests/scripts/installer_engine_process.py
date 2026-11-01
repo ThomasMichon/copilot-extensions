@@ -316,6 +316,8 @@ def _retained_windows(
     execution_deadline = time.monotonic() + timeout
     if deadline is not None:
         execution_deadline = min(execution_deadline, deadline)
+    progress_output = on_output is not None or bool(output_fds)
+    completion_deadline = deadline if progress_output else execution_deadline
     packet = _guardian_packet(procutil, runtime_path, guardian_sources)
     reader, writer = os.pipe()
     process = None
@@ -335,8 +337,9 @@ def _retained_windows(
                      "--owner-handle", str(handle), "--runtime-root", str(root),
                      "--runtime-version", version,
                      "--timeout", str(timeout),
-                     *(["--progress-output"] if on_output is not None or output_fds else []),
-                     "--deadline", str(execution_deadline), "--", *argv],
+                     *(["--progress-output"] if progress_output else []),
+                     *(["--deadline", str(completion_deadline)] if completion_deadline is not None else []),
+                     "--", *argv],
                     cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                     startupinfo=startup, close_fds=True, executable=sys.executable,
@@ -363,7 +366,7 @@ def _retained_windows(
                 )
                 capture.wait(
                     timeout, startup_timeout=timeout + 30,
-                    deadline=execution_deadline, wait_for_eof=False,
+                    deadline=completion_deadline, wait_for_eof=False,
                 )
         except subprocess.TimeoutExpired as error:
             timeout_error = error
@@ -399,7 +402,8 @@ def _retained_windows(
             raise RuntimeError("installer retention guardian returned invalid completion")
         if outcome["launch_error"] is not None:
             raise ChildLaunchError(f"Installer child could not start: {outcome['launch_error']}")
-        if timeout_error is not None or outcome["timed_out"] or time.monotonic() >= execution_deadline:
+        if (timeout_error is not None or outcome["timed_out"]
+                or completion_deadline is not None and time.monotonic() >= completion_deadline):
             raise ChildTimeoutExpired(
                 argv, timeout, output=outcome["stdout"], stderr=outcome["stderr"],
             ) from timeout_error
@@ -451,6 +455,8 @@ def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, e
     deadline = time.monotonic() + args.timeout
     if absolute_deadline is not None:
         deadline = min(deadline, absolute_deadline)
+    progress_output = getattr(args, "progress_output", False)
+    completion_deadline = absolute_deadline if progress_output else deadline
     if disconnected():
         raise RuntimeError("installer caller exited before child execution")
     if time.monotonic() >= deadline:
@@ -469,7 +475,7 @@ def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, e
     timed_out = False
     capture = None
     try:
-        if getattr(args, "progress_output", False):
+        if progress_output:
             def observe_owner():
                 if disconnected():
                     raise _OwnerDisconnected("installer caller exited during child execution")
@@ -480,7 +486,7 @@ def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, e
             )
             try:
                 capture.wait(
-                    args.timeout, deadline=deadline,
+                    args.timeout, deadline=completion_deadline,
                     on_wait=observe_owner, wait_for_eof=False,
                 )
             except subprocess.TimeoutExpired:
@@ -510,7 +516,9 @@ def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, e
                 capture.finish if capture is not None else lambda grace: process.communicate(timeout=grace),
                 10, capture=capture,
             )
-    timed_out = timed_out or time.monotonic() >= deadline
+    timed_out = timed_out or (
+        completion_deadline is not None and time.monotonic() >= completion_deadline
+    )
     return {
         "returncode": process.returncode, "stdout": stdout,
         "stderr": stderr, "timed_out": timed_out, "launch_error": None,

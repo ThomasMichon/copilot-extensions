@@ -1,15 +1,7 @@
 """Windows-headless / detached process-spawn helpers (shared, vendored per plugin).
 
-A copilot-extensions runtime frequently runs **windowless**: under a hidden
-Windows Scheduled Task launched via ``conhost --headless``, inside the
-agent-bridge daemon, or from a session-start hook whose parent has no console of
-its own. When such a windowless parent shells out to a *console* program -- a
-``.cmd`` binstub that re-execs ``python.exe``, or ``git.exe`` / ``ssh.exe`` /
-``pwsh.exe`` -- Windows allocates a fresh console **window** for the child, which
-flashes on screen once per spawn.
-
-These helpers standardize the fix across every plugin so the behavior (and the
-exact creation flags) can't drift between copies:
+Windowless runtimes must not allocate a console when spawning console programs.
+These helpers keep the creation flags consistent across plugins:
 
 * :func:`no_window_kwargs` -- ``CREATE_NO_WINDOW`` for a non-interactive child
   whose output is still captured over pipes (the common case: git/gh/az checks).
@@ -37,9 +29,7 @@ Development uses canonical editable references; release materializes consumer
 copies. See ``README.md`` for vendoring and
 ``tools/check-vendored-libs-sync.py`` for source consistency.
 
-Synchronous imports do not load asyncio. Accessing the async spawn helper
-loads its implementation; the asyncio module attribute remains available for
-callers that patch subprocess creation.
+Synchronous imports stay asyncio-free; accessing the async helper loads it lazily.
 """
 
 from __future__ import annotations
@@ -93,21 +83,45 @@ _JOB_SCOPE_NAME = re.compile(r"Local\\ce-owned-job-[0-9a-f]{32}\Z")
 log = logging.getLogger("agent-procutil")
 
 __all__ = [
-    "direct_python",
+    "DaemonSpawnError",
+    "JobHandle",
+    "SyncProcessLaunchError",
     "contained_test_mode",
+    "detached_kwargs",
+    "direct_python",
     "no_window_flags",
     "no_window_kwargs",
-    "JobHandle",
+    "python_cache_args",
+    "spawn_daemon",
     "spawn_in_kill_on_close_job",
     "spawn_sync_in_kill_on_close_job",
-    "SyncProcessLaunchError",
-    "detached_kwargs",
     "windowless_daemon_kwargs",
     "windowless_python",
     "windowless_python_env",
-    "spawn_daemon",
-    "DaemonSpawnError",
 ]
+
+
+def python_cache_args(
+    root: str | os.PathLike[str], *, runtime: str | os.PathLike[str] | None = None,
+) -> list[str]:
+    """Select enabled external bytecode for the target installed generation.
+
+    ``runtime`` is the target interpreter or venv, not the current redirect.
+    Omit it only when launching this process's own installed environment.
+    """
+    if __name__ in sys.modules:
+        from .python_cache import cache_arguments
+    else:
+        import importlib.util
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location(
+            __name__ + ".python_cache", Path(__file__).with_name("python_cache.py"),
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cache_arguments = module.cache_arguments
+
+    return cache_arguments(root, runtime=runtime)
 
 
 def contained_test_mode() -> bool:
@@ -141,9 +155,20 @@ def _job_scope_names(environment) -> tuple[str, ...]:
 def _job_child_environment(
     environment=None, *, append: str | None = None, inherit_current: bool = True,
 ) -> dict[str, str]:
-    from ._job_scopes import child_environment
-
-    return child_environment(environment, append=append, inherit_current=inherit_current)
+    if type(inherit_current) is not bool:
+        raise ValueError("owned Job scope inheritance must be a boolean")
+    child = dict(os.environ if environment is None else environment)
+    names = list(_job_scope_names(os.environ)) if inherit_current else []
+    for key in tuple(child):
+        if key.upper() == _JOB_SCOPES_ENV:
+            names.extend(_job_scope_names({_JOB_SCOPES_ENV: child.pop(key)}))
+    names = list(dict.fromkeys(names))
+    if append is not None:
+        names.append(append)
+    if names:
+        child[_JOB_SCOPES_ENV] = ";".join(names)
+        _job_scope_names(child)
+    return child
 
 
 def _publish_job_scope(name: str) -> None:
@@ -217,7 +242,7 @@ class JobHandle:
                 raise TimeoutError("Job still has active processes after termination timeout")
             time.sleep(min(0.05, remaining))
 
-    def __enter__(self) -> "JobHandle":
+    def __enter__(self) -> JobHandle:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
@@ -519,7 +544,10 @@ def spawn_sync_in_kill_on_close_job(
         try:
             return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
         except OSError as error:
-            kind = SyncProcessNotFoundError if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+            kind = (
+                SyncProcessNotFoundError
+                if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+            )
             raise kind(error) from error
 
     spawn_kwargs = dict(kwargs)
@@ -533,7 +561,10 @@ def spawn_sync_in_kill_on_close_job(
     try:
         process = subprocess.Popen(argv, **spawn_kwargs)  # noqa: S603 - argv list, no shell
     except OSError as error:
-        kind = SyncProcessNotFoundError if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+        kind = (
+            SyncProcessNotFoundError
+            if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+        )
         raise kind(error) from error
     job_handle: JobHandle | None = None
     try:
@@ -581,46 +612,13 @@ def _local_pythonw(python: str) -> str | None:
 
 
 def _venv_home_python(python: str, filename: str) -> str | None:
-    venv_root = os.path.dirname(os.path.dirname(python))
-    cfg_path = os.path.join(venv_root, "pyvenv.cfg")
-    try:
-        with open(cfg_path, encoding="utf-8", errors="replace") as fh:
-            home = next(
-                (value.strip() for line in fh
-                 for key, _, value in [line.partition("=")] if key.strip() == "home"),
-                "",
-            )
-    except OSError:
-        return None
-    # Keep resolution outside the optional-config read: access errors, unreadable
-    # reparse points and cycles are not evidence that an interpreter is absent.
-    if not home:
-        return None
-    # CPython rereads this home through __PYVENV_LAUNCHER__, even if the
-    # requested executable is missing. Validate independently of selection.
-    try:
-        os.stat(home)
-    except (FileNotFoundError, NotADirectoryError):
-        return None
-    except OSError as exc:
-        if getattr(exc, "winerror", None) == 448:
-            raise RuntimeError(
-                "Cannot preserve the Windows venv: pyvenv.cfg home is blocked "
-                "by RedirectionGuard; rebuild the runtime with a physical Python home."
-            ) from exc
-        raise
-    return _physical_executable(os.path.join(home, filename))
+    from ._interpreter import venv_home_python
+
+    return venv_home_python(python, filename, resolve_executable=_physical_executable)
 
 
 def _venv_home_pythonw(python: str) -> str | None:
-    """Return the base ``pythonw.exe`` recorded by a venv's ``pyvenv.cfg``.
-
-    Relocatable Windows venv launchers (for example from ``uv venv``) can ship a
-    tiny local ``pythonw.exe`` trampoline that re-execs the base interpreter
-    named by ``pyvenv.cfg``'s ``home = ...`` entry. When that base install also
-    ships a genuine GUI-subsystem ``pythonw.exe``, prefer it over the local
-    trampoline so the detached daemon never re-enters a console interpreter.
-    """
+    """Prefer the venv's physical base GUI interpreter over its local trampoline."""
     return _venv_home_python(python, "pythonw.exe")
 
 

@@ -188,6 +188,7 @@ def test_fast_entry_cannot_bypass_the_normal_front_door_gates(tmp_path, monkeypa
 @pytest.mark.skipif(os.name != "nt", reason="Windows launch-job custody")
 def test_fast_handoff_retains_the_selected_engine_and_closes_its_job(tmp_path, monkeypatch):
     import agent_procutil
+    from agent_worktrees import manager_launch_cli
 
     result = {
         "manager_command": ["qualified-manager", "--resident-picker"],
@@ -196,12 +197,19 @@ def test_fast_handoff_retains_the_selected_engine_and_closes_its_job(tmp_path, m
     monkeypatch.delenv("WORKTREE_MANAGER_ENGINE_CMD", raising=False)
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
     monkeypatch.setattr(picker_fast_entry.registry_paths, "registry_root", lambda: tmp_path)
+    monkeypatch.setattr(manager_launch_cli.cfg, "install_dir", lambda: str(tmp_path))
     monkeypatch.setattr(picker_fast_entry, "_request", lambda *_args: result)
     events = []
 
     def spawn(command, *, env):
+        from pathlib import Path
+
         assert command == ["qualified-manager", "--resident-picker", "--project", "sample"]
-        assert json.loads(env["WORKTREE_MANAGER_ENGINE_ARGV"]) == [sys.executable, "-m", "agent_worktrees"]
+        argv = json.loads(env["WORKTREE_MANAGER_ENGINE_ARGV"])
+        assert argv[0] == sys.executable and argv[1] == "-X"
+        prefix = Path(argv[2].removeprefix("pycache_prefix="))
+        assert prefix.parent == Path(agent_procutil.python_cache_args(tmp_path)[1].partition("=")[2]).parent
+        assert argv[3:] == ["-m", "agent_worktrees"]
         assert json.loads(env[picker_fast_entry.BOOTSTRAP_ENV]) == result
         return (
             SimpleNamespace(wait=lambda: 17, poll=lambda: 17),

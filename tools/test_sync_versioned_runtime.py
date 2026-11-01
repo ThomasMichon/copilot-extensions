@@ -179,10 +179,10 @@ def test_lifecycle_source_archive_is_deterministic_and_contains_only_python():
         assert not any("build_native" in name for name in archive.namelist())
         assert archive.read("agent_procutil/_daemon_instance_linux.py") == (
             SCRIPT.parents[1] / "libs/agent-procutil/src/agent_procutil/_daemon_instance_linux.py"
-        ).read_bytes()
+        ).read_bytes().replace(b"\r\n", b"\n")
         assert archive.read("agent_procutil/_windows_job_types.py") == (
             SCRIPT.parents[1] / "libs/agent-procutil/src/agent_procutil/_windows_job_types.py"
-        ).read_bytes()
+        ).read_bytes().replace(b"\r\n", b"\n")
 
 
 def test_lifecycle_source_archive_requires_native_accounting_dependency(tmp_path):
@@ -200,6 +200,23 @@ def test_lifecycle_source_archive_requires_native_accounting_dependency(tmp_path
         lifecycle_archive(tmp_path)
     (package / "_windows_job_types.py").write_bytes(b"# retained native accounting source\n")
     assert lifecycle_archive(tmp_path)
+
+
+def test_lifecycle_source_archive_is_checkout_line_ending_independent(tmp_path: Path) -> None:
+    from daemon_lifecycle_assets import lifecycle_archive
+
+    package = tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil"
+    package.mkdir(parents=True)
+    original = SCRIPT.parents[1] / "libs" / "agent-procutil" / "src" / "agent_procutil"
+    for source in original.glob("*.py"):
+        (package / source.name).write_bytes(source.read_bytes().replace(b"\r\n", b"\n"))
+    expected = lifecycle_archive(tmp_path)
+    changed = package / "retirement_custody.py"
+    content = changed.read_bytes().replace(b"\n", b"\r\n")
+    assert b"\r\n" in content
+    changed.write_bytes(content)
+    assert lifecycle_archive(tmp_path) == expected
+    assert changed.read_bytes() == content
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX source archive custody")

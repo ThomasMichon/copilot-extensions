@@ -1,5 +1,5 @@
 """Explicit authenticated Manager caller enters its existing install lifecycle."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 import time
@@ -221,7 +221,9 @@ def test_explicit_caller_may_retain_typed_candidate_error_without_changing_defau
 
     monkeypatch.setattr(self_install, "payload_version", lambda payload: "1.0")
     monkeypatch.setattr(self_install, "needs_install", lambda version, root: True)
-    monkeypatch.setattr(self_install, "_runtime_installer", lambda: SimpleNamespace(candidate=fail))
+    monkeypatch.setattr(self_install, "_runtime_installer", lambda: SimpleNamespace(
+        candidate=fail, _installation_custody=lambda: nullcontext(object()),
+    ))
     if raise_errors:
         with pytest.raises(builds.engine.HealthRepairRequired, match="synthetic installed health"):
             self_install.self_install(

@@ -71,6 +71,36 @@ launch envelopes. Redaction handles known credential forms and supplied known
 values after control normalization; it is best-effort, not a guarantee about
 arbitrary third-party output.
 
+## Managed Python bytecode cache
+
+`agent_procutil.python_cache_args(root, runtime=target)` returns `["-X",
+"pycache_prefix=<root>/cache/python/<installation-scope>"]` for an absolute,
+caller-owned durable runtime state root. `target` is the interpreter or runtime
+slot being launched; omission selects the caller's own `sys.prefix`, never
+another runtime. Put these interpreter arguments before `-m`, `-c`, or the
+script path. Bytecode remains enabled and isolated-mode Python honors the
+explicit prefix; `-B` read-only probes and bootstrap admission still suppress
+writes. The helper normalizes paths lexically (including standard extended
+drive/UNC paths on Windows), without creating directories, resolving links,
+changing global environment or interpreter settings, or choosing another state
+owner. It rejects relative roots and remains available in standalone bundles.
+
+Warm reuse requires the target's existing completion marker and installed
+distribution RECORD contents. Their combined digest selects the namespace;
+a changed installation selects another even when source paths, sizes, and
+timestamps match. Missing, malformed, redirected, or unrecorded evidence gets
+a fresh invocation namespace, not an owner-wide fallback. This reads existing
+installation evidence and produces no new deployment receipt or build cache.
+Native launchers that cannot inspect that evidence likewise use fresh
+invocation scopes; systemd uses its own service invocation ID.
+
+`cache/python` contains mutable, derived executable bytecode outside immutable
+version slots, not protected credentials, configuration, or business data.
+Cache reuse neither migrates nor deletes existing caches. Runtime inventory,
+retention, and explicit uninstall/all-code-absent accounting still belong to
+their existing lifecycle owners; external cache routing does not establish
+that those gates have passed or introduce another cleanup policy.
+
 ## Windows bootstrap and shell admission
 
 ### Compiler-free migration boundary
@@ -421,7 +451,9 @@ new launcher or a permission to terminate work on communication silence.
 Minimal lifecycle bundles may copy only `agent_procutil/__init__.py` and load
 it directly, with or without registering the module in `sys.modules`.
 The short-lived containment helpers and their typed process-creation errors
-remain self-contained; calling `spawn_daemon` requires the full package.
+remain self-contained. Bundles calling `python_cache_args` also carry the
+canonical sibling `python_cache.py`; calling `spawn_daemon` requires the full
+package.
 
 `agent_procutil.owned_process.run_owned()` executes a finite command with
 captured UTF-8 output, optional `input_text`, and a required positive `timeout`.
@@ -947,8 +979,10 @@ retain no runtime dependencies and need no sibling plugin or service.
 Only the consumer's canonical installer, under its existing execution driver,
 calls `reconcile` with its validated installation identity, private durable root
 and already-qualified immutable runtime. Registration has no triggers, saved
-password, elevation or network listener. Installed action and cwd cannot point
-into a payload, checkout or session. Missing adoption fails explicitly; normal
+password, elevation or network listener. The installed action belongs to the
+qualified immutable runtime, and its explicit cwd cannot point into a payload.
+A Git ancestor does not invalidate an otherwise qualified installation.
+Missing adoption fails explicitly; normal
 launches never install or repair it. Update drains finite accepted transactions
 without stopping them; stop/uninstall disable admission and report that already
 transferred child control remains the consumer's responsibility.

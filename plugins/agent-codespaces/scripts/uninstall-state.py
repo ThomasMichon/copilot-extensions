@@ -6,6 +6,8 @@ import argparse
 import importlib.util
 import json
 import os
+import platform
+import re
 import stat
 import sys
 from pathlib import Path
@@ -138,11 +140,80 @@ def main() -> int:
     return 0
 
 
+def _observation_helpers(payload_root: Path):
+    """Load observation and principal-custody helpers only from the trusted payload."""
+    scripts = payload_root / "scripts"
+    spec = importlib.util.spec_from_file_location(
+        "_codespaces_uninstall_observer", scripts / "installer_engine_uninstall.py",
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Uninstall observation helpers unavailable")
+    engine = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = engine
+    spec.loader.exec_module(engine)
+    proof = engine._load(scripts / "versioned_runtime_publication.py")
+    binding = engine._load(scripts / "command_binding.py")
+    return proof, binding._load_primitive(payload_root)
+
+
+def check_predecessors(path: Path, payload_root: Path) -> None:
+    """Observe retained native births without pruning durable exclusion evidence."""
+    proof, native = _observation_helpers(payload_root)
+    before = proof.state_path(path, private=True)
+    if before is None or before.size > 65536:
+        raise RuntimeError("Uninstall predecessor evidence exceeded its bound")
+    with path.open("rb") as stream:
+        data = stream.read(65537)
+    if len(data) > 65536:
+        raise RuntimeError("Uninstall predecessor evidence exceeded its bound")
+    evidence = json.loads(data, object_pairs_hook=proof._pairs)
+    if before != proof.state_path(path, private=True):
+        raise RuntimeError("Uninstall predecessor evidence changed or exceeded its bound")
+    if (not isinstance(evidence, dict)
+            or set(evidence) != {"schema", "version", "host", "predecessors"}
+            or evidence["schema"] != "agent-codespaces.owner-predecessors"
+            or type(evidence["version"]) is not int or evidence["version"] != 1
+            or evidence["host"] != platform.node()
+            or not isinstance(evidence["predecessors"], list)):
+        raise RuntimeError("Uninstall refuses unknown Connection Owner exclusion custody")
+    for record in evidence["predecessors"]:
+        if (not isinstance(record, dict) or set(record) != {"pid", "process_identity"}
+                or type(record["pid"]) is not int or record["pid"] <= 0
+                or (record["process_identity"] is not None and (
+                    not isinstance(record["process_identity"], str)
+                    or len(record["process_identity"]) > 256
+                    or re.fullmatch(
+                        r"(?:windows-filetime:[1-9][0-9]*|proc-start:"
+                        r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}:[1-9][0-9]*"
+                        r"|ps-start:\S[^\r\n]*)",
+                        record["process_identity"],
+                    ) is None))):
+            raise RuntimeError("Uninstall refuses invalid native predecessor evidence")
+        pid, birth = record["pid"], record["process_identity"]
+        if not native._pid_is_live(pid):
+            continue
+        current = native._runtime_publication_process_identity(pid)
+        if current and current.startswith("windows:"):
+            current = "windows-filetime:" + current.partition(":")[2]
+        elif current and current.startswith("linux:"):
+            current = "proc-start:" + current.partition(":")[2]
+        if not birth or not current or birth.split(":")[0] != current.split(":")[0] or birth == current:
+            raise RuntimeError("Uninstall refuses unresolved legacy Connection Owner exclusion custody")
+    if before != proof.state_path(path, private=True):
+        raise RuntimeError("Uninstall predecessor evidence changed during observation")
+
+
 def check_under_custody(root: Path, payload_root: Path, plugin_id: str) -> None:
     """Protect reconnect closures without treating persistent leases as busy."""
     if plugin_id != PLUGIN or payload_root.resolve() != Path(__file__).resolve().parents[1]:
         raise RuntimeError("Foreign uninstall guard ownership")
     for transport_root in (root, Path.home() / ".agent-codespaces"):
+        if not os.path.lexists(transport_root):
+            continue
+        real_path(transport_root)
+        exclusions = transport_root / "connection-owner.predecessors.json"
+        if os.path.lexists(exclusions):
+            check_predecessors(exclusions, payload_root)
         sockets = transport_root / "sockets"
         if os.path.lexists(sockets) and (not sockets.is_dir() or any(sockets.iterdir())):
             raise RuntimeError("Uninstall refuses active/reconnect transport custody (sockets)")

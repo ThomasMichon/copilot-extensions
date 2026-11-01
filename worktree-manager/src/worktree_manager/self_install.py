@@ -745,18 +745,16 @@ def _complete_candidate(
 ) -> SelfInstallResult:
     slot = ready.slot
     version = payload_version(payload)
-    cleaned: tuple[str, ...] = ()
     stubs: list[Path] = []
 
     def publish_frontdoors() -> None:
-        nonlocal cleaned, stubs
+        nonlocal stubs
         publication = installer.runtime._runtime_component("versioned_runtime_publication")
         targets = [*(local_bin() / name for name in _binstub_files()),
                    _control_plane_provider_manifest_path(payload, root=root)]
         with publication.target_leases(root, targets):
             if before_publish is not None:
                 before_publish()
-            cleaned = tuple(clean_legacy_artifacts(root))
             stubs = _deploy_binstubs()
             _write_control_plane_provider_manifest(payload, root=root)
 
@@ -774,7 +772,7 @@ def _complete_candidate(
         version=version, action="already-current"
         if was_current and ready.reused and previous == slot.name else "installed",
         root=str(root), slot=str(slot), marker=slot.name,
-        binstubs=tuple(str(stub) for stub in stubs), cleaned=cleaned,
+        binstubs=tuple(str(stub) for stub in stubs),
     )
 
 
@@ -802,12 +800,11 @@ def self_install(
             selected = _selected_runtime_slot(r)
             generation, source_matches = installer.source_install_selection(pd, version, selected)
             slot = version_slot(generation, r)
-            would_clean = tuple(plan_legacy_cleanup(r))
             if source_matches and selected is not None and not needs_install(version, r):
                 return SelfInstallResult(version=version, action="already-current", root=str(r),
-                                         slot=str(selected), marker=selected.name, cleaned=would_clean)
+                                         slot=str(selected), marker=selected.name)
             return SelfInstallResult(version=version, action="planned", root=str(r),
-                                     slot=str(slot), reason="dry-run", cleaned=would_clean)
+                                     slot=str(slot), reason="dry-run")
         previous = current_version(r)
         was_current = not needs_install(version, r)
         if _reconcile_instances and not (
@@ -987,20 +984,26 @@ def self_update(
 
             payload = fetch(repo, r, environment=auth_env)
         elif use_git:
-            if (staging / ".git").is_dir():
-                subprocess.run(["git", "-C", str(staging), "fetch", "--depth", "1",
+            git = ["git", "-c", "core.longpaths=true"]
+            existing = (staging / ".git").is_dir()
+            if existing:
+                subprocess.run([*git, "-C", str(staging), "fetch", "--depth", "1",
                                 repo, ref], check=True, capture_output=True,
                                text=True, timeout=180, **environment)
-                subprocess.run(["git", "-C", str(staging), "checkout", "-q",
-                                "FETCH_HEAD"], check=True, capture_output=True,
-                               text=True, timeout=60, **environment)
             else:
                 # staging may hold a prior tarball payload (no .git); clear so the
                 # clone lands in an empty dir.
                 _clear_dir(staging)
-                subprocess.run(["git", "clone", "--depth", "1", "--branch", ref,
+                subprocess.run([*git, "clone", "--no-checkout", "--depth", "1", "--branch", ref,
                                 repo, str(staging)], check=True,
                                capture_output=True, text=True, timeout=300, cwd=staging, **environment)
+            sparse = staging / ".git" / "info" / "sparse-checkout"
+            sparse.parent.mkdir(parents=True, exist_ok=True)
+            sparse.write_text("/worktree-manager/\n/libs/\n/.gitattributes\n", encoding="utf-8")
+            subprocess.run([*git, "-c", "core.sparseCheckout=true",
+                            "-c", "core.sparseCheckoutCone=false", "-C", str(staging),
+                            "checkout", "-q", "FETCH_HEAD" if existing else "HEAD"], check=True,
+                           capture_output=True, text=True, timeout=60, **environment)
         else:
             url = manager_tarball_url(r, ref)
             if url is None:
@@ -1012,8 +1015,9 @@ def self_update(
     except update_auth.AuthRequired as e:
         return SelfUpdateResult(action="auth_required", previous=previous, reason=str(e))
     except (OSError, ValueError, subprocess.SubprocessError, engine_client.EngineError) as e:
+        detail = f"\n{e.stderr.strip()}" if isinstance(e, subprocess.CalledProcessError) and e.stderr else ""
         return SelfUpdateResult(action="error", previous=previous,
-                                reason=f"fetch failed: {e}")
+                                reason=f"fetch failed: {e}{detail}")
 
     if not (payload / "pyproject.toml").is_file():
         return SelfUpdateResult(action="error", previous=previous,

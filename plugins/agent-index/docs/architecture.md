@@ -26,6 +26,11 @@ requiring explicit `[stdio-mcp]` opt-in on either role (absent from base and hos
 That means the old "Phase 1 service shell only" description is stale. Future
 work still exists, but indexing and retrieval are present in the shipped code.
 
+Managed server launches use the
+[external Python bytecode cache](../../../libs/agent-procutil/README.md#managed-python-bytecode-cache)
+outside immutable runtime slots. The separately managed engine uses its own
+durable engine root for that cache; it does not share the server's cache root.
+
 ## Incremental connector and reuse contracts
 
 The shared engine exposes additive, round-local

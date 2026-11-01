@@ -2,22 +2,27 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
-from agent_procutil import no_window_kwargs
+from agent_procutil import no_window_kwargs, python_cache_args
 
 PLUGIN = Path(__file__).resolve().parents[1]
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
 
 
-def _restart_body() -> str:
+def _function(name: str) -> str:
     source = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
-    tail = source.split("function Restart-EngineDaemon {", 1)[1]
-    return "function Restart-EngineDaemon {" + re.split(r"\nfunction \w", tail, maxsplit=1)[0]
+    tail = source.split(f"function {name} {{", 1)[1]
+    return f"function {name} {{" + re.split(r"\nfunction \w", tail, maxsplit=1)[0]
+
+
+def _restart_body() -> str:
+    return _function("Restart-EngineDaemon")
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell is unavailable")
@@ -31,7 +36,9 @@ def _restart_body() -> str:
         ("no-service", "SKIP:Engine daemon restart skipped"),
     ],
 )
-def test_restart_uses_primary_manager_without_first_touch_install(mode, expected):
+def test_restart_uses_primary_manager_without_first_touch_install(
+    tmp_path: Path, mode: str, expected: str,
+) -> None:
     script = r"""
 $ErrorActionPreference = 'Stop'
 $EngineVenvPython = 'engine-python'
@@ -47,8 +54,9 @@ function Test-Path {
 function engine-python { throw 'Engine-owned management must never be invoked' }
 function primary-python {
     $global:LASTEXITCODE = 0
-    $verb = $args[6]
-    Write-Output ('CALL:' + ($args -join '|'))
+    $module = [Array]::IndexOf($args, '-m')
+    $verb = $args[$module + 3]
+    Write-Output ('CALL:' + (ConvertTo-Json -InputObject @($args) -Compress))
     if (($Mode -eq 'stop-failed' -and $verb -eq 'stop') -or
         ($Mode -eq 'start-failed' -and $verb -eq 'start')) { $global:LASTEXITCODE = 7 }
 }
@@ -56,7 +64,12 @@ function Start-Sleep { }
 function Write-Ok { param($Msg) Write-Output "OK:$Msg" }
 function Write-Skip { param($Msg) Write-Output "SKIP:$Msg" }
 """
-    script = f"$Mode = '{mode}'\n" + script + "\n" + _restart_body()
+    root = tmp_path / "owned index"
+    quoted_root = str(root).replace("'", "''")
+    script = (
+        f"$Mode = '{mode}'\n$InstallDir = '{quoted_root}'\n"
+        + script + "\n" + _function("Get-IndexPythonCacheArgs") + "\n" + _restart_body()
+    )
     script += "\ntry { Restart-EngineDaemon } catch { Write-Output \"REFUSED:$_\" }\n"
     result = subprocess.run(  # noqa: S603
         [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
@@ -69,11 +82,19 @@ function Write-Skip { param($Msg) Write-Output "SKIP:$Msg" }
     if mode in ("missing-primary", "no-service"):
         assert "CALL:" not in result.stdout
     else:
-        assert "CALL:-I|-X|utf8|-m|agent_index|engine|stop" in result.stdout
+        calls = [json.loads(line.removeprefix("CALL:"))
+                 for line in result.stdout.splitlines() if line.startswith("CALL:")]
+        stop = calls[0]
+        module = stop.index("-m")
+        assert stop[module:] == ["-m", "agent_index", "engine", "stop"]
+        assert stop[:module] == ["-I", *python_cache_args(root), "-X", "utf8"]
         if mode == "stop-failed":
-            assert "engine|start" not in result.stdout
+            assert len(calls) == 1
         else:
-            assert "CALL:-I|-X|utf8|-m|agent_index|engine|start|--strict" in result.stdout
+            start = calls[1]
+            module = start.index("-m")
+            assert start[:module] == ["-I", *python_cache_args(root), "-X", "utf8"]
+            assert start[module:] == ["-m", "agent_index", "engine", "start", "--strict"]
     if mode != "ready":
         assert "OK:" not in result.stdout
 

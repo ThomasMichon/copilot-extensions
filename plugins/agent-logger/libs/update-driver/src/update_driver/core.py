@@ -693,7 +693,8 @@ def _execute(transaction: Transaction) -> int:
     # The shim changes cwd/env and directs output before exec. The product
     # invocation itself remains exactly the pinned argv supplied by its adapter.
     command = [
-        sys.executable, "-I", str(Path(__file__).with_name("_runner.py")),
+        sys.executable, "-I", *agent_procutil.python_cache_args(transaction.root),
+        str(Path(__file__).with_name("_runner.py")),
         str(transaction.root), request.id, witness["UPDATE_DRIVER_WITNESS"],
         str(Path(agent_procutil.__file__).resolve()),
     ]

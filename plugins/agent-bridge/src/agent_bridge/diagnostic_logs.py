@@ -113,7 +113,7 @@ def inventory() -> dict:
     entry["maintenance"] = "startup and existing bounded writer iteration, including idle periods"
     entry["counter_observation"] = "ordinary diagnostic_buffer_callbacks records in these files"
     patterns = (
-        "agent-bridge.log*", "agent-bridge-err.log*", "lifecycle.log*",
+        "agent-bridge.log*", "agent-bridge-err.log*", "agent-bridge-watchdog.log*", "lifecycle.log*",
         "reconcile.log*", "reconcile.err.log*", "logs/boot-trace.jsonl*",
     )
     roots = {root, native_root}

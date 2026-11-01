@@ -46,6 +46,15 @@ separately scoped cleanup are not implied by an ordinary or repair update;
 maintained disposable inventory is not an instruction to reclaim old code on
 the update's critical path.
 
+The operator's [I/O-only refusal boundary](inception-transcript.md#io-only-installation-refusal-boundary)
+applies to explicitly requested installation: only actual I/O failures, such as
+file locks or insufficient write permissions, may block applying it. Existing
+footprint, receipt, ownership-metadata and compatibility disagreements are not
+additional refusal classes. They must route through fresh installation.
+**Agent-recommended realization:** report application of code/registrations
+separately from build/start/readiness and convergence diagnostics; never turn
+those diagnostics into incumbent admission checks or a false healthy result.
+
 The [independent replacement clarification](inception-transcript.md#independent-v1-to-v2-repair-acceptance),
 [verbatim requests](inception-transcript.md#fresh-default-upstream-installation-orchestration)
 and [manifest refinement](inception-transcript.md#recognizer-manifests-and-footprint-migrations)
@@ -89,9 +98,11 @@ owner. Keep its two decisions separate:
    inventory remains available for explicitly addressed cleanup/uninstall.
 
 An unrecognized artifact is preserved unless an explicitly scoped removal
-operation owns its declared disposable class. A required foreign/edited command
-collision or uncertain convergence has a precise failure outcome; neither justifies deleting
-unrelated content or a generic "unrecognized install cannot update" response.
+operation owns its declared disposable class. A foreign/edited historical
+command or uncertain convergence cannot itself veto installation. Apply the
+requested current outputs through their normal writers; report any actual
+write/registration failure by its I/O cause rather than inventing a
+metadata-permission refusal. Unrelated content remains outside that write scope.
 Use existing provenance, custody and path protections without adding manifest
 signing, renderer handshakes or a second installation-permission receipt.
 
@@ -114,9 +125,10 @@ Resolve the exact source, installation and desired target once. The existing
 caller-independent driver holds exclusive custody across acquisition,
 construction, selection and integration. Concurrent
 same-target callers share/coalesce; different targets queue or follow the
-existing desired-target policy. Neither path bypasses maintenance holds,
-managed-publication restrictions or the authorization of the requested scope.
-These checks do not depend on the old installation's health.
+existing desired-target policy. Automatic callers still obey maintenance and
+publication policy before requesting installation; this is not permission for
+unrequested self-repair. Once an explicitly addressed installation is requested,
+its application does not demand another old-state permission receipt.
 
 Build and start the selected immutable candidate without modifying a completed
 slot or requiring teardown of the old runtime. Recognition chooses reusable
@@ -135,10 +147,12 @@ a new cell, a copied database or manual queue surgery. Preserve pending work
 with its original outcome/source semantics; requesting a new install is not
 silently replaying an uncertain old operation.
 
-Success requires selected-runtime health, current command/registration routing
-and confirmed old-owner self-retirement. Starting V2 and completing convergence
-are separate observed facts. An uncooperative V1 is a convergence failure, not
-permission to kill it or a reason to require V1 cooperation before starting V2.
+Applying the installation, selected-runtime health, current command/registration
+routing and confirmed old-owner self-retirement are separate observed facts.
+Only actual I/O failure may block applying the explicitly requested installation;
+an uncooperative V1 is a convergence failure, not an installation veto or
+permission to kill it. Build/start/readiness failures remain explicit and never
+license a false claim of working service.
 If construction, supersession
 or integration fails, retain an attributable failure and describe any loss of
 service; do not claim readiness, silence or an untouched healthy predecessor

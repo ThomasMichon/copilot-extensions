@@ -52,7 +52,12 @@ def test_companion_command_pins_runtime_and_scrubs_credentials(tmp_path, monkeyp
     prefix = tmp_path / "versions" / "1.2.3"
     (prefix / ".runtime-bootstrap").mkdir(parents=True)
     (prefix / ".runtime-bootstrap" / "runtime_launcher.py").touch()
-    (prefix / ".install-complete.json").touch()
+    (prefix / ".install-complete.json").write_text(json.dumps({
+        "version": prefix.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
+    }), encoding="utf-8")
+    record = prefix / "Lib" / "site-packages" / "fixture.dist-info" / "RECORD"
+    record.parent.mkdir(parents=True)
+    record.write_text("fixture.py,sha256=" + "a" * 43 + ",1\n", encoding="utf-8")
     python = prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     python.parent.mkdir()
     python.touch()
@@ -64,6 +69,7 @@ def test_companion_command_pins_runtime_and_scrubs_credentials(tmp_path, monkeyp
     tail = ["-m", "worktree_manager.mux_companion", "--cli-pane", "%42", "--cwd", "space path"]
     command, env = companion_runtime.companion_command(tail)
     assert command == [str(python), "-I", "-S", "-B", "-X", "utf8",
+                       *companion_runtime.python_cache_args(tmp_path, runtime=prefix),
                        str(prefix / ".runtime-bootstrap" / "runtime_launcher.py"), *tail]
     assert all(name not in env for name in names)
     assert env["WORKTREE_MANAGER_ROOT"] == str(tmp_path)
@@ -143,7 +149,8 @@ def test_installed_companion_pane_wrapper_uses_bootstrap_without_uv(tmp_path, ac
     slot = synthetic_runtime(root, "1.2.3", program=PROGRAM)
     env = dict(os.environ, GH_TOKEN="fixture", GITHUB_TOKEN="fixture",
                AGENT_WORKTREES_AHP_AUTH_TOKEN="fixture", PYTHONPATH="foreign",
-               VIRTUAL_ENV="foreign", __PYVENV_LAUNCHER__=sys.executable)
+               PYTHONHOME="foreign", VIRTUAL_ENV="foreign",
+               __PYVENV_LAUNCHER__=sys.executable, WORKTREE_MANAGER_ROOT="foreign-owner")
     # The interpreter and wrapper shell are absolute; no uv is available.
     env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32") if os.name == "nt" else "/usr/bin:/bin"
     if os.name == "nt":

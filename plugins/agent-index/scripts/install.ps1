@@ -2068,6 +2068,23 @@ function Install-Engine {
     }
 }
 
+function Get-IndexPythonCacheArgs {
+    param([Parameter(Mandatory)][string]$Root)
+    if (-not [IO.Path]::IsPathRooted($Root) -or
+        ($env:OS -eq 'Windows_NT' -and
+         $Root -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))')) {
+        throw 'Python cache requires an absolute owned runtime root'
+    }
+    # Without inspecting installed completion/RECORD evidence, never reuse a namespace.
+    $cacheId = [Guid]::NewGuid().ToString('N')
+    $prefix = [IO.Path]::GetFullPath((Join-Path $Root "cache\python\unsealed-$cacheId"))
+    if ($env:OS -eq 'Windows_NT' -and -not $prefix.StartsWith('\\?\')) {
+        $prefix = if ($prefix.StartsWith('\\')) { '\\?\UNC\' + $prefix.Substring(2) }
+            else { '\\?\' + $prefix }
+    }
+    return @('-X', ('pycache_prefix=' + $prefix))
+}
+
 function Restart-EngineDaemon {
     # Restart the engine daemon so a freshly-updated durable venv is loaded. This
     # is the ONE place a restart is intended -- the explicit engine-runtime update
@@ -2087,10 +2104,11 @@ function Restart-EngineDaemon {
         if (-not (Test-Path $managePy)) {
             throw 'Primary index runtime not installed -- explicitly install it before restarting the engine; engine runtime preserved'
         }
-        & $managePy -I -X utf8 -m agent_index engine stop 2>&1 | Out-Host
+        $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir)
+        & $managePy -I @cacheArgs -X utf8 -m agent_index engine stop 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to stop the engine' }
         Start-Sleep -Seconds 1
-        & $managePy -I -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
+        & $managePy -I @cacheArgs -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to restart the engine' }
         Write-Ok 'Engine daemon restarted (user-mode, new engine runtime loaded)'
     } else {
@@ -2832,8 +2850,21 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
-    if (Test-Path $LinkPython) {
-        & $LinkPython -I -X utf8 -m agent_index stop | Out-Host
+    $stopPython = $LinkPython
+    $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+    if (Test-Path -LiteralPath $resolver) {
+        $previousRoot = $env:AGENT_RT_ROOT
+        try {
+            $env:AGENT_RT_ROOT = $InstallDir
+            . $resolver -TraceMode read-only
+            $stopPython = $AgentRtPy
+        } finally {
+            $env:AGENT_RT_ROOT = $previousRoot
+        }
+    }
+    if ($stopPython -and (Test-Path -LiteralPath $stopPython)) {
+        $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir)
+        & $stopPython -I @cacheArgs -X utf8 -m agent_index stop | Out-Host
         # The durable engine daemon is a SEPARATE detached process from the
         # light service stopped above (daemon.py, launched by 'engine start' /
         # Ensure-Running via a plain detached Popen, not necessarily under
@@ -2844,7 +2875,7 @@ function Invoke-Stop {
         # gotcha in service-lifecycle-supervision.md). `engine stop` uses the
         # daemon's own pid file and is idempotent -- a no-op when the engine
         # was never started.
-        & $LinkPython -I -X utf8 -m agent_index engine stop | Out-Host
+        & $stopPython -I @cacheArgs -X utf8 -m agent_index engine stop | Out-Host
     }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue

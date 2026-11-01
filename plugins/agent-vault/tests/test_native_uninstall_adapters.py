@@ -363,6 +363,8 @@ def test_runtime_code_absent_and_retained_bytes_unchanged(
     module_spec.loader.exec_module(module)
     for name in (*module.RUNTIME_MODULES, "command_binding.py", "command_lifecycle.py"):
         shutil.copyfile(origin / name, scripts / name)
+    for helper in origin.glob("installer_engine_uninstall*.py"):
+        shutil.copyfile(helper, scripts / helper.name)
     (payload / "pyproject.toml").write_text(
         f'[project]\nname="{plugin}"\nversion="1.0"\n', encoding="utf-8",
     )

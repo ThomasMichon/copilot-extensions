@@ -4,7 +4,41 @@ from __future__ import annotations
 import errno
 import os
 import stat
+from collections.abc import Callable
 from pathlib import Path
+
+
+def venv_home_python(
+    python: str, filename: str, *, resolve_executable: Callable[[str], str | None],
+) -> str | None:
+    """Read a venv's physical base interpreter without traversing its redirector."""
+    venv_root = os.path.dirname(os.path.dirname(python))
+    cfg_path = os.path.join(venv_root, "pyvenv.cfg")
+    try:
+        with open(cfg_path, encoding="utf-8", errors="replace") as fh:
+            home = next(
+                (value.strip() for line in fh
+                 for key, _, value in [line.partition("=")] if key.strip() == "home"),
+                "",
+            )
+    except OSError:
+        return None
+    # CPython rereads this home through __PYVENV_LAUNCHER__, even if the
+    # requested executable is missing. Validate independently of selection.
+    if not home:
+        return None
+    try:
+        os.stat(home)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 448:
+            raise RuntimeError(
+                "Cannot preserve the Windows venv: pyvenv.cfg home is blocked "
+                "by RedirectionGuard; rebuild the runtime with a physical Python home."
+            ) from exc
+        raise
+    return resolve_executable(os.path.join(home, filename))
 
 
 def physical_executable(path: str) -> str | None:

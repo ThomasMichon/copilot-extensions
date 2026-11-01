@@ -153,6 +153,7 @@ class _PluginActivation(str, enum.Enum):
 class _RegisteredPluginTarget:
     context: Path | None
     activation: _PluginActivation
+    repository_contexts: tuple[Path, ...] = ()
 
     @property
     def required(self) -> bool:
@@ -307,8 +308,9 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
         activation: _PluginActivation,
     ) -> None:
         existing = targets.get(name)
+        contexts = (context,) if context is not None and activation is _PluginActivation.ACTIVE else ()
         if existing is None:
-            targets[name] = _RegisteredPluginTarget(context, activation)
+            targets[name] = _RegisteredPluginTarget(context, activation, contexts)
             return
         preferred_context = existing.context if existing.context is not None else context
         precedence = {
@@ -324,6 +326,7 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
         targets[name] = _RegisteredPluginTarget(
             preferred_context,
             selected_activation,
+            tuple(dict.fromkeys((*existing.repository_contexts, *contexts))),
         )
 
     activation_unknown = False
@@ -491,6 +494,8 @@ def _reconcile_registered_runtimes(
                     platform_name,
                     force=forced,
                     gate_context=targets[name].context,
+                    **({"repository_contexts": targets[name].repository_contexts}
+                       if name == "agent-index" else {}),
                 ),
             )
         )
@@ -517,6 +522,7 @@ def _reconcile_one_runtime(
     *,
     force: bool,
     gate_context: Path | None = None,
+    repository_contexts: tuple[Path, ...] = (),
 ) -> str:
     """Reconcile a single registered plugin's runtime; returns a status string.
 
@@ -527,7 +533,8 @@ def _reconcile_one_runtime(
     """
     started = time.monotonic()
     status = _reconcile_one_runtime_status(
-        name, platform_name, force=force, gate_context=gate_context
+        name, platform_name, force=force, gate_context=gate_context,
+        **({"repository_contexts": repository_contexts} if repository_contexts else {}),
     )
     update_events.record("runtime_reconcile", f"{name}@copilot-extensions", status,
                          changed=status.startswith("OK"), started=started)
@@ -540,9 +547,11 @@ def _reconcile_one_runtime_status(
     *,
     force: bool,
     gate_context: Path | None = None,
+    repository_contexts: tuple[Path, ...] = (),
 ) -> str:
     return _execute_runtime_step(update_runtime_plan.plan_registered(
         name, platform_name, force=force, gate_context=gate_context,
+        repository_contexts=repository_contexts,
     ))
 
 

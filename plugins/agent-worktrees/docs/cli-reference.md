@@ -1502,6 +1502,16 @@ are refused. Keep prepared generations available through queued execution and
 retry; the packet is stored in the existing durable request argv, not read from
 a mutable pointer or inherited environment.
 
+Index runtime planning keeps the enabling repository separate from the neutral
+installer working directory. A source-managed update with no known repository
+does not export that working directory as `AGENT_INDEX_REPO`. For a runtime
+shared by several enabling repositories, preflight uses Index's own activation
+role resolver and prefers a verified host repository over a client repository
+before machine-gate and source-target planning. An explicit `AGENT_INDEX_REPO`
+remains authoritative; unavailable or failed role resolution blocks preflight
+rather than guessing a host. This changes neither the source assembly contract
+nor the Index role configuration.
+
 Marketplace payload acquisition remains independent. After refreshing payloads,
 the normal engine/module/registered planners retain the installed command owner
 and installation root, but consume the matching prepared artifact. Every

@@ -37,6 +37,8 @@ uv.lock
 # Cached per-plugin dev venvs built by tools/run-plugin-tests.py
 /.test-venvs/
 .test-runs/
+/.validation/
+/.v/
 
 # Capture-owner recovery inputs and stable publication lock; never evidence.
 /plugins/agent-bridge/contract/.capture-publication/

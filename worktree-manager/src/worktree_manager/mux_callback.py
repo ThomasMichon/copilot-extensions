@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+from agent_procutil import python_cache_args
 from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_finite_worker
 
 from .mux_daemon_process import direct_daemon_python, scrub_session_credentials, selected_root
@@ -25,9 +26,13 @@ def callback_command(arguments: list[str]) -> tuple[list[str], dict[str, str], P
         if not bootstrap.is_file() or not (prefix / ".install-complete.json").is_file():
             raise RuntimeError("mux callback requires a constructed Manager runtime")
         root = prefix.parent.parent
-        command += ["-I", "-S", "-B", "-X", "utf8", str(bootstrap)]
+        command += [
+            "-I", "-S", "-B", "-X", "utf8", *python_cache_args(root), str(bootstrap),
+        ]
         for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__"):
             env.pop(name, None)
+    else:
+        command += python_cache_args(root)
     command += ["-m", "worktree_manager", "mux-daemon", *arguments]
     env["WORKTREE_MANAGER_ROOT"] = str(root)
     env.update(extra)

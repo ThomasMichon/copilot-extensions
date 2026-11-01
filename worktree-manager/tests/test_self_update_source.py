@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -171,3 +172,30 @@ def test_dev_auth_required_is_reported_before_acquisition(
     monkeypatch.setattr("worktree_manager.update_auth.environment", refuse)
     result = si.self_update(root=root)
     assert result.action == "auth_required" and result.reason == "fixture auth required"
+
+
+@pytest.mark.parametrize("command", ("clone", "fetch", "checkout"))
+def test_main_git_failure_preserves_captured_cause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str,
+) -> None:
+    root = tmp_path / "manager"
+    source_config.set_source(repo=str(tmp_path / "source"), ref="main", root=root)
+    if command != "clone":
+        (root / si.STAGING_DIR / ".git").mkdir(parents=True)
+    marker = root / "current-version"
+    marker.write_text("0.9.0\n", encoding="utf-8")
+    monkeypatch.setattr(si.shutil, "which", lambda name: "git")
+    monkeypatch.setattr("worktree_manager.update_auth.environment", lambda *a, **kw: None)
+    monkeypatch.setattr(si, "self_install", lambda **kw: pytest.fail("No acquired candidate"))
+
+    def run(argv: list[str], **options: object) -> subprocess.CompletedProcess:
+        assert argv[:3] == ["git", "-c", "core.longpaths=true"]
+        if command in argv:
+            raise subprocess.CalledProcessError(128, argv, stderr="fatal: fixture checkout I/O failure")
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(si.subprocess, "run", run)
+    result = si.self_update(root=root)
+    assert result.action == "error"
+    assert "fatal: fixture checkout I/O failure" in result.reason
+    assert marker.read_text(encoding="utf-8") == "0.9.0\n"

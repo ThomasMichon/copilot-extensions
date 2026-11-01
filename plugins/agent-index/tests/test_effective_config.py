@@ -55,6 +55,44 @@ def _write_active(path: Path) -> Path:
     return config
 
 
+@pytest.mark.parametrize("state_policy", ["absent", "false", "invalid"])
+def test_base_interpreter_resolves_explicit_host_overlay_without_runtime_packages(tmp_path, state_policy):
+    from agent_procutil import no_window_kwargs
+
+    repo = _repo(tmp_path / "repo")
+    policy = repo / ".agent-worktrees" / "config.yaml"
+    if state_policy == "absent":
+        policy.unlink()
+    elif state_policy == "invalid":
+        policy.write_text("requires_external_state_root: invalid\n", encoding="utf-8")
+    overlay = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("indexers:\n  - machine: fixture-host\n", encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    index = home / ".agent-index"
+    index.mkdir()
+    (index / "config.yaml").write_text("role: host\n", encoding="utf-8")
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.upper().startswith(("AGENT_", "WORKTREE_", "COPILOT_", "GIT_"))
+        and key.upper() not in {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__"}
+    }
+    environment.update(HOME=str(home), USERPROFILE=str(home))
+    result = subprocess.run(
+        [getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B", str(SCRIPT), "--cwd", str(repo)],
+        cwd=repo, env=environment, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["opted_in"] is (state_policy != "invalid"), observed
+    if state_policy == "invalid":
+        assert observed["reason"] == "repository-config-invalid"
+    else:
+        assert observed["indexers"] == [{"machine": "fixture-host"}]
+    assert not (home / ".agent-worktrees").exists()
+
+
 def _deliver_configuration(monkeypatch, repo: Path, knowledge: Path):
     local = repo.parent / "configuration-local"
     local.mkdir(exist_ok=True)

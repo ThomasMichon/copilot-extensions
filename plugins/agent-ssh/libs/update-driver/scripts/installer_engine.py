@@ -80,6 +80,10 @@ class ReadyCandidate:
     local_packages: tuple[str, ...] | None = None
 
 
+class ContentRepairRequired(RuntimeError):
+    """Published bytes differ; a caller must select a distinct generation."""
+
+
 class HealthRepairRequired(RuntimeError):
     """Published health needs a distinct generation, never an in-place rebuild."""
 
@@ -700,7 +704,7 @@ getattr(module, sys.argv[3])(json.loads(sys.argv[4]))
 
 def _refuse(decision: str, version: str) -> None:
     if decision == runtime.ADMIT_CONTENT_CONFLICT:
-        raise RuntimeError(
+        raise ContentRepairRequired(
             f"Published runtime {version} has different content; publish a new version "
             "or use an explicitly owned dev slot. Force cannot rewrite a numbered runtime."
         )

@@ -36,6 +36,7 @@ class VaultConnections:
         self.clients: dict[asyncio.Task, asyncio.StreamWriter] = {}
         self.busy: set[asyncio.StreamWriter] = set()
         self.workers: set[asyncio.Future] = set()
+        self.work: set[asyncio.Future] = set()
 
     def callback(self, transport):
         return partial(self.accept, transport=transport)
@@ -56,12 +57,20 @@ class VaultConnections:
     def request(self, writer, request, peer, transport):
         if self.closing or self.service._shutdown:
             return None
+        credential_work = request.get("action") not in {"ping", "stop", "handoff-export"}
+        if credential_work and not self.service._runtime_can_work:
+            response = asyncio.get_running_loop().create_future()
+            response.set_result({"ok": False, "error": "service_transition", "retryable": True})
+            return response
         self.busy.add(writer)
         worker = asyncio.get_running_loop().run_in_executor(
-            None, self.service.handle_request, request, peer, transport
+            None, self.service._handle_admitted_request, request, peer, transport
         )
         self.workers.add(worker)
         worker.add_done_callback(self.workers.discard)
+        if credential_work:
+            self.work.add(worker)
+            worker.add_done_callback(self.work.discard)
         return worker
 
     async def close(self, servers, pipe_servers, cleanup):

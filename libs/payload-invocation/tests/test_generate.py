@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import venv
 from types import ModuleType
 from pathlib import Path
 
@@ -59,6 +60,161 @@ def _manifest(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+@pytest.mark.parametrize("kind", ["sh", "ps1", "cmd", "dispatcher", "dispatcher-installed"] if os.name == "nt"
+                         else ["sh", "ps1", "dispatcher", "dispatcher-installed",
+                               "dispatcher-sh", "dispatcher-sh-installed"])
+def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
+    dispatcher = kind.startswith("dispatcher")
+    installed = kind.endswith("-installed")
+    manifest = _manifest(tmp_path)
+    (manifest.parent / "plugin.json").write_text('{"name":"agent-example"}', encoding="utf-8")
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    root = profile / ".agent-example"
+    slot = root / "versions" / "immutable"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    site = slot / (
+        "Lib/site-packages" if os.name == "nt"
+        else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    )
+    package_name = "agent_worktrees" if dispatcher else "agent_example"
+    package = site / package_name
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("VALUE = 42\n", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        f"import {package_name} as package, json, sys\n"
+        "print(json.dumps([package.VALUE, package.__cached__, "
+        "sys.dont_write_bytecode, sys.argv[1:]]))\n",
+        encoding="utf-8",
+    )
+    if installed:
+        procutil = site / "agent_procutil"
+        procutil.mkdir()
+        (procutil / "__init__.py").touch()
+        shutil.copyfile(
+            REPO / "libs" / "agent-procutil" / "src" / "agent_procutil" / "python_cache.py",
+            procutil / "python_cache.py",
+        )
+        (slot / ".install-complete.json").write_text(json.dumps({
+            "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
+        }), encoding="utf-8")
+        record = site / "fixture.dist-info" / "RECORD"
+        record.parent.mkdir()
+        record.write_text("fixture.py,sha256=" + "a" * 43 + ",1\n", encoding="utf-8")
+    scripts = manifest.parent / "scripts"
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = '" + str(python).replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    (scripts / "resolve-runtime.sh").write_text(
+        "AGENT_RT_PY=" + shlex.quote(str(python).replace("\\", "/")) + "\n", encoding="utf-8",
+    )
+    assert generator.process_manifest(manifest, check=False) == []
+    shim = manifest.parent / "bin" / ("agent-example" + ("" if kind == "sh" else "." + kind))
+    if kind == "cmd":
+        argv = [os.environ["COMSPEC"], "/d", "/c", str(shim)]
+    elif kind in ("ps1", "dispatcher", "dispatcher-installed"):
+        host = shutil.which("pwsh") or shutil.which("powershell")
+        if not host and os.name != "nt":
+            pytest.skip("PowerShell unavailable on this POSIX host")
+        assert host, "native PowerShell is required"
+        if dispatcher:
+            source = (REPO / "plugins" / "agent-worktrees" / "scripts"
+                      / "invoke-payload-runtime.ps1").read_text(encoding="utf-8")
+            start = source.index("function Invoke-AgentWorktreesRuntime(")
+            end = source.index("$python = Resolve-AgentWorktreesRuntime", start)
+            shim = tmp_path / "dispatcher-cache.ps1"
+            shim.write_text(
+                "$ErrorActionPreference = 'Stop'\n"
+                "$context = $null\n"
+                "$forwardArgs = @('argument with spaces')\n"
+                "$runtimeRoot = '" + str(root).replace("'", "''") + "'\n"
+                + source[start:end]
+                + "\nInvoke-AgentWorktreesRuntime '" + str(python).replace("'", "''") + "'\n",
+                encoding="utf-8",
+            )
+        argv = [host, "-NoProfile", "-NonInteractive", "-File", str(shim)]
+    elif kind.startswith("dispatcher-sh"):
+        source = (REPO / "plugins" / "agent-worktrees" / "scripts"
+                  / "invoke-payload-runtime.sh").read_text(encoding="utf-8")
+        start = source.index("run_runtime() {")
+        end = source.index('[[ -f "$MODE_RUNNER"', start)
+        shim = tmp_path / "dispatcher-cache.sh"
+        shim.write_text(
+            "set -eu\nCONTEXT=''\nRUNTIME_ROOT=" + shlex.quote(str(root)) + "\n"
+            "AGENT_RT_PY=" + shlex.quote(str(python)) + "\n"
+            + source[start:end] + '\nrun_runtime "$@"\n', encoding="utf-8",
+        )
+        argv = ["bash", str(shim)]
+    else:
+        if os.name == "nt":
+            git = shutil.which("git")
+            host = Path(git).parent.parent / "bin/bash.exe" if git else None
+            assert host and host.is_file(), "native Git Bash is required"
+            argv = [str(host), str(shim)]
+        else:
+            argv = ["sh", str(shim)]
+    environment = dict(os.environ)
+    child_env = {**environment, "USERPROFILE": str(profile), "HOME": str(profile)}
+    child_env.pop("PYTHONDONTWRITEBYTECODE", None)
+    child_env.pop("PYTHONPYCACHEPREFIX", None)
+
+    def snapshot():
+        return {
+            str(path.relative_to(slot)): (
+                path.read_bytes() if path.is_file() else None,
+                path.stat().st_mtime_ns, path.stat().st_ctime_ns, path.stat().st_ino,
+            )
+            for path in (slot, *slot.rglob("*"))
+        }
+
+    before = snapshot()
+    cached_before = None
+    previous_cache = None
+    for _ in range(2):
+        result = subprocess.run(
+            [*argv, "argument with spaces"], cwd=tmp_path, env=child_env,
+            capture_output=True, text=True, timeout=30,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout)
+        assert output[0] == 42 and output[2:] == [False, ["argument with spaces"]]
+        prefix = str(root / "cache" / "python")
+        if os.name == "nt":
+            prefix = "\\\\?\\" + prefix
+        cached = Path(output[1])
+        assert cached.is_relative_to(Path(prefix))
+        current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
+        if cached_before is not None:
+            assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
+                    previous_cache.stat().st_ino) == cached_before
+            assert (cached == previous_cache) is installed
+        cached_before = current
+        previous_cache = cached
+        assert snapshot() == before
+        if installed:
+            assert all(path.name.startswith("installed-") for path in (root / "cache" / "python").iterdir())
+    module = package / "__init__.py"
+    previous_stat = module.stat()
+    module.write_text("VALUE = 84\n", encoding="utf-8")
+    os.utime(module, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
+    if installed:
+        record.write_text("fixture.py,sha256=" + "b" * 43 + ",1\n", encoding="utf-8")
+    result = subprocess.run(
+        [*argv, "argument with spaces"], cwd=tmp_path, env=child_env,
+        capture_output=True, text=True, timeout=30,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    assert output[0] == 84 and output[2:] == [False, ["argument with spaces"]]
+    assert Path(output[1]) != previous_cache
+    assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
+            previous_cache.stat().st_ino) == cached_before
+    assert dict(os.environ) == environment
 
 
 def _multi_manifest(tmp_path: Path) -> Path:
@@ -626,14 +782,12 @@ def _agent_machines_import_sources(payload: Path) -> list[str]:
         for name in ("plugin-resolve", "agent-procutil", "machine-transport", "remote-login-shell")
     ]
 def _dependency_materializer() -> ModuleType:
-    helper = (
-        REPO / "worktree-manager" / "src" / "worktree_manager"
-        / "_trusted_pointer_materializer.py"
-    )
+    helper = REPO / "tools" / "materialize_main.py"
     spec = importlib.util.spec_from_file_location("payload_dependency_materializer", helper)
     assert spec and spec.loader
     materializer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(materializer)
+    materializer.find_uv_editable_refs = materializer.uer.find_uv_editable_refs
     return materializer
 
 
@@ -663,7 +817,7 @@ def _stage_payload_dependencies(payload: Path, *, source_consumer: Path) -> None
         canonical_root=REPO,
         dest_root=payload,
     )
-    assert not any(line.startswith("SKIP ") for line in result), result
+    assert not any(line.startswith("SKIP ") for line in result), "\n".join(result)
     assert (payload / "libs" / "machine-transport" / "src" / "machine_transport").is_dir()
     assert (payload / "libs" / "remote-login-shell" / "src" / "remote_login_shell").is_dir()
 
@@ -864,6 +1018,68 @@ def _agent_worktrees_test_environment(
 NATIVE_POWERSHELL_HOSTS = list(dict.fromkeys(filter(None, (
     shutil.which("pwsh"), shutil.which("powershell"),
 ))))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows required-context command")
+@pytest.mark.parametrize("host", NATIVE_POWERSHELL_HOSTS or [None])
+def test_required_context_inner_command_external_cache(tmp_path: Path, host: str) -> None:
+    if host is None:
+        pytest.skip("PowerShell is unavailable")
+    payload = _copied_agent_worktrees_payload(tmp_path, dispatch_only=True)
+    context = _stamp_agent_worktrees_context(tmp_path, payload)
+    home = tmp_path / "home"
+    home.mkdir()
+    root = _activate_agent_worktrees_context(tmp_path, home, context)
+    slot = root / "versions" / "immutable"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / "Scripts" / "python.exe"
+    package = slot / "Lib" / "site-packages" / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("VALUE = 42\n", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import agent_worktrees, json, sys\n"
+        "print(json.dumps([agent_worktrees.VALUE, agent_worktrees.__cached__, "
+        "sys.dont_write_bytecode, sys.argv[1:]]))\n", encoding="utf-8",
+    )
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = '" + str(python).replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    environment = dict(os.environ)
+    child_env = _agent_worktrees_test_environment(home, payload)
+    child_env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
+    for key in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "PYTHONPATH"):
+        child_env.pop(key, None)
+
+    def snapshot(directory):
+        return {
+            str(path.relative_to(directory)): (
+                path.read_bytes() if path.is_file() else None,
+                path.stat().st_mtime_ns, path.stat().st_ctime_ns, path.stat().st_ino,
+            )
+            for path in (directory, *directory.rglob("*"))
+        }
+
+    before = snapshot(slot), snapshot(payload)
+    cached_before = None
+    for _ in range(2):
+        result = subprocess.run(
+            [host, "-NoProfile", "-File",
+             str(payload / "bin" / "payload" / "agent-worktrees.ps1"), "argument with spaces"],
+            env=child_env, cwd=tmp_path, capture_output=True, text=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout)
+        assert output[0] == 42 and output[2:] == [False, ["argument with spaces"]]
+        cached = Path(output[1])
+        assert cached.is_relative_to(Path("\\\\?\\" + str(root / "cache" / "python")))
+        current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
+        if cached_before is not None:
+            assert current == cached_before
+        cached_before = current
+        assert (snapshot(slot), snapshot(payload)) == before
+    assert not (home / ".agent-worktrees" / "cache").exists()
+    assert dict(os.environ) == environment
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows context semantics")
@@ -2487,9 +2703,9 @@ def test_skill_catalog_references_name_payload_adopters() -> None:
             )
             composes_catalog = any(
                 (plugin_root / "scripts" / writer_name).is_file()
-                and "emit-command-catalog"
-                in (plugin_root / "scripts" / writer_name).read_text(
-                    encoding="utf-8"
+                and any(
+                    emitter in (plugin_root / "scripts" / writer_name).read_text(encoding="utf-8")
+                    for emitter in ("emit-command-catalog", "emit_command_catalog.py")
                 )
                 for writer_name in (
                     "write_session_guidance.py",
@@ -2568,7 +2784,11 @@ def test_posix_shim_preserves_args_exit_and_project_cwd(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 23
-    assert result.stdout.strip() == f"{project}|-m agent_example search two words"
+    assert re.fullmatch(
+        re.escape(f"{project}|-X pycache_prefix={home / '.agent-example/cache/python'}")
+        + r"/unsealed-[0-9a-f]{32} -m agent_example search two words",
+        result.stdout.strip(),
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
@@ -2822,7 +3042,11 @@ def test_multi_command_shim_dispatches_its_own_module(tmp_path: Path) -> None:
         text=True,
         check=True,
     )
-    assert result.stdout.strip() == "-m agent_example.helper two words"
+    assert re.fullmatch(
+        re.escape(f"-X pycache_prefix={home / '.agent-example/cache/python'}")
+        + r"/unsealed-[0-9a-f]{32} -m agent_example\.helper two words",
+        result.stdout.strip(),
+    )
 
 
 def test_multi_command_traces_use_manifest_plugin_identity(tmp_path: Path) -> None:

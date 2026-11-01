@@ -86,8 +86,24 @@ def test_engine_management_and_explicit_engine_lifecycle_remain_separate():
     assert "Complete-RuntimeConstruction -PayloadHash $payloadHash" in engine
     restart = function("Restart-EngineDaemon")
     assert "$managePy = Get-ActiveSlotPython" in restart
-    assert "& $managePy -I -X utf8 -m agent_index engine start --strict" in restart
+    assert re.search(
+        r"\$cacheArgs\s*=\s*@\(Get-IndexPythonCacheArgs\s+-Root\s+\$InstallDir\)",
+        restart,
+    )
+    commands = [
+        arguments.split() for arguments in re.findall(
+            r"(?m)^\s*&\s+\$managePy\s+(.+?)\s+2>&1\s*\|", restart,
+        )
+    ]
+    verbs = []
+    for command in commands:
+        module = command.index("-m")
+        assert command[:module] == ["-I", "@cacheArgs", "-X", "utf8"]
+        assert command[module:module + 3] == ["-m", "agent_index", "engine"]
+        verbs.append(command[module + 3:])
+    assert verbs == [["stop"], ["start", "--strict"]]
     assert "& $EngineVenvPython" not in restart
+    assert "$EngineHome" not in restart
     assert "BrokerAdoption" not in restart
 
 

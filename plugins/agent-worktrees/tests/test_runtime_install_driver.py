@@ -101,7 +101,7 @@ def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, t
     assert runner.argv[6] == str(SCRIPTS / "runtime_install_driver.py")
     assert "--participant" in runner.argv
     driver.drain.assert_called_once_with()
-    driver.wait.assert_called_once_with("request", output=sys.stdout)
+    driver.wait.assert_called_once_with("request", output=sys.stderr)
 
 
 @pytest.mark.parametrize("ticket", [

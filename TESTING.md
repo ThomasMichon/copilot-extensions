@@ -74,6 +74,16 @@ and closed-wheel deadline controls retain their absolute bounds. These checks
 do not qualify every native self-stage watchdog or an installed whole-update
 footprint.
 
+The same lane runs the real cold/warm cache control through native PowerShell
+on both Linux and Windows, including the generated payload shim and Worktrees'
+actual forwarding function. Cache files must remain beneath the durable root
+and reuse unchanged bytes and identity, while original slot snapshots and caller
+environment stay unchanged. Windows retains its extended-path form; POSIX keeps
+an ordinary absolute cache path. The workflow uses a native `pwsh` step, so a
+missing PowerShell prerequisite cannot be silently credited as POSIX acceptance.
+These are scoped cache-entry controls, not full dispatcher/adoption or macOS
+qualification.
+
 `libs/versioned-runtime/tests/test_runtime_source_native.py` separately exercises
 stderr-only streaming through both native PowerShell hosts. Actual no-newline
 output outlives the quiet allowance while captured stdout, diagnostics, stdin
@@ -265,6 +275,25 @@ runner's disposable roots and process containment. Read the actual outcomes
 and skips: WSL PowerShell and a skipped Windows-only case are not native Windows
 evidence. This focused opt-in lane neither expands required unit-only CI nor
 reenrolls the unavailable full Windows rotation.
+
+Dispatch's admission-bundle and conditional-publication POSIX packet uses the
+same manual workflow with `portfolio=dispatch-publication`. Its Ubuntu job
+verifies the exact source SHA and runs `test_conditional_runtime_publication.py`
+and `test_install_sh_activation_guard.py` through the bounded plugin runner.
+This includes ownership-aware rollback cases skipped on Windows. It does not
+expand the required unit packet or replace native Windows/whole-suite evidence;
+read its actual exits, containment cleanup and skips separately.
+The installer fixture keeps a 524,288-character combined-output bound so genuine
+per-unit source progress is retained. A real-child regression verifies progress
+above the former 64 KiB bound and confirms excessive output still fails; the
+standalone publication-helper bound and production inactivity renewal stay
+unchanged.
+The conditional failure/healthy-selection integration case uses a 60-second
+item guard: measured healthy installation plus rejected installation/rollback
+can consume the default 30 seconds before its final installed `--version`
+probe. All rollback and final-health assertions, the 90-second child bound and
+other item guards remain unchanged. Parent command durations are reported even
+when capture is interrupted.
 
 Fleet-manager's `test_komodo_*` packet exercises strict declaration/current
 grant checks, real caller-owned synthetic Docker protocol processes, physical
@@ -5047,6 +5076,15 @@ synthetic POSIX profiles do not establish native WSL guest identity.
 `libs/agent-procutil/tests`, including explicit native daemon wait-status controls.
 `--all` remains scoped to plugin suites.
 
+Native command-lifecycle fixtures materialize the complete installer and its
+declared driver dependency closure. The initialized PowerShell host frames its
+control replies separately from captured raw stdout, including native JSON.
+Refusal comparisons retain every product, command, staging and user-data byte;
+only declared driver audit files, the known PowerShell startup cache and Python
+bytecode for existing payload modules are accounted separately. Driver requests
+must finish nonzero without unresolved execution. Same-size/same-mtime source,
+runtime and command mutations remain detected.
+
 The copied-pane boundary controls are an explicit, non-serving native lane:
 
 ```text
@@ -5095,6 +5133,92 @@ fixture mux cutover to the source-qualified target. Injected failures before and
 after the second selector replacement prove both selector states and runtime
 receipts survive, with no failed-update cutover. Fixture mux processes suppress
 production breakaway and are terminated/waited within the containing test.
+The installed-generation update witness forbids installer IPC to the incumbent
+and predecessor recovery/termination. It waits for the real old daemon to exit
+cleanly and for its successor to acquire the work lease, while preserving all
+incumbent runtime file hashes. This Manager-only proof does not qualify the
+assembled suite's ordinary-update/repair paths or scheduled registrations.
+
+Whole-suite replacement has a separate manual Windows VM portfolio:
+`installation-context-full.yml`, `portfolio=manager-suite`. It runs normal
+update and repair in independent disposable GitHub-hosted Windows jobs:
+
+```text
+python tools/run-manager-suite-acceptance.py --root .v --mode normal
+python tools/run-manager-suite-acceptance.py --root .v --mode repair
+```
+
+These commands refuse local execution before creating fixtures. Each case
+constructs V1 and V2 through canonical materialization, starts the applicable
+V1 portfolio, and calls the real installed Manager for normal updates or its
+native bootstrap repair entrypoint for repair, against the same default HOME
+and durable data. The private repaired-engine handoff is not a substitute for
+constructing the fresh Manager first. Controlled acquisition replaces only external artifact
+delivery and credentials; the planner, constructors, launchers and scheduled
+registrations remain real. Missing prerequisite or resident-attribution evidence
+fails acceptance rather than reducing the portfolio.
+
+The Index host role is written as YAML readable by both native and
+dependency-free role resolvers. Preparation explicitly provisions its full
+independent engine through the native installer; ordinary Manager updates
+preserve that separately managed engine rather than provisioning it implicitly.
+Its exact native process identity, running version, healthy readiness and sealed
+slot are attested as retained; it is not misclassified as a replaced runtime.
+After cold setup, the Codespaces owner starts through its installed on-demand
+ensure API, retaining the controlled caller's delivery environment, with
+installed liveness observed before recording V1. Its real native scheduled
+registration is retained and its current-runtime resolver is separately verified.
+Worktrees' V1 monitor is explicitly ensured through its installed on-demand API;
+installation alone intentionally need not start an absent monitor. A
+fixture-owned Codespaces tenant hold, periodic Worktrees list demand and an
+authenticated Manager subscriber keep these on-demand residents needed through
+the final routing and exclusive-work probes without changing their idle policy. The Manager subscriber
+follows the current route and releases the prior and final generations.
+This synthetic demand does not qualify a real remote SSH channel.
+Settlement releases the fixture tenant,
+uses Codespaces' generation-bound `owner --stop` and waits for normal channel
+cleanup before removing the exact owned scheduled registration. Task termination
+alone is not daemon-exit evidence. Idle policy, deadlines and final birth-verified
+resident-exit assertions are unchanged.
+Observers retain each successor's native handle through the final sample rather
+than reopening a possibly exited process ID after the update. Failure artifacts
+include bounded tails of the fixture's known Bridge and Codespaces daemon logs;
+durable application data and unrelated files are not collected.
+Bridge's first observed incumbent exit also snapshots those bounded logs before
+successor startup can truncate the shared output files.
+Strict V1 snapshots retain hashes, size, modification time and native file
+identity for every file. Failure diagnostics name added, removed and changed
+paths after update and after settlement, with exact counts and bounded metadata
+samples rather than file contents. No cache-file exemption or resealing converts
+a changed immutable slot into retained evidence.
+The outer VM coordinator retains a bounded process trace beginning immediately
+before baseline observation and sealing, through exercise and settlement.
+Construction noise does not consume its at-most-512 process birth identities with component,
+module and cache-flag observations. Raw command lines and argument values are
+not retained. Readiness and the final stop/report are checked; scan failures
+remain explicit failures. This trace supplies candidate launch evidence, not
+proof that a particular process wrote a changed file.
+The assembled Manager update retains a finite stderr allowance of 4 MiB per
+declared component plus Manager, rather than applying one component's 4 MiB
+capture to the entire suite. Other fixture calls and stdout keep their existing
+limits; execution deadlines and per-unit source progress remain unchanged.
+
+Cold preparation has an 1800-second owned-process deadline; exercise has 900 seconds.
+Assertions retain a separate 300-second runner boundary and the usual pytest
+item limit. Settlement runs independently after success, stage failure or
+timeout. The disposable VM owns the outer scheduled-registration and explicit
+product-daemon lifetime boundary; this flow does not run inside a restrictive
+local test Job. The workflow retains synthetic diagnostics and cannot pass on
+failed or missing settlement. Neither this test flow nor a passing component
+test asserts that whole-suite acceptance has already passed.
+
+The bootstrap RedirectionGuard controls create links as an unprivileged user:
+Windows deliberately [trusts administrator-created links](https://www.microsoft.com/en-us/msrc/blog/2025/06/redirectionguard-mitigating-unsafe-junction-traversal-in-windows).
+An elevated test host
+uses a restricted same-user thread token only during fixture link creation,
+then restores its original identity, including on failure. File-symlink cases
+retain their developer-mode/privilege prerequisite; guard and physical-path
+assertions are not relaxed.
 
 Prepared-source Manager selection/recovery has its own bounded native contract:
 
@@ -6372,6 +6496,11 @@ use `INSTALLATION_CONTEXT_POWERSHELL=powershell`; an explicitly requested
 unavailable shell fails rather than silently supplying evidence. The Windows
 derived-diagnostic step propagates both dependency-construction and pytest
 failures explicitly. None of these jobs gates ordinary PR or promotion snapshots.
+The legacy/no-pointer cell also runs Logger's two real-process command-removal
+regressions once per OS: a held publication lease blocks a competing publisher,
+and removal refuses a same-byte replacement file. They retain each platform's
+command-family scope and run in this native lane, never in the subprocess-free
+promotion-unit packet. Existing matrix and job budgets are unchanged.
 
 `tools/test_installation_context_ci_scope.py` checks the current unit-only
 boundary, explicit manual matrix/selector bounds and real PowerShell failure

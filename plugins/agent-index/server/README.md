@@ -24,3 +24,9 @@ already-admitted inference (including response conversion outside the GPU
 lock) before unloading the model and releasing instance admission. Repeated
 task cancellation cannot discard native completion. An embedding caller
 retains ownership of its event loop and shared executor.
+
+`GET /health` also reports the responding process's `pid` and frozen installed
+package `version`, independently of its configured lifecycle `generation`.
+An uninstalled source invocation reports an empty version rather than borrowing
+the selected light-service version. These additive fields do not load a model
+or change engine startup, idle shutdown or dependency selection.

@@ -8,6 +8,8 @@ import shlex
 import sys
 from pathlib import Path
 
+from agent_procutil import python_cache_args
+
 from .mux_daemon_process import scrub_session_credentials
 
 _CLEAR_ENVIRONMENT = (
@@ -38,7 +40,10 @@ def companion_command(arguments: list[str]) -> tuple[list[str], dict[str, str]]:
     for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__"):
         env.pop(name, None)
     env["WORKTREE_MANAGER_ROOT"] = str(prefix.parent.parent)
-    return [str(python), "-I", "-S", "-B", "-X", "utf8", str(bootstrap), *arguments], env
+    return [
+        str(python), "-I", "-S", "-B", "-X", "utf8",
+        *python_cache_args(prefix.parent.parent), str(bootstrap), *arguments,
+    ], env
 
 
 def companion_shell_command(arguments: list[str]) -> str:

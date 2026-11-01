@@ -463,7 +463,29 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python -m agent_worktrees @forwardArgs
+        $pythonCache = [IO.Path]::GetFullPath(
+            (Join-Path $runtimeRoot ('cache\python\unsealed-' + [Guid]::NewGuid().ToString('N')))
+        )
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not $pythonCache.StartsWith('\\?\')) {
+            $pythonCache = if ($pythonCache.StartsWith('\\')) {
+                '\\?\UNC\' + $pythonCache.Substring(2)
+            } else { '\\?\' + $pythonCache }
+        }
+        $cacheSelector = @'
+import sys
+try:
+    from agent_procutil.python_cache import cache_arguments
+except ImportError:
+    print(sys.pycache_prefix)
+else:
+    print(cache_arguments(sys.argv[1], runtime=sys.executable)[1].split("=", 1)[1])
+'@
+        $selectedCache = & $Python -I -B -X "pycache_prefix=$pythonCache" -c $cacheSelector $runtimeRoot
+        if ($LASTEXITCODE -ne 0 -or @($selectedCache).Count -ne 1 -or -not $selectedCache) {
+            [Console]::Error.WriteLine('[agent-worktrees] Runtime cache selection failed.')
+            exit 126
+        }
+        & $Python -X "pycache_prefix=$selectedCache" -m agent_worktrees @forwardArgs
     } finally {
         $ErrorActionPreference = $previousEap
     }

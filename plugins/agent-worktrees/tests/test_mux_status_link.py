@@ -242,6 +242,7 @@ def test_ensure_uses_declared_invocation_root_and_bounded_headless_custody(
 ):
     import json
     import subprocess
+    from pathlib import Path
     from types import SimpleNamespace
 
     monkeypatch.setattr(mux_status_link.sys, "platform", "win32")
@@ -259,7 +260,20 @@ def test_ensure_uses_declared_invocation_root_and_bounded_headless_custody(
     assert argv == [*command, "mux-daemon", "ensure"]
     assert kwargs["cwd"] == str(root)
     assert kwargs["env"]["WORKTREE_MANAGER_ROOT"] == str(root)
-    assert json.loads(kwargs["env"]["WORKTREE_MANAGER_ENGINE_ARGV"])[1:] == ["-m", "agent_worktrees"]
+    from agent_worktrees import manager_launch_cli
+
+    engine = json.loads(kwargs["env"]["WORKTREE_MANAGER_ENGINE_ARGV"])
+    fresh = manager_launch_cli._agent_worktrees_launch_command(None)
+    assert engine[:2] == fresh[:2] == [manager_launch_cli.sys.executable, "-X"]
+    assert engine[3:] == fresh[3:] == ["-m", "agent_worktrees"]
+    prefixes = [
+        Path(command[2].removeprefix("pycache_prefix=").removeprefix("\\\\?\\"))
+        for command in (engine, fresh)
+    ]
+    assert all(prefix.parent == Path(manager_launch_cli.cfg.install_dir()).absolute() / "cache" / "python"
+               for prefix in prefixes)
+    assert all(prefix.name.startswith("unsealed-") for prefix in prefixes)
+    assert prefixes[0] != prefixes[1]
     assert kwargs["require_job"] is True
     assert kwargs["stdin"] == kwargs["stdout"] == kwargs["stderr"] == subprocess.DEVNULL
     for field, value in mux_status_link.no_window_kwargs().items():

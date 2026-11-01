@@ -78,6 +78,7 @@ def test_lifecycle_exposes_held_cleanup_without_retrying_it(tmp_path: Path, monk
 
         monkeypatch.setattr(owner, "assert_path_owner", fixture_owner)
     monkeypatch.setattr(store, "_monotonic_clock", lambda: 20)
+    monkeypatch.setattr(store, "_root", lambda path, *, create: path)
     monkeypatch.setattr(store, "birth_identity", lambda _pid: "fixture")
     monkeypatch.setattr(store, "_ensure_monitor", lambda: None)
     monkeypatch.setattr(store, "_owners", {})

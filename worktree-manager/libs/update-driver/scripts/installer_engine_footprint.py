@@ -343,6 +343,11 @@ def _manifest_text(path: Path) -> str:
     return _bounded_text(path, 1 << 20, "manifest")
 
 
+def load_manifest(path: Path, plugin: str) -> Manifest:
+    """Read maintained source history independently of small installed markers."""
+    return parse(decode(_manifest_text(path)), plugin)
+
+
 def producer_problems(manifest: Manifest, payload: Path) -> list[str]:
     problems = []
     for relative, expected in manifest.producers.items():

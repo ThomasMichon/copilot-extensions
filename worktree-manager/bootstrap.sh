@@ -192,6 +192,10 @@ if [ "$have_git" -eq 1 ]; then
         git init --quiet -- "$STAGING"
     fi
     git -C "$STAGING" fetch --depth 1 -- "$REPO" "$REF"
+    if [ -f "$STAGING/.git/info/sparse-checkout" ]; then
+        # Fresh repair needs the engine SDK omitted by routine Manager self-update.
+        git -C "$STAGING" -c core.hooksPath= sparse-checkout disable
+    fi
     git -C "$STAGING" -c core.hooksPath= checkout -q --detach FETCH_HEAD
     if ! git -C "$STAGING" diff --quiet --no-ext-diff --no-textconv HEAD --; then
         _bootstrap_progress 'Git source checkout is incomplete or changed; refusing Manager construction.' failed
