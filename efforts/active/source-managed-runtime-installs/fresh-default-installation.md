@@ -250,6 +250,13 @@ installed survival, complete portfolio or same-existing-data adoption gates.
 
 ### Independent V1-to-V2 repair acceptance - operator-requested
 
+**Contained Windows qualification:** #9623 merged the integrated implementation
+after exact-head run `41323397699` passed ordinary and repair preparation,
+exercise, strict original-slot retention assertions and settlement. The
+[dated record](<journal/2026/11.01 replacement-qualification.md>)
+preserves the complete evidence. This does not qualify installed-adopter
+data, live uninstall survival, or the later wheel-first stage/activate flow.
+
 The [2026-10-29 request](inception-transcript.md#independent-v1-to-v2-repair-acceptance)
 adds a decisive suite-level repair test:
 
