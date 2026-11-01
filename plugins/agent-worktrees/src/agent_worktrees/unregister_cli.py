@@ -36,6 +36,9 @@ def add_parsers(sub) -> None:
             "project's registration. Use this to deregister a stale/broken "
             "project stub; use 'uninstall --remove-config' only for a "
             "genuine full-machine teardown of the shared runtime."
+            " When work remains, inspect the closure bounce, help its owners "
+            "finish it, and retry normally; --force is an explicit override, "
+            "not the default agent workflow."
         ),
     )
     p.add_argument(
@@ -94,6 +97,17 @@ def _unregister_blockers(project: str) -> list[str]:
     if open_prs:
         blockers.append(f"{open_prs} open PR(s)")
 
+    for record in records:
+        blockers.append(
+            f"worktree {record.worktree_id!r}: inspect with "
+            f"--project {project} claims {record.worktree_id}"
+        )
+        for claim in record.resources:
+            if claim.is_unsettled:
+                blockers.append(
+                    f"  unsettled {claim.kind}: {claim.ref}"
+                )
+
     return blockers
 
 
@@ -117,9 +131,23 @@ def _unregister_guarded(args: argparse.Namespace) -> int:
     blockers = _unregister_blockers(project)
     if blockers and not args.force:
         output.err(
-            f"Refusing to unregister '{project}': it still has "
-            f"{', '.join(blockers)}. Clean these up first, or pass --force "
-            "to unregister anyway."
+            f"Refusing to unregister '{project}': claims bounce "
+            "(local project records still carry outstanding work)."
+        )
+        for blocker in blockers:
+            print(f"  {blocker}")
+        print(
+            "  With the same selected executable, inspect each listed "
+            "worktree's claims using the project-scoped arguments above."
+        )
+        print(
+            "  Help the rightful owners finish their work, merge PRs under "
+            "their review policy, and settle resource obligations. Then use "
+            f"--project {project} finalize <worktree-id> and retry unregister."
+        )
+        print(
+            "  Keep this unregister request open through closure. Do not "
+            "automatically add --force, abandon work, or terminate sessions."
         )
         return 1
     if blockers:
@@ -127,6 +155,7 @@ def _unregister_guarded(args: argparse.Namespace) -> int:
             f"Unregistering '{project}' with outstanding "
             f"{', '.join(blockers)} (--force)"
         )
+        output.warn("Explicit --force does not settle the outstanding work or its claims.")
 
     try:
         for path in inst.remove_project_binstub(project):
