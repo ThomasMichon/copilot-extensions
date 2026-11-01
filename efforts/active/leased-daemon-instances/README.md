@@ -176,6 +176,9 @@ their existing owners and guarantees.
   entrypoints through
   setup-provided PATH Python without interpreter attestation; preserve Windows
   process/Job and uncertainty contracts.
+- [x] Land the bounded compiler-free finite owned-process source through #9687;
+  the complete native and compiler-free construction gates remain open.
+  Continue through the [shared non-UI preparation journal](../lean-runtime-dependencies/journal/2026/11.01%20non-ui-process-safety.md).
 - [x] Remove canonical C, all distributed copies and native build/export hooks,
   regenerating consumers through their normal owner.
 - [ ] Complete actual compiler-free construction and lifecycle qualification,
@@ -231,6 +234,7 @@ compiler-free construction/lifecycle qualification remain open.
 All original entries and qualification details are retained in dated sidecars,
 newest first:
 
+- [2026-11-01 - merged finite source and non-UI safety preparation](../lean-runtime-dependencies/journal/2026/11.01%20non-ui-process-safety.md)
 - [2026-10-30 - compiler-free finite process custody](../lean-runtime-dependencies/journal/2026/10.30%20finite-owned-process.md)
 - [2026-10-30 - compiler-free PowerShell instance custody](../lean-runtime-dependencies/journal/2026/10.30%20powershell-instance-custody.md)
 - [2026-10-28 - SDK caller bounds and native qualification](../lean-runtime-dependencies/journal/2026/10.28%20sdk-caller-qualification.md)

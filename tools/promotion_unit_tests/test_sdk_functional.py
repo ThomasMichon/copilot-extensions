@@ -18,8 +18,12 @@ def console_bindings():
     source = Path(runner.__file__).with_name("sdk_desktop_win32.py")
     declared = next(node for node in ast.parse(source.read_bytes()).body
                     if isinstance(node, ast.ClassDef) and node.name == "WinAPI")
-    methods = {"check", "console_facts", "facts", "require_console", "require_desktop"}
-    selected = [node for node in declared.body if isinstance(node, ast.FunctionDef) and node.name in methods]
+    native = source.with_name("sdk_native_win32.py")
+    native_class = next(node for node in ast.parse(native.read_bytes()).body
+                        if isinstance(node, ast.ClassDef) and node.name == "NativeProcessAPI")
+    methods = {"check", "elevated", "console_facts", "facts", "require_console", "require_desktop"}
+    selected = [node for node in [*native_class.body, *declared.body]
+                if isinstance(node, ast.FunctionDef) and node.name in methods]
     assert {node.name for node in selected} == methods
     owner = ast.copy_location(ast.ClassDef(
         name="WinAPI", bases=[], keywords=[], body=selected, decorator_list=[], type_params=[],
@@ -38,7 +42,7 @@ def console_bindings():
         "ct": SimpleNamespace(byref=lambda value: SimpleNamespace(_obj=value),
                               sizeof=lambda value: 4, get_last_error=lambda: 0),
         "wt": SimpleNamespace(BOOL=Number, HANDLE=Number, DWORD=Number),
-        "os": os, "ObservationBlocked": runner.ObservationBlocked,
+        "os": os, "Any": Any, "ObservationBlocked": runner.ObservationBlocked,
     }
     exec(compile(ast.fix_missing_locations(ast.Module(body=[owner], type_ignores=[])),
                  str(source), "exec"), namespace)
@@ -60,7 +64,7 @@ def functional_fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple
             self, api: Any, argv: list[str], child_request: dict, directory: Path,
             name: str, evidence: dict,
         ) -> None:
-            assert argv[-1] == "functional-worker"
+            assert argv[-1] == fault.get("mode", "functional-worker")
             self.name, self.evidence = name, evidence
             self.process = SimpleNamespace(returncode=1 if fault["at"] == name + "-exit" else 0)
             evidence["launched"] = True

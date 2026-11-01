@@ -1267,6 +1267,8 @@ onto one branch.
 
 ## Journal
 
+- [2026-11-01 - finite source merge and separately prepared non-UI validation](../lean-runtime-dependencies/journal/2026/11.01%20non-ui-process-safety.md). Phase 4a/4b, native replacement and installed adoption remain open.
+
 ### 2026-10-28 - Fresh-default installation and recognizer manifests
 
 The operator changed the installation baseline: upstream fresh construction,
