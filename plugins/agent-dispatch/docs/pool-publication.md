@@ -156,8 +156,15 @@ its actual completion; discarding cached read data is not release of its work.
 This is **optimistic observed coherence**, not an atomic filesystem transaction
 or a remote attestation. The digest includes the entire observed declaration
 and override inputs, not just surviving workers; it is a correlation value and
-does not renew freshness. External file writers, the final effect-boundary local
-recheck and the complete configured cohort remain integration gates.
+does not renew freshness. A separate observation revision is retained even
+when complete definitions are unavailable. Unreadable, cached or uncopyable
+local inputs have no comparable observation revision and cannot authorize a
+write; equal unavailable reasons are not evidence that inputs stayed unchanged.
+An observed final digest change refuses preparation before retaining a request
+and refuses sending any older request, including an unavailable publication.
+External file writers and the complete configured cohort remain integration
+gates; the explicit sender's final recheck below is still optimistic, not an
+atomic filesystem fence.
 
 `prepare_pool_metadata_request()` captures through that owner rather than
 accepting a caller-supplied completeness certificate. It retains exactly one
@@ -174,9 +181,86 @@ with bounded local memory; durable publication history stays provider-owned.
 The client read negotiates the running peer's version-1 metadata/definition
 support and configured control authority before accessing the unfiltered catalog.
 Missing, old or unsupported support refuses the new operation without trying a
-legacy write. **No serve-loop caller, enrollment/publication RPC sender or pool
-activation is wired.** These source prerequisites leave the provider's
+legacy write. **No serve-loop caller or pool activation is wired.**
+These source prerequisites leave the provider's
 metadata-only/false admission and placement advertisements unchanged.
+
+## Implemented explicit sender and unknown-outcome recovery
+
+`send_pool_metadata_request()` sends or recovers only the request already
+retained by `prepare_pool_metadata_request()`. It does not prepare another
+request, enroll automatically, run from a tick/serve loop or enable placement.
+The existing read executor carries one request-bound future in the daemon's
+probe/retirement/shutdown accounting. Concurrent callers reuse that future.
+A bounded caller timeout does not cancel, replace or forget the original RPC.
+Completed failures leave the immutable request pending; the next explicit
+invocation recovers it, not a newer input revision.
+Successful completed flights stay retained until acknowledgment, including a
+timeout racing completion or an unavailable acknowledgment lock. They can
+settle after shutdown without needing another recovery read.
+A failed flight that finishes after a caller timeout is observed and logged
+on the next invocation, which recovers the same original request immediately
+rather than requiring another invocation to discard the old failure.
+Validated acknowledgment stays on that request-bound flight, so a delayed
+waiter cannot acknowledge an old result against a newer pending request.
+
+Recovery first reads the unfiltered catalog through the negotiated client. An
+already-accepted original generation/revision is parsed and checked against all
+original request and definition-attribution fences before custody is settled.
+This read may account for a result after release/reacquisition or a source change,
+without another POST or freshness renewal. A successor or different result
+cannot rebase the pending request. Required response fields, scope, versions,
+integer revisions, finite freshness and lossless definitions are validated;
+additive response fields remain compatible.
+The original catalog read retains each complete scope, not just its position.
+Enrollment acknowledgment must preserve that original definition/freshness
+baseline exactly, including empty, unattributed initial enrollment.
+Pending replies cannot attribute definitions to their new, unpublished
+generation; complete and unavailable replies retain their respective
+current-versus-prior attribution rules. Malformed attribution cannot become
+the baseline for a later otherwise-valid acknowledgment.
+
+If the original result is not observable, the client negotiates the running
+peer again before POST. Its write boundary rechecks the actual original
+singleton acquisition and pending request, fresh complete local sources (or
+the same whole-scope unavailable observation), coordinator registration revision
+and every original publisher position. Changed sources, delayed observations,
+withdrawals, a changed publisher or closed admission refuse the write.
+The original and current final local-read revisions are retained separately from
+the collection revision and must both match it. A repeated final-read failure
+cannot qualify merely because its reason and earlier collection stayed equal.
+The original capture deadline is checked again immediately before POST admission,
+after parsing and final comparisons, not just before source collection.
+That final closed-state/deadline decision shares the short shutdown admission
+guard. Native acquisition and source guards are also released after that
+decision, before blocking I/O; an admitted operation stays tracked even if
+shutdown closes or the acquisition is released immediately afterward. The
+request body retains its original generation, revisions and definitions; an
+unavailable request still carries an empty definition array.
+These are bounded, optimistic source checks, not atomic external-file fencing
+or remote OS-lock verification.
+
+Shutdown closes metadata-send admission before draining existing futures.
+Submission and future registration share a short admission guard with that
+close, separate from source collection. Closed admission
+refuses a new flight; it does not prevent a retained flight from settling.
+A delayed preflight cannot initiate a new write after that close. An
+already-admitted POST remains under its original request-bound future owner until
+it finishes, not under the singleton release mutex. Its caller's bounded wait
+and shutdown drain may return with visible
+pending custody. A later matching result can settle that custody, but cannot
+reopen send admission or the original acquisition. No new lease, registry,
+executor, timer or durable history store is introduced.
+The actual self-update/release path can therefore proceed after its bounded
+drain without waiting for that RPC's network timeout. The provider's original
+generation/revision fences and retained request still govern the late result;
+this is not remote OS-lock verification or permission for replacement work.
+
+Control credentials authorize metadata only. Missing/unsupported running-peer
+support, authentication refusals, conflicts, malformed replies and transport
+errors remain explicit; no new write is replayed as a legacy registration.
+Configured-scope completeness, mixed-cohort qualification, external atomic
+fencing and placement remain separate integration gates.
 
 ## Implemented storage boundary
 
@@ -227,11 +311,12 @@ equivalent-source deduplication, pauses and overrides. This storage API does not
 prove that collection is complete. Its opaque `input_revision` is a correlation
 provided by that owner, not an arbitrary allocator's completeness certificate.
 No ordinary allocator may publish a preferred subset or available-slot count.
-The local collector and bounded preparation refuse failed/cached/uncertain
-observations. A future sender must carry the retained unavailable request rather
-than reuse an older complete tuple, recheck the original local acquisition at
-the write boundary and reconcile unknown outcomes before changing requests.
-External source mutations and final write-boundary rechecks remain unqualified.
+The local collector, bounded preparation and explicit sender refuse
+failed/cached/uncertain complete observations. The sender carries the retained
+unavailable request rather than reusing an older complete tuple, checks the
+original acquisition at the write boundary and recovers unknown outcomes before
+changing requests. External source atomicity and installed publisher activation
+remain unqualified.
 
 The controlling registration owner must also establish the complete expected
 scope membership. These primitives retain every scope it enrolls; an empty

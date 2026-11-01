@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit singleton-fenced pool metadata sending and original-request recovery without activating ordinary callers",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

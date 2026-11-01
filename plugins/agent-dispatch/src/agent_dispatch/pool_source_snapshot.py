@@ -72,6 +72,7 @@ class PoolSourceSnapshot:
     observations: tuple[SourceObservation, ...]
     reasons: tuple[str, ...]
     input_revision: str | None = None
+    observation_revision: str | None = None
 
     @property
     def complete(self) -> bool:

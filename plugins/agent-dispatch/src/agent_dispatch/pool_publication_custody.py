@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from .pool_source_snapshot import PoolSourceSnapshot
 from .queue_pool_catalog import PoolPublicationScope
+
+if TYPE_CHECKING:
+    from .pool_instances import PoolInstanceDefinition
 
 
 class PoolPublicationError(RuntimeError):
@@ -26,9 +29,12 @@ class PoolPublisherPosition:
 class PoolCatalogRead:
     registration_revision: int
     positions: tuple[PoolPublisherPosition, ...]
+    scopes: tuple[PoolPublicationScope, ...] = ()
 
     @classmethod
     def from_dict(cls, value: object) -> PoolCatalogRead:
+        from .pool_publication_response import read_pool_scope
+
         if not isinstance(value, dict) or (
             value.get("protocol") != "pool_catalog_transport/v1"
             or type(value.get("version")) is not int or value["version"] != 1
@@ -38,6 +44,7 @@ class PoolCatalogRead:
         ):
             raise PoolPublicationError("pool catalog input observation is malformed or unsupported")
         positions = []
+        scopes = []
         seen = set()
         for scope in value["scopes"]:
             if not isinstance(scope, dict) or any(
@@ -56,7 +63,8 @@ class PoolCatalogRead:
             positions.append(PoolPublisherPosition(
                 *identity, scope["publisher_id"], scope["generation"], scope["revision"],
             ))
-        return cls(value["registration_revision"], tuple(positions))
+            scopes.append(read_pool_scope(scope))
+        return cls(value["registration_revision"], tuple(positions), tuple(scopes))
 
 
 @dataclass(frozen=True)
@@ -67,12 +75,14 @@ class PoolPublicationInputs:
     snapshot: PoolSourceSnapshot
     catalog: PoolCatalogRead | None
     reasons: tuple[str, ...]
+    local_recheck_revision: str | None = None
 
     @property
     def coherent(self) -> bool:
         return (
             not self.reasons and self.snapshot.complete
             and self.snapshot.input_revision is not None and self.catalog is not None
+            and self.local_recheck_revision == self.snapshot.input_revision
         )
 
 
@@ -130,6 +140,8 @@ class PoolPublisherCustody:
     def prepare(self, inputs: PoolPublicationInputs) -> PoolMetadataRequest:
         if self.pending is not None:
             raise PoolPublicationError("original pool metadata request remains unresolved")
+        if "local-inputs-changed" in inputs.reasons:
+            raise PoolPublicationError("pool metadata requires unchanged final local inputs")
         if inputs.publisher_id != self.publisher_id or inputs.catalog is None or any(
             reason.startswith("coordinator-") for reason in inputs.reasons
         ):
@@ -181,7 +193,26 @@ class PoolPublisherCustody:
             ))
         ):
             raise PoolPublicationError("pool metadata result failed its original request fences")
-        if request.operation == "publish":
+        if request.operation == "begin":
+            previous = next(
+                (scope for scope in catalog.scopes
+                 if (scope.machine, scope.env) == (result.machine, result.env)), None,
+            )
+            baseline = (
+                ((), None, None, None, None, None) if previous is None else (
+                    previous.definitions, previous.definitions_generation,
+                    previous.definitions_revision, previous.input_revision,
+                    previous.registration_revision, previous.valid_until,
+                )
+            )
+            if (
+                result.definitions, result.definitions_generation,
+                result.definitions_revision, result.input_revision,
+                result.registration_revision, result.valid_until,
+            ) != baseline:
+                raise PoolPublicationError("pool enrollment result changed original retained baseline")
+        else:
+            expected: tuple[tuple[PoolInstanceDefinition, ...], int | None, int | None]
             if request.reason is None:
                 expected = (request.inputs.snapshot.definitions, result.generation, result.revision)
             else:
