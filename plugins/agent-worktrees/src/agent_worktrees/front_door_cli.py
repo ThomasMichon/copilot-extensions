@@ -36,6 +36,27 @@ def _core():
     return core
 
 
+def agenda_project_unavailable(argv, message: str) -> int:
+    from .agenda_cli import project_unavailable
+
+    return project_unavailable(argv, message)
+
+
+def project_resolution_failure(argv, error: Exception) -> int:
+    if argv and argv[0] in {"agenda-read", "agenda-publish", "agenda-feed"}:
+        return agenda_project_unavailable(argv, str(error))
+    if not argv or argv[0] != "record":
+        raise error
+    from . import output
+
+    cfg.set_active_project(None)
+    output._json_output({
+        "ok": False, "worktree": None,
+        "error": {"code": "project-unavailable", "message": str(error)},
+    })
+    return 1
+
+
 def _core_helper(name: str, local):
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:

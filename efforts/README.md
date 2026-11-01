@@ -11,7 +11,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Agenda CLI and Live Updates](active/agenda-cli-live-updates/README.md) | Draft; reviewed mutation/durability/live-projection contract before implementation | #9855; standalone efforts, existing Manager/resident consumers; #8811 UI/native/relay custody retained; no rollout |
+| [Agenda CLI and Live Updates](active/agenda-cli-live-updates/README.md) | Active; source CLI/store and held live delivery validated, independent critique and reviewed publication | #9855; standalone efforts, existing Manager/resident consumers; #8811 UI/native/relay custody retained; no rollout |
 | [Python Static Type Safety](active/python-static-type-safety/README.md) | Active; reviewed plan merged, checker foundation before incremental CI/project activation | #9807/#9831; strict all-Python completion, common local/CI commands, existing dependency/source/release owners retained; no runtime rollout |
 | [Model-Guided Skill Selection](active/model-guided-skill-selection/README.md) | Active; native SDK witnesses and model preflight recorded, guided comparison and implementation pending | #9809; existing customization, SDK and model-policy owners; no parallel catalog or shared rollout |
 | [Startup-Only Guidance](active/startup-only-guidance/README.md) | Active; declarations released, approved adoption held on installer prerequisites | Bounded #5993 follow-up; preserves periodic sync, existing delivery/native owners and separately owned #9489 repair |

@@ -11,6 +11,10 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+For optional committed current-head agenda reads, publication and held updates,
+see [the agenda projection contract](docs/worktree-agendas.md). It uses the
+existing resident owner without importing planning or UI packages.
+
 Source repositories can veto managed authoring agents without losing source
 worktree and contribution operations. See
 [repository hosting policy](docs/repository-agent-policy.md) for `expose_agent`,

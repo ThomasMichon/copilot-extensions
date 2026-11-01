@@ -26,12 +26,24 @@ fallback, and cross-platform policy producers:
 | [**planning-efforts**](skills/planning-efforts/SKILL.md) | The workflow: start, plan, resume, and archive efforts. Governs the canonical effort pattern (folder layout, README schema, lifecycle, journal, the participants seam) and optionally binds a managed worktree to its declared active effort slice. Ships the reference guide and the effort README template as skill assets. |
 | [**efforts-setup**](skills/efforts-setup/SKILL.md) | Adoption: how a repo takes on the efforts system — create the `efforts/` tree and write a short repo **addendum** that specializes the bindings. |
 | [**driving-backlog-burndown**](skills/driving-backlog-burndown/SKILL.md) | Execution: charter a scoped backlog recovery, maintain the item/owner ledger, supervise original owners through verified outcomes, and preserve state across native rollover or explicit transfer. Ships charter, dashboard, checkpoint and handoff templates; no scheduler or runtime is started. |
-| [**driving-effort-agendas**](skills/driving-effort-agendas/SKILL.md) | Opt-in execution aide: coarse agenda nodes, explicit exits, a journal-local worktree cursor and bounded child-return stack. Supplies manual JSON examples, the continuous "what next?" procedure and an optional read-only Python next/check helper; no hook or service is required. |
+| [**driving-effort-agendas**](skills/driving-effort-agendas/SKILL.md) | Opt-in execution aide: coarse nodes, explicit exits and bounded root/child/deferred chains. Supplies a standalone transactional Python CLI/store, optional committed-observation publisher and compatible legacy read-only helper; no hook or service is required. |
 
 The optional agenda helper is invoked directly from the skill's payload path
 using an existing Python 3 interpreter and an explicit journal/state-home path.
-It reads and diagnoses; it never creates or mutates agenda state, executes tasks,
-starts services or proves source completion. Manual use needs no helper.
+The [managed command contract](skills/driving-effort-agendas/references/managed-agenda.md)
+owns `read`/`next`/`check`/`history` and explicit `init`/semantic `update`/`publish`.
+SQLite transactions preserve full state/history, stable retry results and finite
+budgets. Optional argv-only delivery is separate from durable acceptance.
+The legacy inspector remains read-only. Explicit quiescent same-home adoption
+preserves exact cursor bytes before installing an unsupported-version marker,
+so already-installed old inspectors also refuse stale JSON. Filesystem fencing
+precedes SQLite acceptance; interrupted adoption requires explicit recovery.
+This migration durability path requires POSIX directory fsync; unqualified
+platforms are refused rather than claimed compatible. Neither path executes
+tasks or proves source completion.
+There is no global agenda binstub; CLI/App/ACP invocation requires a tool host
+with process execution and an existing Python interpreter. Manual use remains
+available for unmanaged homes; migration is explicit, never automatic.
 
 Its optional version-2 cursor preserves full deferred branch/return state,
 original budgets, pending decision packets and real attempt/revisit times.
@@ -148,7 +160,8 @@ binding derives the existing follow-up cleanup gate and contributes a bounded
 pointer through agent-worktrees' existing session-conduct hook. The efforts
 plugin does not own or rewrite the worktree provider's tracking records.
 Its optional agenda format describes separate agent-local data beside the
-worktree journal; the read-only helper never writes either store. No session-start
+worktree journal; the managed CLI writes only its explicitly adopted SQLite
+home, never the worktree provider's records. No session-start
 hook is registered; the policy producers remain staged and unregistered.
 
 ## Enable

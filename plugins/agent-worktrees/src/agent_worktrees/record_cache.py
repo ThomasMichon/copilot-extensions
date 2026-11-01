@@ -44,6 +44,19 @@ if TYPE_CHECKING:
 
 _cache_lock = threading.Lock()
 _cache: dict[str, tuple[int, int, "WorktreeRecord"]] = {}
+_write_observers: set[Callable] = set()
+
+
+def observe_writes(callback: Callable) -> Callable:
+    """Observe committed records in this process; observers cannot rewrite them."""
+    with _cache_lock:
+        _write_observers.add(callback)
+
+    def unsubscribe():
+        with _cache_lock:
+            _write_observers.discard(callback)
+
+    return unsubscribe
 
 
 _TRANSIENT_PROJECTION_ATTRS = (
@@ -160,6 +173,9 @@ def store(path: Path, record: "WorktreeRecord") -> None:
             delattr(cached_record, attr)
     with _cache_lock:
         _cache[str(path)] = (st.st_mtime_ns, st.st_size, cached_record)
+        observers = tuple(_write_observers)
+    for observer in observers:
+        observer(path, cached_record)
 
 
 def clear() -> None:
