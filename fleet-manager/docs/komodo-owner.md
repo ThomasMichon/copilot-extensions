@@ -186,6 +186,10 @@ inside directory mounts; the SDK cannot infer those dependencies from a director
 It authenticates those observations through its existing host/storage/release/
 credential authorities before constructing the record. The record itself
 authenticates nothing and transfers no incumbent writer custody.
+Both mandatory private keys are reread through the existing owner-private
+file reader, including current OS ownership/privacy and opened-file consistency.
+Unchanged bytes/inodes do not permit a newly shared permission or ACL grant.
+The SDK refuses that drift without repairing permissions or copying keys.
 
 Only existing ordinary bind paths or existing local named volumes with no
 driver options are accepted. Volume name, creation time, mountpoint, labels and

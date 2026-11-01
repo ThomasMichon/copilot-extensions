@@ -188,6 +188,27 @@ def test_incumbent_file_content_and_physical_replacement_change_selection_eviden
     assert incumbent.material.evidence() != before
 
 
+@pytest.mark.parametrize("name", ["core_key", "periphery_key"])
+def test_mandatory_private_key_permission_drift_refuses_unchanged_material(incumbent, name):
+    path = incumbent.files[name]
+    original = path.read_bytes(), path.stat().st_ino
+    incumbent.material.evidence()
+    if os.name == "nt":
+        from agent_procutil.owned_process import run_caller_owned
+
+        executable = Path(os.environ["SystemRoot"]) / "System32" / "icacls.exe"
+        result = run_caller_owned(
+            [str(executable), str(path), "/grant", "*S-1-1-0:(R)"],
+            cwd=str(path.parent), timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096,
+        )
+        assert result.returncode == 0
+    else:
+        path.chmod(0o644)
+    assert (path.read_bytes(), path.stat().st_ino) == original
+    with pytest.raises(PlanError):
+        incumbent.material.evidence()
+
+
 @pytest.mark.parametrize("change", [
     None, "time", "labels", "mountpoint", "options", "missing", "reverse", "duplicate",
 ])

@@ -143,14 +143,16 @@ class KomodoIncumbentMaterialization:
                 info = path.stat()
                 paths[str(path)] = {"device": info.st_dev, "inode": info.st_ino}
         files = {}
+        private_keys = {self.keys / "core.key", self.keys / "periphery.key"}
         for path in (*self.retained_files, self.admin_username, self.admin_password):
             ordinary_path(path)
             info = path.stat()
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise PlanError("Komodo incumbent retained file custody is ambiguous")
+            reader = read_private_file if path in private_keys else _bytes
             files[str(path)] = {
                 "device": info.st_dev, "inode": info.st_ino,
-                "sha256": hashlib.sha256(_bytes(path, 1024 * 1024)).hexdigest(),
+                "sha256": hashlib.sha256(reader(path, 1024 * 1024)).hexdigest(),
             }
         info = self.keys.stat()
         return {
