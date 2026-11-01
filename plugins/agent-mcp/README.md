@@ -16,8 +16,8 @@ negotiation, credential injection, filtering and catalog reshaping,
 materialization, and bridge-equivalent fallback. It does not own the authoring
 policy for custom agents or the runtime decision to delegate. Use
 `customizing-copilot:defining-subagents` for agent structure, domain-service
-ownership, readiness sections, and anti-self-delegation; use
-`delegation-guidance:delegating-work` for task decomposition.
+ownership, readiness sections, and anti-self-delegation. This tool boundary
+does not prescribe a general delegation strategy.
 
 ## Legacy state home
 

@@ -29,9 +29,6 @@ component owns its command and support contract.
 | Apply general conduct/publication guidance | [agent-conduct-guidance](../plugins/agent-conduct-guidance/README.md), [ai-attribution](../plugins/ai-attribution/README.md) | General policy and task-time procedures; host-specific policy remains host-owned |
 | Contribute to this toolkit | [copilot-extensions-harness](../plugins/copilot-extensions-harness/README.md) | Toolkit contribution/diagnosis guidance, not your complete harness |
 
-[delegation-guidance](../plugins/delegation-guidance/README.md) is a deprecated
-compatibility pointer, not an additional independent capability.
-
 ## Support and dependencies
 
 The [architecture lifecycle tables](architecture.md#the-plugins) distinguish

@@ -613,10 +613,10 @@ agent-bridge owns **live cross-boundary agent communication**: starting or
 resuming a persistent session, sending a turn, streaming its response, and
 steering or taking over that live agent across repository, worktree, machine,
 or venue boundaries. It does not own generic delegation policy or durable task
-state. Use native Task sub-agents for bounded work inside the current session,
-`delegation-guidance:delegating-work` for task decomposition, and
-`agent-dispatch:agent-dispatch` for queued tasks, atomic claims, retries, and
-supervision.
+state. Native Task sub-agents serve in-session assignments; agent-bridge serves
+live cross-boundary conversations. `agent-dispatch:agent-dispatch` owns queued
+tasks, atomic claims, retries and supervision. These capability distinctions
+do not prescribe whether arbitrary work should be delegated.
 
 The current session-oriented controls and the target compact delegation
 semantics are mapped in

@@ -1,14 +1,10 @@
-"""Budget-owner validity and real standalone consumer interoperability."""
+"""Current monthly economy advice without execution or model routing."""
 
 from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal
 import json
-import os
-from pathlib import Path
-import subprocess
-import sys
 
 import pytest
 
@@ -27,7 +23,7 @@ def _posture(*, capture: str = "2026-09-05T19:00:00Z", **fields: object) -> dict
 
 def test_owner_caps_snapshot_advice_age_without_recalculating_in_consumer() -> None:
     posture = _posture()
-    advice = posture["routing_advice"]
+    advice = posture["economy_advice"]
     assert advice["availability"] == "available"
     assert advice["evaluated_at"] == posture["evaluated_at"]
     assert advice["valid_until"] == "2026-09-05T19:05:00Z"
@@ -35,7 +31,7 @@ def test_owner_caps_snapshot_advice_age_without_recalculating_in_consumer() -> N
 
 
 def test_owner_uses_earliest_field_freshness_deadline() -> None:
-    advice = _posture(capture="2026-09-05T17:00:03Z")["routing_advice"]
+    advice = _posture(capture="2026-09-05T17:00:03Z")["economy_advice"]
     assert advice["valid_until"] == "2026-09-05T19:00:03Z"
 
 
@@ -46,13 +42,13 @@ def test_owner_bounds_advice_by_reset_and_rejects_future_captures() -> None:
             consumption=Decimal(20), reset_at="2026-09-05T19:00:01Z",
         ),
     ))
-    assert build_posture(config, NOW)["routing_advice"]["valid_until"] == (
+    assert build_posture(config, NOW)["economy_advice"]["valid_until"] == (
         "2026-09-05T19:00:01Z"
     )
-    assert build_posture(config, NOW + timedelta(seconds=1))["routing_advice"][
+    assert build_posture(config, NOW + timedelta(seconds=1))["economy_advice"][
         "availability"
     ] == "stale"
-    future = _posture(capture="2026-09-05T19:00:01Z")["routing_advice"]
+    future = _posture(capture="2026-09-05T19:00:01Z")["economy_advice"]
     assert future["availability"] == "unavailable"
     assert future["warning_band"] is None
     assert future["valid_until"] is None
@@ -76,40 +72,26 @@ def test_owner_withholds_actionable_advice_for_failure_states(kind: str) -> None
             )),
         )
         posture = build_posture(config, NOW)
-    advice = posture["routing_advice"]
+    advice = posture["economy_advice"]
     assert advice["availability"] != "available"
     assert advice["valid_until"] is None
     assert advice["warning_band"] is None
+    assert advice["suggestions"] == []
 
 
-def test_real_owner_posture_is_consumed_without_budget_runtime_import(tmp_path: Path) -> None:
-    posture = tmp_path / "posture.json"
-    posture.write_text(json.dumps(_posture()), encoding="utf-8")
-    home = tmp_path / "home"
-    (home / ".copilot").mkdir(parents=True)
-    (home / ".copilot" / "model-routing.json").write_text(json.dumps({
-        "schema": "copilot-extensions.model-routing", "version": 1,
-        "purposes": {"coding": [{
-            "model": "qualified", "state": "demonstrated", "surfaces": ["task"],
-            "evidence": [{
-                "ref": "https://example.com/evidence", "observedAt": "2026-01-01",
-                "sampleCount": 2,
-            }],
-        }]},
-    }), encoding="utf-8")
-    resolver = Path(__file__).resolve().parents[3] / (
-        "plugins/agent-conduct-guidance/scripts/resolve-model-routing.py"
+def test_monthly_pressure_offers_only_optional_economy_suggestions() -> None:
+    config = _config(_adapter("manual", 1, _reading(
+        "manual", "2026-09-05T19:00:00Z", allowance=Decimal(100),
+        consumption=Decimal(120), reset_at="2026-09-06T19:00:00Z",
+    )))
+    posture = build_posture(config, NOW)
+    assert posture["calculated"]["overspend"] == "20"
+    assert "routing_advice" not in posture
+    advice = posture["economy_advice"]
+    assert advice["schema"] == "copilot-extensions.budget-economy-advice"
+    assert advice["warning_band"] == "overspent"
+    assert advice["suggestions"] and all(
+        suggestion.startswith("Consider ") for suggestion in advice["suggestions"]
     )
-    environment = {**os.environ, "HOME": str(home), "USERPROFILE": str(home)}
-    environment.pop("PYTHONPATH", None)
-    result = subprocess.run([
-        sys.executable, "-E", "-s", str(resolver), "--repo", str(tmp_path),
-        "--purpose", "coding", "--surface", "task", "--available-model", "qualified",
-        "--as-of", "2026-09-05", "--budget-posture", str(posture),
-        "--budget-at", "2026-09-05T19:00:00Z",
-    ], capture_output=True, text=True, env=environment, timeout=10, check=False)
-    assert result.returncode == 0, result.stderr
-    decision = json.loads(result.stdout)["decision"]
-    assert decision["model"] == "qualified"
-    assert decision["budgetAdvice"]["availability"] == "available"
-    assert decision["budgetAdvice"]["warningBand"] == "no-rate"
+    assert not {"model", "concurrency", "launchBlocked", "action"} & advice.keys()
+    assert "model" not in json.dumps(advice)

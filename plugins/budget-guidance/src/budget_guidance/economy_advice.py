@@ -1,4 +1,4 @@
-"""Owner-issued, short-lived advice for optional routing consumers."""
+"""Short-lived monthly economy information, independent of execution strategy."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 from .models import instant_text
 from .resolve import Resolution
 
-ADVICE_SCHEMA = "copilot-extensions.budget-routing-advice"
+ADVICE_SCHEMA = "copilot-extensions.budget-economy-advice"
 MAX_ADVICE_AGE_SECONDS = 300
 
 
@@ -17,14 +17,15 @@ def _deadline(at: datetime, seconds: int) -> datetime:
     return at + min(timedelta(seconds=seconds), ceiling - at)
 
 
-def routing_advice(
+def economy_advice(
     posture: dict[str, Any], resolution: Resolution | None, at: datetime,
 ) -> dict[str, Any]:
-    """Issue point-in-time advice without granting execution or pricing models."""
+    """Keep monthly suggestions tied to current evidence without gating work."""
     availability = posture["availability"]
     reason = posture["error"]
     valid_until = None
     warning_band = None
+    suggestions: list[str] = []
     if availability == "available" and resolution is not None:
         selected = [field.selected for field in resolution.fields.values()]
         if any(field.captured_at > at for field in selected):
@@ -45,6 +46,11 @@ def routing_advice(
             else:
                 valid_until = instant_text(deadline)
                 warning_band = posture["calculated"]["warning_band"]
+                if warning_band in {"warning", "critical", "overspent"}:
+                    suggestions = [
+                        "Consider reusing valid results rather than repeating completed work.",
+                        "Consider bounding prolonged speculative detours to avoid unnecessary monthly spend.",
+                    ]
     return {
         "schema": ADVICE_SCHEMA,
         "version": 1,
@@ -53,4 +59,5 @@ def routing_advice(
         "valid_until": valid_until,
         "warning_band": warning_band,
         "reason": reason,
+        "suggestions": suggestions,
     }

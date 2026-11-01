@@ -46,9 +46,10 @@ Configuration is inert JSON. The plugin does not source configuration or execute
 commands from it. [Bounded external readers](docs/external-readers.md) require
 an explicit invocation-owned command grant, separate from configuration.
 Automatic startup does not refresh providers. The plugin does not store a
-longitudinal ledger, qualify models, or alter routing decisions. Status includes
-optional [short-lived routing advice](docs/configuration.md#optional-routing-advice)
-for independent consumers. The opt-in
+longitudinal ledger, select models or delegation strategies, or block requested
+work. Status includes optional
+[monthly economy information](docs/configuration.md#optional-monthly-economy-advice),
+not an upfront lookup requirement. The opt-in
 [personal GitHub report adapter](docs/github-usage.md) reads usage through a
 host-owned authenticated transport; it does not infer current entitlement,
 reset, or provider freshness from billing reports.

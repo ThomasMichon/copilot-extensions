@@ -104,8 +104,8 @@ operating-system cause, such as a missing path or permission denial, instead of
 being mislabeled as invalid JSON. Existing directories and other nonregular
 paths are rejected before reading.
 
-Raw legacy account-authentication resets, measured trailing-rate history,
-launch guidance, and routing integration remain later slices of
-the [active effort](../../../efforts/active/budget-aware-model-routing/README.md).
+Raw legacy account-authentication resets and measured trailing-rate history
+remain separate acquisition contracts. Current usage/quota and monthly economy
+information do not select models, route delegates or block requested work.
 
 See [budget-guidance](../README.md) for static/manual posture support.

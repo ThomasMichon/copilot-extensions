@@ -83,9 +83,8 @@ service installers and process supervisors remain with their owning system.
 
 A dispatched task may launch an agent-bridge-backed worker, but that composition
 does not transfer ownership: agent-dispatch owns the task loop; agent-bridge
-owns the live session transport. For generic task decomposition and the
-decision to delegate at all, use
-**`delegation-guidance:delegating-work`**.
+owns the live session transport. These capabilities do not prescribe a
+general direct-versus-delegated work policy.
 
 **agent-dispatch's four canonical use cases** (they line up with the *Producers*
 below): (1) **handoff-prompt storage** for an in-place cutover (same worktree,

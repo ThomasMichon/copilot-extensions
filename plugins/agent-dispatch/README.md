@@ -26,8 +26,8 @@ agent-dispatch owns the **durable task loop**: queued intent, deduplication,
 atomic claims, routing, retries, supervision, and terminal task state. It does
 not own generic process/service lifecycle management, live conversational
 control of an agent, or the decision to delegate a bounded subtask. Use
-agent-bridge for live cross-boundary conversation and steering, and
-`delegation-guidance:delegating-work` for runtime task decomposition.
+agent-bridge for live cross-boundary conversation and steering. This capability
+does not prescribe whether arbitrary work should be delegated.
 
 Each queue operation owns a short-lived SQLite connection. Leaving its context
 commits or rolls back the transaction and closes the connection immediately,

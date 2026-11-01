@@ -1,43 +1,47 @@
-"""Contract test for the delegation-fallback static instruction projection."""
+"""Actual projection and skill discovery omit arbitrary delegation policy."""
 
-from __future__ import annotations
-
-import json
 from pathlib import Path
+from types import SimpleNamespace
 
-_PLUGIN = Path(__file__).resolve().parents[1]
-_DECLARATION = _PLUGIN / "instruction-projections.json"
-_TEMPLATE = _PLUGIN / "instructions" / "delegation-fallback.instructions.md"
+from test_useful_autonomy import projections, scan_skills
 
-
-def _projection_by_id(declaration: dict, projection_id: str) -> dict:
-    matches = [p for p in declaration["projections"] if p["id"] == projection_id]
-    assert len(matches) == 1
-    return matches[0]
+PLUGIN = Path(__file__).resolve().parents[1]
 
 
-def test_projection_declaration_shape():
-    declaration = json.loads(_DECLARATION.read_text(encoding="utf-8"))
-    assert declaration["schema"] == "copilot-extensions.instruction-projections"
-    projection = _projection_by_id(declaration, "delegation-fallback")
-    assert projection["template"] == "instructions/delegation-fallback.instructions.md"
-    assert projection["destination"] == (
-        ".github/instructions/agent-conduct-guidance/delegation-fallback.instructions.md"
+def test_projection_consumer_keeps_scoped_modules_without_delegation_policy(tmp_path):
+    source = SimpleNamespace(
+        origin="copilot-extensions/agent-conduct-guidance",
+        payload_root=PLUGIN, skills_root=PLUGIN / "skills",
+        controlled=False, source="", version="",
     )
-    assert projection["applyTo"] == "**"
-    assert projection["legacyMarkers"] == []
+    result = projections.Result(operation="test")
+    specs, unknown = projections._load_specs(tmp_path, [source], result)
+    assert not unknown and result.blocking == 0, result.findings
+    assert {spec.source_id for spec in specs} == {
+        "useful-autonomy", "maintenance-standby", "elevation-fallback",
+        "multi-agent-rules-of-engagement", "process-hygiene-fallback",
+        "scratch-space-fallback", "secret-masking-fallback",
+    }
+    for spec in specs:
+        rendered = projections.render_projection(spec)
+        assert rendered.fallback_content is not None
+        assert b"delegating-work" not in rendered.fallback_content
+        assert b"resolve-model-routing" not in rendered.fallback_content
 
 
-def test_template_is_reviewable_static_fallback():
-    content = _TEMPLATE.read_text(encoding="utf-8")
-    assert content.startswith('---\napplyTo: "**"\n---\n')
-    assert "delegating-work" in content
-    assert "agent-conduct-guidance@" in content
-    # No live/session/host state -- checked-in instructions never interpolate.
-    for forbidden in (
-        "COPILOT_AGENT_SESSION_ID",
-        "session-state",
-        "C:\\",
-        "/home/",
-    ):
-        assert forbidden not in content
+def test_assignment_discovery_is_explicit_not_generic_research_or_model_choice():
+    parsed = scan_skills.split_frontmatter(
+        (PLUGIN / "skills/delegating-work/SKILL.md").read_text(encoding="utf-8"),
+    )
+    assert parsed is not None
+    frontmatter, body = parsed
+    assert scan_skills.extract_triggers(frontmatter) == [
+        "prepare a delegate assignment", "write a bounded sub-agent prompt",
+    ]
+    description = scan_skills.get_field_block(frontmatter, "description")
+    assert "Ordinary requests to delegate or execute tasks do not select this skill." in description
+    assert "Ordinary requests to delegate or execute tasks do not\nselect it." in body
+    assert "do not\ncreate child agents unless" in body
+    assert "Never delegate back to the same agent type" in body
+    assert "own managed worktree" in body
+    assert "worker-evidence-and-readiness.md" in body

@@ -1,0 +1,29 @@
+{
+  "comment": "Remove ambient delegation mandates and obsolete alias; retain scoped assignments and optional model APIs, with non-blocking monthly budget economy information",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
