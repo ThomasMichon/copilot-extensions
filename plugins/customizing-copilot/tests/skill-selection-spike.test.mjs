@@ -1,7 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { freezeCatalog, collectHistory, bytes, spikeInputs, summarizeRequest, SENTINELS,
-    modelSummary, observeOwnTask, deadline, syntheticHandler } from "../scripts/skill-selection-spike.mjs";
+    modelSummary, modelCatalogSummary, runtimeEnvironment, observeOwnTask, deadline,
+    syntheticHandler } from "../scripts/skill-selection-spike.mjs";
 
 const event = (id, type, content, extra = {}) => ({ id, type, data: { content }, ...extra });
 test("runtime selection is explicit, absolute and never a silent bundled fallback", () => {
@@ -90,6 +97,27 @@ test("JsonValue model metadata cannot manufacture supported limits or efforts", 
     assert.equal(modelSummary({ supportedReasoningEfforts: [2] }).efforts, null);
     assert.equal(modelSummary({ billing: { tokenPrices: { longContext: {} } } }).contextTiers, null);
 });
+test("model preflight preserves non-Luna capability metadata", () => {
+    const result = modelCatalogSummary([{ id: "synthetic-other", capabilities: {
+        limits: { max_prompt_tokens: 400 }, supports: { reasoningEffort: true } },
+    supportedReasoningEfforts: ["medium"] }]);
+    assert.equal(result.models[0].id, "synthetic-other");
+    assert.equal(result.models[0].promptLimit, 400);
+    assert.deepEqual(result.models[0].efforts, ["medium"]);
+});
+test("runtime environment refuses GitHub credential aliases case-insensitively", () => {
+    const aliases = ["GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN",
+        "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "github_api_token", "COPILOT_GITHUB_TOKEN"];
+    const environment = Object.fromEntries(aliases.map(name => [name, "synthetic-value"]));
+    assert.deepEqual(runtimeEnvironment({ ...environment, PATH: "synthetic-bin", absent: undefined }),
+        { PATH: "synthetic-bin" });
+});
+test("Responses top-level instructions participate in ordered sentinel evidence", () => {
+    const summary = summarizeRequest({ instructions: SENTINELS.old, input: [
+        { role: "user", content: [{ type: "input_text", text: SENTINELS.recent }] }] });
+    assert(summary.sentinels.old && summary.oldBeforeRecent);
+    assert.equal(summary.instructionBytes, bytes(SENTINELS.old));
+});
 test("subscribe before dispatch; ACK/foreign/late output cannot substitute own settlement", async () => {
     let listener, unsubscribed = false;
     const observation = observeOwnTask({ on: callback => { listener = callback; return () => { unsubscribed = true; }; } });
@@ -115,6 +143,15 @@ test("timeout is not operation abort or settlement", async () => {
     assert(!completed);
     await operation;
     assert(completed);
+});
+test("first-dispatched model cannot stand in for the completion model", async () => {
+    let listener;
+    const observation = observeOwnTask({ on: callback => { listener = callback; return () => {}; } });
+    listener({ type: "subagent.completed", agentId: "own", data: { firstDispatchedModel: "first" } });
+    const result = await observation.settled("own");
+    assert.equal(result.actualModel, null);
+    assert.equal(result.firstDispatchedModel, "first");
+    observation.unsubscribe();
 });
 class NeverForward {
     sendRequest() { throw new Error("unexpected forwarding"); }
@@ -164,6 +201,21 @@ test("unowned/unsupported/budget-exhausted requests cannot forward or capture", 
     await assert.rejects(handler.sendRequest(request("own"), { sessionId: "own" }), /allowance/);
     assert.equal(captures.length, 16);
 });
+test("capture allowance reserves concurrent body reads and releases failed parsing", async () => {
+    const captures = Array.from({ length: 15 }, () => ({}));
+    const handler = syntheticHandler(NeverForward, new Set(["own"]), captures);
+    const context = { sessionId: "own", signal: new AbortController().signal };
+    let resolveBody;
+    const pending = handler.sendRequest({ json: () => new Promise(resolve => { resolveBody = resolve; }) }, context);
+    await assert.rejects(handler.sendRequest(request("over-limit"), context), /allowance/);
+    resolveBody({ model: "synthetic", messages: [{ role: "user", content: "owned" }] });
+    await pending;
+    assert.equal(captures.length, 16);
+    captures.pop();
+    await assert.rejects(handler.sendRequest({ json: async () => { throw new Error("synthetic parse failure"); } }, context), /parse failure/);
+    await handler.sendRequest(request("last-owned"), context);
+    assert.equal(captures.length, 16);
+});
 test("held synthetic request observes abort separately from dispatch acknowledgement", async () => {
     const abort = new AbortController();
     let held;
@@ -177,4 +229,67 @@ test("held synthetic request observes abort separately from dispatch acknowledge
     abort.abort();
     assert.equal((await response).status, 200);
     assert(completed);
+});
+
+test("startup failures stay structured and late owned startup is awaited before cleanup", async t => {
+    const root = await mkdtemp(join(tmpdir(), "skill-spike-controls-"));
+    t.after(() => rm(root, { recursive: true }));
+    const runner = fileURLToPath(new URL("../scripts/run-skill-selection-spike.mjs", import.meta.url));
+    const run = async (sdk, fixture, modelsOnly = true) => {
+        const { stdout } = await promisify(execFile)(process.execPath,
+            [runner, sdk, join(root, fixture), ...(modelsOnly ? ["--list-models"] : [])],
+            { windowsHide: true, timeout: 3000 });
+        return JSON.parse(stdout);
+    };
+    const missing = await run(join(root, "missing-sdk"), "missing-fixture");
+    assert.equal(missing.native.startup.status, "unavailable");
+    assert.equal(missing.cleanup.clientCreated, false);
+    assert.equal(missing.cleanup.runtimeStopped, null);
+    assert(!JSON.stringify(missing).includes(root));
+    const sdk = join(root, "fake-sdk");
+    await mkdir(sdk);
+    await writeFile(join(sdk, "package.json"), '{"type":"module"}');
+    await writeFile(join(sdk, "index.js"), `
+        export const RuntimeConnection = { forStdio: () => ({}) };
+        export class CopilotClient { constructor() { throw new Error("synthetic constructor failure"); } }
+    `);
+    const construction = await run(sdk, "constructor-fixture");
+    assert.equal(construction.native.startup.status, "unavailable");
+    assert.equal(construction.error, "synthetic constructor failure");
+    assert.equal(construction.cleanup.clientCreated, false);
+    await writeFile(join(sdk, "index.js"), `
+        const timer = globalThis.setTimeout;
+        globalThis.setTimeout = (callback, delay, ...args) => timer(callback, delay >= 15000 ? 5 : delay, ...args);
+        export const RuntimeConnection = { forStdio: () => ({}) };
+        export class CopilotClient {
+            started = false;
+            async start() { await new Promise(resolve => timer(resolve, 25)); this.started = true; }
+            async listModels() { if (!this.started) throw new Error("startup not settled"); return []; }
+            async stop() { return this.started ? [] : [new Error("cleanup preceded late startup")]; }
+        }
+    `);
+    const late = await run(sdk, "late-fixture");
+    assert.equal(late.status, "preflight-only");
+    assert.equal(late.cleanup.runtimeStopped, true);
+    assert.deepEqual(late.cleanup.runtimeStopErrors, []);
+    await writeFile(join(sdk, "index.js"), `
+        export const RuntimeConnection = { forStdio: () => ({}) };
+        export class CopilotRequestHandler {}
+        export class CopilotClient {
+            async start() {}
+            async createSession() {
+                return { sessionId: "owned", capabilities: {},
+                    rpc: { skills: { list: async () => ({ skills: [
+                        { name: "synthetic-review", description: "review", enabled: true, source: "provider" },
+                        { name: "synthetic-disabled", description: "disabled", enabled: false, source: "provider" },
+                        { name: "synthetic-long", description: "long", enabled: true, source: "provider" }
+                    ] }) }, agent: { list: async () => ({ agents: [] }) },
+                    model: { list: async () => ({ list: [] }), getCurrent: async () => ({}) } },
+                    async sendAndWait() { throw new Error("synthetic seeding stop"); }, async abort() {} };
+            }
+            async stop() { return []; }
+        }
+    `);
+    const missingPermission = await run(sdk, "permission-fixture", false);
+    assert.equal(missingPermission.native.catalog.nonUserInvocableEnabled, false);
 });

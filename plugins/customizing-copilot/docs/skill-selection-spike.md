@@ -33,6 +33,12 @@ model enumeration may use the vendor's existing login; the script neither
 exports nor prints credentials. Enumeration errors are unavailable, not zero
 capacity, and there is no live inference fallback.
 
+The child environment strips the SDK's GitHub token aliases, including
+enterprise aliases, case-insensitively; authentication stays in the vendor
+store. Model preflight retains capability summaries for every returned model,
+not a selected family only. Missing SDK exports and constructor failures produce
+sanitized startup reports; no client means cleanup is not applicable.
+
 For a **separate read-only model preflight**, append `--list-models`. This mode
 starts an owned client, calls the public `client.listModels()` retrieval API,
 then stops it without creating sessions or sending prompts. Model enumeration
@@ -66,6 +72,13 @@ Native task events are subscribed before dispatch, scoped to owned IDs;
 cancellation acknowledgement is not settlement. No session-wide drain is used.
 All sessions are aborted and the owned client is stopped through public SDK
 lifecycle methods, including after errors. Cleanup errors remain visible.
+Ownership-acquiring calls (startup, create, fork, resume and dispatch) are
+awaited to completion rather than raced against an application deadline.
+Run this probe under the caller's finite supervisor: a hung acquisition cannot
+advance to another arm or claim cleanup while a late resource is untracked.
+Read-only operations still have local deadlines. Capture slots are reserved
+before asynchronous body reads; instructions and input both participate in
+Responses sentinel scans. First dispatch and completion models are separate.
 
 Limitations: forks require the owned server client and do not establish access
 from an ordinary joined extension. Native task input has no isolation promise.

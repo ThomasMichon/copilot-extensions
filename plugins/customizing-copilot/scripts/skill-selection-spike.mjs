@@ -11,6 +11,12 @@ export const SENTINELS = Object.freeze({
 export const bytes = value => Buffer.byteLength(typeof value === "string" ? value : JSON.stringify(value));
 const textTypes = ["user.message", "assistant.message"];
 
+export function runtimeEnvironment(environment) {
+    const excluded = /^(COPILOT_|AGENT_|OTEL_|OPENAI_|ANTHROPIC_|CLAUDE_|GH_TOKEN$|GH_ENTERPRISE_TOKEN$|GITHUB_TOKEN$|GITHUB_API_TOKEN$|GITHUB_ENTERPRISE_TOKEN$)/i;
+    return Object.fromEntries(Object.entries(environment).filter(([key, value]) =>
+        value !== undefined && !excluded.test(key)));
+}
+
 export function spikeInputs(args) {
     const firstOption = args.findIndex(value => typeof value === "string" && value.startsWith("--"));
     const paths = firstOption < 0 ? args : args.slice(0, firstOption);
@@ -95,10 +101,12 @@ export function summarizeRequest(body, context = {}) {
     if (!messages) {
         throw new Error(`unsupported model request shape (messagesArray=${Array.isArray(body?.messages)}, inputArray=${Array.isArray(body?.input)}, inputString=${typeof body?.input === "string"})`);
     }
-    const text = JSON.stringify(messages);
+    const instructions = typeof body.instructions === "string" ? body.instructions : "";
+    const text = instructions + JSON.stringify(messages);
     const positions = Object.fromEntries(Object.entries(SENTINELS).map(([key, marker]) => [key, text.indexOf(marker)]));
     return {
         requestFormat: Array.isArray(body.messages) ? "chat-completions" : "responses",
+        instructionBytes: bytes(instructions),
         assembledBytes: bytes(body), messageBytes: bytes(messages),
         messageCount: messages.length, toolBytes: bytes(body.tools ?? []),
         tools: (body.tools ?? []).map(tool => tool.function?.name ?? tool.name ?? "unknown"),
@@ -129,6 +137,11 @@ export function modelSummary(model) {
     };
 }
 
+export function modelCatalogSummary(models) {
+    if (!Array.isArray(models)) throw new Error("invalid native model catalog");
+    return { count: models.length, models: models.map(modelSummary) };
+}
+
 /** Observe only this dispatch's own events, including events arriving before startAgent resolves. */
 export function observeOwnTask(session) {
     const events = [];
@@ -148,7 +161,8 @@ export function observeOwnTask(session) {
                     settled: true, terminal: terminal.type,
                     cancelled: terminal.data.cancelled ?? false,
                     configured: throughTerminal.find(event => event.type === "subagent.configured")?.data ?? null,
-                    actualModel: terminal.data.model ?? terminal.data.firstDispatchedModel ?? null,
+                    actualModel: terminal.data.model ?? null,
+                    firstDispatchedModel: terminal.data.firstDispatchedModel ?? null,
                     resultObserved: terminal.type === "subagent.completed" && !terminal.data.cancelled
                         && throughTerminal.some(event => event.type === "assistant.message"),
                     lateOutputIgnored: own.slice(throughTerminal.length).some(event => event.type === "assistant.message"),
@@ -179,13 +193,18 @@ export async function deadline(promise, ms = 15000) {
 
 /** Build a synthetic-only public request interceptor; no inherited forwarding path is called. */
 export function syntheticHandler(Base, owned, requests, onHeld = () => {}) {
+    let pendingBodies = 0;
     return new class extends Base {
         async sendRequest(request, context) {
             if (!owned.has(context.sessionId)) throw new Error("unowned model request refused");
-            if (requests.length >= 16) throw new Error("synthetic request allowance exhausted");
-            const body = await request.json();
-            const summary = summarizeRequest(body, context);
-            requests.push({ sessionId: context.sessionId, agentId: context.agentId, summary });
+            if (requests.length + pendingBodies >= 16) throw new Error("synthetic request allowance exhausted");
+            pendingBodies++;
+            let body, summary;
+            try {
+                body = await request.json();
+                summary = summarizeRequest(body, context);
+                requests.push({ sessionId: context.sessionId, agentId: context.agentId, summary });
+            } finally { pendingBodies--; }
             if (summary.sentinels.cancel) {
                 onHeld();
                 await new Promise(resolve => {

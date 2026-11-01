@@ -3,14 +3,11 @@ import { mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { SENTINELS, bytes, spikeInputs, freezeCatalog, collectHistory, syntheticHandler,
-    modelSummary, observeOwnTask, deadline } from "./skill-selection-spike.mjs";
+    modelCatalogSummary, runtimeEnvironment, observeOwnTask, deadline } from "./skill-selection-spike.mjs";
 
 const { sdkDirectory, root, runtimePath, modelsOnly, profile } = spikeInputs(process.argv.slice(2));
-await mkdir(root); // Refuse reuse of existing session state.
 const home = join(root, "owned-home"), workspace = join(root, "synthetic-workspace");
-await mkdir(home);
-await mkdir(workspace);
-const sdk = await import(pathToFileURL(join(resolve(sdkDirectory), "index.js")).href);
+let sdk, client;
 const requests = [], sessions = [], taskOwners = [], owned = new Set();
 let heldRequestResolve;
 const heldRequest = new Promise(resolve => { heldRequestResolve = resolve; });
@@ -40,20 +37,6 @@ const safeError = error => String(error?.message ?? error)
     .replace(/\/(?:home|Users|tmp|var)\/[^\s"']+/g, "<local-path>")
     .replace(/\b[\w.+-]+@[\w.-]+\.\w+\b/g, "<account>").slice(0, 500);
 
-// Keep authentication in the vendor store. Never export credential values or copy parent configuration.
-const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => value !== undefined
-    && !/^(COPILOT_|AGENT_|OTEL_|GH_TOKEN$|GITHUB_TOKEN$|OPENAI_|ANTHROPIC_|CLAUDE_)/.test(key)));
-const client = new sdk.CopilotClient({
-    mode: "empty", baseDirectory: home, workingDirectory: workspace, env,
-    connection: sdk.RuntimeConnection.forStdio({
-        ...(runtimePath ? { path: runtimePath } : {}),
-        args: ["--no-auto-update", "--no-remote"],
-    }),
-    ...(!modelsOnly ? {
-        requestHandler: syntheticHandler(sdk.CopilotRequestHandler, owned, requests, heldRequestResolve),
-    } : {}),
-    useLoggedInUser: true, logLevel: "none",
-});
 const fixtureSkills = [
     { name: "synthetic-review", description: "Review the synthetic fixture without changing it.", userInvocable: false },
     { name: "synthetic-disabled", description: "A disabled negative-control descriptor." },
@@ -84,7 +67,7 @@ const config = {
     }],
 };
 async function create() {
-    const session = await deadline(client.createSession(config));
+    const session = await client.createSession(config);
     sessions.push(session); owned.add(session.sessionId);
     return session;
 }
@@ -101,16 +84,30 @@ async function attempt(name, action) {
     catch (error) { report.arms[name] = { status: "unavailable", error: safeError(error) }; }
 }
 try {
+    await mkdir(root); // Refuse reuse of existing session state.
+    await mkdir(home);
+    await mkdir(workspace);
+    sdk = await import(pathToFileURL(join(resolve(sdkDirectory), "index.js")).href);
+    client = new sdk.CopilotClient({
+        mode: "empty", baseDirectory: home, workingDirectory: workspace,
+        env: runtimeEnvironment(process.env),
+        connection: sdk.RuntimeConnection.forStdio({
+            ...(runtimePath ? { path: runtimePath } : {}),
+            args: ["--no-auto-update", "--no-remote"],
+        }),
+        ...(!modelsOnly ? {
+            requestHandler: syntheticHandler(sdk.CopilotRequestHandler, owned, requests, heldRequestResolve),
+        } : {}),
+        useLoggedInUser: true, logLevel: "none",
+    });
     const startup = performance.now();
-    await deadline(client.start());
+    await client.start();
     report.native.startup = { status: "started" };
     report.native.startupMs = Math.round(performance.now() - startup);
     if (modelsOnly) {
         const models = await deadline(client.listModels());
         report.native.models = {
-            status: "available", count: models.length,
-            candidates: models.filter(model => typeof model?.id === "string" && /luna/i.test(model.id)).map(modelSummary),
-            otherIds: models.filter(model => typeof model?.id === "string" && !/luna/i.test(model.id)).map(model => model.id),
+            status: "available", ...modelCatalogSummary(models),
         };
         report.status = "preflight-only";
     } else {
@@ -126,17 +123,14 @@ try {
             fixtureIds: catalog.filter(skill => skill.name.startsWith("synthetic-")).map(skill => skill.name),
             longDescriptorComplete: catalog.some(skill => skill.name === "synthetic-long"
                 && skill.description === fixtureSkills[2].description),
-            nonUserInvocableEnabled: catalog.some(skill => skill.name === "synthetic-review" && skill.enabled && !skill.userInvocable),
+            nonUserInvocableEnabled: catalog.some(skill => skill.name === "synthetic-review"
+                && skill.enabled && skill.userInvocable === false),
             providerCalls: { ...providerCalls },
         };
         report.native.agentIds = (await deadline(parent.rpc.agent.list())).agents.map(agent => agent.id);
         try {
             const models = await deadline(parent.rpc.model.list());
-            report.native.models = {
-                count: models.list.length,
-                candidates: models.list.filter(model => typeof model?.id === "string" && /luna/i.test(model.id)).map(modelSummary),
-                otherIds: models.list.filter(model => typeof model?.id === "string" && !/luna/i.test(model.id)).map(model => model.id),
-            };
+            report.native.models = modelCatalogSummary(models.list);
         } catch (error) { report.native.models = { status: "unavailable", error: safeError(error) }; }
         const before = await deadline(parent.rpc.model.getCurrent());
         report.native.sourceModel = before;
@@ -160,11 +154,11 @@ try {
         report.native.frozenTextEvents = prefixIds.length;
         const prompt = SENTINELS.brief + "\nReturn synthetic guidance only.\nFrozen native catalog:\n" + JSON.stringify(catalog);
         for (const full of [true, false]) await attempt(full ? "fullFork" : "boundaryFork", async () => {
-            const fork = await deadline(client.rpc.sessions.fork({
+            const fork = await client.rpc.sessions.fork({
                 sessionId: parent.sessionId, ...(full ? {} : { toEventId: boundary }), name: "synthetic-context-fork",
-            }));
+            });
             owned.add(fork.sessionId);
-            const child = await deadline(client.resumeSession(fork.sessionId, config));
+            const child = await client.resumeSession(fork.sessionId, config);
             sessions.push(child);
             const inherited = await deadline(child.rpc.eventLog.read({
                 direction: "backward", max: 32, types: ["user.message", "assistant.message"],
@@ -185,10 +179,10 @@ try {
             let id;
             try {
                 const start = requests.length;
-                ({ agentId: id } = await deadline(parent.rpc.tasks.startAgent({
+                ({ agentId: id } = await parent.rpc.tasks.startAgent({
                     agentType: "synthetic-selector", prompt, name: "synthetic-context-task",
                     ...(profile.model ? { model: profile.model } : {}),
-                })));
+                }));
                 taskOwners.push({ parent, id });
                 return { suppliedBytes: bytes(prompt), ...await observation.settled(id),
                     requests: requests.slice(start).filter(item => item.agentId === id).map(item => item.summary),
@@ -198,13 +192,13 @@ try {
         await attempt("cancellation", async () => {
             const observation = observeOwnTask(parent);
             try {
-                const { agentId: id } = await deadline(parent.rpc.tasks.startAgent({
+                const { agentId: id } = await parent.rpc.tasks.startAgent({
                     agentType: "synthetic-selector", prompt: SENTINELS.cancel, name: "synthetic-cancel-task",
                     ...(profile.model ? { model: profile.model } : {}),
-                }));
+                });
                 taskOwners.push({ parent, id });
                 await deadline(heldRequest, 8000);
-                const ack = await deadline(parent.rpc.tasks.cancel({ id }));
+                const ack = await parent.rpc.tasks.cancel({ id });
                 const settlement = await observation.settled(id);
                 return { acknowledgement: ack, ...settlement };
             } finally { observation.unsubscribe(); }
@@ -230,16 +224,17 @@ try {
 }
 finally {
     // Only fixture-owned IDs/sessions. No global task drain or shared-process termination.
-    report.cleanup = { taskCancellationErrors: [], abortErrors: [], runtimeStopErrors: [], runtimeStopped: false };
+    report.cleanup = { taskCancellationErrors: [], abortErrors: [], runtimeStopErrors: [],
+        clientCreated: !!client, runtimeStopped: client ? false : null };
     for (const { parent, id } of taskOwners) {
-        try { await deadline(parent.rpc.tasks.cancel({ id }), 5000); }
+        try { await parent.rpc.tasks.cancel({ id }); }
         catch (error) { report.cleanup.taskCancellationErrors.push(safeError(error)); }
     }
     for (const session of sessions) {
-        try { await deadline(session.abort(), 5000); }
+        try { await session.abort(); }
         catch (error) { report.cleanup.abortErrors.push(safeError(error)); }
     }
-    try {
+    if (client) try {
         report.cleanup.runtimeStopErrors = (await client.stop()).map(safeError);
         report.cleanup.runtimeStopped = report.cleanup.runtimeStopErrors.length === 0;
     }
