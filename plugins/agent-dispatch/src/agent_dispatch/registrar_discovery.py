@@ -27,7 +27,6 @@ from contextlib import contextmanager
 import logging
 import os
 import stat
-import tempfile
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
@@ -40,6 +39,13 @@ from plugin_activation import ActivationReport
 from . import repo_config
 from .install_paths import install_dir as dispatch_install_dir
 from .registrar import ProfileDeclaration, RegistrarError
+from .registrar_configuration import (
+    ConfiguredSupervisorCohort,
+    RegistrarIndeterminateError,
+    observe_configured_supervisors,
+    read_pointer_registry,
+    write_pointer_registry,
+)
 from .registrar_document import expand_declaration_document  # noqa: F401 -- public validation seam
 from .registrar_document import qualify_supplier_context
 from .repository_resources import (
@@ -71,10 +77,6 @@ _DECL_SUFFIXES = (".yaml", ".yml", ".json")
 REGISTRAR_DIR_ENV = "AGENT_DISPATCH_REGISTRAR_DIR"
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 log = logging.getLogger(__name__)
-
-
-class RegistrarIndeterminateError(RegistrarError):
-    """Trusted registrar state could not be read authoritatively."""
 
 
 def _is_reparse(info: os.stat_result) -> bool:
@@ -125,34 +127,8 @@ def _load_pointers_with_authority(
     base: Path | None = None,
 ) -> tuple[ScanAuthority, list[Pointer]]:
     """Read pointers and report absence from the same filesystem operation."""
-    path = pointers_file(base)
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return ScanAuthority.ABSENT, []
-    except UnicodeError as exc:
-        raise RegistrarError(
-            f"{path}: invalid pointer registry encoding: {exc}"
-        ) from exc
-    except OSError as exc:
-        raise RegistrarIndeterminateError(
-            f"{path}: pointer registry could not be read: {exc}"
-        ) from exc
-    try:
-        raw = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise RegistrarError(f"{path}: invalid pointer registry JSON: {exc}") from exc
-    if not isinstance(raw, list):
-        raise RegistrarError(
-            f"{path}: pointer registry must be a JSON list, got {type(raw).__name__}"
-        )
-    out: list[Pointer] = []
-    for i, item in enumerate(raw):
-        try:
-            out.append(Pointer.from_dict(item))
-        except RegistrarError as exc:
-            raise RegistrarError(f"{path}[{i}]: {exc}") from exc
-    return ScanAuthority.COMPLETE, out
+    observed = read_pointer_registry(pointers_file(base))
+    return observed.authority, list(observed.pointers)
 
 
 def load_pointers(base: Path | None = None) -> list[Pointer]:
@@ -161,19 +137,9 @@ def load_pointers(base: Path | None = None) -> list[Pointer]:
 
 
 def save_pointers(pointers: Iterable[Pointer], base: Path | None = None) -> Path:
-    """Atomically write the pointer registry, returning its path."""
-    path = pointers_file(base)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps([p.to_dict() for p in pointers], indent=2) + "\n"
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".pointers-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(payload)
-        os.replace(tmp, path)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-    return path
+    """Serialize pointer writes without replacing configured supervisor intent."""
+    with _pointer_transaction(base):
+        return write_pointer_registry(pointers, pointers_file(base))
 
 
 _UNSET: Any = object()
@@ -205,7 +171,7 @@ def ensure_pointer(pointer: Pointer, base: Path | None = None) -> Pointer:
             if existing != [pointer]:
                 raise RegistrarError(f"pointer {pointer.name!r} collides with another source")
         else:
-            save_pointers([*pointers, pointer], base)
+            write_pointer_registry([*pointers, pointer], pointers_file(base))
         return pointer
 
 
@@ -342,7 +308,7 @@ def _add_pointer(
     if current == pointer:
         return pointer  # truly idempotent: identical entry, don't rewrite the file
     others = [p for p in existing if p.name != name]
-    save_pointers([*others, pointer], base)
+    write_pointer_registry([*others, pointer], pointers_file(base))
     return pointer
 
 
@@ -353,7 +319,7 @@ def remove_pointer(name: str, base: Path | None = None) -> bool:
         kept = [p for p in pointers if p.name != name]
         if len(kept) == len(pointers):
             return False
-        save_pointers(kept, base)
+        write_pointer_registry(kept, pointers_file(base))
         return True
 
 
@@ -869,6 +835,10 @@ class RegistrarSources:
         self._trusted: list[ProfileDeclaration] = []
         self._plugin_entries: dict[str, RegistrarCandidate] = {}
         self.last_report: RegistrarDiscoveryReport | None = None
+
+    def configured_supervisor_cohort(self) -> ConfiguredSupervisorCohort:
+        """Read configured membership, never infer it from discovered/enrolled pools."""
+        return observe_configured_supervisors(pointers_file(self.base))
 
     def _trusted_error_finding(
         self,

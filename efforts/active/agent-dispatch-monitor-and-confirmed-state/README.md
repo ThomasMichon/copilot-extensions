@@ -1447,3 +1447,26 @@ is an explicitly invoked sender and original-request unknown-outcome recovery
 under the same singleton and bounded-future owner. No live enrollment, ordinary
 caller migration, activation, installed qualification or placement trial is
 authorized or claimed by this source merge; the parent remains Active.
+
+The explicit sender prerequisite actually merged in
+[#9817](https://github.com/ThomasMichon/copilot-extensions/pull/9817) as
+`331f251a53e60b2f5d2d79dbc9481d37839e9aac`, after current-head independent
+Copilot approval and successful required checks. The final contained 299-case
+packet covers original request recovery, complete enrollment baselines,
+unavailable/final-read revision comparison, concurrent waiters, admission versus
+shutdown and actual bounded singleton release/self-update with pending I/O.
+Seven review rounds resolved the coupled custody and deadline classes, including
+body-only findings; the five addressed inline threads retain their history.
+Managed post-merge reconciliation preserved its backup and reached the exact
+squash merge with the qualified source/test/doc bytes unchanged.
+
+This closes explicit source-only sending/recovery, not publisher activation.
+Native/source guards own the final admission decision; blocking I/O stays in
+the original tracked future, not the singleton release mutex. Late results can
+settle original custody without restoring admission or renewing freshness.
+The [publication reference](../../../plugins/agent-dispatch/docs/pool-publication.md)
+records these implemented boundaries. The next source stretch derives complete
+configured-cohort membership through its existing owner and qualifies mixed
+cohorts before ordinary caller migration. External source atomicity, installed
+publisher qualification, atomic placement and the original Plan/Validation
+matrix remain open. No pool was activated and this parent remains **Active**.
