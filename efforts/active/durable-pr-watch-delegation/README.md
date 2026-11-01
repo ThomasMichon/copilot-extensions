@@ -440,8 +440,8 @@ existing serving/consumer contract, not a second watcher or evaluator._
 
 _Operator-required usage; agent-recommended design, sequencing and validation._
 
-- [ ] Review the [caller-driven subscription amendment](caller-driven-subscriptions.md)
-  and corresponding PR/reviewer vision changes before implementation.
+- [x] Review the [caller-driven subscription amendment](caller-driven-subscriptions.md)
+  and corresponding PR/reviewer vision changes before implementation (#9033).
 - [ ] Add caller-driven connections to admitted forge backends and durable
   exact-PR-set registrations through the existing central service owners;
   preserve current credentials, identities and legacy watch contracts.
@@ -826,6 +826,23 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-31 - Accept the caller-driven registration proposal
+
+- #9033 merged as `9a6adc0dc3ad6704830729ecdec246feb507ea47` from
+  head `0ac5d27621695193b2d402947319559c55517593`. Current-head Copilot
+  review `5725904092` approved without open findings, required CI
+  `41261657361` passed, and the documentation-impact thread was resolved.
+- The rebase retained the newer per-origin keeper and incremental review
+  contracts alongside the caller-driven intake proposal. The original
+  source replay preserved its author and message; a separate revision-date
+  commit records the integrated intent without changing that provenance.
+- Re-read the current Plan and Validation boundary after the verified merge
+  and pull-forward. Close only proposal review. Backend connections and
+  exact-set intake are the next implementation slice under #7188; selections,
+  author/reviewer integration, live provider, image, installed/fleet and
+  independent-evaluator acceptance remain open. No runtime, credential,
+  service or deployment was activated, and #6007 remains Active.
 
 ### 2026-10-28 - Direct retained keeper, adoption and fleet outcomes
 
