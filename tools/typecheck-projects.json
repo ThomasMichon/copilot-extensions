@@ -66,6 +66,14 @@
       "level": "pending"
     },
     {
+      "name": "lib-configuration-layers",
+      "include": [
+        "libs/configuration-layers"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
       "name": "lib-core-delegation",
       "include": [
         "libs/core-delegation"
