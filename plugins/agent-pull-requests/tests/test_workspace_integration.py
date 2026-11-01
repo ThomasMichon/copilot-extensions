@@ -73,9 +73,12 @@ def integration(environment):
         corrupt = None
         after_chunk = None
         before_request = None
+        transport_error = None
         calls = []
 
         async def request(self, method, target, *, request_headers, body, response_limit):
+            if self.transport_error is not None:
+                raise self.transport_error
             if self.before_request is not None:
                 self.before_request()
             self.calls.append(target)
@@ -165,6 +168,30 @@ def test_large_materialization_respects_actual_gateway_challenge_budget(environm
             with pytest.raises(WorkspaceClientError) as error:
                 await client.materialize(42, descriptor["id"])
             assert error.value.http_status == 429 and not error.value.outcome_unknown
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("code,unknown", [
+    ("caller-credentials-unavailable", False),
+    ("gateway-challenge-refused", False),
+    ("outcome-unknown", True),
+])
+def test_submit_preserves_actual_sdk_dispatch_stage_in_error_outcomes(environment, integration, code, unknown):
+    from fleet_manager.gateway_service_channel import TransportError
+    _, selected, _, attachment, backend, _ = environment
+    gateway, client, _, _, caller, _ = integration
+
+    async def scenario():
+        await client.capabilities()
+        caller.transport_error = TransportError(code, 502 if unknown else 401)
+        with pytest.raises(WorkspaceClientError) as error:
+            await client.exchange("submit", {
+                "number": 42, "intent": selected, "source_attachment": attachment, "budget_seconds": 120,
+            })
+        assert error.value.code == code and error.value.outcome_unknown is unknown
+        assert backend.threads == []
         await gateway.drain(timeout=2)
 
     asyncio.run(scenario())

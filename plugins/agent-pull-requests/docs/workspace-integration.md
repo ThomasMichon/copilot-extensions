@@ -84,6 +84,11 @@ intent/in-flight/partial receipts use the same ReplayStore; there is no upload
 staging store or second operation ledger. A lost transport result is unknown,
 not a failed effect. Retain the original operation ID, inspect/reconcile through
 the same owner, and never invent a new identity or infer success from equal values.
+The existing SDK's explicit pre-dispatch credential/challenge failures retain
+their known-no-send classification. Only its `outcome-unknown` transport error
+marks a possibly dispatched submit; ordinary post-dispatch HTTP/response failures
+remain conservative. No new stage, credential issuer or speculative reconciliation
+is invented for an SDK-confirmed unattempted request.
 
 Oversized submit envelopes refuse locally before dispatch. Large immutable read
 generations are framed, but this first wire does **not** upload arbitrarily large

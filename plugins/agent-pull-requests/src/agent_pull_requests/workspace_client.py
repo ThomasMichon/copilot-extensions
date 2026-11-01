@@ -51,7 +51,7 @@ class WorkspaceClient:
             )
         except TransportError as error:
             raise WorkspaceClientError(error.code, http_status=error.status,
-                                       outcome_unknown=operation == "submit") from None
+                                       outcome_unknown=operation == "submit" and error.code == "outcome-unknown") from None
         if response.status != 200:
             raise WorkspaceClientError(
                 "workspace_unsupported" if response.status == 404 else "workspace_unavailable",
