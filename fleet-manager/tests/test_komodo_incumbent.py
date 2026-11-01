@@ -23,7 +23,7 @@ from fleet_manager.komodo_health import identity_digest
 from fleet_manager.komodo_identity import effective_global_key
 from fleet_manager.komodo_network import network_fingerprint
 from fleet_manager.komodo_owner import KomodoOwner
-from fleet_manager.komodo_profile import render_profile
+from fleet_manager.komodo_profile import DATA_NAMES, SECRET_NAMES, KomodoMaterialization, render_profile
 from fleet_manager.komodo_selection import KomodoSelection
 from fleet_manager.komodo_state import KomodoState
 from fleet_manager.node_journal import NodeJournal
@@ -333,6 +333,8 @@ def test_native_apply_refuses_incumbent_even_with_a_fixed_declaration(incumbent)
     "failed-lost-terminal", "failed-pending-terminal", "failed-native-drift",
     "failed-recovered-converge", "failed-recovered-settle",
     "failed-recovered-foreign-request", "failed-recovered-changed-evidence",
+    "failed-unstarted-converge", "failed-unstarted-settle",
+    "failed-unstarted-foreign-network",
 ])
 def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
     incumbent, keys, monkeypatch, scenario,
@@ -427,6 +429,25 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
             desired = declaration()
             desired.update(profile="preserve-incumbent", core_port=server.port)
             desired["images"]["mongo"]["version"] = "7.0.45"
+            unstarted = scenario.startswith("failed-unstarted-")
+            if unstarted:
+                desired.pop("profile")
+                desired["images"]["mongo"]["version"] = "8.0.0"
+                paths = {"keys": material.keys, "admin_username": material.admin_username,
+                         "admin_password": material.admin_password}
+                for name in DATA_NAMES:
+                    if name not in paths:
+                        paths[name] = material.keys.parent / name
+                        private_directory(paths[name])
+                for name in SECRET_NAMES:
+                    if name not in paths:
+                        paths[name] = material.keys.parent / name
+                        descriptor = create_private_file(paths[name])
+                        with os.fdopen(descriptor, "wb") as stream:
+                            stream.write((name + "-fixed-fixture-material").encode())
+                fixed_material = KomodoMaterialization(material.docker_socket, **paths)
+                for name in ("core", "periphery"):
+                    (material.keys / (name + ".pub")).unlink()
             project = desired["project"] + "_default"
             containers = {}
             images = {}
@@ -465,11 +486,17 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
             }
             selection = KomodoSelection(
                 KomodoDeclaration.from_dict(desired), "fleet-a", "install-a", 1, "policy-1",
-                1900001000, "e" * 64, runtime, tooling, material,
-                adoption=tuple((name, native_fingerprint(item)) for name, item in containers.items()),
-                adopted_public_identity=identity_digest(material),
-                adopted_network=network_fingerprint(network),
+                1900001000, "e" * 64, runtime, tooling, fixed_material if unstarted else material,
+                adoption=() if unstarted else tuple(
+                    (name, native_fingerprint(item)) for name, item in containers.items()),
+                adopted_public_identity=None if unstarted else identity_digest(material),
+                adopted_network=None if unstarted else network_fingerprint(network),
             )
+            if unstarted:
+                created_containers = deepcopy(containers)
+                created_network = deepcopy(network)
+                containers.clear()
+                network = None
             if scenario == "missing-adoption":
                 with pytest.raises(PlanError, match="requires exact incumbent"):
                     replace(selection, adoption=(), adopted_public_identity=None)
@@ -479,13 +506,46 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
             current = [selection]
             harness = Harness(keys)
             native_calls = []
+
+            def apply(*arguments, **options):
+                nonlocal network
+                native_calls.append("apply")
+                if not unstarted:
+                    return
+                profile = decode(options["expected"])
+                for name, item in created_containers.items():
+                    service = profile["services"][name]
+                    item["Config"].update(
+                        Labels=service["labels"],
+                        Env=[key + "=" + value for key, value in service["environment"].items()],
+                        Entrypoint=[], Cmd=[value.replace("$$", "$")
+                                            for value in service.get("command", [])],
+                    )
+                    item["Mounts"] = [
+                        {"Type": "bind", "Source": mount["source"], "Destination": mount["target"],
+                         "RW": not mount["read_only"]}
+                        for mount in service["volumes"]
+                    ] + [
+                        {"Type": "bind", "Source": str(getattr(fixed_material, secret)),
+                         "Destination": "/run/secrets/" + secret, "RW": False}
+                        for secret in service.get("secrets", [])
+                    ]
+                    item["State"].update(Status="created", Running=False, Pid=0, StartedAt="")
+                    item["NetworkSettings"]["Networks"][project].update(NetworkID="", EndpointID="")
+                containers.update(created_containers)
+                network = {**created_network, "Containers": {}, "Labels": {
+                    "io.fleet-manager.owner": selection.owner,
+                    "com.docker.compose.project": desired["project"],
+                    "com.docker.compose.network": "default",
+                }}
+
             native = SimpleNamespace(
                 tooling=tooling, native_failure=None,
                 prerequisites=lambda *a, **k: deepcopy(images),
                 verify_host=lambda *a, **k: None,
                 inspect=lambda *a, **k: deepcopy(containers),
                 network=lambda *a, **k: deepcopy(network),
-                _apply=lambda *a, **k: native_calls.append("apply"),
+                _apply=apply,
             )
             owner = KomodoOwner(current=lambda: current[0], admission=harness.owner,
                                 authority="gateway-a", clock=harness.clock)
@@ -504,10 +564,10 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
 
             request = intent(deployment=selection.deployment_digest)
             if scenario.startswith("failed-"):
-                with pytest.raises(PlanError, match="Core version"):
+                with pytest.raises(PlanError, match="network attachment" if unstarted else "Core version"):
                     await invoke(request)
                 assert state_record[0]["attempt"]["native_settled"] is True
-                if scenario != "failed-repeat-running":
+                if scenario != "failed-repeat-running" and not unstarted:
                     containers["core"]["State"].update(Status="exited", Running=False, Pid=0)
                 reconcile = NodeJournal.reconcile
                 settled = []
@@ -515,6 +575,8 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                     "failed-lost-terminal", "failed-pending-terminal",
                     "failed-recovered-converge", "failed-recovered-settle",
                     "failed-recovered-foreign-request", "failed-recovered-changed-evidence",
+                    "failed-unstarted-converge", "failed-unstarted-settle",
+                    "failed-unstarted-foreign-network",
                 ):
                     def lost_failure(journal, original, outcome):
                         if scenario == "failed-lost-terminal":
@@ -526,6 +588,24 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                         await invoke(request, failed=True)
                     assert state_record[0]["failed"] is not None
                     monkeypatch.setattr(NodeJournal, "reconcile", reconcile)
+                if unstarted:
+                    original_failed = deepcopy(state_record[0]["failed"])
+                    if scenario == "failed-unstarted-foreign-network":
+                        containers["core"]["NetworkSettings"]["Networks"][project]["NetworkID"] = "9" * 64
+                        for failed in (False, True):
+                            with pytest.raises(PlanError, match="network attachment"):
+                                await invoke(request, failed=failed)
+                        assert state_record[0]["attempt"] is not None
+                        assert state_record[0]["failed"] == original_failed
+                        assert native_calls == ["apply"] and not requests
+                        return
+                    receipt = await invoke(request, failed=scenario == "failed-unstarted-settle")
+                    assert receipt.to_dict()["status"] == "failed"
+                    assert state_record[0]["attempt"] is None
+                    assert state_record[0]["failed"] == original_failed
+                    assert await invoke(request) == receipt
+                    assert native_calls == ["apply"] and not requests
+                    return
                 if scenario.startswith("failed-recovered-"):
                     from fleet_manager.planning import digest
 

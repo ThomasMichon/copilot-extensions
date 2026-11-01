@@ -453,7 +453,8 @@ class KomodoOwner:
                 network = verify_network(self.native.network(
                     selected.declaration, selected.material, deadline=deadline),
                     selected, containers, attempt["network_before"],
-                    created=attempt["fixed_profile"] and attempt["native_settled"])
+                    created=attempt["fixed_profile"] and attempt["native_settled"],
+                    pending="failure_outcome" in attempt)
                 if "failure_outcome" in attempt:
                     verify_failed_candidate(containers, selected, images, profile, attempt)
                     self._preserved(record, selected, containers)

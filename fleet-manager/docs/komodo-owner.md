@@ -237,6 +237,9 @@ The original attempt retains its exact failure receipt before journal
 publication. Both recovery entry points finish that request-bound decision
 even if health improves; they verify the retained evidence digest and never
 borrow a failed outcome from an earlier operation.
+Recovery of that retained failure permits the original pending attachment
+of a never-started fixed-profile container, but not a foreign NetworkID.
+Success readiness retains its strict running-network requirements.
 
 **Contract support:** this optional profile expands the source SDK's strict
 version-1 declaration reader; older readers reject the unknown `profile`
