@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+import time
 
 _MAX_INPUT = 16 * 1024 * 1024
 _MAX_OUTPUT = 64 * 1024
@@ -24,6 +25,7 @@ def _watch_caller() -> None:
 
 
 def main() -> int:
+    settlement_deadline = time.monotonic() + 23.0
     if sys.argv[1:] not in ([], ["--base64-input"]):
         return 2
     encoded = bool(sys.argv[1:])
@@ -56,6 +58,7 @@ def main() -> int:
         environment = dict(os.environ)
         environment.update(overrides)
         environment.update(PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+        environment["AGENT_WORKTREES_PRE_SETTLEMENT_DEADLINE"] = str(settlement_deadline)
         result = run_caller_owned(
             [
                 python,

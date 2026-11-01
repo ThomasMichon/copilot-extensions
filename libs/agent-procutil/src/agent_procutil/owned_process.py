@@ -14,6 +14,7 @@ import time
 from typing import Callable, Protocol
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+from agent_procutil.owned_budget import OwnedExecutionBudget
 
 
 class UnreapedChild(Protocol):
@@ -253,6 +254,7 @@ def _communicate_windows_bounded(
     process: subprocess.Popen, job, *, input_text: str | None, deadline: float,
     argv: list[str], timeout: float, capture_limits: tuple[int, int],
     binary: bool = False,
+    budget: OwnedExecutionBudget | None = None,
 ) -> tuple[str | None, str | None]:
     if job is None:
         raise RuntimeError("native child Windows Job custody is unavailable")
@@ -269,17 +271,22 @@ def _communicate_windows_bounded(
                 primary.append(error)
 
     def retire() -> None:
-        with retirement:
+        acquired = retirement.acquire(timeout=budget.cleanup_timeout()) if budget else retirement.acquire()
+        if not acquired:
+            raise TimeoutError("owned retirement lock did not settle")
+        try:
             if retiring.is_set():
                 if retirement_error:
                     raise retirement_error[0]
                 return
             retiring.set()
             try:
-                process.retire_job(job, 2.0)
+                process.retire_job(job, budget.cleanup_timeout() if budget else 2.0)
             except BaseException as error:
                 retirement_error.append(error)
                 raise
+        finally:
+            retirement.release()
 
     def fail(error: BaseException) -> None:
         note(error)
@@ -375,16 +382,16 @@ def _communicate_windows_bounded(
             cleanup_error = error
         for worker, completed in attempted:
             try:
-                if not completed.wait(2.0):
+                if not completed.wait(budget.cleanup_timeout() if budget else 2.0):
                     raise RuntimeError("native child pipe worker startup or completion is unconfirmed")
-                worker.join(timeout=2.0)
+                worker.join(timeout=budget.cleanup_timeout() if budget else 2.0)
                 if worker.is_alive():
                     raise RuntimeError("native child pipe worker did not settle")
             except BaseException as error:
                 if cleanup_error is None:
                     cleanup_error = error
         try:
-            process.wait(timeout=2.0)
+            process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
         except BaseException as error:
             if cleanup_error is None:
                 cleanup_error = error
@@ -414,6 +421,7 @@ def _run_owned(
     env: dict[str, str] | None = None,
     allow_daemon_breakaway: bool = False,
     binary: bool = False,
+    budget: OwnedExecutionBudget | None = None,
 ) -> subprocess.CompletedProcess:
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("native child timeout must be finite and positive")
@@ -429,6 +437,11 @@ def _run_owned(
     if not windows:
         _require_posix_execution_support()
     deadline = time.monotonic() + timeout
+    if budget is not None:
+        if not isinstance(budget, OwnedExecutionBudget):
+            raise TypeError("budget must be an OwnedExecutionBudget")
+        deadline = min(deadline, budget.execution_deadline)
+        _remaining(deadline, argv, timeout)
     bounded_windows = windows and capture_limits is not None
     if on_settled is not None and not (bounded_windows or confirm_posix_group):
         raise ValueError("settlement notification requires whole-scope native confirmation")
@@ -457,6 +470,7 @@ def _run_owned(
                 process, job, input_text=input_text, deadline=deadline,
                 argv=argv, timeout=timeout, capture_limits=capture_limits,
                 binary=binary,
+                **({"budget": budget} if budget is not None else {}),
             )
         elif windows:
             stdout, stderr = _communicate_windows(
@@ -475,8 +489,8 @@ def _run_owned(
         try:
             if bounded_windows and not retained and job.handle:
                 try:
-                    process.retire_job(job, 2.0)
-                    process.wait(timeout=2.0)
+                    process.retire_job(job, budget.cleanup_timeout() if budget else 2.0)
+                    process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
                 except BaseException as error:
                     retained = True
                     raise OwnedCleanupError(process, job) from error
@@ -486,14 +500,18 @@ def _run_owned(
 
                     try:
                         _retire_posix_group(process)
-                        _confirm_group(process)
-                        process.wait(timeout=2.0)
+                        _confirm_group(process, **({"budget": budget} if budget else {}))
+                        process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
                     except BaseException as error:
                         retained = True
                         raise OwnedCleanupError(process) from error
                 else:
-                    _retire_posix_group(process, inherit_process_group=inherit_process_group)
-                    process.wait(timeout=2.0)
+                    try:
+                        _retire_posix_group(process, inherit_process_group=inherit_process_group)
+                        process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
+                    except BaseException as error:
+                        retained = True
+                        raise OwnedCleanupError(process) from error
         finally:
             if not retained:
                 for stream in (process.stdin, process.stdout, process.stderr):
@@ -551,6 +569,7 @@ def run_caller_owned(
     cwd: str | os.PathLike | None = None,
     env: dict[str, str] | None = None,
     binary: bool = False,
+    budget: OwnedExecutionBudget | None = None,
 ) -> subprocess.CompletedProcess:
     """Execute with caller lifetime/stream budgets; binary capture preserves exact bytes."""
     from agent_procutil._caller_owned import run
@@ -562,6 +581,7 @@ def run_caller_owned(
         **({"cwd": cwd} if cwd is not None else {}),
         **({"env": env} if env is not None else {}),
         **({"binary": binary} if binary is not False else {}),
+        **({"budget": budget} if budget is not None else {}),
     )
 
 

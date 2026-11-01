@@ -54,7 +54,21 @@ def decide(
             )
         except Exception:
             return unavailable("installation-context validation failed")
-    deadline = time.monotonic() + budget_seconds
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    deadline = time.monotonic() + budget_seconds - 2.0
+    inherited = os.environ.get("AGENT_WORKTREES_PRE_SETTLEMENT_DEADLINE")
+    if inherited:
+        try:
+            import math
+
+            value = float(inherited)
+            if math.isfinite(value):
+                deadline = min(deadline, value)
+        except ValueError:
+            pass
+    budget = OwnedExecutionBudget(deadline, cleanup_reserve=3.0)
     combined: dict = {}
     for name in (
         "statelessness_guard.py", "cross_repo_guard.py",
@@ -65,8 +79,12 @@ def decide(
             combined = merge_decisions(combined, unavailable(f"{name} unavailable"))
             continue
         try:
-            kwargs = {"deadline": deadline - 2.0} if name == "cross_repo_guard.py" else {}
+            kwargs = {"deadline": budget.execution_deadline} if name == "cross_repo_guard.py" else {}
+            if name == "pr_supersede_guard.py":
+                kwargs = {"deadline": budget.execution_deadline, "budget": budget}
             decision = module.decide(payload, home=home, **kwargs)
+        except OwnedCleanupError:
+            raise
         except Exception:
             combined = merge_decisions(combined, unavailable(f"{name} evaluation failed"))
             continue

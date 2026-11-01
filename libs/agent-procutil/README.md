@@ -401,6 +401,40 @@ ordinary Windows workers rather than claiming enforcement or deployed recovery.
 
 ## Bounded owned children
 
+### Aggregate execution and settlement budget
+
+`agent_procutil.owned_budget.OwnedExecutionBudget` is an optional additive
+contract for `owned_process.run_caller_owned(..., budget=budget)`. Construct one
+with `OwnedExecutionBudget.from_timeout(total_seconds, cleanup_reserve=seconds)`
+and reuse it across sequential observations. Its absolute monotonic `deadline`
+includes native cleanup and reader settlement; execution stops at
+`deadline - cleanup_reserve`, also bounded by each call's existing `timeout`.
+Passing an already-expired execution budget refuses before target creation.
+The reserve is never renewed by another call, pipe worker or POSIX guardian.
+Cwd, environment, raw-byte limits, binary capture and caller-death custody are
+unchanged. Omitting `budget` preserves every existing default.
+
+Windows retirement, retirement-lock acquisition, pipe-worker completion/join
+and process-exit waits consume the same remaining deadline. POSIX passes that
+same clock through its finite guardian and retains unreaped group custody
+through native group confirmation and reaping. `OwnedCleanupError` still retains
+the exact process/Job when settlement cannot be confirmed; deadline expiry is
+not successful cleanup. The deadline bounds supervised waits, not arbitrary
+blocking kernel calls or caller-supplied callbacks. Settlement callbacks remain
+synchronous bounded bookkeeping, never permission or execution-success proof.
+Consumers must reserve response/serialization time outside this budget.
+
+Windowless launch guidance lives here rather than in the package initializer:
+`no_window_kwargs` selects captured headless children; `detached_kwargs` and
+`windowless_daemon_kwargs` serve explicitly owned durable lifetimes.
+`windowless_python`/`windowless_python_env` preserve the selected GUI interpreter's
+venv, and `direct_python` avoids a Windows venv redirector while preserving
+console interpreter context. `spawn_daemon` owns durable cwd/log and launch
+identity. Off Windows, captured children inherit the session and detached work
+selects a new one. Synchronous package imports remain asyncio-free.
+Finite containment helpers remain self-contained in `__init__.py` for minimal
+single-file lifecycle consumers; release vendoring remains byte-identical.
+
 `run_caller_owned(..., binary=True)` returns exact captured stdout/stderr bytes,
 including invalid UTF-8, NUL and unchanged CR/LF sequences. Its default remains
 strict UTF-8 text with the existing newline normalization. Both modes retain the

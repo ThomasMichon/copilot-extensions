@@ -1,35 +1,9 @@
-"""Windows-headless / detached process-spawn helpers (shared, vendored per plugin).
+"""Shared headless process creation and caller-owned containment.
 
-Windowless runtimes must not allocate a console when spawning console programs.
-These helpers keep the creation flags consistent across plugins:
-
-* :func:`no_window_kwargs` -- ``CREATE_NO_WINDOW`` for a non-interactive child
-  whose output is still captured over pipes (the common case: git/gh/az checks).
-* :func:`detached_kwargs` -- fully detach a background child so it outlives its
-  parent AND carries no console (so no window); optionally break away from a
-  parent Job object.
-* :func:`windowless_daemon_kwargs` -- keep a Windows daemon in a
-  ``CREATE_NO_WINDOW`` host while optionally breaking away from an inherited
-  Job object; use this when its own children must inherit the windowless host.
-* :func:`windowless_python` -- select the safest available ``pythonw.exe`` for a
-  detached Python daemon on Windows so neither a venv launcher nor its base
-  interpreter can allocate a second console.
-* :func:`windowless_python_env` -- preserve the original venv context when
-  ``windowless_python`` targets a base install's ``pythonw.exe``.
-* :func:`direct_python` -- keep a console daemon's PID on the actual interpreter,
-  not a Windows venv redirector, while retaining its venv context.
-* :func:`spawn_daemon` -- the one launch primitive for a long-lived daemon:
-  windowless, escapes the caller's Job object / session, runs from an
-  explicit durable ``cwd``, and appends its stdout/stderr to a log file.
-
-Off Windows, ``no_window_kwargs`` is empty and ``detached_kwargs`` selects a
-new session; call sites stay platform-agnostic.
-
-Development uses canonical editable references; release materializes consumer
-copies. See ``README.md`` for vendoring and
-``tools/check-vendored-libs-sync.py`` for source consistency.
-
-Synchronous imports stay asyncio-free; accessing the async helper loads it lazily.
+README.md owns the launch-kind, interpreter, vendoring and lifetime contracts.
+Synchronous imports remain asyncio-free; the async spawn helper loads lazily.
+This module retains the self-contained finite containment implementation for
+minimal lifecycle bundles that copy only this file.
 """
 
 from __future__ import annotations

@@ -25,6 +25,7 @@ from agent_procutil.owned_process import (
     require_contained_worker,
 )
 from agent_procutil._linux_pidfd import open_pidfd
+from agent_procutil.owned_budget import OwnedExecutionBudget
 
 _MAX_REQUEST = 16 * 1024 * 1024
 _lifetime_lock = threading.Lock()
@@ -87,13 +88,13 @@ def _pidfd_exited(fd: int) -> bool:
     return any(mask & select.POLLIN for _fd, mask in events)
 
 
-def _confirm_group(process: UnreapedChild) -> None:
+def _confirm_group(process: UnreapedChild, *, budget: OwnedExecutionBudget | None = None) -> None:
     if sys.platform == "darwin":
         from agent_procutil._darwin_caller_owned import GroupCensus
 
         try:
             census = GroupCensus()
-            deadline = time.monotonic() + 2.0
+            deadline = time.monotonic() + (budget.cleanup_timeout() if budget else 2.0)
             empty = 0
             while True:
                 active = _observe_unreaped(process) is None
@@ -107,13 +108,15 @@ def _confirm_group(process: UnreapedChild) -> None:
         except (OSError, RuntimeError, ValueError) as error:
             raise OwnedCleanupError(process) from error
         return
-    deadline = time.monotonic() + 2.0
+    deadline = time.monotonic() + (budget.cleanup_timeout() if budget else 2.0)
     empty = 0
     try:
         while True:
             active = _observe_unreaped(process) is None
             with os.scandir("/proc") as entries:
                 for entry in entries:
+                    if budget:
+                        budget.cleanup_timeout()
                     if not entry.name.isdigit():
                         continue
                     pid = int(entry.name)
@@ -144,7 +147,7 @@ def _confirm_group(process: UnreapedChild) -> None:
 
 
 def _validate(request: object) -> dict:
-    if not isinstance(request, dict) or set(request) - {"binary"} != {
+    if not isinstance(request, dict) or set(request) - {"binary", "budget"} != {
         "argv", "timeout", "input_text", "capture", "limits",
     }:
         raise ValueError("invalid caller-owned request")
@@ -164,6 +167,11 @@ def _validate(request: object) -> dict:
         raise ValueError("native child capture must be a boolean")
     if type(request.get("binary", False)) is not bool:
         raise ValueError("native child binary capture must be a boolean")
+    if "budget" in request:
+        value = request["budget"]
+        if not isinstance(value, dict) or set(value) != {"deadline", "cleanup_reserve"}:
+            raise ValueError("invalid owned aggregate budget")
+        OwnedExecutionBudget(**value)
     limits = request["limits"]
     if not isinstance(limits, list) or len(limits) != 2 or any(
         type(limit) is not int or limit <= 0 for limit in limits
@@ -230,14 +238,21 @@ def run(
     env: dict[str, str] | None = None,
     allow_daemon_breakaway: bool = False,
     binary: bool = False,
+    budget: OwnedExecutionBudget | None = None,
 ) -> subprocess.CompletedProcess:
     if on_settled is not None and not callable(on_settled):
         raise TypeError("settlement notification must be callable")
     try:
+        if budget is not None and not isinstance(budget, OwnedExecutionBudget):
+            raise TypeError("budget must be an OwnedExecutionBudget")
+        if budget is not None and time.monotonic() >= budget.execution_deadline:
+            raise subprocess.TimeoutExpired(argv, timeout)
         request = _validate({
             "argv": argv, "timeout": timeout, "input_text": input_text, "capture": capture,
             "limits": [max_stdout_bytes, max_stderr_bytes],
             **({"binary": binary} if binary is not False else {}),
+            **({"budget": {"deadline": budget.deadline, "cleanup_reserve": budget.cleanup_reserve}}
+               if budget is not None else {}),
         })
         frame = json.dumps(request, ensure_ascii=True, allow_nan=False) + "\n"
         if len(frame) > _MAX_REQUEST:
@@ -256,6 +271,7 @@ def run(
             on_settled=on_settled,
             allow_daemon_breakaway=allow_daemon_breakaway,
             binary=binary,
+            **({"budget": budget} if budget is not None else {}),
             **({"cwd": cwd} if cwd is not None else {}),
             **({"env": env} if env is not None else {}),
         )
@@ -278,6 +294,7 @@ def run(
                 capture_limits=(6 * (max_stdout_bytes + max_stderr_bytes) + 4096, 65536),
                 confirm_posix_group=True,
                 on_settled=on_settled,
+                **({"budget": budget} if budget is not None else {}),
                 **({"cwd": cwd} if cwd is not None else {}),
                 **({"env": env} if env is not None else {}),
             )
@@ -361,6 +378,7 @@ def _main() -> None:
                 input_text=request["input_text"], capture=request["capture"],
                 inherit_process_group=True, capture_limits=tuple(request["limits"]),
                 binary=request.get("binary", False),
+                **({"budget": OwnedExecutionBudget(**request["budget"])} if "budget" in request else {}),
             )
             if request.get("binary", False) and request["capture"]:
                 result.stdout, result.stderr = (

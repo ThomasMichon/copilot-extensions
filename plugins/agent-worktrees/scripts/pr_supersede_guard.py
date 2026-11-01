@@ -150,37 +150,51 @@ def _find_close_attempts(cmd: str) -> list[dict]:
     return attempts
 
 
-def _run_gh(args: list[str], cwd: str, deadline: float | None) -> str | None:
+def _run_gh(args: list[str], cwd: str, deadline: float | None, *, budget=None) -> str | None:
     timeout = _GH_TIMEOUT_S
     if deadline is not None:
-        timeout = max(0.1, min(timeout, deadline - time.monotonic()))
+        timeout = min(timeout, deadline - time.monotonic())
         if timeout <= 0:
             return None
     try:
-        proc = subprocess.run(
-            ["gh", *args], cwd=cwd or None,
-            capture_output=True, text=True, timeout=timeout,
-            creationflags=(0x08000000 if _IS_WIN else 0),
-        )
-    except (OSError, subprocess.SubprocessError):
+        if budget is not None:
+            from agent_procutil.owned_process import run_caller_owned
+
+            proc = run_caller_owned(
+                ["gh", *args], cwd=cwd or None, env=dict(os.environ),
+                timeout=timeout, max_stdout_bytes=65536, max_stderr_bytes=4096,
+                budget=budget,
+            )
+        else:
+            proc = subprocess.run(
+                ["gh", *args], cwd=cwd or None,
+                capture_output=True, text=True, timeout=timeout,
+                creationflags=(0x08000000 if _IS_WIN else 0),
+            )
+    except (OSError, subprocess.SubprocessError) as error:
+        if budget is not None:
+            from agent_procutil.owned_process import OwnedCleanupError
+
+            if isinstance(error, OwnedCleanupError):
+                raise
         return None
     if proc.returncode != 0:
         return None
     return proc.stdout
 
 
-def _default_current_login(cwd: str, deadline: float | None) -> str | None:
-    out = _run_gh(["api", "user", "--jq", ".login"], cwd, deadline)
+def _default_current_login(cwd: str, deadline: float | None, *, budget=None) -> str | None:
+    out = _run_gh(["api", "user", "--jq", ".login"], cwd, deadline, budget=budget)
     return out.strip() if out else None
 
 
 def _default_pr_lookup(
-    repo: str | None, number: int, cwd: str, deadline: float | None
+    repo: str | None, number: int, cwd: str, deadline: float | None, *, budget=None,
 ) -> dict | None:
     args = ["pr", "view", str(number), "--json", "author,state"]
     if repo:
         args += ["--repo", repo]
-    out = _run_gh(args, cwd, deadline)
+    out = _run_gh(args, cwd, deadline, budget=budget)
     if not out:
         return None
     try:
@@ -221,7 +235,7 @@ def _hit_to_output(reason: str, mode: str) -> dict | None:
 
 def decide(
     payload: dict, *, env=None, home=None,
-    current_login=None, pr_lookup=None, deadline: float | None = None,
+    current_login=None, pr_lookup=None, deadline: float | None = None, budget=None,
 ) -> dict | None:
     """Return a hook-output decision dict, or None to allow. Pure/injectable.
 
@@ -255,13 +269,15 @@ def decide(
 
     cwd = str(payload.get("cwd") or "")
     lookup = pr_lookup if pr_lookup is not None else (
-        lambda repo, number, cwd_, dl: _default_pr_lookup(repo, number, cwd_, dl)
+        lambda repo, number, cwd_, dl: _default_pr_lookup(repo, number, cwd_, dl, budget=budget)
     )
     whoami = current_login if current_login is not None else (
-        lambda cwd_, dl: _default_current_login(cwd_, dl)
+        lambda cwd_, dl: _default_current_login(cwd_, dl, budget=budget)
     )
 
     for attempt in attempts:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         pr = lookup(attempt["repo"], attempt["number"], cwd, deadline)
         if pr is None or pr.get("state") != "OPEN":
             continue  # unresolvable or already settled: nothing to protect

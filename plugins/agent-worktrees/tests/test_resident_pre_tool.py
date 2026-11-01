@@ -418,17 +418,21 @@ else:
         """
 import json, os, subprocess, sys, time
 from pathlib import Path
-_real_run = subprocess.run
+from agent_procutil import owned_process
+_real_run = owned_process.run_caller_owned
 _root = Path(os.environ['PRETOOL_TEST_OBSERVATIONS'])
 def emit(value):
     with (_root / 'events.jsonl').open('a', encoding='utf-8') as stream:
         stream.write(json.dumps(value) + '\\n')
 def local_gh(args, *positional, **kwargs):
     if isinstance(args, (list, tuple)) and args and str(args[0]).lower() == 'gh':
-        emit({'event': 'gh-call', 'args': list(args[1:]), 'timeout': kwargs.get('timeout'), 'time': time.monotonic()})
+        budget = kwargs.get('budget')
+        emit({'event': 'gh-call', 'args': list(args[1:]), 'timeout': kwargs.get('timeout'),
+              'deadline': budget.deadline, 'cleanup_reserve': budget.cleanup_reserve,
+              'time': time.monotonic()})
         return _real_run([sys.executable, os.environ['PRETOOL_TEST_GH_CHILD'], *args[1:]], *positional, **kwargs)
     return _real_run(args, *positional, **kwargs)
-subprocess.run = local_gh
+owned_process.run_caller_owned = local_gh
 def observe(frame, event, result):
     if event == 'return' and frame.f_code.co_name == '_merge_pre_decisions' and frame.f_code.co_filename.endswith('hook_client.py'):
         if isinstance(result, dict) and result.get('permissionDecision') in ('ask', 'deny'):
@@ -505,6 +509,10 @@ sys.setprofile(observe)
         assert decisions and decisions[0] == "ask", observed
         calls = [row for row in observed if row["event"] == "gh-call"]
         assert len(calls) == 2, calls
+        assert calls[0]["deadline"] == calls[1]["deadline"]
+        assert all(row["cleanup_reserve"] == 3.0 for row in calls)
+        if late_result == "timeout":
+            assert calls[1]["timeout"] < calls[0]["timeout"]
         reply = json.loads(stdout)
         print(json.dumps({"consumer": consumer, "late_result": late_result, "observed": observed, "reply": reply}))
         assert not target.exists()

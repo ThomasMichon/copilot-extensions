@@ -3104,6 +3104,16 @@ failure cancels the real worker behind a virtual-environment launcher; the SDK
 owns the policy's descendants under its 25-second budget. The shared installer
 native runner is unchanged; no generic installer lifetime behavior is widened.
 
+The worker publishes an event-local monotonic settlement deadline 23 seconds
+after receipt, leaving two seconds for response inside its 25-second execution
+limit. Policy evaluation reserves three of those seconds for owned cleanup.
+Cross-repo and supersede observations share the remaining decision clock;
+supersede calls use the public `OwnedExecutionBudget` SDK seam with 64-KiB stdout
+and 4-KiB stderr caps. Each PR observation retains its 15-second individual cap
+but cannot renew the aggregate clock. Confirmed deny takes precedence, and a
+settled late observation timeout preserves an accumulated ask. The native/SDK
+28-second adapter and 30-second host limits are unchanged.
+
 Explicit installation cells are validated through the existing native
 installation-context helper before the read-only runtime resolver selects the
 owning slot. A missing/invalid cell or unavailable owning interpreter produces
