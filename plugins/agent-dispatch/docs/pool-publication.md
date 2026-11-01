@@ -329,6 +329,8 @@ the entire membership tuple. A valid explicit empty list means the configuration
 declares no supervisors; a missing file, legacy pointer list or omitted cohort
 does not prove that. These remain explicitly unconfirmed. Unreadable, malformed
 or unsupported configuration is unavailable, never a retained complete result.
+Duplicate JSON keys are rejected at every object level before selecting
+pointers or membership, so a later edit cannot erase hidden configuration.
 
 The observation retains the configured revision and a separate digest of the
 whole file's exact bytes, including pointer inputs. A fresh read does not modify

@@ -15,6 +15,7 @@ from typing import Literal
 from dropin_registry import ScanAuthority
 
 from .registrar import RegistrarError
+from .registrar_json import unique_json_fields
 from .registrar_pointer import Pointer
 
 log = logging.getLogger(__name__)
@@ -112,10 +113,10 @@ def read_pointer_registry(path: Path) -> PointerRegistryRead:
             f"{path}: pointer registry could not be read: {exc}"
         ) from exc
     try:
-        raw = json.loads(content.decode("utf-8"))
+        raw = json.loads(content.decode("utf-8"), object_pairs_hook=unique_json_fields)
     except UnicodeError as exc:
         raise RegistrarError(f"{path}: invalid pointer registry encoding: {exc}") from exc
-    except json.JSONDecodeError as exc:
+    except ValueError as exc:
         raise RegistrarError(f"{path}: invalid pointer registry JSON: {exc}") from exc
     envelope = None
     pointers = raw

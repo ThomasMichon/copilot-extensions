@@ -215,3 +215,32 @@ def test_failed_pointer_replace_preserves_config_and_surfaces_error(tmp_path: Pa
     assert path.read_bytes() == original
     assert not list(tmp_path.glob(".pointers-*"))
     assert observe(tmp_path).complete
+
+
+@pytest.mark.parametrize("raw", [
+    '{"version":1,"pointers":[],"configured_supervisors":{"revision":0,'
+    '"members":[{"machine":"host","execution_machine":"host-linux","env":"linux"}],"members":[]}}',
+    '{"version":1,"pointers":[],"configured_supervisors":{"revision":0,'
+    '"members":[{"machine":"host","execution_machine":"host-linux","env":"linux"}]},'
+    '"configured_supervisors":{"revision":0,"members":[]}}',
+    '{"version":2,"version":1,"pointers":[]}',
+    '{"version":1,"pointers":[{"name":"one","location":"/one"}],"pointers":[]}',
+    '{"version":1,"pointers":[],"configured_supervisors":{"revision":9,"revision":0,"members":[]}}',
+    '{"version":1,"pointers":[],"configured_supervisors":{"revision":0,'
+    '"members":[{"machine":"host","execution_machine":"host-linux","env":"linux","env":"windows"}]}}',
+    '[{"name":"one","name":"two","location":"/one"}]',
+    '{"version":1,"pointers":[],"description":{"note":"one","note":"two"},'
+    '"configured_supervisors":{"revision":0,"members":[]}}',
+])
+def test_duplicate_json_keys_never_hide_intent_or_get_erased_by_pointer_edit(tmp_path: Path, raw: str) -> None:
+    path = rd.pointers_file(tmp_path)
+    path.write_text(raw, encoding="utf-8")
+    original = path.read_bytes()
+    result = observe(tmp_path)
+    assert result.state == "unavailable" and result.members == ()
+    assert result.source_revision is None
+    with pytest.raises(rd.RegistrarError, match="duplicate JSON field"):
+        rd.load_pointers(tmp_path)
+    with pytest.raises(rd.RegistrarError, match="duplicate JSON field"):
+        rd.add_pointer("three", tmp_path / "three", base=tmp_path)
+    assert path.read_bytes() == original
