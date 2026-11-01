@@ -457,6 +457,7 @@ def test_progress_guardian_renews_only_quiet_time_and_keeps_explicit_cap(
     )
     monkeypatch.setattr(owner, "_output_capture", lambda *_a, **_k: capture)
     monkeypatch.setattr(owner, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+    monkeypatch.setattr(owner, "sys", SimpleNamespace(stderr=SimpleNamespace(fileno=lambda: 2)))
     outcome = owner._run_guardian_child(
         SimpleNamespace(timeout=1.0, progress_output=True), ["fixture"], procutil,
         lambda: False, absolute_deadline, {},

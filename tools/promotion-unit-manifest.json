@@ -3771,7 +3771,7 @@
         "tools/promotion_unit_tests/test_chat_collaboration.py": "c0cb983e6dfd36ee892f825797c7be9de124626544f958f09d0179a81c8b9fbe",
         "tools/promotion_unit_tests/test_ci_contract.py": "7647bcab50ac82c4dedf740f21b49997fedd9b1e8d16d5aab5336771528ed7f4",
         "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py": "45dcd38499372b6e9cc055d05ea34b4d18f4788001fd23df6ecf3b0a684baf97",
-        "tools/promotion_unit_tests/test_client_guardian_resources.py": "b1d5279e3c7461229ce8267197f16770624c67ca96d5812b39f09a133f9220e8",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py": "e56d7abb61d29e37d846c634f0fda9cc9ef30ab5eeebc732b8d9395c2a167415",
         "tools/promotion_unit_tests/test_collector.py": "1c37ceb50ff79dd135d4f27d6fc605accfab1899a0de03455bf1abb50a882ce4",
         "tools/promotion_unit_tests/test_complete_source.py": "a7967ba6269846c143078bdb774d2103273304538708e471be5b5d81aa1091be",
         "tools/promotion_unit_tests/test_complete_source_publication.py": "bd65baaf55b459a2bcb596b211d515fd02aa053e93961d96944c11f87abf3a91",
