@@ -4,7 +4,9 @@ from copy import deepcopy
 
 import pytest
 
-from worktree_manager.agenda_contract import AgendaFeed, AgendaUnavailable, MAX_INTEGER, validate_snapshot
+from worktree_manager.agenda_contract import (
+    AgendaFeed, AgendaPublicationFence, AgendaUnavailable, MAX_INTEGER, validate_snapshot,
+)
 
 
 def publication(sequence=0, *, kind="snapshot", revision=1, generation="a" * 32):
@@ -187,3 +189,61 @@ def test_temporary_drain_does_not_permanently_retire_generation(reason, retired)
             "type": "going-away", "generation": "a" * 32, "sequence": 0, "reason": reason,
         })
     assert feed.closed and feed.retired_generation == retired
+
+
+def test_publication_fence_keeps_observed_revision_across_null_updates():
+    feed = AgendaFeed("example", "selected", "head-a")
+    first = publication(5, revision=3)
+    feed.receive(first)
+    empty = {**publication(6, kind="update"), "availability": "not-published", "observation": None}
+    feed.receive(empty)
+    with pytest.raises(ValueError, match="store revision"):
+        feed.receive(publication(7, kind="update", revision=2))
+    assert feed.current == empty
+    assert feed.fence.observed == first["observation"]
+    restored = publication(7, kind="update", revision=3)
+    assert feed.receive(restored) == restored
+
+
+@pytest.mark.parametrize("change", ["revision", "body", "status", "availability"])
+def test_publication_fence_refuses_equal_sequence_changes_before_updating_evidence(change):
+    fence = AgendaPublicationFence()
+    first = publication(5, revision=3)
+    AgendaFeed("example", "selected", "head-a", fence=fence).receive(first)
+    changed = deepcopy(first)
+    if change == "revision":
+        changed["observation"]["revision"] = changed["observation"]["snapshot"]["revision"] = 4
+    elif change == "body":
+        changed["observation"]["snapshot"]["next_action"] = "Changed action"
+    elif change == "status":
+        changed["observation"]["snapshot"]["status"] = "steering"
+    else:
+        changed.update(availability="not-published", observation=None)
+    with pytest.raises(ValueError, match="without advancing"):
+        AgendaFeed("example", "selected", "head-a", fence=fence).receive(changed)
+    assert fence.last == first and fence.observed == first["observation"]
+
+
+def test_publication_fence_is_independent_of_mutable_display_data():
+    fence = AgendaPublicationFence()
+    first = publication(5, revision=3)
+    original = deepcopy(first)
+    AgendaFeed("example", "selected", "head-a", fence=fence).receive(first)
+    first["observation"]["revision"] = first["observation"]["snapshot"]["revision"] = 1
+    first.update(availability="not-published", observation=None)
+    assert fence.last == original and fence.observed == original["observation"]
+    with pytest.raises(ValueError, match="store revision"):
+        AgendaFeed("example", "selected", "head-a", fence=fence).receive(
+            publication(6, revision=2, generation="c" * 32)
+        )
+
+
+def test_publication_fence_refuses_store_replacement_for_the_same_selected_head():
+    fence = AgendaPublicationFence()
+    first = publication(5, revision=3)
+    AgendaFeed("example", "selected", "head-a", fence=fence).receive(first)
+    changed = publication(6, revision=4, generation="c" * 32)
+    changed["observation"]["source"]["store_id"] = "d" * 32
+    with pytest.raises(ValueError, match="source store changed"):
+        AgendaFeed("example", "selected", "head-a", fence=fence).receive(changed)
+    assert fence.observed == first["observation"]

@@ -567,10 +567,19 @@ def test_actual_atomic_frame_exact_35_kib_boundary(synthetic_peer, tmp_path, ext
     asyncio.run(check())
 
 
+def changed_snapshot(frame, **values):
+    frame["observation"]["snapshot"].update(values)
+    return frame
+
+
 @pytest.mark.parametrize("next_frame, expected", [
     (publication(4, revision=2), "resident sequence"),
     (publication(6, revision=1, generation="c" * 32), "store revision"),
     (publication(5, revision=2), None),
+    (publication(5, revision=3), "without advancing"),
+    ({**publication(5), "availability": "not-published", "observation": None}, "without advancing"),
+    (changed_snapshot(publication(5, revision=2), status="steering"), "without advancing"),
+    (changed_snapshot(publication(5, revision=2), next_action="Changed body"), "without advancing"),
 ])
 def test_reconnect_snapshot_cannot_regress_known_publication(
     synthetic_peer, tmp_path, next_frame, expected,
@@ -593,4 +602,94 @@ def test_reconnect_snapshot_cannot_regress_known_publication(
                     assert app._data.agenda == next_frame
                 await pilot.press("escape")
                 assert await asyncio.to_thread(second.recv, 1) == b""
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("generation,sequence", [("a" * 32, 7), ("c" * 32, 0)])
+def test_revision_fence_survives_unpublished_reconnect_without_bad_paint(
+    synthetic_peer, tmp_path, monkeypatch, generation, sequence,
+):
+    paints = []
+    update = Static.update
+
+    def observe_paint(self, *args, **kwargs):
+        result = update(self, *args, **kwargs)
+        if self.id == "agenda":
+            content = self.content
+            paints.append(content.plain if isinstance(content, Text) else content.label.plain)
+        return result
+
+    monkeypatch.setattr(Static, "update", observe_paint)
+    transient = {
+        "type": "error", "ok": False, "contract_version": 1,
+        "error": {"code": "unavailable", "message": "synthetic route retry"},
+    }
+
+    async def check():
+        app = companion.MuxCompanionApp(cwd=str(tmp_path))
+        async with app.run_test() as pilot:
+            first = await asyncio.to_thread(accept, synthetic_peer)
+            with first:
+                send(first, publication(5, revision=3))
+                await until(pilot, lambda: "Action 3" in widget(app))
+                data, worker = app._data, app._agenda_worker
+                send(first, transient)
+                await until(pilot, lambda: "reconnecting in 1s" in widget(app))
+                assert await asyncio.to_thread(first.recv, 1) == b""
+            second = await asyncio.to_thread(accept, synthetic_peer)
+            with second:
+                send(second, {**publication(6), "availability": "not-published", "observation": None})
+                await until(pilot, lambda: "Not published" in widget(app))
+                assert app._data.agenda["observation"] is None
+                assert "Action 3" not in widget(app)
+                send(second, transient)
+                await until(pilot, lambda: "reconnecting in 2s" in widget(app))
+                assert await asyncio.to_thread(second.recv, 1) == b""
+            third = await asyncio.to_thread(accept, synthetic_peer)
+            with third:
+                send(third, publication(sequence, revision=2, generation=generation))
+                await until(pilot, lambda: "store revision" in widget(app))
+                await worker.wait()
+                assert app._data is data and app._agenda_worker is worker
+                assert app._data.agenda is None
+                assert "Action 2" not in widget(app)
+                assert not any("Action 2" in paint for paint in paints)
+                assert await asyncio.to_thread(third.recv, 1) == b""
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("sequence,generation,revision", [
+    (6, "a" * 32, 3), (7, "a" * 32, 4), (0, "c" * 32, 4),
+])
+def test_reconnect_publication_fence_allows_qualified_snapshot_after_update(
+    synthetic_peer, tmp_path, sequence, generation, revision,
+):
+    async def check():
+        app = companion.MuxCompanionApp(cwd=str(tmp_path))
+        async with app.run_test() as pilot:
+            first = await asyncio.to_thread(accept, synthetic_peer)
+            with first:
+                send(first, publication(5, revision=2))
+                await until(pilot, lambda: "Action 2" in widget(app))
+                send(first, publication(6, kind="update", revision=3))
+                await until(pilot, lambda: "Action 3" in widget(app))
+                data, worker = app._data, app._agenda_worker
+                send(first, {
+                    "type": "error", "ok": False, "contract_version": 1,
+                    "error": {"code": "disconnected", "message": "synthetic route retry"},
+                })
+                await until(pilot, lambda: "reconnecting in 1s" in widget(app))
+                assert await asyncio.to_thread(first.recv, 1) == b""
+            second = await asyncio.to_thread(accept, synthetic_peer)
+            with second:
+                frame = publication(sequence, revision=revision, generation=generation)
+                send(second, frame)
+                await until(pilot, lambda: app._data.agenda is not None)
+                assert app._data.agenda == frame
+                assert app._data is data and app._agenda_worker is worker
+                assert f"Action {revision}" in widget(app)
+                await pilot.press("escape")
+                assert await asyncio.to_thread(second.recv, 1) == b""
+
     asyncio.run(check())

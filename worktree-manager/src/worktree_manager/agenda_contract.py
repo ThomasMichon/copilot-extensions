@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from copy import deepcopy
 from datetime import datetime, timezone
 
 MAX_FRAME_BYTES = 35 * 1024
@@ -142,14 +143,53 @@ def validate_snapshot(frame: dict, project: str, worktree: str, session: str) ->
             raise ValueError(f"agenda snapshot has invalid {field}")
 
 
+class AgendaPublicationFence:
+    """Bounded evidence for one selected head, independent of display availability."""
+
+    def __init__(self) -> None:
+        self.last: dict | None = None
+        self.observed: dict | None = None
+
+    @staticmethod
+    def _content(value: dict) -> str:
+        return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"))
+
+    def admit(self, frame: dict) -> None:
+        if self.last is not None and frame["generation"] == self.last["generation"]:
+            if frame["sequence"] < self.last["sequence"]:
+                raise ValueError("agenda reconnect regressed its resident sequence")
+            if frame["sequence"] == self.last["sequence"] and self._content(
+                {key: value for key, value in frame.items() if key != "type"}
+            ) != self._content({key: value for key, value in self.last.items() if key != "type"}):
+                raise ValueError("agenda publication changed without advancing its resident sequence")
+        observation = frame["observation"]
+        if observation is not None and self.observed is not None:
+            if observation["source"]["store_id"] != self.observed["source"]["store_id"]:
+                raise ValueError("agenda source store changed for the selected head")
+            if observation["revision"] < self.observed["revision"] or (
+                observation["revision"] == self.observed["revision"]
+                and self._content(observation) != self._content(self.observed)
+            ):
+                raise ValueError("agenda observation regressed or rewrote its store revision")
+        # Commit both fences only after all checks; null availability never
+        # clears the last observed store's revision/body evidence.
+        self.last = deepcopy(frame)
+        if observation is not None:
+            self.observed = deepcopy(observation)
+
+
 class AgendaFeed:
     """One connection, one atomic first snapshot, one resident generation."""
 
-    def __init__(self, project: str, worktree: str, session: str) -> None:
+    def __init__(
+        self, project: str, worktree: str, session: str, *,
+        fence: AgendaPublicationFence | None = None,
+    ) -> None:
         self.identity = (project, worktree, session)
         self.current: dict | None = None
         self.closed = False
         self.retired_generation: str | None = None
+        self.fence = fence if fence is not None else AgendaPublicationFence()
 
     def receive(self, frame: dict) -> dict | None:
         bounded_json(frame)
@@ -209,10 +249,7 @@ class AgendaFeed:
                 == (previous["availability"], previous["observation"])
             ):
                 raise ValueError("agenda feed repeated or regressed its publication")
-            old, new = previous["observation"], frame["observation"]
-            if old and new and old["source"]["store_id"] == new["source"]["store_id"]:
-                if new["revision"] <= old["revision"]:
-                    raise ValueError("agenda observation regressed its store revision")
+        self.fence.admit(frame)
         self.current = frame
         if frame["availability"] == "head-changed":
             self.closed = True

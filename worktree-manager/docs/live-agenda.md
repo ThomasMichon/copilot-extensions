@@ -57,6 +57,18 @@ project/worktree/session. Duplicate JSON members, malformed data, invalid
 versions, repeated publications and stale source/store revisions fail visibly,
 including reconnect snapshots that regress a previously
 observed resident sequence or rewrite/regress the same store revision.
+The worker retains last-publication evidence separately from the last observed
+store revision/body. `not-published` clears presentation but never erases that
+observed high-water fence. A same-generation, equal-sequence reconnect is admitted
+only when its complete publication is semantically identical; the envelope's
+`snapshot` versus `update` type alone does not make it different. A greater
+sequence permits a truthful change, and a new generation may reset sequence,
+but neither can rewrite or regress an already observed revision of the same store.
+These bounded fences are copied away from mutable display data and updated only
+after all admission checks pass. The selected head retains one observed store;
+replacing that store fails visibly, matching the provider's refusal of an
+unregistered same-head store change rather than inventing a registration capability
+or silently evicting old evidence.
 
 The observation must carry `efforts.agenda-observation` version 1, the requested
 worktree/session, a 32-hex store ID, positive revision, UTC commit timestamp, and

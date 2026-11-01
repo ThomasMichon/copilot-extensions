@@ -8,7 +8,7 @@ from contextlib import closing
 from threading import Event
 from rich.text import Text
 from . import agenda_transport, engine_client
-from .agenda_contract import AgendaFeed, AgendaUnavailable
+from .agenda_contract import AgendaFeed, AgendaPublicationFence, AgendaUnavailable
 
 
 def agenda_text(frame: dict | None, error: str | None) -> Text:
@@ -58,11 +58,11 @@ def subscribe(
         supported = True
 
     retired: set[str] = set()
-    last: dict | None = None
+    fence = AgendaPublicationFence()
     for attempt in range(4):
         if cancelled.is_set():
             return
-        receiver = AgendaFeed(project, worktree, session)
+        receiver = AgendaFeed(project, worktree, session, fence=fence)
         stream = agenda_transport.frames(
             project, worktree, session, cancelled=cancelled, cwd=cwd,
             on_supported=authenticated,
@@ -74,20 +74,6 @@ def subscribe(
                         raise ValueError("agenda feed returned a retired resident generation")
                     admitted = receiver.receive(frame)
                     if admitted is not None:
-                        if last is not None:
-                            if (
-                                admitted["generation"] == last["generation"]
-                                and admitted["sequence"] < last["sequence"]
-                            ):
-                                raise ValueError("agenda reconnect regressed its resident sequence")
-                            old, new = last["observation"], admitted["observation"]
-                            if old and new and old["source"]["store_id"] == new["source"]["store_id"]:
-                                if (
-                                    new["revision"] < old["revision"]
-                                    or (new["revision"] == old["revision"] and new != old)
-                                ):
-                                    raise ValueError("agenda reconnect regressed or rewrote its store revision")
-                        last = admitted
                         supported = True
                         if not cancelled.is_set():
                             publish(admitted, None)

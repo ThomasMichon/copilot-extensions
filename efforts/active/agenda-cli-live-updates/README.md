@@ -163,6 +163,24 @@ proposal is claimed available merely because its intended name is described.
 
 ## Journal
 
+### 2026-11-01 - Consumer reconnect fence reconciliation
+
+- The next review listed no open findings and accepted initialization closure,
+  but its reconnect warning matched two concrete consumer defects on inspection.
+  A not-published snapshot could erase the preceding observed store revision;
+  an equal-sequence reconnect could accept changed publication content.
+- Receive and reconnect now share one bounded publication fence, retaining
+  copied store-revision/body evidence independently from display availability.
+  Equal-sequence same-generation snapshots require semantic equality, ignoring
+  only snapshot/update envelope type. Same-head store replacement refuses,
+  matching the existing provider's unregistered-store refusal.
+- The full contract/held-consumer/connected packet passed 133 cases independently
+  with cleanup verified. Actual subprocess/Textual regressions reject rollback
+  through a null snapshot and changed equal-sequence publications without bad
+  paint, while preserving unchanged reconnects, later sequences, new generations,
+  temporary recovery, cancellation and the finite retry budget. A fresh review
+  follows these confirmed fixes; no extra approval shape is being invented.
+
 ### 2026-11-01 - Agenda initialization failure review
 
 - Fresh review accepted shared-root history preservation and the resident
