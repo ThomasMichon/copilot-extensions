@@ -33,6 +33,11 @@ Native launchers deliver a validated version-1 owner projection through
 ready-only same-cell peer. Without an optional qualified owner/projection,
 standalone reads retain native repository files/defaults without selecting an
 incomplete legacy runtime or bootstrapping it.
+The caller's native installation is qualified before any delivered report is
+read. A genuinely absent same-cell Worktrees peer, or its recognized older
+`--configuration` option rejection, preserves native standalone defaults/files.
+Wrong-cell data, explicit binding/refusal signals and ambiguous readiness or
+read failures remain vetoes; optional compatibility never provisions an owner.
 
 Deep mappings merge; lists/null/scalars replace. Credential source allowlists
 and identity/feed variable-name collections retain their native union contract

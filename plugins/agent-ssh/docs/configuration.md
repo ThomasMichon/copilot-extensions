@@ -58,6 +58,14 @@ Aliases, readiness, role, hostname, transport, identity and profile custody rema
 outside composition. Source-owned paths are read through shared physical-root
 containment; relative path values are not part of this label-only schema.
 The in-memory mesh retains JSON-pointer provenance; no generated state is written.
+Conventional nested topology paths retain the repository root returned by native
+discovery, not the topology file's parent directory. The Git-root reader and
+existing non-Git selection walk supply that root; snapshots retain their original
+selection start. Delivered configuration is matched against the selected root.
+Explicit topology paths continue to bypass ordinary preference grafting.
+Direct preference-enabled loaders retain a non-current selector's start through
+`selection_start`; an unrelated current selection refuses grafting rather than
+guessing the repository from the topology's parent folder.
 
 Minimal native mesh (`machines.yaml`):
 

@@ -15,14 +15,22 @@ def configuration_report(root: Path) -> dict[str, Any] | None:
     from ._peer_launch import launch_prefix
 
     own = worktrees.validate_context()
-    delivered = delivered_context(repository_root=root)
+    delivered = delivered_context()
     if delivered is not None:
         if own is not None and context_from_owner(delivered)["installation_cell"] != str(own["cellRoot"]):
             raise ConfigurationError("CodeSpace configuration belongs to another installation cell")
-        return delivered
+        if delivered_context(repository_root=root) is not None:
+            return delivered
     if own is not None:
         import os
 
+        peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+        try:
+            peer_root.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise ConfigurationError("optional Worktrees installation could not be inspected") from error
         prefix = launch_prefix(
             "agent-codespaces", Path(own["pluginRoot"]),
             os.environ["COPILOT_EXTENSIONS_CONTEXT"], "agent-worktrees",
@@ -31,7 +39,13 @@ def configuration_report(root: Path) -> dict[str, Any] | None:
         # Without a native delivered projection, an optional legacy owner is
         # unavailable to this read. Do not run its lazy/provisioning front door.
         prefix = None
-    return read_owner_context(prefix, str(root), required=own is not None)
+    report = read_owner_context(prefix, str(root))
+    if (
+        report is not None and own is not None
+        and context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
+    ):
+        raise ConfigurationError("CodeSpace configuration belongs to another installation cell")
+    return report
 
 
 def compose_documents(

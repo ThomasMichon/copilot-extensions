@@ -3,7 +3,9 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -77,7 +79,9 @@ def _clean_activation_env(monkeypatch):
 
 
 @pytest.mark.parametrize("level", range(4))
-def test_native_runtime_consumer_four_tiers_and_source_identity(tmp_path, monkeypatch, level):
+def test_native_runtime_consumer_four_tiers_and_source_identity(
+    tmp_path, monkeypatch, level, qualified_owner_reply,
+):
     from agent_index import config as runtime
 
     repo = _repo(tmp_path / "repo")
@@ -198,7 +202,9 @@ def test_native_projection_never_bypasses_installation_owner(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("matching_cell", [True, False])
-def test_native_implicit_index_cell_checked_before_projection(tmp_path, monkeypatch, matching_cell):
+def test_native_implicit_index_cell_checked_before_projection(
+    tmp_path, monkeypatch, matching_cell, qualified_owner_reply,
+):
     from agent_index import config as runtime
 
     base = _repo(tmp_path / "base")
@@ -230,6 +236,63 @@ def test_native_implicit_index_cell_checked_before_projection(tmp_path, monkeypa
         with pytest.raises(ValueError, match="another installation cell"):
             runtime.read_indexers(base)
     assert calls == [("agent-index", own, str(own / "install.json"))]
+
+
+@pytest.fixture
+def qualified_owner_reply(monkeypatch):
+    from agent_index import configuration_layers
+
+    monkeypatch.setattr(
+        configuration_layers, "read_owner_context",
+        lambda *args, **kwargs: json.loads(os.environ["AGENT_CONFIGURATION_CONTEXT"]),
+    )
+
+
+@pytest.mark.parametrize("peer", ["absent", "old", "refused"])
+@pytest.mark.parametrize("delivered", [False, True])
+def test_native_optional_namespaced_index_owner_compatibility(
+    tmp_path, monkeypatch, peer, delivered,
+):
+    from configuration_layers import ConfigurationError
+
+    from agent_index import config as runtime
+
+    base = _repo(tmp_path / "base")
+    _write_active(base)
+    own = tmp_path / "marketplaces" / "cell" / "plugins" / "agent-index"
+    own.mkdir(parents=True)
+    cell = own.parent.parent
+    boundary = runtime._knowledge_overlay._load_peer_launch()
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(own))
+    monkeypatch.setattr(boundary, "validate_owner", lambda *args: {
+        "cellRoot": str(cell), "pluginRoot": str(own),
+    })
+    if peer != "absent":
+        receipt = cell / "plugins" / "agent-worktrees" / "install.json"
+        receipt.parent.mkdir()
+        receipt.write_text("{}\n", encoding="utf-8")
+    code = (
+        "import sys; print('unrecognized arguments: --configuration', file=sys.stderr); sys.exit(2)"
+        if peer == "old" else "import sys; sys.exit(1)"
+    )
+    monkeypatch.setattr(boundary, "launch_prefix", lambda *args: [sys.executable, "-c", code])
+    monkeypatch.setattr(
+        runtime, "_knowledge_root_for_repo", lambda *args: pytest.fail("second owner lookup"),
+    )
+    if delivered:
+        monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+            "schema": "agent-worktrees.configuration", "version": 1,
+            "context": {
+                "repository_id": "declared-repository", "execution_machine": "declared-machine",
+                "installation_cell": str(cell), "binding": "unbound", "base_root": str(base),
+            },
+            "repository_machine_root": str(tmp_path / "untrusted-exact"),
+        }))
+    if delivered or peer == "refused":
+        with pytest.raises(ConfigurationError):
+            runtime.read_indexers(base)
+    else:
+        assert runtime.read_indexers(base)[0]["machine"] == "primary"
 
 
 def test_absent_config_is_inactive(tmp_path: Path) -> None:
@@ -398,7 +461,7 @@ def test_present_unsafe_local_config_blocks_external_fallback(
 
 
 def test_bound_external_state_config_is_effective(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, qualified_owner_reply,
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -849,7 +912,7 @@ def test_duplicate_source_name_uses_higher_precedence_machine_local_layer(
 
 
 def test_knowledge_overlay_beats_in_repo_base_for_duplicate_names(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, qualified_owner_reply,
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -890,7 +953,7 @@ def test_knowledge_overlay_beats_in_repo_base_for_duplicate_names(
 
 
 def test_knowledge_grafts_over_canonical_repository_namespace_for_duplicate_names(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, qualified_owner_reply,
 ) -> None:
     module = _module()
     repo = _repo(tmp_path / "repo", requires_external=True)
@@ -935,7 +998,7 @@ def test_knowledge_grafts_over_canonical_repository_namespace_for_duplicate_name
 
 
 def test_marketplace_overlay_merges_on_top_of_base(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, qualified_owner_reply,
 ) -> None:
     module = _module()
     from agent_index import config as runtime

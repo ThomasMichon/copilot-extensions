@@ -16,7 +16,7 @@ from . import config as cfg
 
 def owner_report(root):
     raw = os.environ.get(cfg.INSTALLATION_CONTEXT_ENV, "").strip()
-    policy, external = cfg._requires_external(root)
+    policy, _external = cfg._requires_external(root)
     if policy != "ready":
         raise ValueError("repository state policy is invalid")
     own = None
@@ -38,12 +38,12 @@ def owner_report(root):
         reported_cell = context_from_owner(report)["installation_cell"]
         if own is not None and reported_cell != str(own["cellRoot"]):
             raise ValueError("configuration projection belongs to another installation cell")
-        return report
     if raw:
         peer = cfg._knowledge_overlay._load_peer_launch()
+        receipt = Path(own["cellRoot"]) / "plugins" / "agent-worktrees" / "install.json"
         prefix = peer.launch_prefix(
             "agent-index", Path(own["pluginRoot"]), raw, "agent-worktrees",
-        )
+        ) if receipt.exists() or receipt.is_symlink() else []
     else:
         from configuration_context import ready_owner_prefix
 
@@ -53,9 +53,19 @@ def owner_report(root):
         peer = cfg._knowledge_overlay._load_peer_launch()
         environment = peer.legacy_peer_environment(dict(os.environ))
         environment["AGENT_HOME"] = str(cfg._agent_worktrees_home().parent)
-    return read_owner_context(
-        prefix, root, required=bool(raw) or external, environment=environment,
+    fresh = read_owner_context(
+        prefix, root, required=report is not None, environment=environment,
     )
+    if fresh is not None:
+        context = context_from_owner(fresh)
+        if own is not None and context["installation_cell"] != str(own["cellRoot"]):
+            raise ValueError("configuration owner belongs to another installation cell")
+        if report is not None and (
+            context["repository_id"] != context_from_owner(report)["repository_id"]
+            or context["installation_cell"] != context_from_owner(report)["installation_cell"]
+        ):
+            raise ValueError("configuration projection differs from the current owner")
+    return fresh
 
 
 def _legacy_owner_prefix(ready_owner_prefix):
@@ -89,7 +99,16 @@ def _repository_paths(root):
 def load_repository_layers(root, *, parser=None):
     report = owner_report(root)
     if report is None:
-        return None
+        # Optional absent/older owner retains native files without a second
+        # binding lookup through a legacy or cross-cell front door.
+        merged = {}
+        paths = _repository_paths(root)
+        marketplace = cfg._repo_marketplace_overlay_path(root)
+        if marketplace is not None:
+            paths.append(marketplace)
+        for path in paths:
+            merged = cfg._merge_repo_config_dicts(merged, cfg._load_yaml(path))
+        return {"values": merged, "provenance": {}, "layers": []}
     context = context_from_owner(report)
     context["base_root"] = str(root.absolute())
     layers = [{"id": "defaults", "tier": "defaults", "origin": "defaults", "values": {}}]

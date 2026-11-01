@@ -152,7 +152,9 @@ def test_config_user_override(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("level", range(4))
-def test_native_organization_four_tiers_and_source_paths(tmp_path, monkeypatch, level):
+def test_native_organization_four_tiers_and_source_paths(
+    tmp_path, monkeypatch, level, qualified_owner_reply,
+):
     from agent_logger import repo_trust
 
     base, knowledge, home, local = (
@@ -238,7 +240,7 @@ def test_native_standalone_unbound_logger_never_bootstraps_owner(tmp_path, monke
 
 
 def test_native_bound_organization_path_escape_is_not_hidden_by_machine_preference(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, qualified_owner_reply,
 ):
     from agent_logger import repo_trust
 
@@ -267,7 +269,9 @@ def test_native_bound_organization_path_escape_is_not_hidden_by_machine_preferen
         load_config(home=home)
 
 
-def test_native_bound_knowledge_organization_without_base_file(tmp_path, monkeypatch):
+def test_native_bound_knowledge_organization_without_base_file(
+    tmp_path, monkeypatch, qualified_owner_reply,
+):
     from agent_logger import repo_trust
 
     base, knowledge, local = (tmp_path / name for name in ("base", "knowledge", "local"))
@@ -295,7 +299,9 @@ def test_native_bound_knowledge_organization_without_base_file(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("matching_cell", [True, False])
-def test_native_implicit_logger_cell_checked_before_projection(tmp_path, monkeypatch, matching_cell):
+def test_native_implicit_logger_cell_checked_before_projection(
+    tmp_path, monkeypatch, matching_cell, qualified_owner_reply,
+):
     from agent_logger import configuration_layers
 
     base = tmp_path / "base"
@@ -327,6 +333,65 @@ def test_native_implicit_logger_cell_checked_before_projection(tmp_path, monkeyp
         with pytest.raises(ValueError, match="another installation cell"):
             load_config(home=own, repo_start=base)
     assert calls == [("agent-logger", own, str(own / "install.json"))]
+
+
+@pytest.fixture
+def qualified_owner_reply(monkeypatch):
+    """Organization tests supply their qualified owner transport independently."""
+    from agent_logger import configuration_layers
+
+    monkeypatch.setattr(
+        configuration_layers, "read_owner_context",
+        lambda *args, **kwargs: json.loads(os.environ["AGENT_CONFIGURATION_CONTEXT"]),
+    )
+
+
+@pytest.mark.parametrize("peer", ["absent", "old", "refused"])
+@pytest.mark.parametrize("delivered", [False, True])
+def test_native_optional_namespaced_logger_owner_compatibility(
+    tmp_path, monkeypatch, peer, delivered,
+):
+    from configuration_layers import ConfigurationError
+
+    from agent_logger import configuration_layers
+
+    base = tmp_path / "base"
+    (base / ".git").mkdir(parents=True)
+    (base / ".agent-logger.yaml").write_text("log:\n  note_marker: native\n", encoding="utf-8")
+    own = tmp_path / "marketplaces" / "cell" / "plugins" / "agent-logger"
+    own.mkdir(parents=True)
+    cell = own.parent.parent
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    monkeypatch.setattr(configuration_layers._peer_launch, "validate_owner", lambda *args: {
+        "cellRoot": str(cell), "pluginRoot": str(own),
+    })
+    if peer != "absent":
+        receipt = cell / "plugins" / "agent-worktrees" / "install.json"
+        receipt.parent.mkdir()
+        receipt.write_text("{}\n", encoding="utf-8")
+    code = (
+        "import sys; print('unrecognized arguments: --configuration', file=sys.stderr); sys.exit(2)"
+        if peer == "old" else "import sys; sys.exit(1)"
+    )
+    monkeypatch.setattr(
+        configuration_layers._peer_launch, "launch_prefix",
+        lambda *args: [sys.executable, "-c", code],
+    )
+    if delivered:
+        monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+            "schema": "agent-worktrees.configuration", "version": 1,
+            "context": {
+                "repository_id": "declared-repository", "execution_machine": "declared-machine",
+                "installation_cell": str(cell), "binding": "unbound", "base_root": str(base),
+            },
+            "repository_machine_root": str(tmp_path / "untrusted-exact"),
+        }))
+    if delivered or peer == "refused":
+        with pytest.raises(ConfigurationError):
+            load_config(home=own, repo_start=base)
+    else:
+        assert load_config(home=own, repo_start=base).note_marker == "native"
 
 
 def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> None:

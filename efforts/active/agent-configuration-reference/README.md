@@ -391,3 +391,31 @@ their implementation and validation gates actually pass.
 - Publication, required CI, automated review, actual source/downstream
   merges and final effort archival remain open. A green local packet is not
   completion or merge authority.
+
+### 2026-10-31 - Review qualification and follow-through
+
+- #9823 received four blocking findings: foreign delivered cells in Bridge,
+  MCP and SSH, and lost discovery ownership on atomic Dispatch declarations.
+  Corrected all affected adapters, including Vault and Machines, and added
+  actual-consumer regressions without widening protected authority.
+- Extracted existing pure helpers to satisfy shrink-only module caps.
+  Conduct now qualifies an already-ready same-marketplace Worktrees owner,
+  checks its actual legacy or active namespaced cell, and reads fresh roots.
+  Its no-report path remains runtime-free. Canonical Python-only SDK delivery
+  is synchronized without installers or lifecycle-worker assets.
+- Independent review-fix checks passed 75 machine-adapter cases, 14
+  venue/ownership cases, 70 Conduct routing/budget cases and five SDK-delivery
+  cases. The committed review-fix packet passed all 3,188 admitted units in
+  224 seconds with coverage recorded once. Source, install, vendoring,
+  documentation, lint and exact-diff size guards passed.
+- Closed the wider review overview's optional/older Worktrees compatibility
+  and SSH nested-topology selection gaps. Independent contained checks passed
+  CodeSpaces 89, Dispatch 78, SSH 79, Vault 2, Logger 65 and Index 16 cases.
+  Four existing POSIX-only SSH cases remain excluded on Windows. Missing or
+  recognized older optional peers retain native no-report defaults; delivered
+  reports, foreign cells, binding failures and ambiguous refusals remain
+  qualified or blocked. Vault null retains native fallback without false
+  winning-source provenance. The final unit source closure has zero drift.
+- Required current-head CI and accepted review, actual merge and archival
+  remain open. No settings, installations, services or external venues were
+  changed. Completed test artifacts were removed after recording results.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import replace
 
 import pytest
@@ -180,6 +181,171 @@ def test_layered_registrar_delivered_foreign_cell_refuses_before_discovery(tmp_p
     )
     with pytest.raises(ConfigurationError, match="another installation cell"):
         read_repo_location_layers(tmp_path)
+
+
+@pytest.fixture
+def optional_dispatch_owner(tmp_path, monkeypatch):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _write_dispatch_layer(repository, {"labels": ["portable"]})
+    cell = tmp_path / "nested" / "marketplaces" / "selected-cell"
+    own_root = cell / "plugins" / "agent-dispatch"
+    own_root.mkdir(parents=True)
+    events = []
+
+    def qualify(*args):
+        events.append("qualify")
+        return {"cellRoot": str(cell), "pluginRoot": str(own_root)}
+
+    monkeypatch.setattr("agent_dispatch.peer_launch.validate_owner", qualify)
+    monkeypatch.setattr(
+        "agent_dispatch.procutil.agent_worktrees_launch_prefix", lambda: ["qualified-owner"],
+    )
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "qualified-owner-receipt")
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(own_root))
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    return repository, cell / "plugins" / "agent-worktrees", events
+
+
+@pytest.mark.parametrize("peer_state", ["missing", "older"])
+def test_optional_dispatch_owner_preserves_namespace_defaults(
+    optional_dispatch_owner, monkeypatch, peer_state,
+):
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+
+    repository, peer, events = optional_dispatch_owner
+    if peer_state == "older":
+        peer.mkdir()
+
+    def run(argv, **kwargs):
+        assert peer_state == "older", "missing optional peer must not be launched"
+        events.append("query")
+        assert argv == ["qualified-owner", "state-root", "--configuration", "--json"]
+        return subprocess.CompletedProcess(
+            argv, 2, b"", b"unrecognized arguments: --configuration",
+        )
+
+    monkeypatch.setattr("configuration_context.subprocess.run", run)
+    declaration, = read_repo_location_layers(repository, owner="repo:qualified")
+    assert declaration.labels == ("portable",)
+    assert declaration.owner == "repo:qualified"
+    assert events == (["qualify", "query"] if peer_state == "older" else ["qualify"])
+    assert not (peer.parent / "agent-dispatch" / "tasks.db").exists()
+
+
+@pytest.mark.parametrize("exit_code", [1, 3, 126, 2])
+def test_optional_dispatch_owner_refusal_never_falls_back(
+    optional_dispatch_owner, monkeypatch, exit_code,
+):
+    from configuration_layers import ConfigurationError
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+
+    repository, peer, events = optional_dispatch_owner
+    peer.mkdir()
+
+    def run(argv, **kwargs):
+        events.append("query")
+        return subprocess.CompletedProcess(
+            argv, exit_code, b"", b"configured knowledge binding or readiness refused",
+        )
+
+    monkeypatch.setattr("configuration_context.subprocess.run", run)
+    with pytest.raises(ConfigurationError, match="refused"):
+        read_repo_location_layers(repository)
+    assert events == ["qualify", "query"]
+
+
+@pytest.mark.parametrize("invalid_report", ["foreign-cell", "foreign-cell-other-repo", "unresolved"])
+def test_optional_dispatch_owner_rejects_delivered_state_before_absence(
+    optional_dispatch_owner, monkeypatch, invalid_report,
+):
+    from configuration_layers import ConfigurationError
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+
+    repository, peer, events = optional_dispatch_owner
+    context = {
+        "repository_id": "qualified-repository", "execution_machine": "worker",
+        "installation_cell": str(peer.parent.parent), "binding": "unbound",
+        "base_root": str(repository),
+    }
+    if invalid_report.startswith("foreign-cell"):
+        context["installation_cell"] = "foreign-cell"
+    if invalid_report == "foreign-cell-other-repo":
+        context["base_root"] = str(repository.parent)
+    if invalid_report == "unresolved":
+        context["binding"] = "unresolved"
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1, "context": context,
+    }))
+    with pytest.raises(ConfigurationError):
+        read_repo_location_layers(repository)
+    assert events == ["qualify"]
+    assert not peer.exists()
+
+
+@pytest.mark.parametrize("failure", ["owner", "inspection", "execution"])
+def test_optional_dispatch_owner_ambiguous_failure_never_selects_defaults(
+    optional_dispatch_owner, monkeypatch, failure,
+):
+    from configuration_layers import ConfigurationError
+    from pathlib import Path
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+
+    repository, peer, events = optional_dispatch_owner
+    if failure == "owner":
+        monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", "untrusted malformed projection")
+
+        def refuse_owner(*args):
+            events.append("qualify")
+            raise ConfigurationError("owner qualification refused")
+
+        monkeypatch.setattr("agent_dispatch.peer_launch.validate_owner", refuse_owner)
+    elif failure == "inspection":
+        original = Path.lstat
+
+        def deny_inspection(path, *args, **kwargs):
+            if path == peer:
+                raise PermissionError("optional peer directory is unreadable")
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "lstat", deny_inspection)
+    else:
+        peer.mkdir()
+
+        def refuse_execution(argv, **kwargs):
+            events.append("query")
+            raise PermissionError("qualified owner execution failed")
+
+        monkeypatch.setattr("configuration_context.subprocess.run", refuse_execution)
+    with pytest.raises(ConfigurationError):
+        read_repo_location_layers(repository)
+    assert events == (["qualify", "query"] if failure == "execution" else ["qualify"])
+
+
+def test_optional_dispatch_owner_native_foreign_cell_is_not_accepted(
+    optional_dispatch_owner, monkeypatch,
+):
+    from configuration_layers import ConfigurationError
+    from agent_dispatch.registrar_discovery import read_repo_location_layers
+
+    repository, peer, events = optional_dispatch_owner
+    peer.mkdir()
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "qualified-repository", "execution_machine": "worker",
+            "installation_cell": "foreign-cell", "binding": "unbound", "base_root": str(repository),
+        },
+    }
+
+    def run(argv, **kwargs):
+        events.append("query")
+        return subprocess.CompletedProcess(argv, 0, json.dumps(report).encode("utf-8"), b"")
+
+    monkeypatch.setattr("configuration_context.subprocess.run", run)
+    with pytest.raises(ConfigurationError, match="another installation cell"):
+        read_repo_location_layers(repository)
+    assert events == ["qualify", "query"]
 
 
 def test_layered_identity_real_consumer_and_introspection(layered_dispatch_context):

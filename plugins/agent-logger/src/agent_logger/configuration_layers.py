@@ -50,11 +50,11 @@ def _owner_report(root: Path, home: Path):
         reported_cell = context_from_owner(report)["installation_cell"]
         if own is not None and reported_cell != str(own["cellRoot"]):
             raise ValueError("configuration projection belongs to another installation cell")
-        return report
     if raw:
+        receipt = Path(own["cellRoot"]) / "plugins" / "agent-worktrees" / "install.json"
         prefix = _peer_launch.launch_prefix(
             "agent-logger", Path(own["pluginRoot"]), raw, "agent-worktrees",
-        )
+        ) if receipt.exists() or receipt.is_symlink() else []
     else:
         prefix = _legacy_owner_prefix()
     environment = None
@@ -63,7 +63,17 @@ def _owner_report(root: Path, home: Path):
 
         environment = _peer_launch.legacy_peer_environment(dict(os.environ))
         environment["AGENT_HOME"] = str(_default_repos_yaml_root().parent)
-    return read_owner_context(prefix, root, required=bool(raw), environment=environment)
+    fresh = read_owner_context(prefix, root, required=report is not None, environment=environment)
+    if fresh is not None:
+        context = context_from_owner(fresh)
+        if own is not None and context["installation_cell"] != str(own["cellRoot"]):
+            raise ValueError("configuration owner belongs to another installation cell")
+        if report is not None and (
+            context["repository_id"] != context_from_owner(report)["repository_id"]
+            or context["installation_cell"] != context_from_owner(report)["installation_cell"]
+        ):
+            raise ValueError("configuration projection differs from the current owner")
+    return fresh
 
 
 def _organization_file(root: Path):

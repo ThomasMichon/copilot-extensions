@@ -178,3 +178,32 @@ def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkey
         with pytest.raises(ConfigurationError, match="another installation cell"):
             config.resolve_context(str(base), strict=True)
     assert calls
+
+
+@pytest.mark.parametrize("tier", ["knowledge", "repository_machine"])
+def test_tier_null_keeps_native_fallback_and_does_not_claim_false_provenance(tmp_path, monkeypatch, tier):
+    base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
+    write(base, {"vault": "base", "group": "base-group"})
+    if tier == "knowledge":
+        write(knowledge, {"vault": None, "group": None})
+        monkeypatch.setattr(config, "_ext_config", lambda cwd: {
+            "vault": "explicit", "group": "extension-group",
+        })
+        expected_vault, expected_group = "explicit", "extension-group"
+        vault_source, group_source = "ext", "ext"
+    else:
+        write(knowledge, {"vault": "knowledge", "group": "knowledge-group"})
+        data = json.loads(global_path.read_text())
+        data.update(default_vault="machine", group="machine-group")
+        data["vaults"]["machine"]["group"] = "registered-group"
+        global_path.write_text(json.dumps(data), encoding="utf-8")
+        write(local, {"vault": None, "group": None})
+        expected_vault, expected_group = "machine", "registered-group"
+        vault_source, group_source = "global", "vault:machine"
+    result = config.resolve_context(str(base), strict=True)
+    assert (result.vault_name, result.group) == (expected_vault, expected_group)
+    assert result.sources["vault"] == vault_source
+    assert result.sources["group"] == group_source
+    assert "/vault" not in result.configuration_provenance
+    assert "/group" not in result.configuration_provenance
+    assert not (tmp_path / f"{expected_vault}.kdbx").exists()

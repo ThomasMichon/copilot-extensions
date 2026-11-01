@@ -18,27 +18,41 @@ def configuration_report(root: Path) -> dict[str, Any] | None:
 
     import os
 
-    if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT"):
+    raw_context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
+    own = None
+    if not raw_context:
         from .hosting_policy import selected_marketplace_id
 
         selected_marketplace_id()
-    delivered = delivered_context(repository_root=root)
-    if delivered is not None:
-        if os.environ.get("COPILOT_EXTENSIONS_CONTEXT"):
-            from .peer_launch import validate_owner
+    else:
+        from .peer_launch import validate_owner
 
-            own = validate_owner(
-                "agent-dispatch", install_dir(), os.environ["COPILOT_EXTENSIONS_CONTEXT"],
-            )
-            if context_from_owner(delivered)["installation_cell"] != str(own["cellRoot"]):
-                raise ConfigurationError("dispatch configuration belongs to another installation cell")
-        return delivered
-    return read_owner_context(
-        agent_worktrees_launch_prefix() if os.environ.get("COPILOT_EXTENSIONS_CONTEXT") else None,
+        own = validate_owner("agent-dispatch", install_dir(), raw_context)
+    delivered = delivered_context()
+    if delivered is not None:
+        if own is not None and context_from_owner(delivered)["installation_cell"] != str(own["cellRoot"]):
+            raise ConfigurationError("dispatch configuration belongs to another installation cell")
+        if delivered_context(repository_root=root) is not None:
+            return delivered
+    if own is not None:
+        peer_root = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+        try:
+            peer_root.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise ConfigurationError("optional Worktrees installation could not be inspected") from error
+    report = read_owner_context(
+        agent_worktrees_launch_prefix() if own is not None else None,
         str(root),
-        required=bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT")),
         environment=agent_worktrees_environment(),
     )
+    if (
+        report is not None and own is not None
+        and context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
+    ):
+        raise ConfigurationError("dispatch configuration belongs to another installation cell")
+    return report
 
 
 def surface_layers(report: dict[str, Any], surface: str):

@@ -35,6 +35,10 @@ additional inferred graft discovery. Ordinary discovery can receive trusted
 knowledge organization even when the base has no organization file.
 Absence of an optional legacy owner preserves standalone behavior. Invalid
 explicit binding/cell/projection data is an error, not an empty knowledge layer.
+With no delivered report, a genuinely missing Worktrees peer or its recognized
+older `--configuration` option remains optional, including namespaced installs.
+A delivered report instead requires a successful fresh owner read; its roots
+are never used as fallback when that owner is absent or refuses.
 Namespaced invocation and a delivered projection independently retain the
 installation-owner/cell gate. Legacy reads use the existing completion-gated
 [`resolve_python`](../../../libs/versioned-runtime/versioned_runtime.py)

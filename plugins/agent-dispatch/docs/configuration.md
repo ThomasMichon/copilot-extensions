@@ -60,6 +60,11 @@ envelopes and installed-generation receipts do not.
 projection, not a grant. Namespaced lookup uses the existing ready-only
 same-cell boundary; optional legacy owner absence retains native local/
 packaged defaults without a PATH, provisioning or service-start fallback.
+Caller qualification precedes delivered-report parsing. A genuinely absent
+same-cell Worktrees peer, or its recognized older `--configuration` option
+rejection, retains native files/defaults. Wrong-cell reports, explicit binding
+refusals and ambiguous readiness/read errors still block rather than degrading
+to defaults.
 
 Native strict unknown-key rejection stays in force. Mappings merge deeply,
 lists/null/scalars replace atomically; `extends` retains the existing native

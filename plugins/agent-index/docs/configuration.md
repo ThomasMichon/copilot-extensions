@@ -37,6 +37,11 @@ the delivered-projection path. Legacy invocation uses the existing
 completion-gated SDK callback, never a self-provisioning front door. A valid
 projection cannot bypass the independent installation-owner/cell or canonical
 repository state-policy checks.
+Without a delivered report, genuinely absent peers and recognized older
+`--configuration` support retain native repository configuration even in
+namespaced mode. No secondary legacy/cross-cell binding lookup occurs.
+Delivered reports require fresh owner data; refusals and differing cells or
+repository identities never become optional absence.
 
 ## Field families, types and defaults
 

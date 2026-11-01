@@ -182,6 +182,177 @@ def test_layered_codespace_implicit_namespace_refuses_delivered_report(tmp_path,
         load_merged_config()
 
 
+@pytest.fixture
+def optional_codespace_owner(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from agent_codespaces import config, worktrees
+
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _write_codespace_layer(repository, {"defaults": {"machine_type": "portable"}})
+    cell = tmp_path / "nested" / "marketplaces" / "selected-cell"
+    own_root = cell / "plugins" / "agent-codespaces"
+    own_root.mkdir(parents=True)
+    events = []
+
+    def qualify():
+        events.append("qualify")
+        return {"cellRoot": str(cell), "pluginRoot": str(own_root)}
+
+    monkeypatch.setattr(worktrees, "validate_context", qualify)
+    monkeypatch.setattr(config, "cwd_repo_root", lambda: repository)
+    monkeypatch.setattr(config, "load_adopted_repos", lambda: [])
+    monkeypatch.setattr(config, "RUNTIME_DIR", own_root)
+    monkeypatch.setattr(config, "scan_config_providers", lambda: SimpleNamespace(
+        active_plugins=None, config_d=None, active_configs=[],
+    ))
+    monkeypatch.setattr(config, "_warn_active_plugin_config_findings", lambda report: None)
+    monkeypatch.setattr(config, "_warn_config_dropin_findings", lambda report: None)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "qualified-owner-receipt")
+    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(own_root))
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    monkeypatch.setattr(
+        "agent_codespaces._peer_launch.launch_prefix",
+        lambda *args: ["qualified-owner"],
+    )
+    return repository, cell / "plugins" / "agent-worktrees", events
+
+
+@pytest.mark.parametrize("peer_state", ["missing", "older"])
+def test_optional_codespace_owner_preserves_namespace_defaults(
+    optional_codespace_owner, monkeypatch, peer_state,
+):
+    repository, peer, events = optional_codespace_owner
+    if peer_state == "older":
+        peer.mkdir()
+
+    def run(argv, **kwargs):
+        assert peer_state == "older", "missing optional peer must not be launched"
+        events.append("query")
+        assert argv == ["qualified-owner", "state-root", "--configuration", "--json"]
+        return subprocess.CompletedProcess(
+            argv, 2, b"", b"unrecognized arguments: --configuration",
+        )
+
+    monkeypatch.setattr("configuration_context.subprocess.run", run)
+    result = load_merged_config()
+    assert result.default_machine_type == "portable"
+    assert result.source_paths == [repository]
+    assert events == (["qualify", "query"] if peer_state == "older" else ["qualify"])
+    assert not (peer.parent / "agent-codespaces" / "adopted-repos.yaml").exists()
+
+
+@pytest.mark.parametrize("exit_code", [1, 3, 126, 2])
+def test_optional_codespace_owner_refusal_never_falls_back(
+    optional_codespace_owner, monkeypatch, exit_code,
+):
+    from configuration_layers import ConfigurationError
+
+    _, peer, events = optional_codespace_owner
+    peer.mkdir()
+
+    def run(argv, **kwargs):
+        events.append("query")
+        return subprocess.CompletedProcess(
+            argv, exit_code, b"", b"configured knowledge binding or readiness refused",
+        )
+
+    monkeypatch.setattr("configuration_context.subprocess.run", run)
+    with pytest.raises(ConfigurationError, match="refused"):
+        load_merged_config()
+    assert events == ["qualify", "query"]
+
+
+@pytest.mark.parametrize("invalid_report", ["foreign-cell", "foreign-cell-other-repo", "unresolved"])
+def test_optional_codespace_owner_rejects_delivered_state_before_absence(
+    optional_codespace_owner, monkeypatch, invalid_report,
+):
+    from configuration_layers import ConfigurationError
+
+    repository, peer, events = optional_codespace_owner
+    context = {
+        "repository_id": "qualified-repository", "execution_machine": "worker",
+        "installation_cell": str(peer.parent.parent), "binding": "unbound",
+        "base_root": str(repository),
+    }
+    if invalid_report.startswith("foreign-cell"):
+        context["installation_cell"] = "foreign-cell"
+    if invalid_report == "foreign-cell-other-repo":
+        context["base_root"] = str(repository.parent)
+    if invalid_report == "unresolved":
+        context["binding"] = "unresolved"
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1, "context": context,
+    }))
+    with pytest.raises(ConfigurationError):
+        load_merged_config()
+    assert events == ["qualify"]
+    assert not peer.exists()
+
+
+@pytest.mark.parametrize("failure", ["owner", "inspection", "execution"])
+def test_optional_codespace_owner_ambiguous_failure_never_selects_defaults(
+    optional_codespace_owner, monkeypatch, failure,
+):
+    from configuration_layers import ConfigurationError
+    from agent_codespaces import worktrees
+
+    _, peer, events = optional_codespace_owner
+    if failure == "owner":
+        monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", "untrusted malformed projection")
+
+        def refuse_owner():
+            events.append("qualify")
+            raise ConfigurationError("owner qualification refused")
+
+        monkeypatch.setattr(worktrees, "validate_context", refuse_owner)
+    elif failure == "inspection":
+        original = Path.lstat
+
+        def deny_inspection(path, *args, **kwargs):
+            if path == peer:
+                raise PermissionError("optional peer directory is unreadable")
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "lstat", deny_inspection)
+    else:
+        peer.mkdir()
+
+        def refuse_execution(argv, **kwargs):
+            events.append("query")
+            raise PermissionError("qualified owner execution failed")
+
+        monkeypatch.setattr("configuration_context.subprocess.run", refuse_execution)
+    with pytest.raises(ConfigurationError):
+        load_merged_config()
+    assert events == (["qualify", "query"] if failure == "execution" else ["qualify"])
+
+
+def test_optional_codespace_owner_native_foreign_cell_is_not_accepted(
+    optional_codespace_owner, monkeypatch,
+):
+    from configuration_layers import ConfigurationError
+
+    repository, peer, events = optional_codespace_owner
+    peer.mkdir()
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "qualified-repository", "execution_machine": "worker",
+            "installation_cell": "foreign-cell", "binding": "unbound", "base_root": str(repository),
+        },
+    }
+
+    def run(argv, **kwargs):
+        events.append("query")
+        return subprocess.CompletedProcess(argv, 0, json.dumps(report).encode("utf-8"), b"")
+
+    monkeypatch.setattr("configuration_context.subprocess.run", run)
+    with pytest.raises(ConfigurationError, match="another installation cell"):
+        load_merged_config()
+    assert events == ["qualify", "query"]
+
+
 def test_layered_codespace_first_touch_isolated_import_operation(tmp_path):
     base, knowledge, machine = (tmp_path / name for name in ("base", "knowledge", "machine"))
     for root in (base, knowledge, machine):

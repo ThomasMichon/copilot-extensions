@@ -17,6 +17,7 @@ def setup(tmp_path, monkeypatch, binding="bound"):
     base, knowledge, machine, local = (tmp_path / part for part in ("base", "knowledge", "machine", "local"))
     for root in (base, knowledge, machine, local):
         root.mkdir()
+    monkeypatch.chdir(base)
     path = base / "machines.yaml"
     path.write_text(yaml.safe_dump({"machines": {"logical": {
         "description": "native", "ssh": {"ready": True, "environments": [{"alias": "native-ssh"}]},
@@ -92,13 +93,17 @@ def test_default_cli_producer_requests_preferences_but_explicit_path_does_not(tm
 
 def test_actual_absent_owner_preserves_unbound_mesh_without_process(tmp_path, monkeypatch):
     import configuration_context
+    import subprocess
 
     for name in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_CONFIGURATION_CONTEXT"):
         monkeypatch.delenv(name, raising=False)
     path = tmp_path / "machines.yaml"
     path.write_text("machines:\n  standalone:\n    description: native\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
 
     def no_process(*args, **kwargs):
+        if args[0][0] == "git":
+            return subprocess.CompletedProcess(args[0], 0, str(tmp_path), "")
         pytest.fail("standalone mesh presentation must not bootstrap an optional owner")
 
     monkeypatch.setattr(configuration_context.subprocess, "run", no_process)
@@ -111,6 +116,7 @@ def test_native_unready_legacy_owner_preserves_mesh_without_process(tmp_path, mo
     import shutil
     from pathlib import Path
     import configuration_context
+    import subprocess
 
     home = tmp_path / "home"
     scripts = home / ".agent-ssh" / "scripts"
@@ -127,8 +133,11 @@ def test_native_unready_legacy_owner_preserves_mesh_without_process(tmp_path, mo
         monkeypatch.delenv(name, raising=False)
     path = tmp_path / "machines.yaml"
     path.write_text("machines:\n  standalone:\n    description: native\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
 
     def no_process(*args, **kwargs):
+        if args[0][0] == "git":
+            return subprocess.CompletedProcess(args[0], 0, str(tmp_path), "")
         pytest.fail("an unready optional owner must not bootstrap")
 
     monkeypatch.setattr(configuration_context.subprocess, "run", no_process)
@@ -172,3 +181,63 @@ def test_real_mesh_loader_checks_delivered_cell_against_actual_owner(tmp_path, m
         with pytest.raises(ConfigurationError, match="another installation cell"):
             mesh.load_mesh(path, strict=True, preferences=True)
     assert calls
+
+
+@pytest.mark.parametrize("folder", [".agent-worktrees", "config", ".github"])
+@pytest.mark.parametrize("git_root", [False, True])
+def test_native_mesh_loader_keeps_repository_root_for_nested_conventional_source(
+    tmp_path, monkeypatch, folder, git_root,
+):
+    import json
+    import subprocess
+
+    base, knowledge = tmp_path / "repository", tmp_path / "knowledge"
+    base.mkdir()
+    knowledge.mkdir()
+    path = base / folder / "machines.yaml"
+    path.parent.mkdir()
+    path.write_text("machines:\n  worker:\n    description: native\n", encoding="utf-8")
+    write(knowledge, {"machines": {"worker": {"description": "knowledge"}}})
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "repo-qualified", "execution_machine": "worker",
+            "installation_cell": "legacy-cell", "binding": "bound",
+            "base_root": str(base), "knowledge_root": str(knowledge),
+        },
+    }
+    for name in ("AGENT_RT_ROOT", "COPILOT_EXTENSIONS_CONTEXT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    monkeypatch.chdir(path.parent if git_root else base)
+
+    def selected_root(argv, **kwargs):
+        assert argv[0] == "git"
+        return subprocess.CompletedProcess(argv, 0 if git_root else 1, str(base), "")
+
+    monkeypatch.setattr(mesh.subprocess, "run", selected_root)
+    result = mesh.load_mesh(path, strict=True, preferences=True)
+    assert result.machines[0].description == "knowledge"
+    assert result.configuration_provenance["/machines/worker/description"]["source"]["root"] == str(knowledge)
+
+    def no_selection(*args, **kwargs):
+        pytest.fail("an explicit source must not trigger repository preference selection")
+
+    monkeypatch.setattr(mesh, "_find_machines_source", no_selection)
+    assert mesh.load_mesh(path, strict=True).machines[0].description == "native"
+
+
+def test_preference_loader_refuses_an_unrelated_selection_root(tmp_path, monkeypatch):
+    import subprocess
+
+    selected, unrelated = tmp_path / "selected", tmp_path / "unrelated"
+    selected.mkdir()
+    unrelated.mkdir()
+    path = selected / "config" / "machines.yaml"
+    path.parent.mkdir()
+    path.write_text("machines: {worker: {description: native}}\n", encoding="utf-8")
+    monkeypatch.chdir(unrelated)
+    monkeypatch.setattr(mesh.subprocess, "run", lambda argv, **kwargs:
+                        subprocess.CompletedProcess(argv, 0, str(unrelated), ""))
+    with pytest.raises(ValueError, match="selected topology repository root"):
+        mesh.load_mesh(path, strict=True, preferences=True)
