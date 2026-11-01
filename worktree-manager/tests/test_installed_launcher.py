@@ -137,6 +137,22 @@ def test_constructed_slot_runs_installed_package_without_resolution(launcher, tm
         )
         for path in (slot, *slot.rglob("*"))
     } == before
+    installed_module = Path(output["file"])
+    module_stat = installed_module.stat()
+    installed_module.write_bytes(
+        installed_module.read_bytes().replace(b'"1.2.3"', b'"1.2.4"')
+    )
+    os.utime(installed_module, ns=(module_stat.st_atime_ns, module_stat.st_mtime_ns))
+    (slot / "src" / "worktree_manager" / "__init__.py").write_text(
+        '__version__ = "1.2.4"\n', encoding="utf-8",
+    )
+    replaced = _run(argv, env=env, cwd=tmp_path)
+    assert replaced.returncode == 0, replaced.stderr
+    replacement = json.loads(replaced.stdout)
+    assert replacement["version"] == "1.2.4"
+    assert replacement["file"] == output["file"]
+    assert Path(replacement["cached"]) != cache
+    assert (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino) == cached_before
 
 
 def test_selected_payload_only_slot_is_not_an_installed_runtime(launcher, tmp_path, monkeypatch):

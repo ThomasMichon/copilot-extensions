@@ -1041,7 +1041,8 @@ $portDirective
 `$_py = `$null
 if (Test-Path -LiteralPath `$_resolver) { `$env:AGENT_RT_ROOT = `$_root; . `$_resolver; `$_py = `$AgentRtPy }
 if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = '$($LinkPython -replace "'","''")' }
-`$_pythonCache = [IO.Path]::GetFullPath((Join-Path `$_root 'cache\python'))
+`$_cacheId = [Guid]::NewGuid().ToString('N')
+`$_pythonCache = [IO.Path]::GetFullPath((Join-Path `$_root "cache\python\unsealed-`$_cacheId"))
 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not `$_pythonCache.StartsWith('\\?\')) {
     `$_pythonCache = if (`$_pythonCache.StartsWith('\\')) {
         '\\?\UNC\' + `$_pythonCache.Substring(2)

@@ -158,7 +158,10 @@ _resolve_runtime() {
         . "$_resolver"
     fi
     if [ -n "${AGENT_RT_PY:-}" ]; then
-        _python_cache="$_runtime_root/cache/python"
+        _cache_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+        [ "${#_cache_id}" -eq 32 ] || exit 1
+        case "$_cache_id" in *[!0-9a-f]*) exit 1 ;; esac
+        _python_cache="$_runtime_root/cache/python/unsealed-$_cache_id"
         case "$AGENT_RT_PY" in
             *.exe)
                 _python_cache="$(cygpath -aw "$_python_cache")" || return

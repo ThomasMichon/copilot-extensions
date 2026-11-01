@@ -2075,8 +2075,9 @@ function Get-IndexPythonCacheArgs {
          $Root -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))')) {
         throw 'Python cache requires an absolute owned runtime root'
     }
-    # Match agent_procutil.python_cache_args without importing the selected slot.
-    $prefix = [IO.Path]::GetFullPath((Join-Path (Join-Path $Root 'cache') 'python'))
+    # Without inspecting installed completion/RECORD evidence, never reuse a namespace.
+    $cacheId = [Guid]::NewGuid().ToString('N')
+    $prefix = [IO.Path]::GetFullPath((Join-Path $Root "cache\python\unsealed-$cacheId"))
     if ($env:OS -eq 'Windows_NT' -and -not $prefix.StartsWith('\\?\')) {
         $prefix = if ($prefix.StartsWith('\\')) { '\\?\UNC\' + $prefix.Substring(2) }
             else { '\\?\' + $prefix }

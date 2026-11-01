@@ -164,7 +164,7 @@ def test_conditional_service_publication_preserves_documented_best_effort(tmp_pa
         assert "--user restart agent-vault-fixture.service" in commands
         assert "ExecStart=/fixture/runtime-not-executed" in target.read_text()
         assert (
-            f'-X "pycache_prefix={tmp_path / "runtime/cache/python"}" '
+            f'-X "pycache_prefix={tmp_path / "runtime/cache/python"}/unsealed-${{INVOCATION_ID}}" '
             "-m agent_vault.service --foreground --persistent --handoff-stdin"
         ) in target.read_text()
         assert ("WARN:" if scenario == "unsupported-manager" else "OK:") in result.stdout

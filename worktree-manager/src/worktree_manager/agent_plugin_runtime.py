@@ -515,7 +515,7 @@ def resolve_installed_plugin_invocation(
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     root = slot.parent.parent
     return [
-        str(python), *python_cache_args(root), "-m", module or plugin_id.replace("-", "_"),
+        str(python), *python_cache_args(root, runtime=slot), "-m", module or plugin_id.replace("-", "_"),
     ], root
 
 

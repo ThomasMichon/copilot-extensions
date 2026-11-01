@@ -1940,7 +1940,8 @@ if (Test-Path `$pidFile) {
     }
 }
 
-`$cache = [IO.Path]::GetFullPath((Join-Path `$runtimeHome 'cache\python'))
+`$cacheId = [Guid]::NewGuid().ToString('N')
+`$cache = [IO.Path]::GetFullPath((Join-Path `$runtimeHome "cache\python\unsealed-`$cacheId"))
 if (-not `$cache.StartsWith('\\?\')) {
     `$cache = if (`$cache.StartsWith('\\')) { '\\?\UNC\' + `$cache.Substring(2) } else { '\\?\' + `$cache }
 }

@@ -143,6 +143,7 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
 
     before = snapshot()
     cached_before = None
+    previous_cache = None
     for _ in range(2):
         result = subprocess.run(
             [*argv, "argument with spaces"], cwd=tmp_path, env=child_env,
@@ -159,9 +160,27 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
         assert cached.is_relative_to(Path(prefix))
         current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
         if cached_before is not None:
-            assert current == cached_before
+            assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
+                    previous_cache.stat().st_ino) == cached_before
+            assert cached != previous_cache
         cached_before = current
+        previous_cache = cached
         assert snapshot() == before
+    module = package / "__init__.py"
+    previous_stat = module.stat()
+    module.write_text("VALUE = 84\n", encoding="utf-8")
+    os.utime(module, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
+    result = subprocess.run(
+        [*argv, "argument with spaces"], cwd=tmp_path, env=child_env,
+        capture_output=True, text=True, timeout=30,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    assert output[0] == 84 and output[2:] == [False, ["argument with spaces"]]
+    assert Path(output[1]) != previous_cache
+    assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
+            previous_cache.stat().st_ino) == cached_before
     assert dict(os.environ) == environment
 
 
@@ -2732,9 +2751,10 @@ def test_posix_shim_preserves_args_exit_and_project_cwd(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 23
-    assert result.stdout.strip() == (
-        f"{project}|-X pycache_prefix={home / '.agent-example/cache/python'} "
-        "-m agent_example search two words"
+    assert re.fullmatch(
+        re.escape(f"{project}|-X pycache_prefix={home / '.agent-example/cache/python'}")
+        + r"/unsealed-[0-9a-f]{32} -m agent_example search two words",
+        result.stdout.strip(),
     )
 
 
@@ -2989,9 +3009,10 @@ def test_multi_command_shim_dispatches_its_own_module(tmp_path: Path) -> None:
         text=True,
         check=True,
     )
-    assert result.stdout.strip() == (
-        f"-X pycache_prefix={home / '.agent-example/cache/python'} "
-        "-m agent_example.helper two words"
+    assert re.fullmatch(
+        re.escape(f"-X pycache_prefix={home / '.agent-example/cache/python'}")
+        + r"/unsealed-[0-9a-f]{32} -m agent_example\.helper two words",
+        result.stdout.strip(),
     )
 
 

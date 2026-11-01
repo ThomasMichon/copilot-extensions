@@ -55,6 +55,7 @@ LIBRARIES = (
     "session-liveness-probe",
     "plugin-resolve",
     "repository-policy",
+    "configuration-layers",
 )
 
 

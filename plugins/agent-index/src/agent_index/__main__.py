@@ -624,7 +624,8 @@ def _dispatch_to_server_venv(
         return None
 
     cmd = [
-        str(server_python), "-I", *python_cache_args(os.path.abspath(install_dir())),
+        str(server_python), "-I",
+        *python_cache_args(os.path.abspath(install_dir()), runtime=server_python),
         "-X", "utf8", "-m", "agent_index",
     ]
     if raw_args is not None:
@@ -1376,7 +1377,8 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         python = str(host_runtime_python())
         root = Path(os.path.abspath(install_dir()))
         cmd = [
-            windowless_python(python), "-I", *python_cache_args(root), "-X", "utf8", "-m", "agent_index",
+            windowless_python(python), "-I", *python_cache_args(root, runtime=python),
+            "-X", "utf8", "-m", "agent_index",
             start_command, "--host", cfg.host, "--port", str(port), "--passive",
         ]
         root.mkdir(parents=True, exist_ok=True)

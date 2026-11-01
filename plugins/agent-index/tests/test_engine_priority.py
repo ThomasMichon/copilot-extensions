@@ -50,18 +50,45 @@ def _load_module():
 
 
 def test_health_freezes_the_running_engine_build(monkeypatch: pytest.MonkeyPatch) -> None:
-    package_version = importlib.metadata.version
+    package_distribution = importlib.metadata.distribution
+    installed = types.SimpleNamespace(
+        version="1.2.3", files=["agent_index_engine/app.py"],
+        locate_file=lambda member: APP_PATH,
+    )
     monkeypatch.setattr(
-        importlib.metadata, "version",
-        lambda name: "1.2.3" if name == "agent-index-engine" else package_version(name),
+        importlib.metadata, "distribution",
+        lambda name: installed if name == "agent-index-engine" else package_distribution(name),
     )
     module = _load_module()
-    monkeypatch.setattr(importlib.metadata, "version", lambda name: "9.9.9")
+    installed.version = "9.9.9"
     monkeypatch.setattr(module, "_check_gpu_deps", lambda: False)
     health = asyncio.run(module.health())
     assert health.pid == os.getpid()
     assert health.version == "1.2.3"
     assert health.model_loaded is False
+
+
+@pytest.mark.parametrize("attribution", ["foreign", "unrecorded", "missing"])
+def test_health_leaves_unattributed_engine_version_unknown(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, attribution: str,
+) -> None:
+    package_distribution = importlib.metadata.distribution
+
+    def selected_distribution(name):
+        if name != "agent-index-engine":
+            return package_distribution(name)
+        if attribution == "missing":
+            raise importlib.metadata.PackageNotFoundError(name)
+        return types.SimpleNamespace(
+            version="1.2.3",
+            files=[] if attribution == "unrecorded" else ["agent_index_engine/app.py"],
+            locate_file=lambda member: tmp_path / member if attribution == "foreign" else APP_PATH,
+        )
+
+    monkeypatch.setattr(importlib.metadata, "distribution", selected_distribution)
+    module = _load_module()
+    monkeypatch.setattr(module, "_check_gpu_deps", lambda: False)
+    assert asyncio.run(module.health()).version == ""
 
 
 class _FakePipeline:

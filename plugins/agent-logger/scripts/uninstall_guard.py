@@ -82,6 +82,13 @@ def validate(root: Path):
         _plain(manifest)
         if not manifest.is_file():
             raise RuntimeError("Logger deployment manifest must be a plain file")
+        record = primitive.read_deployment_manifest(manifest)
+        if (
+            not isinstance(record, dict)
+            or record.get("schema_version") != 3
+            or record.get("service") != "agent-logger"
+        ):
+            raise RuntimeError("Logger deployment manifest is invalid or belongs to another product")
     else:
         marker = root / "payload-dir"
         _plain(marker)
@@ -105,11 +112,20 @@ def validate(root: Path):
             raise RuntimeError("Logger stamped ownership belongs to another product")
     receipt = None
     try:
-        receipt = binding.publish_legacy_binding(primitive, **arguments)
+        receipt = binding.publish_legacy_binding(primitive, operation="teardown", **arguments)
     except binding.SourceProvenanceUnavailable:
         if manifest.exists() and primitive.read_deployment_manifest(manifest).get("commandLifecycle") is not None:
             raise RuntimeError("Logger lifecycle ownership cannot be revalidated") from None
     return primitive, receipt
+
+
+def owned_command_names(root: Path) -> tuple[str, ...]:
+    """Select only ordinary global commands recognized by Logger's existing inventory."""
+    inventory = _load("_logger_uninstall_inventory", "installer_engine_uninstall.py")
+    payload = SCRIPTS.parent
+    profile = inventory.profile_for(payload, "agent-logger")
+    _, names = inventory._local_bindings(payload, root, profile)
+    return names
 
 
 def refuse_live_runtime(root: Path) -> None:
@@ -316,6 +332,7 @@ def main() -> int:
     parser.add_argument("--resolve-root", action="store_true")
     parser.add_argument("--unit-names", action="store_true")
     parser.add_argument("--unit-dir", type=Path)
+    parser.add_argument("--command-names", action="store_true")
     parser.add_argument("--idle", action="store_true")
     parser.add_argument("--prepare", action="store_true")
     parser.add_argument("--remove-runtime", action="store_true")
@@ -328,6 +345,9 @@ def main() -> int:
         owner = validate(root)
         if args.resolve_root:
             print(root)
+        if args.command_names:
+            for name in owned_command_names(root):
+                print(name)
         if args.unit_names:
             if args.unit_dir is None:
                 raise RuntimeError("Logger unit discovery requires a unit directory")

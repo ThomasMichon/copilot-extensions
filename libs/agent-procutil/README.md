@@ -73,15 +73,26 @@ arbitrary third-party output.
 
 ## Managed Python bytecode cache
 
-`agent_procutil.python_cache_args(root)` returns `["-X",
-"pycache_prefix=<root>/cache/python"]` for an absolute, caller-owned durable
-runtime state root. Put these interpreter arguments before `-m`, `-c`, or the
+`agent_procutil.python_cache_args(root, runtime=target)` returns `["-X",
+"pycache_prefix=<root>/cache/python/<installation-scope>"]` for an absolute,
+caller-owned durable runtime state root. `target` is the interpreter or runtime
+slot being launched; omission selects the caller's own `sys.prefix`, never
+another runtime. Put these interpreter arguments before `-m`, `-c`, or the
 script path. Bytecode remains enabled and isolated-mode Python honors the
 explicit prefix; `-B` read-only probes and bootstrap admission still suppress
 writes. The helper normalizes paths lexically (including standard extended
 drive/UNC paths on Windows), without creating directories, resolving links,
 changing global environment or interpreter settings, or choosing another state
 owner. It rejects relative roots and remains available in standalone bundles.
+
+Warm reuse requires the target's existing completion marker and installed
+distribution RECORD contents. Their combined digest selects the namespace;
+a changed installation selects another even when source paths, sizes, and
+timestamps match. Missing, malformed, redirected, or unrecorded evidence gets
+a fresh invocation namespace, not an owner-wide fallback. This reads existing
+installation evidence and produces no new deployment receipt or build cache.
+Native launchers that cannot inspect that evidence likewise use fresh
+invocation scopes; systemd uses its own service invocation ID.
 
 `cache/python` contains mutable, derived executable bytecode outside immutable
 version slots, not protected credentials, configuration, or business data.

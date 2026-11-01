@@ -224,7 +224,7 @@ def engine_command(home: Path | None = None) -> list[str]:
     py = engine_venv_python(home)
     return [
         windowless_python(str(py)),
-        *python_cache_args(os.path.abspath(home or engine_home())),
+        *python_cache_args(os.path.abspath(home or engine_home()), runtime=py),
         "-m",
         "agent_index_engine.app",
         "--host",

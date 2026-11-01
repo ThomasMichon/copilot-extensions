@@ -2034,9 +2034,14 @@ switch ($Action) {
             if ($LASTEXITCODE -ne 0) { throw $guardError }
         }
         if ($publishGlobalBinstubs) {
+            $guardError = ''
+            $ownedCommandOutput = Invoke-Hidden -FilePath $uninstallPython -ArgList ($uninstallGuardArgs + @('--command-names')) -ErrorOutput ([ref]$guardError)
+            if ($LASTEXITCODE -ne 0) { throw $guardError }
+            $ownedCommands = @($ownedCommandOutput -split '\r?\n' | Where-Object { $_ })
             $anyStub = $false
             foreach ($name in $BinstubNames) {
                 foreach ($ext in 'ps1', 'cmd') {
+                    if ("$name.$ext" -cnotin $ownedCommands) { continue }
                     $f = Join-Path $LocalBin "$name.$ext"
                     if (Test-Path $f) {
                         $anyStub = $true

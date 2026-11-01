@@ -202,10 +202,14 @@ def test_fast_handoff_retains_the_selected_engine_and_closes_its_job(tmp_path, m
     events = []
 
     def spawn(command, *, env):
+        from pathlib import Path
+
         assert command == ["qualified-manager", "--resident-picker", "--project", "sample"]
-        assert json.loads(env["WORKTREE_MANAGER_ENGINE_ARGV"]) == [
-            sys.executable, *agent_procutil.python_cache_args(tmp_path), "-m", "agent_worktrees",
-        ]
+        argv = json.loads(env["WORKTREE_MANAGER_ENGINE_ARGV"])
+        assert argv[0] == sys.executable and argv[1] == "-X"
+        prefix = Path(argv[2].removeprefix("pycache_prefix="))
+        assert prefix.parent == Path(agent_procutil.python_cache_args(tmp_path)[1].partition("=")[2]).parent
+        assert argv[3:] == ["-m", "agent_worktrees"]
         assert json.loads(env[picker_fast_entry.BOOTSTRAP_ENV]) == result
         return (
             SimpleNamespace(wait=lambda: 17, poll=lambda: 17),

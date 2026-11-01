@@ -9,6 +9,7 @@ import sys
 import os
 import tempfile
 import venv
+import re
 
 import pytest
 
@@ -67,7 +68,9 @@ def test_global_frontdoor_keeps_import_cache_outside_the_selected_slot(
     observed = json.loads(result.stdout)
     assert observed["args"] == ["cache-probe", "argument with spaces"]
     assert Path(observed["prefix"]).resolve() == slot.resolve()
-    assert observed["cache"] == python_cache_args(root)[1].split("=", 1)[1]
+    cache = Path(observed["cache"])
+    assert cache.parent == Path(python_cache_args(root)[1].split("=", 1)[1]).parent
+    assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
     assert {path.relative_to(slot): path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
     assert list((root / "cache" / "python").rglob("__main__*.pyc"))
 

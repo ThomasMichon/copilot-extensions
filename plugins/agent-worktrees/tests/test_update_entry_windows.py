@@ -9,8 +9,8 @@ import subprocess
 import sys
 
 import pytest
-from agent_procutil import no_window_kwargs, python_cache_args
-from test_update_entry import PLUGIN
+from agent_procutil import no_window_kwargs
+from test_update_entry import PLUGIN, _assert_cache_arguments
 from test_update_entry import update_entry_case as shared_update_entry_case
 
 update_entry_case = shared_update_entry_case
@@ -89,8 +89,9 @@ def test_selected_update_operation_bypasses_native_repair_and_implicit_provision
     )
     assert result.returncode == (29 if available else 127), result.stdout + result.stderr
     if available:
-        assert json.loads(proof.read_text()) == [
-            *python_cache_args(home / ".agent-worktrees"),
+        args = json.loads(proof.read_text())
+        _assert_cache_arguments(args[:2], home / ".agent-worktrees")
+        assert args[2:] == [
             "-m", "agent_worktrees", "--project", "sample", "update", *flags,
         ]
     else:

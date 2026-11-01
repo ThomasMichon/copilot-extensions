@@ -4981,6 +4981,11 @@ The parent allows the guardian's existing startup grace only until its first
 output. Subsequent progress renews the configured child inactivity window,
 not the startup-plus-teardown allowance; a blocked output pipe cannot postpone
 hang detection by repeatedly borrowing that grace.
+When incremental output is requested, `timeout` bounds inactivity, not total
+productive execution. An explicitly supplied monotonic `deadline` remains an
+absolute cap through launch and settlement; without incremental output the
+finite execution timeout still applies. Preparation and native launch retain
+their finite startup checks in either mode.
 If the parent's quiet window expires first, it closes its liveness pipe and
 continues draining the guardian's settled completion before propagating the
 timeout, preserving the child's original stdout and stderr channels.

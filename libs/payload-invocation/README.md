@@ -18,7 +18,9 @@ Generated shims:
 - preserve caller arguments and child exit status;
 - send enabled Python bytecode caches to the resolved legacy state root's
   `cache/python`, outside version slots (extended paths for native Windows
-  interpreters, including Windows Git Bash);
+  interpreters, including Windows Git Bash), with installation-scoped reuse or
+  fresh invocation namespaces under the
+  [shared cache contract](../agent-procutil/README.md#managed-python-bytecode-cache);
 - self-provision only through the same payload's installer/snapshot;
 - never scan installed marketplaces or resolve a sibling command through
   `PATH`.

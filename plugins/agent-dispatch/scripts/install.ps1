@@ -2843,7 +2843,8 @@ if (`$ResolveOnly) {
     Write-Output `$_py
     exit 0
 }
-`$_cache = [IO.Path]::GetFullPath((Join-Path `$_root 'cache\python'))
+`$_cacheId = [Guid]::NewGuid().ToString('N')
+`$_cache = [IO.Path]::GetFullPath((Join-Path `$_root "cache\python\unsealed-`$_cacheId"))
 if (-not `$_cache.StartsWith('\\?\')) {
     `$_cache = if (`$_cache.StartsWith('\\')) { '\\?\UNC\' + `$_cache.Substring(2) } else { '\\?\' + `$_cache }
 }
@@ -3527,7 +3528,8 @@ if (`$ResolveOnly) {
     Write-Output `$_py
     exit 0
 }
-`$_cache = [IO.Path]::GetFullPath((Join-Path `$_root 'cache\python'))
+`$_cacheId = [Guid]::NewGuid().ToString('N')
+`$_cache = [IO.Path]::GetFullPath((Join-Path `$_root "cache\python\unsealed-`$_cacheId"))
 if (-not `$_cache.StartsWith('\\?\')) {
     `$_cache = if (`$_cache.StartsWith('\\')) { '\\?\UNC\' + `$_cache.Substring(2) } else { '\\?\' + `$_cache }
 }

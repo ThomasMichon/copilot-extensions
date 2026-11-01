@@ -252,7 +252,10 @@ run_runtime() {
     else
         unset COPILOT_EXTENSIONS_CONTEXT
     fi
-    local python_cache="$RUNTIME_ROOT/cache/python"
+    local nonce python_cache selected_cache
+    nonce="$(LC_ALL=C od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+    [[ "$nonce" =~ ^[0-9a-f]{32}$ ]] || return 126
+    python_cache="$RUNTIME_ROOT/cache/python/unsealed-$nonce"
     if [[ "$AGENT_RT_PY" == *.exe ]]; then
         python_cache="$(cygpath -aw "$python_cache")"
         case "$python_cache" in
@@ -261,7 +264,17 @@ run_runtime() {
             *) python_cache='\\?\'"$python_cache" ;;
         esac
     fi
-    exec "$AGENT_RT_PY" -X "pycache_prefix=$python_cache" -m agent_worktrees "$@"
+    selected_cache="$("$AGENT_RT_PY" -I -X "pycache_prefix=$python_cache" -c '
+import sys
+try:
+    from agent_procutil.python_cache import cache_arguments
+except ImportError:
+    print(sys.pycache_prefix)
+else:
+    print(cache_arguments(sys.argv[1], runtime=sys.executable)[1].split("=", 1)[1])
+' "$RUNTIME_ROOT")" || return 126
+    [[ -n "$selected_cache" && "$selected_cache" != *$'\n'* ]] || return 126
+    exec "$AGENT_RT_PY" -X "pycache_prefix=$selected_cache" -m agent_worktrees "$@"
 }
 
 [[ -f "$MODE_RUNNER" && -f "$JSON_QUERY" && -f "$RUNTIME_RESOLVER" &&

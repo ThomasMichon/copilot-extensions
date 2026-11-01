@@ -430,6 +430,42 @@ def test_guardian_cannot_report_success_after_requested_execution_limit(monkeypa
     assert observed == [("retire", 10)]
 
 
+@pytest.mark.parametrize("absolute_deadline", [None, 2.0])
+def test_progress_guardian_renews_only_quiet_time_and_keeps_explicit_cap(
+    monkeypatch, absolute_deadline,
+):
+    path = ROOT / "libs/installer-engine/installer_engine_process.py"
+    spec = importlib.util.spec_from_file_location("fixture_guardian", path)
+    owner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(owner)
+    clock = {"now": 0.0}
+    observed = []
+    process = SimpleNamespace(returncode=0, wait=lambda **_: None)
+    job = SimpleNamespace(terminate_and_wait=lambda timeout: observed.append(("retire", timeout)))
+
+    def wait(timeout, **options):
+        assert timeout == 1.0
+        assert options["deadline"] == absolute_deadline
+        clock["now"] = 3.0
+
+    capture = SimpleNamespace(
+        wait=wait, finish=lambda _: ("productive", ""), deliver=lambda: None,
+    )
+    procutil = SimpleNamespace(
+        spawn_sync_in_kill_on_close_job=lambda *_a, **_k: (process, job),
+        no_window_kwargs=lambda: {}, SyncProcessLaunchError=RuntimeError,
+    )
+    monkeypatch.setattr(owner, "_output_capture", lambda *_a, **_k: capture)
+    monkeypatch.setattr(owner, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+    outcome = owner._run_guardian_child(
+        SimpleNamespace(timeout=1.0, progress_output=True), ["fixture"], procutil,
+        lambda: False, absolute_deadline, {},
+    )
+    assert outcome["timed_out"] is (absolute_deadline is not None)
+    assert outcome["stdout"] == "productive"
+    assert observed == [("retire", 10)]
+
+
 @pytest.mark.parametrize("deadline", [None, 2.0])
 @pytest.mark.parametrize("boundary", ["packet", "startup", "completion", "retirement"])
 def test_retained_guardian_preserves_deadline_before_launch_and_after_settlement(

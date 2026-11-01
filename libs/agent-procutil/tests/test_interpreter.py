@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import errno
+import base64
+import hashlib
 import json
 import os
 import stat
@@ -22,8 +24,21 @@ def test_external_python_cache_cold_warm_and_readonly(tmp_path):
     source.mkdir(parents=True)
     module = source / "cache_witness.py"
     module.write_text("VALUE = 42\n", encoding="utf-8")
+    runtime = source.parent
+    marker = runtime / ".install-complete.json"
+    marker.write_text(json.dumps({
+        "version": runtime.name, "completed_at": "2026-11-01T11:00:00Z",
+        "pid": 1, "payload_hash": "a" * 64,
+    }), encoding="utf-8")
+    record = runtime / "Lib" / "site-packages" / "witness.dist-info" / "RECORD"
+    record.parent.mkdir(parents=True)
+    def record_module():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(module.read_bytes()).digest()).decode().rstrip("=")
+        record.write_text(f"cache_witness.py,sha256={digest},11\n", encoding="utf-8")
+
+    record_module()
     environment = dict(os.environ)
-    arguments = pu.python_cache_args(root)
+    arguments = pu.python_cache_args(root, runtime=runtime)
     assert not root.exists()
 
     def snapshot():
@@ -47,7 +62,7 @@ def test_external_python_cache_cold_warm_and_readonly(tmp_path):
 
     def run(cache_root, *flags):
         result = subprocess.run(  # noqa: S603 - actual owned interpreter and fixture source
-            [sys.executable, "-I", *flags, *pu.python_cache_args(cache_root),
+            [sys.executable, "-I", *flags, *pu.python_cache_args(cache_root, runtime=runtime),
              "-c", code, str(source), str(module)],
             env={**environment, "PYTHONPYCACHEPREFIX": str(tmp_path / "foreign"),
                  "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": str(tmp_path / "foreign")},
@@ -72,6 +87,37 @@ def test_external_python_cache_cold_warm_and_readonly(tmp_path):
     assert snapshot() == before
     assert dict(os.environ) == environment
 
+    original_time = module.stat().st_mtime_ns
+    original_size = module.stat().st_size
+    module.write_text("VALUE = 84\n", encoding="utf-8")
+    os.utime(module, ns=(original_time, original_time))
+    assert module.stat().st_size == original_size
+    record_module()
+    replacement = run(root)
+    assert replacement[0] == 84
+    assert replacement[4] == 1
+    assert cached.read_bytes() == cache_before[0]
+    assert run(root)[4] == 0
+
+
+@pytest.mark.parametrize("evidence", ["absent", "malformed", "unrecorded"])
+def test_unsealed_python_cache_never_reuses_a_namespace(tmp_path, evidence):
+    runtime = tmp_path / "versions" / "incoming"
+    runtime.mkdir(parents=True)
+    if evidence != "absent":
+        (runtime / ".install-complete.json").write_text(
+            "{" if evidence == "malformed" else json.dumps({
+                "version": "incoming", "completed_at": "2026-11-01T11:00:00Z",
+                "pid": 1, "payload_hash": "a" * 64,
+            }), encoding="utf-8",
+        )
+    root = tmp_path / "owner"
+    first = pu.python_cache_args(root, runtime=runtime)
+    second = pu.python_cache_args(root, runtime=runtime)
+    assert first != second
+    assert "unsealed-" in first[1] and "unsealed-" in second[1]
+    assert not root.exists()
+
 
 def test_python_cache_rejects_relative_owner():
     with pytest.raises(ValueError, match="absolute owned"):
@@ -86,7 +132,9 @@ def test_python_cache_rejects_relative_owner():
     ("\\\\?\\UNC\\server\\share\\runtime", "\\\\?\\UNC\\server\\share\\runtime\\cache\\python"),
 ])
 def test_python_cache_windows_owned_paths(root, expected):
-    assert pu.python_cache_args(root) == ["-X", "pycache_prefix=" + expected]
+    arguments = pu.python_cache_args(root)
+    assert arguments[0] == "-X"
+    assert arguments[1].startswith("pycache_prefix=" + expected + "\\unsealed-")
 
 
 def _venv(root, home):

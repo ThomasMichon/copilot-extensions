@@ -111,24 +111,17 @@ __all__ = [
 ]
 
 
-def python_cache_args(root: str | os.PathLike[str]) -> list[str]:
-    """Keep enabled bytecode writes beneath the caller's durable state root.
+def python_cache_args(
+    root: str | os.PathLike[str], *, runtime: str | os.PathLike[str] | None = None,
+) -> list[str]:
+    """Select enabled external bytecode for the target installed generation.
 
-    Normalize lexically, without resolving links, creating directories, or
-    changing process settings. Windows extended paths accommodate CPython's
-    mirrored source paths without requiring machine-wide long-path settings.
+    ``runtime`` is the target interpreter or venv, not the current redirect.
+    Omit it only when launching this process's own installed environment.
     """
-    owned_root = os.fspath(root)
-    if not os.path.isabs(owned_root):
-        raise ValueError("Python cache requires an absolute owned runtime root")
-    prefix = os.path.normpath(os.path.join(owned_root, "cache", "python"))
-    if os.name == "nt" and not prefix.startswith("\\\\?\\"):
-        prefix = (
-            "\\\\?\\UNC\\" + prefix[2:]
-            if prefix.startswith("\\\\")
-            else "\\\\?\\" + prefix
-        )
-    return ["-X", "pycache_prefix=" + prefix]
+    from .python_cache import cache_arguments
+
+    return cache_arguments(root, runtime=runtime)
 
 
 def contained_test_mode() -> bool:

@@ -44,7 +44,8 @@ foreach ($_pyEnvVar in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONEXECUTABLE', 'VIRTUA
 # from the snapshot the stamp recorded, then dispatch. Opt out with
 # AGENT_WORKTREES_NO_SELFPROVISION=1 (then falls through to a PATH python).
 $_root = Join-Path $env:USERPROFILE '.agent-worktrees'
-$_awPythonCache = [IO.Path]::GetFullPath((Join-Path $_root 'cache\python'))
+$_awCacheId = [Guid]::NewGuid().ToString('N')
+$_awPythonCache = [IO.Path]::GetFullPath((Join-Path $_root "cache\python\unsealed-$_awCacheId"))
 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not $_awPythonCache.StartsWith('\\?\')) {
     $_awPythonCache = if ($_awPythonCache.StartsWith('\\')) {
         '\\?\UNC\' + $_awPythonCache.Substring(2)
