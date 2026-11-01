@@ -71,9 +71,10 @@ class PoolCatalogSnapshot:
 class QueuePoolCatalogMixin:
     """Internal primitives for the control-authenticated reconciliation owner.
 
-    Only that owner may enroll a real OS-lock holder and publish its complete
-    effective set. Ordinary allocators cannot supply their preferred pool subset.
-    There is deliberately no HTTP route or production caller in this expansion.
+    Only that owner may account for a publisher and publish its effective set.
+    Metadata authorization is not proof of the publisher's OS-lock admission.
+    Ordinary allocators cannot supply their preferred pool subset. No production
+    supervisor or allocator consumes these primitives.
     """
 
     if TYPE_CHECKING:

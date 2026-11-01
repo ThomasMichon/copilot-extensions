@@ -12,6 +12,7 @@ from .coordinator_loops import DrainGate, LoopHealth
 from .events import EventBus, sse_format
 from .queue import TaskQueue
 from .coordinator_task_recovery import RECOVERY_CONTRACT
+from .coordinator_pool_catalog import pool_catalog_contract
 
 
 def _slot_descriptor(app_state: Any) -> dict:
@@ -61,6 +62,8 @@ def register_status_routes(
     app: FastAPI,
     queue: TaskQueue,
     bus: EventBus,
+    *,
+    control_token: str | None = None,
 ) -> None:
     @app.get("/health")
     def health(request: Request, repo: str | None = None) -> dict:
@@ -103,6 +106,7 @@ def register_status_routes(
             "card_draft_scope": 1,
             "task_categories": 1,
             "exact_dedup_lookup": 1,
+            "pool_catalog_transport": pool_catalog_contract(control_token),
             "task_recovery": RECOVERY_CONTRACT,
             "delegated_run_waiters": {
                 "protocol": "delegated_run_waiters/v1",

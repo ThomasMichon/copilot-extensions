@@ -176,10 +176,11 @@ clients. Define mixed-cohort admission and rollback before switching a lane;
 unsupported peers must not silently bypass required capacity/routing semantics.
 Preserve direct interactive claims without inventing a supervised reservation.
 
-The [provider storage boundary](../../../plugins/agent-dispatch/docs/pool-publication.md)
-separates internal revision/generation-fenced storage from the still-pending
-authenticated transport, actual complete-source publisher and expected-scope
-membership. The singleton's OS lock is not a shared coordinator lease.
+The [metadata provider boundary](../../../plugins/agent-dispatch/docs/pool-publication.md)
+separates revision/generation-fenced storage and control-authenticated transport
+from the still-pending admitted complete-source publisher, expected-scope
+membership and atomic placement. Transport support is not executing-runtime
+qualification. The singleton's OS lock is not a shared coordinator lease.
 
 Do not backfill legacy pool/native identity from labels or mark historical
 startup effects settled. Preserve manual sessions, suspended work, attachment

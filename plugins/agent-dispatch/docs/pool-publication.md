@@ -1,9 +1,59 @@
-# Pool catalog provider storage
+# Pool catalog metadata provider
 
-`queue_pool_catalog.py` is the internal storage expansion for the
+`queue_pool_catalog.py` and its control-authorized coordinator routes provide
+the metadata expansion for the
 [reviewed assignment/startup amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md#selected-pool-scope-and-ordering).
-It is **not yet exposed over HTTP or used by a production supervisor or
-allocator**. Its metadata does not advertise atomic-placement support.
+It is **not used by a production supervisor or allocator**. Transport
+authorization does not prove publisher OS-lock admission, complete configured
+scope membership or atomic-placement support.
+
+## Implemented authenticated transport
+
+The running coordinator's existing `/health` response adds
+`pool_catalog_transport`, with protocol `pool_catalog_transport/v1`, supported
+metadata/definition versions and whether control authority is configured.
+The descriptor explicitly advertises metadata-only support and no lock-holder
+verification, configured-scope completeness or atomic placement. Read this
+running-peer declaration rather than inferring support from a package version
+or newer installed payload.
+
+All three new routes require the existing control bearer, independently of
+whether ordinary API authentication is enabled. A missing or empty configured
+control token yields `503`; missing, wrong or ordinary data authority yields
+`403`. Task-scoped authority cannot access these routes. Authentication is
+authorization for retained metadata, not a certificate of local source
+completeness or a supervisor process identity.
+
+| Route | Metadata operation |
+|-------|--------------------|
+| `GET /pool-catalog` | One unfiltered transaction over every retained scope, the catalog/registration revisions, original definitions, blockers and `metadata_ready` |
+| `POST /pool-catalog/scopes/begin` | Compare `expected_generation` for the explicit machine/environment/publisher incarnation |
+| `POST /pool-catalog/scopes/publish` | Compare generation, publication and registration revisions and replace the whole scope, or record unavailable inputs |
+
+Both write bodies require integer `version: 1`, `machine`, `env` and
+`publisher_id`. Begin also requires `expected_generation`; publish requires
+`generation`, `expected_revision`, `registration_revision`, `input_revision`
+and the entire `definitions` array, with an optional unavailable `reason`.
+Definitions use the lossless [version-1 model](pool-instances.md); its reader
+tolerates additive fields without dropping required permit/reject semantics.
+The write envelope rejects unknown fields and coerced revisions, including
+booleans. There is no caller clock, TTL, preferred subset, winner, slot count
+or completeness flag. Scoped/partial GET requests are refused.
+
+Malformed request bodies yield `422`; invalid normalized definitions yield
+`400`; stale generation/revision/input fences or incompatible scope publication
+yield `409`, with a visible rejection reason. A malformed array cannot publish
+its otherwise-valid subset. An unknown write response must be recovered by
+retrying the **original** request; successful immediate replay observes the
+retained result without extending freshness. Inspection also never renews it.
+
+This is a provider-first expansion: legacy registration requests/responses and
+supervisor behavior are unchanged; ordinary callers emit no new syntax.
+Missing/out-of-range transport declarations on old or rolled-back providers
+are unsupported for this new operation, not permission to replay a write as a
+legacy registration or to reject an otherwise-supported legacy operation.
+Publisher enrollment, consumer migration and the retirement/rollback window
+remain gated by the integration obligations below.
 
 ## Implemented local collection boundary
 
@@ -111,9 +161,10 @@ store does not prove there are no configured pools. Scope withdrawal and
 mixed-cohort/rollback policy remain separate reviewed integration work; there
 is no automatic unenrollment or legacy identity backfill.
 
-Add the authenticated transport and running-peer capability declaration
-provider-first through existing coordinator seams. Only migrate callers after
-those capabilities and complete-source collection are qualified. A legacy
+The authenticated transport and running-peer declaration are provider-first
+metadata support, not executing-runtime qualification. Only migrate callers
+after those capabilities, actual lock-holder publication and complete-source
+collection are qualified. A legacy
 peer cannot be treated as enforcing required placement semantics by ignoring
 new metadata. This expansion changes no existing registration response,
 subprocess spec, reservation, worker claim, startup or suspension behavior.
