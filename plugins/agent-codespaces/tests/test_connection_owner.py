@@ -625,7 +625,8 @@ def test_ensure_selected_owner_never_accepts_an_old_build_as_startup_readiness(
     monkeypatch.setattr(owner, "_live_snapshot", lambda: live)
     starts = []
 
-    def spawn(root, *, source):
+    def spawn(root, *, source, installed):
+        assert installed, "only captured slot provenance licenses isolated startup"
         starts.append(root)
         return object(), root / "log"
 

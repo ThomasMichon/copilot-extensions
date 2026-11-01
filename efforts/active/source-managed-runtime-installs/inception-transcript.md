@@ -244,3 +244,23 @@ Keep temporary path prefixes compact and avoid materializing unrelated Git
 trees when acquiring the Manager's payload and required libraries. This
 refines the path-length remedy; it does not authorize moving or deleting
 active scratch data or changing the installation's durable data root.
+
+## Promotion-mediated backing checkouts and app staging
+
+Operator refinement, 2026-10-31:
+
+> Right. We want to ensure we stay out of the way of the new effort's mostly-uv-native wheel-first and pyproject-strict approach. The new effort should still support the "install from any backing checkout" approach you are doing here, with the caveat that all source-install footprints must be done by a "promotion" flow, which produces a main-equivalent snapshot and matching pre-built wheels for fast install.
+
+> One important piece of that effort requires that every "app" have a split "install" and "activate" flow. Probably would look more like having `install --stage` and `install`; `--stage` just loads the venv up and ensures everything is ready for the cutover, and then a normal `install` handles the binstub updates, version slot redirect update, and then launches the now-current versions to launch and cause the outgoing versions to sunset.
+
+The source choice remains flexible, but all installable source representations
+come from promotion as a main-equivalent snapshot and matching prebuilt wheels.
+Source expansion and first-party builds belong to that flow, not a parallel
+downstream assembler. The existing cached-source-wheel-assembly effort owns its
+UV-native, pyproject-strict construction direction.
+
+Every app must separate candidate staging/readiness from active publication and
+launch. The two command spellings are proposed; this capture neither implements
+them nor authorizes sending new flags to older providers. The outgoing owner
+sunsets after the successor starts, not merely when its selector changes.
+Existing installation/data, lifecycle and rollout custody remain unchanged.

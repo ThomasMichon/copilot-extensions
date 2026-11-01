@@ -12,9 +12,19 @@
 
 ## Guiding Intent
 
+Backing checkouts remain source inputs, but every source-install footprint is
+prepared by a promotion flow producing a main-equivalent snapshot and matching
+prebuilt wheels. Consume the existing cached-source-wheel-assembly effort's
+UV-native, pyproject-strict factory rather than extending a competing raw-source
+installer. Every app separates candidate staging/readiness from active
+publication and launch; the incumbent sunsets after its successor starts.
+The [current refinement](inception-transcript.md#promotion-mediated-backing-checkouts-and-app-staging)
+governs the wheel-first transition, not a claim that the historical source lane
+or installed fleet has already migrated.
+
 Separate Copilot plugin delivery from service-runtime deployment without
-disabling ordinary hook behavior. An opted-in installation can deploy clean,
-merged development source directly, retain a stable release or exact pin, and
+disabling ordinary hook behavior. An opted-in installation can select its backing
+source independently, consume its promoted snapshot and wheels, retain a stable release or exact pin, and
 iterate through immutable generations without waiting for marketplace payload
 updates or rewriting a live environment.
 
@@ -117,6 +127,20 @@ commits, materialized payload digests, package versions, profiles and dependency
 locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
+
+**Promotion-mediated source inputs and app staging (2026-10-31), settled summary:**
+stay out of the existing cached-source-wheel-assembly effort's UV-native,
+wheel-first and pyproject-strict implementation. Preserve install-from-any-backing-
+checkout as a source choice, but require promotion to produce every source-install
+footprint as a main-equivalent snapshot with matching prebuilt wheels.
+Every app must split staging/install preparation from activation.
+`install --stage` and normal `install` are proposed command spellings: staging
+loads and qualifies the candidate venv without active publication; normal
+installation updates binstubs and version redirects, launches the now-current
+version, and lets the outgoing version sunset after that startup.
+The [verbatim refinement](inception-transcript.md#promotion-mediated-backing-checkouts-and-app-staging)
+is authoritative. Existing owners, data, approvals and provider-version gates
+remain; no alternate builder, cache or project-declaration model is introduced.
 
 **Intentional footprint evolution (2026-10-31), operator refinement:**
 make schema changes deliberately, retain backward compatibility when practical,
@@ -350,6 +374,7 @@ disposable scope while preserving config and durable data.
 
 ### Phase W — Wheel-first independent suite (proposal extension)
 - [ ] Review and merge the [upstream intent checkpoint and W0–W4 plan](wheel-first-transition.md#plan-and-acceptance) before implementing the new direction.
+- [ ] Reconcile the promotion-mediated backing-checkout and every-app staging/activation contract with the existing #9290 owners; consume their UV-native, pyproject-strict implementation without taking over construction/cache/profile/publisher work.
 - [ ] Deliver the Manager-only fast path and complete locally promoted uv/wheel inputs through existing source/release owners.
 - [ ] Prove whole-system Windows-container installation, source/version update, cutover, state survival and the generic recovery cases.
 - [ ] Integrate independent maintenance and bounded prepared plugin/guidance selection without foreground rebuilds/scans.

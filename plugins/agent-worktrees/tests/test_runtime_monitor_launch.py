@@ -27,9 +27,11 @@ def runtime():
     return module
 
 
-@pytest.mark.parametrize("complete,owner_dies", [(False, False), (True, False), (True, True)])
-def test_retained_bootstrap_pins_before_application_imports(
-    runtime, tmp_path, complete, owner_dies,
+@pytest.mark.parametrize("complete,owner_dies,site_before_lease", [
+    (False, False, False), (True, False, False), (True, True, False), (True, False, True),
+])
+def test_retained_bootstrap_pins_before_pth_or_application_imports(
+    runtime, tmp_path, complete, owner_dies, site_before_lease,
 ):
     from zdd import diagnostics
 
@@ -46,6 +48,21 @@ def test_retained_bootstrap_pins_before_application_imports(
     bootstrap.mkdir()
     for source in [scripts / "runtime_launcher.py", *scripts.glob("versioned_runtime*.py")]:
         shutil.copyfile(source, bootstrap / source.name)
+    if site_before_lease:
+        launcher = bootstrap / "runtime_launcher.py"
+        text = launcher.read_text(encoding="utf-8")
+        original = (
+            '    with runtime.retention_lease(root, slot.name, payload_hash=marker["payload_hash"]):\n'
+            "        import site\n\n"
+            "        site.main()\n"
+        )
+        assert text.count(original) == 1
+        launcher.write_text(text.replace(
+            original,
+            "    import site\n"
+            "    site.main()\n"
+            '    with runtime.retention_lease(root, slot.name, payload_hash=marker["payload_hash"]):\n',
+        ), encoding="utf-8")
     python = runtime.slot_python(root, slot.name)
     site_packages = Path(subprocess.check_output(
         [str(python), "-I", "-B", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
@@ -53,6 +70,7 @@ def test_retained_bootstrap_pins_before_application_imports(
     ).strip())
     site_packages.mkdir(parents=True, exist_ok=True)
     ready = tmp_path / "ready.json"
+    site_ready = tmp_path / "site-ready.json"
     stop = tmp_path / "stop"
     (site_packages / "retention_probe.py").write_text(
         "import json, pathlib, sys\n"
@@ -63,12 +81,27 @@ def test_retained_bootstrap_pins_before_application_imports(
         "shared=False, timeout=0):\n"
         "        raise AssertionError('site imported without process retention')\n"
         "except runtime.RetentionTimeout:\n"
-        f"    pathlib.Path({str(ready)!r}).write_text(json.dumps({{'prefix':sys.prefix}}))\n",
+        "    pass\n",
         encoding="utf-8",
+    )
+    # Exercise an admitted slot-local hook without allowing arbitrary executable .pth files.
+    hook_dir = site_packages / "win32" / "lib"
+    hook_dir.mkdir(parents=True)
+    (site_packages / "pywin32_system32").mkdir()
+    (hook_dir / "pywin32_bootstrap.py").write_text(
+        "import retention_probe\n"
+        "import json,pathlib,sys\n"
+        f"pathlib.Path({str(site_ready)!r}).write_text(json.dumps({{'prefix':sys.prefix}}))\n",
+        encoding="utf-8",
+    )
+    (site_packages / "pywin32.pth").write_text(
+        "win32/lib\npywin32_system32\nimport pywin32_bootstrap\n", encoding="utf-8",
     )
     (site_packages / "retention_application.py").write_text(
         "import retention_probe\n"
-        "import pathlib,time\n"
+        "import json,pathlib,sys,time\n"
+        f"assert pathlib.Path({str(site_ready)!r}).exists(), 'site hook did not observe retention'\n"
+        f"pathlib.Path({str(ready)!r}).write_text(json.dumps({{'prefix':sys.prefix}}))\n"
         f"stop=pathlib.Path({str(stop)!r})\n"
         "while not stop.exists(): time.sleep(0.05)\n",
         encoding="utf-8",
@@ -100,10 +133,15 @@ def test_retained_bootstrap_pins_before_application_imports(
     child_identity = None
     child_pid = None
     try:
-        if not complete:
+        if not complete or site_before_lease:
             output, error = process.communicate(timeout=30)
             assert process.returncode != 0
-            assert "attributable completion" in error, (output, error)
+            expected_error = (
+                "site imported without process retention" if site_before_lease
+                else "attributable completion"
+            )
+            assert expected_error in error, (output, error)
+            assert not site_ready.exists(), "site hook imported before retention admission"
             assert not ready.exists(), "site/application imported before retention admission"
             return
         deadline = time.monotonic() + 30
@@ -113,6 +151,7 @@ def test_retained_bootstrap_pins_before_application_imports(
             process.communicate(timeout=5) if process.poll() is not None else "bootstrap stalled"
         )
         assert Path(json.loads(ready.read_text())["prefix"]).resolve() == slot.resolve()
+        assert Path(json.loads(site_ready.read_text())["prefix"]).resolve() == slot.resolve()
         if owner_dies:
             child_pid = int(pid_file.read_text())
             child_identity = diagnostics.process_start_time(child_pid)

@@ -134,7 +134,7 @@ def test_codespaces_legacy_exclusions_are_preserved_state_and_guard_uninstall(
         "host": platform.node(), "predecessors": [],
     }
     if evidence == "unresolved":
-        value["predecessors"] = [{"pid": 123, "process_identity": None}]
+        value["predecessors"] = [{"pid": os.getpid(), "process_identity": None}]
     elif evidence == "unknown":
         value["version"] = 99
     path.write_text("{" if evidence == "corrupt" else json.dumps(value), encoding="utf-8")
@@ -148,6 +148,171 @@ def test_codespaces_legacy_exclusions_are_preserved_state_and_guard_uninstall(
     assert path.read_bytes() == before
     profile = json.loads((payload / "scripts" / "uninstall-profile.json").read_text())
     assert path.name not in profile["root_entries"]
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize("known_birth", (True, False))
+def test_codespaces_uninstall_observes_exited_predecessor_without_pruning(tmp_path, monkeypatch, known_birth):
+    from ssh_manager.locks import process_identity
+    from agent_procutil import no_window_kwargs
+
+    module = _policy("agent-codespaces")
+    home = tmp_path / "home"
+    root = home / ".agent-codespaces"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    path = root / "connection-owner.predecessors.json"
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdin.buffer.read(1)"],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        **no_window_kwargs(),
+    )
+    try:
+        birth = process_identity(child.pid)
+        assert birth
+        path.write_text(json.dumps({
+            "schema": "agent-codespaces.owner-predecessors", "version": 1,
+            "host": platform.node(),
+            "predecessors": [{"pid": child.pid, "process_identity": birth if known_birth else None}],
+        }), encoding="utf-8")
+        before = path.read_bytes()
+        with pytest.raises(RuntimeError, match="unresolved"):
+            module.check_under_custody(root, ROOT / "plugins" / "agent-codespaces", "agent-codespaces")
+        child.stdin.close()
+        assert child.wait(timeout=8) == 0
+        module.check_under_custody(root, ROOT / "plugins" / "agent-codespaces", "agent-codespaces")
+        assert path.read_bytes() == before
+    finally:
+        if not child.stdin.closed:
+            child.stdin.close()
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=5)
+
+
+def test_codespaces_uninstall_settles_reused_birth_without_retargeting(tmp_path, monkeypatch):
+    from ssh_manager.locks import process_identity
+
+    module = _policy("agent-codespaces")
+    home = tmp_path / "home"
+    root = home / ".agent-codespaces"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    birth = process_identity(os.getpid())
+    assert birth and not birth.startswith("ps-start:")
+    prefix, _, ticks = birth.rpartition(":")
+    path = root / "connection-owner.predecessors.json"
+    path.write_text(json.dumps({
+        "schema": "agent-codespaces.owner-predecessors", "version": 1,
+        "host": platform.node(),
+        "predecessors": [{"pid": os.getpid(), "process_identity": prefix + ":" + str(int(ticks) + 1)}],
+    }), encoding="utf-8")
+    before = path.read_bytes()
+    module.check_under_custody(root, ROOT / "plugins" / "agent-codespaces", "agent-codespaces")
+    assert process_identity(os.getpid()) == birth
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("evidence", (
+    "unknown-birth", "malformed-birth", "malformed-pid", "foreign-host", "linked",
+    "duplicate", "unprovable",
+))
+def test_codespaces_uninstall_refuses_uncertain_predecessor_evidence(tmp_path, monkeypatch, evidence):
+    module = _policy("agent-codespaces")
+    home = tmp_path / "home"
+    root = home / ".agent-codespaces"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    path = root / "connection-owner.predecessors.json"
+    from ssh_manager.locks import process_identity
+
+    record = {"pid": os.getpid(), "process_identity": process_identity(os.getpid())}
+    assert record["process_identity"]
+    value = {
+        "schema": "agent-codespaces.owner-predecessors", "version": 1,
+        "host": platform.node(), "predecessors": [record],
+    }
+    if evidence == "unknown-birth":
+        record["process_identity"] = None
+    elif evidence == "malformed-birth":
+        record["process_identity"] = "not-a-native-birth"
+    elif evidence == "malformed-pid":
+        record["pid"] = True
+    elif evidence == "foreign-host":
+        value["host"] += "-foreign"
+    elif evidence == "unprovable":
+        original = module._observation_helpers
+
+        def helpers(payload):
+            proof, native = original(payload)
+            monkeypatch.setattr(native, "_runtime_publication_process_identity", lambda pid: None)
+            return proof, native
+
+        monkeypatch.setattr(module, "_observation_helpers", helpers)
+    path.write_text(json.dumps(value), encoding="utf-8")
+    if evidence == "linked":
+        os.link(path, root / "alias")
+    elif evidence == "duplicate":
+        path.write_text(path.read_text().replace('"version": 1', '"version": 1, "version": 1'))
+    before = path.read_bytes()
+    with pytest.raises((RuntimeError, ValueError)):
+        module.check_under_custody(root, ROOT / "plugins" / "agent-codespaces", "agent-codespaces")
+    assert path.read_bytes() == before
+
+
+def test_codespaces_uninstall_bounds_actual_read_after_evidence_growth(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    module = _policy("agent-codespaces")
+    home = tmp_path / "home"
+    root = home / ".agent-codespaces"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    path = root / "connection-owner.predecessors.json"
+    initial = json.dumps({
+        "schema": "agent-codespaces.owner-predecessors", "version": 1,
+        "host": platform.node(), "predecessors": [],
+    }).encode("utf-8")
+    path.write_bytes(initial)
+    original_open = Path.open
+    reads = []
+
+    class BoundedReader:
+        def __init__(self, stream) -> None:
+            self.stream = stream
+
+        def read(self, size: int = -1) -> bytes:
+            reads.append(size)
+            assert size == 65537, "evidence growth must not trigger an unbounded read"
+            return self.stream.read(size)
+
+    @contextmanager
+    def growing_reader():
+        # state_path uses native descriptors; this growth occurs only after
+        # its initial principal/size proof, immediately before the JSON read.
+        with original_open(path, "ab") as writer:
+            remaining = 65538 - len(initial)
+            while remaining:
+                chunk = min(remaining, 512)
+                writer.write(b" " * chunk)
+                remaining -= chunk
+        with original_open(path, "rb") as reader:
+            yield BoundedReader(reader)
+
+    def open_evidence(candidate, mode="r", *args, **kwargs):
+        if candidate == path and mode == "rb":
+            return growing_reader()
+        return original_open(candidate, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", open_evidence)
+    with pytest.raises(RuntimeError, match="exceeded its bound"):
+        module.check_under_custody(root, ROOT / "plugins" / "agent-codespaces", "agent-codespaces")
+    assert reads == [65537]
+    assert path.stat().st_size == 65538
+    with original_open(path, "rb") as retained:
+        assert retained.read(len(initial)) == initial
 
 
 def _run(tmp_path, plugin, shell, home, root, *, preview=False, before=""):

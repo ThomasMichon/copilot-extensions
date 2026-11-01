@@ -983,7 +983,9 @@ def ensure_owner_running(
     if selected_is_live():
         return True
     try:
-        child, stdio_log = spawn_owner_process(RUNTIME_DIR, source=__file__)
+        child, stdio_log = spawn_owner_process(
+            RUNTIME_DIR, source=__file__, installed=_PROCESS_SELECTION is not None,
+        )
     except Exception as exc:
         log.warning("Connection Owner on-demand spin-up failed: %s", exc)
         return False
