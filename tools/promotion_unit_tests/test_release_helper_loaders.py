@@ -283,7 +283,10 @@ def test_fingerprint_preserves_type_parameter_like_string_constants():
     assert _dump_ast(literal) == ast.dump(literal)
 
 
-@pytest.mark.parametrize("fault", ["bundle", "accounting-bundle", "bootstrap", "supervisor", "main"])
+@pytest.mark.parametrize("fault", [
+    "bundle", "accounting-bundle", "bootstrap", "supervisor", "main",
+    "scope-retention", "scope-registration", "stream-deadline",
+])
 def test_retained_guardian_actor_changes_require_fresh_source_qualification(fault):
     root = Path(__file__).resolve().parents[2]
     source = (root / _ACTOR_SOURCE).read_text()
@@ -293,6 +296,12 @@ def test_retained_guardian_actor_changes_require_fresh_source_qualification(faul
         "bootstrap": ("base64.b64decode(v,validate=True)", "base64.b64decode(v)"),
         "supervisor": ("allow_breakaway=False", "allow_breakaway=True"),
         "main": ("_supervise_windows(args, args.command[1:])", "_supervise_windows(other, args.command[1:])"),
+        "scope-retention": (
+            "custody.enter_context(runtime.retention_lease(Path(args.runtime_root), args.runtime_version))",
+            "custody.enter_context(runtime.retention_lease(Path(args.runtime_root), 'other'))",
+        ),
+        "scope-registration": ("scope.versions.add(args.runtime_version.lower())", "scope.versions.add('other')"),
+        "stream-deadline": ("deadline=execution_deadline, wait_for_eof=False", "deadline=None, wait_for_eof=False"),
     }[fault]
     assert before in source
     with pytest.raises(UnitEvidenceError, match="retained runtime actor source shape changed"):
