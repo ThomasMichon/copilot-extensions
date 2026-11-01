@@ -205,6 +205,10 @@ live claim token. No new blanket ACK or executor appointment is created.
 - [ ] Execute the amendment's implementation/compatibility plan only through
       separately claimed, reviewed source slices, preserving incumbent startup,
       idle-worker, pool-capacity and submission owners.
+      Configured-source and coordinator metadata-fence prerequisites merged in
+      #9826 and #9834; fresh owner publication, cohort-aware original request
+      custody, external atomicity, mixed writers and placement remain separate
+      acceptance gates.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
       reservation admission; preserve active replay and suspended re-embodiment.
       This bounded admission fix does not complete atomic pool placement,
@@ -1500,3 +1504,39 @@ qualification, scope withdrawal, installed adoption and atomic placement remain
 open. No configuration was migrated, no publisher was enrolled and the running
 descriptor still advertises `configured_scope_membership: false`. This parent
 and its entire original Plan/Validation matrix remain **Active**.
+
+### 2026-10-31 - Configured-cohort coordinator metadata fences
+
+The existing catalog owner now retains the registrar's whole configured
+observation with coordinator CAS and append-only history. Configured intent
+remains distinct from enrolled scopes, reported registrations and actual runtime
+support. Fresh enrollment/publication checks the current cohort revision and
+actual execution-machine/environment membership in its write transaction.
+Missing configured scopes, retained unconfigured scopes and stale definition
+attribution block metadata readiness without erasing custody or history.
+
+[#9834](https://github.com/ThomasMichon/copilot-extensions/pull/9834) actually
+merged as `b0ac1df138352487e62819382c7d5afc5bd5f37e` after independent
+current-head approval and all three required checks passed. The final contained
+310-case packet includes whole-cohort refusal, exact source/configured/coordinator
+revision distinctions, original replay without freshness renewal, transaction
+rollback, concurrent CAS, prior-schema preservation/reopen and strict transport.
+An acknowledgment gap allowed fabricated enrollment attribution on an unfenced
+publish response; all four begin/publish and enrollment/definition-attribution
+combinations now refuse before clearing original pending custody. The resolved
+thread and post-merge backup remain retained.
+
+Explicit complete empty intent can confirm configured coverage, never infer it
+from an absent projection. Additive transport fence support is metadata-only;
+runtime membership, lock-holder verification and placement still advertise false.
+No configuration publisher route, ordinary caller or activation is wired.
+Older positional clock initialization cannot reopen the expanded schema:
+old-writer exclusion and executable rollback require separate qualification
+before any live migration or adoption.
+
+This closes the bounded coordinator metadata projection/fence prerequisite,
+not the amendment. The next source slice carries the cohort fence through
+the existing original-request read, preparation, replay and acknowledgment owner.
+Fresh configuration publication, external-file atomicity, mixed-version writers,
+scope withdrawal, installed/runtime qualification, atomic placement and every
+original Plan/Validation item remain open. The parent stays **Active**.

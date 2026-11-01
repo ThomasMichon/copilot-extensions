@@ -130,7 +130,8 @@ including when another parent thread held that mutex at the fork.
 The explicit `capture_pool_publication_inputs()` seam brackets the existing
 effective-set collection and a fresh declaration/override recheck with two
 control-authorized coordinator catalog observations. It requires equal
-coordinator registration revisions and publisher positions, exact local-input
+coordinator registration revisions, publisher positions and the whole retained
+configured-cohort observation, exact local-input
 digests and fresh reads from this attempt. Declaration publication or any other
 registration mutation during collection makes that attempt unavailable.
 Delayed futures, read failures, incomplete sources and changed local inputs do
@@ -187,6 +188,23 @@ with bounded local memory; durable publication history stays provider-owned.
 
 The client read negotiates the running peer's version-1 metadata/definition
 support and configured control authority before accessing the unfiltered catalog.
+Its additive cohort reader preserves the coordinator revision, configured
+revision, exact source-byte digest, logical and intended execution identities,
+state and unavailable reason. Missing legacy fields and an explicit unprojected
+observation remain distinct from confirmed-empty, unconfirmed or unavailable
+configuration. Duplicate or malformed members refuse the whole observation;
+reported scopes cannot stand in for missing configured members.
+Once a projected cohort exists, preparation requires a complete observation
+containing this actual execution machine/environment; a matching logical name
+alone is insufficient. The original request emits that retained coordinator
+revision as `expected_cohort_revision`. Fenced POSTs additionally require the
+running peer's optional version-1 cohort support before local admission or
+effects. Unfenced requests retain their supported legacy wire form; an old or
+rolled-back peer never receives a downgraded copy of a fenced request.
+Subsequent preparation cannot silently lose/regress the settled cohort revision,
+reuse it for different observation data, or change the same-position retained
+scope's attribution. These are observed metadata fences, not an attestation
+of current external configuration or runtime membership.
 Missing, old or unsupported support refuses the new operation without trying a
 legacy write. **No serve-loop caller or pool activation is wired.**
 These source prerequisites leave the provider's
@@ -222,6 +240,14 @@ additive response fields remain compatible.
 The original catalog read retains each complete scope, not just its position.
 Enrollment acknowledgment must preserve that original definition/freshness
 baseline exactly, including empty, unattributed initial enrollment.
+Its enrollment attribution matches the original begin fence; a publication
+preserves the original scope's enrollment attribution even when the current
+cohort has advanced. Complete definitions receive the original publication's
+cohort revision, while unavailable results retain the last-settled definition
+attribution. A fabricated or missing expected attribution leaves the same
+request pending. Accepted original results can still be accounted after
+cohort removal, uncertainty or revision advancement without another POST,
+freshness renewal or re-enrollment.
 Pending replies cannot attribute definitions to their new, unpublished
 generation; complete and unavailable replies retain their respective
 current-versus-prior attribution rules. Malformed attribution cannot become
