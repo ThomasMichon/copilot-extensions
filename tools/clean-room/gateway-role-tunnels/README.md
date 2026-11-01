@@ -53,6 +53,12 @@ prevents accidentally exercising the current uncommitted runtime or substituting
 a host fixture. The allowlist intentionally requires review when the package
 source closure changes.
 
+The pinned roster and closed Docker context must carry the construction inputs
+declared by `fleet-manager/setup.py` and the package data declared by its
+`pyproject.toml`, not only Python modules. The distribution controls build both
+repository and pinned contexts and check the installed resource bytes; they do
+not qualify a live container witness.
+
 ## Composition and custody
 
 One unique timestamp/random private directory beneath the supplied root contains

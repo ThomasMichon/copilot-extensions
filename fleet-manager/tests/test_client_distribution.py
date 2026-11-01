@@ -379,7 +379,9 @@ def gateway_context_inputs(recipe: Path) -> tuple[set[str], list[str]]:
         if not line.startswith("COPY "):
             continue
         words = shlex.split(line)
-        copied.update(name for name in words[1:-1] if name.startswith("libs/"))
+        copied.update(
+            name for name in words[1:-1] if name.startswith(("libs/", "fleet-manager/"))
+        )
     patterns = (recipe / "Dockerfile.dockerignore").read_text(encoding="utf-8").splitlines()
     return copied, patterns
 
@@ -392,7 +394,11 @@ def gateway_context_supplies(name: str, copied: set[str], patterns: list[str]) -
             if fnmatch.fnmatchcase(name, pattern.removeprefix("!").rstrip("/")):
                 included = allow
     return included and (
-        name in copied or any(source.endswith("/") and name.startswith(source) for source in copied)
+        any(
+            fnmatch.fnmatchcase(name, source)
+            or source.endswith("/") and name.startswith(source)
+            for source in copied
+        )
     )
 
 
@@ -570,5 +576,13 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
     with zipfile.ZipFile(next(output.glob("*.whl"))) as artifact:
         for module in sorted((PROJECT / "src" / "fleet_manager").glob("*.py")):
             assert artifact.read("fleet_manager/" + module.name) == module.read_bytes()
+        contract = PROJECT / "src/fleet_manager/ssh-client-contract.json"
+        assert gateway_context_supplies(
+            "fleet-manager/src/fleet_manager/ssh-client-contract.json", copied, patterns,
+        )
+        assert not gateway_context_supplies(
+            "fleet-manager/src/fleet_manager/unregistered-contract.json", copied, patterns,
+        )
+        assert artifact.read("fleet_manager/" + contract.name) == contract.read_bytes()
         for name, member in runtime.RUNTIME_RESOURCES.items():
             assert artifact.read(f"fleet_manager/{member}") == (LIBRARY / name).read_bytes()
