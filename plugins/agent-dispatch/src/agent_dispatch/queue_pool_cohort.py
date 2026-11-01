@@ -85,6 +85,18 @@ def cohort_from_clock(row: sqlite3.Row) -> PoolConfiguredCohort:
     )
 
 
+def _original_cohort_result(
+    conn: sqlite3.Connection, encoded: str, expected_revision: int,
+) -> PoolConfiguredCohort | None:
+    row = conn.execute(
+        "SELECT revision AS cohort_revision, observation AS cohort_observation"
+        " FROM pool_catalog_cohort_history WHERE observation = ?"
+        " AND revision IN (?, ?) ORDER BY revision DESC LIMIT 1",
+        (encoded, expected_revision, expected_revision + 1),
+    ).fetchone()
+    return None if row is None else cohort_from_clock(row)
+
+
 def require_cohort_scope(
     conn: sqlite3.Connection, machine: str, env: str, expected: int | None,
 ) -> None:
@@ -141,6 +153,23 @@ class QueuePoolCohortMixin:
             " accepted_at REAL NOT NULL)"
         )
 
+    def pool_configured_cohort(self) -> PoolConfiguredCohort:
+        """Read the whole retained projection without renewing or inferring it."""
+        with self._connect() as conn:
+            return cohort_from_clock(conn.execute(
+                "SELECT * FROM pool_catalog_clock WHERE singleton = 1",
+            ).fetchone())
+
+    def recover_pool_configured_cohort(
+        self, observation: ConfiguredSupervisorCohort, *, expected_revision: int,
+    ) -> PoolConfiguredCohort | None:
+        """Read only an exact original result, including a satisfied no-op."""
+        encoded = _encode_observation(observation)
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise TaskError("pool cohort expected revision must be a nonnegative integer")
+        with self._connect() as conn:
+            return _original_cohort_result(conn, encoded, expected_revision)
+
     def observe_pool_configured_cohort(
         self, observation: ConfiguredSupervisorCohort, *,
         expected_revision: int, now: float | None = None,
@@ -159,8 +188,9 @@ class QueuePoolCohortMixin:
                 "SELECT * FROM pool_catalog_clock WHERE singleton = 1"
             ).fetchone()
             current = cohort_from_clock(clock)
-            if current.revision == expected_revision + 1 and clock["cohort_request"] == request:
-                return current
+            original = _original_cohort_result(conn, encoded, expected_revision)
+            if original is not None:
+                return original
             if current.revision != expected_revision:
                 raise TaskError("pool cohort revision changed; refusing stale observation")
             if clock["cohort_observation"] == encoded:

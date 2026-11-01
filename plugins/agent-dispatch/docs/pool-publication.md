@@ -210,6 +210,43 @@ legacy write. **No serve-loop caller or pool activation is wired.**
 These source prerequisites leave the provider's
 metadata-only/false admission and placement advertisements unchanged.
 
+### Fresh configured-owner projection preparation
+
+`PoolCohortPreparation` explicitly brackets two fresh
+`RegistrarSources.configured_supervisor_cohort()` reads with whole coordinator
+cohort observations. It retains one immutable original observation and its
+original coordinator CAS only when both source reads and both coordinator
+observations agree. It does not accept a preferred member subset or inferred
+enrollment roster. Logical names and intended execution identities remain
+separate. Original source/coordinator target paths remain in local request
+custody, not the metadata body; equal bytes or revisions at a different target
+cannot silently replace either owner.
+
+Confirmed file absence, digest-bearing legacy configuration, explicit empty
+membership and digest-bearing invalid cohort metadata retain their distinct
+whole observations. Unreadable or invalid-registry observations without
+comparable source evidence refuse preparation; two identical error reasons are
+not a freshness fence. A pending request blocks another preparation before
+source I/O. Returned dictionary copies cannot alter its original members,
+source digest, configured revision or coordinator CAS.
+
+Acknowledgment validates the complete original observation and its exact
+result revision, including an already-satisfied no-op. Unknown or mismatched
+results retain custody. Recovery reads the existing coordinator cohort history
+for that original observation and CAS, including after a newer projection or
+queue reopen. It neither reads a newer source nor writes, advances clocks,
+renews freshness or erases retained publication/startup history.
+`observe_pool_configured_cohort()` likewise recovers an exact historical
+original result before applying current-state admission to a fresh write.
+
+This is **source-only optimistic preparation and result accounting**. No
+projection sender, live HTTP configuration publisher, ordinary caller,
+configuration setter, membership activation or placement is wired. The local
+custody mutex is not an OS-lock acquisition or coordinator lease. External-file
+atomicity, admitted execution, mixed-writer exclusion and rollback remain
+separate integration gates; a projected observation is not current-file or
+runtime attestation.
+
 ## Implemented explicit sender and unknown-outcome recovery
 
 `send_pool_metadata_request()` sends or recovers only the request already
