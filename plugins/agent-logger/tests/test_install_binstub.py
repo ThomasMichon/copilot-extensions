@@ -1140,8 +1140,9 @@ def test_provision_publishes_durable_compatibility_wrappers(
 # 2026-10-04): same class as `test_provision_publishes_durable_compatibility_
 # wrappers` above -- two sequential subprocess.run calls (timeout=90,
 # timeout=420) mean a worst case near 510s on Windows (480s on POSIX).
-# Keep fixture headroom above the combined internal ceiling.
-@pytest.mark.timeout(550 if os.name == "nt" else 520)
+# Materialization, offline tools and source removal precede provisioning too;
+# retain 120 seconds of setup headroom above both native child deadlines.
+@pytest.mark.timeout(630 if os.name == "nt" else 600)
 def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -> None:
     started = time.monotonic()
 
@@ -1187,15 +1188,26 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         wrapper = home / ".local" / "bin" / "agent-logger"
         invoke = [str(wrapper), "version"]
 
-    stamped = subprocess.run(
-        stamp,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=_STAMP_TIMEOUT_SECONDS,
-        check=False,
-    )
-    assert stamped.returncode == 0, stamped.stderr
+    stamp_output = tmp_path / "stamp.stdout"
+    stamp_errors = tmp_path / "stamp.stderr"
+    stamp_timeout = None
+    with stamp_output.open("w", encoding="utf-8") as stdout, stamp_errors.open(
+        "w", encoding="utf-8",
+    ) as stderr:
+        try:
+            stamped = subprocess.run(
+                stamp, env=env, stdout=stdout, stderr=stderr,
+                timeout=_STAMP_TIMEOUT_SECONDS, check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            stamped = None
+            stamp_timeout = str(error)
+    if stamped is None or stamped.returncode != 0:
+        pytest.fail(
+            f"{stamp_timeout or ''}\n"
+            f"{stamp_output.read_text(encoding='utf-8', errors='replace')}"
+            f"{stamp_errors.read_text(encoding='utf-8', errors='replace')}"
+        )
     assert not calls.exists(), "stamp must defer dependency installation"
     assert not (home / ".agent-logger" / ".venv").exists()
     completed("native stamp completed")

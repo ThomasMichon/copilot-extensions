@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -1045,6 +1046,34 @@ def test_logger_bootstrap_windows_keeps_disjoint_storage_packets() -> None:
     assert [shlex.split(step["run"]) for step in linux_execution] == [
         shlex.split(step["run"]) for step in execution
     ]
+
+
+def test_logger_snapshot_fixture_outer_budget_preserves_inner_deadlines() -> None:
+    source = HERE.parent / "plugins/agent-logger/tests/test_install_binstub.py"
+    function = next(
+        node for node in ast.parse(source.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "test_stamp_supports_first_use_provision_from_snapshot_only"
+    )
+    outer = next(
+        decorator.args[0].value for decorator in function.decorator_list
+        if isinstance(decorator, ast.Call)
+        and isinstance(decorator.func, ast.Attribute)
+        and decorator.func.attr == "timeout"
+    )
+    inner = [
+        keyword.value.value
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr == "run"
+        for keyword in node.keywords if keyword.arg == "timeout"
+    ]
+    assert sorted(inner) == [60, 420]
+    assert outer == 600
+    assert outer >= sum(inner) + 120
 
 
 def test_codespaces_recipes_remain_manual_and_bounded() -> None:

@@ -3821,8 +3821,9 @@ The deployment CLI and immutable runtime engine select non-editable retention.
 Explicit editable operands, including requirement-file entries, are refused.
 Admitted local `tool.uv.sources` mappings are preserved but their editable flags
 are disabled only in private retained metadata; the original checkout is unchanged.
-Native `uv pip install` receives supported arguments, not `uv sync`'s
-`--no-editable` option. Ordinary retained-source API callers keep their explicit
+Deployment retention enforces non-editability through that private metadata
+without appending `--no-editable` to the caller's native UV argument list.
+Ordinary retained-source API callers keep their explicit
 editable-install behavior unless they select non-editable retention.
 
 Absolute, non-editable source-only installations retain the common source/resource
