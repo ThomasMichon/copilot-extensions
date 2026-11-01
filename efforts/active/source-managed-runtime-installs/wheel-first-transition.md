@@ -185,8 +185,8 @@ edit installed code, add privilege, or replace other contributors' open fixes.
 ## Plan and acceptance
 
 ### W0 — Reviewed upstream intent first
-- [ ] Capture the operator request and distinguish requested scope from recommendations.
-- [ ] Review and merge the effort/vision/performance proposal upstream before implementation.
+- [x] Capture the operator request and distinguish requested scope from recommendations.
+- [x] Review and merge the effort/vision/performance proposal upstream before implementation. #9623 lands the current intent checkpoint; W1–W4 implementation and qualification remain open.
 - [ ] Qualify locally, then submit one final implementation PR for the complete flow.
 
 ### W1 — Complete local promotion and Manager fast path
