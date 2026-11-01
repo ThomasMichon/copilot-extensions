@@ -32,6 +32,16 @@ def _whoami(login: str):
     return lambda cwd, dl: login
 
 
+def test_observation_owner_uses_guard_tool_and_argument_aliases():
+    assert guard.needs_observations(_shell("gh pr close 203 --repo example/project"))
+    assert guard.needs_observations({
+        "tool_name": "bash", "tool_input": '{"script":"gh pr close 203 --repo example/project"}',
+    })
+    assert not guard.needs_observations({
+        "toolName": "view", "toolArgs": {"command": "gh pr close 203"},
+    })
+
+
 # --- core denial ---------------------------------------------------------
 
 def test_close_other_authors_open_pr_denies():

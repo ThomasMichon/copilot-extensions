@@ -150,6 +150,16 @@ def _find_close_attempts(cmd: str) -> list[dict]:
     return attempts
 
 
+def needs_observations(payload: dict) -> bool:
+    """Classify the same shell/argument aliases used by the live guard."""
+    tool = str(payload.get("toolName") or payload.get("tool_name") or "")
+    if tool not in SHELL_TOOLS:
+        return False
+    args = _as_args(payload.get("toolArgs") if "toolArgs" in payload else payload.get("tool_input"))
+    command = _pick(args, CMD_ARG_KEYS)
+    return bool(command and "close" in command.lower() and _find_close_attempts(command))
+
+
 def owned_cleanup_failure(error) -> bool:
     """Recognize the canonical error without acquiring the SDK for cheap guards."""
     try:

@@ -36,9 +36,9 @@ def unavailable(boundary: str) -> dict:
 
 def execute_owned_observations(payload, raw, load_sibling):
     """Give legacy PR observations the same enclosing settlement owner."""
-    arguments = payload.get("toolArgs")
-    command = str(arguments.get("command", "")) if isinstance(arguments, dict) else ""
-    if "gh" not in command.lower() or "close" not in command.lower():
+    guard = load_sibling("pr_supersede_guard.py")
+    needs = getattr(guard, "needs_observations", None)
+    if not callable(needs) or not needs(payload):
         return None
     try:
         __import__("agent_procutil.owned_budget", fromlist=["OwnedExecutionBudget"])
