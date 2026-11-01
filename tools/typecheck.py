@@ -271,7 +271,7 @@ def check_project(
         config.write_text("[mypy]\n", encoding="utf-8")
         for platform in project.platforms:
             argv = [
-                str(python), "-I", "-m", "mypy", "--config-file", str(config),
+                str(python), "-I", "-X", "utf8", "-m", "mypy", "--config-file", str(config),
                 "--python-version", project.python_version, "--platform", platform,
                 "--explicit-package-bases", "--follow-imports", "silent",
                 "--check-untyped-defs", "--show-error-codes", "--no-pretty",

@@ -387,22 +387,23 @@ def test_checker_timeout_settles_targets_and_environment_lease(
 
 
 @pytest.mark.parametrize(
-    ("source", "level", "expected"),
+    ("source", "level", "expected", "filename"),
     [
-        ("def accept(value: int) -> int:\n    return value\naccept('wrong')\n", "basic", "[arg-type]"),
-        ("def body(value):\n    wrong: int = 'text'\n    return wrong\n", "basic", "[assignment]"),
-        ("def missing(value):\n    return value\n", "strict", "[no-untyped-def]"),
-        ("def generic(value: dict) -> dict:\n    return value\n", "strict", "[type-arg]"),
+        ("def accept(value: int) -> int:\n    return value\naccept('wrong')\n", "basic", "[arg-type]", "sample.py"),
+        ("def body(value):\n    wrong: int = 'text'\n    return wrong\n", "basic", "[assignment]", "sample.py"),
+        ("def missing(value):\n    return value\n", "strict", "[no-untyped-def]", "sample.py"),
+        ("def generic(value: dict) -> dict:\n    return value\n", "strict", "[type-arg]", "sample.py"),
+        ("wrong: int = 'text'\n", "strict", "[assignment]", "caf\u00e9.py"),
     ],
 )
 def test_actual_mypy_rejects_type_regressions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-    source: str, level: typecheck.Level, expected: str,
+    source: str, level: typecheck.Level, expected: str, filename: str,
 ) -> None:
     """Exercise the real front door's MyPy argv, not a mocked checker result."""
     root = tmp_path / "source with spaces"
     root.mkdir()
-    (root / "sample.py").write_text(source, encoding="utf-8")
+    (root / filename).write_text(source, encoding="utf-8")
     environment = tmp_path / "environment with spaces"
     environment.mkdir()
     (environment / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
@@ -423,7 +424,7 @@ def test_actual_mypy_rejects_type_regressions(
     monkeypatch.setattr(typecheck, "environment_python", environment_python)
     monkeypatch.setattr(typecheck, "acquire_environment", acquire)
     assert typecheck.check_project(
-        root, project(level=level), ("sample.py",), all_paths=("sample.py",),
+        root, project(level=level), (filename,), all_paths=(filename,),
     ) != 0
     assert expected in capsys.readouterr().out
     assert lease.released
