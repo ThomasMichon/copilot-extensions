@@ -43,7 +43,7 @@ def fingerprint_entries(
         return len(data).to_bytes(8, "big") + data
 
     ordered = sorted(entries, key=label)
-    parallel = os.name == "nt" and on_file is None and len(ordered) > 4
+    parallel = on_file is None and len(ordered) > 1
     digest = hashlib.sha256()
     with ThreadPoolExecutor(max_workers=4) if parallel else nullcontext() as readers:
         for start in range(0, len(ordered), 4):
