@@ -196,7 +196,17 @@ def _path_is_fully_qualified(
 
 
 def _path_key(path: Path) -> str:
-    return os.path.normcase(os.fspath(canonical_path(path)))
+    text = os.fspath(canonical_path(path))
+    if os.name == "nt":
+        drive = PureWindowsPath(text).drive
+        if drive.casefold().startswith("\\\\?\\unc\\"):
+            text = "\\\\" + text[8:]
+        elif (
+            len(drive) == 6 and drive.startswith("\\\\?\\")
+            and drive[4].lower() in "abcdefghijklmnopqrstuvwxyz" and drive[5] == ":"
+        ):
+            text = text[4:]
+    return os.path.normcase(text)
 
 
 def paths_equal(left: str | os.PathLike[str], right: str | os.PathLike[str]) -> bool:

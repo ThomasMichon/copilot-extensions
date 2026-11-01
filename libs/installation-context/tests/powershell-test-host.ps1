@@ -12,10 +12,11 @@ try {
     [Console]::InputEncoding = $utf8NoBom
     [Console]::OutputEncoding = $utf8NoBom
 } catch {}
+$protocolOutput = [Console]::Out
 
 function Write-ProtocolResponse([hashtable]$Response) {
-    [Console]::Out.WriteLine(($Response | ConvertTo-Json -Depth 8 -Compress))
-    [Console]::Out.Flush()
+    $protocolOutput.WriteLine(($Response | ConvertTo-Json -Depth 8 -Compress))
+    $protocolOutput.Flush()
 }
 
 while ($null -ne ($line = [Console]::In.ReadLine())) {
@@ -30,8 +31,8 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             }
             $requestId = [int]$request.id
             $arguments = @($request.arguments | ForEach-Object { [string]$_ })
-            if ($arguments.Count -lt 1) {
-                throw 'A request must contain at least one argument.'
+            if ($null -eq $request.PSObject.Properties['arguments']) {
+                throw 'A request must declare its arguments.'
             }
         }
         catch {
@@ -76,9 +77,14 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 
         $runner = [PowerShell]::Create()
         $errorWriter = New-Object IO.StringWriter
+        $outputWriter = New-Object IO.StringWriter
         $originalError = [Console]::Error
+        $originalOutput = [Console]::Out
         try {
-            $builder = $runner.AddCommand($ScriptPath).AddArgument($arguments[0])
+            $builder = $runner.AddCommand($ScriptPath)
+            if ($arguments.Count -gt 0) {
+                $builder = $builder.AddArgument($arguments[0])
+            }
             for ($index = 1; $index -lt $arguments.Count;) {
                 $name = $arguments[$index].TrimStart('-')
                 if ($index + 1 -ge $arguments.Count) {
@@ -91,6 +97,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             }
 
             [Console]::SetError($errorWriter)
+            [Console]::SetOut($outputWriter)
             $asyncResult = $runner.BeginInvoke()
             if (-not $asyncResult.AsyncWaitHandle.WaitOne($TimeoutSeconds * 1000)) {
                 $runner.Stop()
@@ -110,7 +117,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             Write-ProtocolResponse @{
                 id = $requestId
                 returncode = [int]$returnCode
-                stdout = $output -join [Environment]::NewLine
+                stdout = $outputWriter.ToString() + ($output -join [Environment]::NewLine)
                 stderr = $errorWriter.ToString()
             }
         }
@@ -129,7 +136,9 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         }
         finally {
             [Console]::SetError($originalError)
+            [Console]::SetOut($originalOutput)
             $errorWriter.Dispose()
+            $outputWriter.Dispose()
             $runner.Dispose()
             foreach ($name in $environmentNames) {
                 [Environment]::SetEnvironmentVariable(
