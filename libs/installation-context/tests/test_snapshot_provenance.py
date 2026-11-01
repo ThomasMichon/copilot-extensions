@@ -1280,6 +1280,12 @@ def test_agent_machines_powershell_watchdog_bounds_cell_lock_wait(tmp_path):
     script.write_text(script.read_text().replace(
         marker, f"    [IO.File]::WriteAllText('{str(waiting).replace(chr(39), chr(39) * 2)}', 'waiting')\n" + marker, 1,
     ))
+    _reserve_exemplar_completion_slot(installed, layout, version)
+    inspected = _run_exemplar_slot_action(exemplar, "slot-validate", layout, tmp_path)
+    assert inspected.returncode == 0, inspected.stderr
+    assert json.loads(inspected.stdout)["reason"] == "runtime-slot-ownership-valid"
+    assert not waiting.exists()
+    assert not witness.exists()
     lock_path = Path(layout["plugin_root"]) / ".payload-provision.lock"
     with lock_path.open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
