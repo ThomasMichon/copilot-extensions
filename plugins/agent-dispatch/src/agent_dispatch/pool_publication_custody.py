@@ -181,6 +181,7 @@ class PoolPublisherCustody:
             (result.machine, result.env, result.publisher_id)
             != (request.inputs.machine, request.inputs.env, self.publisher_id)
             or result.generation != expected_generation
+            or (request.operation == "begin" and result.enrollment_cohort_revision is not None)
             or (request.operation == "begin" and (
                 result.revision != 0 or result.state != "pending" or result.reason is not None
             ))
@@ -199,28 +200,40 @@ class PoolPublisherCustody:
                  if (scope.machine, scope.env) == (result.machine, result.env)), None,
             )
             baseline = (
-                ((), None, None, None, None, None) if previous is None else (
+                ((), None, None, None, None, None, None) if previous is None else (
                     previous.definitions, previous.definitions_generation,
                     previous.definitions_revision, previous.input_revision,
                     previous.registration_revision, previous.valid_until,
+                    previous.definitions_cohort_revision,
                 )
             )
             if (
                 result.definitions, result.definitions_generation,
                 result.definitions_revision, result.input_revision,
                 result.registration_revision, result.valid_until,
+                result.definitions_cohort_revision,
             ) != baseline:
                 raise PoolPublicationError("pool enrollment result changed original retained baseline")
         else:
-            expected: tuple[tuple[PoolInstanceDefinition, ...], int | None, int | None]
+            expected: tuple[
+                tuple[PoolInstanceDefinition, ...], int | None, int | None, int | None,
+            ]
             if request.reason is None:
-                expected = (request.inputs.snapshot.definitions, result.generation, result.revision)
+                expected = (
+                    request.inputs.snapshot.definitions, result.generation, result.revision, None,
+                )
             else:
                 if self.settled is None:
                     raise PoolPublicationError("unavailable result has no prior definition custody")
                 previous = self.settled[1]
-                expected = (previous.definitions, previous.definitions_generation, previous.definitions_revision)
-            if (result.definitions, result.definitions_generation, result.definitions_revision) != expected:
+                expected = (
+                    previous.definitions, previous.definitions_generation,
+                    previous.definitions_revision, previous.definitions_cohort_revision,
+                )
+            if (
+                result.definitions, result.definitions_generation,
+                result.definitions_revision, result.definitions_cohort_revision,
+            ) != expected:
                 raise PoolPublicationError("pool metadata result changed original definition custody")
         self.position = PoolPublisherPosition(
             result.machine, result.env, result.publisher_id, result.generation, result.revision,

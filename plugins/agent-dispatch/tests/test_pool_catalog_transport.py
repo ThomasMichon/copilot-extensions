@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.coordinator_pool_catalog import POOL_CATALOG_PROTOCOL
 from agent_dispatch.queue import TaskQueue
+from agent_dispatch.registrar_configuration import ConfiguredSupervisorCohort, SupervisorScopeIntent
 from agent_dispatch.task_scope import TASK_SCOPE_HEADER, mint_task_scope_token
 from tests._helpers import TEST_REPO
 
@@ -162,6 +164,7 @@ def test_running_health_advertises_only_the_registered_metadata_contract(queue) 
         "protocol": POOL_CATALOG_PROTOCOL, "supported_versions": [1], "definition_versions": [1],
         "control_authority_configured": True, "metadata_only": True,
         "lock_holder_verification": False, "configured_scope_membership": False,
+        "configured_cohort_fencing_versions": [1],
         "atomic_placement": False,
     }
     assert queue.pool_catalog_snapshot() == before
@@ -184,6 +187,69 @@ def test_http_round_trip_preserves_all_filters_order_and_revision_attribution(qu
     assert catalog["definitions"] == [DEFINITION, low]
     assert published["definitions_generation"] == 1 and published["definitions_revision"] == 1
     assert published["valid_until"] == 130.0
+
+
+def test_configured_projection_get_and_fenced_writes_preserve_metadata_only_contract(queue):
+    client = _client(queue)
+    observation = ConfiguredSupervisorCohort(
+        "complete", hashlib.sha256(b"configuration").hexdigest(), 0,
+        (SupervisorScopeIntent("logical-host", "host-a", "default"),
+         SupervisorScopeIntent("logical-host", "host-b", "other")),
+    )
+    queue.observe_pool_configured_cohort(observation, expected_revision=0)
+    before = queue.pool_catalog_snapshot()
+    refused = client.post("/pool-catalog/scopes/begin", headers=_headers(), json=BEGIN)
+    assert refused.status_code == 409
+    assert "cohort revision" in refused.json()["detail"]["reason"]
+    assert queue.pool_catalog_snapshot() == before
+    scope = _begin(client, expected_cohort_revision=1)
+    assert scope["enrollment_cohort_revision"] == 1
+    body = _publication(queue, scope, expected_cohort_revision=1)
+    published = _publish(client, body)
+    catalog = client.get("/pool-catalog", headers=_headers()).json()
+    assert not catalog["metadata_ready"] and not catalog["configured_metadata_ready"]
+    assert catalog["blockers"] == ["host-b/other: configured scope has not enrolled"]
+    assert catalog["configured_cohort"] == {
+        "revision": 1, "observation": {
+            "state": "complete", "source_revision": observation.source_revision,
+            "revision": 0, "reason": "", "members": [
+                {"machine": member.machine, "execution_machine": member.execution_machine,
+                 "env": member.env} for member in observation.members
+            ],
+        },
+    }
+    assert published["definitions_cohort_revision"] == 1
+    queue.observe_pool_configured_cohort(
+        ConfiguredSupervisorCohort("unavailable", None, None, (), "read failed"),
+        expected_revision=1,
+    )
+    before = queue.pool_catalog_snapshot()
+    assert _publish(client, body) == published
+    response = client.post(
+        "/pool-catalog/scopes/publish", headers=_headers(),
+        json=_publication(queue, published, expected_cohort_revision=2),
+    )
+    assert response.status_code == 409
+    assert "unconfirmed or unavailable" in response.json()["detail"]["reason"]
+    assert queue.pool_catalog_snapshot() == before
+    contract = client.get("/health", headers=_headers("data")).json()["pool_catalog_transport"]
+    assert contract["configured_cohort_fencing_versions"] == [1]
+    assert contract["metadata_only"]
+    assert not contract["configured_scope_membership"]
+    assert not contract["lock_holder_verification"] and not contract["atomic_placement"]
+    assert not any("cohort" in route.path for route in client.app.routes)
+
+
+@pytest.mark.parametrize("field", ["expected_cohort_revision"])
+@pytest.mark.parametrize("invalid", [True, -1, "1", 1.5])
+def test_http_cohort_fence_rejects_coercion_without_mutation(queue, field, invalid):
+    client = _client(queue)
+    before = queue.pool_catalog_snapshot()
+    response = client.post(
+        "/pool-catalog/scopes/begin", headers=_headers(), json={**BEGIN, field: invalid},
+    )
+    assert response.status_code == 422
+    assert queue.pool_catalog_snapshot() == before
 
 
 def test_lost_responses_retry_original_requests_without_renewal_or_new_history(
