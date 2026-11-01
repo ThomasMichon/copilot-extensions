@@ -98,6 +98,8 @@ def incumbent(tmp_path, monkeypatch):
     else:
         docker_socket.touch()
         monkeypatch.setattr("fleet_manager.komodo_incumbent.stat.S_ISSOCK", lambda mode: True)
+        is_file = Path.is_file
+        monkeypatch.setattr(Path, "is_file", lambda path: False if path == docker_socket else is_file(path))
         socket_context = None
     try:
         material = KomodoIncumbentMaterialization(
@@ -125,6 +127,141 @@ def test_incumbent_observation_retains_originals_without_synthesizing_fresh_cred
     selected["images"]["mongo"]["version"] = "7.0.45"
     with pytest.raises(PlanError, match="cannot render"):
         render_profile(KomodoDeclaration.from_dict(selected), material, owner="a" * 64)
+
+
+def _socket_mount(material, source):
+    value = decode(material.encoded)
+    value["mounts"]["periphery"].append({
+        "Type": "bind", "Source": source, "Destination": "/var/run/docker.sock",
+        "RW": True, "Propagation": "rprivate",
+    })
+    return canonical(value)
+
+
+def test_explicit_socket_source_preserves_native_bytes_and_binds_physical_identity(incumbent):
+    material = incumbent.material
+    source = str(material.docker_socket)
+    encoded = _socket_mount(material, source)
+    selected = replace(material, encoded=encoded, docker_socket_source=source)
+    assert selected.encoded == encoded
+    assert selected.evidence()["docker_socket"] == {
+        "source": source, "path": source,
+        "device": material.docker_socket.stat().st_dev,
+        "inode": material.docker_socket.stat().st_ino,
+    }
+    mounts = decode(encoded)["mounts"]["periphery"]
+    selected.check_mounts("periphery", mounts)
+    changed = deepcopy(mounts)
+    changed[-1]["Propagation"] = "rshared"
+    with pytest.raises(PlanError, match="mounts changed"):
+        selected.check_mounts("periphery", changed)
+
+
+@pytest.mark.parametrize("change", ["missing", "different", "volume", "core", "duplicate", "unsafe"])
+def test_explicit_socket_source_refuses_unmatched_or_ambiguous_native_mounts(incumbent, change):
+    material = incumbent.material
+    source = str(material.docker_socket)
+    value = decode(_socket_mount(material, source))
+    mount = value["mounts"]["periphery"][-1]
+    if change == "missing":
+        value["mounts"]["periphery"].pop()
+    elif change == "different":
+        mount["Source"] = str(incumbent.files["core_config"])
+    elif change == "volume":
+        mount["Type"] = "volume"
+    elif change == "core":
+        value["mounts"]["core"].append(value["mounts"]["periphery"].pop())
+    elif change == "duplicate":
+        value["mounts"]["periphery"].append({**mount, "Destination": "/other-socket"})
+    else:
+        source = str(material.docker_socket.parent / ".." / material.docker_socket.name)
+        mount["Source"] = source
+    with pytest.raises(PlanError, match="socket"):
+        replace(material, encoded=canonical(value), docker_socket_source=source)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="real native socket and symlink semantics require Linux")
+def test_native_socket_directory_alias_is_opt_in_and_rechecked_without_rewriting(incumbent, tmp_path):
+    from test_komodo_native import _private_docker_socket
+
+    from fleet_manager.komodo_profile import ordinary_path
+
+    material = incumbent.material
+    alias = tmp_path / "native-run"
+    alias.symlink_to(material.docker_socket.parent, target_is_directory=True)
+    source = str(alias / material.docker_socket.name)
+    encoded = _socket_mount(material, source)
+    with pytest.raises(PlanError, match="indirection"):
+        replace(material, encoded=encoded)
+    with pytest.raises(PlanError, match="indirection"):
+        ordinary_path(Path(source))
+    selected = replace(material, encoded=encoded, docker_socket_source=source)
+    before = selected.evidence()
+    assert before["docker_socket"]["path"] == str(material.docker_socket)
+    assert source in before["paths"]
+    assert selected.encoded == encoded
+    changed = decode(encoded)["mounts"]["periphery"]
+    changed[-1]["Source"] = str(material.docker_socket)
+    with pytest.raises(PlanError, match="mounts changed"):
+        selected.check_mounts("periphery", changed)
+    with _private_docker_socket() as another:
+        alias.unlink()
+        alias.symlink_to(another.parent, target_is_directory=True)
+        with pytest.raises(PlanError, match="socket"):
+            selected.evidence()
+    alias.unlink()
+    with pytest.raises(PlanError, match="socket"):
+        selected.evidence()
+    alias.symlink_to(alias, target_is_directory=True)
+    with pytest.raises(PlanError, match="socket"):
+        selected.evidence()
+
+
+def test_explicit_socket_source_refuses_python310_to312_resolver_loop_error(incumbent, monkeypatch):
+    material = incumbent.material
+    source = str(material.docker_socket)
+    selected = replace(material, encoded=_socket_mount(material, source), docker_socket_source=source)
+    resolve = Path.resolve
+
+    def cyclic(path, *args, **options):
+        if path == Path(source):
+            raise RuntimeError("Symlink loop on Python 3.10-3.12")
+        return resolve(path, *args, **options)
+
+    monkeypatch.setattr(Path, "resolve", cyclic)
+    with pytest.raises(PlanError, match="socket source is unavailable"):
+        selected.evidence()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="real native socket and symlink semantics require Linux")
+def test_native_socket_retarget_during_retained_file_reads_refuses(incumbent, tmp_path, monkeypatch):
+    from test_komodo_native import _private_docker_socket
+
+    material = incumbent.material
+    alias = tmp_path / "native-run"
+    alias.symlink_to(material.docker_socket.parent, target_is_directory=True)
+    source = str(alias / material.docker_socket.name)
+    selected = replace(material, encoded=_socket_mount(material, source), docker_socket_source=source)
+    reader = KomodoIncumbentMaterialization.credential_bytes
+    with _private_docker_socket() as another:
+        def retargeting(self):
+            values = reader(self)
+            alias.unlink()
+            alias.symlink_to(another.parent, target_is_directory=True)
+            return values
+
+        monkeypatch.setattr(KomodoIncumbentMaterialization, "credential_bytes", retargeting)
+        with pytest.raises(PlanError, match="socket"):
+            selected.evidence()
+
+
+def test_explicit_socket_binding_does_not_relax_other_bind_sources(incumbent):
+    material = incumbent.material
+    source = str(material.docker_socket)
+    value = decode(_socket_mount(material, source))
+    value["mounts"]["core"][1]["Source"] = str(material.keys / ".." / "core_config")
+    with pytest.raises(PlanError, match="ordinary"):
+        replace(material, encoded=canonical(value), docker_socket_source=source)
 
 
 def test_incumbent_reads_username_from_retained_core_config_without_a_username_file(incumbent):
