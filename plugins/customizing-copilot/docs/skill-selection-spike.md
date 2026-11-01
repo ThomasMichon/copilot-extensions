@@ -61,7 +61,10 @@ compares a full persisted fork, exclusive event-boundary fork, automatically
 bounded primary user/assistant history, and an explicit brief. The catalog
 is identical across arms. Bounded history is tail-first, durable and page/byte
 limited; it excludes reasoning, tool output and child payloads and refuses
-expired or missing boundaries. It retains newest whole messages in order.
+expired or missing boundaries. It retains a contiguous suffix of newest whole
+messages in order, stopping at the first message that exceeds the remaining
+budget. Older messages cannot replace oversized newer intent; omission and
+truncation evidence accompany the arm input.
 
 JSON output identifies the request format and reports supplied input separately from **assembled request**
 bytes, message/tool overhead, synthetic sentinel inclusion/order, inherited
@@ -79,6 +82,12 @@ advance to another arm or claim cleanup while a late resource is untracked.
 Read-only operations still have local deadlines. Capture slots are reserved
 before asynchronous body reads; instructions and input both participate in
 Responses sentinel scans. First dispatch and completion models are separate.
+An unsettled native task stops subsequent parent-task arms; cleanup retains its
+known ID. An expired synthetic cancellation hold fails instead of generating
+a normal completion. Aggregate status distinguishes failed/incomplete runs from
+completed transport witnesses, includes cleanup failures and captures provider
+counters after all arm and cleanup activity. Error reports redact absolute
+paths (including nonstandard mounts, spaces and URIs) and account identifiers.
 
 Limitations: forks require the owned server client and do not establish access
 from an ordinary joined extension. Native task input has no isolation promise.

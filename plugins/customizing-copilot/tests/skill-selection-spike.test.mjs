@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { freezeCatalog, collectHistory, bytes, spikeInputs, summarizeRequest, SENTINELS,
     modelSummary, modelCatalogSummary, runtimeEnvironment, observeOwnTask, deadline,
-    syntheticHandler } from "../scripts/skill-selection-spike.mjs";
+    syntheticHandler, safeError, spikeStatus } from "../scripts/skill-selection-spike.mjs";
 
 const event = (id, type, content, extra = {}) => ({ id, type, data: { content }, ...extra });
 test("runtime selection is explicit, absolute and never a silent bundled fallback", () => {
@@ -56,6 +56,42 @@ test("bounded input uses UTF-8 serialized bytes and newest whole messages", asyn
     assert.equal(result.messages.length, 1);
     assert.equal(result.inputBytes, bytes(result.messages));
     assert(result.inputBytes <= 90 && result.truncated && result.omitted === 1);
+});
+test("bounded history stops at an oversized message rather than resurrecting stale intent", async () => {
+    const events = [event("1", "user.message", "old fits"),
+        event("2", "user.message", "oversized".repeat(100)), event("3", "assistant.message", "latest fits")];
+    const log = { read: async () => ({ events, cursor: "end", cursorStatus: "ok", hasMore: false }) };
+    const result = await collectHistory(log, { maxBytes: 90 });
+    assert.deepEqual(result.messages.map(message => message.content), ["latest fits"]);
+    assert.equal(result.omitted, 2);
+    assert(result.truncated);
+    events.pop();
+    const newestOversized = await collectHistory(log, { maxBytes: 90 });
+    assert.deepEqual(newestOversized.messages, []);
+    assert.equal(newestOversized.omitted, 2);
+    assert(newestOversized.truncated);
+});
+test("structured errors redact arbitrary absolute paths, mounts, spaces, URIs and accounts", () => {
+    for (const path of ["/mnt/team data/session.json", "/opt/private/session.json",
+        "Z:\\team data\\session.json", "\\\\server\\share name\\session.json", "file:///Volumes/team data/session.json"]) {
+        const result = safeError(new Error(`acquisition failed at "${path}" for synthetic@example.invalid`));
+        assert.equal(result, 'acquisition failed at "<local-path>" for <account>');
+    }
+});
+test("aggregate status cannot conceal failed, unfinished or unsettled arms and cleanup", () => {
+    const report = { mode: "synthetic-transport", arms: { one: { status: "completed" } },
+        native: { catalog: { status: "available" } },
+        cleanup: { runtimeStopped: true, taskCancellationErrors: [], abortErrors: [], runtimeStopErrors: [] } };
+    assert.equal(spikeStatus(report), "completed-with-limitations");
+    report.arms.one = { status: "unavailable" };
+    assert.equal(spikeStatus(report), "failed");
+    report.arms.one = { status: "completed", settled: false };
+    assert.equal(spikeStatus(report), "incomplete");
+    report.arms.one = { status: "not-reached" };
+    assert.equal(spikeStatus(report), "incomplete");
+    report.arms.one = { status: "completed" };
+    report.cleanup.abortErrors.push("synthetic abort failure");
+    assert.equal(spikeStatus(report), "failed");
 });
 test("expired or unobserved frozen boundary is unavailable, not a brief fallback", async () => {
     await assert.rejects(collectHistory({ read: async () => ({ cursorStatus: "expired" }) }), /expired/);
@@ -229,6 +265,163 @@ test("held synthetic request observes abort separately from dispatch acknowledge
     abort.abort();
     assert.equal((await response).status, 200);
     assert(completed);
+});
+test("expired cancellation hold fails without a normal synthetic completion", async () => {
+    const handler = syntheticHandler(NeverForward, new Set(["own"]), [], () => {}, 5);
+    await assert.rejects(handler.sendRequest(request(SENTINELS.cancel),
+        { sessionId: "own", signal: new AbortController().signal }), /hold expired/);
+});
+
+const fakeSdk = `
+    import { writeFile } from "node:fs/promises";
+    import { basename, dirname, join } from "node:path";
+    export const RuntimeConnection = { forStdio: () => ({}) };
+    export class CopilotRequestHandler {}
+    export class CopilotClient {
+        constructor(options) {
+            this.options = options;
+            this.scenario = basename(dirname(options.baseDirectory));
+            this.sessions = new Map(); this.tasks = new Map(); this.sequence = 0;
+            this.trace = { created: [], forks: [], resumed: [], dispatched: [], cancelled: [], aborted: [], prompts: [] };
+        }
+        async start() {}
+        rpc = { sessions: { fork: async ({ sessionId, toEventId }) => {
+            const parent = this.sessions.get(sessionId);
+            const end = toEventId ? parent.events.findIndex(event => event.id === toEventId) : parent.events.length;
+            const id = "fork-" + ++this.sequence;
+            this.sessions.set(id, { events: parent.events.slice(0, end) });
+            this.trace.forks.push({ id, toEventId: toEventId ?? null });
+            return { sessionId: id };
+        } } };
+        makeSession(id, config, events = []) {
+            const listeners = new Set();
+            const emit = event => { for (const listener of listeners) listener(event); };
+            const session = { sessionId: id, capabilities: { tasks: true }, events,
+                on: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+                abort: async () => { this.trace.aborted.push(id); },
+                rpc: {
+                    skills: { list: async () => ({ skills: config.skillProvider.listSkills().map(skill =>
+                        ({ ...skill, enabled: !config.disabledSkills.includes(skill.name), source: "provider" })) }) },
+                    agent: { list: async () => ({ agents: [{ id: "synthetic-selector" }] }) },
+                    model: { list: async () => ({ list: [] }), getCurrent: async () => ({ model: config.model ?? "synthetic" }) },
+                    eventLog: { read: async () => ({ events: structuredClone(events),
+                        cursor: "end", cursorStatus: "ok", hasMore: false }) },
+                    tasks: {
+                        startAgent: async ({ prompt }) => {
+                            const agentId = "task-" + ++this.sequence, abort = new AbortController();
+                            this.tasks.set(agentId, { abort, emit });
+                            this.trace.dispatched.push({ id: agentId, parent: id, prompt });
+                            if (this.scenario === "unsettled" && !prompt.includes("SPIKE_CANCEL")) {
+                                const now = Date.now, timer = globalThis.setTimeout;
+                                let offset = 0;
+                                Date.now = () => now() + offset;
+                                globalThis.setTimeout = (callback, delay, ...args) => timer(() => {
+                                    offset += delay === 25 ? 9000 : 0; callback(...args);
+                                }, delay);
+                            } else {
+                                emit({ type: "subagent.configured", agentId, data: { model: config.model ?? "synthetic" } });
+                                this.respond(id, prompt, abort.signal, agentId).then(() => {
+                                    if (!abort.signal.aborted) {
+                                        emit({ type: "assistant.message", agentId, data: { content: "synthetic result" } });
+                                        emit({ type: "subagent.completed", agentId, data: { model: config.model ?? "synthetic" } });
+                                    }
+                                });
+                            }
+                            return { agentId };
+                        },
+                        cancel: async ({ id: taskId }) => {
+                            const task = this.tasks.get(taskId);
+                            if (!task) throw new Error("foreign task cancellation");
+                            this.trace.cancelled.push(taskId);
+                            task.abort.abort();
+                            task.emit({ type: "subagent.completed", agentId: taskId,
+                                data: { cancelled: true, model: config.model ?? "synthetic" } });
+                            return { success: true };
+                        },
+                    },
+                },
+                sendAndWait: async ({ prompt }) => {
+                    this.trace.prompts.push({ id, prompt });
+                    await this.respond(id, prompt, new AbortController().signal);
+                    events.push({ id: "event-" + ++this.sequence, type: "user.message", data: { content: prompt } },
+                        { id: "event-" + ++this.sequence, type: "assistant.message", data: { content: "synthetic reply" } });
+                },
+            };
+            config.skillProvider.listSkills();
+            this.config = config; this.sessions.set(id, session);
+            return session;
+        }
+        async respond(sessionId, prompt, signal, agentId) {
+            const response = await this.options.requestHandler.sendRequest(new Request("https://synthetic.invalid/model", {
+                method: "POST", body: JSON.stringify({ model: "synthetic", messages: [{ role: "user", content: prompt }] }),
+            }), { sessionId, agentId, signal });
+            return response.json();
+        }
+        async createSession(config) {
+            const id = "session-" + ++this.sequence;
+            this.trace.created.push(id);
+            return this.makeSession(id, config);
+        }
+        async resumeSession(id, config) {
+            if (this.scenario === "acquisition-failure") throw new Error("synthetic resume acquisition failed");
+            this.trace.resumed.push(id);
+            return this.makeSession(id, config, this.sessions.get(id).events);
+        }
+        async stop() {
+            this.config?.skillProvider.listSkills();
+            await writeFile(join(this.options.baseDirectory, "fake-witness.json"), JSON.stringify(this.trace));
+            return [];
+        }
+    }
+`;
+test("model-free SDK orchestration covers all arms, owned cleanup and acquisition failures", async t => {
+    const root = await mkdtemp(join(tmpdir(), "skill-spike-orchestration-"));
+    t.after(() => rm(root, { recursive: true }));
+    const sdk = join(root, "fake-sdk");
+    await mkdir(sdk);
+    await writeFile(join(sdk, "package.json"), '{"type":"module"}');
+    await writeFile(join(sdk, "index.js"), fakeSdk);
+    const runner = fileURLToPath(new URL("../scripts/run-skill-selection-spike.mjs", import.meta.url));
+    const run = async scenario => {
+        const fixture = join(root, scenario);
+        const { stdout } = await promisify(execFile)(process.execPath, [runner, sdk, fixture],
+            { windowsHide: true, timeout: 3000 });
+        return { report: JSON.parse(stdout),
+            trace: JSON.parse(await readFile(join(fixture, "owned-home", "fake-witness.json"), "utf8")) };
+    };
+    const { report, trace } = await run("success");
+    assert.equal(report.status, "completed-with-limitations");
+    assert(Object.values(report.arms).every(arm => arm.status === "completed"));
+    assert.equal(trace.forks.length, 2);
+    assert.equal(trace.forks[0].toEventId, null);
+    assert(trace.forks[1].toEventId);
+    assert(report.arms.boundaryFork.exclusivePrefixIdsMatch);
+    assert.equal(trace.dispatched.length, 2);
+    assert.equal(trace.dispatched[1].prompt, SENTINELS.cancel);
+    const bounded = trace.prompts.find(item => item.id === trace.created[1]);
+    assert(bounded.prompt.includes('"omitted":') && bounded.prompt.includes('"truncated":true'));
+    assert(!trace.prompts.find(item => item.id === trace.created[2]).prompt.includes(SENTINELS.old));
+    assert(trace.dispatched.every(item => !item.prompt.includes(SENTINELS.old)));
+    assert.deepEqual(new Set(trace.aborted), new Set([...trace.created, ...trace.resumed]));
+    assert(trace.cancelled.every(id => trace.dispatched.some(task => task.id === id)));
+    assert(trace.dispatched.every(task => trace.cancelled.includes(task.id)));
+    assert.equal(report.native.catalog.providerCalls.list, trace.created.length + trace.resumed.length + 2);
+    assert.equal(report.native.catalog.providerCalls.read, 0);
+    assert(report.cleanup.runtimeStopped && report.arms.cancellation.settled && report.arms.cancellation.cancelled);
+    const acquisition = await run("acquisition-failure");
+    assert.equal(acquisition.report.status, "failed");
+    assert.equal(acquisition.report.arms.fullFork.status, "unavailable");
+    assert.equal(acquisition.report.arms.boundaryFork.status, "unavailable");
+    assert.equal(acquisition.trace.resumed.length, 0);
+    assert.deepEqual(new Set(acquisition.trace.aborted), new Set(acquisition.trace.created));
+    assert(acquisition.report.cleanup.runtimeStopped);
+    const unsettled = await run("unsettled");
+    assert.equal(unsettled.report.status, "incomplete");
+    assert.equal(unsettled.report.arms.nativeTask.settled, false);
+    assert.equal(unsettled.report.arms.cancellation.status, "not-reached");
+    assert.equal(unsettled.trace.dispatched.length, 1);
+    assert.deepEqual(unsettled.trace.cancelled, [unsettled.trace.dispatched[0].id]);
+    assert(unsettled.report.cleanup.runtimeStopped);
 });
 
 test("startup failures stay structured and late owned startup is awaited before cleanup", async t => {

@@ -11,6 +11,25 @@ export const SENTINELS = Object.freeze({
 export const bytes = value => Buffer.byteLength(typeof value === "string" ? value : JSON.stringify(value));
 const textTypes = ["user.message", "assistant.message"];
 
+export const safeError = error => String(error?.message ?? error)
+    .replace(/(?:[a-z][a-z0-9+.-]*:\/\/|[A-Za-z]:[\\/]|\\\\|\/)[^\r\n"']+/gi, "<local-path>")
+    .replace(/\b[\w.+-]+@[\w.-]+\.\w+\b/g, "<account>").slice(0, 500);
+
+export function spikeStatus(report) {
+    const cleanup = report.cleanup;
+    if (report.error || ["taskCancellationErrors", "abortErrors", "runtimeStopErrors"]
+        .some(key => cleanup?.[key]?.length)) return "failed";
+    if (cleanup?.runtimeStopped === false) return "incomplete";
+    if (report.mode === "model-enumeration") return report.status;
+    const arms = Object.values(report.arms);
+    if (arms.some(arm => ["failed", "unavailable"].includes(arm.status))
+        || report.native.parentConfigurationUnchanged === false
+        || report.native.parentTextPrefixUnchanged === false) return "failed";
+    if (arms.some(arm => arm.status !== "completed" || arm.settled === false)
+        || report.native.catalog.status !== "available") return "incomplete";
+    return "completed-with-limitations";
+}
+
 export function runtimeEnvironment(environment) {
     const excluded = /^(COPILOT_|AGENT_|OTEL_|OPENAI_|ANTHROPIC_|CLAUDE_|GH_TOKEN$|GH_ENTERPRISE_TOKEN$|GITHUB_TOKEN$|GITHUB_API_TOKEN$|GITHUB_ENTERPRISE_TOKEN$)/i;
     return Object.fromEntries(Object.entries(environment).filter(([key, value]) =>
@@ -84,10 +103,10 @@ export async function collectHistory(eventLog, { boundary, maxBytes = 6000, maxP
         && !event.data?.agentId && !event.data?.parentToolCallId && typeof event.data?.content === "string");
     const messages = [];
     let used = 2, omitted = 0;
-    for (const event of eligible.toReversed()) {
+    for (const [index, event] of eligible.toReversed().entries()) {
         const message = { role: event.type === "user.message" ? "user" : "assistant", content: event.data.content };
         const size = bytes(message) + (messages.length ? 1 : 0);
-        if (used + size > maxBytes) { omitted++; continue; }
+        if (used + size > maxBytes) { omitted = eligible.length - index; break; }
         messages.unshift(message);
         used += size;
     }
@@ -192,7 +211,7 @@ export async function deadline(promise, ms = 15000) {
 }
 
 /** Build a synthetic-only public request interceptor; no inherited forwarding path is called. */
-export function syntheticHandler(Base, owned, requests, onHeld = () => {}) {
+export function syntheticHandler(Base, owned, requests, onHeld = () => {}, holdMs = 5000) {
     let pendingBodies = 0;
     return new class extends Base {
         async sendRequest(request, context) {
@@ -207,12 +226,14 @@ export function syntheticHandler(Base, owned, requests, onHeld = () => {}) {
             } finally { pendingBodies--; }
             if (summary.sentinels.cancel) {
                 onHeld();
-                await new Promise(resolve => {
-                    const timer = setTimeout(resolve, 5000);
-                    if (context.signal.aborted) { clearTimeout(timer); resolve(); }
-                    else context.signal.addEventListener("abort", () => {
-                        clearTimeout(timer); resolve();
-                    }, { once: true });
+                await new Promise((resolve, reject) => {
+                    const abort = () => { clearTimeout(timer); resolve(); };
+                    const timer = setTimeout(() => {
+                        context.signal.removeEventListener("abort", abort);
+                        reject(new Error("synthetic cancellation hold expired"));
+                    }, holdMs);
+                    if (context.signal.aborted) abort();
+                    else context.signal.addEventListener("abort", abort, { once: true });
                 });
             }
             if (summary.requestFormat === "responses") {

@@ -3,7 +3,8 @@ import { mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { SENTINELS, bytes, spikeInputs, freezeCatalog, collectHistory, syntheticHandler,
-    modelCatalogSummary, runtimeEnvironment, observeOwnTask, deadline } from "./skill-selection-spike.mjs";
+    modelCatalogSummary, runtimeEnvironment, observeOwnTask, deadline, safeError,
+    spikeStatus } from "./skill-selection-spike.mjs";
 
 const { sdkDirectory, root, runtimePath, modelsOnly, profile } = spikeInputs(process.argv.slice(2));
 const home = join(root, "owned-home"), workspace = join(root, "synthetic-workspace");
@@ -32,11 +33,6 @@ const report = {
         "No production selector, main preference, live inference or model qualification is installed.",
     ],
 };
-const safeError = error => String(error?.message ?? error)
-    .replace(/[A-Za-z]:[\\/][^\r\n"']+/g, "<local-path>")
-    .replace(/\/(?:home|Users|tmp|var)\/[^\s"']+/g, "<local-path>")
-    .replace(/\b[\w.+-]+@[\w.-]+\.\w+\b/g, "<account>").slice(0, 500);
-
 const fixtureSkills = [
     { name: "synthetic-review", description: "Review the synthetic fixture without changing it.", userInvocable: false },
     { name: "synthetic-disabled", description: "A disabled negative-control descriptor." },
@@ -80,7 +76,13 @@ async function turn(session, prompt) {
         requests: requests.slice(start).filter(item => item.sessionId === session.sessionId).map(item => item.summary) };
 }
 async function attempt(name, action) {
-    try { report.arms[name] = await action(); }
+    try {
+        const result = await action();
+        const status = result.settled === false ? "incomplete"
+            : result.terminal === "subagent.failed" || (name === "cancellation" && result.cancelled !== true)
+                ? "failed" : "completed";
+        report.arms[name] = { ...result, status };
+    }
     catch (error) { report.arms[name] = { status: "unavailable", error: safeError(error) }; }
 }
 try {
@@ -125,7 +127,6 @@ try {
                 && skill.description === fixtureSkills[2].description),
             nonUserInvocableEnabled: catalog.some(skill => skill.name === "synthetic-review"
                 && skill.enabled && skill.userInvocable === false),
-            providerCalls: { ...providerCalls },
         };
         report.native.agentIds = (await deadline(parent.rpc.agent.list())).agents.map(agent => agent.id);
         try {
@@ -170,7 +171,7 @@ try {
         await attempt("boundedHistory", async () => {
             const history = await deadline(collectHistory(parent.rpc.eventLog, { boundary }));
             const child = await create();
-            return { ...await turn(child, JSON.stringify(history.messages) + "\n" + prompt),
+            return { ...await turn(child, JSON.stringify(history) + "\n" + prompt),
                 acquisition: { ...history, messages: undefined } };
         });
         await attempt("explicitBrief", async () => turn(await create(), prompt));
@@ -189,7 +190,9 @@ try {
                     taskInfo: "No public per-ID TaskAgentInfo getter; lifecycle/result events used." };
             } finally { observation.unsubscribe(); }
         });
-        await attempt("cancellation", async () => {
+        if (report.arms.nativeTask.settled !== true) {
+            report.arms.cancellation = { status: "not-reached", error: "prior owned task did not settle; parent arms stopped" };
+        } else await attempt("cancellation", async () => {
             const observation = observeOwnTask(parent);
             try {
                 const { agentId: id } = await parent.rpc.tasks.startAgent({
@@ -209,7 +212,6 @@ try {
             (await deadline(parent.rpc.eventLog.read({ direction: "backward", max: 32,
                 types: ["user.message", "assistant.message"], agentScope: "primary", includeEphemeral: false })))
                 .events.slice(0, prefixIds.length).map(event => event.id));
-        report.status = "completed-with-limitations";
     }
 } catch (error) {
     report.error = safeError(error);
@@ -240,5 +242,7 @@ finally {
     }
     catch (error) { report.cleanup.runtimeStopErrors.push(safeError(error)); }
     report.native.interceptedRequests = requests.length;
+    if (!modelsOnly) report.native.catalog.providerCalls = { ...providerCalls };
+    report.status = spikeStatus(report);
     console.log(JSON.stringify(report, null, 2));
 }

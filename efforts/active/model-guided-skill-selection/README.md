@@ -292,3 +292,23 @@ owned-session alternative or name the SDK dependency before adopting it.
   Preserve that discrepancy: a configured long tier is not proof of prospective
   capacity, and synthetic usage is not cost or model-quality evidence. Complete
   adopter catalog, independent quality judgment and real accounting remain open.
+
+### 2026-10-31 - Transport reporting and regression coverage corrected
+
+- Corrected the current review's transport-reporting findings: redaction covers
+  arbitrary absolute paths and URIs, bounded history is a contiguous newest
+  suffix with omission evidence supplied to the child, an expired cancellation
+  hold fails, and an unsettled task prevents another arm on the same parent.
+  Aggregate status retains failed/incomplete arms and cleanup errors; provider
+  counters are captured after arm and cleanup activity.
+- Added a model-free fake-SDK orchestration control covering all context arms,
+  exclusive fork history, task attribution, owned cleanup, resume acquisition
+  failure and an unsettled task. Twenty-four Node controls passed through the
+  bounded Python wrapper. The initial fake used a shared event-array reference;
+  returning an RPC-style detached snapshot corrected the fixture rather than
+  weakening the exclusive-prefix assertion.
+- Repeated the corrected owned native transport witness with the bound profile.
+  Every arm completed, cancellation settled under its own ID, parent state
+  remained unchanged, no model request was forwarded and public lifecycle
+  cleanup plus the bounded caller's process-cleanup verification passed.
+  This closes no quality, actual-cost, full-catalog or production-selector gate.
