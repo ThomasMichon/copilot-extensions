@@ -1,6 +1,7 @@
 """Real storage, handlers, protocol framing and protected synthetic transport."""
 
 import asyncio
+import base64
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -95,15 +96,25 @@ def integration(environment):
             if self.after_chunk is not None and target.endswith("/chunk"):
                 callback, self.after_chunk = self.after_chunk, None
                 callback()
-            if self.corrupt == "missing_descriptor" and target.endswith("/lookup"):
+            if self.corrupt in ("missing_descriptor", "scope", "id") and target.endswith("/lookup"):
                 from dataclasses import replace
                 value = json.loads(response.body)
-                value["result"].pop("descriptor", None)
+                if self.corrupt == "missing_descriptor":
+                    value["result"].pop("descriptor", None)
+                elif self.corrupt == "scope":
+                    value["scope"]["principal_id"] = "unselected-principal"
+                else:
+                    value["result"]["descriptor"]["id"] = "f" * 64
                 return replace(response, body=json.dumps(value).encode())
             if self.corrupt and target.endswith("/chunk"):
                 from dataclasses import replace
                 data = json.loads(response.body)
-                data["result"]["offset"] += 1
+                if self.corrupt in ("hash", "truncated"):
+                    block = base64.b64decode(data["result"]["data"])
+                    block = bytes([block[0] ^ 1]) + block[1:] if self.corrupt == "hash" else block[:-1]
+                    data["result"]["data"] = base64.b64encode(block).decode()
+                else:
+                    data["result"]["offset"] += 1
                 response = replace(response, body=json.dumps(data).encode())
             return response
 
@@ -478,6 +489,22 @@ def test_missing_lookup_descriptor_is_a_structured_client_refusal(environment, i
         with pytest.raises(WorkspaceClientError, match="invalid_workspace_descriptor"):
             await client.materialize(42, generation["id"])
         assert backend.threads == []
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("corruption", ["scope", "id", "hash", "truncated"])
+def test_adversarial_frame_scope_identity_hash_and_truncation_never_materialize(environment, integration, corruption):
+    _, _, generation, _, backend, _ = environment
+    gateway, client, _, _, caller, _ = integration
+
+    async def scenario():
+        await client.capabilities()
+        caller.corrupt = corruption
+        with pytest.raises(WorkspaceClientError) as error:
+            await client.materialize(42, generation["id"])
+        assert not error.value.outcome_unknown and backend.threads == []
         await gateway.drain(timeout=2)
 
     asyncio.run(scenario())

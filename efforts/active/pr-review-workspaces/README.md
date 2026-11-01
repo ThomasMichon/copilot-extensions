@@ -107,11 +107,12 @@ The source implementation continuation is admitted; operational effects are not.
   [existing-owner service/client integration](service-client-integration-slice.md):
   optional existing-gateway routes, immutable framed materialization and the
   same protected operations; no new transport or deployment owner.
-- [ ] Admit concrete implementation slices through their own reviewed plans
+- [x] Admit concrete implementation slices through their own reviewed plans
   and source claims; keep operational rollout separately authorized.
   The first bounded [read-generation slice](read-generation-slice.md) is claimed
   under #9535; its contract amendment cleared review in #9641 before source
-  realization. Further cache/acquisition/submission contracts remain open.
+  realization. Cache, acquisition, source attachment, submission and bounded
+  service/client contracts subsequently cleared their own review gates.
 
 ### Phase 2 - Build the ADO read and source path after admission
 - [x] Implement the admitted offline read-generation builder and comparison
@@ -129,7 +130,11 @@ The source implementation continuation is admitted; operational effects are not.
   and materialized local read views.
   The [immutable generation-cache slice](generation-cache-slice.md) merged in
   #9693, reusing the existing PR storage owner and keeping operation receipts
-  separate. Service/client adoption and materialized source views remain open.
+  separate. Source client metadata materialization is merged in #9795; actual
+  service/client adoption and source acquisition remain open.
+- [x] Implement source-only normalized native/service client operations,
+  immutable framed metadata materialization and explicit selected submission
+  through the existing cache/store/provider/resource/lifecycle seams (#9795).
 - [x] Implement the reviewed source-only immutable generation cache, scoped CAS,
   retained lookup, explicit bounded recovery and receipt-isolation controls.
 - [ ] Attach exact shallow source/head/common-baseline workspaces through the
@@ -207,6 +212,33 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-11-01 - Bounded workspace integration merged; original objective Active
+- #9795 merged as `32a6539dc31795cdb07e89ed2f9cb120e2fcabe4`
+  from head `139eb80091fc63e078ea28c4fa696901cad6cd18` after actual current-head
+  approval, all three published threads resolved and required CI success.
+  Unpublished overview findings were assessed and corrected as well.
+- Final unchanged contained packets pass 166 workspace/read-owner/Gateway/client
+  controls and all 45 service controls. A combined packet's three-second
+  parallel-reader startup timeout is tracked in #9815; its exact unchanged
+  control and entire service file pass separately. Failed combined packets are
+  not passing proof, no selected test was omitted, and no budget was widened.
+- Direct adversarial wire scope, generation ID, content hash and truncated chunk
+  consumers also pass; the final focused workspace/Gateway/client/owner packet
+  passes 170 cases, alongside the same 45-case service packet. This completes
+  the bounded source slice's validation, not the original operational objective.
+- Source read buffers stay bounded and scope-bound; identical publication is
+  revalidated without quadratic read work. Actual Fleet challenge pacing,
+  concurrent discovery ordering, SDK no-send/unknown stages, owner denial,
+  corrupt state and owner payload limits preserve honest outcomes.
+- This realizes the bounded source integration only. Current-owner read/write
+  factory adoption, actual compatible running readers, source acquisition,
+  operational tool exposure, eligible ADO end-to-end review, concurrent real
+  reviewers and separately authorized serving/release/rollout remain open.
+  Large remote submit/source envelopes beyond the physical frame are explicitly
+  unsupported in this first wire; native capacities remain independent.
+- No backend call, installer, service activation or credential change occurred.
+  Keep #9535 and this effort Active; do not finalize or infer original completion.
 
 ### 2026-10-31 - Existing-owner service/client source realization
 - #9787 merged as `5a47a3b278b614f0f6422cd115c21403113a718d`
