@@ -154,6 +154,18 @@ class PoolCohortPreparation:
             raise PoolPublicationError(
                 "cohort result failed the original observation and CAS fences"
             )
+        retained = self._queue.recover_pool_configured_cohort(
+            request.observation,
+            expected_revision=request.expected_revision,
+        )
+        if Path(self._queue.db_path).absolute() != request.coordinator_path:
+            raise PoolPublicationError(
+                "cohort acknowledgment lost the original coordinator target"
+            )
+        if retained != result:
+            raise PoolPublicationError(
+                "cohort result was not accepted by the original coordinator"
+            )
         self._settled = (request, result)
         self._pending = None
 

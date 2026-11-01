@@ -443,3 +443,40 @@ def test_coordinator_retarget_during_recovery_read_preserves_original_custody(ow
     with pytest.raises(PoolPublicationError, match="acknowledgment lost the original coordinator"):
         custody.recover()
     assert custody.pending is request and custody.settled is None
+
+
+def test_matching_foreign_result_cannot_settle_unchanged_original_coordinator(owner):
+    base, _sources, queue, custody = owner
+    _write(base)
+    request = custody.prepare()
+    other = TaskQueue(base.parent / "other-queue.db")
+    lookalike = _project(other, request)
+    assert Path(queue.db_path).absolute() == request.coordinator_path
+    with pytest.raises(PoolPublicationError, match="not accepted by the original coordinator"):
+        custody.acknowledge(request, lookalike)
+    assert custody.pending is request and custody.settled is None
+    assert custody.recover() is None
+    accepted = _project(queue, request)
+    custody.acknowledge(request, accepted)
+    assert custody.settled == (request, accepted)
+
+
+def test_coordinator_retarget_during_acknowledgment_verification_preserves_custody(
+    owner, monkeypatch
+):
+    base, _sources, queue, custody = owner
+    _write(base)
+    request = custody.prepare()
+    accepted = _project(queue, request)
+    other = TaskQueue(base.parent / "other-queue.db")
+    original = queue.recover_pool_configured_cohort
+
+    def read(*args, **kwargs):
+        result = original(*args, **kwargs)
+        queue.db_path = other.db_path
+        return result
+
+    monkeypatch.setattr(queue, "recover_pool_configured_cohort", read)
+    with pytest.raises(PoolPublicationError, match="acknowledgment lost the original coordinator"):
+        custody.acknowledge(request, accepted)
+    assert custody.pending is request and custody.settled is None
