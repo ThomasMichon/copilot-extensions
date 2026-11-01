@@ -503,7 +503,7 @@ cd plugins/agent-bridge
 
 ## Code Standards
 
-- **Python 3.10+**, type hints encouraged
+- **Python 3.10+**, follow the declared MyPy admission level. For Python changes, `python tools/typecheck.py --enforced` pre-validates admitted scopes; see `docs/python-typechecking.md` for explicit preparation, per-project checking and visible pending scope. The migration does not yet qualify all Python or activate required CI.
 - **uv** for all dependency operations -- never bare `pip`
 - Docstrings for public functions
 - Commit messages: imperative mood, descriptive

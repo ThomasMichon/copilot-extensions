@@ -1,0 +1,559 @@
+{
+  "version": 1,
+  "python_version": "3.10",
+  "platforms": [
+    "linux",
+    "win32"
+  ],
+  "requirements": "tools/typecheck-requirements.txt",
+  "projects": [
+    {
+      "name": "checker",
+      "include": [
+        "tools/typecheck.py",
+        "tools/cache_directory_paths.py",
+        "tools/test_typecheck.py"
+      ],
+      "exclude": [],
+      "level": "strict"
+    },
+    {
+      "name": "devcontainer",
+      "include": [
+        ".devcontainer"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "effort-helpers",
+      "include": [
+        "efforts"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "fleet-manager",
+      "include": [
+        "fleet-manager"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-agent-procutil",
+      "include": [
+        "libs/agent-procutil"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-bootstrap-killswitch",
+      "include": [
+        "libs/bootstrap-killswitch"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-config-migrate",
+      "include": [
+        "libs/config-migrate"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-core-delegation",
+      "include": [
+        "libs/core-delegation"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-credential-relay",
+      "include": [
+        "libs/credential-relay"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-docker-resource-producer",
+      "include": [
+        "libs/docker-resource-producer"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-dropin-registry",
+      "include": [
+        "libs/dropin-registry"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-endpoint-rendezvous",
+      "include": [
+        "libs/endpoint-rendezvous"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-fleet-contracts",
+      "include": [
+        "libs/fleet-contracts"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-fleet-index-adapter",
+      "include": [
+        "libs/fleet-index-adapter"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-fleet-vault-adapter",
+      "include": [
+        "libs/fleet-vault-adapter"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-installation-context",
+      "include": [
+        "libs/installation-context"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-installer-engine",
+      "include": [
+        "libs/installer-engine"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-installer-readiness",
+      "include": [
+        "libs/installer-readiness"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-lazy-cli-dispatch",
+      "include": [
+        "libs/lazy-cli-dispatch"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-machine-transport",
+      "include": [
+        "libs/machine-transport"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-payload-invocation",
+      "include": [
+        "libs/payload-invocation"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-peer-launch",
+      "include": [
+        "libs/peer-launch"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-plugin-activation",
+      "include": [
+        "libs/plugin-activation"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-plugin-resolve",
+      "include": [
+        "libs/plugin-resolve"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-process-telemetry",
+      "include": [
+        "libs/process-telemetry"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-remote-login-shell",
+      "include": [
+        "libs/remote-login-shell/src"
+      ],
+      "exclude": [],
+      "level": "strict"
+    },
+    {
+      "name": "lib-remote-login-shell-remaining",
+      "include": [
+        "libs/remote-login-shell"
+      ],
+      "exclude": [
+        "libs/remote-login-shell/src"
+      ],
+      "level": "pending"
+    },
+    {
+      "name": "lib-repository-policy",
+      "include": [
+        "libs/repository-policy"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-session-liveness-probe",
+      "include": [
+        "libs/session-liveness-probe/src"
+      ],
+      "exclude": [],
+      "level": "strict"
+    },
+    {
+      "name": "lib-session-liveness-probe-remaining",
+      "include": [
+        "libs/session-liveness-probe"
+      ],
+      "exclude": [
+        "libs/session-liveness-probe/src"
+      ],
+      "level": "pending"
+    },
+    {
+      "name": "lib-single-instance-lease",
+      "include": [
+        "libs/single-instance-lease"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-ssh-manager",
+      "include": [
+        "libs/ssh-manager"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-update-driver",
+      "include": [
+        "libs/update-driver"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-update-telemetry",
+      "include": [
+        "libs/update-telemetry"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-venue-copilot",
+      "include": [
+        "libs/venue-copilot"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-versioned-runtime",
+      "include": [
+        "libs/versioned-runtime"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-work-coalescing-singleton",
+      "include": [
+        "libs/work-coalescing-singleton"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "lib-worktree-identity",
+      "include": [
+        "libs/worktree-identity/src"
+      ],
+      "exclude": [],
+      "level": "strict"
+    },
+    {
+      "name": "lib-worktree-identity-remaining",
+      "include": [
+        "libs/worktree-identity"
+      ],
+      "exclude": [
+        "libs/worktree-identity/src"
+      ],
+      "level": "pending"
+    },
+    {
+      "name": "lib-zdd",
+      "include": [
+        "libs/zdd"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-bridge",
+      "include": [
+        "plugins/agent-bridge"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-codespaces",
+      "include": [
+        "plugins/agent-codespaces"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-conduct-guidance",
+      "include": [
+        "plugins/agent-conduct-guidance"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-containers",
+      "include": [
+        "plugins/agent-containers"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-dispatch",
+      "include": [
+        "plugins/agent-dispatch"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-index",
+      "include": [
+        "plugins/agent-index"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-logger",
+      "include": [
+        "plugins/agent-logger"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-machines",
+      "include": [
+        "plugins/agent-machines"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-mcp",
+      "include": [
+        "plugins/agent-mcp"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-pull-requests",
+      "include": [
+        "plugins/agent-pull-requests"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-ssh",
+      "include": [
+        "plugins/agent-ssh"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-vault",
+      "include": [
+        "plugins/agent-vault"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "agent-worktrees",
+      "include": [
+        "plugins/agent-worktrees"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "ai-attribution",
+      "include": [
+        "plugins/ai-attribution"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "budget-guidance",
+      "include": [
+        "plugins/budget-guidance"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "context-handoff",
+      "include": [
+        "plugins/context-handoff"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "copilot-extensions-harness",
+      "include": [
+        "plugins/copilot-extensions-harness"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "customizing-copilot",
+      "include": [
+        "plugins/customizing-copilot"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "efforts",
+      "include": [
+        "plugins/efforts"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "harness-knowledge",
+      "include": [
+        "plugins/harness-knowledge"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "service-chat",
+      "include": [
+        "services/chat"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "service-dispatch",
+      "include": [
+        "services/dispatch"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "service-index",
+      "include": [
+        "services/index"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "service-pr",
+      "include": [
+        "services/pr"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "service-ssh",
+      "include": [
+        "services/ssh"
+      ],
+      "exclude": [],
+      "level": "pending"
+    },
+    {
+      "name": "repository-tools",
+      "include": [
+        "tools"
+      ],
+      "exclude": [
+        "tools/typecheck.py",
+        "tools/cache_directory_paths.py",
+        "tools/test_typecheck.py"
+      ],
+      "level": "pending"
+    },
+    {
+      "name": "worktree-manager",
+      "include": [
+        "worktree-manager"
+      ],
+      "exclude": [],
+      "level": "pending"
+    }
+  ]
+}

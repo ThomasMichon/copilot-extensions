@@ -15,6 +15,9 @@ else:
     from native_test_paths import native_test_path
 
 _ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
+from tools.cache_directory_paths import ordinary_cache_root as ordinary_cache_root  # noqa: E402
+
 sys.path.insert(0, str(_ROOT / "libs" / "installer-engine"))
 sys.path.insert(0, str(_ROOT / "libs" / "versioned-runtime"))
 from installer_engine import _package_roots, _source_files  # noqa: E402
@@ -49,19 +52,6 @@ def dependency_fingerprint(
     for dependency in runner_dependencies:
         digest.update(f"runner:{dependency}\n".encode("utf-8"))
     return digest.hexdigest()
-
-
-def ordinary_cache_root(path: Path) -> Path:
-    """Refuse linked cache roots before resolving a lease or removing contents."""
-    native = native_test_path(path.absolute())
-    for candidate in (native, *native.parents):
-        try:
-            info = candidate.lstat()
-        except FileNotFoundError:
-            continue
-        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_reparse_tag", 0):
-            raise ValueError(f"Test cache directory is not ordinary: {candidate}")
-    return path.resolve()
 
 
 def clear_cache_contents(path: Path) -> None:
