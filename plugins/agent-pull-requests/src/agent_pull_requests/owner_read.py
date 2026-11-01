@@ -121,13 +121,17 @@ class OwnerReadHandler:
         self.max_payload_bytes = min(max_payload_bytes, MAX_GENERATION_BYTES + 65536)
         self.clock = clock
 
-    def read(self, request: object) -> dict:
+    def read(self, request: object, *, request_checkpoint=None) -> dict:
+        if request_checkpoint is not None and not callable(request_checkpoint):
+            raise ValueError("invalid current request checkpoint")
         parsed = parse_request(request)
         started = self.clock()
         work_budget = min(parsed["budget_seconds"], self.max_work_seconds)
         deadline = started + work_budget
 
         def remaining():
+            if request_checkpoint is not None:
+                request_checkpoint()
             value = deadline - self.clock()
             if value <= 0:
                 raise OwnerReadBudgetExceeded("owner-read work budget exhausted")
