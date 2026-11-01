@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,14 @@ from contextlib import ExitStack
 import pytest
 import agent_procutil
 from agent_procutil import no_window_kwargs
+
+
+def _load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
@@ -134,7 +143,7 @@ def test_retained_windows_child_preserves_outcome_and_releases_custody(
         Path(__file__).resolve().parents[3]
         / "libs" / "versioned-runtime" / "versioned_runtime.py"
     )
-    runtime = guardian._load_resource("retained_guardian_test_runtime", runtime_path)
+    runtime = _load("retained_guardian_test_runtime", runtime_path)
     root = tmp_path / "runtime"
     root.mkdir()
     slot = runtime.slot(root, "probe")
@@ -237,7 +246,7 @@ def test_retained_control_preserves_only_explicit_durable_children(
     from ctypes import wintypes
 
     runtime_path = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime" / "versioned_runtime.py"
-    runtime = guardian._load_resource("control_lifetime_runtime", runtime_path)
+    runtime = _load("control_lifetime_runtime", runtime_path)
     root = tmp_path / "runtime"
     slot = runtime.slot(root, "control")
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -288,7 +297,7 @@ def test_mode_control_owner_death_cannot_release_runtime_before_writers_exit(gua
     from ctypes import wintypes
 
     runtime_path = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime" / "versioned_runtime.py"
-    runtime = guardian._load_resource("control_owner_death_runtime", runtime_path)
+    runtime = _load("control_owner_death_runtime", runtime_path)
     root = tmp_path / "runtime"
     runtime.slot(root, "control")
     ready = tmp_path / "ready.json"
@@ -296,13 +305,13 @@ def test_mode_control_owner_death_cannot_release_runtime_before_writers_exit(gua
         sys._base_executable, "-I", "-B", "-c", _CONTROL_CHILD_PROBE, str(os.getpid()),
         agent_procutil.__file__, "owner-death", str(ready),
     ]
-    owner_code = """
+    owner_code = inspect.getsource(_load) + """
 import importlib.util,json,os,sys
 from pathlib import Path
 spec=importlib.util.spec_from_file_location("owner_guardian",sys.argv[1])
 guardian=importlib.util.module_from_spec(spec);spec.loader.exec_module(guardian)
-runtime=guardian._load_resource("owner_runtime",sys.argv[2])
-procutil=guardian._load_resource("owner_procutil",sys.argv[3])
+runtime=_load("owner_runtime",sys.argv[2])
+procutil=_load("owner_procutil",sys.argv[3])
 root=Path(sys.argv[4])
 with runtime.retention_custody(root,"control") as (slot,descriptor):
     guardian.run_owned(json.loads(sys.argv[5]),cwd=slot,env=dict(os.environ),timeout=20,
@@ -370,7 +379,7 @@ def test_installer_breakaway_policy_refuses_nonboolean_values(guardian, tmp_path
 @pytest.mark.skipif(os.name != "nt", reason="Windows finite mode-owner retention protocol")
 def test_mode_scope_acknowledges_only_after_real_candidate_retention(guardian, tmp_path):
     runtime_path = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime" / "versioned_runtime.py"
-    runtime = guardian._load_resource("scope_registration_runtime", runtime_path)
+    runtime = _load("scope_registration_runtime", runtime_path)
     root = tmp_path / "runtime"
     runtime.slot(root, "candidate")
     with ExitStack() as custody, ThreadPoolExecutor(max_workers=1) as executor:
@@ -448,7 +457,7 @@ def test_mode_scope_packet_reads_while_publisher_retains_delete_access(guardian,
 @pytest.mark.skipif(os.name != "nt", reason="Windows finite mode-owner retention protocol")
 def test_mode_scope_rejects_success_shaped_integer_acknowledgement(guardian, tmp_path):
     runtime_path = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime" / "versioned_runtime.py"
-    runtime = guardian._load_resource("scope_invalid_ack_runtime", runtime_path)
+    runtime = _load("scope_invalid_ack_runtime", runtime_path)
     with ExitStack() as custody, ThreadPoolExecutor(max_workers=1) as executor:
         scope = guardian._RetentionScope(tmp_path / "scope", tmp_path, runtime, custody)
         waiting = executor.submit(
@@ -471,7 +480,7 @@ def test_mode_scope_refuses_invalid_or_unavailable_candidate_custody(
     guardian, tmp_path, monkeypatch, failure,
 ):
     runtime_path = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime" / "versioned_runtime.py"
-    runtime = guardian._load_resource("scope_refusal_runtime", runtime_path)
+    runtime = _load("scope_refusal_runtime", runtime_path)
     with ExitStack() as custody:
         scope = guardian._RetentionScope(tmp_path / "scope", tmp_path, runtime, custody)
         packet = {
@@ -504,7 +513,7 @@ def test_mode_scope_coretains_nested_writers_when_caller_job_closes(guardian, tm
     from ctypes import wintypes
 
     runtime_path = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime" / "versioned_runtime.py"
-    runtime = guardian._load_resource("nested_mode_retention_runtime", runtime_path)
+    runtime = _load("nested_mode_retention_runtime", runtime_path)
     root = tmp_path / "runtime"
     runtime.slot(root, "control")
     ready = tmp_path / "ready.json"
@@ -512,13 +521,13 @@ def test_mode_scope_coretains_nested_writers_when_caller_job_closes(guardian, tm
         sys._base_executable, "-I", "-B", "-c", _CONTROL_CHILD_PROBE, str(os.getpid()),
         agent_procutil.__file__, "owner-death", str(ready),
     ]
-    builder_code = """
+    builder_code = inspect.getsource(_load) + """
 import importlib.util,json,os,sys
 from pathlib import Path
 spec=importlib.util.spec_from_file_location("builder_guardian",sys.argv[1])
 guardian=importlib.util.module_from_spec(spec);spec.loader.exec_module(guardian)
-runtime=guardian._load_resource("builder_runtime",sys.argv[2])
-procutil=guardian._load_resource("builder_procutil",sys.argv[3])
+runtime=_load("builder_runtime",sys.argv[2])
+procutil=_load("builder_procutil",sys.argv[3])
 root=Path(sys.argv[4]);slot=runtime.slot(root,"candidate")
 child=json.loads(sys.argv[5])
 scope=json.loads(os.environ[guardian._RETENTION_SCOPE_ENV])
@@ -532,13 +541,13 @@ with runtime.construction_lease(root,"candidate") as descriptor:
         sys._base_executable, "-I", "-B", "-c", builder_code, guardian.__file__,
         str(runtime_path), agent_procutil.__file__, str(root), json.dumps(writer),
     ]
-    caller_code = """
+    caller_code = inspect.getsource(_load) + """
 import importlib.util,json,os,sys
 from pathlib import Path
 spec=importlib.util.spec_from_file_location("caller_guardian",sys.argv[1])
 guardian=importlib.util.module_from_spec(spec);spec.loader.exec_module(guardian)
-runtime=guardian._load_resource("caller_runtime",sys.argv[2])
-procutil=guardian._load_resource("caller_procutil",sys.argv[3])
+runtime=_load("caller_runtime",sys.argv[2])
+procutil=_load("caller_procutil",sys.argv[3])
 root=Path(sys.argv[4])
 with runtime.retention_custody(root,"control") as (slot,descriptor):
     guardian.run_owned(json.loads(sys.argv[5]),cwd=slot,env=dict(os.environ),timeout=20,
@@ -618,13 +627,13 @@ def test_retained_windows_guardian_accepts_a_long_owning_interpreter(guardian, t
     venv.EnvBuilder(with_pip=False, symlinks=False).create(environment)
     python = environment / "Scripts" / "python.exe"
     repo = Path(__file__).resolve().parents[3]
-    code = """
+    code = inspect.getsource(_load) + """
 import importlib.util,json,sys
 from pathlib import Path
 s=importlib.util.spec_from_file_location("long_owner_guardian",sys.argv[1])
 guardian=importlib.util.module_from_spec(s);s.loader.exec_module(guardian)
-runtime=guardian._load_resource("long_owner_runtime",sys.argv[2])
-procutil=guardian._load_resource("long_owner_procutil",sys.argv[3])
+runtime=_load("long_owner_runtime",sys.argv[2])
+procutil=_load("long_owner_procutil",sys.argv[3])
 root=Path(sys.argv[4]);root.mkdir();slot=runtime.slot(root,"probe")
 assert len(sys.executable)>260
 with runtime.construction_lease(root,"probe") as descriptor:
