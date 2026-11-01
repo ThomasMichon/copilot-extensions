@@ -1,0 +1,9 @@
+{
+  "comment": "Cover buffered read completion versus action receipt outcomes",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

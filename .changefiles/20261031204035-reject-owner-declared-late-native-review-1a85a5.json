@@ -1,0 +1,9 @@
+{
+  "comment": "Reject owner-declared late native review reads before parsing readiness",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
