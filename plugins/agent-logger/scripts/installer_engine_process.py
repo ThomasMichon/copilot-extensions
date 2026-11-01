@@ -510,11 +510,14 @@ def _retained_windows(
 ):
     import msvcrt
 
-    execution_deadline = time.monotonic() + timeout
-    if deadline is not None:
-        execution_deadline = min(execution_deadline, deadline)
-    progress_output = on_output is not None or bool(output_fds)
-    completion_deadline = deadline if progress_output else execution_deadline
+    streaming = on_output is not None or bool(output_fds)
+    startup_deadline = time.monotonic() + timeout + 30
+    execution_deadline = deadline
+    if not streaming:
+        quiet_end = time.monotonic() + timeout
+        execution_deadline = min(quiet_end, deadline) if deadline is not None else quiet_end
+    if execution_deadline is not None:
+        startup_deadline = min(startup_deadline, execution_deadline)
     packet = _guardian_packet(procutil, runtime_path, guardian_sources)
     reader, writer = os.pipe()
     process = None
@@ -528,7 +531,7 @@ def _retained_windows(
         os.set_handle_inheritable(handle, True)
         try:
             try:
-                if time.monotonic() >= execution_deadline:
+                if time.monotonic() >= startup_deadline:
                     raise ChildTimeoutExpired(argv, timeout, output="", stderr="")
                 process = subprocess.Popen(
                     [guardian_python, "-I", *(["-S"] if retention_scope is not None else []),
@@ -536,8 +539,8 @@ def _retained_windows(
                      "--owner-handle", str(handle), "--runtime-root", str(root),
                      "--runtime-version", version,
                      "--timeout", str(timeout),
-                     *(["--progress-output"] if progress_output else []),
-                     *(["--deadline", str(completion_deadline)] if completion_deadline is not None else []),
+                     *(["--progress-output"] if on_output is not None or output_fds else []),
+                     *(["--deadline", str(execution_deadline)] if execution_deadline is not None else []),
                      *(["--retention-scope", str(retention_scope)] if retention_scope is not None else []),
                      *(["--allow-breakaway"] if allow_breakaway else []), "--", *argv],
                     cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -569,7 +572,7 @@ def _retained_windows(
                 )
                 capture.wait(
                     timeout, startup_timeout=timeout + 30,
-                    deadline=completion_deadline, wait_for_eof=False,
+                    deadline=execution_deadline, wait_for_eof=False,
                 )
         except subprocess.TimeoutExpired as error:
             timeout_error = error
@@ -605,8 +608,9 @@ def _retained_windows(
             raise RuntimeError("installer retention guardian returned invalid completion")
         if outcome["launch_error"] is not None:
             raise ChildLaunchError(f"Installer child could not start: {outcome['launch_error']}")
-        if (timeout_error is not None or outcome["timed_out"]
-                or completion_deadline is not None and time.monotonic() >= completion_deadline):
+        if timeout_error is not None or outcome["timed_out"] or (
+            execution_deadline is not None and time.monotonic() >= execution_deadline
+        ):
             raise ChildTimeoutExpired(
                 argv, timeout, output=outcome["stdout"], stderr=outcome["stderr"],
             ) from timeout_error
@@ -670,14 +674,14 @@ def _supervise_windows(args, argv):
 def _run_guardian_child(
     args, argv, procutil, disconnected, absolute_deadline, expired, *, scope=None, environment=None,
 ):
-    deadline = time.monotonic() + args.timeout
-    if absolute_deadline is not None:
-        deadline = min(deadline, absolute_deadline)
-    progress_output = getattr(args, "progress_output", False)
-    completion_deadline = absolute_deadline if progress_output else deadline
+    streaming = getattr(args, "progress_output", False)
+    deadline = absolute_deadline
+    if not streaming:
+        quiet_end = time.monotonic() + args.timeout
+        deadline = min(quiet_end, absolute_deadline) if absolute_deadline is not None else quiet_end
     if disconnected():
         raise RuntimeError("installer caller exited before child execution")
-    if time.monotonic() >= deadline:
+    if deadline is not None and time.monotonic() >= deadline:
         return expired
     try:
         process, job = procutil.spawn_sync_in_kill_on_close_job(
@@ -694,12 +698,14 @@ def _run_guardian_child(
     timed_out = False
     capture = None
     try:
-        if progress_output:
+        if streaming:
             def observe_owner():
                 if disconnected():
                     raise _OwnerDisconnected("installer caller exited during child execution")
                 if scope is not None:
-                    scope.retain_requests(max(0, deadline - time.monotonic()))
+                    scope.retain_requests(
+                        args.timeout if deadline is None else max(0, deadline - time.monotonic()),
+                    )
 
             capture = _output_capture(
                 process, procutil, None,
@@ -707,7 +713,7 @@ def _run_guardian_child(
             )
             try:
                 capture.wait(
-                    args.timeout, deadline=completion_deadline,
+                    args.timeout, deadline=deadline,
                     on_wait=observe_owner, wait_for_eof=False,
                 )
             except subprocess.TimeoutExpired:
@@ -745,9 +751,7 @@ def _run_guardian_child(
                 capture.finish if capture is not None else lambda grace: process.communicate(timeout=grace),
                 10, capture=capture,
             )
-    timed_out = timed_out or (
-        completion_deadline is not None and time.monotonic() >= completion_deadline
-    )
+    timed_out = timed_out or (deadline is not None and time.monotonic() >= deadline)
     return {
         "returncode": process.returncode, "stdout": stdout,
         "stderr": stderr, "timed_out": timed_out, "launch_error": None,

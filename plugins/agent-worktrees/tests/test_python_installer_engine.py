@@ -673,6 +673,29 @@ def test_productive_owned_child_preserves_explicit_absolute_deadline(
         pass
 
 
+@pytest.mark.parametrize("retained", [False, True])
+def test_productive_owned_child_cannot_renew_explicit_deadline(
+    engine, procutil, tmp_path, retained,
+):
+    engine.runtime.slot(tmp_path, "1.0")
+    with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+        started = time.monotonic()
+        with pytest.raises(engine.ChildTimeoutExpired):
+            engine.run_owned(
+                [sys.executable, "-c",
+                 "import time\nfor _ in range(40): print('progress',flush=True);time.sleep(.25)"],
+                cwd=tmp_path, env=dict(os.environ), timeout=2, deadline=started + 3,
+                procutil=procutil, construction_fd=descriptor, on_output=lambda *_args: None,
+                **({
+                    "runtime_root": tmp_path, "runtime_version": "1.0",
+                    "runtime_path": Path(engine.runtime.__file__),
+                } if retained else {}),
+            )
+        assert 2.5 <= time.monotonic() - started < 7
+    with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
+        pass
+
+
 @pytest.mark.parametrize("condition", ["progress", "uneven", "silent"])
 def test_source_phase_initial_retention_progress_crosses_real_quiet_window(
     engine, procutil, tmp_path, condition,
@@ -1991,31 +2014,35 @@ def test_reused_health_does_not_classify_cleanup_or_ownership_failure_as_repair(
 def test_unsettled_job_teardown_keeps_frozen_inputs_and_construction_custody(
     engine, procutil, tmp_path, build_inputs, monkeypatch,
 ):
-    from types import SimpleNamespace
-    from native_installer_guardian_teardown import write_procutil
+    import base64
+    from native_installer_guardian_teardown import fault_source
 
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
     marker = tmp_path / "writers"
     observations = tmp_path / "teardown.json"
-    injected = tmp_path / "guardian_procutil.py"
     observed_inputs = []
     original = engine._procutil
+    run_owned = engine.run_owned
 
     def instrument(inputs):
         observed_inputs.append(inputs)
-        owned = original(inputs)
-        write_procutil(
-            injected, procutil=Path(owned.__file__), runtime=Path(engine.runtime.__file__),
-            root=root, frozen=inputs.plugin, marker=marker, observations=observations,
-            writer=_writer_tree(marker),
+        return original(inputs)
+
+    def inject(argv, **options):
+        guardian = sys.modules[run_owned.__module__]
+        packet = json.loads(guardian._guardian_packet(
+            options["procutil"], options["runtime_path"], None,
+        ))
+        sources = {name: base64.b64decode(value) for name, value in packet.items()}
+        sources["_construction_procutil/__init__.py"] += fault_source(
+            root=root, frozen=observed_inputs[-1].plugin, marker=marker,
+            observations=observations, writer=_writer_tree(marker),
         )
-        return SimpleNamespace(
-            __file__=injected, no_window_kwargs=owned.no_window_kwargs,
-            __name__=owned.__name__,
-        )
+        return run_owned(argv, **{**options, "guardian_sources": sources})
 
     monkeypatch.setattr(engine, "_procutil", instrument)
+    monkeypatch.setattr(engine, "run_owned", inject)
     with pytest.raises(RuntimeError, match="guardian did not confirm settlement"):
         with engine.numbered_candidate(
             root, "1.0.0", plugin=plugin, uv=uv, base_python=Path(sys.executable),
