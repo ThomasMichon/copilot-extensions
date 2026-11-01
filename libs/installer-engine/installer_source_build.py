@@ -79,7 +79,7 @@ def retained_input_graph(
     selected = engine._installed_packages(inputs)
     with engine.retain_uv_install(
         str(Path(engine._select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)),
-        ["--python", str(python), "--no-editable", "--link-mode", "copy" if refresh else "hardlink",
+        ["--python", str(python), "--link-mode", "copy" if refresh else "hardlink",
          *(["--reinstall"] if refresh else []),
          *(argument for package in selected
            for argument in ("-r", str(package / "pyproject.toml"))),
@@ -88,6 +88,7 @@ def retained_input_graph(
          ) for package in selected)],
         env=environment, cwd=inputs.plugin,
         trusted_source_roots=inputs.packages,
+        non_editable=True,
         excluded_local_packages=tuple(engine._excluded_packages(inputs)),
         on_progress=on_progress,
     ) as transaction:

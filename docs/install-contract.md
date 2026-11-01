@@ -1710,10 +1710,13 @@ explicit development generations. Canonical source references may use
 `editable = true` to locate libraries in a source checkout; deployment must
 still install noneditable wheel content rather than references to those source
 directories. The canonical installer dependency CLI
-refuses explicit editable operands and non-copy link modes, and supplies
-`--no-editable --link-mode copy` to UV. The Python constructor enforces
-`--no-editable`, verifies installed origins and permits ordinary immutable
-wheel-cache hardlinks as described in the source-wheel cache contract below.
+refuses explicit editable operands, including requirements-file entries, and
+non-copy link modes. It freezes editable source mappings in private retained
+metadata and supplies `--link-mode copy` to UV; `uv pip install` does not accept
+the global `--no-editable` option. The Python constructor uses the same
+non-editable retention mode, verifies installed origins and permits ordinary
+immutable wheel-cache hardlinks as described in the source-wheel cache contract
+below.
 Completion rejects symlink/reparse redirection, editable origins and escaping
 path hooks, not an ordinary file merely having another hardlink. Cache content
 is never modified in place; cache retirement unlinks its own names without
@@ -4896,9 +4899,10 @@ repair, generation propagation and process-death/live monitor recovery still req
 own implementation and evidence.
 
 Construction uses the explicitly supplied base interpreter's `venv --copies`
-and one `uv pip install --no-sources --no-editable --link-mode copy` invocation
-over every frozen local package. It preserves the caller's configured indexes;
-it neither fetches unpublished local libraries from an index nor silently
+and one retained `uv pip install --link-mode copy` invocation over every frozen
+local package, with non-editable private source mappings. It preserves the
+caller's configured indexes; it neither fetches unpublished local libraries
+from an index nor silently
 downgrades to another interpreter. An isolated installed-origin health probe
 precedes immutable completion publication. Retention is acquired before
 construction ownership is released, so GC cannot discard a ready candidate
@@ -4984,9 +4988,10 @@ Logger installs its existing setuptools/PyYAML prerequisites together, then
 submits its seven explicit helper roots and plugin root in one retained
 transaction. This replaces ten governed UV calls with two without removing
 dependencies or weakening build isolation, seasoning or reinstall policy.
-The local batch uses `--no-editable` to override canonical development
-mappings and preserves a named reinstall for every root. Either failure stops
-before runtime activation; retained healthy construction reuse stays unchanged.
+The local batch freezes canonical editable development mappings in private
+retained metadata and preserves a named reinstall for every root. Either failure
+stops before runtime activation; retained healthy construction reuse stays
+unchanged.
 
 `agent-codespaces` uses the canonical-reference form for both installers.
 Its Connection Owner service, complete explicit local closure, and Windows
@@ -4994,8 +4999,8 @@ signed-Python recovery/venv health probes remain plugin-owned; uv acquisition,
 transient retries, and deploy-manifest writing use the shared engine.
 Both installers submit the eight helper roots and plugin root in one retained
 UV transaction, preserving every named `--reinstall-package` selection or all
-nine editable roots. Normal installs explicitly pass `--no-editable` so canonical
-development mappings cannot conflict with those non-editable direct roots.
+nine editable roots. Normal installs freeze editable development mappings in
+private retained metadata so they cannot conflict with non-editable direct roots.
 UV resolves their dependency order once; a closure failure
 still refuses construction. Windows requires UV and omits pip seeding from
 its signed-copy venv as well.
