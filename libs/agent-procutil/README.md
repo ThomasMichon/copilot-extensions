@@ -439,8 +439,12 @@ enclosing owner confirms the whole group. Borrowed calls therefore cannot claim
 whole-group `on_settled` callbacks. This is an explicit lifetime delegation,
 not application authority or a general ambient-containment fallback. Windows
 retains its strict owned Job. Ordinary callers keep the existing guardian.
-The guardian reserves an additional half-second inside the same deadline for
-its bounded completion frame. Confirmed-cleanup timeouts retain bounded raw
+`budget.enclosed_budget()` places a nested owner's settlement deadline before
+the enclosing read cutoff, reserving a quarter-second for its bounded completion
+frame and retaining cleanup time inside that earlier bound. POSIX callers pass
+that nested budget to the guardian, also capped by the individual call timeout.
+Consumers align their own nested work with its `execution_deadline`, rather
+than merely advancing execution while allowing cleanup past the reader's cutoff. Confirmed-cleanup timeouts retain bounded raw
 partial streams; no partial result is treated as successful execution.
 
 Windowless launch guidance lives here rather than in the package initializer:

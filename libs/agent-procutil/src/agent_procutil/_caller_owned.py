@@ -253,6 +253,7 @@ def run(
 ) -> subprocess.CompletedProcess:
     if on_settled is not None and not callable(on_settled):
         raise TypeError("settlement notification must be callable")
+    execution_budget = budget
     try:
         if type(borrow_parent_scope) is not bool:
             raise TypeError("borrow_parent_scope must be a boolean")
@@ -271,6 +272,11 @@ def run(
             **({"budget": {"deadline": budget.deadline, "cleanup_reserve": budget.cleanup_reserve}}
                if budget is not None else {}),
         })
+        if budget is not None and os.name != "nt" and not borrow_parent_scope:
+            read_deadline = min(time.monotonic() + timeout, budget.execution_deadline)
+            execution_budget = OwnedExecutionBudget(read_deadline + budget.cleanup_reserve, budget.cleanup_reserve)
+            enclosed = execution_budget.enclosed_budget()
+            request["budget"] = {"deadline": enclosed.deadline, "cleanup_reserve": enclosed.cleanup_reserve}
         frame = json.dumps(request, ensure_ascii=True, allow_nan=False) + "\n"
         if len(frame) > _MAX_REQUEST:
             raise ValueError("caller-owned request exceeds its frame limit")
@@ -289,7 +295,7 @@ def run(
                 on_settled=on_settled,
                 allow_daemon_breakaway=allow_daemon_breakaway,
                 binary=binary,
-                **({"budget": budget} if budget is not None else {}),
+                **({"budget": execution_budget} if execution_budget is not None else {}),
                 **({"cwd": cwd} if cwd is not None else {}),
                 **({"env": env} if env is not None else {}),
             )
@@ -324,7 +330,7 @@ def run(
                 capture_limits=(6 * (max_stdout_bytes + max_stderr_bytes) + 4096, 65536),
                 confirm_posix_group=True,
                 on_settled=on_settled,
-                **({"budget": budget} if budget is not None else {}),
+                **({"budget": execution_budget} if execution_budget is not None else {}),
                 **({"cwd": cwd} if cwd is not None else {}),
                 **({"env": env} if env is not None else {}),
             )
@@ -406,8 +412,6 @@ def _main() -> None:
             raise ValueError("caller-owned request frame is invalid")
         request = _validate(json.loads(frame))
         budget = OwnedExecutionBudget(**request["budget"]) if "budget" in request else None
-        if budget is not None:
-            budget = OwnedExecutionBudget(budget.deadline, budget.cleanup_reserve + .5)
         try:
             result = _run_owned(
                 request["argv"], timeout=request["timeout"],

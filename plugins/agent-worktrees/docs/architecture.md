@@ -3107,6 +3107,10 @@ native runner is unchanged; no generic installer lifetime behavior is widened.
 The worker publishes an event-local monotonic settlement deadline 23 seconds
 after receipt, leaving two seconds for response inside its 25-second execution
 limit. Policy evaluation reserves three of those seconds for owned cleanup.
+On POSIX that deadline is additionally capped by the public
+`enclosed_budget().execution_deadline`, leaving the guardian's own cleanup and
+completion frame before the parent reader cutoff. Advancing execution alone
+does not reserve enough time for slow settlement. Policy evaluation reserves three of those seconds for owned cleanup.
 Cross-repo and supersede observations share the remaining decision clock;
 supersede calls use the public `OwnedExecutionBudget` SDK seam with 64-KiB stdout
 and 4-KiB stderr caps. Each PR observation retains its 15-second individual cap

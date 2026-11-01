@@ -49,11 +49,16 @@ def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None, ini
         return 3
     settled = []
     try:
+        budget = OwnedExecutionBudget(settlement_deadline + 2.0, 2.0)
         python, overrides = direct_python(sys.executable)
         environment = dict(os.environ)
         environment.update(overrides)
         environment.update(PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
-        environment["AGENT_WORKTREES_PRE_SETTLEMENT_DEADLINE"] = str(settlement_deadline)
+        environment["AGENT_WORKTREES_PRE_SETTLEMENT_DEADLINE"] = str(
+            settlement_deadline if os.name == "nt" else min(
+                settlement_deadline, budget.enclosed_budget().execution_deadline,
+            )
+        )
         if initial_decision is not None:
             frame = json.dumps({"event": json.loads(frame), "initial": initial_decision}).encode("utf-8")
         result = run_caller_owned(
@@ -72,7 +77,7 @@ def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None, ini
             input_text=frame.decode("utf-8"),
             cwd=Path.home(),
             env=environment,
-            budget=OwnedExecutionBudget(settlement_deadline + 2.0, 2.0),
+            budget=budget,
             on_settled=lambda: settled.append(True),
         )
     except OwnedCleanupError as error:

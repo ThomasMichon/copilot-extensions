@@ -41,3 +41,7 @@ class OwnedExecutionBudget:
         if remaining <= 0:
             raise TimeoutError("owned aggregate settlement deadline expired")
         return min(maximum, remaining)
+
+    def enclosed_budget(self):
+        """Settle and publish a nested owner before this owner's read cutoff."""
+        return OwnedExecutionBudget(self.execution_deadline - .25, self.cleanup_reserve)

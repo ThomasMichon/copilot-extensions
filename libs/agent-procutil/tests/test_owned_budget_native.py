@@ -92,7 +92,7 @@ from pathlib import Path
 sys.path.insert(0,sys.argv[1])
 from agent_procutil.owned_process import run_caller_owned
 from agent_procutil.owned_budget import OwnedExecutionBudget
-root=Path(sys.argv[2]);budget=OwnedExecutionBudget.from_timeout(6,cleanup_reserve=2)
+root=Path(sys.argv[2]);budget=OwnedExecutionBudget.from_timeout(8,cleanup_reserve=2)
 env=dict(os.environ);env['BUDGET_NATIVE_DEADLINE']=str(budget.deadline)
 settled=[]
 try:
@@ -148,3 +148,29 @@ except subprocess.TimeoutExpired:
             process.communicate(timeout=5)
             for pin in pins:
                 pin.close()
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="native POSIX guardian")
+def test_slow_guardian_settlement_publishes_pending_output_before_parent_cutoff(monkeypatch):
+    from agent_procutil import _caller_owned as protocol
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_procutil.owned_process import run_caller_owned
+
+    monkeypatch.setattr(protocol, "_BOOTSTRAP",
+        "import sys,time;sys.path.insert(0,sys.argv.pop(1));"
+        "from agent_procutil import _caller_owned as p;"
+        "exec('original=p._run_owned\\ndef slow(*a,**k):\\n"
+        " try:return original(*a,**k)\\n finally:time.sleep(.75)\\np._run_owned=slow');"
+        "p._main()")
+    budget = OwnedExecutionBudget.from_timeout(4, cleanup_reserve=1)
+    settled = []
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        run_caller_owned(
+            [sys.executable, "-I", "-c", "import time;print('pending',flush=True);time.sleep(60)"],
+            timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096,
+            budget=budget, on_settled=lambda: settled.append(True),
+        )
+    assert settled == [True]
+    assert caught.value.output == b"pending\n"
+    assert time.monotonic() < budget.deadline
