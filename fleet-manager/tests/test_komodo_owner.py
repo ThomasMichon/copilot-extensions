@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from dataclasses import replace
 import json
 import subprocess
@@ -17,14 +18,15 @@ import pytest
 from fleet_manager.komodo_declaration import KomodoDeclaration
 from fleet_manager.komodo_evidence import FIELDS
 from fleet_manager.komodo_health import identity_digest
+from fleet_manager.komodo_incumbent import KomodoIncumbentMaterialization
 from fleet_manager.komodo_network import network_fingerprint
 from fleet_manager.komodo_native import KomodoNative
 from fleet_manager.komodo_owner import KomodoOwner, native_fingerprint
-from fleet_manager.komodo_profile import render_profile
+from fleet_manager.komodo_profile import SECRET_NAMES, render_profile
 from fleet_manager.komodo_selection import KomodoSelection
 from fleet_manager.komodo_state import KomodoState
 from fleet_manager.node_journal import NodeJournal
-from fleet_manager.planning import PlanError, digest
+from fleet_manager.planning import PlanError, canonical, digest
 from fleet_manager.runtime_admission import AdmissionError, OperationGrant
 from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
 from test_komodo_declaration import intent
@@ -39,6 +41,16 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
 @pytest.mark.parametrize("scenario", [
     "fresh-repeat", "lost-reply", "recovery", "update", "adoption", "foreign",
     "failed-recovery", "unsettled-restart", "lost-terminal-receipt",
+    "failed-retained-health-converge", "failed-retained-health-settle",
+    "failed-retained-health-missing-outcome-evidence", "failed-retained-health-corrupt-outcome-evidence",
+    "failed-retained-health-missing-terminal-outcome-evidence",
+    "failed-retained-health-corrupt-terminal-outcome-evidence",
+    "lost-terminal-receipt-missing-outcome-evidence", "lost-terminal-receipt-corrupt-outcome-evidence",
+    "lost-terminal-receipt-missing-terminal-outcome-evidence",
+    "lost-terminal-receipt-corrupt-terminal-outcome-evidence",
+    "lost-terminal-receipt-replaced-container",
+    "first-complete-unstarted-lost-failure-publication",
+    "first-partial-created-lost-failure-publication",
     "credential-drift", "native-drift", "network-drift", "foreign-endpoint",
     "foreign-network", "adoption-drift", "adoption-update", "adoption-update-corrupt", "adoption-failed-drift",
     "retire-reinstall", "retire-lost-reply", "retire-partial",
@@ -60,6 +72,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
     "missing-membership-before-health", "repeat-missing-network-membership", "status-missing-network-membership",
     "failed-short-native-1",
     "mismatched-attachment-before-health", "repeat-mismatched-attachment", "status-mismatched-attachment",
+    "adoption-incumbent", "adoption-incumbent-volume-drift", "adoption-incumbent-update",
 ])
 def test_composed_owner_preserves_original_operation_and_real_native_custody(
     native_rig: Any, keys: Any, scenario: str, monkeypatch: Any, compose_version: str,
@@ -82,6 +95,19 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
     def effects() -> int:
         path = rig["directory"] / "effects"
         return len(path.read_text().splitlines()) if path.exists() else 0
+
+    @contextmanager
+    def damaged_outcome(path):
+        original = path.read_bytes()
+        if "missing" in scenario:
+            path.unlink()
+        else:
+            path.write_bytes(b"{}")
+        try:
+            yield
+        finally:
+            path.write_bytes(original)
+            path.chmod(0o600)
 
     async def exercise() -> None:
         current = []
@@ -222,6 +248,50 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     rig["native"]._apply, selected.declaration, selected.material,
                     profile=profile, expected=raw, deadline=time.monotonic() + 5)
                 original_native = live()
+                if scenario.startswith("adoption-incumbent"):
+                    volumes = {}
+                    storage = {str(getattr(selected.material, name)): name for name in (
+                        "mongo_data", "mongo_config", "keys", "backups",
+                    )}
+                    for container in original_native.values():
+                        for mount in container["Mounts"]:
+                            name = storage.get(mount["Source"])
+                            if name is None:
+                                continue
+                            volume_name = "original-" + name.replace("_", "-")
+                            mount.update(Type="volume", Name=volume_name, Driver="local")
+                            volumes[volume_name] = {
+                                "Name": volume_name, "Mountpoint": mount["Source"],
+                                "Driver": "local", "Scope": "local", "Options": None,
+                                "CreatedAt": "2026-01-01T00:00:00Z", "Labels": {},
+                            }
+                    private_keys = tuple(selected.material.keys / (name + ".key")
+                                         for name in ("core", "periphery"))
+                    for path in private_keys:
+                        path.write_bytes(b"original-private-key-fixture")
+                        path.chmod(0o600)
+                    material = KomodoIncumbentMaterialization(
+                        selected.material.docker_socket, selected.material.keys,
+                        selected.material.admin_username, selected.material.admin_password,
+                        (*tuple(getattr(selected.material, name) for name in SECRET_NAMES), *private_keys),
+                        canonical({
+                            "schema": "fleet-manager.komodo-incumbent-material", "version": 1,
+                            "mounts": {name: item["Mounts"] for name, item in original_native.items()},
+                            "volumes": list(volumes.values()),
+                        }),
+                    )
+                    desired = selected.declaration.to_dict()
+                    desired["profile"] = "preserve-incumbent"
+                    desired["images"]["mongo"]["version"] = "7.0.45"
+                    selected = replace(selected, declaration=KomodoDeclaration.from_dict(desired),
+                                       material=material, adoption=tuple(
+                                           (name, native_fingerprint(item))
+                                           for name, item in original_native.items()),
+                                       adopted_public_identity=identity_digest(material),
+                                       adopted_network=network_fingerprint(json.loads(
+                                           (rig["directory"] / "network.json").read_text())))
+                    (rig["directory"] / "live.json").write_text(json.dumps(original_native))
+                    (rig["directory"] / "volumes.json").write_text(json.dumps(list(volumes.values())))
                 if scenario == "foreign-network":
                     (rig["directory"] / "live.json").write_text("{}")
                     with pytest.raises(PlanError, match="network requires exact existing-owner adoption"):
@@ -239,6 +309,29 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     adopted_public_identity=identity_digest(selected.material),
                     adopted_network=network_fingerprint(json.loads(
                         (rig["directory"] / "network.json").read_text())))
+                if scenario.startswith("adoption-incumbent"):
+                    original = request()
+                    receipt = await invoke(owner(), original)
+                    assert receipt.to_dict()["status"] == "succeeded"
+                    assert await invoke(owner(), original) == receipt
+                    assert (await invoke(owner(), original, status=True))["converged"] is True
+                    if scenario.endswith("volume-drift"):
+                        values = list(volumes.values())
+                        values[0]["CreatedAt"] = "fixture-recreated"
+                        (rig["directory"] / "volumes.json").write_text(json.dumps(values))
+                        with pytest.raises(PlanError, match="volume changed"):
+                            await invoke(owner(), original)
+                    elif scenario.endswith("update"):
+                        changed = current[0].declaration.to_dict()
+                        changed["revision"] = "config-2"
+                        current[0] = replace(
+                            current[0], declaration=KomodoDeclaration.from_dict(changed),
+                            compatible_with=(current[0].deployment_digest,),
+                        )
+                        with pytest.raises(PlanError, match="cannot apply"):
+                            await invoke(owner(), request("update-1"))
+                    assert effects() == 1 and live() == original_native
+                    return
                 if scenario.startswith("adoption-accepted-"):
                     begin = NodeJournal.begin_external
 
@@ -285,7 +378,7 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     return
             if scenario.startswith("first-"):
                 marker = rig["directory"] / "fail-create.json"
-                complete_unstarted = scenario == "first-complete-unstarted"
+                complete_unstarted = scenario.startswith("first-complete-unstarted")
                 services = (["core", "mongo", "periphery"] if complete_unstarted
                             else [] if scenario.startswith("first-empty") else ["core", "mongo"]
                             if scenario in ("first-partial-core", "first-partial-key-drift") else ["mongo"])
@@ -330,7 +423,28 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                         await invoke(owner(), original, failed=True)
                     assert effects() == 1 and not health_requests
                     return
-                failed = await invoke(owner(), original, failed=True)
+                if scenario.endswith("lost-failure-publication"):
+                    reconcile = NodeJournal.reconcile
+                    outcomes = []
+
+                    def lost_failure(journal, operation, outcome, **options):
+                        outcomes.append(outcome)
+                        raise PlanError("fixture-lost-failure-publication")
+
+                    monkeypatch.setattr(NodeJournal, "reconcile", lost_failure)
+                    with pytest.raises(PlanError, match="fixture-lost-failure-publication"):
+                        await invoke(owner(), original, failed=True)
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        retained_failure = state.read()["failed"]
+                        assert state.read()["attempt"]["failure_outcome"] == outcomes[0].to_dict()
+                    monkeypatch.setattr(NodeJournal, "reconcile", reconcile)
+                    failed = await invoke(owner(), original)
+                    assert failed == outcomes[0]
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        assert state.read()["failed"] == retained_failure
+                        assert state.read()["attempt"] is None
+                else:
+                    failed = await invoke(owner(), original, failed=True)
                 assert failed.to_dict()["status"] == "failed"
                 assert await invoke(owner(), original) == failed
                 status = await invoke(owner(), original, status=True)
@@ -471,6 +585,55 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
 
             first = owner()
             original = request()
+            if scenario.startswith("failed-retained-health-"):
+                health_failure[0] = True
+                with pytest.raises(PlanError, match="current Core version"):
+                    await invoke(first, original)
+                original_native = live()
+                reconcile = NodeJournal.reconcile
+                outcomes = []
+
+                def lost_failure(journal, operation, outcome, **options):
+                    outcomes.append(outcome)
+                    if "terminal-outcome-evidence" in scenario:
+                        reconcile(journal, operation, outcome, **options)
+                    raise PlanError("fixture-lost-failure-publication")
+
+                monkeypatch.setattr(NodeJournal, "reconcile", lost_failure)
+                with pytest.raises(PlanError, match="fixture-lost-failure-publication"):
+                    await invoke(owner(), original, failed=True)
+                with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                    retained_failure = state.read()["failed"]
+                    assert state.read()["attempt"]["failure_outcome"] == outcomes[0].to_dict()
+                monkeypatch.setattr(NodeJournal, "reconcile", reconcile)
+                health_failure[0] = False
+                before_http = len(health_requests)
+                if scenario.endswith("outcome-evidence"):
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        original_record = (state.root / "selection.json").read_bytes()
+                        journal = NodeJournal(
+                            state.root / "node.sqlite", authority="gateway-a",
+                            installation="install-a", target="host-a")
+                        original_receipt = journal.inspect(original)
+                        assert original_receipt.to_dict()["status"] == (
+                            "failed" if "terminal-outcome-evidence" in scenario else "unknown")
+                        outcome_path = state.root / "receipts" / (digest(retained_failure) + ".json")
+                    with damaged_outcome(outcome_path):
+                        status = await invoke(owner(), original, status=True)
+                        assert "retained-terminal-outcome-unavailable" in status["blockers"]
+                        assert not status["converged"]
+                        with pytest.raises(PlanError, match="immutable|outcome"):
+                            await invoke(owner(), original)
+                        assert journal.inspect(original) == original_receipt
+                        assert (outcome_path.parent.parent / "selection.json").read_bytes() == original_record
+                recovered = await invoke(owner(), original, failed=scenario.endswith("-settle"))
+                assert recovered == outcomes[0] and recovered.to_dict()["status"] == "failed"
+                assert await invoke(owner(), original) == recovered
+                with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                    assert state.read()["failed"] == retained_failure
+                    assert state.read()["attempt"] is None and state.read()["good"] is None
+                assert effects() == 1 and live() == original_native and len(health_requests) == before_http
+                return
             if scenario in ("missing-membership-before-health", "mismatched-attachment-before-health"):
                 def omit_membership(arguments: list[str], **kwargs: Any) -> Any:
                     result = rig["tooling"].run(arguments, **kwargs)
@@ -503,20 +666,51 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 assert status["installed"] is False and status["accepted"] is None
                 assert status["currently_healthy"] is None and status["converged"] is False
                 assert effects() == 0
-            if scenario == "lost-terminal-receipt":
+            if scenario.startswith("lost-terminal-receipt"):
                 reconcile = NodeJournal.reconcile
                 failures = []
 
-                def lost(journal: Any, request: Any, receipt: Any) -> Any:
+                def lost(journal: Any, request: Any, receipt: Any, **options: Any) -> Any:
                     if not failures:
                         failures.append(True)
+                        if "terminal-outcome-evidence" in scenario:
+                            reconcile(journal, request, receipt, **options)
                         raise PlanError("fixture-lost-terminal-receipt")
-                    return reconcile(journal, request, receipt)
+                    return reconcile(journal, request, receipt, **options)
 
                 monkeypatch.setattr(NodeJournal, "reconcile", lost)
                 with pytest.raises(PlanError, match="fixture-lost-terminal"):
                     await invoke(first, original)
                 assert effects() == 1
+                if scenario == "lost-terminal-receipt-replaced-container":
+                    retained = (runtime / current[0].resource / "selection.json").read_bytes()
+                    before_http = len(health_requests)
+                    changed = live()
+                    changed["core"]["Id"] = "9" * 64
+                    (rig["directory"] / "live.json").write_text(json.dumps(changed))
+                    with pytest.raises(PlanError, match="replaced or changed"):
+                        await invoke(owner(), original)
+                    assert (runtime / current[0].resource / "selection.json").read_bytes() == retained
+                    assert effects() == 1 and len(health_requests) == before_http
+                    return
+                if scenario.endswith("outcome-evidence"):
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        original_record = (state.root / "selection.json").read_bytes()
+                        journal = NodeJournal(
+                            state.root / "node.sqlite", authority="gateway-a",
+                            installation="install-a", target="host-a")
+                        original_receipt = journal.inspect(original)
+                        assert original_receipt.to_dict()["status"] == (
+                            "succeeded" if "terminal-outcome-evidence" in scenario else "unknown")
+                        outcome_path = state.root / "receipts" / (digest(state.read()["good"]) + ".json")
+                    with damaged_outcome(outcome_path):
+                        status = await invoke(owner(), original, status=True)
+                        assert "retained-terminal-outcome-unavailable" in status["blockers"]
+                        assert not status["converged"]
+                        with pytest.raises(PlanError, match="immutable|outcome"):
+                            await invoke(owner(), original)
+                        assert journal.inspect(original) == original_receipt
+                        assert (outcome_path.parent.parent / "selection.json").read_bytes() == original_record
                 receipt = await invoke(owner(), original)
                 assert receipt.to_dict()["status"] == "succeeded" and effects() == 1
                 return

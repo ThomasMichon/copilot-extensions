@@ -19,6 +19,7 @@ from .komodo_native import KomodoImage, KomodoNative
 from .komodo_network import retained_network, same_network_observation, verify_network
 from .komodo_selection import KomodoSelection
 from .komodo_state import KomodoState
+from .komodo_repair_evidence import read_outcome
 from .node_journal import NodeJournal
 from .operations import OperationIntent, TargetReceipt
 from .planning import PlanError, decode, digest, integer
@@ -64,9 +65,14 @@ def verify_native(containers: dict[str, dict[str, Any]], selected: KomodoSelecti
         raise PlanError("Komodo native substrate is incomplete")
     if not complete and (not owned or ready):
         raise PlanError("Komodo partial evidence requires fixed-profile failure inspection")
-    desired = decode(profile)["services"]
+    preserving = selected.declaration.preserving
+    if preserving and owned:
+        raise PlanError("Komodo incumbent cannot become a fixed native profile")
+    desired = {} if preserving else decode(profile)["services"]
     for name in containers:
-        item, expected, image = containers[name], desired[name], images[name]
+        item, image = containers[name], images[name]
+        expected = ({"mem_limit": selected.declaration.to_dict()["resources"][name]["memory_bytes"]}
+                    if preserving else desired[name])
         config, host = item["Config"], item["HostConfig"]
         if (item.get("Image") != image.identity
                 or (ready and not native_running(item))
@@ -79,22 +85,10 @@ def verify_native(containers: dict[str, dict[str, Any]], selected: KomodoSelecti
                 or host.get("NanoCpus") != (
                     selected.declaration.to_dict()["resources"][name]["cpu_millis"] * 1000000)):
             raise PlanError("Komodo native runtime differs from selected images or isolation")
-        required_mounts = {
-            entry["target"]: (entry["source"], not entry["read_only"])
-            for entry in expected["volumes"]
-        }
-        for secret in expected.get("secrets", []):
-            required_mounts["/run/secrets/" + secret] = (
-                str(getattr(selected.material, secret)), False)
-        actual_mounts = {}
-        for mount in item["Mounts"]:
-            destination = mount.get("Destination")
-            if (destination in actual_mounts or mount.get("Type") != "bind"
-                    or type(mount.get("RW")) is not bool):
-                raise PlanError("Komodo native mount custody is ambiguous")
-            actual_mounts[destination] = (mount.get("Source"), mount["RW"])
-        if actual_mounts != required_mounts:
-            raise PlanError("Komodo native storage or credential mounts differ from selection")
+        if preserving:
+            selected.material.check_mounts(name, item["Mounts"])
+        else:
+            _verify_fixed_mounts(item, expected, selected)
         ports = host.get("PortBindings") or {}
         expected_ports = ({"9120/tcp": [{"HostIp": "127.0.0.1",
                                         "HostPort": str(selected.declaration.to_dict()["core_port"])}]}
@@ -113,6 +107,25 @@ def verify_native(containers: dict[str, dict[str, Any]], selected: KomodoSelecti
                     or tuple(config.get("Entrypoint") or ()) != image.entrypoint
                     or tuple(config.get("Cmd") or ()) != command):
                 raise PlanError("Komodo native fixed configuration differs from selection")
+
+
+def _verify_fixed_mounts(item: dict, expected: dict, selected: KomodoSelection) -> None:
+    required_mounts = {
+        entry["target"]: (entry["source"], not entry["read_only"])
+        for entry in expected["volumes"]
+    }
+    for secret in expected.get("secrets", []):
+        required_mounts["/run/secrets/" + secret] = (
+            str(getattr(selected.material, secret)), False)
+    actual_mounts = {}
+    for mount in item["Mounts"]:
+        destination = mount.get("Destination")
+        if (destination in actual_mounts or mount.get("Type") != "bind"
+                or type(mount.get("RW")) is not bool):
+            raise PlanError("Komodo native mount custody is ambiguous")
+        actual_mounts[destination] = (mount.get("Source"), mount["RW"])
+    if actual_mounts != required_mounts:
+        raise PlanError("Komodo native storage or credential mounts differ from selection")
 
 
 def verify_candidate(containers: dict[str, dict[str, Any]], selected: KomodoSelection,
@@ -167,9 +180,9 @@ class KomodoOwner:
         if type(selected) is not KomodoSelection:
             raise PlanError("Komodo current owner resolution is unavailable")
         value = request.to_dict()
+        content = selected.deployment_digest
         now = self.clock()
         integer(now, "Komodo current owner time")
-        content = selected.deployment_digest
         if (now >= selected.valid_until or value["command"] != "manager.converge"
                 or value["authority"] != self.authority
                 or value["target"] != selected.declaration.to_dict()["target"]
@@ -282,8 +295,40 @@ class KomodoOwner:
             settled = journal.inspect(original)
             if settled is None or settled.to_dict()["status"] not in ("succeeded", "failed"):
                 raise PlanError("Komodo retained attempt requires original-operation reconciliation")
+            read_outcome(state.root, settled.to_dict()["result_ref"])
             record["attempt"] = None
             state.save(record)
+
+    @staticmethod
+    def _require_native_reconciliation(record: dict[str, Any], request: OperationIntent) -> None:
+        for name in ("good", "failed"):
+            retained = record[name]
+            if (type(retained) is dict and type(retained.get("repair")) is dict
+                    and retained["repair"].get("request_digest") == request.request_digest):
+                raise PlanError("Komodo retained terminal decision requires original repair-owner reconciliation")
+
+    @staticmethod
+    def _reconcile_terminal(state: KomodoState, record: dict[str, Any],
+                            journal: NodeJournal, request: OperationIntent, *, failed: bool) -> TargetReceipt:
+        attempt = record["attempt"]
+        status, key = ("failed", "failed") if failed else ("succeeded", "good")
+        retained = record[key]
+        outcome = TargetReceipt.from_dict(attempt["failure_outcome" if failed else "success_outcome"])
+        outcome.check_intent(request)
+        if (attempt["request"] != request.to_dict() or retained is None
+                or outcome.to_dict()["status"] != status
+                or outcome.to_dict()["result_ref"] != digest(retained)):
+            raise PlanError("Komodo retained terminal decision lacks original evidence")
+
+        def checkpoint() -> None:
+            if read_outcome(state.root, outcome.to_dict()["result_ref"]) != retained:
+                raise PlanError("Komodo original immutable outcome changed")
+
+        settled = journal.reconcile(request, outcome, checkpoint=checkpoint)
+        checkpoint()
+        record["attempt"] = None
+        state.save(record)
+        return settled
 
     def converge(self, request: OperationIntent, permit: Permit) -> TargetReceipt:
         """UNKNOWN is persisted before mutation; restart only inspects that original attempt."""
@@ -324,16 +369,24 @@ class KomodoOwner:
                 permit = self.admission.revalidate(permit, request)
                 prior = journal.inspect(request)
                 if prior is None or prior.to_dict()["status"] == "accepted":
+                    if selected.declaration.preserving:
+                        verify_native(containers, selected, images, selected.profile(), owned=False)
+                        if (record["failed"] is not None or record["good"] is not None
+                                and record["good"]["deployment"] != content):
+                            raise PlanError("Komodo preserving profile cannot apply or recreate native resources")
                     self._preserved(record, selected, containers)
                     verify_network(network, selected, containers,
                                    retained_network(record, selected), pending=pending)
                 receipt = journal.accept_named_external(request, resource=selected.resource)
                 status = receipt.to_dict()["status"]
+                if status == "unknown":
+                    self._require_native_reconciliation(record, request)
                 profile = selected.profile()
                 if status in ("succeeded", "failed"):
                     self._preserved(record, selected, containers)
                     expected_network = verify_network(
-                        network, selected, containers, retained_network(record, selected), pending=pending)
+                        network, selected, containers, retained_network(record, selected),
+                        pending=pending or status == "failed")
                     if status == "succeeded":
                         verify_native(containers, selected, images, profile,
                                       owned=record["good"]["fixed_profile"])
@@ -341,6 +394,7 @@ class KomodoOwner:
                                     identity=record["good"]["public_identity"])
                         self._preserved_material(record, selected)
                         self._selected(request, content)
+                    read_outcome(state.root, receipt.to_dict()["result_ref"])
                     self.admission.complete(permit, request)
                     if record["attempt"] is not None and record["attempt"]["request"] == request.to_dict():
                         record["attempt"] = None
@@ -360,11 +414,13 @@ class KomodoOwner:
                             raise PlanError("Komodo accepted native attempt was replaced or changed")
                         verify_network(network, selected, containers,
                                        attempt["network_before"], pending=pending)
-                    slot = state.profile(profile)
                     needs_apply = (not containers or record["good"] is not None and (
                         record["good"]["deployment"] != content or set(containers) != set(SERVICES)
                         or not all(map(native_running, containers.values())))
                         or record["failed"] is not None)
+                    if selected.declaration.preserving and needs_apply:
+                        raise PlanError("Komodo preserving profile cannot apply or recreate native resources")
+                    slot = state.profile(profile)
                     retained = record["failed"] or record["good"]
                     record["attempt"] = {"request": request.to_dict(), "deployment": content,
                                          "profile": str(slot),
@@ -419,12 +475,24 @@ class KomodoOwner:
                 network = verify_network(self.native.network(
                     selected.declaration, selected.material, deadline=deadline),
                     selected, containers, attempt["network_before"],
-                    created=attempt["fixed_profile"] and attempt["native_settled"])
+                    created=attempt["fixed_profile"] and attempt["native_settled"],
+                    pending="failure_outcome" in attempt)
+                if "failure_outcome" in attempt:
+                    verify_failed_candidate(containers, selected, images, profile, attempt)
+                    self._preserved(record, selected, containers)
+                    self._selected(request, content)
+                    return self._reconcile_terminal(state, record, journal, request, failed=True)
+                if "success_outcome" in attempt:
+                    self._preserved(record, selected, containers)
                 verify_candidate(containers, selected, images, profile, attempt)
-                health = self._ready(selected, containers, network, deadline=deadline)
+                health = self._ready(
+                    selected, containers, network, deadline=deadline,
+                    identity=record["good"]["public_identity"] if "success_outcome" in attempt else None)
                 verify_attempt_keys(attempt, selected)
                 self._preserved_material(record, selected, allow_new_identity=True)
                 self._selected(request, content)
+                if "success_outcome" in attempt:
+                    return self._reconcile_terminal(state, record, journal, request, failed=False)
                 good = {
                     "deployment": content, "profile": record["attempt"]["profile"],
                     "material": selected.material_evidence(), "public_identity": health["public_identity"],
@@ -438,15 +506,13 @@ class KomodoOwner:
                 record["failed"] = None
                 record["retirement"] = None
                 result_ref = state.retain(good)
-                state.save(record)
                 value = request.to_dict()
                 del value["parameters"]
                 value.update(schema="fleet-manager.target-receipt", sequence=3, status="succeeded",
                              request_digest=request.request_digest, result_ref=result_ref)
-                settled = journal.reconcile(request, TargetReceipt.from_dict(value))
-                record["attempt"] = None
+                record["attempt"]["success_outcome"] = TargetReceipt.from_dict(value).to_dict()
                 state.save(record)
-                return settled
+                return self._reconcile_terminal(state, record, journal, request, failed=False)
         finally:
             self.admission.discard(permit)
 
@@ -494,8 +560,15 @@ class KomodoOwner:
                 receipt = journal.accept_named_external(request, resource=selected.resource)
                 if receipt.to_dict()["status"] != "unknown":
                     raise PlanError("Komodo failed settlement requires the original uncertain attempt")
+                self._require_native_reconciliation(record, request)
                 permit = self.admission.revalidate(permit, request)
                 self.admission.complete(permit, request)
+                if "failure_outcome" in attempt:
+                    self._preserved(record, selected, containers)
+                    self._selected(request, content)
+                    return self._reconcile_terminal(state, record, journal, request, failed=True)
+                if "success_outcome" in attempt:
+                    raise PlanError("Komodo retained terminal decision requires original success reconciliation")
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise PlanError("Komodo failure inspection requires remaining native deadline")
@@ -531,15 +604,13 @@ class KomodoOwner:
                     failed["partial_public_keys"] = {name: digest(value) for name, value in keys.items()}
                 record["failed"] = failed
                 result_ref = state.retain(failed)
-                state.save(record)
                 value = request.to_dict()
                 del value["parameters"]
                 value.update(schema="fleet-manager.target-receipt", sequence=3, status="failed",
                              request_digest=request.request_digest, result_ref=result_ref)
-                settled = journal.reconcile(request, TargetReceipt.from_dict(value))
-                record["attempt"] = None
+                record["attempt"]["failure_outcome"] = TargetReceipt.from_dict(value).to_dict()
                 state.save(record)
-                return settled
+                return self._reconcile_terminal(state, record, journal, request, failed=True)
         finally:
             self.admission.discard(permit)
 

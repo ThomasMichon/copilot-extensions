@@ -46,6 +46,9 @@ def _docker_protocol(args: list[str], directory: str) -> tuple[int, str]:
     if args[:2] == ["compose", "version"]:
         version = root / "compose-version"
         return 0, version.read_text() if version.exists() else "2.39.4"
+    if args[:2] == ["volume", "inspect"]:
+        volumes = json.loads((root / "volumes.json").read_text())
+        return 0, json.dumps([item for item in volumes if item["Name"] in args[2:]])
     if args[:2] == ["image", "inspect"]:
         overrides = root / "image-digests.json"
         digests = json.loads(overrides.read_text()) if overrides.exists() else {}

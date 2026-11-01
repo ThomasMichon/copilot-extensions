@@ -9,7 +9,7 @@ from typing import Any
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_der_public_key
 
-from .komodo_profile import KomodoMaterialization
+from .komodo_incumbent import KomodoIncumbentMaterialization, KomodoMaterial
 from .planning import PlanError
 
 
@@ -34,7 +34,7 @@ def public_identity(value: object) -> bytes:
     return encoded
 
 
-def effective_global_key(core: dict[str, Any], material: KomodoMaterialization,
+def effective_global_key(core: dict[str, Any], material: KomodoMaterial,
                          retained: str) -> str:
     """Resolve only the inspected fixed key reference or an explicit inline public key."""
     environment: dict[str, str] = {}
@@ -49,8 +49,11 @@ def effective_global_key(core: dict[str, Any], material: KomodoMaterialization,
     if value == "file:/config/keys/periphery.pub":
         mounts = [mount for mount in core["Mounts"]
                   if mount.get("Destination") == "/config/keys"]
-        if (len(mounts) != 1 or mounts[0].get("Type") != "bind"
-                or mounts[0].get("Source") != str(material.keys)):
+        if len(mounts) != 1 or mounts[0].get("Source") != str(material.keys):
+            raise PlanError("Komodo Core global public identity custody is unproved")
+        if type(material) is KomodoIncumbentMaterialization:
+            material.check_mounts("core", core["Mounts"])
+        elif mounts[0].get("Type") != "bind":
             raise PlanError("Komodo Core global public identity custody is unproved")
         return retained
     if value is None or value.startswith("file:"):

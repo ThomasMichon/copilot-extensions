@@ -183,6 +183,12 @@ checkpoint before current completion returns. Late key, process or endpoint
 drift refuses that completion while preserving the already committed original
 terminal receipt; it never changes the decision back to UNKNOWN or appends a
 second terminal outcome.
+The same failure decision is retained before terminal journal publication;
+improved health does not reclassify it during an original repair retry.
+A native-owner failure receipt retained on the original attempt instead
+requires that native owner's reconciliation. Conversely, the native owner
+refuses an interrupted repair-owned outcome. These entry points do not
+transfer terminal-decision custody or reinterpret each other's provenance.
 
 Successful terminal retries, terminal status and interrupted pending-outcome
 retries/status bind the retained outcome's bridge, not the pre-apply attempt's
