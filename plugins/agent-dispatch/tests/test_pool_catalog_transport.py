@@ -86,6 +86,42 @@ def test_all_routes_refuse_ordinary_authority_before_metadata_mutation(
     assert queue.pool_catalog_snapshot() == before
 
 
+@pytest.mark.parametrize("endpoint,method", [
+    ("/pool-catalog", "GET"),
+    ("/pool-catalog/scopes/begin", "POST"),
+    ("/pool-catalog/scopes/publish", "POST"),
+])
+@pytest.mark.parametrize("credential", [None, "wrong"])
+def test_catalog_routes_preserve_inherited_api_authentication(
+    queue, endpoint, method, credential,
+) -> None:
+    before = queue.pool_catalog_snapshot()
+    response = _client(queue).request(
+        method, endpoint, headers={} if credential is None else _headers(credential),
+        json=BEGIN if method == "POST" else None,
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid or missing bearer token"
+    assert queue.pool_catalog_snapshot() == before
+
+
+@pytest.mark.parametrize("endpoint,method", [
+    ("/pool-catalog", "GET"),
+    ("/pool-catalog/scopes/begin", "POST"),
+    ("/pool-catalog/scopes/publish", "POST"),
+])
+def test_missing_control_configuration_is_visible_after_valid_api_auth(
+    queue, endpoint, method,
+) -> None:
+    before = queue.pool_catalog_snapshot()
+    client = _client(queue, control=None)
+    response = client.request(method, endpoint, headers=_headers("data"),
+                              json=BEGIN if method == "POST" else None)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "pool_catalog_control_unavailable"
+    assert queue.pool_catalog_snapshot() == before
+
+
 @pytest.mark.parametrize("control", [None, ""])
 @pytest.mark.parametrize("endpoint,method", [
     ("/pool-catalog", "GET"),

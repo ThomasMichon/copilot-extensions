@@ -1382,3 +1382,9 @@ and merge. Actual admitted lock-holder publication, local/coordinator coherent
 input rechecks, complete expected-scope membership and mixed-cohort qualification
 remain the next integration stretch. The parent and amendment remain Active;
 there is no publisher enrollment, caller migration, placement or live rollout.
+
+The final HTTP transport packet passes 73 controls. The documentation
+distinguishes inherited API `401` string-detail failures from the structured
+catalog `403`/`503` failures, including the configuration refusal reached only
+after valid ordinary authentication. This preserves the existing app-wide
+authentication boundary rather than overriding it for the new routes.

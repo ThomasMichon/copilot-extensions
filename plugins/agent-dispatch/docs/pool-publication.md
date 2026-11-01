@@ -18,9 +18,15 @@ running-peer declaration rather than inferring support from a package version
 or newer installed payload.
 
 All three new routes require the existing control bearer, independently of
-whether ordinary API authentication is enabled. A missing or empty configured
-control token yields `503`; missing, wrong or ordinary data authority yields
-`403`. Task-scoped authority cannot access these routes. Authentication is
+whether ordinary API authentication is enabled. On an authenticated coordinator,
+the app-wide API dependency runs first: a missing or invalid bearer yields `401`
+with a string `detail`. Only after that check passes does the catalog dependency
+evaluate control authority. It yields structured catalog `503` detail for a
+missing or empty configured control token, or `403` for missing, wrong or
+ordinary data authority. On an open coordinator there is no preceding API
+bearer check. Callers must handle both inherited and catalog-specific failures,
+not assume every refusal has a catalog error code.
+Task-scoped authority cannot access these routes. Authentication is
 authorization for retained metadata, not a certificate of local source
 completeness or a supervisor process identity.
 
