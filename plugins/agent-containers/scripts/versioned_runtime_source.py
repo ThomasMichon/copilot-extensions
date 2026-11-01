@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 import importlib.util
@@ -28,6 +30,60 @@ _PACKAGE_VERSION = re.compile(
 _GENERATED = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache",
 }
+
+
+def fingerprint_entries(
+    entries, *, label, root_label, roots, normalize_link, path_type, file_hashes, on_file,
+    on_progress=None,
+):
+    """Hash validated entries with the unchanged ordered, length-framed format."""
+    import hashlib
+
+    def frame(data):
+        return len(data).to_bytes(8, "big") + data
+
+    ordered = sorted(entries, key=label)
+    parallel = os.name == "nt" and on_file is None and len(ordered) > 4
+    digest = hashlib.sha256()
+    with ThreadPoolExecutor(max_workers=4) if parallel else nullcontext() as readers:
+        for start in range(0, len(ordered), 4):
+            batch = ordered[start:start + 4]
+            pending = {
+                entry: readers.submit(entry.read_bytes)
+                for entry in batch if entries[entry] != "symlink"
+            } if readers is not None else {}
+            for entry in batch:
+                kind = entries[entry]
+                if kind == "symlink":
+                    try:
+                        target = normalize_link(os.readlink(entry))
+                    except OSError as exc:
+                        raise OSError(f"fingerprint_source: could not read symlink {entry}: {exc}") from exc
+                    if os.path.isabs(target):
+                        try:
+                            resolved = path_type(target).resolve()
+                        except OSError:
+                            resolved = None
+                        if resolved is not None and any(
+                            resolved == root or resolved.is_relative_to(root) for root in roots
+                        ):
+                            target = root_label(resolved)
+                    data = path_type(target).as_posix().encode("utf-8")
+                else:
+                    try:
+                        data = pending[entry].result() if entry in pending else entry.read_bytes()
+                    except OSError as exc:
+                        raise OSError(f"fingerprint_source: could not read {entry}: {exc}") from exc
+                    if file_hashes is not None:
+                        file_hashes[entry] = hashlib.sha256(data).hexdigest()
+                    if on_file is not None:
+                        on_file(entry, data)
+                digest.update(frame(label(entry).encode("utf-8")))
+                digest.update(frame(kind.encode("utf-8")))
+                digest.update(frame(data))
+                if on_progress is not None:
+                    on_progress()
+    return digest.hexdigest()
 
 
 class SourceIdentityError(ValueError):
@@ -710,8 +766,10 @@ def fingerprint_source(
     regular file can never hash identically to a symlink merely because
     its raw bytes happen to equal some symlink's encoded target text.
     """
-    import hashlib
     import os as _os
+
+    if file_hashes:
+        raise ValueError("fingerprint_source file_hashes collector must be empty")
 
     def _lstat_mode(p: Path, context: str) -> int:
         # An explicit lstat (never following the final symlink component),
@@ -728,6 +786,8 @@ def fingerprint_source(
         except OSError as exc:
             raise OSError(f"fingerprint_source: could not stat {p} ({context})") from exc
 
+    resolved_parents: dict[Path, Path] = {}
+
     def _declared_root_path(p) -> Path:
         # Resolve the PARENT chain (handles relative paths, intermediate
         # symlinks, '..' components) to get a canonical absolute path, but
@@ -738,7 +798,10 @@ def fingerprint_source(
         raw = Path(p)
         if not raw.is_absolute():
             raw = Path.cwd() / raw
-        return raw.parent.resolve() / raw.name
+        parent = raw.parent
+        if parent not in resolved_parents:
+            resolved_parents[parent] = parent.resolve()
+        return resolved_parents[parent] / raw.name
 
     roots = [_declared_root_path(p) for p in paths]
     root_modes: dict[Path, int] = {}
@@ -913,86 +976,8 @@ def fingerprint_source(
             return _root_label(root_path) + "/" + rel.as_posix()
         return f.as_posix()
 
-    def _frame(data: bytes) -> bytes:
-        return len(data).to_bytes(8, "big") + data
-
-    def _read_data(f: Path) -> bytes:
-        kind = entries[f]
-        if kind == "symlink":
-            try:
-                target = _os.readlink(f)
-            except OSError as exc:
-                raise OSError(
-                    f"fingerprint_source: could not read symlink {f}: {exc}"
-                ) from exc
-            target = _normalize_windows_extended_path(target)
-            if _os.path.isabs(target):
-                # An absolute target is only made relocation-invariant
-                # when it actually falls INSIDE one of the DECLARED roots
-                # themselves (never merely under their common ancestor,
-                # which can include undeclared sibling paths the caller
-                # never opted into relocating together with the rest --
-                # e.g. roots `project/src` and `project/pyproject.toml`
-                # share ancestor `project/`, but `project/shared.py` was
-                # never declared and is not guaranteed to move with the
-                # declared roots). Relocating the WHOLE declared set then
-                # moves the target's effective position the same way it
-                # moves everything else, so the relative form stays
-                # stable. A target outside every declared root (a fixed
-                # external location, or on a different drive on Windows)
-                # is NOT part of what gets relocated -- its raw absolute
-                # text is already the stable identity in that case.
-                try:
-                    target_resolved = Path(target).resolve()
-                except OSError:
-                    target_resolved = None
-                if target_resolved is not None and any(
-                    target_resolved == r or target_resolved.is_relative_to(r)
-                    for r in roots
-                ):
-                    target = _root_label(target_resolved)
-            data = Path(target).as_posix().encode("utf-8")
-        else:
-            try:
-                data = f.read_bytes()
-            except OSError as exc:
-                raise OSError(f"fingerprint_source: could not read {f}: {exc}") from exc
-        return data
-
-    digest = hashlib.sha256()
-
-    def _update(f: Path, data: bytes) -> None:
-        if entries[f] != "symlink":
-            if file_hashes is not None:
-                file_hashes[f] = hashlib.sha256(data).hexdigest()
-            if on_file is not None:
-                on_file(f, data)
-        digest.update(_frame(_label(f).encode("utf-8")))
-        # Frame kind separately so identical file bytes and link text cannot collide.
-        digest.update(_frame(entries[f].encode("utf-8")))
-        digest.update(_frame(data))
-        if on_progress is not None:
-            on_progress()
-
-    ordered = sorted(entries, key=_label)
-    if len(ordered) < 2 or on_file is not None or _os.name != "nt":
-        for f in ordered:
-            _update(f, _read_data(f))
-    else:
-        from collections import deque
-        from concurrent.futures import ThreadPoolExecutor
-
-        batch_size = 4
-        with ThreadPoolExecutor(
-            max_workers=batch_size, thread_name_prefix="runtime-fingerprint",
-        ) as pool:
-            for offset in range(0, len(ordered), batch_size):
-                pending = deque(
-                    (f, pool.submit(_read_data, f))
-                    for f in ordered[offset:offset + batch_size]
-                )
-                while pending:
-                    f, future = pending.popleft()
-                    _update(f, future.result())
-                    del future
-    return digest.hexdigest()
+    return fingerprint_entries(
+        entries, label=_label, root_label=_root_label, roots=roots,
+        normalize_link=_normalize_windows_extended_path, path_type=Path,
+        file_hashes=file_hashes, on_file=on_file, on_progress=on_progress,
+    )
