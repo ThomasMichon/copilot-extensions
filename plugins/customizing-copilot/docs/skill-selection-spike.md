@@ -129,3 +129,40 @@ python tools/run-plugin-tests.py customizing-copilot --test-file tests/native/te
 
 Stage new source/tests before invoking the runner. This native Node packet is
 opt-in; it adds no inference or exhaustive subprocess matrix to required CI.
+
+## Canonical specialist and decision contracts
+
+The import-inert sibling `scripts/skill-selection-contract.mjs` defines the
+SDK specialist configuration and comparison result contract. It is not a
+registered extension or a selected production strategy. `selectionAgent()`
+has one read-only source tool and no model pin by default; an explicitly bound
+trial supplies `model` and `reasoningEffort`. Native `tasks.startAgent` supplies
+the actual agent identifier and optional model, not undocumented effort, tier,
+tool or result-schema arguments. Observe the resolved configuration:
+`CustomAgentConfig.model` permits fallback, so a requested model is not proof
+of a comparable arm.
+
+`selectionSnapshot()` preserves unique native identifiers, aliases, invocation
+metadata and argument hints. `selectionPrompt()` carries the current intent,
+purpose, frozen catalog digest and attributed context, including omissions.
+The specialist cannot execute recommendations or replace mandatory procedures.
+Its JSON result distinguishes selected, no-match, ambiguity and insufficient
+context. Acquisition failure remains a tool/runtime failure, not no-match.
+
+`selectionReader()` accepts source roots from the host's existing canonical
+source and filesystem-access policy, never the model or a guessed skill path.
+It reads necessary bodies on demand and only their explicitly declared local
+Markdown references. Contained parent-relative references are valid; undeclared,
+absolute, remote or escaping references are refused. No directory crawl,
+transitive guide traversal or skill execution occurs. Reads are byte/count
+bounded, reject non-UTF-8 sources, and return unavailable for pathless entries
+without excluding their advisory metadata.
+
+Successful source reads retain catalog-bound body/guide digests.
+`validateSelection()` rejects unknown, disabled, duplicate or alias-substituted
+IDs, stale catalog digests, malformed outcomes and unread guide recommendations.
+Use the reader's asynchronous `validate()` to recheck inspected source bytes
+before returning the decision; source changes during inspection or validation
+fail explicitly. The integrating host must separately recheck its current
+native catalog and actual owned-task configuration/settlement. File digests
+prove observed byte consistency, not authority or model quality.

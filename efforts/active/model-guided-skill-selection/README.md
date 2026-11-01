@@ -373,3 +373,43 @@ owned-session alternative or name the SDK dependency before adopting it.
   Focused fake-runtime controls deliberately catch refusals and continue
   catalog discovery; the observation must fail rather than report no traffic.
   The bounded helper packet passes with the corrected guard.
+
+### 2026-11-01 - Catalog observation merged; requesting-host binding remains open
+
+- PR #9850 merged after current-head Copilot approval, successful required
+  checks and resolution of the refused-request finding. Reconciled the source
+  worktree and reread this full Plan and Validation Plan; this effort stays Active.
+- The corrected owned native observation reported zero HTTP and WebSocket
+  attempts, zero captures/forwarding and verified cleanup. Explicit roots still
+  changed source classification, so no foreground-catalog validation gate closes.
+- Next is actual requesting-host catalog binding and the matched independent
+  quality/cost comparison. The ordinary extension API requires its supported
+  extension-child context; a shell is not a substitute, and private connection
+  fields or effectful shared discovery remain excluded.
+
+- A separately approved, session-scoped read-only probe subsequently joined
+  its requesting foreground through the supported extension API and observed
+  the native catalog with retained plugin qualification. It returned only
+  counts, source categories and a digest; it performed no inference or history
+  acquisition. This resolves the access-path uncertainty without claiming
+  matched model quality, effective child configuration or full accounting.
+
+### 2026-11-01 - Canonical specialist and source-bound decision contracts
+
+- Added import-inert SDK specialist configuration and decision contracts for
+  the upcoming comparison. One narrowly scoped source-read tool is the leaf's
+  only capability; model/effort are explicit trial inputs, not production pins.
+  Native task dispatch does not gain undocumented effort, tier or tool fields.
+- Preserved native argument hints alongside exact IDs, aliases, enabled state
+  and source metadata. The decision validator rejects invented/disabled IDs,
+  alias substitution, stale catalog digests, unread guides and contradictory
+  outcomes. No-match stays distinct from acquisition failure or missing context.
+- The on-demand reader uses host-admitted canonical roots and declared local
+  references only, including contained parent-relative paths. Byte/read bounds,
+  symlink escapes, encoded absolute references, source changes and non-UTF-8
+  content fail explicitly; pathless metadata remains advisory. Inspected source
+  bytes are rechecked before returning a decision.
+- The focused existing bounded packet passed one Python wrapper containing
+  thirty-four model-free Node controls. These contracts are not registered or
+  rolled out. Native integration, independent matched quality/complete-cost
+  comparison and preference guidance remain open; this effort stays Active.
