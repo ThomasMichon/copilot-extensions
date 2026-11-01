@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Retained managed source worktree; reviewed PRs to `dev`
 - **Created:** 2026-11-01
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/plugins/efforts` and `visions/mux-companion`
 - **Umbrella issue:** [#9855](https://github.com/ThomasMichon/copilot-extensions/issues/9855)
 - **Related:** existing Mux Companion continuation #8811
@@ -43,8 +43,8 @@ canonical effort/worktree completion.
 
 ## Context
 
-The efforts plugin currently ships a read-only `next`/`check` inspector and a
-manual version-1/2 JSON convention. The existing Manager supports a mux-owned
+At intake, the efforts plugin shipped a read-only `next`/`check` inspector and a
+manual version-1/2 JSON convention. The existing Manager supported a mux-owned
 coalescing daemon and optional plugin-contribution contracts. Its current-roster
 consumer also uses the agency resident's held notification feed.
 
@@ -127,9 +127,9 @@ They are not public source identifiers or permission to mutate the active agent.
   transition guidance plus the existing on-demand skill/reference.
 - [x] Prefer CLI submission over manual edits; make legacy/manual recovery and
   actual App/CLI/ACP command availability explicit rather than assumed.
-- [ ] Run bounded targeted tests and independent critique, add required
+- [x] Run bounded targeted tests and independent critique, add required
   changefiles, and drive all implementation PRs through actual merge.
-- [ ] Reconcile every Plan/Validation item, archive the completed source effort,
+- [x] Reconcile every Plan/Validation item, archive the completed source effort,
   and record source/release/rollout responsibility truthfully.
 
 ## Validation Plan
@@ -150,7 +150,7 @@ They are not public source identifiers or permission to mutate the active agent.
   reconnect and daemon retirement retain explicit source/delivery semantics.
 - [x] Standalone/no-Manager paths, process-boundary owned invocation and
   supported host/tool surfaces are tested; no deployment claim from source tests.
-- [ ] Public artifacts remain generic, required review/CI pass, and source,
+- [x] Public artifacts remain generic, required review/CI pass, and source,
   release, installation and actual active-agent migration are distinguished.
 
 ## Proposal
@@ -162,6 +162,37 @@ owners. Expansion precedes independently deployed callers. No API in this
 proposal is claimed available merely because its intended name is described.
 
 ## Journal
+
+### 2026-11-01 - Source implementation merged and effort reconciled
+
+- Implementation [#9869](https://github.com/ThomasMichon/copilot-extensions/pull/9869)
+  merged to `dev` as `d14b70a4e1c931bcb379ffa6d09b6858d8af64ad`.
+  The current-head Copilot Comment listed no open findings; the three required
+  checks passed. The documented owner-authored clean-Comment rule satisfied the
+  verdict gate without inventing a further approval shape.
+- Every Plan and Validation Plan item is resolved for the approved source scope.
+  Standalone read/update/init/history/publish, strict durable metadata and
+  idempotence, preserved legacy evidence/budgets, optional held delivery and the
+  real connected consumer are implemented. Independent critique and the scoped
+  fault/recovery/process packets are recorded above; living guarantees remain in
+  the owning efforts, agency and Manager documentation.
+- The PR description now includes the required graceful-cutover impact analysis:
+  existing lifecycle ownership, compatible admission/drain, bounded cold
+  recovery, exact child cleanup and source/sequence fencing remain explicit.
+  Native Windows cleanup and installed-host cutover were not qualified by these
+  source tests and were never included in this effort's approval.
+- The same retained workspace was reconciled through the guarded verified-squash
+  completion path. This dated archive and completed-index update are a separate
+  reviewed documentation change; the effort binding and worktree obligations
+  remain held until that change actually merges.
+- Release remains owned by the existing `dev`-to-`main` pipeline (#3336).
+  Installation and active-agent adoption require their existing adopter-owned
+  authorization; no runtime rollout, service restart or active lane migration was
+  requested or performed. Existing #8811 UI/native/relay/manual/head acceptance
+  stays with its incumbents, not this completed source effort.
+- Review-request workflow diagnostics remain tracked separately in #9870.
+  Normal review requests worked; this source delivery does not claim that
+  independent workflow defect is fixed.
 
 ### 2026-11-01 - Executable module admission review
 
