@@ -1595,12 +1595,15 @@ matching the supported first-adopter floor. No host-state opt-in, live
 installation or service deployment is used.
 
 Namespaced installation management requires Bash 4.4+. The macOS namespaced
-cell selects the runner's existing Homebrew Bash and records its actual version;
+cell selects Homebrew Bash and records its actual version;
 it does not weaken the guard or skip the case. Legacy macOS keeps stock Bash.
 The Worktrees installer carries its already-selected Bash into context queries,
 staged children and helper publication instead of rediscovering a different
 `bash` after a PATH change. Missing supported native tooling fails qualification.
-The lane never installs Homebrew Bash to satisfy that prerequisite. Copied POSIX
+Only that disposable optional macOS namespaced cell installs a missing Homebrew
+Bash, without Homebrew auto-update or installation cleanup. Existing Bash is reused;
+legacy macOS and all other cells never install it. Canonical test-dependency
+seasoning and the Bash version guard remain unchanged. Copied POSIX
 fixtures redirect the SDK's current `canonical_path_into` account-home seam;
 they leave the source SDK and the runner's actual account profile unchanged.
 The PowerShell transport uses the already-redirected Python SDK resolution.
