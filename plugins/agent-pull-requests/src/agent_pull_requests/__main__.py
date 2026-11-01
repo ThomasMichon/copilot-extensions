@@ -809,6 +809,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    from .workspace_cli import add_parser as add_workspace_parser
+    add_workspace_parser(subparsers)
 
     status = subparsers.add_parser("status", help="read one pull request by owner/repo + number")
     status.add_argument(
@@ -974,11 +976,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    from .watch_invocation import WatchInvocation
-
+def main(argv: list[str] | None = None, *, workspace_host=None) -> int:
     global _WATCH_INVOCATION
     args = build_parser().parse_args(argv)
+    if args.command == "workspace":
+        from .workspace_cli import run
+        return run(args, workspace_host)
+    from .watch_invocation import WatchInvocation
     _WATCH_INVOCATION = WatchInvocation.capture(
         require_selected=not (args.command == "serve" and args.passive_instance),
     )

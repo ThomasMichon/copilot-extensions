@@ -123,6 +123,9 @@ Source embeddings additionally expose the finite
 [workspace service/client API](docs/workspace-integration.md) through the
 existing PR owner. These library interfaces do not install a writer, acquire
 credentials or imply that a running service has adopted the protocol.
+The [workspace tool/CLI façade](docs/workspace-tools.md) uses those same owners,
+with exact retained-source reads and explicit unavailable unbound execution.
+Source declarations do not register operational tools or prepare/fetch a workspace.
 
 ```text
 agent-pull-requests status --repo <owner/repo> --number <n> [--json]
