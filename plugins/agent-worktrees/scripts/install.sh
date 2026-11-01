@@ -30,6 +30,12 @@
 
 set -euo pipefail
 
+# Preserve plugin-specific and global overrides, including an explicitly disabled watchdog.
+if [ -z "${AGENT_WORKTREES_INSTALL_DEADLINE_SEC:-}" ] && [ -z "${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}" ]; then
+    AGENT_WORKTREES_INSTALL_DEADLINE_SEC=900
+fi
+export AGENT_WORKTREES_INSTALL_DEADLINE_SEC
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 

@@ -115,11 +115,16 @@ class AdoReviewContext:
             method, url, copy.deepcopy(body), query=copy.deepcopy(query),
             expected_binding=self.pinned, remaining=remaining,
         )
-        if not isinstance(result, NativeReviewResponse) or type(result.status) is not int or not isinstance(result.body, dict):
+        if (
+            not isinstance(result, NativeReviewResponse) or type(result.status) is not int
+            or not isinstance(result.body, dict) or type(result.late) is not bool
+        ):
             raise ReviewContextUnavailable("protected transport returned an invalid native response")
         if len(json.dumps(result.body, allow_nan=False).encode()) > MAX_RESPONSE_BYTES:
             raise ReviewContextUnavailable("native review response exceeds its byte bound")
         self.check()
+        if method == "GET" and result.late:
+            raise ReviewContextUnavailable("native read did not complete at the transport boundary")
         try:
             self.remaining()
         except TimeoutError:

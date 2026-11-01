@@ -213,6 +213,26 @@ contract.
 
 ## Journal
 
+### 2026-11-01 - Read completion disposition source boundary
+- A synthetic source check found that an explicitly late native read DTO could
+  still be parsed when the separate operation budget remained positive.
+  Refuse that read at the existing owner boundary; buffered complete-looking
+  JSON, empty output or a terminal status cannot become readiness/effect proof.
+- Source controls retain preflight actions as unattempted and earlier confirmed
+  receipts after a failed readback. No backend retry, legacy adapter repair,
+  runtime change or budget modification is admitted by this compatibility fix.
+
+### 2026-11-01 - Source acceptance follow-through merged
+- #9819 merged as `a9f5b53e0766b1a355a443037a37aa0ef3a61378`
+  from head `f8e565f822b972ef77ab7f5c41a1a9e61f2ebfcf` after actual approval,
+  both findings resolved and required CI success. Direct scope/descriptor
+  tests assert their early refusal stage; the checksum control keeps generation
+  content valid and changes only the declared transport hash.
+- The bounded service/client source acceptance is resolved. Original Phase 4
+  and operational Validation Plan remain open; keep this effort Active and
+  retain #9535/workspace custody. Existing adopter/lifecycle owners must qualify
+  real contexts/readers/source acquisition before operational tool or live use.
+
 ### 2026-11-01 - Bounded workspace integration merged; original objective Active
 - #9795 merged as `32a6539dc31795cdb07e89ed2f9cb120e2fcabe4`
   from head `139eb80091fc63e078ea28c4fa696901cad6cd18` after actual current-head

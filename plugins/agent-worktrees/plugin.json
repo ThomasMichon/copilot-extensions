@@ -19,8 +19,9 @@
   ],
   "hooks": "hooks.json",
   "sessionContext": "session-context.json",
-  "version": "1.24.381-dev1",
+  "version": "1.24.382-dev1",
   "runtimeScope": "universal",
   "installerReadiness": "installer-readiness.json",
+  "installerDeadlineSeconds": 900,
   "zeroDowntimeUpdate": true
 }
