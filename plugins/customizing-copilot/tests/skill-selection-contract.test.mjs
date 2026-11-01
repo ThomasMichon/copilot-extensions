@@ -76,7 +76,7 @@ test("declared-source reads admit contained parent references without crawling o
             reader.receipts().map(receipt => ({ ...receipt, catalogDigest: "other catalog" }))), /successful/);
         await fs.writeFile(join(root, "references", "guide.md"), "Changed guidance");
         await assert.rejects(reader.validate(result), /changed before/);
-        await assert.rejects(reader.read({ skill: "fixture", reference: source.references[0] }), /guide changed/);
+        await assert.rejects(reader.read({ skill: "fixture", reference: source.references[0] }), /source changed/);
         assert.equal((await reader.read({ skill: "pathless" })).status, "unavailable");
         await assert.rejects(reader.read({ skill: "fixture", reference: "invented.md" }), /not declared/);
         await assert.rejects(reader.read({ skill: "fixture", reference: source.references[1] }), /local relative/);
@@ -119,23 +119,62 @@ test("Markdown declarations exclude examples and preserve balanced and escaped d
             "`[Example](wrong.md)`", "\\[Escaped](wrong.md)", "```md", "[Fence](wrong.md)", "````",
             "    [Indented code](wrong.md)", "<!-- [Comment](wrong.md) -->",
             "> ```", "> [Quoted code](wrong.md)", "> ```",
+            "- ```md", "  [List code](wrong.md)", "  ```", "[After list](after.md)",
             "[Guide](api(v1).md)", "[Escaped target](api\\(v2\\).md)",
             "[Angle](<guide with spaces.md> 'title')", "[ref]: ref(v3).md",
+            '[Title](real.md "See [example](wrong.md)")',
             "[Malformed](api(v4).md junk)", "[Unclosed](api(v5.md)",
         ].join("\n"));
-        for (const name of ["api(v1).md", "api(v2).md", "guide with spaces.md", "ref(v3).md"]) {
+        const expected = ["after.md", "api(v1).md", "api(v2).md", "guide with spaces.md", "ref(v3).md", "real.md"];
+        for (const name of expected) {
             await fs.writeFile(join(root, name), name);
         }
         const reader = await selectionReader(selectionSnapshot([
             { name: "fixture", description: "Fixture", source: "project", enabled: true, path },
         ]), [root]);
         const source = await reader.read({ skill: "fixture" });
-        assert.deepEqual(source.references, ["api(v1).md", "api(v2).md", "guide with spaces.md", "ref(v3).md"]);
+        assert.deepEqual(source.references, expected);
         for (const reference of source.references) {
             assert.equal((await reader.read({ skill: "fixture", reference })).content, reference);
         }
         await assert.rejects(reader.read({ skill: "fixture", reference: "wrong.md" }), /not declared/);
         await assert.rejects(reader.read({ skill: "fixture", reference: "api(v1" }), /not declared/);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+test("bracket-heavy malformed Markdown retains valid later declarations with bounded parsing work", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "skill-selection-brackets-"));
+    try {
+        const path = join(root, "SKILL.md");
+        await fs.writeFile(path, "[".repeat(25000) + "\n[Later](later.md)");
+        const reader = await selectionReader(selectionSnapshot([
+            { name: "fixture", description: "Fixture", source: "project", enabled: true, path },
+        ]), [root]);
+        assert.deepEqual((await reader.read({ skill: "fixture" })).references, ["later.md"]);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+test("supplied root aliases work and source-target rebinding invalidates identical skill text", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "skill-selection-rebinding-"));
+    try {
+        const first = join(root, "first"), second = join(root, "second"), alias = join(root, "alias");
+        await fs.mkdir(first); await fs.mkdir(second);
+        for (const directory of [first, second]) await fs.writeFile(join(directory, "SKILL.md"), "[Guide](guide.md)");
+        await fs.writeFile(join(first, "guide.md"), "First guide");
+        await fs.writeFile(join(second, "guide.md"), "Second guide");
+        await fs.symlink(first, alias, "junction");
+        const snapshot = selectionSnapshot([
+            { name: "fixture", description: "Fixture", source: "project", enabled: true, path: join(alias, "SKILL.md") },
+        ]);
+        const aliased = await selectionReader(snapshot, [alias]);
+        assert.equal((await aliased.read({ skill: "fixture", reference: "guide.md" })).content, "First guide");
+        const reader = await selectionReader(snapshot, [root]);
+        await reader.read({ skill: "fixture", reference: "guide.md" });
+        const result = { version: 1, catalogDigest: snapshot.digest, status: "selected", uncertainties: [],
+            recommendations: [{ skill: "fixture", reason: "Owns procedure", confidence: "high", guides: ["guide.md"] }] };
+        assert.deepEqual(await reader.validate(result), result);
+        await fs.unlink(alias);
+        await fs.symlink(second, alias, "junction");
+        await assert.rejects(reader.validate(result), /changed before/);
+        await assert.rejects(reader.read({ skill: "fixture", reference: "guide.md" }), /source changed/);
     } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 test("overlapping guide acquisition cannot record receipts from two skill revisions", async t => {

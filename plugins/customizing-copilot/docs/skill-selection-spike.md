@@ -161,12 +161,18 @@ without excluding their advisory metadata.
 Reference extraction handles inline links and single-line reference definitions,
 balanced or escaped destination parentheses, angle-bracket paths and optional
 titles. Code spans, fenced/indented examples and comments do not declare guides.
-Ambiguous or unsupported Markdown forms are not guessed. Source acquisition
+List-contained fences are classified before their contents, and link destinations
+and titles are consumed as one declaration. Bracket matching is linear; a finite
+work budget also bounds malformed destination parsing. Ambiguous or unsupported
+Markdown forms are not guessed. Source acquisition
 rejects non-regular files before opening, uses nonblocking opens on Unix and
 retains a descriptor-level file check. The opt-in packet includes a bounded
 FIFO control executed on Unix, not claimed as a Windows-native witness.
 
 Successful source reads retain catalog-bound body/guide digests.
+Supplied root aliases retain both their lexical and canonical containment
+boundaries. Observations bind canonical targets as well as content; retargeting
+an admitted symlink invalidates the decision even when skill text is unchanged.
 `validateSelection()` rejects unknown, disabled, duplicate or alias-substituted
 IDs, stale catalog digests, malformed outcomes and unread guide recommendations.
 Use the reader's asynchronous `validate()` to recheck inspected source bytes

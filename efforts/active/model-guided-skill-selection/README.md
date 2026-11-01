@@ -429,3 +429,18 @@ owned-session alternative or name the SDK dependency before adopting it.
   newline defect; the corrected parser passed without weakening the assertion.
 - No source workflow, production registration, native model comparison or
   rollout changed. Current-head review and merge remain required.
+
+### 2026-11-01 - Source targets and malformed Markdown remain decision-bound
+
+- The next review exposed admitted-root aliases and same-text symlink rebinding,
+  plus list-contained fences, title text and quadratic malformed-link parsing.
+- Preserved supplied and canonical root boundaries and bound observed canonical
+  targets alongside bytes. Retargeting a source invalidates the decision even
+  when the skill body is identical.
+- Classified list fences before reading their contents, consumed complete
+  destinations/titles, used linear bracket/code-span scans and bounded remaining
+  parsing work. Focused controls retain a valid later guide after heavy malformed
+  bracket input and reject stale guide decisions after junction rebinding.
+- The same bounded packet passed thirty-nine Node controls on Windows with
+  verified process cleanup. Native integration and independent comparison are
+  still separate; no production selection or rollout is claimed.

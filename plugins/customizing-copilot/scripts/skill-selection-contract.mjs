@@ -70,44 +70,79 @@ function declaredReferences(body) {
     let fence, prose = "";
     for (const line of body.split(/\r?\n/)) {
         const unquoted = line.replace(/^(?:[ ]{0,3}>[ ]?)+/, "");
-        const marker = /^[ \t]{0,3}(`{3,}|~{3,})(.*)$/.exec(unquoted);
+        const list = /^[ ]{0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+/.exec(unquoted);
+        const logical = fence?.indent && unquoted.startsWith(" ".repeat(fence.indent))
+            ? unquoted.slice(fence.indent) : list ? unquoted.slice(list[0].length) : unquoted;
+        const marker = /^[ \t]{0,3}(`{3,}|~{3,})(.*)$/.exec(logical);
         if (fence) {
-            if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
-        } else if (marker) fence = marker[1];
+            if (marker && marker[1][0] === fence.marker[0] && marker[1].length >= fence.marker.length && !marker[2].trim()) fence = null;
+        } else if (marker) fence = { marker: marker[1], indent: list?.[0].length ?? 0 };
         else if (!/^(?: {4}|\t)/.test(unquoted)) prose += `${unquoted}\n`;
     }
-    // Remove only matching backtick runs; an unmatched backtick is literal Markdown.
-    prose = prose.replace(/(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g, match => " ".repeat(match.length));
+    prose = excludeCodeSpans(prose);
     prose = prose.replace(/<!--[\s\S]*?(?:-->|$)/g, match => " ".repeat(match.length));
-    const references = [];
+    const closing = new Map(), stack = [];
     for (let index = 0; index < prose.length; index++) {
         if (prose[index] === "\\") { index++; continue; }
+        if (prose[index] === "[") stack.push(index);
+        if (prose[index] === "]" && stack.length) closing.set(stack.pop(), index);
+    }
+    let work = prose.length * 8 + 256;
+    const spend = () => { if (--work < 0) throw new Error("declared reference parsing work limit exceeded"); };
+    const definitions = new Set([...prose.matchAll(/(?:^|\n)[ \t]{0,3}(?=\[)/g)]
+        .map(match => match.index + match[0].length));
+    const references = [];
+    for (let index = 0; index < prose.length; index++) {
+        spend();
+        if (prose[index] === "\\") { index++; continue; }
         if (prose[index] !== "[" || prose[index - 1] === "!") continue;
-        let end = index + 1, depth = 1;
-        for (; end < prose.length && depth; end++) {
-            if (prose[end] === "\\") { end++; continue; }
-            if (prose[end] === "[") depth++;
-            if (prose[end] === "]") depth--;
-        }
-        if (depth) continue;
-        const definition = prose[end] === ":" && /^[ \t]{0,3}$/.test(prose.slice(prose.lastIndexOf("\n", index) + 1, index));
+        if (!closing.has(index)) continue;
+        const end = closing.get(index) + 1;
+        const definition = prose[end] === ":" && definitions.has(index);
         if (prose[end] !== "(" && !definition) continue;
-        const destination = markdownDestination(prose, end + 1, !definition);
-        if (destination) references.push(destination);
-        index = end - 1;
+        const destination = markdownDestination(prose, end + 1, !definition, spend);
+        if (destination) references.push(destination.reference);
+        index = destination?.end ?? end - 1;
     }
     const unique = [...new Set(references)];
     if (unique.length > 64) throw new Error("declared reference limit exceeded");
     return unique;
 }
 
-function markdownDestination(source, start, inline) {
+function excludeCodeSpans(source) {
+    const runs = [];
+    for (let index = 0; index < source.length; index++) {
+        if (source[index] === "\\") { index++; continue; }
+        if (source[index] !== "`") continue;
+        const start = index;
+        while (source[index + 1] === "`") index++;
+        runs.push({ start, end: index + 1, length: index + 1 - start });
+    }
+    const next = new Map(), matching = new Map();
+    for (let index = runs.length - 1; index >= 0; index--) {
+        if (next.has(runs[index].length)) matching.set(index, next.get(runs[index].length));
+        next.set(runs[index].length, index);
+    }
+    const parts = [];
+    let cursor = 0;
+    for (let index = 0; index < runs.length; index++) {
+        if (runs[index].start < cursor || !matching.has(index)) continue;
+        const end = runs[matching.get(index)].end;
+        parts.push(source.slice(cursor, runs[index].start),
+            source.slice(runs[index].start, end).replace(/[^\r\n]/g, " "));
+        cursor = end;
+    }
+    return parts.join("") + source.slice(cursor);
+}
+
+function markdownDestination(source, start, inline, spend) {
     let index = start;
-    while (source[index] === " " || source[index] === "\t") index++;
+    while (source[index] === " " || source[index] === "\t") { spend(); index++; }
     const angle = source[index] === "<";
     if (angle) index++;
     let destination = "", depth = 0, ended = false;
     for (; index < source.length; index++) {
+        spend();
         const char = source[index];
         if (char === "\n" || char === "\r") {
             if (!inline && !angle && !depth) { ended = true; break; }
@@ -125,19 +160,20 @@ function markdownDestination(source, start, inline) {
     }
     if (depth || angle && !ended || !destination) return null;
     const beforeSpace = index;
-    while (source[index] === " " || source[index] === "\t") index++;
+    while (source[index] === " " || source[index] === "\t") { spend(); index++; }
     if (index > beforeSpace && ['"', "'", "("].includes(source[index])) {
         const close = source[index] === "(" ? ")" : source[index];
         for (index++; index < source.length && source[index] !== close; index++) {
+            spend();
             if (/[\r\n]/.test(source[index])) return null;
             if (source[index] === "\\") index++;
         }
         if (source[index] !== close) return null;
         index++;
-        while (source[index] === " " || source[index] === "\t") index++;
+        while (source[index] === " " || source[index] === "\t") { spend(); index++; }
     }
     if (inline ? source[index] !== ")" : source[index] !== undefined && !/[\r\n]/.test(source[index])) return null;
-    return destination;
+    return { reference: destination, end: index };
 }
 
 async function readBounded(path, limit) {
@@ -165,16 +201,26 @@ export async function selectionReader(snapshot, trustedRoots, { maxBytes = 32000
     if (!Array.isArray(trustedRoots) || trustedRoots.some(root => typeof root !== "string" || !isAbsolute(root))
         || !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 128000
         || !Number.isInteger(maxReads) || maxReads < 1 || maxReads > 64) throw new Error("invalid selection read bounds");
-    const roots = await Promise.all(trustedRoots.map(root => realpath(root)));
+    const roots = await Promise.all(trustedRoots.map(async root => ({
+        supplied: resolve(root), canonical: await realpath(root),
+    })));
     const reads = new Map(), checks = new Map();
     let attempts = 0;
     async function admitted(path) {
-        if (!isAbsolute(path) || !roots.some(root => contained(resolve(path), root))) {
+        if (!isAbsolute(path) || !roots.some(root => contained(resolve(path), root.supplied)
+            || contained(resolve(path), root.canonical))) {
             throw new Error("selection source outside admitted roots");
         }
         const canonical = await realpath(path);
-        if (!roots.some(root => contained(canonical, root))) throw new Error("selection source escapes admitted roots");
+        if (!roots.some(root => contained(canonical, root.canonical))) throw new Error("selection source escapes admitted roots");
         return canonical;
+    }
+    function record(path, canonical, digest) {
+        const previous = checks.get(path);
+        if (previous && (previous.canonical !== canonical || previous.digest !== digest)) {
+            throw new Error("selection source changed during the decision");
+        }
+        checks.set(path, { canonical, digest });
     }
     async function read({ skill, reference } = {}) {
         if (++attempts > maxReads) throw new Error("selection read allowance exhausted");
@@ -184,10 +230,7 @@ export async function selectionReader(snapshot, trustedRoots, { maxBytes = 32000
         if (!descriptor.path) return { status: "unavailable", reason: "native skill has no readable path", skill };
         const canonical = await admitted(descriptor.path);
         const body = await readBounded(canonical, maxBytes);
-        if (checks.has(descriptor.path) && checks.get(descriptor.path) !== hash(body)) {
-            throw new Error("selection source changed during the decision");
-        }
-        checks.set(descriptor.path, hash(body));
+        record(descriptor.path, canonical, hash(body));
         const references = declaredReferences(body);
         let content = body, guidePath;
         if (reference !== undefined) {
@@ -200,12 +243,10 @@ export async function selectionReader(snapshot, trustedRoots, { maxBytes = 32000
                 throw new Error("reference is not a local relative source");
             }
             guidePath = resolve(dirname(canonical), decoded);
-            content = await readBounded(await admitted(guidePath), maxBytes);
-            if (checks.has(guidePath) && checks.get(guidePath) !== hash(content)) {
-                throw new Error("selection guide changed during the decision");
-            }
+            const guideCanonical = await admitted(guidePath);
+            content = await readBounded(guideCanonical, maxBytes);
+            record(guidePath, guideCanonical, hash(content));
         }
-        if (guidePath) checks.set(guidePath, hash(content));
         const receipt = Object.freeze({ catalogDigest: snapshot.digest, skill, ...(reference !== undefined ? { reference } : {}),
             bodyDigest: hash(body), contentDigest: hash(content), bytes: bytes(content) });
         reads.set(JSON.stringify([skill, reference ?? null]), receipt);
@@ -215,8 +256,9 @@ export async function selectionReader(snapshot, trustedRoots, { maxBytes = 32000
         read, receipts: () => [...reads.values()],
         async validate(value) {
             const result = validateSelection(value, snapshot, [...reads.values()]);
-            for (const [path, digest] of checks) {
-                if (hash(await readBounded(await admitted(path), maxBytes)) !== digest) {
+            for (const [path, evidence] of checks) {
+                const canonical = await admitted(path);
+                if (canonical !== evidence.canonical || hash(await readBounded(canonical, maxBytes)) !== evidence.digest) {
                     throw new Error("selection source changed before result validation");
                 }
             }
