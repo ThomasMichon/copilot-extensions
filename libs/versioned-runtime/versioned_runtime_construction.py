@@ -781,19 +781,35 @@ function script:Start-RuntimeConstruction {
     }
     return $reuse
 }
+function script:Get-RuntimeConstructionFailure($Session, [string]$Cause) {
+    try {
+        $Session.Process.StandardInput.Close()
+    } catch {
+        $Cause += ("; construction input close failed: " + $_.Exception.Message)
+    }
+    $remaining = $Session.Process.StandardOutput.ReadToEndAsync()
+    $Session.Process.WaitForExit()
+    [Threading.Tasks.Task]::WaitAll($remaining, $Session.Errors)
+    return ("$Cause (construction helper exit $($Session.Process.ExitCode)): " +
+        $Session.Errors.Result)
+}
 function script:Complete-RuntimeConstruction([string]$PayloadHash, [switch]$RetainHelpers) {
     $session = $script:RuntimeConstructionSession
     if (-not $session) { throw 'Completion requires attached construction ownership' }
-    $session.Process.StandardInput.WriteLine(
-        (@{command='complete'; payload_hash=$PayloadHash; retain_helpers=[bool]$RetainHelpers} |
-            ConvertTo-Json -Compress)
-    )
-    $session.Process.StandardInput.Flush()
-    $line = $session.Process.StandardOutput.ReadLine()
-    if (-not $line -or -not ($line | ConvertFrom-Json).complete) {
-        throw 'Construction completion refused; candidate remains non-selectable'
+    try {
+        $session.Process.StandardInput.WriteLine(
+            (@{command='complete'; payload_hash=$PayloadHash; retain_helpers=[bool]$RetainHelpers} |
+                ConvertTo-Json -Compress)
+        )
+        $session.Process.StandardInput.Flush()
+        $line = $session.Process.StandardOutput.ReadLine()
+        if (-not $line -or -not ($line | ConvertFrom-Json).complete) {
+            throw 'Construction completion refused; candidate remains non-selectable'
+        }
+        $session.Complete = $true
+    } catch {
+        throw (Get-RuntimeConstructionFailure $session $_.Exception.Message)
     }
-    $session.Complete = $true
 }
 function script:Stop-RuntimeConstruction {
     if (-not $script:RuntimeConstructionSession) { return }
@@ -817,6 +833,8 @@ function script:Stop-RuntimeConstruction {
         if (-not $line -or $session.Process.ExitCode -ne 0) {
             throw ("Construction did not complete: " + $session.Errors.Result)
         }
+    } catch {
+        throw (Get-RuntimeConstructionFailure $session $_.Exception.Message)
     } finally {
         $session.Process.Dispose()
     }
