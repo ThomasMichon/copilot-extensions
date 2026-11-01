@@ -98,6 +98,12 @@ def declarations():
         "id": "code-impact", "timeout-minutes": 2,
         "env": GUARD.CODE_IMPACT_ENV, "run": GUARD.CODE_IMPACT_SCRIPT,
     })
+    ci["jobs"]["checks"]["steps"].extend({
+        "run": command, "if": GUARD.CODE_CONDITION, "timeout-minutes": 6,
+    } for command in (
+        "python tools/typecheck.py --prepare",
+        "python tools/typecheck.py --enforced",
+    ))
     ci["jobs"]["checks"]["steps"].append({
         "run": "python tools/check-changefile-presence.py --base base --head head",
         "if": GUARD.CHANGEFILE_CONDITION,
