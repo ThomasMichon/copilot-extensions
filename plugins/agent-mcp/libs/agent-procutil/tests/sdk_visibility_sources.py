@@ -21,7 +21,7 @@ PACKAGE_FILES = (
     "_shell_caller_owned.py", "_windows_caller_owned.py",
     "_windows_parent_job.py", "_windows_job_types.py", "daemon.py", "daemon_broker.py", "daemon_instances.py",
     "diagnostics.py", "interactive.py", "metrics.py", "metrics_accounting.py",
-    "native_child.py", "owned_process.py", "process_retirement.py", "retirement_custody.py",
+    "native_child.py", "owned_process.py", "process_retirement.py", "python_cache.py", "retirement_custody.py",
     "startup.py", "streaming.py",
     "windows_broker_cell.py", "windows_broker_entry.py", "windows_broker_installation.py",
     "windows_broker_native.py", "windows_broker_protocol.py", "windows_broker_retention.py",

@@ -36,6 +36,9 @@ __path__=procutil.__path__
 no_window_kwargs=procutil.no_window_kwargs
 original=procutil.JobHandle.terminate_and_wait
 
+def __getattr__(name):
+    return getattr(procutil,name)
+
 def terminate_and_wait(job,timeout):
     entries=json.loads(report.read_text()) if report.exists() else []
     assert (Path(CONFIG["frozen"])/"pyproject.toml").is_file()
@@ -84,3 +87,5 @@ def spawn_sync_in_kill_on_close_job(argv,**kwargs):
         "CONFIG = " + repr(configuration) + "\n" + textwrap.dedent(program),
         encoding="utf-8",
     )
+    for name in ("_job_scopes.py", "_windows_job_types.py", "streaming.py", "_output_relay.py"):
+        destination.with_name(name).write_bytes(procutil.with_name(name).read_bytes())

@@ -157,13 +157,28 @@ _resolve_runtime() {
         # shellcheck source=/dev/null
         . "$_resolver"
     fi
+    if [ -n "${AGENT_RT_PY:-}" ]; then
+        _cache_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+        [ "${#_cache_id}" -eq 32 ] || exit 1
+        case "$_cache_id" in *[!0-9a-f]*) exit 1 ;; esac
+        _python_cache="$_runtime_root/cache/python/unsealed-$_cache_id"
+        case "$AGENT_RT_PY" in
+            *.exe)
+                _python_cache="$(cygpath -aw "$_python_cache")" || return
+                case "$_python_cache" in
+                    '\\?\'*) ;;
+                    '\\'*) _python_cache='\\?\UNC\'"${_python_cache#'\\'}" ;;
+                    *) _python_cache='\\?\'"$_python_cache" ;;
+                esac ;;
+        esac
+    fi
 }
 
 @@PAYLOAD_ROOT_ENV_POSIX@@_resolve_runtime
 _boot_trace resolver-loaded shim
 if [ -n "${AGENT_RT_PY:-}" ]; then
     _boot_trace dispatch shim '' '' '' fast
-    exec "$AGENT_RT_PY" -m "$_module" "$@"
+    exec "$AGENT_RT_PY" -X "pycache_prefix=$_python_cache" -m "$_module" "$@"
 fi
 if [ -n "${@@NO_SELFPROVISION_ENV@@:-}" ]; then
     printf '[%s] runtime not provisioned (%s set).\n' \
@@ -262,7 +277,7 @@ if [ -n "${AGENT_RT_PY:-}" ]; then
     _unlock_provision
     trap - EXIT INT TERM
     _boot_trace resolver-loaded
-    exec "$AGENT_RT_PY" -m "$_module" "$@"
+    exec "$AGENT_RT_PY" -X "pycache_prefix=$_python_cache" -m "$_module" "$@"
 fi
 
 _installer="$_payload_root/scripts/@@INSTALLER@@.sh"
@@ -284,7 +299,7 @@ if [ -n "${AGENT_RT_PY:-}" ]; then
     trap - EXIT INT TERM
     _boot_trace resolver-loaded shim
     _boot_trace dispatch shim '' '' '' provisioned
-    exec "$AGENT_RT_PY" -m "$_module" "$@"
+    exec "$AGENT_RT_PY" -X "pycache_prefix=$_python_cache" -m "$_module" "$@"
 fi
 printf '[%s] provisioning completed without a resolvable runtime.\n' "$_command" >&2
 exit 1

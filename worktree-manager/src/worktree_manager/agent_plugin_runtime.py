@@ -32,6 +32,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+from agent_procutil import python_cache_args
+
 _INSTALLATION_CONTEXT_MODULE = "worktree_manager._installation_context"
 
 #: Filesystem-safe plugin id: mirrors the vendored resolver's own
@@ -511,12 +513,15 @@ def resolve_installed_plugin_invocation(
     if slot is None:
         return None
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    return [str(python), "-m", module or plugin_id.replace("-", "_")], slot.parent.parent
+    root = slot.parent.parent
+    return [
+        str(python), *python_cache_args(root, runtime=slot), "-m", module or plugin_id.replace("-", "_"),
+    ], root
 
 
 def resolve_installed_plugin_command(
     plugin_id: str, module: str | None = None, *, environment: dict[str, str] | None = None,
 ) -> list[str] | None:
-    """The exact installed ``[python, -m, module]`` command, without provisioning."""
+    """The installed Python command with owner-scoped cache, without provisioning."""
     invocation = resolve_installed_plugin_invocation(plugin_id, module, environment=environment)
     return invocation[0] if invocation is not None else None

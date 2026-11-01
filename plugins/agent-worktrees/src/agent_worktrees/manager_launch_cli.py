@@ -347,7 +347,12 @@ def _usable_worktree_manager_launcher_dir() -> Path | None:
 
 
 def _agent_worktrees_launch_command(project: str | None) -> list[str]:
-    argv = [sys.executable, "-m", "agent_worktrees"]
+    from agent_procutil import python_cache_args
+
+    argv = [
+        sys.executable, *python_cache_args(os.path.abspath(cfg.install_dir())),
+        "-m", "agent_worktrees",
+    ]
     if project:
         argv += ["--project", project]
     return argv
@@ -494,7 +499,7 @@ def _exec_worktree_manager(
         argv += ["--project", project]
     env = {
         **os.environ,
-        _WORKTREE_MANAGER_ENGINE_ARGV_ENV: json.dumps([sys.executable, "-m", "agent_worktrees"]),
+        _WORKTREE_MANAGER_ENGINE_ARGV_ENV: json.dumps(_agent_worktrees_launch_command(None)),
     }
     if subcommand and subcommand[0] == "update":
         from update_driver import participant_environment

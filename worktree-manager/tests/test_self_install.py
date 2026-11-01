@@ -804,16 +804,7 @@ def test_replace_with_retry_reraises_after_exhausting_attempts(tmp_path, monkeyp
         si._replace_with_retry(src, dst, attempts=3, delay_s=0.0)
 
 
-def test_known_legacy_prerename_binstub_is_recognized_and_cleaned(tmp_path, monkeypatch):
-    """The pre-rename ``worktree-manager`` plugin prototype (before it became
-    agent-worktrees, commit ab0716e28..6512114be) shipped this exact
-    ``~/.local/bin/worktree-manager`` (+ ``.cmd``) content and a non-versioned
-    ``~/.worktree-manager/.venv`` + ``.../lib`` runtime -- both colliding with
-    this Manager's own binstub name and root. A machine that installed that
-    prototype before the rename can still carry these exact artifacts; a real
-    self-install must positively recognize and remove them, not just
-    overwrite the binstub incidentally.
-    """
+def test_install_replaces_frontdoors_without_removing_recognized_legacy_code(tmp_path, monkeypatch):
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"
     lb = _patch_local_bin(monkeypatch, tmp_path)
@@ -828,6 +819,10 @@ def test_known_legacy_prerename_binstub_is_recognized_and_cleaned(tmp_path, monk
     legacy_venv.mkdir(parents=True)
     (legacy_venv / "python").write_text("#!/usr/bin/env python\n")
     (root / "lib").mkdir(parents=True)
+    (root / "lib" / "legacy.py").write_text("retained = True\n")
+    retained = {path: path.read_bytes() for path in (
+        legacy_venv / "python", root / "lib" / "legacy.py",
+    )}
 
     # Dry-run reports, but never touches, the recognized legacy artifacts.
     planned = si.plan_legacy_cleanup(root)
@@ -839,9 +834,8 @@ def test_known_legacy_prerename_binstub_is_recognized_and_cleaned(tmp_path, monk
 
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "installed"
-    assert len(res.cleaned) == 4
-    assert not (root / ".venv").exists()
-    assert not (root / "lib").exists()
+    assert res.cleaned == ()
+    assert all(path.read_bytes() == content for path, content in retained.items())
     # The binstub is now this version's own content, not the legacy one.
     assert (lb / "worktree-manager").read_text() != si._LEGACY_PRERENAME_SH
 

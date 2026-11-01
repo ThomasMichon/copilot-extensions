@@ -69,9 +69,11 @@ def _legacy_receipt(
 
 
 def publish_legacy_binding(
-    primitive: InstallationPrimitive, **arguments: Any
+    primitive: InstallationPrimitive, *, operation: str = "publish", **arguments: Any
 ) -> dict[str, Any]:
     """Build ownership metadata only inside an authorized legacy lifecycle."""
+    if operation not in {"publish", "teardown"}:
+        raise ValueError("Runtime lifecycle operation must be publish or teardown.")
     incumbent = _load_lifecycle().incumbent_manifest(_rules(), primitive, arguments)
     previous = incumbent.get("commandBinding")
     reservation = incumbent.get("commandLifecycle")
@@ -127,7 +129,7 @@ def publish_legacy_binding(
                 "Legacy command ownership belongs to another source, installation, "
                 "or environment; explicit transfer is required."
             )
-    if previous is None and reservation is None:
+    if previous is None and reservation is None and operation == "publish":
         _load_lifecycle()._recovery_commands(_rules(), primitive, arguments)
     return receipt
 
@@ -137,6 +139,8 @@ def legacy_manifest_publication(
     primitive: InstallationPrimitive, manifest: dict[str, Any], **arguments: Any
 ) -> Iterator[tuple[dict[str, Any], dict[str, str], Any]]:
     """Retain validated command ownership through the caller's manifest commit."""
+    if "operation" in arguments:
+        raise ValueError("Manifest publication cannot override the lifecycle operation.")
     root = Path(arguments["legacy_root"])
     if not root.is_absolute() or not root.is_dir():
         raise ValueError("Legacy manifest publication requires an existing absolute runtime root.")

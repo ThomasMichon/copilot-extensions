@@ -385,6 +385,14 @@ if ($HaveGit) {
         Write-BootstrapProgress "git fetch of $Repo@$Ref failed (exit $LASTEXITCODE)." failed
         exit $LASTEXITCODE
     }
+    if (Test-Path (Join-Path $Staging '.git\info\sparse-checkout')) {
+        # Routine self-update stages only Manager; fresh repair also needs the engine SDK.
+        git -C $Staging -c core.longpaths=true -c core.hooksPath= sparse-checkout disable
+        if ($LASTEXITCODE -ne 0) {
+            Write-BootstrapProgress "Expanding bootstrap source failed (exit $LASTEXITCODE)." failed
+            exit $LASTEXITCODE
+        }
+    }
     git -C $Staging -c core.longpaths=true -c core.hooksPath= checkout -q --detach FETCH_HEAD
     if ($LASTEXITCODE -ne 0) {
         Write-BootstrapProgress "git checkout of $Repo@$Ref failed (exit $LASTEXITCODE)." failed

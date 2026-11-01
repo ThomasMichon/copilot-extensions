@@ -374,15 +374,28 @@ def repair_case(
     ignore = shutil.ignore_patterns(
         "tests", "__pycache__", "*.pyc", "*.pyo", ".git", ".test-venvs", "*.egg-info",
     )
+
+    def ignore_payload(directory, names):
+        return set(ignore(directory, names)) | ({"libs"} if Path(directory) == PLUGIN else set())
+
     copies = temporary.enter_context(ThreadPoolExecutor(max_workers=2))
     source_copies = [
-        copies.submit(_copy_fixture_tree, PLUGIN, fresh, ignore=ignore, symlinks=True),
+        copies.submit(_copy_fixture_tree, PLUGIN, fresh, ignore=ignore_payload, symlinks=True),
         copies.submit(
             _copy_fixture_tree, REPO / "libs", source / "libs", ignore=ignore, symlinks=True,
         ),
     ]
     for future in source_copies:
         future.result()
+    monkeypatch.syspath_prepend(str(REPO / "tools"))
+    from materialize_main import materialize_uv_editable_ref_into
+
+    materialized = materialize_uv_editable_ref_into(
+        source_consumer_dir=PLUGIN, dest_consumer_dir=fresh,
+        canonical_root=REPO, dest_root=source,
+    )
+    refused = [row for row in materialized if "SKIP" in row]
+    assert not refused, "\n".join(refused)
     policy = source / "worktree-manager/scripts"
     policy.mkdir(parents=True)
     shutil.copy2(REPO / "worktree-manager/scripts/update_entry.py", policy / "update_entry.py")
@@ -401,12 +414,23 @@ def repair_case(
         "import json, os, pathlib, sys\n"
         "sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))\n"
         "import runtime_install_real as real\n"
+        "class ConstructionFence(Exception):\n"
+        "    pass\n"
         "def construction_fence(*args, **kwargs):\n"
         "    pathlib.Path(os.environ['ENGINE_REPAIR_CONSTRUCTION_FENCE']).write_text(\n"
         "        json.dumps({'boundary': 'engine.numbered_candidate', "
         "'plugin': str(kwargs.get('plugin'))}))\n"
-        "    raise SystemExit(79)\n"
+        "    raise ConstructionFence\n"
         "real.engine.numbered_candidate = construction_fence\n"
+        "canonical_install = real.install\n"
+        "def install(*args, **kwargs):\n"
+        "    with real.install_driver.required_custody():\n"
+        "        try:\n"
+        "            return canonical_install.__wrapped__(*args, **kwargs)\n"
+        "        except ConstructionFence:\n"
+        "            pass\n"
+        "    raise SystemExit(79)\n"
+        "real.install = install\n"
         "if __name__ == '__main__':\n"
         "    raise SystemExit(real.main())\n",
         encoding="utf-8",
@@ -500,6 +524,38 @@ def repair_case(
     # Observe the actual canonical CLI/native dispatch, not a fake result.
     monkeypatch.setattr(update_bootstrap, "_wait", observe_lifecycle)
 
+    def run_manager_request(operation):
+        from update_driver import core
+        from update_driver.participant import ENVIRONMENT_KEY, participant
+        from worktree_manager import update_driver_cli
+
+        queued = core.enqueue(
+            core.RequestSpec(
+                "manager", ("--repair-engine", str(source)), project=str(home),
+                cwd=str(home), source=update_driver_cli._source_key(),
+                context=tuple(update_driver_cli.request_context().items()), repair=True,
+            ),
+            runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(home)),
+        )
+
+        def execute(transaction):
+            transaction.assert_owned()
+            with participant(
+                root=transaction.root,
+                witness=transaction.participant_env()[ENVIRONMENT_KEY],
+            ) as custody:
+                custody.assert_owned()
+                result = operation()
+                custody.assert_owned()
+            transaction.assert_owned()
+            return result
+
+        assert core.drain(executor=execute) == 0
+        settled = core.status(queued.id)
+        assert settled.state == "completed", settled.error
+        assert type(settled.exit_code) is int
+        return settled.exit_code
+
     @contextmanager
     def admitted_incumbent():
         from update_driver import participant_environment
@@ -524,6 +580,7 @@ def repair_case(
         effect=effect, binding=binding, primitive=primitive, receipt=receipt,
         manifest=manifest_path, update=update_bootstrap, calls=calls,
         admitted_incumbent=admitted_incumbent,
+        run_manager_request=run_manager_request,
         execute=execute_actual_installer,
         acquisitions=acquisitions,
     )

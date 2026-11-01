@@ -58,6 +58,9 @@ its own versioned slot, and the plugin's installer/runtime commands supervise
 it directly. `install`/`update` rebuild only the light `[store,server]` service
 slot, then cut traffic over with zdd; the durable engine remains on its separate
 explicit lifecycle and is never rebuilt by a routine service update.
+Explicit Windows stop resolves the installed selected runtime, not the
+installer payload's prospective slot. A payload refresh without runtime
+installation therefore does not skip shutdown of the existing owner.
 
 Native legacy `uninstall` stops the registered service/engine and removes owned
 runtime generations, source snapshots, selectors and generated command helpers.
@@ -178,6 +181,9 @@ runs its local service through the plugin's own installer/runtime lifecycle.
 use zdd cutover when replacing a live service. The independent durable engine's
 explicit lifecycle remains separate and is never coupled to routine host
 cutover.
+During suite updates, activation uses the selected consuming repository rather
+than the physical build artifact. The updater carries that repository through
+the existing `AGENT_INDEX_REPO` binding while preserving an explicit override.
 
 The installer exposes explicit installation-context actions for disposable
 installation-cell validation:

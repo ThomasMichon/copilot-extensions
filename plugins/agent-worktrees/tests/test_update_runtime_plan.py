@@ -313,6 +313,128 @@ def test_plan_execution_uses_collected_command_and_environment(portfolio, monkey
     assert captured[0][1]["target_version"] == "2"
 
 
+@pytest.mark.parametrize("name,explicit_repo", [
+    ("agent-index", False), ("agent-index", True), ("agent-bridge", False),
+])
+def test_index_activation_retains_logical_repo_without_changing_artifact(
+    portfolio, monkeypatch, name, explicit_repo,
+):
+    from agent_worktrees import update_runtime_plan
+
+    _engine, payload, _calls = portfolio
+    project = payload.parent / "consumer"
+    project.mkdir()
+    explicit = payload.parent / "explicit-repo"
+    environment = {"AGENT_INDEX_REPO": str(explicit)} if explicit_repo else {}
+    monkeypatch.setattr(
+        reconcile, "runtime_installer_environment",
+        lambda *args: (environment, payload.parent / "runtime"),
+    )
+    step = update_runtime_plan._select_inputs(
+        update_runtime_plan.RuntimeUpdateStep(name, "module_update", payload), None, project,
+    )
+    assert not step.blocked
+    assert step.artifact == payload and step.project_root == project
+    expected = str(explicit) if explicit_repo else str(project) if name == "agent-index" else None
+    assert step.environment.get("AGENT_INDEX_REPO") == expected
+
+
+def test_source_index_without_repository_does_not_export_neutral_cwd(portfolio, monkeypatch):
+    from agent_worktrees import update_runtime_plan, update_runtime_target
+
+    _engine, payload, _calls = portfolio
+    source = SimpleNamespace(
+        payload=payload, identity="prepared-source", version="2",
+        validate=lambda *args: None,
+    )
+    monkeypatch.setattr(update_runtime_target, "plan_target", lambda *args: None)
+    step = update_runtime_plan._select_inputs(
+        update_runtime_plan.RuntimeUpdateStep("agent-index", "runtime_reconcile", payload),
+        source,
+    )
+    assert not step.blocked
+    assert step.project_root is None and "AGENT_INDEX_REPO" not in step.environment
+    assert step.environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] == str(Path.cwd().resolve())
+
+
+@pytest.mark.parametrize("kind", ["registered", "module"])
+@pytest.mark.parametrize("prepared", [False, True])
+def test_index_update_selects_real_host_repository(tmp_path, monkeypatch, kind, prepared):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import update_runtime_plan, update_runtime_target
+
+    payload = Path(__file__).resolve().parents[2] / "agent-index"
+    repos = {}
+    for role, machine in (("client", "remote-fixture"), ("host", "local-fixture")):
+        repo = tmp_path / role
+        repo.mkdir()
+        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True,
+                       timeout=10, **no_window_kwargs())
+        (repo / ".agent-index").mkdir()
+        (repo / ".agent-index" / "config.yaml").write_text(
+            f"indexer:\n  machine: {machine}\n  ssh: {machine}\n", encoding="utf-8",
+        )
+        repos[role] = repo
+    monkeypatch.setattr(core, "_invocation_update_context", lambda: repos["client"])
+    monkeypatch.setattr(config, "load_config", lambda: SimpleNamespace(repos={
+        role: SimpleNamespace(anchor=str(repos[role]))
+        for role in ("client", "host")
+    }))
+    monkeypatch.setattr(config, "detect_machine", lambda *args: "local-fixture")
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda *args: ["agent-index"])
+    monkeypatch.setattr(reconcile, "read_user_enabled_plugins", lambda: [])
+    monkeypatch.setattr(reconcile, "read_installed_plugins", lambda: ["agent-index"])
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda *args: payload)
+    monkeypatch.setattr(reconcile, "runtime_installer_environment",
+                        lambda *args: (dict(os.environ, AGENT_INDEX_MACHINE="local-fixture"),
+                                       tmp_path / "runtime"))
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *args, **kwargs: "old")
+    gate_contexts = []
+    monkeypatch.setattr(
+        update_runtime, "_machine_gate_blocks",
+        lambda name, scope, project: gate_contexts.append(project) or project == repos["client"],
+    )
+    target_environments = []
+    monkeypatch.setattr(
+        update_runtime_target, "plan_target",
+        lambda *args: target_environments.append(dict(args[-1])) or None,
+    )
+    target = update_runtime._registered_plugin_targets()["agent-index"]
+    assert set(target.repository_contexts) == set(repos.values())
+    plan = (update_runtime_plan.plan_module if kind == "module"
+            else update_runtime_plan.plan_registered)
+    args = ("agent-index", payload, "windows" if os.name == "nt" else "linux") if (
+        kind == "module"
+    ) else ("agent-index", "windows" if os.name == "nt" else "linux")
+    step = plan(*args, force=True, gate_context=target.context,
+                repository_contexts=target.repository_contexts,
+                **({"source": SimpleNamespace(
+                    payload=payload, identity="prepared-source", version="new",
+                    validate=lambda *args: None, deployed_version=lambda *args, **kwargs: "old",
+                )} if prepared else {}))
+    assert not step.blocked, step.status
+    assert step.project_root == repos["host"]
+    assert step.environment["AGENT_INDEX_REPO"] == str(repos["host"])
+    assert step.artifact == payload
+    assert gate_contexts and set(gate_contexts) == {repos["host"]}
+    if prepared:
+        assert target_environments[0]["AGENT_INDEX_REPO"] == str(repos["host"])
+
+
+def test_index_multi_repository_role_failure_blocks_preflight(portfolio, monkeypatch):
+    from agent_worktrees import update_runtime_plan
+
+    _engine, payload, calls = portfolio
+    project = payload.parent / "consumer"
+    other = payload.parent / "other"
+    step = update_runtime_plan._select_inputs(
+        update_runtime_plan.RuntimeUpdateStep("agent-index", "module_update", payload),
+        None, project, repository_contexts=(project, other),
+    )
+    assert step.blocked and "role resolver is unavailable" in step.status
+    assert not calls and not step.argv
+
+
 def test_collected_environment_is_an_immutable_snapshot(portfolio, monkeypatch):
     from agent_worktrees import update_runtime_plan
 

@@ -291,7 +291,7 @@ def _ownership(payload: Path, plugin: str, root: Path) -> tuple[Any, Any, Any, d
         raise UninstallRefused(f"Typed installation ownership refused: {decision['probeReason']}")
     receipt = None
     try:
-        receipt = binding.publish_legacy_binding(primitive, **arguments)
+        receipt = binding.publish_legacy_binding(primitive, operation="teardown", **arguments)
     except binding.SourceProvenanceUnavailable:
         if record.get("commandBinding") is not None or record.get("commandLifecycle") is not None:
             raise UninstallRefused("Existing typed/lifecycle ownership cannot be revalidated") from None
@@ -931,8 +931,6 @@ def cleanup(payload_root: Path, plugin_id: str, root: Path, shell: str, *,
     manifest = root / "deploy-manifest.json"
     existing = manifest.read_bytes() if manifest.exists() else None
     record = dict(owner[3])
-    if owner[2] is not None:
-        record["commandBinding"] = owner[2]
     proof = existing if existing is not None else json.dumps(record, sort_keys=True).encode() + b"\n"
     with _custody(payload, plugin_id, root, owner, targets, runtime) as lifecycle_lease:
         _root(payload, root)

@@ -478,6 +478,35 @@ def test_productive_owned_child_renews_timeout_and_relays_before_completion(
         pass
 
 
+@pytest.mark.parametrize("retained", [False, True])
+def test_productive_owned_child_preserves_explicit_absolute_deadline(
+    engine, procutil, tmp_path, retained,
+):
+    engine.runtime.slot(tmp_path, "1.0")
+    started = time.monotonic()
+    with engine.runtime.construction_lease(tmp_path, "1.0") as descriptor:
+        with pytest.raises(subprocess.TimeoutExpired) as failure:
+            engine.run_owned(
+                [sys.executable, "-c",
+                 "import sys,time\n"
+                 "for index in range(40):\n"
+                 " print(f'progress{index:02d}',flush=True);time.sleep(.25)\n"],
+                cwd=tmp_path, env=dict(os.environ), timeout=2,
+                deadline=started + 2,
+                procutil=procutil, construction_fd=descriptor,
+                on_output=lambda _name, _data: None,
+                **({
+                    "runtime_root": tmp_path, "runtime_version": "1.0",
+                    "runtime_path": Path(engine.runtime.__file__),
+                } if retained else {}),
+            )
+        assert "progress00" in failure.value.output
+        assert "progress39" not in failure.value.output
+        assert time.monotonic() - started < 12
+    with engine.runtime.construction_lease(tmp_path, "1.0", timeout=0):
+        pass
+
+
 @pytest.mark.parametrize("condition", ["progress", "uneven", "silent"])
 def test_source_phase_initial_retention_progress_crosses_real_quiet_window(
     engine, procutil, tmp_path, condition,

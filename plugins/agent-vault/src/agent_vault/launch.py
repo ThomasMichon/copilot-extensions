@@ -14,7 +14,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
+from agent_procutil import python_cache_args, spawn_daemon, windowless_python, windowless_python_env
 
 from . import config
 from .cache import CACHE_DIR_ENV
@@ -74,7 +74,7 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
             )
     return spawn_daemon(
         [
-            windowless_python(python), "-c", _SERVICE_BOOTSTRAP,
+            windowless_python(python), *python_cache_args(root), "-c", _SERVICE_BOOTSTRAP,
             str(Path(__file__).resolve().parent.parent), *args,
         ],
         cwd=root,

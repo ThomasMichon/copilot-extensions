@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from collections.abc import Mapping
-import os
 from . import (
     _JOB_SCOPES_ENV as ENVIRONMENT_KEY,
+    _job_child_environment as child_environment,
     _new_job_name as new_name,
     _job_scope_names as scope_names,
     _publish_job_scope as publish_current,
@@ -16,26 +15,6 @@ __all__ = [
     "ENVIRONMENT_KEY", "new_name", "scope_names", "child_environment",
     "publish_current", "query_scopes",
 ]
-
-
-def child_environment(
-    environment: Mapping[str, str] | None = None, *, append: str | None = None,
-    inherit_current: bool = True,
-) -> dict[str, str]:
-    if type(inherit_current) is not bool:
-        raise ValueError("owned Job scope inheritance must be a boolean")
-    child = dict(os.environ if environment is None else environment)
-    names = list(scope_names(os.environ)) if inherit_current else []
-    for key in tuple(child):
-        if key.upper() == ENVIRONMENT_KEY:
-            names.extend(scope_names({ENVIRONMENT_KEY: child.pop(key)}))
-    names = list(dict.fromkeys(names))
-    if append is not None:
-        names.append(append)
-    if names:
-        child[ENVIRONMENT_KEY] = ";".join(names)
-        scope_names(child)
-    return child
 
 
 def _api():

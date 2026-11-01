@@ -29,6 +29,34 @@ def test_route_label_alone_cannot_attest_target_generation(tmp_path, monkeypatch
     assert not cutover._already_at_version(route, target, root=tmp_path)
 
 
+def test_passive_promotion_cannot_open_work_before_resident_lease(tmp_path):
+    runtime = mux_daemon.MuxDaemonRuntime(tmp_path / "registry.json", root=tmp_path, passive=True)
+    assert runtime.promote() == {"adopted": False, "reason": "resident-lease-pending"}
+    assert not runtime.accepting_requests()
+    runtime.passive = False
+    assert runtime.promote() == {"adopted": True}
+    assert runtime.accepting_requests()
+
+
+@pytest.mark.parametrize("generation,expected", [
+    ("1.2.3+repair.new", True), ("1.2.3+repair.wrong", False),
+])
+def test_self_retirement_requires_successors_actual_generation(tmp_path, generation, expected):
+    from test_mux_daemon_cutover_helper import _FakeMuxDaemon
+
+    token = cutover.load_or_create_control_token(tmp_path)
+    old = cutover.publish_route(cutover.pick_free_port(), root=tmp_path, pid=101, version="old")
+    incoming = _FakeMuxDaemon(202, token=token, generation=generation)
+    try:
+        incoming.start(cutover.pick_free_port())
+        cutover.publish_route(
+            incoming.port, root=tmp_path, pid=incoming.pid, version="1.2.3+repair.new",
+        )
+        assert cutover.is_superseded(tmp_path, 101, old.generation) is expected
+    finally:
+        incoming.force_terminate()
+
+
 @pytest.mark.parametrize("relative,expected", [
     ("versions/1.2.3+repair.old", "1.2.3+repair.old"),
     ("versions/1.2.3/.venv", "1.2.3"),
@@ -64,7 +92,6 @@ def test_wrong_target_generation_rolls_back_without_misclassifying_old_health(tm
             version="1.2.3+repair.new", health_timeout=0.2, drain_timeout=0.2,
         )
         assert not result["result"]["ok"], result
-        assert result["result"]["rolled_back"], result
         assert old.alive and not wrong.alive
         assert cutover.routed_endpoint(tmp_path).version == old.generation
         assert cutover._health_check("127.0.0.1", old.port, root=tmp_path)

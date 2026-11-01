@@ -448,6 +448,171 @@ def _stage_payload(tmp_path: Path) -> Path:
     return payload
 
 
+def _legacy_uninstall_fixture(tmp_path: Path, monkeypatch):
+    payload = _stage_payload(tmp_path)
+    home = tmp_path / "home"
+    env = _isolated_install_env(home)
+    env.pop("COPILOT_PLUGIN_STAGED_FROM", None)
+    env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    catalog = tmp_path / ".github" / "plugin" / "marketplace.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text(json.dumps({
+        "name": "fixture",
+        "plugins": [{"name": "agent-logger", "source": "./plugins/agent-logger"}],
+    }), encoding="utf-8")
+    (home / ".copilot" / "settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "fixture": {"source": {"source": "directory", "path": str(tmp_path)}},
+        },
+    }), encoding="utf-8")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    for key in ("COPILOT_PLUGIN_STAGED_FROM", "COPILOT_EXTENSIONS_CONTEXT"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.chdir(home)
+    root = home / ".agent-logger"
+    (root / "versions").mkdir()
+    manifest = root / "deploy-manifest.json"
+    manifest.write_text(json.dumps({
+        "schema_version": 3, "service": "agent-logger",
+        "source": {"plugin": "agent-logger", "kind": "local", "path": str(payload)},
+    }), encoding="utf-8")
+    config = root / "config.yaml"
+    config.write_bytes(b"preserved configuration\n")
+    data = root / "session-state"
+    data.mkdir()
+    (data / "sentinel").write_bytes(b"preserved session data\n")
+    cache = root / "cache" / "python"
+    cache.mkdir(parents=True)
+    (cache / "sentinel").write_bytes(b"preserved cache\n")
+    guard = runpy.run_path(str(payload / "scripts" / "uninstall_guard.py"))
+    inventory = guard["_load"]("_logger_test_inventory", "installer_engine_uninstall.py")
+    commands = inventory._load(inventory._dependency(payload, "installer_engine_commands.py"))
+    local_bin = home / ".local" / "bin"
+    local_bin.mkdir(parents=True)
+    templates = commands._templates(payload, root, "agent-logger", home=home)
+    return payload, root, env, guard, local_bin, templates
+
+
+def test_legacy_uninstall_guard_uses_teardown_admission(tmp_path, monkeypatch):
+    payload, root, _, guard, local_bin, _ = _legacy_uninstall_fixture(tmp_path, monkeypatch)
+    foreign = local_bin / "session-sync"
+    foreign.write_bytes(b"foreign command\n")
+    before = (root / "deploy-manifest.json").read_bytes()
+    binding = guard["_load"]("_logger_test_binding", "command_binding.py")
+    primitive = binding._load_primitive(payload)
+    with pytest.raises(binding.CommandOwnershipConflict, match="Unrecognized global commands"):
+        binding.publish_legacy_binding(
+            primitive, payload_root=payload, plugin_id="agent-logger",
+            legacy_root=root, project_root=Path.cwd(),
+        )
+    _, receipt = guard["validate"](root)
+    assert receipt["pluginId"] == "agent-logger"
+    assert (root / "deploy-manifest.json").read_bytes() == before
+    assert foreign.read_bytes() == b"foreign command\n"
+
+
+@pytest.mark.parametrize("ownership", ["foreign", "malformed", "unknown"])
+def test_legacy_uninstall_guard_preserves_refusal(tmp_path, monkeypatch, ownership):
+    _, root, _, guard, _, _ = _legacy_uninstall_fixture(tmp_path, monkeypatch)
+    manifest = root / "deploy-manifest.json"
+    if ownership == "foreign":
+        manifest.write_text('{"schema_version":3,"service":"other-product"}', encoding="utf-8")
+    elif ownership == "malformed":
+        manifest.write_text("{broken", encoding="utf-8")
+    else:
+        manifest.unlink()
+    before = manifest.read_bytes() if manifest.exists() else None
+    with pytest.raises((RuntimeError, ValueError, OSError)):
+        guard["validate"](root)
+    assert (manifest.read_bytes() if manifest.exists() else None) == before
+    assert (root / "versions").is_dir()
+
+
+@pytest.mark.parametrize("native", ["ps1", "sh"])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_native_uninstall_removes_only_owned_commands(tmp_path, monkeypatch, native, dry_run):
+    payload, root, env, _, local_bin, templates = _legacy_uninstall_fixture(tmp_path, monkeypatch)
+    suffixes = (".ps1", ".cmd") if native == "ps1" else ("",)
+    owned = ["agent-logger" + suffix for suffix in suffixes]
+    foreign = ["session-sync" + suffix for suffix in suffixes]
+    # An exact cmd delegate alone is not owned when its PowerShell peer is foreign.
+    if native == "ps1":
+        foreign += ["collate-session.ps1", "collate-session.cmd"]
+    for name in owned:
+        (local_bin / name).write_text(templates[name][0], encoding="utf-8")
+    for name in foreign:
+        text = templates[name][0] if name == "collate-session.cmd" else "foreign command\n"
+        (local_bin / name).write_text(text, encoding="utf-8")
+    original = {name: (local_bin / name).read_bytes() for name in owned + foreign}
+    manifest = (root / "deploy-manifest.json").read_bytes()
+    installer = (payload / "scripts" / ("install." + native)).read_text(encoding="utf-8")
+    if native == "ps1":
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if shell is None:
+            pytest.skip("Native PowerShell unavailable")
+        branch = installer.split("    'uninstall' {", 1)[1]
+        policy = branch[branch.index("        if ($publishGlobalBinstubs) {"):]
+        policy = policy.split("\n        if ($DryRun) {", 1)[0]
+        def quote(value):
+            return "'" + str(value).replace("'", "''") + "'"
+        script = (
+            "$ErrorActionPreference='Stop'\n"
+            f". {quote(payload / 'scripts' / 'versioned_runtime_native.ps1')}\n"
+            f"$uninstallPython={quote(sys.executable)}\n"
+            f"$uninstallGuardArgs=@('-I','-B',{quote(payload / 'scripts' / 'uninstall_guard.py')},"
+            f"'--root',{quote(root)})\n"
+            f"$LocalBin={quote(local_bin)}\n"
+            "$publishGlobalBinstubs=$true\n"
+            f"$DryRun={'$true' if dry_run else '$false'}\n"
+            "$BinstubNames=@(" + ",".join(quote(name) for name in _COMMANDS) + ")\n"
+            "function Write-Changed { param($message) }\n" + policy
+        )
+        argv = [shell, "-NoProfile", "-NonInteractive", "-Command", script]
+    else:
+        if os.name == "nt":
+            shell = Path(os.environ.get("ProgramFiles", "")) / "Git" / "bin" / "bash.exe"
+            if not shell.is_file():
+                pytest.skip("Git Bash unavailable; do not use the WSL launcher")
+        else:
+            shell = shutil.which("bash")
+            if shell is None:
+                pytest.skip("Native Bash unavailable")
+        branch = installer.split("  uninstall)\n", 1)[1]
+        policies = branch.split('      if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then\n')[1:]
+        policy = policies[0 if dry_run else 1].split("\n      fi", 1)[0]
+        policy = policy.split("\n      else", 1)[0]
+        script = (
+            "set -e\n"
+            "chg() { :; }\n"
+            "if command -v cygpath >/dev/null; then\n"
+            ' py="$(cygpath -u "$1")"; SCRIPT_DIR="$(cygpath -u "$2")"; '
+            'LOCAL_BIN="$(cygpath -u "$4")"\n'
+            'else py="$1"; SCRIPT_DIR="$2"; LOCAL_BIN="$4"; fi\n'
+            'INSTALL_DIR="$3"\n' + policy
+        )
+        argv = [str(shell), "--noprofile", "--norc", "-c", script,
+                "logger-policy", sys.executable, str(payload / "scripts"), str(root), str(local_bin)]
+    result = subprocess.run(
+        argv, cwd=root.parent, env=env, capture_output=True, text=True, timeout=60,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    for name in foreign:
+        assert (local_bin / name).read_bytes() == original[name], name
+        assert str(local_bin / name) not in result.stdout
+    for name in owned:
+        if dry_run:
+            assert (local_bin / name).read_bytes() == original[name]
+            assert name in result.stdout
+        else:
+            assert not (local_bin / name).exists(), name
+    assert (root / "deploy-manifest.json").read_bytes() == manifest
+    assert (root / "config.yaml").read_bytes() == b"preserved configuration\n"
+    assert (root / "session-state" / "sentinel").read_bytes() == b"preserved session data\n"
+    assert (root / "cache" / "python" / "sentinel").read_bytes() == b"preserved cache\n"
+
+
 def _stage_release_payload(tmp_path: Path) -> Path:
     publisher = _stage_payload(tmp_path)
     repository = _PLUGIN_ROOT.parents[1]

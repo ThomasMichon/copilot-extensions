@@ -966,6 +966,8 @@ driver; it does not install from a daemon-launch fallback. The source driver
 uses the declared dependency closure and Python 3.11+; no sibling runtime is
 required. Live authentication and publication tickets remain inherited, never
 journaled. The internal Python construction/settlement APIs require that owner.
+Foreground installer diagnostics replay on stderr without translating native
+line endings twice. Participant inspection retains its separate JSON stdout.
 
 A retained, completed numbered candidate adopts its finite, user-scoped
 on-demand launch broker before helper publication, Manager recovery or monitor

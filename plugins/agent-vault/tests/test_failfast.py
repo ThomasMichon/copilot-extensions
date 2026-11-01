@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import os
 
 from agent_vault import extensions as ext
 from agent_vault.extensions import ExtensionRegistry
@@ -33,6 +34,21 @@ def _no_prompt(monkeypatch):
         raise AssertionError("interactive prompt must not run in fail-fast mode")
 
     monkeypatch.setattr(service_mod, "prompt_password", _fail)
+
+
+def test_ping_reports_running_build_without_unlock(
+    empty_registry, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault import service
+
+    monkeypatch.setattr(service, "_PROCESS_VERSION", "1.2.3")
+    svc = VaultService()
+    monkeypatch.setattr(svc.cli, "status", lambda db=None: {})
+    monkeypatch.setattr(svc.cli, "unlocked_vaults", lambda: [])
+    _no_prompt(monkeypatch)
+    response = svc.handle_request({"action": "ping"})
+    assert response["ok"] and response["pid"] == os.getpid()
+    assert response["version"] == "1.2.3"
 
 
 # ---------------------------------------------------------------------------

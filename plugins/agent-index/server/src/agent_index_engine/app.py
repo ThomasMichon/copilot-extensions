@@ -18,6 +18,7 @@ from __future__ import annotations
 from agent_procutil.daemon_instances import daemon_entrypoint
 
 import asyncio
+from importlib.metadata import PackageNotFoundError, distribution
 import logging
 import os
 import signal
@@ -25,12 +26,28 @@ import threading
 import time
 import sys
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from agent_index.engine.generation import current_engine_generation
+
+def _running_engine_version() -> str:
+    try:
+        installed = distribution("agent-index-engine")
+        member = "agent_index_engine/app.py"
+        if member not in {str(path) for path in installed.files or ()}:
+            return ""
+        if Path(installed.locate_file(member)).resolve() != Path(__file__).resolve():
+            return ""
+        return installed.version
+    except (PackageNotFoundError, OSError, ValueError):
+        return ""
+
+
+_PROCESS_VERSION = _running_engine_version()
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +79,8 @@ class BatchEmbedResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+    pid: int
+    version: str
     generation: str
     gpu_deps_installed: bool
     model_loaded: bool
@@ -338,6 +357,8 @@ async def health() -> HealthResponse:
 
     return HealthResponse(
         status="ok" if gpu_ok else "degraded",
+        pid=os.getpid(),
+        version=_PROCESS_VERSION,
         generation=current_engine_generation(),
         gpu_deps_installed=gpu_ok,
         model_loaded=model_loaded,

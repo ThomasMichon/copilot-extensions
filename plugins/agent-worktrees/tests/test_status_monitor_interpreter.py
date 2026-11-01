@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -88,8 +89,10 @@ def test_monitor_uses_the_shared_direct_interpreter():
 @pytest.mark.parametrize("passive", [False, True])
 def test_monitor_spawn_preserves_direct_interpreter_environment(tmp_path, monkeypatch, passive):
     captured = {}
+    venv_python = str(tmp_path / "venv" / "Scripts" / "python.exe")
     monkeypatch.setattr(cutover, "os", SimpleNamespace(name="nt", path=os.path))
     monkeypatch.setattr(runtime, "_daemon_cwd", lambda: str(tmp_path))
+    monkeypatch.setattr(runtime.cfg, "install_dir", lambda: str(tmp_path))
     monkeypatch.setattr(
         runtime, "_daemon_environment", lambda: {"KEEP": "yes", "__PYVENV_LAUNCHER__": "old"},
     )
@@ -105,14 +108,18 @@ def test_monitor_spawn_preserves_direct_interpreter_environment(tmp_path, monkey
 
     monkeypatch.setattr(cutover, "spawn_daemon", spawn_daemon)
     if passive:
-        assert cutover.spawn_passive("venv-python", port=54321).pid == 77
-        assert captured["argv"][4:] == ["--passive", "--control-port", "54321"]
+        assert cutover.spawn_passive(venv_python, port=54321).pid == 77
+        assert captured["argv"][6:] == ["--passive", "--control-port", "54321"]
     else:
-        assert runtime._spawn_detached(["venv-python", "-m", "agent_worktrees", "status-monitor"])
+        assert runtime._spawn_detached([venv_python, "-m", "agent_worktrees", "status-monitor"])
     assert captured["argv"][0] == "base-python"
+    assert captured["argv"][1] == "-X"
+    cache = Path(captured["argv"][2].removeprefix("pycache_prefix="))
+    assert cache.parent == Path(interpreter.python_cache_args(tmp_path)[1].partition("=")[2]).parent
+    assert cache.name.startswith("unsealed-")
     kwargs = captured["kwargs"]
     assert kwargs["env"]["KEEP"] == "yes"
-    assert kwargs["env"]["__PYVENV_LAUNCHER__"] == "venv-python"
+    assert kwargs["env"]["__PYVENV_LAUNCHER__"] == venv_python
     assert kwargs["cwd"] == str(tmp_path)
     assert kwargs["log_path"] == tmp_path / "logs" / "status-monitor.log"
     # Console children share one hidden console; breakaway from the caller's

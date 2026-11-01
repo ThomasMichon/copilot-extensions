@@ -449,11 +449,16 @@ def spawn_monitor(argv: list[str], env: dict[str, str], *, console_children: boo
     breakaway fails the spawn rather than starting a monitor that would die
     with its caller.
     """
+    from agent_procutil import python_cache_args
     from . import status_monitor_runtime as smr
 
     cwd = smr._daemon_cwd()
     return spawn_daemon(
-        argv, cwd=cwd, log_path=monitor_log_path(cwd), env=env,
+        [argv[0], *python_cache_args(
+            os.path.abspath(smr.cfg.install_dir()),
+            runtime=env.get("__PYVENV_LAUNCHER__", argv[0]),
+        ), *argv[1:]],
+        cwd=cwd, log_path=monitor_log_path(cwd), env=env,
         instance=DaemonInstanceSpec(
             "agent-worktrees-status-monitor", Path(cwd), Path(__file__).resolve(),
         ),
