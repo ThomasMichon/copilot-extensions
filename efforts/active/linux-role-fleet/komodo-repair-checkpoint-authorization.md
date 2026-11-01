@@ -77,10 +77,12 @@ identity, old-proof or baseline-operation fallback.
 - [x] Keep proofs, private keys and credentials out of outcomes and diagnostics.
   Preserve original candidate versus executor provenance, prior history and
   data compatibility without a new checkpoint persistence ledger.
-- [ ] Integrate the existing embedding's signer/verifier and current selection
+- [x] Integrate the existing embedding's signer/verifier and current selection
   owners. Remove redundant same-checkpoint acquisition only through those owners,
   retaining before/after source, runtime, key and credential/material checks.
   Neither a self-supplied snapshot nor a cross-checkpoint cache grants authority.
+  The embedding source and local noneditable checkpoint composition are qualified;
+  actual adopter wall-time and original-attempt acceptance remain below.
 - [ ] Publish accurate installed support/operating docs, then obtain normal
   release/acquisition and separately authorized actual adopter qualification.
   Keep #9735 and every broader parent delivery gate open until actually resolved.
@@ -237,3 +239,50 @@ The selected packet's whole supervisor bound remains separate from each
 permit and the original native deadline. Current source review, existing
 embedding integration, normal release/acquisition and actual adopter
 qualification remain open; #9735 and #6030 stay open.
+
+### 2026-10-31 - Installed checkpoint compatibility merged
+
+#9802 merged as `304cb373a05959dae37a8df87c38ec63d79ff022` after the actual
+current-head Copilot approval, no inline or active findings and required green
+CI. Managed completion verified the merge and reconciled the same source
+worktree with its pre-complete backup retained. Both complete parent Plan and
+Validation Plan were re-read; only the installed compatibility item closes.
+
+All 16 selected installed controls retain their real noneditable SDK cells,
+checkout denial, machine signatures, common admission and contained native/
+HTTP/journal boundaries. They are not actual adopter source/credential latency,
+official-image readiness, authenticated release admission or production repair.
+Continue the existing embedding and ordinary release/acquisition owners, then
+qualify the actual selected executor and full cold/warm original status and
+terminal publication. #9735 and #6030 remain open; no wider fleet gate closes.
+
+### 2026-10-31 - Released SDK and embedding composition qualified locally
+
+The normal Main promotion selects checkpoint source
+`7a4e378ba114a4a3b22d8c87dad427c1cd36e3e7`. The signed index and complete
+schema-4 standalone bundle passed hosted-workflow attestation and the existing
+artifact owner's complete-source/build-resource validation. The selected
+closure contains Fleet `0.1.72.dev1`, process `0.1.12.dev1` and ZDD
+`0.1.1.dev1`; an older identically versioned library artifact is not substituted.
+
+The existing embedding's source integration has passed its normal review and
+merge. Its strict opt-in discovers support from the executing SDK before
+protected-source acquisition or signing. Its original identity anchor, fresh
+verified caller, registered signer/verifier and current-selection callbacks
+retain full before/after custody and common admission without a new issuer,
+permit cache or native writer.
+
+A local Linux x86-64 source-independent environment qualifies that noneditable
+embedding against the authenticated three-wheel SDK closure and retained
+runtime owner. Complete external installed files match their five exact wheels;
+cold publication and warm reuse pass. The complete packet passed 389 controls,
+then its three unresolved runtime-reader controls passed after correcting only
+caller-owned local input-file modes. This is aggregate 392-case qualification,
+not a second complete packet or actual adopter credentials/native wall-time.
+
+Both complete parent Plan and Validation Plan remain active. Only the
+embedding-source integration and local installed composition close here.
+Actual selected ARM64 publication, finite current transition, complete cold/warm
+status and terminal publication, and one authorized original-attempt
+qualification remain unresolved. No original receipt, resource, key, credential,
+data or selected native deadline changed; #9735 and #6030 remain open.
