@@ -3452,7 +3452,11 @@
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_client_resource_preparation_consumes_shared_startup_deadline[45-procutil]",
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_client_resource_preparation_consumes_shared_startup_deadline[45-runtime]",
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_progress_guardian_renews_only_quiet_time_and_keeps_explicit_cap[None]",
-        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_progress_guardian_renews_only_quiet_time_and_keeps_explicit_cap[2.0]"
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_progress_guardian_renews_only_quiet_time_and_keeps_explicit_cap[2.0]",
+        "tools/promotion_unit_tests/test_python_cache.py::test_recorded_installation_reuses_cache_but_same_stat_record_change_does_not",
+        "tools/promotion_unit_tests/test_python_cache.py::test_selected_interpreter_uses_its_target_installation_not_current_redirect",
+        "tools/promotion_unit_tests/test_python_cache.py::test_unrecorded_completion_uses_fresh_external_namespace[missing]",
+        "tools/promotion_unit_tests/test_python_cache.py::test_unrecorded_completion_uses_fresh_external_namespace[malformed]"
     ],
     "sources": {
         "libs/configuration-layers/src/configuration_layers/__init__.py": "e522797fe6207e3648705759db4234936df60bcf255b36deb23f8d400b52a890",
@@ -3887,7 +3891,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/creation_owner_claim.py": "aea9f0de14e962099fb1c70b139d9c62a0ae0051c6cd3174683fe13d534acffa",
         "plugins/agent-worktrees/src/agent_worktrees/launch_progress.py": "b44ba6207d319af74ecbf40a0324ad0126a7415573b15b564b107002f16431c8",
         "libs/installer-engine/installer_engine_footprint.py": "d21294107d14486a23778e075497fec0fa145aff0631680fd9ace6ad7033455d",
-        "libs/agent-procutil/src/agent_procutil/python_cache.py": "37e93017af90235d2ce668a98b97a65be18a39ae7ef2435b35d9a778d56c4df2"
+        "libs/agent-procutil/src/agent_procutil/python_cache.py": "37e93017af90235d2ce668a98b97a65be18a39ae7ef2435b35d9a778d56c4df2",
+        "tools/promotion_unit_tests/test_python_cache.py": "6498e304566231b8576c556dcbd6f737904e3935ae2a21c1328192da5aab3510"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_engine_footprint.py",
