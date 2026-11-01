@@ -362,3 +362,158 @@ console.log(JSON.stringify(result));
         if fault == "activation-report-failure":
             assert "policy activation unavailable" in decision["additionalContext"]
             assert "diagnostic-failed" in decision["additionalContext"]
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows caller-owned native/SDK deadline consumers")
+@pytest.mark.parametrize("consumer", ["resident", "powershell.exe"])
+@pytest.mark.parametrize("late_result", ["timeout", "deny"])
+def test_pretool_preserves_accumulated_ask_across_later_lookup(tmp_path, consumer, late_result):
+    import time
+    import uuid
+
+    from agent_procutil import spawn_sync_in_kill_on_close_job
+    from test_hook_policy_lifetime import _pin_descendant
+    from test_hook_pre_relevance import _pretool_recovery_fixture
+
+    home, cwd, scripts, env = _pretool_recovery_fixture(tmp_path, "none")
+    (scripts.parent / "repos.yaml").write_text(
+        "repos:\n  fixture:\n    class: worktree\n    windows: '" + str(cwd) + "'\n", encoding="utf-8",
+    )
+    env["ANCHOR_WRITE_GUARD_MODE"] = "ask"
+    probes = tmp_path / "local-gh"
+    probes.mkdir()
+    observations = tmp_path / "observations"
+    observations.mkdir()
+    nonce = uuid.uuid4().hex
+    child = probes / "gh_child.py"
+    child.write_text(
+        """
+import ctypes, json, os, sys, threading
+from pathlib import Path
+from agent_procutil._daemon_instance_identity import _windows_birth
+kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+kernel.GetCurrentProcess.restype = ctypes.c_void_p
+birth = _windows_birth(kernel.GetCurrentProcess())
+args = sys.argv[1:]
+root = Path(os.environ['PRETOOL_TEST_OBSERVATIONS'])
+if args[:2] == ['pr', 'view']:
+    number = args[2]
+    marker = root / ('gh-' + number + '.json')
+    prepared = marker.with_suffix('.prepared')
+    prepared.write_text(json.dumps({'pid': os.getpid(), 'birth': birth, 'nonce': os.environ['PRETOOL_TEST_NONCE']}), encoding='utf-8')
+    prepared.replace(marker)
+    if os.environ['PRETOOL_TEST_LATE_RESULT'] == 'timeout':
+        threading.Event().wait(11 if number == '41' else 60)
+        state = 'CLOSED'
+    else:
+        state = 'OPEN'
+    print(json.dumps({'author': {'login': 'fixture-contributor'}, 'state': state}))
+elif args[:2] == ['api', 'user']:
+    print('fixture-operator')
+else:
+    raise AssertionError('unexpected synthetic gh request')
+""",
+        encoding="utf-8",
+    )
+    (probes / "sitecustomize.py").write_text(
+        """
+import json, os, subprocess, sys, time
+from pathlib import Path
+_real_run = subprocess.run
+_root = Path(os.environ['PRETOOL_TEST_OBSERVATIONS'])
+def emit(value):
+    with (_root / 'events.jsonl').open('a', encoding='utf-8') as stream:
+        stream.write(json.dumps(value) + '\\n')
+def local_gh(args, *positional, **kwargs):
+    if isinstance(args, (list, tuple)) and args and str(args[0]).lower() == 'gh':
+        emit({'event': 'gh-call', 'args': list(args[1:]), 'timeout': kwargs.get('timeout'), 'time': time.monotonic()})
+        return _real_run([sys.executable, os.environ['PRETOOL_TEST_GH_CHILD'], *args[1:]], *positional, **kwargs)
+    return _real_run(args, *positional, **kwargs)
+subprocess.run = local_gh
+def observe(frame, event, result):
+    if event == 'return' and frame.f_code.co_name == '_merge_pre_decisions' and frame.f_code.co_filename.endswith('hook_client.py'):
+        if isinstance(result, dict) and result.get('permissionDecision') in ('ask', 'deny'):
+            emit({'event': 'accumulated-decision', 'decision': result['permissionDecision'], 'time': time.monotonic()})
+    elif event == 'call' and frame.f_code.co_name == 'decide' and frame.f_code.co_filename.endswith('pr_supersede_guard.py'):
+        emit({'event': 'pr-guard-entry', 'deadline': frame.f_locals.get('deadline'), 'time': time.monotonic()})
+sys.setprofile(observe)
+""",
+        encoding="utf-8",
+    )
+    env.update(
+        PRETOOL_TEST_OBSERVATIONS=str(observations), PRETOOL_TEST_NONCE=nonce,
+        PRETOOL_TEST_GH_CHILD=str(child), PRETOOL_TEST_LATE_RESULT=late_result,
+        PYTHONPATH=str(probes) + os.pathsep + env.get("PYTHONPATH", ""),
+    )
+    no_backend = tmp_path / "no-backend"
+    no_backend.mkdir()
+    node = shutil.which("node")
+    shell = shutil.which("powershell.exe")
+    assert node and shell
+    env["PATH"] = str(no_backend)
+    target = cwd / "protected.txt"
+    event = {
+        "toolName": "powershell", "cwd": str(cwd), "workingDirectory": str(cwd),
+        "sessionId": "ask-deadline-fixture",
+        "toolArgs": {"command": "Set-Content '" + str(target) + "' value; "
+                     "gh pr close 41 --repo example/project; gh pr close 42 --repo example/project"},
+    }
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(event), encoding="utf-8")
+    if consumer == "resident":
+        driver = tmp_path / "ask-deadline.mjs"
+        driver.write_text(
+            "import {readFileSync} from 'node:fs'; import {pathToFileURL} from 'node:url';\n"
+            "const [modulePath,scriptsRoot,python,eventPath]=process.argv.slice(2);\n"
+            "const {createPythonPolicy,createResidentPreToolHook}=await import(pathToFileURL(modulePath));\n"
+            "const hook=createResidentPreToolHook({scriptsRoot,invokePolicy:createPythonPolicy({scriptsRoot,python})});\n"
+            "console.log(JSON.stringify(await hook(JSON.parse(readFileSync(eventPath,'utf8')))));\n",
+            encoding="utf-8",
+        )
+        command = [node, str(driver), str(PLUGIN / "extensions" / "agent-worktrees" / "resident-pre-tool.mjs"),
+                   str(scripts), sys.executable, str(event_path)]
+    else:
+        command = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(scripts / "pre-tool-hook.ps1")]
+    started = time.monotonic()
+    process, job = spawn_sync_in_kill_on_close_job(
+        command, require_job=True, allow_breakaway=False, env=env, cwd=home,
+        stdin=subprocess.DEVNULL if consumer == "resident" else subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    close_observer = None
+    try:
+        if consumer != "resident":
+            process.stdin.write(json.dumps(event).encode("utf-8"))
+            process.stdin.close()
+            process.stdin = None
+        if late_result == "timeout":
+            marker = observations / "gh-42.json"
+            deadline = time.monotonic() + 15
+            while not marker.is_file():
+                assert process.poll() is None, process.communicate(timeout=5)
+                assert time.monotonic() < deadline, "second local lookup never started"
+                time.sleep(0.02)
+            record = json.loads(marker.read_text(encoding="utf-8"))
+            assert record["nonce"] == nonce
+            retired, close_observer = _pin_descendant(record["pid"], record["birth"])
+        stdout, stderr = process.communicate(timeout=40)
+        assert process.returncode == 0, (stdout, stderr)
+        assert time.monotonic() - started < 30, "consumer exceeded the original hook deadline"
+        if late_result == "timeout":
+            assert retired(), "local lookup child survived its owned policy scope"
+        observed = [json.loads(line) for line in (observations / "events.jsonl").read_text().splitlines()]
+        decisions = [row["decision"] for row in observed if row["event"] == "accumulated-decision"]
+        assert decisions and decisions[0] == "ask", observed
+        calls = [row for row in observed if row["event"] == "gh-call"]
+        assert len(calls) == 2, calls
+        reply = json.loads(stdout)
+        print(json.dumps({"consumer": consumer, "late_result": late_result, "observed": observed, "reply": reply}))
+        assert not target.exists()
+        assert reply.get("permissionDecision") == ("ask" if late_result == "timeout" else "deny"), reply
+        if late_result == "deny":
+            assert decisions[-1] == "deny"
+            assert "contributor" in reply.get("permissionDecisionReason", "")
+    finally:
+        if close_observer is not None:
+            close_observer()
+        job.terminate_and_wait(5)
+        process.wait(timeout=5)
