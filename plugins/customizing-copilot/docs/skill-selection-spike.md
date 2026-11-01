@@ -158,6 +158,14 @@ transitive guide traversal or skill execution occurs. Reads are byte/count
 bounded, reject non-UTF-8 sources, and return unavailable for pathless entries
 without excluding their advisory metadata.
 
+Reference extraction handles inline links and single-line reference definitions,
+balanced or escaped destination parentheses, angle-bracket paths and optional
+titles. Code spans, fenced/indented examples and comments do not declare guides.
+Ambiguous or unsupported Markdown forms are not guessed. Source acquisition
+rejects non-regular files before opening, uses nonblocking opens on Unix and
+retains a descriptor-level file check. The opt-in packet includes a bounded
+FIFO control executed on Unix, not claimed as a Windows-native witness.
+
 Successful source reads retain catalog-bound body/guide digests.
 `validateSelection()` rejects unknown, disabled, duplicate or alias-substituted
 IDs, stale catalog digests, malformed outcomes and unread guide recommendations.

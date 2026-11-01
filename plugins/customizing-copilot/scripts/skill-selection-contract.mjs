@@ -1,5 +1,6 @@
 /** Import-inert selector contracts. No session connection, inference or skill execution. */
-import { open, realpath } from "node:fs/promises";
+import { open, realpath, stat } from "node:fs/promises";
+import { constants } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { freezeCatalog, catalogSummary, bytes } from "./skill-selection-spike.mjs";
@@ -66,18 +67,85 @@ function contained(path, root) {
 }
 
 function declaredReferences(body) {
-    const withoutFences = body.replace(/^[ \t]*(`{3,}|~{3,})[^\r\n]*\r?\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "");
-    const inline = [...withoutFences.matchAll(/(?<!!)\[[^\]\r\n]+\]\(\s*(?:<([^>\r\n]+)>|([^\s)]+))(?:\s+"[^"\r\n]*")?\s*\)/g)]
-        .map(match => match[1] ?? match[2]);
-    const definitions = [...withoutFences.matchAll(/^[ \t]{0,3}\[[^\]\r\n]+\]:\s*(?:<([^>\r\n]+)>|([^\s]+))/gm)]
-        .map(match => match[1] ?? match[2]);
-    const references = [...new Set([...inline, ...definitions])];
-    if (references.length > 64) throw new Error("declared reference limit exceeded");
-    return references;
+    let fence, prose = "";
+    for (const line of body.split(/\r?\n/)) {
+        const unquoted = line.replace(/^(?:[ ]{0,3}>[ ]?)+/, "");
+        const marker = /^[ \t]{0,3}(`{3,}|~{3,})(.*)$/.exec(unquoted);
+        if (fence) {
+            if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+        } else if (marker) fence = marker[1];
+        else if (!/^(?: {4}|\t)/.test(unquoted)) prose += `${unquoted}\n`;
+    }
+    // Remove only matching backtick runs; an unmatched backtick is literal Markdown.
+    prose = prose.replace(/(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g, match => " ".repeat(match.length));
+    prose = prose.replace(/<!--[\s\S]*?(?:-->|$)/g, match => " ".repeat(match.length));
+    const references = [];
+    for (let index = 0; index < prose.length; index++) {
+        if (prose[index] === "\\") { index++; continue; }
+        if (prose[index] !== "[" || prose[index - 1] === "!") continue;
+        let end = index + 1, depth = 1;
+        for (; end < prose.length && depth; end++) {
+            if (prose[end] === "\\") { end++; continue; }
+            if (prose[end] === "[") depth++;
+            if (prose[end] === "]") depth--;
+        }
+        if (depth) continue;
+        const definition = prose[end] === ":" && /^[ \t]{0,3}$/.test(prose.slice(prose.lastIndexOf("\n", index) + 1, index));
+        if (prose[end] !== "(" && !definition) continue;
+        const destination = markdownDestination(prose, end + 1, !definition);
+        if (destination) references.push(destination);
+        index = end - 1;
+    }
+    const unique = [...new Set(references)];
+    if (unique.length > 64) throw new Error("declared reference limit exceeded");
+    return unique;
+}
+
+function markdownDestination(source, start, inline) {
+    let index = start;
+    while (source[index] === " " || source[index] === "\t") index++;
+    const angle = source[index] === "<";
+    if (angle) index++;
+    let destination = "", depth = 0, ended = false;
+    for (; index < source.length; index++) {
+        const char = source[index];
+        if (char === "\n" || char === "\r") {
+            if (!inline && !angle && !depth) { ended = true; break; }
+            return null;
+        }
+        if (char === "\\" && source[index + 1] && /[!-/:-@[-`{-~]/.test(source[index + 1])) {
+            destination += source[++index]; continue;
+        }
+        if (angle && char === ">") { index++; ended = true; break; }
+        if (angle && char === "<") return null;
+        if (!angle && (/\s/.test(char) || char === ")" && depth === 0)) { ended = true; break; }
+        if (!angle && char === "(" && ++depth > 32) return null;
+        if (!angle && char === ")") depth--;
+        destination += char;
+    }
+    if (depth || angle && !ended || !destination) return null;
+    const beforeSpace = index;
+    while (source[index] === " " || source[index] === "\t") index++;
+    if (index > beforeSpace && ['"', "'", "("].includes(source[index])) {
+        const close = source[index] === "(" ? ")" : source[index];
+        for (index++; index < source.length && source[index] !== close; index++) {
+            if (/[\r\n]/.test(source[index])) return null;
+            if (source[index] === "\\") index++;
+        }
+        if (source[index] !== close) return null;
+        index++;
+        while (source[index] === " " || source[index] === "\t") index++;
+    }
+    if (inline ? source[index] !== ")" : source[index] !== undefined && !/[\r\n]/.test(source[index])) return null;
+    return destination;
 }
 
 async function readBounded(path, limit) {
-    const handle = await open(path, "r");
+    if (!(await stat(path)).isFile()) throw new Error("selection source is not a regular file");
+    if (process.platform !== "win32" && !Number.isInteger(constants.O_NONBLOCK)) {
+        throw new Error("nonblocking source acquisition unavailable");
+    }
+    const handle = await open(path, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NONBLOCK));
     try {
         if (!(await handle.stat()).isFile()) throw new Error("selection source is not a regular file");
         const buffer = Buffer.alloc(limit + 1);
@@ -119,6 +187,7 @@ export async function selectionReader(snapshot, trustedRoots, { maxBytes = 32000
         if (checks.has(descriptor.path) && checks.get(descriptor.path) !== hash(body)) {
             throw new Error("selection source changed during the decision");
         }
+        checks.set(descriptor.path, hash(body));
         const references = declaredReferences(body);
         let content = body, guidePath;
         if (reference !== undefined) {
@@ -136,7 +205,6 @@ export async function selectionReader(snapshot, trustedRoots, { maxBytes = 32000
                 throw new Error("selection guide changed during the decision");
             }
         }
-        checks.set(descriptor.path, hash(body));
         if (guidePath) checks.set(guidePath, hash(content));
         const receipt = Object.freeze({ catalogDigest: snapshot.digest, skill, ...(reference !== undefined ? { reference } : {}),
             bodyDigest: hash(body), contentDigest: hash(content), bytes: bytes(content) });

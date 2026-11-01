@@ -413,3 +413,19 @@ owned-session alternative or name the SDK dependency before adopting it.
   thirty-four model-free Node controls. These contracts are not registered or
   rolled out. Native integration, independent matched quality/complete-cost
   comparison and preference guidance remain open; this effort stays Active.
+
+### 2026-11-01 - Current review's source-reader defects corrected
+
+- The source review found three concrete gaps: code examples and parenthesized
+  Markdown destinations, blocking FIFO acquisition, and overlapping guide
+  reads that could overwrite the first skill-body revision.
+- Added bounded Markdown-aware reference extraction, pre-open regular-file
+  rejection with Unix nonblocking acquisition, and first-revision recording
+  before asynchronous guide work. Focused controls cover the reported cases.
+- Split selection controls from the existing transport test module and kept
+  both in the same opt-in bounded wrapper. Thirty-seven Node controls passed
+  on Windows; the FIFO child control executes only on Unix and is not reported
+  as a Windows-native witness. A first run exposed a reference-definition
+  newline defect; the corrected parser passed without weakening the assertion.
+- No source workflow, production registration, native model comparison or
+  rollout changed. Current-head review and merge remain required.
