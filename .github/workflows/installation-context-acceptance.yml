@@ -3,6 +3,10 @@ name: Installation context native acceptance
 on:
   workflow_dispatch:
     inputs:
+      owned_budget:
+        description: Qualify only the finite POSIX borrowed-parent execution budget on Linux and macOS
+        type: boolean
+        default: false
       immutable_runtime:
         description: Qualify native POSIX Worktrees development lifecycle at an immutable source
         type: boolean
@@ -256,7 +260,7 @@ jobs:
           --timeout 120 --plugin-timeout 240 --test-timeout 30
 
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.uv_deployment_compatibility && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit }}
+    if: ${{ !inputs.owned_budget && !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.uv_deployment_compatibility && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -280,7 +284,7 @@ jobs:
         run: python -m pytest -q tools/test_logger_runtime_uninstall.py -k command_removal_preserves_publication
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.uv_deployment_compatibility && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit }}
+    if: ${{ !inputs.owned_budget && !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.uv_deployment_compatibility && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics && !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers && !inputs.native_daemon_exit }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -941,6 +945,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_installer_guardian.py
+
       - name: Companion lifecycle retained through guidance and concurrent embody
         if: ${{ !cancelled() && steps.guardian-tooling.outcome == 'success' }}
         run: >-
@@ -960,6 +965,57 @@ jobs:
           --test-file tests/test_reviewer_source.py
           -k test_windows_command_shim_uses_cmd
 
+  owned-budget-native:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.owned_budget }}
+    name: Borrowed budget native (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Prepare seasoned native test tooling
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest "pytest-timeout>=2.3,<3" psutil
+      - name: Qualify exact source and enclosing native custody
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          root = Path.cwd()
+          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if actual != os.environ["EXPECTED_SHA"]:
+              raise SystemExit("native budget checkout differs from its immutable dispatch")
+          print(f"Checkout: {actual}", flush=True)
+          sys.path.insert(0, str(root / "tools"))
+          from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
+          with TestSandbox(prefix=".owned-budget-", dir=root) as folder:
+              sandbox = Path(folder)
+              env = isolated_environment(os.environ, sandbox, allow_explicit_tiers=True)
+              env["PYTHONPATH"] = os.pathsep.join((str(root / "tools"), str(root / "libs/agent-procutil/src")))
+              result = run_contained(
+                  [sys.executable, "-m", "pytest", "-q", "-p", "pytest_portfolio_guard",
+                   "--timeout=30", f"--basetemp={sandbox / 'pytest'}",
+                   "libs/agent-procutil/tests/test_owned_budget_native.py"],
+                  cwd=root, env=env, sandbox=sandbox, limits=Limits(wall_seconds=180),
+              )
+          raise SystemExit(result)
+          PY
   interactive-completion-linux:
     if: ${{ inputs.interactive_completion }}
     name: Owned foreground completion (Linux)

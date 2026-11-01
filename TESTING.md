@@ -61,6 +61,13 @@ beyond the quiet allowance, retaining a flushed byte and deadline renewal for
 each unit while detailed diagnostics coalesce below64 KiB. Terminal counts,
 unchanged stdout and subsequent silent expiry are checked independently.
 
+The existing `installation-context-acceptance.yml` manual lane accepts
+`owned_budget=true` to run only the bounded borrowed-parent budget packet on
+native Linux and macOS. It records the exact dispatched source, uses isolated
+test roots, and pins descendant exits across accepted delegation, sequential
+lookup timeout and enclosing caller death. Two cycles retain the same shared
+deadline; the packet does not activate a runtime, service or agent session.
+
 The optional `update_diagnostics` lane runs the native installer inactivity
 packet separately from the focused constructor packet on Linux and Windows.
 Real children emit stdout/stderr without newlines beyond their quiet window;

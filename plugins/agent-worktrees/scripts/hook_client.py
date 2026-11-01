@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Tiny Copilot hook client for the resident agent-worktrees monitor.
-
-The hot path is one bounded loopback request. If the monitor is unavailable,
-pre-tool safety guards run in-process from their deployed standalone modules;
-post-tool advisory work falls back to nudge_status and bind_nudge.
-"""
+"""Bounded resident hook transport with canonical standalone policy fallback."""
 
 from __future__ import annotations
 
@@ -834,7 +829,10 @@ def _pre_unavailable(boundary: str) -> dict:
     )}
 
 
-def _fallback_pre(payload: dict, home: Path, *, require_policy: bool = False) -> dict:
+def _fallback_pre(
+    payload: dict, home: Path, *, require_policy: bool = False,
+    initial_decision=None, only_observations=False,
+) -> dict:
     policy = _load_file(Path(__file__).resolve().with_name("hook_pre_policy.py"))
     decide_policy = getattr(policy, "decide", None)
     if not callable(decide_policy):
@@ -842,6 +840,7 @@ def _fallback_pre(payload: dict, home: Path, *, require_policy: bool = False) ->
     return decide_policy(
         payload, home=home, load_sibling=_load_sibling, merge_decisions=_merge_pre_decisions,
         budget_seconds=_FALLBACK_PRE_BUDGET_S, require_policy=require_policy,
+        initial_decision=initial_decision, only_observations=only_observations,
     )
 
 
@@ -940,6 +939,9 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write(json.dumps(_pre_unavailable("event payload is not an object")))
                 return 0
             payload = {}
+        initial = None
+        if strict_policy and "--only-pr-observations" in argv:
+            payload, initial = _load_sibling("hook_pre_policy.py").deferred_frame(payload)
         if kind == "sessionStart":
             payload = _enrich_session_payload(payload)
             # Catalog evidence must survive cancellation of slow lifecycle work.
@@ -949,12 +951,15 @@ def main(argv: list[str] | None = None) -> int:
         if kind == "postToolUse" and "--local-fallback" in argv[1:]:
             result = _fallback_post(payload, Path.home())
         elif strict_policy:
-            result = decide(kind, payload, require_policy=True)
+            result = (
+                _fallback_pre(payload, Path.home(), require_policy=True, initial_decision=initial, only_observations=True)
+                if initial is not None else decide(kind, payload, require_policy=True)
+            )
         else:
             if kind == "preToolUse":
                 helper = _load_sibling("hook_pre_policy.py")
                 execute = getattr(helper, "execute_owned_observations", None)
-                handled = execute(payload, raw, _load_sibling) if callable(execute) else None
+                handled = execute(payload, raw, _load_sibling, _merge_pre_decisions) if callable(execute) else None
                 if handled is not None:
                     return handled
             result = decide(kind, payload)
@@ -976,15 +981,9 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(json.dumps(result, separators=(",", ":")))
     except Exception as error:
         if kind == "preToolUse":
-            pending = getattr(error, "pretool_decision", None)
-            if strict_policy and isinstance(pending, dict):
-                from threading import Event
-
-                sys.stdout.write(json.dumps({"_ownedCleanupPending": pending}, separators=(",", ":")))
-                sys.stdout.flush()
-                # The enclosing SDK retires this worker and its borrowed descendants
-                # before admitting its pending decision to the command/SDK adapter.
-                Event().wait()
+            hold = getattr(_load_sibling("hook_pre_policy.py"), "hold_pending", None)
+            if strict_policy and callable(hold):
+                hold(error)
             sys.stdout.write(json.dumps(_pre_unavailable("policy client evaluation failed")))
     # sessionStart always emits exactly one JSON object -- write it here,
     # outside the try block, so an exception anywhere above still leaves

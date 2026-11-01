@@ -43,6 +43,10 @@ class OwnedCleanupError(subprocess.SubprocessError):
         super().__init__("native child cleanup did not complete")
 
 
+class _PreparationTimeout(subprocess.TimeoutExpired):
+    """Known refusal before attempting any native process creation."""
+
+
 def _require_windows_job() -> None:
     import ctypes
     from ctypes import wintypes
@@ -459,7 +463,8 @@ def _run_owned(
         if not isinstance(budget, OwnedExecutionBudget):
             raise TypeError("budget must be an OwnedExecutionBudget")
         deadline = min(deadline, budget.execution_deadline)
-        _remaining(deadline, argv, timeout)
+        if deadline <= time.monotonic():
+            raise _PreparationTimeout(argv, timeout)
     bounded_windows = windows and capture_limits is not None
     if on_settled is not None and not (bounded_windows or confirm_posix_group):
         raise ValueError("settlement notification requires whole-scope native confirmation")

@@ -22,6 +22,7 @@ from agent_procutil.owned_process import (
     UnreapedChild,
     _observe_unreaped,
     _run_owned,
+    _PreparationTimeout,
     require_contained_worker,
 )
 from agent_procutil._linux_pidfd import open_pidfd
@@ -281,16 +282,21 @@ def run(
             on_settled()
         raise
     if os.name == "nt":
-        return _run_owned(
-            argv, timeout=timeout, input_text=input_text, capture=capture,
-            capture_limits=(max_stdout_bytes, max_stderr_bytes),
-            on_settled=on_settled,
-            allow_daemon_breakaway=allow_daemon_breakaway,
-            binary=binary,
-            **({"budget": budget} if budget is not None else {}),
-            **({"cwd": cwd} if cwd is not None else {}),
-            **({"env": env} if env is not None else {}),
-        )
+        try:
+            return _run_owned(
+                argv, timeout=timeout, input_text=input_text, capture=capture,
+                capture_limits=(max_stdout_bytes, max_stderr_bytes),
+                on_settled=on_settled,
+                allow_daemon_breakaway=allow_daemon_breakaway,
+                binary=binary,
+                **({"budget": budget} if budget is not None else {}),
+                **({"cwd": cwd} if cwd is not None else {}),
+                **({"env": env} if env is not None else {}),
+            )
+        except _PreparationTimeout as error:
+            if on_settled is not None:
+                on_settled()
+            raise subprocess.TimeoutExpired(argv, timeout) from error
     if borrow_parent_scope:
         return _run_owned(
             argv, timeout=timeout, input_text=input_text, capture=capture,
@@ -300,6 +306,7 @@ def run(
         )
     reader = writer = None
     launch_attempted = False
+    preparation_refused = False
     try:
         with _lifetime_lock:
             reader, writer = os.pipe()
@@ -321,6 +328,9 @@ def run(
                 **({"cwd": cwd} if cwd is not None else {}),
                 **({"env": env} if env is not None else {}),
             )
+        except _PreparationTimeout as error:
+            preparation_refused = True
+            raise subprocess.TimeoutExpired(argv, timeout) from error
         except subprocess.TimeoutExpired as error:
             raise subprocess.TimeoutExpired(argv, timeout) from error
         except OutputLimitExceeded as error:
@@ -336,7 +346,7 @@ def run(
                         _lifetime_writers.discard(writer)
                         os.close(writer)
         finally:
-            if not launch_attempted and on_settled is not None:
+            if (not launch_attempted or preparation_refused) and on_settled is not None:
                 on_settled()
     try:
         reply = json.loads(result.stdout)

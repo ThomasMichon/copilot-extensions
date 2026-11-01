@@ -366,7 +366,7 @@ console.log(JSON.stringify(result));
 @pytest.mark.skipif(os.name != "nt", reason="Windows caller-owned native/SDK deadline consumers")
 @pytest.mark.parametrize("consumer", ["resident", "powershell.exe"])
 @pytest.mark.parametrize("late_result", ["timeout", "deny", "cleanup-error"])
-def test_pretool_preserves_accumulated_ask_across_later_lookup(tmp_path, consumer, late_result):
+def test_pretool_preserves_accumulated_ask_across_later_lookup(tmp_path, consumer, late_result, aliased=False):
     import time
     import uuid
 
@@ -473,6 +473,9 @@ sys.setprofile(observe)
         "toolArgs": {"command": "Set-Content '" + str(target) + "' value; "
                      "gh pr close 41 --repo example/project; gh pr close 42 --repo example/project"},
     }
+    if aliased:
+        event = {"tool_name": "powershell", "cwd": str(cwd),
+                 "tool_input": json.dumps({"script": event["toolArgs"]["command"]})}
     event_path = tmp_path / "event.json"
     event_path.write_text(json.dumps(event), encoding="utf-8")
     if consumer == "resident":
@@ -487,6 +490,8 @@ sys.setprofile(observe)
         )
         command = [node, str(driver), str(PLUGIN / "extensions" / "agent-worktrees" / "resident-pre-tool.mjs"),
                    str(scripts), sys.executable, str(event_path)]
+    elif consumer == "legacy":
+        command = [sys.executable, str(scripts / "hook_client.py"), "preToolUse"]
     else:
         command = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(scripts / "pre-tool-hook.ps1")]
     started = time.monotonic()
@@ -564,3 +569,47 @@ def test_missing_sdk_does_not_suppress_intact_stateless_guard(monkeypatch, tmp_p
         merge_decisions=lambda left, right: {**left, **right},
     )
     assert result["permissionDecision"] == "deny"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows legacy command consumer")
+def test_legacy_aliased_json_keeps_ask_after_cleanup_error(tmp_path):
+    test_pretool_preserves_accumulated_ask_across_later_lookup(
+        tmp_path, "legacy", "cleanup-error", aliased=True,
+    )
+
+
+@pytest.mark.parametrize("permission", ["deny", "ask"])
+def test_legacy_main_keeps_cheap_guard_when_sdk_native_admission_unavailable(monkeypatch, tmp_path, capsys, permission):
+    import importlib.util
+    import io
+    from types import SimpleNamespace
+    from agent_procutil import owned_process
+
+    modules = {}
+    for filename in ("hook_client", "hook_pre_policy", "hook_policy_process", "pr_supersede_guard"):
+        spec = importlib.util.spec_from_file_location(filename, PLUGIN / "scripts" / (filename + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        modules[filename + ".py"] = module
+        monkeypatch.setitem(sys.modules, filename, module)
+    client = modules["hook_client.py"]
+    modules.update({
+        "pretool_killswitch.py": SimpleNamespace(is_active=lambda: False),
+        "statelessness_guard.py": SimpleNamespace(decide=lambda *a, **k: {
+            "permissionDecision": permission, "permissionDecisionReason": "confirmed cheap guard",
+        }),
+        "cross_repo_guard.py": SimpleNamespace(decide=lambda *a, **k: None),
+        "anchor_write_guard.py": SimpleNamespace(decide=lambda *a, **k: None),
+    })
+    monkeypatch.setattr(client, "_load_sibling", lambda filename: modules.get(filename))
+    def unavailable():
+        raise RuntimeError("fixture unavailable native observation")
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", unavailable)
+    monkeypatch.delenv("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
+        "toolName": "powershell", "cwd": str(tmp_path),
+        "toolArgs": {"command": "gh pr close 41 --repo example/project"},
+    })))
+    assert client.main(["preToolUse"]) == 0
+    assert json.loads(capsys.readouterr().out)["permissionDecision"] == permission

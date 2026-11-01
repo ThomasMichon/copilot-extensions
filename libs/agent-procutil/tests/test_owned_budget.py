@@ -151,3 +151,38 @@ def test_native_setup_cannot_admit_execution_after_individual_cutoff(tmp_path, m
     assert not target.exists()
     assert calls == ([] if phase == "before-create" else ["create"])
     assert settled == [True]
+
+
+@pytest.mark.parametrize("platform", ["nt", "posix"])
+def test_between_check_expiry_notifies_after_closing_lifetime_descriptors(monkeypatch, platform):
+    from agent_procutil import _caller_owned as protocol
+
+    before = set(protocol._lifetime_writers)
+    fds = []
+    settled = []
+    monkeypatch.setattr(os, "name", platform)
+    monkeypatch.setattr(protocol, "_require_posix_support", lambda: None)
+    monkeypatch.setattr(protocol, "Path", lambda value: SimpleNamespace(
+        resolve=lambda: SimpleNamespace(parents=["source", "root"]),
+    ))
+
+    def refuse(argv, **kwargs):
+        fds.extend(kwargs.get("pass_fds", ()))
+        fds.extend(protocol._lifetime_writers - before)
+        raise owned_process._PreparationTimeout(argv, kwargs["timeout"])
+
+    def observe():
+        assert protocol._lifetime_writers == before
+        for fd in fds:
+            with pytest.raises(OSError):
+                os.fstat(fd)
+        settled.append(True)
+
+    monkeypatch.setattr(protocol, "_run_owned", refuse)
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        run_caller_owned(
+            ["fixture"], timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+            budget=OwnedExecutionBudget(time.monotonic() + 5, 1), on_settled=observe,
+        )
+    assert caught.value.cmd == ["fixture"] and caught.value.timeout == 5
+    assert settled == [True]

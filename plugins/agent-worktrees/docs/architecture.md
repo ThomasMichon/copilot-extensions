@@ -3116,6 +3116,11 @@ settled late observation timeout preserves an accumulated ask. The native/SDK
 
 SDK acquisition is lazy for supersede observations: an absent SDK cannot
 suppress an intact cheap guard's denial. SDK-capable legacy PR observations use
+Legacy command mode evaluates its non-observation guards first, retaining their
+decision before native observation admission. A deferred owned frame evaluates
+only PR observations in the child, so cheap guards are not evaluated twice.
+Unavailable admission merges recovery context without discarding a confirmed
+denial or ask. All supported tool/argument aliases use the guard's same classifier. SDK-capable legacy PR observations use
 the same enclosing worker owner while preserving silent empty legacy outcomes.
 POSIX observations explicitly borrow their enclosing guardian's native group;
 Windows retains strict nested Jobs. A cleanup failure keeps the accumulated

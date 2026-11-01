@@ -25,7 +25,7 @@ def _watch_caller() -> None:
         os._exit(3)
 
 
-def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None) -> int:
+def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None, initial_decision=None) -> int:
     """Supervise the one strict policy worker before forwarding any decision."""
     settlement_deadline = settlement_deadline or time.monotonic() + 23.0
     try:
@@ -39,6 +39,12 @@ def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None) -> 
 
         require_caller_owned_support()
     except Exception:
+        if initial_decision is not None:
+            from hook_pre_policy import unavailable
+            from hook_client import _merge_pre_decisions
+
+            print(json.dumps(_merge_pre_decisions(initial_decision, unavailable("supersede native admission unavailable"))), end="")
+            return 0
         sys.stderr.write("agent-worktrees resident policy: owned runtime unavailable\n")
         return 3
     settled = []
@@ -48,6 +54,8 @@ def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None) -> 
         environment.update(overrides)
         environment.update(PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
         environment["AGENT_WORKTREES_PRE_SETTLEMENT_DEADLINE"] = str(settlement_deadline)
+        if initial_decision is not None:
+            frame = json.dumps({"event": json.loads(frame), "initial": initial_decision}).encode("utf-8")
         result = run_caller_owned(
             [
                 python,
@@ -56,6 +64,7 @@ def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None) -> 
                 "-B",
                 str(Path(__file__).with_name("hook_client.py")),
                 "preToolUseStrict",
+                *(["--only-pr-observations"] if initial_decision is not None else []),
             ],
             timeout=25.0,
             max_stdout_bytes=_MAX_OUTPUT,
@@ -87,8 +96,23 @@ def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None) -> 
                 return 4
             sys.stdout.write(json.dumps(pending, separators=(",", ":")))
             return 0
+        if settled and initial_decision is not None:
+            from hook_pre_policy import unavailable
+            from hook_client import _merge_pre_decisions
+
+            print(json.dumps(_merge_pre_decisions(initial_decision, unavailable("supersede observation timeout"))), end="")
+            return 0
         return 4
     except Exception:
+        if initial_decision is not None:
+            if settled:
+                from hook_pre_policy import unavailable
+                from hook_client import _merge_pre_decisions
+
+                print(json.dumps(_merge_pre_decisions(initial_decision, unavailable("supersede execution unavailable"))), end="")
+                return 0
+            sys.stderr.write("agent-worktrees supersede: native custody unresolved\n")
+            threading.Event().wait()
         return 2
     if result.returncode:
         return 2
