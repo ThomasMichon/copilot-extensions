@@ -1,4 +1,4 @@
-"""Explicitly consented, finite SDK visibility qualification; never a daemon."""
+"""Explicitly consented, finite SDK process and visibility qualification; never a daemon."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ from sdk_visibility_sources import bind_sdk_import, require_sdk_sources
 
 if TYPE_CHECKING:
     from sdk_desktop_win32 import WinAPI
+    from sdk_native_win32 import NativeProcessAPI
 
 
 def new_api():
@@ -35,13 +36,21 @@ def new_api():
     return WinAPI()
 
 
+def new_process_api() -> NativeProcessAPI:
+    from sdk_native_win32 import NativeProcessAPI
+
+    return NativeProcessAPI()
+
+
 def validate_request(mode: str, value: object) -> dict:
     fields = {
         "probe": {"output", "python", "sdk_root", "sources", "visible_controls", "case_packets"},
         "functional": {"output", "python", "sdk_root", "sources", "case_packets"},
+        "process-safety": {"output", "python", "sdk_root", "sources", "case_packets"},
         "canary": {"parent_pid", "parent_birth", "original", "visible_controls"},
         "worker": {"parent_pid", "parent_birth", "sdk_root", "output", "sources", "nodes", "packet"},
         "functional-worker": {"parent_pid", "parent_birth", "sdk_root", "output", "sources", "nodes", "packet"},
+        "process-safety-worker": {"parent_pid", "parent_birth", "sdk_root", "output", "sources", "nodes", "packet"},
         "identity": {"parent_pid", "parent_birth"},
         "passive": {"python", "output"},
     }
@@ -96,9 +105,9 @@ def validate_request(mode: str, value: object) -> dict:
         if len(set(paths)) != len(paths):
             raise ObservationBlocked("qualification source closure is duplicated or incomplete")
         require_sdk_sources(Path(value["sdk_root"]), files, runner=Path(__file__))
-    if mode in {"probe", "functional"}:
+    if mode in {"probe", "functional", "process-safety"}:
         validate_case_packets(Path(value["sdk_root"]), value["case_packets"])
-    elif mode in {"worker", "functional-worker"}:
+    elif mode in {"worker", "functional-worker", "process-safety-worker"}:
         validate_case_packet(Path(value["sdk_root"]), value["nodes"])
         native_arguments(
             Path(value["sdk_root"]), Path(value["output"]), value["nodes"], value["packet"],
@@ -313,7 +322,7 @@ class Child:
             raise ObservationBlocked("owned fixture cleanup: " + "; ".join(failures))
 
 
-def command(api: WinAPI, nonce: str, deadline: float) -> str:
+def command(api: NativeProcessAPI, nonce: str, deadline: float) -> str:
     pending = bytearray()
     while True:
         require_time(deadline, "private command")
@@ -339,7 +348,7 @@ def command(api: WinAPI, nonce: str, deadline: float) -> str:
         time.sleep(0.01)
 
 
-def wait_generation_boundary(api: WinAPI, tick: int, deadline: float) -> None:
+def wait_generation_boundary(api: NativeProcessAPI, tick: int, deadline: float) -> None:
     while True:
         require_time(deadline, "private command generation boundary")
         delta = (int(api.kernel.GetTickCount64()) - tick) & 0xFFFFFFFF
@@ -430,21 +439,30 @@ def canary(request: dict, allow_visible: bool) -> int:
                 parent.close()
 
 
-def worker(request: dict, *, functional_only: bool = False) -> int:
+def worker(request: dict, *, functional_only: bool = False, process_only: bool = False) -> int:
+    if functional_only and process_only:
+        raise ObservationBlocked("native worker admission modes cannot overlap")
     require_sdk_sources(Path(request["sdk_root"]), request["sources"], runner=Path(__file__))
     verify_sources(request["sources"])
     validate_case_packet(Path(request["sdk_root"]), request["nodes"])
     arguments = native_arguments(
         Path(request["sdk_root"]), Path(request["output"]), request["nodes"], request["packet"],
     )
+    if process_only:
+        require_time(request["deadline"], "process-safety worker preparation")
     bind_sdk_import(Path(request["sdk_root"]))
-    api = new_api()
-    if functional_only:
+    api = new_process_api() if process_only else new_api()
+    if process_only:
+        api.require_process_owner()
+        require_time(request["deadline"], "process-safety process admission")
+    elif functional_only:
         api.require_console()
     else:
         api.require_desktop()
     parent = api.require_parent_pipe(request)
     try:
+        if process_only:
+            require_time(request["deadline"], "process-safety pipe admission")
         emit({"kind": "ready", "nonce": request["nonce"], "identity": api.identity()})
         if command(api, request["nonce"], request["deadline"]) != "run" or parent.gone():
             raise ObservationBlocked("SDK test worker was not admitted by its original caller")
@@ -453,6 +471,8 @@ def worker(request: dict, *, functional_only: bool = False) -> int:
 
         result = int(pytest.main(arguments))
         verify_sources(request["sources"])
+        if process_only:
+            require_time(request["deadline"], "process-safety worker completion")
         return result
     finally:
         parent.close()
@@ -495,10 +515,13 @@ def restore_incomplete_control(api: WinAPI, original: dict, pin, report: dict) -
 
 
 def run_workers(
-    request: dict, root: Path, api: WinAPI, deadline: float, start: float,
+    request: dict, root: Path, api: NativeProcessAPI, deadline: float, start: float,
     report: dict, observer: DesktopObserver | None = None,
     *, functional_only: bool = False,
+    process_only: bool = False,
 ) -> None:
+    if process_only and (functional_only or observer is not None):
+        raise ObservationBlocked("process safety cannot borrow console or desktop observation")
     packets = validate_case_packets(Path(request["sdk_root"]), request["case_packets"])
     worker_deadline = min(deadline, start + 150)
     require_time(worker_deadline, "native worker admission")
@@ -521,7 +544,8 @@ def run_workers(
         try:
             require_time(worker_deadline, f"native worker {index + 1} launch")
             tests = Child(
-                api, [*argv, "functional-worker" if functional_only else "worker"],
+                api, [*argv, "process-safety-worker" if process_only else
+                      "functional-worker" if functional_only else "worker"],
                 {**child_request, "sdk_root": request["sdk_root"], "output": str(root),
                  "sources": request["sources"], "nodes": nodes, "packet": index},
                 root, f"worker-{index + 1:02}", evidence=attempt,
@@ -553,7 +577,17 @@ def run_workers(
 
 def functional(request: dict) -> int:
     """Run source-bound kernel/lifetime checks without any desktop control."""
-    validate_request("functional", request)
+    return _non_desktop_control(request, process_only=False)
+
+
+def process_safety(request: dict) -> int:
+    """Run kernel/lifetime evidence without querying any desktop or window."""
+    return _non_desktop_control(request, process_only=True)
+
+
+def _non_desktop_control(request: dict, *, process_only: bool) -> int:
+    mode = "process-safety" if process_only else "functional"
+    validate_request(mode, request)
     source_before = verify_sources(request["sources"])
     start = time.monotonic()
     deadline = min(request["deadline"], start + 165)
@@ -561,12 +595,22 @@ def functional(request: dict) -> int:
     root = Path(request["output"])
     root.mkdir()
     report = {
-        "kind": "sdk-functional", "passed": False, "started": start, "deadline": deadline,
+        "kind": "sdk-process-safety" if process_only else "sdk-functional",
+        "passed": False, "started": start, "deadline": deadline,
         "source_before": source_before, "visible_controls_attempted": 0,
         "desktop_qualified": False,
     }
+    if process_only:
+        report["desktop_observed"] = False
     try:
-        run_workers(request, root, new_api(), deadline, start, report, functional_only=True)
+        api = new_process_api() if process_only else new_api()
+        if process_only:
+            report["process_owner"] = api.require_process_owner()
+            require_time(deadline, "process-safety original owner admission")
+        run_workers(
+            request, root, api, deadline, start, report,
+            functional_only=not process_only, process_only=process_only,
+        )
         report["native_junit"] = verify_native_junit(
             root, Path(request["sdk_root"]), request["case_packets"],
         )
@@ -583,7 +627,7 @@ def functional(request: dict) -> int:
         if report["ended"] > deadline:
             report["passed"] = False
             report["deadline_error"] = "immutable functional deadline exceeded"
-        write_new(root / "functional-result.json", report)
+        write_new(root / f"{mode}-result.json", report)
         if report.get("deadline_error") and not report.get("error"):
             raise ObservationBlocked(report["deadline_error"])
 
@@ -734,11 +778,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=(
         "probe", "canary", "worker", "functional-worker", "passive", "identity", "functional",
+        "process-safety", "process-safety-worker",
     ))
     parser.add_argument("--allow-visible-control-once", action="store_true")
     parser.add_argument("request", type=Path)
     args = parser.parse_args()
     request = validate_request(args.mode, json.loads(args.request.read_text("utf-8")))
+    if args.mode in {"process-safety", "process-safety-worker"}:
+        if args.allow_visible_control_once:
+            parser.error("process safety never accepts visible-control permission")
+        return process_safety(request) if args.mode == "process-safety" else worker(request, process_only=True)
     if args.mode in {"functional", "functional-worker"}:
         if args.allow_visible_control_once:
             parser.error("functional qualification never accepts visible-control permission")
