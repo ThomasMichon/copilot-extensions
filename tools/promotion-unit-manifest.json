@@ -4164,7 +4164,8 @@
         "tools/plugin_test_containment_observation.py",
         "libs/agent-procutil/src/agent_procutil/_windows_job_types.py",
         "libs/agent-procutil/src/agent_procutil/_output_relay.py",
-        "libs/agent-procutil/src/agent_procutil/streaming.py"
+        "libs/agent-procutil/src/agent_procutil/streaming.py",
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py"
     ],
     "max_seconds": 300
 }
