@@ -206,8 +206,8 @@ live claim token. No new blanket ACK or executor appointment is created.
       separately claimed, reviewed source slices, preserving incumbent startup,
       idle-worker, pool-capacity and submission owners.
       Configured-source and coordinator metadata-fence prerequisites merged in
-      #9826 and #9834; fresh owner publication, cohort-aware original request
-      custody, external atomicity, mixed writers and placement remain separate
+      #9826 and #9834; cohort-aware original request custody merged in #9837.
+      Fresh owner publication, external atomicity, mixed writers and placement remain separate
       acceptance gates.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
       reservation admission; preserve active replay and suspended re-embodiment.
@@ -1540,3 +1540,39 @@ the existing original-request read, preparation, replay and acknowledgment owner
 Fresh configuration publication, external-file atomicity, mixed-version writers,
 scope withdrawal, installed/runtime qualification, atomic placement and every
 original Plan/Validation item remain open. The parent stays **Active**.
+
+### 2026-10-31 - Original configured-cohort request custody
+
+[#9837](https://github.com/ThomasMichon/copilot-extensions/pull/9837) actually
+merged as `1039991a258276da1ffd15ab91f1f2b27c93e5fc`, after independent
+current-head Copilot approval and all three required checks passed. The complete
+review reported no active findings and had no inline threads. The final
+contained packet passed 369 controls across cohort custody and the existing
+request, sender, provider, transport, source-collection and singleton boundaries.
+The merged source, tests and docs match the qualified head; normal managed
+source reconciliation retained its pre-completion backup.
+
+The original catalog read now retains the whole configured observation, not
+only enrolled scope positions. Preparation requires the actual execution scope
+in a complete projected cohort. Begin and whole-scope publication emit only
+their original optional coordinator cohort revision, after the running peer
+advertises support. Legacy unfenced requests remain supported without silently
+downgrading a fenced request. Duplicate/invalid members, uncertain or excluded
+scope, changed original observations and settled-revision/attribution rebase
+remain explicit refusals.
+
+Enrollment acknowledgment matches the original begin fence. Publication keeps
+its original scope's enrollment attribution while complete definitions acquire
+the original publication fence; unavailable results retain prior definition
+attribution. Forged acknowledgments leave the same request pending. Accepted
+original recovery still works after cohort removal, uncertainty, advancement or
+acquisition release without another POST or freshness renewal. The actual HTTP
+fixture covers both the running support declaration and strict provider parser.
+
+This closes one source-only request-custody prerequisite, not configured runtime
+membership. The next bounded source stretch prepares a fresh configured-owner
+observation and original projection-request custody through the existing
+registrar/coordinator owners. No automatic publisher, configuration migration,
+ordinary caller, runtime enrollment or placement is enabled. External atomicity,
+old-writer exclusion, supported executable rollback, installed/runtime proof and
+every original Plan/Validation item remain open. The parent stays **Active**.
