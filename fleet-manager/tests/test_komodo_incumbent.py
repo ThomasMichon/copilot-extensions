@@ -212,6 +212,25 @@ def test_native_socket_directory_alias_is_opt_in_and_rechecked_without_rewriting
     alias.unlink()
     with pytest.raises(PlanError, match="socket"):
         selected.evidence()
+    alias.symlink_to(alias, target_is_directory=True)
+    with pytest.raises(PlanError, match="socket"):
+        selected.evidence()
+
+
+def test_explicit_socket_source_refuses_python310_to312_resolver_loop_error(incumbent, monkeypatch):
+    material = incumbent.material
+    source = str(material.docker_socket)
+    selected = replace(material, encoded=_socket_mount(material, source), docker_socket_source=source)
+    resolve = Path.resolve
+
+    def cyclic(path, *args, **options):
+        if path == Path(source):
+            raise RuntimeError("Symlink loop on Python 3.10-3.12")
+        return resolve(path, *args, **options)
+
+    monkeypatch.setattr(Path, "resolve", cyclic)
+    with pytest.raises(PlanError, match="socket source is unavailable"):
+        selected.evidence()
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="real native socket and symlink semantics require Linux")

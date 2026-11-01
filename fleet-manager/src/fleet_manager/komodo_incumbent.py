@@ -251,7 +251,7 @@ class KomodoIncumbentMaterialization:
                     or (before.st_dev, before.st_ino) != (physical.st_dev, physical.st_ino)
                     or (after.st_dev, after.st_ino) != (physical.st_dev, physical.st_ino)):
                 raise PlanError("Komodo incumbent native socket identity changed during observation")
-        except OSError:
+        except (OSError, RuntimeError):
             raise PlanError("Komodo incumbent native socket source is unavailable") from None
         return {"source": native, "path": str(self.docker_socket),
                 "device": physical.st_dev, "inode": physical.st_ino}
