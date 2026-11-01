@@ -402,6 +402,8 @@ def installation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
+    shutil.copyfile(SOURCE, scripts / SOURCE.name)
+    shutil.copyfile(SOURCE.with_name("installer_engine_footprint.py"), scripts / "installer_engine_footprint.py")
     shutil.copyfile(CONTROLLERS, scripts / CONTROLLERS.name)
     shutil.copyfile(
         SOURCE.with_name("installer_engine_uninstall_windows.py"),
@@ -498,6 +500,8 @@ def test_staged_typed_uninstall_retains_original_source_and_project(
     )
     shutil.copyfile(REPO / "plugins/agent-worktrees/scripts/uninstall-state.py",
                     original / "scripts/uninstall-state.py")
+    shutil.copyfile(REPO / "plugins/agent-worktrees/scripts/uninstall-profile.json",
+                    original / "scripts/uninstall-profile.json")
     settings = home / ".copilot" / "settings.json"
     settings.write_text(json.dumps({"extraKnownMarketplaces": {
         "example": {"source": {"source": "github", "repo": "Example/Plugins"}},

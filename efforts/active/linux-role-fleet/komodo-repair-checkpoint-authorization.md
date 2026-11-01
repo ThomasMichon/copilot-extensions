@@ -50,31 +50,31 @@ identity, old-proof or baseline-operation fallback.
 ## Plan
 
 - [x] Review this opt-in amendment before changing repair behavior (#9778).
-- [ ] Implement fresh checkpoint identity acquisition inside the existing
+- [x] Implement fresh checkpoint identity acquisition inside the existing
   repair owner. Without the opt-in producer, preserve the current whole-operation
   behavior and its expiry refusals.
-- [ ] Match each fresh verified caller and current enrollment to the original
+- [x] Match each fresh verified caller and current enrollment to the original
   identity profile, issuer, subject, audience, proof key/current key binding,
   actor/account, role, installation, fleet, target and generation. Require the
   same exact original request grant and candidate/executor/resource transition;
   a fresh signature cannot substitute a caller, key, scope or terminal choice.
-- [ ] Retire only the preceding exact local permit handle, without refunding
+- [x] Retire only the preceding exact local permit handle, without refunding
   consumed proof evidence. Obtain a distinct current permit before the next
   checkpoint's admitted work, even when the preceding handle has expired
   between checkpoints. No effect is authorized in that gap.
-- [ ] Preserve each new permit's 30-second ceiling and final revalidation after
+- [x] Preserve each new permit's 30-second ceiling and final revalidation after
   all original custody, immutable evidence, native process/network and material
   reads. Expiry or withdrawal during that checkpoint refuses and aborts the
   invocation; do not reacquire midway to excuse its failed final boundary.
-- [ ] Keep current finite transition/candidate/executor validity, monotonic
+- [x] Keep current finite transition/candidate/executor validity, monotonic
   accepted revisions and the original selected outfitting deadline. Fresh
   proofs cannot extend policy, repair authority, native work or resource custody.
-- [ ] Retain all original UNKNOWN and pending/terminal publication semantics.
+- [x] Retain all original UNKNOWN and pending/terminal publication semantics.
   Before append/commit and after cleanup, repeat fresh authorization and exact
   evidence checks under the same physical lock and journal transaction.
   Pre-commit refusal preserves UNKNOWN; post-commit refusal preserves the one
   immutable terminal decision and requires its supported cleanup recovery.
-- [ ] Keep proofs, private keys and credentials out of outcomes and diagnostics.
+- [x] Keep proofs, private keys and credentials out of outcomes and diagnostics.
   Preserve original candidate versus executor provenance, prior history and
   data compatibility without a new checkpoint persistence ledger.
 - [ ] Integrate the existing embedding's signer/verifier and current selection
@@ -87,24 +87,24 @@ identity, old-proof or baseline-operation fallback.
 
 ## Validation Plan
 
-- [ ] With an advancing clock, complete status and terminal publication whose
+- [x] With an advancing clock, complete status and terminal publication whose
   total duration exceeds 30 seconds but remains inside the unchanged selected
   deadline. Each individual admitted checkpoint must complete within its own
   unextended permit. Verify actual fresh signatures and common admission,
   using one consistently advancing clock rather than mocked permits or a
   frozen authorization clock. Actual wall-time qualification is separate.
-- [ ] Refuse reused/wrong-key/wrong-nonce/wrong-action/body proofs, changed
+- [x] Refuse reused/wrong-key/wrong-nonce/wrong-action/body proofs, changed
   caller/account/profile/enrollment/resource/generation, withdrawn grants,
   source/runtime/material drift and expired transition or signer authority.
   Include expiry during acquisition and immediately before append/commit.
-- [ ] Prove no mutation or publication in permit gaps, no extension of an old
+- [x] Prove no mutation or publication in permit gaps, no extension of an old
   permit, no refunded proof evidence and no implicit retry after a checkpoint
   refusal. Keep the common admission expiry/replay tests unchanged.
-- [ ] Interrupt at the existing immutable/state/journal/cleanup boundaries,
+- [x] Interrupt at the existing immutable/state/journal/cleanup boundaries,
   then restart from the same original request and resources. Assert exactly one
   terminal row, retained original history, current native/key/network custody,
   no apply replay and truthful UNKNOWN or already-terminal outcomes.
-- [ ] Exercise old caller/new SDK, new caller/unsupported SDK, supported new/new
+- [x] Exercise old caller/new SDK, new caller/unsupported SDK, supported new/new
   operation and provider rollback through real noneditable installed seams.
   Discover opt-in support from the executing immutable SDK before constructing
   the new embedding; unknown support refuses the new requirement before effects.
@@ -114,7 +114,7 @@ identity, old-proof or baseline-operation fallback.
   transport boundaries, monotonic wall time and owned cleanup. A lower process
   count, a faster status or an enlarged supervisor timeout is not terminal-path
   acceptance. Unavailable native measurements remain explicitly unqualified.
-- [ ] Re-run ordinary owner/admission behavior and secret-safe outputs. Keep
+- [x] Re-run ordinary owner/admission behavior and secret-safe outputs. Keep
   exhaustive process/native matrices out of required unit-only PR CI.
 - [ ] After authenticated release and executor selection, qualify one authorized
   actual original attempt without changing its candidate, generation, keys,
@@ -189,3 +189,51 @@ the original permit ceiling and selected native deadline stay unchanged.
 Normal current-head review, required CI, release, installed compatibility and
 actual embedding/adopter qualification remain open. This correction is source
 work, not an actual original repair or broader delivery credit.
+
+### 2026-10-31 - Checkpoint SDK implementation merged
+
+#9791 merged as `7a4e378ba114a4a3b22d8c87dad427c1cd36e3e7` after the
+current-head Copilot approval, actual resolution of the final-custody finding
+and all required checks. Managed completion verified the merge and reconciled
+the same source worktree while retaining its pre-complete backup. The complete
+parent Plan and Validation Plan were reconciled; only the source and contained
+validation items actually delivered by this slice close.
+
+The corrected canonical packet passes 3,175 units and all 9,525 phases without
+actor effects. The focused final-completion and interrupted-cleanup packets
+pass 40 and nine controls. Earlier whole baseline and opt-in repair packets
+retain their 129 and 131 controls; eight final-phase drift cases add status and
+terminal protection. Every permit and selected native deadline remains bounded.
+
+Continue the existing embedding's producer integration and selected installed
+compatibility qualification, then normal release/acquisition and actual
+cold/warm adopter proof. #9735 and #6030 remain open. Source merge is not
+released support, live activation, original terminal repair or fleet delivery.
+
+### 2026-10-31 - Installed checkpoint compatibility qualified locally
+
+The selected installed packet passes all 16 cases: two ordinary bootstrap
+controls, seven original-repair controls retaining whole-operation admission
+and seven using the checkpoint producer. Its existing build owner constructs
+three real noneditable SDK cells from the current source and pinned committed
+pre-repair and pre-checkpoint repair sources. Runtime guards deny checkout
+reads, verify complete installed module bytes and require every distribution
+file to remain inside its cell.
+
+An older caller continues through the new SDK's baseline repair contract.
+A caller requiring checkpoint support refuses the actual older repair SDK
+before owner construction or native work, preserving original state and
+observations. Supported status and terminal publication use distinct real
+machine proofs; one advancing resolver/native/health clock charges complete
+work beyond 30 seconds within the original synthetic 180-second deadline.
+Whole-operation fixture bounds remain unchanged. Interrupted state/journal/
+partial publication resumes in a fresh process, retaining one native apply,
+one terminal row, original profile, journal inode, immutable evidence and data.
+
+These are actual noneditable SDK and contained synthetic protocol/process
+witnesses, not authenticated release artifacts, official images, actual
+adopter credentials/source acquisition or native cold/warm wall-time proof.
+The selected packet's whole supervisor bound remains separate from each
+permit and the original native deadline. Current source review, existing
+embedding integration, normal release/acquisition and actual adopter
+qualification remain open; #9735 and #6030 stay open.

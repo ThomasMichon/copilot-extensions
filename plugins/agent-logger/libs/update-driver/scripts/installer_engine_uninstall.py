@@ -139,10 +139,11 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
         if path.absolute() != expected:
             raise UninstallRefused("The profile must be this payload's scripts/uninstall-profile.json")
         _plain(path, file=True)
-        record = json.loads(path.read_text(encoding="utf-8-sig"))
-        if isinstance(record, dict) and record.get("version") == 2:
-            footprint = _load(_dependency(payload, "installer_engine_footprint.py"))
-            record = footprint.parse(footprint.decode(path.read_text(encoding="utf-8-sig")), plugin).profile
+        footprint = _load(Path(os.path.abspath(__file__)).with_name("installer_engine_footprint.py"))
+        record = footprint.decode(footprint._manifest_text(path))
+        if (isinstance(record, dict) and type(record.get("version")) is int
+                and record["version"] in {2, 3}):
+            record = footprint.parse(record, plugin).profile
         required = {"version", "root_entries", "bin_entries", "script_entries",
                     "local_bin_entries", "module"}
         if (not isinstance(record, dict) or not required <= record.keys()
