@@ -400,3 +400,34 @@ def test_oversized_source_budget_is_a_json_refusal(environment, tools, monkeypat
         "budget_seconds": 10**400,
     }, monkeypatch, capsys)
     assert code == 1 and value["effect_completion"] == "not_inferred"
+
+
+@pytest.mark.parametrize("identity", [[], {}, None])
+def test_malformed_generation_identity_is_json_before_cache_lookup(environment, integration, identity, monkeypatch, capsys):
+    _, _, native, _, _, _ = integration
+    code, value = invoke_cli(WorkspaceTools(native), "materialize", {
+        "number": 42, "generation_id": identity,
+    }, monkeypatch, capsys)
+    assert code == 1 and value["effect_completion"] == "not_inferred"
+
+
+def test_concurrent_cache_eviction_during_scoped_lookup_does_not_break_read(environment, integration):
+    _, _, generation, _, _, _ = environment
+    _, client, _, _, _, _ = integration
+    host = WorkspaceTools(client)
+
+    async def scenario():
+        request = {"number": 42, "generation_id": generation["id"]}
+        assert await host.invoke("materialize", request) == generation
+        original = client.exchange
+
+        async def evict(operation, payload):
+            result = await original(operation, payload)
+            if operation == "lookup":
+                host._generations.clear()
+            return result
+
+        client.exchange = evict
+        assert await host.invoke("materialize", request) == generation
+
+    asyncio.run(scenario())

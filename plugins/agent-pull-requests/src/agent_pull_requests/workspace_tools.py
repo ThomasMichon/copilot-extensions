@@ -10,6 +10,7 @@ import hashlib
 from .source_attachment import attach_source
 from .workspace_operations import PROTOCOL, encoded
 from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope
+from .review_intent import identifier
 
 TOOL_PROTOCOL = "agent-pull-requests.workspace-tools/v1"
 COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-read", "submit", "inspect")
@@ -163,6 +164,7 @@ class WorkspaceTools:
         )
 
     async def _materialize(self, number, identity):
+        identifier(identity)
         cached = self._generations.get(identity)
         if cached is not None:
             observed = await _call(self.client.exchange, "lookup", {"number": number, "generation_id": identity})
@@ -172,7 +174,8 @@ class WorkspaceTools:
             ):
                 self._generations.pop(identity, None)
                 raise WorkspaceToolUnavailable("immutable_generation_changed")
-            self._generations.move_to_end(identity)
+            if self._generations.get(identity) is cached:
+                self._generations.move_to_end(identity)
             return copy.deepcopy(cached[0])
         generation = await _call(self.client.materialize, number, identity)
         scope = _scope(generation.get("scope"))
