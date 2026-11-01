@@ -256,6 +256,9 @@ reconstructing the missing outcome. Restoring the exact retained evidence
 allows the original request to finish; success still requires current readiness.
 Status reports unavailable terminal evidence as a blocker rather than claiming
 convergence, without clearing metadata or changing the original receipt.
+Recovering a retained success verifies its original native fingerprints before
+readiness; a matching configuration on a recreated container cannot satisfy the
+original successful receipt.
 
 **Contract support:** this optional profile expands the source SDK's strict
 version-1 declaration reader; older readers reject the unknown `profile`

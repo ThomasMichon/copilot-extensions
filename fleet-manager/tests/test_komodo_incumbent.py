@@ -343,6 +343,7 @@ def test_native_apply_refuses_incumbent_even_with_a_fixed_declaration(incumbent)
     "failed-unstarted-keys-missing-terminal-outcome", "failed-unstarted-keys-corrupt-terminal-outcome",
     "lost-terminal-missing-outcome", "lost-terminal-corrupt-outcome",
     "lost-terminal-committed-missing-outcome", "lost-terminal-committed-corrupt-outcome",
+    "lost-terminal-fixed-replaced-container",
 ])
 def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
     incumbent, keys, monkeypatch, scenario,
@@ -474,7 +475,8 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
             desired.update(profile="preserve-incumbent", core_port=server.port)
             desired["images"]["mongo"]["version"] = "7.0.45"
             unstarted = scenario.startswith("failed-unstarted-")
-            if unstarted:
+            fixed = unstarted or scenario == "lost-terminal-fixed-replaced-container"
+            if fixed:
                 desired.pop("profile")
                 desired["images"]["mongo"]["version"] = "8.0.0"
                 paths = {"keys": material.keys, "admin_username": material.admin_username,
@@ -490,7 +492,7 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                         with os.fdopen(descriptor, "wb") as stream:
                             stream.write((name + "-fixed-fixture-material").encode())
                 fixed_material = KomodoMaterialization(material.docker_socket, **paths)
-                if "-keys-" not in scenario:
+                if unstarted and "-keys-" not in scenario:
                     for name in ("core", "periphery"):
                         (material.keys / (name + ".pub")).unlink()
             project = desired["project"] + "_default"
@@ -531,13 +533,13 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
             }
             selection = KomodoSelection(
                 KomodoDeclaration.from_dict(desired), "fleet-a", "install-a", 1, "policy-1",
-                1900001000, "e" * 64, runtime, tooling, fixed_material if unstarted else material,
-                adoption=() if unstarted else tuple(
+                1900001000, "e" * 64, runtime, tooling, fixed_material if fixed else material,
+                adoption=() if fixed else tuple(
                     (name, native_fingerprint(item)) for name, item in containers.items()),
-                adopted_public_identity=None if unstarted else identity_digest(material),
-                adopted_network=None if unstarted else network_fingerprint(network),
+                adopted_public_identity=None if fixed else identity_digest(material),
+                adopted_network=None if fixed else network_fingerprint(network),
             )
-            if unstarted:
+            if fixed:
                 created_containers = deepcopy(containers)
                 created_network = deepcopy(network)
                 containers.clear()
@@ -555,7 +557,7 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
             def apply(*arguments, **options):
                 nonlocal network
                 native_calls.append("apply")
-                if not unstarted:
+                if not fixed:
                     return
                 profile = decode(options["expected"])
                 for name, item in created_containers.items():
@@ -575,10 +577,12 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                          "Destination": "/run/secrets/" + secret, "RW": False}
                         for secret in service.get("secrets", [])
                     ]
-                    item["State"].update(Status="created", Running=False, Pid=0, StartedAt="")
-                    item["NetworkSettings"]["Networks"][project].update(NetworkID="", EndpointID="")
+                    if unstarted:
+                        item["State"].update(Status="created", Running=False, Pid=0, StartedAt="")
+                        item["NetworkSettings"]["Networks"][project].update(NetworkID="", EndpointID="")
                 containers.update(created_containers)
-                network = {**created_network, "Containers": {}, "Labels": {
+                network = {**created_network,
+                           "Containers": {} if unstarted else created_network["Containers"], "Labels": {
                     "io.fleet-manager.owner": selection.owner,
                     "com.docker.compose.project": desired["project"],
                     "com.docker.compose.network": "default",
@@ -802,6 +806,17 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                     await invoke(request)
                 assert state_record[0]["attempt"]["native_settled"] is True
                 monkeypatch.setattr(NodeJournal, "reconcile", reconcile)
+                if scenario == "lost-terminal-fixed-replaced-container":
+                    before = deepcopy(state_record[0])
+                    before_http = len(requests)
+                    previous = containers["core"]["Id"]
+                    containers["core"]["Id"] = "9" * 64
+                    network["Containers"][containers["core"]["Id"]] = network["Containers"].pop(previous)
+                    with pytest.raises(PlanError, match="replaced or changed"):
+                        await invoke(request)
+                    assert state_record[0] == before and native_calls == ["apply"]
+                    assert len(requests) == before_http
+                    return
                 if scenario.endswith("-outcome"):
                     before = deepcopy(state_record[0])
                     path = runtime / selection.resource / "receipts" / (digest(before["good"]) + ".json")

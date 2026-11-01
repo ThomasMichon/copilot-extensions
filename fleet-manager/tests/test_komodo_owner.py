@@ -48,6 +48,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
     "lost-terminal-receipt-missing-outcome-evidence", "lost-terminal-receipt-corrupt-outcome-evidence",
     "lost-terminal-receipt-missing-terminal-outcome-evidence",
     "lost-terminal-receipt-corrupt-terminal-outcome-evidence",
+    "lost-terminal-receipt-replaced-container",
     "first-complete-unstarted-lost-failure-publication",
     "first-partial-created-lost-failure-publication",
     "credential-drift", "native-drift", "network-drift", "foreign-endpoint",
@@ -681,6 +682,17 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                 with pytest.raises(PlanError, match="fixture-lost-terminal"):
                     await invoke(first, original)
                 assert effects() == 1
+                if scenario == "lost-terminal-receipt-replaced-container":
+                    retained = (runtime / current[0].resource / "selection.json").read_bytes()
+                    before_http = len(health_requests)
+                    changed = live()
+                    changed["core"]["Id"] = "9" * 64
+                    (rig["directory"] / "live.json").write_text(json.dumps(changed))
+                    with pytest.raises(PlanError, match="replaced or changed"):
+                        await invoke(owner(), original)
+                    assert (runtime / current[0].resource / "selection.json").read_bytes() == retained
+                    assert effects() == 1 and len(health_requests) == before_http
+                    return
                 if scenario.endswith("outcome-evidence"):
                     with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
                         original_record = (state.root / "selection.json").read_bytes()

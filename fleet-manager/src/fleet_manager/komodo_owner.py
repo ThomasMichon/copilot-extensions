@@ -482,6 +482,8 @@ class KomodoOwner:
                     self._preserved(record, selected, containers)
                     self._selected(request, content)
                     return self._reconcile_terminal(state, record, journal, request, failed=True)
+                if "success_outcome" in attempt:
+                    self._preserved(record, selected, containers)
                 verify_candidate(containers, selected, images, profile, attempt)
                 health = self._ready(
                     selected, containers, network, deadline=deadline,
