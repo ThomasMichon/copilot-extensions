@@ -128,7 +128,7 @@ export function freezeCatalog(skills) {
             throw new Error("invalid native skill descriptor");
         }
         return Object.freeze(Object.fromEntries(
-            ["name", "description", "enabled", "source", "pluginName", "path", "commandName", "userInvocable"]
+            ["name", "description", "enabled", "source", "pluginName", "path", "commandName", "userInvocable", "argumentHint"]
                 .filter(key => skill[key] !== undefined).map(key => [key, skill[key]]),
         ));
     }));

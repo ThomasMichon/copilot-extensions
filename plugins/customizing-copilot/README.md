@@ -83,7 +83,9 @@ Provides:
 
 - An opt-in [model-free SDK context spike](docs/skill-selection-spike.md) using
   synthetic fixtures in an owned isolated runtime, with native descriptor/model
-  preflight, request-size comparisons and lifecycle evidence. It does not
+  preflight, request-size comparisons and lifecycle evidence, plus import-inert
+  specialist, declared-source reading and catalog-bound decision contracts.
+  These contracts require an integrating host and do not
   register a selector, qualify a model or change main-agent preferences.
 - An opt-in [raw client-request capture](skills/capturing-client-requests/references/usage.md)
   script and offline interpreter for debugging a selected harness with a
