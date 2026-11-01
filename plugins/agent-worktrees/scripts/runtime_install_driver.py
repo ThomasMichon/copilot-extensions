@@ -187,7 +187,7 @@ def _uninstall_runtime(args, owner) -> int:
 
 
 def _execute(args) -> int:
-    from update_driver import core
+    from update_driver import ParticipantError, core
 
     with custody(required=True) as owner:
         request = core.status(owner.request_id, root=owner.root)
@@ -225,7 +225,13 @@ def _execute(args) -> int:
         except BaseException:
             _settle(process.wait)
             raise
-        owner.assert_owned()
+        try:
+            owner.assert_owned()
+        except ParticipantError as error:
+            error.add_note(
+                f"Native Worktrees installer child exited {code}; transaction custody is unconfirmed",
+            )
+            raise
         if code:
             print(f"Native Worktrees installer failed (exit {code})", file=sys.stderr, flush=True)
         return code
