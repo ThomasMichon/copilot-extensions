@@ -1,0 +1,9 @@
+{
+  "comment": "Add an opt-in model-free isolated SDK skill-selection context and lifecycle witness.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
