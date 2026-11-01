@@ -3231,11 +3231,19 @@ def test_runtime_slot_serializes_concurrent_publishers(
                     "slot-provision",
                     layout,
                     direct=True,
+                    check=False,
                 ),
                 range(2),
             )
         )
-    results = [json.loads(result.stdout) for result in completed]
+    assert any(result.returncode == 0 for result in completed)
+    results = []
+    for result in completed:
+        if result.returncode != 0:
+            assert result.returncode == 1
+            assert "Installation lock" in result.stderr and "remained busy" in result.stderr
+            result = _run_slot(runner, "slot-provision", layout, direct=True)
+        results.append(json.loads(result.stdout))
 
     assert sorted(result["slotChanged"] for result in results) == [False, True]
     assert len({result["ownership"] for result in results}) == 1
@@ -5357,7 +5365,9 @@ def test_runtime_slot_cutover_cas_mismatch_does_not_mutate_markers(
     layout = _receipt_layout(tmp_path)
     plugin_root = Path(layout["plugin_root"])
     _prepare_completion_slot(layout, runtime_version="1.0.0")
-    _run_completion(runner, "slot-complete", layout, runtime_version="1.0.0")
+    # Native completion/cutover composition remains in the rollback tests;
+    # this negative control spends its native work on both actual cutovers.
+    _run_completion(REFERENCE_RUNNERS[0], "slot-complete", layout, runtime_version="1.0.0")
     _run_cutover(
         runner,
         layout,
@@ -5369,7 +5379,7 @@ def test_runtime_slot_cutover_cas_mismatch_does_not_mutate_markers(
         for name in ("current-version", "last-known-good")
     }
     _prepare_completion_slot(layout, runtime_version="2.0.0")
-    _run_completion(runner, "slot-complete", layout, runtime_version="2.0.0")
+    _run_completion(REFERENCE_RUNNERS[0], "slot-complete", layout, runtime_version="2.0.0")
 
     result = json.loads(
         _run_cutover(

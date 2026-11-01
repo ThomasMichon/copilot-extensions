@@ -6132,6 +6132,13 @@ through the real PowerShell adapter, rather than resurrecting retired C# types.
 They retain the 259/260/280-unit file/publication and 247/248/260/280-unit
 directory boundaries, destination identity/content checks and long snapshot
 parity.
+Concurrent slot controls retain the five-second lock-admission bound: a
+confirmed busy reply is checked explicitly and retried once after the competing
+publisher finishes, rather than assuming every contender must wait indefinitely.
+CAS-negative controls prepare completed versions through the reference CLI
+and exercise both actual native cutovers; native completion/cutover sequences
+remain covered by rollback and interoperability controls. The slots diagnostic
+also exercises the actual PowerShell cell-lock watchdog on POSIX.
 Bootstrap drift fixtures explicitly model the publication decision as well as
 context selection, including a denied-publication control. No-write PowerShell
 hook checks use the bounded initialized host and retain every fixture file in

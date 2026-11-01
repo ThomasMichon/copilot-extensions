@@ -634,6 +634,7 @@ def test_path_capture_diagnostics_leave_full_portfolio_unchanged() -> None:
                 "test_exemplar_slot_actions_do_not_adopt_ambient_context",
                 "test_exemplar_slot_actions_reject_foreign_snapshot_payload",
                 "test_exemplar_slot_actions_reject_spoofed_staging_payload_identity",
+                "test_agent_machines_powershell_watchdog_bounds_cell_lock_wait",
             )
         ),
     }
