@@ -50,6 +50,16 @@ binding change.
 
 ## Implementation sequence
 
+**Operator presentation clarification, 2026-10-31:**
+
+> Basically, addition/removal of claims, effort-binds, etc. work well. The initial prompt might be worth summarizing up top, though the inital prompt becomes less-relevant than the ultimate bound effort as the worktree continues.
+
+The [timeline and in-progress examples](timeline-guidance.md) show this same
+purpose-first experience with generic fictional clocks and references. The
+current bound effort leads; creation context remains expandable provenance.
+This adds documentation guidance, not implemented controls or acceptance of
+the remaining source/native/relay work.
+
 The sequencing and safeguards below are **agent-recommended**, realizing the
 requested feature set without creating another data or session authority.
 
