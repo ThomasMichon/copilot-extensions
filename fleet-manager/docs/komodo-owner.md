@@ -210,6 +210,36 @@ so a freshly resolved identical materialization retains its original deployment
 digest. Every record field and native mount remains bound; duplicates refuse.
 Both Core and Periphery must use the same original `/config/keys` mount.
 Volume mountpoints are read locations, never replacements for native volume mounts.
+The producer may optionally supply immutable canonical `topology` bytes with
+exactly `networks`, `modes` and `attachments`. `networks` maps at most eight
+original names to complete native bridge inspection records; `modes` and
+`attachments` select each service's original `HostConfig.NetworkMode` and
+nonempty network-name list. Names and identities must be unambiguous, every
+bridge must serve a selected service, and only local bridges without driver
+options or configuration indirection are supported. An internal management
+bridge and a separate Core-only egress bridge can therefore be retained
+without flattening or recreating either. Native readback batches the exact
+selected names, binds every stable bridge field, and independently verifies
+the exact service attachment sets and each running endpoint's identity.
+Foreign endpoints, added service memberships, missing running memberships and
+changed native modes refuse. The aggregate stable fingerprint uses the existing
+string-valued network receipt field; dynamic endpoints are compared across
+readiness observations, not discarded. Omitting `topology` preserves the
+original single `<project>_default` contract; fresh Compose rendering is unchanged.
+
+For an incumbent whose local-auth username comes from retained Core TOML,
+`admin_username` may be `KomodoConfigUsername(existing_core_config)` instead of
+a private username file. The exact file must be retained and mounted as Core's
+`/config/config.toml`. The SDK reads its root `init_admin_username` through the
+existing bounded private-file reader, rejects missing, duplicate or unsupported
+values, and binds the source file and effective login bytes to selection
+evidence. Login and recorded file bytes must agree within each observation.
+Python 3.10 uses the conditional `tomli` dependency in the `komodo-host` extra;
+newer interpreters use stdlib `tomllib`. Parsing is loaded only for configured
+usernames, so base/fixed-profile SDK imports remain dependency-free.
+The producer remains responsible for authenticating the incumbent's effective
+configuration, including environment overrides. No username file is generated,
+no credential is rotated, and fresh six-file materialization remains unchanged.
 An existing Core global `file:/config/keys/periphery.pub` reference may resolve
 through that exact adopted named-volume mount. Changed volume names or any other
 mount field refuse; the existing explicit reverse-connection and live-key checks

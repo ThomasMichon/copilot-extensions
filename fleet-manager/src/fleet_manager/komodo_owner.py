@@ -80,7 +80,8 @@ def verify_native(containers: dict[str, dict[str, Any]], selected: KomodoSelecti
                 or config.get("User", "") != image.user
                 or host.get("Privileged") is not False or host.get("CapAdd") not in (None, [])
                 or host.get("PidMode", "") != "" or host.get("NetworkMode") != (
-                    selected.declaration.to_dict()["project"] + "_default")
+                    selected.material.network_mode(name, selected.declaration.to_dict()["project"])
+                    if preserving else selected.declaration.to_dict()["project"] + "_default")
                 or host.get("Memory") != expected["mem_limit"]
                 or host.get("NanoCpus") != (
                     selected.declaration.to_dict()["resources"][name]["cpu_millis"] * 1000000)):

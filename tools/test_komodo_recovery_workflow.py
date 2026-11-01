@@ -72,8 +72,10 @@ def test_actual_workflow_body_preserves_exit_cleanup_and_native_execution_credit
         assert options["env"] == {"isolated": str(sandbox)}
         selector = command[command.index("-k") + 1]
         for name in ("failed-retained-health", "lost-failure-publication", "lost-terminal-receipt",
-                     "native-failure-to-repair", "repair-failure-to-native", "physical_state"):
+                     "native-failure-to-repair", "repair-failure-to-native", "physical_state",
+                     "komodo_incumbent"):
             assert name in selector
+        assert str(tmp_path / "fleet-manager/tests/test_komodo_incumbent.py") in command
         if mode == "unreaped":
             raise Unreaped("original process remains owned")
         report = Path(command[command.index("--junitxml") + 1])
