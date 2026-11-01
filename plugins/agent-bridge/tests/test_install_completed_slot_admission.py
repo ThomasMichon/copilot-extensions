@@ -331,8 +331,8 @@ function Get-VersionedCurrent {{ return '' }}
 function Install-SiblingPlugins {{ Rec 'PRUNED' }}
 function Remove-ConsoleTrampolines {{ Rec 'PRUNED' }}
 function Test-RuntimeHealthy {{ Rec 'HEALTH'; return $true }}
-function Ensure-RuntimeBrokerAdoption {{ Rec 'BROKER' }}
-function Invoke-RuntimeBrokerAdoption {{ Rec 'BROKER' }}
+function Ensure-RuntimeSlotRetention {{ Rec 'RETAINED' }}
+function Invoke-RuntimeBrokerAdoption {{ throw 'UNEXPECTED_BROKER_ADOPTION' }}
 function Invoke-VersionedActivate {{ Rec 'ACTIVATED'; exit 50 }}
 function New-SignedVenv {{ Rec 'PROCEEDED'; exit 42 }}
 function New-SignedVenvShared {{ Rec 'BUILT'; return $true }}

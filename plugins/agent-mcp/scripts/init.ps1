@@ -469,21 +469,6 @@ function Invoke-RuntimeOwnerSettlement {
     Write-Ok 'Old MCP runtime owners and control state settled'
 }
 
-function Invoke-RuntimeBrokerAdoption {
-    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
-    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
-        $script:RuntimeConstructionSession.Process.HasExited) {
-        throw 'Broker adoption requires attached complete-slot retention'
-    }
-    $diagnostic = ''
-    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
-        '--runtime-root', $InstallDir, '--slot', $VenvDir,
-        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
-        -ErrorOutput ([ref]$diagnostic)
-    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
-    $receipt = $result | ConvertFrom-Json
-    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
-}
 # === end install-contract:v4 marker/toss helpers ===
 
 function Get-SourceKind {
@@ -992,7 +977,6 @@ if ($VersionedRuntime) {
         throw "Fresh runtime slot failed its health gate (versions/$SrcVersion)"
     }
     if (-not (Invoke-VersionedMarkComplete)) { throw 'Runtime construction completion failed' }
-    Invoke-RuntimeBrokerAdoption
     # Source manifest inputs are captured before activation.
     if ($script:SourceRuntimeIdentity) {
         $sourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $sourceManifestPath))

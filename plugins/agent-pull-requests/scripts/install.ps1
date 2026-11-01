@@ -347,7 +347,6 @@ function Invoke-VersionedActivate {
     if (-not (Invoke-VersionedMarkComplete -PayloadHash $PayloadHash)) {
         return $false
     }
-    Invoke-RuntimeBrokerAdoption
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
     Test-SourceRuntimeUnchanged
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
@@ -585,21 +584,6 @@ function Invoke-VersionedMarkComplete {
     return $true
 }
 
-function Invoke-RuntimeBrokerAdoption {
-    if ($env:OS -ne 'Windows_NT' -or $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1') { return }
-    if (-not $script:RuntimeConstructionSession -or -not $script:RuntimeConstructionSession.Complete -or
-        $script:RuntimeConstructionSession.Process.HasExited) {
-        throw 'Broker adoption requires attached complete-slot retention'
-    }
-    $diagnostic = ''
-    $result = Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'update_driver.windows_broker',
-        '--runtime-root', $InstallDir, '--slot', $VenvDir,
-        '--execution-root', (Join-Path $env:USERPROFILE '.copilot-extensions\update-driver')) `
-        -ErrorOutput ([ref]$diagnostic)
-    if ($LASTEXITCODE -ne 0) { throw "Runtime broker adoption failed: $diagnostic" }
-    $receipt = $result | ConvertFrom-Json
-    if (-not $receipt -or $receipt.adopted -ne $true) { throw 'Runtime broker adoption returned no receipt' }
-}
 
 function Test-VersionedSlotComplete {
     param([string]$ExpectedHash = '')
