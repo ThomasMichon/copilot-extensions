@@ -20,7 +20,7 @@ def _git(repo: Path, *arguments: str) -> str:
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=False,
     )
     if result.returncode:
-        raise ValueError(f"Cannot verify footprint history baseline: {result.stderr.strip()}")
+        raise ValueError(f"Cannot verify footprint contract baseline: {result.stderr.strip()}")
     return result.stdout
 
 
@@ -28,7 +28,7 @@ def _baseline(repo: Path, relative: str) -> str | None:
     branch = os.environ.get("GITHUB_BASE_REF")
     if branch:
         if not re.fullmatch(r"[A-Za-z0-9_./-]+", branch) or ".." in branch:
-            raise ValueError("Invalid footprint history base branch")
+            raise ValueError("Invalid footprint contract base branch")
         ref = f"refs/remotes/origin/{branch}"
     elif os.environ.get("GITHUB_EVENT_NAME") == "push":
         ref = "HEAD^"
@@ -63,13 +63,15 @@ def check(repo: Path) -> list[str]:
         try:
             inventory._plain(path, file=True)
             manifest = contract.parse(contract.decode(contract._manifest_text(path)), plugin)
+            if manifest.serialization_version != 3:
+                raise ValueError("Source declarations must use the current footprint serialization")
             if set(manifest.producers) != {"scripts", "src"}:
                 raise ValueError("MCP producer coverage must include the complete scripts and src trees")
             inventory.profile_for(payload, plugin, path)
             previous = _baseline(repo, path.relative_to(repo).as_posix())
             if previous is not None:
-                contract.require_append_only(
-                    contract.decode(previous), contract.decode(path.read_text(encoding="utf-8-sig")), plugin,
+                contract.require_transition(
+                    contract.decode(previous), contract.decode(contract._manifest_text(path)), plugin,
                 )
             problems.extend(f"{plugin}: {problem}" for problem in contract.producer_problems(manifest, payload))
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:

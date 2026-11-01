@@ -3175,7 +3175,15 @@
         "tools/promotion_unit_tests/test_creation_diagnostics.py::test_claim_acceptance_follows_persistence_before_failed_notice",
         "tools/promotion_unit_tests/test_creation_diagnostics.py::test_persistence_rejection_stays_distinct_from_notice_failure",
         "tools/promotion_unit_tests/test_creation_diagnostics.py::test_creation_progress_notice_failure_preserves_original_work_error",
-        "tools/promotion_unit_tests/test_creation_diagnostics.py::test_default_progress_still_refuses_failed_initial_output"
+        "tools/promotion_unit_tests/test_creation_diagnostics.py::test_default_progress_still_refuses_failed_initial_output",
+        "tools/promotion_unit_tests/test_footprint_contract.py::test_source_refresh_is_not_a_footprint_revision",
+        "tools/promotion_unit_tests/test_footprint_contract.py::test_supported_v2_adapter_exports_only_the_effective_contract",
+        "tools/promotion_unit_tests/test_footprint_contract.py::test_semantic_changes_require_revision_assessment_and_dispositions[artifact]",
+        "tools/promotion_unit_tests/test_footprint_contract.py::test_semantic_changes_require_revision_assessment_and_dispositions[effect-entry]",
+        "tools/promotion_unit_tests/test_footprint_contract.py::test_semantic_changes_require_revision_assessment_and_dispositions[legacy-rule]",
+        "tools/promotion_unit_tests/test_footprint_contract.py::test_semantic_changes_require_revision_assessment_and_dispositions[producer-scope]",
+        "tools/promotion_unit_tests/test_footprint_contract.py::test_unknown_required_incoming_semantics_are_not_ignored",
+        "tools/promotion_unit_tests/test_footprint_contract.py::test_incoming_revision_is_not_an_incumbent_layout_version"
     ],
     "sources": {
         "tools/core_python_artifacts.py": "cfeae35bfee4537022e1026ffae498b61b23508426a676d9dc09ca8ab8d4b4a0",
@@ -3562,9 +3570,12 @@
         "tools/promotion_unit_tests/test_creation_diagnostics.py": "d4061059850bb6d429ac7f2e221a0ea8d6715f030c5e97221d193f6463f7df27",
         "plugins/agent-worktrees/src/agent_worktrees/creation_diagnostics.py": "9e9df2522173fa739ada6c7201d37e63c17d19c9a75de215eb176304a86e8940",
         "plugins/agent-worktrees/src/agent_worktrees/creation_owner_claim.py": "aea9f0de14e962099fb1c70b139d9c62a0ae0051c6cd3174683fe13d534acffa",
-        "plugins/agent-worktrees/src/agent_worktrees/launch_progress.py": "b44ba6207d319af74ecbf40a0324ad0126a7415573b15b564b107002f16431c8"
+        "plugins/agent-worktrees/src/agent_worktrees/launch_progress.py": "b44ba6207d319af74ecbf40a0324ad0126a7415573b15b564b107002f16431c8",
+        "libs/installer-engine/installer_engine_footprint.py": "3890367f8c163a5bf487dafc56d6eb0c3beeb139fd89d97c6a05596b6f2d5a76",
+        "tools/promotion_unit_tests/test_footprint_contract.py": "39c39f363a0b75a7577000898738a9166faf1cfee9a28e4c47cf224d4151a8fc"
     },
     "coverage_targets": [
+        "libs/installer-engine/installer_engine_footprint.py",
         "tools/core_runtime_profile.py",
         "tools/core_python_artifacts.py",
         "tools/python_project_inventory.py",

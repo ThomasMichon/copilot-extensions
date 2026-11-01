@@ -51,9 +51,32 @@ legacy layout/transition rules. Separate:
   separate from source/package version ordering and from historical source hashes.
 
 Introduce a version-3 current-document form at the existing co-packaged provider.
-Choose its exact fields and defaults in the implementation's contract-impact
-statement; retain one canonical schema and normalizer rather than independent
-schemas in Python, PowerShell, source guards and native removers.
+The implementation uses strict `version`, `schema`, `plugin`, `revision`,
+`contract`, `producers` and `change` fields. `contract` holds the existing finite
+v1 `profile`, effect descriptors and named `recognizers`. Those named layout
+ranges are the explicit supported-legacy portfolio; the reset profile already
+retains `.venv`, `venv` and other supported predecessor artifacts. There is no
+automatic union of old inventories. `revision` remains 36 at the schema-only
+transition and advances only for semantic or producer-scope changes.
+
+`change` is null for the schema-only conversion. Subsequent semantic changes
+carry `from_revision`, the exact introduced/changed/retired `delta`, and one
+`dispositions` entry per retired identity. An entry either identifies a retained
+equivalent current descriptor or explicitly preserves unknown remnants with a
+reason. Effect entry retirements are assessed individually, not hidden inside
+an edited whole effect. Source-only updates preserve the revision and assessment.
+Only the current assessment ships; Git retains earlier change assessments.
+
+The existing constructor selects its sibling provider and refuses a declaration
+outside that same scripts directory. Native MCP removal loads its own scripts
+inventory and sibling provider, including for bounded v1 decoding; it cannot
+select a newer provider from another payload. Other canonical-source dependency
+fallbacks retain byte-identical owner code and the exact source repository
+pairing. Frozen old payloads retain their
+old reader and old document. The adapter expands all newly shipped readers to
+v2/v3 before the co-packaged MCP declaration emits v3; it does not direct an old
+installed helper at the new declaration. A mismatched old-reader/v3 pair is an
+explicit pre-effect refusal, not an invocation to retry.
 
 A footprint change must include an explicit introduced/changed/retired assessment
 and update every affected current or supported-legacy rule. The source guard
@@ -117,42 +140,57 @@ nor a source merge qualifies native installation, live replacement or rollout.
 
 ## Plan
 
-- [ ] Review this amendment before changing the append-only schema/guard contract.
-- [ ] Inventory actual readers, producer guards and supported payload/runtime
+- [x] Review this amendment before changing the append-only schema/guard contract;
+  #9793 merged after exact-head approval and required checks.
+- [x] Inventory actual readers, producer guards and supported payload/runtime
   pairings; specify the current-document schema and explicit compatibility window.
-- [ ] Implement the canonical normalizer/current declaration and meaningful
+- [x] Implement the canonical normalizer/current declaration and meaningful
   footprint-change guard, preserving complete current producer coverage.
-- [ ] Normalize supported version-2 inputs and preserve version-1 finite profiles;
+- [x] Normalize supported version-2 inputs and preserve version-1 finite profiles;
   remove unconditional source-change history growth without losing required
   legacy dispositions or inventing an automatic migration chain.
-- [ ] Wire construction, shared/native uninstall, source/materialization guards
+- [x] Wire construction, shared/native uninstall, source/materialization guards
   and canonical helper shipping to the same provider and document.
 - [ ] Qualify the matrix below, journal actual source closure and return to the
   parent Plan/Validation Plan; do not declare installation/adoption complete.
 
 ## Validation Plan
 
-- [ ] A source-only edit changes producer hashes but not the footprint contract
+- [x] A source-only edit changes producer hashes but not the footprint contract
   or number of runtime compatibility entries; repeated edits keep size bounded.
-- [ ] Adding/removing/changing a disposable artifact or mandatory semantic
+- [x] Adding/removing/changing a disposable artifact or mandatory semantic
   requires an intentional contract change and explicit affected dispositions.
-- [ ] New readers accept real version-2 history fixtures and existing finite
+- [x] New readers accept real version-2 history fixtures and existing finite
   version-1 profiles where supported; current documents use the new form.
-- [ ] Actual selected payload/provider pairings preserve old consumers and
+- [x] Actual selected payload/provider pairings preserve old consumers and
   supported rollback without assuming lockstep deployment or probing effects.
-- [ ] Supported legacy rules retain required old artifact knowledge; deliberate
+- [x] Supported legacy rules retain required old artifact knowledge; deliberate
   support retirement is explicit and unknown remnants remain preserved.
-- [ ] Unsupported incumbent layouts choose fresh construction, not an old-owner
+- [x] Unsupported incumbent layouts choose fresh construction, not an old-owner
   approval or mandatory sequential-migration prerequisite.
-- [ ] Unknown incoming required semantics, schema confusion, duplicate fields,
+- [x] Unknown incoming required semantics, schema confusion, duplicate fields,
   invalid scopes and malformed/oversized/unreadable/redirected files fail explicitly.
-- [ ] Exact read boundaries preserve 64 KiB installed markers and the bounded
+- [x] Exact read boundaries preserve 64 KiB installed markers and the bounded
   legacy-manifest reader; current-manifest size is independent of source history.
-- [ ] Shared/native removers and constructors consume the same current contract;
+- [x] Shared/native removers and constructors consume the same current contract;
   protected data, locks, provenance and uncertain native custody remain unchanged.
 - [ ] Canonical fan-out, packaging/materialization, installer-contract controls
   and the exact-source no-effect packet cover the changed implementation.
   Native and installed acceptance run only through their existing authorized lanes.
+
+The focused source packet passed 225 controls, including the real predecessor
+document/reader, copied constructor and inventory pairings, exact read boundaries,
+materialization and eight positively admitted no-effect unit additions. The
+install-contract guard passes for all 13 plugins. Full exact-source no-effect
+execution, implementation review/merge and parent reconciliation remain required.
+
+The optional native removal portfolio is not this source packet. A developer-host
+run exposed the existing passwd-home isolation gap #9614 and non-isolated process
+inspection refusals. Its incomplete payload fixtures now ship the actual inventory
+helper and provider before ownership publication; that fixture correction is not
+positive native qualification. Complete native removal remains in the existing
+#7028 acceptance lane with an isolated account/process namespace and unchanged
+production admission. No real account, process, installation or rollout changed.
 
 ## See also
 

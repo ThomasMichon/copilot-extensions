@@ -2541,12 +2541,56 @@ ordinary daemon adapters retain their owned service-STOP ordering. Finite
 is validated, only declared immediate children and their own bytecode are
 selected, and unknown siblings are retained.
 
-Agent MCP's `scripts/uninstall-profile.json` now uses the version-2
-`copilot-extensions.installed-footprint` contract. Its ordered history contains
-complete snapshots and exact introduced/changed/retired deltas. The latest
-snapshot's version-1 finite profile is the removal inventory consumed by both
-the shared helper and MCP's native adapter; the adapter no longer maintains a
-second list. Existing version-1 profiles for other owners remain supported.
+Agent MCP's `scripts/uninstall-profile.json` uses the version-3
+`copilot-extensions.installed-footprint` current-document contract. Its strict
+fields are `version`, `schema`, `plugin`, `revision`, `contract`, `producers`
+and `change`. The serialization version, semantic footprint revision and current
+source hashes describe different facts. `contract` contains `profile`, `effects`
+and named `recognizers`; its version-1 finite profile is the same inventory
+consumed by the shared helper and MCP's native adapter. There is no second native
+list or runtime source-history ledger. Existing version-1 finite profiles retain
+their own path. The canonical provider also reads version-2 histories through
+an adapter that validates them and exports only their effective current contract,
+without rewriting the installed document.
+
+Source-only edits refresh complete `scripts`/`src` producer hashes in place with
+`python tools/refresh-install-footprint.py`; they do not change `revision`,
+`change` or the number of compatibility rules. The initial explicit
+`--convert-v2` operation preserves the effective contract and its revision.
+Semantic changes, including producer-scope changes, require the next revision
+and a `change` with `from_revision`, an exact introduced/changed/retired `delta`,
+and `dispositions` for every retired identity. Effect entries are assessed
+individually. A retired descriptor must reference an equivalent retained current
+descriptor (`action: retained`, `target`, `reason`) or explicitly preserve unknown
+remnants (`action: preserve-unknown`, `reason`). Neither action grants deletion
+authority. Only the current assessment ships; Git owns earlier source assessments.
+The source guard compares normalized contracts against the real published baseline
+and continues to reject omitted producer scopes or stale source hashes.
+
+Named layout recognizers and the finite reset inventory are the explicit support
+portfolio: supported predecessor artifacts such as `.venv` and `venv` remain
+declared, rather than being rediscovered by unioning historical inventories.
+Compatibility is practical and removable, not a promise to support every source
+revision forever. Retiring a layout rule is a semantic change with a disposition;
+unrecognized incumbents remain preserved and select independent fresh construction.
+Unknown required incoming semantics still fail explicitly before effects.
+The [version-skew pattern](patterns/service-contract-evolution.md) governs later
+adapter retirement and the supported upgrade/rollback window.
+
+The constructor requires the exact declaration beside its executing provider.
+Uninstall uses the provider beside its executing inventory helper, including for
+plain v1 profile decoding; it never loads a newer provider from another payload.
+Other source dependency fallbacks retain the existing byte-identical canonical
+owner pairing. Thus frozen older payloads
+keep their older reader/document pair; they are not redirected to the new schema.
+New readers support v2/v3 before the co-packaged declaration switches to v3.
+An old-reader/v3 mismatch is an explicit pre-effect refusal, never an effectful
+probe followed by an older retry. Current, predecessor and rollback fixtures
+exercise these actual loading seams. Trusted declarations are ordinary unshared
+files with a separate 1 MiB read bound accommodating already-produced v2 histories;
+installed deployment/selection/completion markers retain their 64 KiB bound.
+Current-document size is independent of source-update count.
+
 Additional effect descriptors distinguish disposable tools/control state,
 identity-bound processes and owned children, registrations (none for MCP's
 installer), shared PATH integration and preserved configuration/data/locks.

@@ -34,7 +34,8 @@ class Manifest:
     effects: dict[str, Any]
     recognizers: dict[str, Any]
     producers: dict[str, str]
-    history: tuple[dict[str, Any], ...]
+    serialization_version: int
+    change: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,12 @@ def _items(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Stable artifact identities make additions, edits and retirements explicit."""
     _object(snapshot, {"profile", "effects", "recognizers", "producers"})
     profile = snapshot["profile"]
-    if not isinstance(profile, dict) or profile.get("version") != 1:
+    required = {"version", "module", *PROFILE_LISTS}
+    if (not isinstance(profile, dict) or not required <= profile.keys()
+            or profile.keys() - required - {"guard_module", "guard_function", "nested_engine"}
+            or type(profile.get("version")) is not int or profile["version"] != 1
+            or not isinstance(profile["module"], str)
+            or not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", profile["module"])):
         raise FootprintError("A footprint revision requires a finite v1 removal profile")
     result: dict[str, Any] = {}
     for key, value in profile.items():
@@ -131,6 +137,10 @@ def _items(snapshot: dict[str, Any]) -> dict[str, Any]:
                 raise FootprintError(f"Invalid footprint profile list: {key}")
             if len(set(value)) != len(value):
                 raise FootprintError(f"Duplicate footprint profile entry: {key}")
+            for item in value:
+                _relative(item)
+                if key in {"root_entries", "local_bin_entries"} and "/" in item:
+                    raise FootprintError("Root and command footprint entries must be finite leaves")
             result.update((f"{key}:{item}", True) for item in value)
         else:
             result[f"profile:{key}"] = value
@@ -139,7 +149,8 @@ def _items(snapshot: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(entries, dict):
             raise FootprintError(f"Invalid footprint {category}")
         for name, value in entries.items():
-            if not isinstance(name, str) or not name:
+            if (not isinstance(name, str) or not name
+                    or (category != "producers" and not re.fullmatch(r"[A-Za-z0-9_.+-]+", name))):
                 raise FootprintError("Empty footprint identity")
             result[f"{category}:{name}"] = value
     return result
@@ -155,60 +166,150 @@ def delta(previous: dict[str, Any] | None, current: dict[str, Any]) -> dict[str,
     }
 
 
+def _validate_snapshot(snapshot: Any) -> None:
+    _items(snapshot)
+    for path, digest in snapshot["producers"].items():
+        _relative(path)
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise FootprintError("Invalid footprint producer digest")
+    if not snapshot["producers"]:
+        raise FootprintError("A footprint must name its actual producers")
+    for effect in snapshot["effects"].values():
+        _object(effect, {"kind", "scope", "entries", "disposition"})
+        if (not isinstance(effect["kind"], str) or effect["kind"] not in KINDS
+                or not isinstance(effect["scope"], str)
+                or effect["scope"] not in {"runtime-root", "installation", "user-environment"}
+                or not isinstance(effect["disposition"], str)
+                or effect["disposition"] not in {"preserve", "retire", "reset"}
+                or not isinstance(effect["entries"], list)
+                or not all(isinstance(item, str) and item for item in effect["entries"])
+                or len(set(effect["entries"])) != len(effect["entries"])):
+            raise FootprintError("Invalid footprint effect descriptor")
+        if (effect["kind"] in {"preserved-state", "shared-environment"}
+                and effect["disposition"] != "preserve"):
+            raise FootprintError("Protected/shared state cannot be declared disposable")
+    for recognizer in snapshot["recognizers"].values():
+        _object(recognizer, {"kind", "footprint", "deployment_schema", "completion_contract"})
+        if recognizer["kind"] != "versioned-runtime-v1":
+            raise FootprintError("Unsupported footprint recognizer provider")
+        for key in ("footprint", "deployment_schema", "completion_contract"):
+            _range(recognizer[key])
+
+
+def _validate_change(change: Any, revision: int) -> None:
+    if change is None:
+        return
+    _object(change, {"from_revision", "delta", "dispositions"})
+    if type(change["from_revision"]) is not int or change["from_revision"] != revision - 1:
+        raise FootprintError("A footprint change must name the preceding contract revision")
+    assessment = _object(change["delta"], {"introduced", "changed", "retired"})
+    for entries in assessment.values():
+        if (not isinstance(entries, list) or not all(isinstance(item, str) and item for item in entries)
+                or entries != sorted(set(entries))):
+            raise FootprintError("Footprint change identities must be unique and sorted")
+    dispositions = change["dispositions"]
+    if not isinstance(dispositions, dict) or set(dispositions) != set(assessment["retired"]):
+        raise FootprintError("Every retired footprint identity requires an explicit disposition")
+    for disposition in dispositions.values():
+        if not isinstance(disposition, dict):
+            raise FootprintError("Invalid footprint retirement disposition")
+        action = disposition.get("action")
+        _object(disposition, {"action", "reason", "target"} if action == "retained" else {"action", "reason"})
+        if (not isinstance(action, str) or action not in {"retained", "preserve-unknown"}
+                or not isinstance(disposition["reason"], str) or not disposition["reason"].strip()
+                or (action == "retained" and (
+                    not isinstance(disposition["target"], str) or not disposition["target"]
+                ))):
+            raise FootprintError("Unsupported footprint retirement disposition")
+
+
 def parse(record: Any, plugin: str) -> Manifest:
-    _object(record, {"version", "schema", "plugin", "history"})
-    if (type(record["version"]) is not int or record["version"] != 2
-            or record["schema"] != SCHEMA or record["plugin"] != plugin
-            or not isinstance(record["history"], list) or not record["history"]):
-        raise FootprintError("Invalid installed-footprint identity or history")
-    previous = None
-    for number, revision in enumerate(record["history"], 1):
-        _object(revision, {"revision", "snapshot", "delta"})
-        if type(revision["revision"]) is not int or revision["revision"] != number:
-            raise FootprintError("Footprint revisions must be contiguous and ordered")
-        snapshot = revision["snapshot"]
-        if revision["delta"] != delta(previous, snapshot):
-            raise FootprintError(f"Footprint revision {number} omits or misstates its delta")
-        for path, digest in snapshot["producers"].items():
-            _relative(path)
-            if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-                raise FootprintError("Invalid footprint producer digest")
-        if not snapshot["producers"]:
-            raise FootprintError("A footprint must name its actual producers")
-        for effect in snapshot["effects"].values():
-            _object(effect, {"kind", "scope", "entries", "disposition"})
-            if (not isinstance(effect["kind"], str) or effect["kind"] not in KINDS
-                    or not isinstance(effect["scope"], str)
-                    or effect["scope"] not in {"runtime-root", "installation", "user-environment"}
-                    or not isinstance(effect["disposition"], str)
-                    or effect["disposition"] not in {"preserve", "retire", "reset"}
-                    or not isinstance(effect["entries"], list)
-                    or not all(isinstance(item, str) and item for item in effect["entries"])):
-                raise FootprintError("Invalid footprint effect descriptor")
-            if (effect["kind"] in {"preserved-state", "shared-environment"}
-                    and effect["disposition"] != "preserve"):
-                raise FootprintError("Protected/shared state cannot be declared disposable")
-        for recognizer in snapshot["recognizers"].values():
-            _object(recognizer, {"kind", "footprint", "deployment_schema", "completion_contract"})
-            if recognizer["kind"] != "versioned-runtime-v1":
-                raise FootprintError("Unsupported footprint recognizer provider")
-            for key in ("footprint", "deployment_schema", "completion_contract"):
-                _range(recognizer[key])
-        previous = snapshot
-    assert previous is not None
-    return Manifest(
-        plugin, len(record["history"]), **previous,
-        history=tuple(revision["snapshot"] for revision in record["history"]),
-    )
+    """Normalize supported documents; source revisions are not installed layouts."""
+    if (not isinstance(record, dict) or type(record.get("version")) is not int
+            or record.get("schema") != SCHEMA or record.get("plugin") != plugin):
+        raise FootprintError("Invalid installed-footprint identity")
+    version = record["version"]
+    change = None
+    if version == 2:
+        _object(record, {"version", "schema", "plugin", "history"})
+        if not isinstance(record["history"], list) or not record["history"]:
+            raise FootprintError("Invalid installed-footprint history")
+        previous = None
+        for number, revision in enumerate(record["history"], 1):
+            _object(revision, {"revision", "snapshot", "delta"})
+            if type(revision["revision"]) is not int or revision["revision"] != number:
+                raise FootprintError("Footprint revisions must be contiguous and ordered")
+            snapshot = revision["snapshot"]
+            _validate_snapshot(snapshot)
+            if revision["delta"] != delta(previous, snapshot):
+                raise FootprintError(f"Footprint revision {number} omits or misstates its delta")
+            previous = snapshot
+        assert previous is not None
+        snapshot = previous
+        number = len(record["history"])
+    elif version == 3:
+        _object(record, {"version", "schema", "plugin", "revision", "contract", "producers", "change"})
+        number = record["revision"]
+        if type(number) is not int or number < 1:
+            raise FootprintError("Invalid footprint contract revision")
+        contract = _object(record["contract"], {"profile", "effects", "recognizers"})
+        snapshot = {**contract, "producers": record["producers"]}
+        _validate_snapshot(snapshot)
+        change = record["change"]
+        _validate_change(change, number)
+    else:
+        raise FootprintError(f"Unsupported installed-footprint serialization version: {version}")
+    return Manifest(plugin, number, **snapshot, serialization_version=version, change=change)
 
 
-def require_append_only(previous: Any, current: Any, plugin: str) -> None:
-    """Source-diff guards can reject rewriting the compatibility/reset history."""
-    parse(previous, plugin)
-    parse(current, plugin)
-    old = previous["history"]
-    if current["history"][:len(old)] != old:
-        raise FootprintError("Published footprint history is append-only")
+def _contract_items(manifest: Manifest) -> dict[str, Any]:
+    items = _items({key: getattr(manifest, key) for key in ("profile", "effects", "recognizers", "producers")})
+    for category in PROFILE_LISTS:
+        for entry in manifest.profile[category]:
+            items[f"{category}:{entry}"] = {"scope": category, "entry": entry}
+    for name, effect in manifest.effects.items():
+        del items[f"effects:{name}"]
+        for key in ("kind", "scope", "disposition"):
+            items[f"effects:{name}:{key}"] = effect[key]
+        for entry in effect["entries"]:
+            items[f"effects:{name}:entry:{entry}"] = {
+                key: effect[key] for key in ("kind", "scope", "disposition")
+            } | {"entry": entry}
+    # Scope coverage changes matter; source hash refreshes do not.
+    for name in manifest.producers:
+        items[f"producers:{name}"] = True
+    return items
+
+
+def contract_delta(previous: Manifest, current: Manifest) -> dict[str, list[str]]:
+    before, after = _contract_items(previous), _contract_items(current)
+    return {
+        "introduced": sorted(after.keys() - before.keys()),
+        "changed": sorted(key for key in before.keys() & after.keys() if before[key] != after[key]),
+        "retired": sorted(before.keys() - after.keys()),
+    }
+
+
+def require_transition(previous: Any, current: Any, plugin: str) -> None:
+    """Require intentional semantic changes against the real published baseline."""
+    before, after = parse(previous, plugin), parse(current, plugin)
+    if after.serialization_version != 3:
+        raise FootprintError("Source declarations must use the current footprint serialization")
+    assessment = contract_delta(before, after)
+    if not any(assessment.values()):
+        if after.revision != before.revision or after.change != before.change:
+            raise FootprintError("Source-only changes must preserve the footprint revision and assessment")
+        return
+    if (after.revision != before.revision + 1 or after.change is None
+            or after.change["from_revision"] != before.revision
+            or after.change["delta"] != assessment):
+        raise FootprintError("Semantic footprint changes require the next revision and exact assessment")
+    old_items, new_items = _contract_items(before), _contract_items(after)
+    for identity, disposition in after.change["dispositions"].items():
+        if disposition["action"] == "retained":
+            target = disposition["target"]
+            if target not in new_items or new_items[target] != old_items[identity]:
+                raise FootprintError(f"Retired footprint is not retained by its declared target: {identity}")
 
 
 def _plain_path(path: Path) -> None:
@@ -247,7 +348,7 @@ def producer_problems(manifest: Manifest, payload: Path) -> list[str]:
     for relative, expected in manifest.producers.items():
         try:
             if producer_digest(payload, relative) != expected:
-                problems.append(f"{relative}: producer changed without its footprint revision/delta")
+                problems.append(f"{relative}: producer changed without refreshing its source digest")
         except (OSError, ValueError) as error:
             problems.append(f"{relative}: producer cannot be verified ({error})")
     return problems
