@@ -133,7 +133,7 @@ class SupervisorPoolPublication(SupervisorPoolSender):
                     revision, complete = self._bounded_read("pool-local-recheck", self._read_pool_local_inputs)
                     if self._source_observations["pool-local-recheck"].state != "fresh" or not complete:
                         reasons.append("local-input-recheck-not-fresh")
-                    if revision != snapshot.input_revision:
+                    if revision != snapshot.observation_revision:
                         reasons.append("local-inputs-changed")
                 except Exception as exc:
                     log.warning("pool local input capture unavailable: error_type=%s", type(exc).__name__)

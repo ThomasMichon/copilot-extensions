@@ -9,7 +9,7 @@ from concurrent.futures import Executor, Future
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from threading import Event
+from threading import Event, Lock
 from typing import TYPE_CHECKING, Any
 
 from .pool_publication_custody import (
@@ -23,10 +23,11 @@ from .single_instance import SingleInstance, SingletonAdmissionError
 log = logging.getLogger("agent-dispatch.supervisor-daemon")
 
 
-@dataclass(frozen=True)
+@dataclass
 class PoolMetadataFlight:
     request: PoolMetadataRequest
     future: Future[PoolPublicationScope]
+    acknowledged: PoolPublicationScope | None = None
 
 
 class SupervisorPoolSender:
@@ -47,9 +48,11 @@ class SupervisorPoolSender:
     def _init_pool_sender(self) -> None:
         self._pool_metadata_flight: PoolMetadataFlight | None = None
         self._pool_metadata_closed = Event()
+        self._pool_metadata_admission_lock = Lock()
 
     def _close_pool_metadata_admission(self) -> None:
-        self._pool_metadata_closed.set()
+        with self._pool_metadata_admission_lock:
+            self._pool_metadata_closed.set()
 
     @contextmanager
     def _pool_request_state(self, deadline: float) -> Iterator[None]:
@@ -76,6 +79,8 @@ class SupervisorPoolSender:
             if (
                 current.catalog != original.catalog
                 or any(reason.startswith("coordinator-") for reason in current.reasons)
+                or original.snapshot.observation_revision is None
+                or current.snapshot.observation_revision != original.snapshot.observation_revision
                 or current.snapshot.input_revision != original.snapshot.input_revision
                 or current.snapshot.definitions != original.snapshot.definitions
                 or current.reasons != original.reasons
@@ -121,6 +126,23 @@ class SupervisorPoolSender:
         finally:
             self._pool_capture_deadline.reset(token)
 
+    def _new_pool_metadata_flight(
+        self, request: PoolMetadataRequest, deadline: float,
+    ) -> PoolMetadataFlight:
+        with self._pool_metadata_admission_lock:
+            if self._pool_metadata_closed.is_set():
+                raise PoolPublicationError("pool metadata send admission is closed")
+            future = self._read_pool().submit(self._run_pool_metadata_send, request, deadline)
+            self._probe_inflight.add(future)
+            flight = PoolMetadataFlight(request, future)
+            self._pool_metadata_flight = flight
+            return flight
+
+    def _wait_pool_metadata_result(
+        self, flight: PoolMetadataFlight, deadline: float,
+    ) -> PoolPublicationScope:
+        return flight.future.result(timeout=max(0.0, deadline - time.monotonic()))
+
     def send_pool_metadata_request(self) -> PoolPublicationScope:
         """Send/recover only the original prepared request with a bounded wait.
 
@@ -137,16 +159,14 @@ class SupervisorPoolSender:
             request = custody.pending
             flight = self._pool_metadata_flight
             if flight is None or flight.request is not request:
-                future = self._read_pool().submit(self._run_pool_metadata_send, request, deadline)
-                self._probe_inflight.add(future)
-                flight = PoolMetadataFlight(request, future)
-                self._pool_metadata_flight = flight
+                flight = self._new_pool_metadata_flight(request, deadline)
         try:
-            result = flight.future.result(timeout=max(0.0, deadline - time.monotonic()))
+            result = self._wait_pool_metadata_result(flight, deadline)
             with self._pool_request_state(deadline):
-                if custody.settled == (request, result):
-                    return result
+                if flight.acknowledged is not None:
+                    return flight.acknowledged
                 custody.acknowledge(request, result)
+                flight.acknowledged = result
                 if self._pool_metadata_flight is flight:
                     self._pool_metadata_flight = None
         except Exception as exc:

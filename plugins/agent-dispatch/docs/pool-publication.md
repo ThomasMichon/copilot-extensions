@@ -156,7 +156,11 @@ its actual completion; discarding cached read data is not release of its work.
 This is **optimistic observed coherence**, not an atomic filesystem transaction
 or a remote attestation. The digest includes the entire observed declaration
 and override inputs, not just surviving workers; it is a correlation value and
-does not renew freshness. External file writers and the complete configured cohort remain integration
+does not renew freshness. A separate observation revision is retained even
+when complete definitions are unavailable. Unreadable, cached or uncopyable
+local inputs have no comparable observation revision and cannot authorize a
+write; equal unavailable reasons are not evidence that inputs stayed unchanged.
+External file writers and the complete configured cohort remain integration
 gates; the explicit sender's final recheck below is still optimistic, not an
 atomic filesystem fence.
 
@@ -189,6 +193,8 @@ probe/retirement/shutdown accounting. Concurrent callers reuse that future.
 A bounded caller timeout does not cancel, replace or forget the original RPC.
 Completed failures leave the immutable request pending; the next explicit
 invocation recovers it, not a newer input revision.
+Validated acknowledgment stays on that request-bound flight, so a delayed
+waiter cannot acknowledge an old result against a newer pending request.
 
 Recovery first reads the unfiltered catalog through the negotiated client. An
 already-accepted original generation/revision is parsed and checked against all
@@ -211,6 +217,9 @@ These are bounded, optimistic source checks, not atomic external-file fencing
 or remote OS-lock verification.
 
 Shutdown closes metadata-send admission before draining existing futures.
+Submission and future registration share a short admission guard with that
+close, separate from the source guard held by an admitted POST. Closed admission
+refuses a new flight; it does not prevent a retained flight from settling.
 A delayed preflight cannot initiate a new write after that close. An
 already-admitted POST remains under the original guard and future owner until it
 finishes; its caller's bounded wait and shutdown drain may return with visible

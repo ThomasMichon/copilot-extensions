@@ -6,7 +6,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from contextlib import nullcontext
 from dataclasses import replace
-from threading import Event
+from threading import Event, Lock
 from typing import Any
 
 import httpx
@@ -50,7 +50,7 @@ def test_explicit_send_begin_publish_and_unavailable_preserve_all_attribution(ow
     publish = daemon.prepare_pool_metadata_request()
     published = daemon.send_pool_metadata_request()
     assert published.definitions == publish.inputs.snapshot.definitions
-    daemon.overrides_source = lambda: {"invalid": 1}
+    daemon.declared_source = lambda: DeclarationRead((), False, "source-scan-unavailable")
     unavailable = daemon.prepare_pool_metadata_request()
     result = daemon.send_pool_metadata_request()
     assert result.state == "unavailable" and unavailable.reason
@@ -288,13 +288,28 @@ def test_shutdown_fences_delayed_preflight_even_with_original_lock_still_held(
             finish.set()
 
 
-def test_two_callers_share_one_original_future_without_duplicate_post(owner: Any) -> None:
+def test_two_callers_share_one_original_future_without_duplicate_post(
+    owner: Any, monkeypatch: Any,
+) -> None:
     daemon, queue, _calls = owner
     daemon.prepare_pool_metadata_request()
     sent = _sender(daemon, queue)
     started, finish, second = Event(), Event(), Event()
     read = daemon.client.pool_catalog_metadata
     reads = 0
+    waits = 0
+    joined = Lock()
+    wait = daemon._wait_pool_metadata_result
+
+    def joining(flight: Any, deadline: float) -> Any:
+        nonlocal waits
+        with joined:
+            waits += 1
+            if waits == 2:
+                second.set()
+        return wait(flight, deadline)
+
+    monkeypatch.setattr(daemon, "_wait_pool_metadata_result", joining)
 
     def slow() -> dict:
         nonlocal reads
@@ -307,18 +322,149 @@ def test_two_callers_share_one_original_future_without_duplicate_post(owner: Any
     daemon.client.pool_catalog_metadata = slow
     daemon._reconcile_call_budget = 1
 
-    def another() -> Any:
-        second.set()
-        return daemon.send_pool_metadata_request()
-
     with ThreadPoolExecutor(max_workers=2) as executor:
         first = executor.submit(daemon.send_pool_metadata_request)
         assert started.wait(1)
-        later = executor.submit(another)
+        later = executor.submit(daemon.send_pool_metadata_request)
         assert second.wait(1)
         finish.set()
         assert first.result(timeout=1) == later.result(timeout=1)
     assert len(sent) == 1 and daemon._pool_publisher_custody.pending is None
+
+
+def test_unavailable_observation_revision_detects_changed_valid_overrides(owner: Any) -> None:
+    daemon, queue, _calls = owner
+    _settle(daemon, queue)
+    _settle(daemon, queue)
+    daemon.declared_source = lambda: DeclarationRead((), False, "source-scan-unavailable")
+    daemon.overrides_source = lambda: {"worker-a": {"disabled": False, "reason": "first"}}
+    request = daemon.prepare_pool_metadata_request()
+    assert request.reason and request.inputs.snapshot.observation_revision
+    assert request.inputs.snapshot.input_revision is None and not request.inputs.snapshot.definitions
+    daemon.overrides_source = lambda: {"worker-a": {"disabled": False, "reason": "changed"}}
+    current = daemon.capture_pool_publication_inputs()
+    assert current.reasons == request.inputs.reasons
+    assert current.snapshot.observation_revision != request.inputs.snapshot.observation_revision
+    sent = _sender(daemon, queue)
+    with pytest.raises(PoolPublicationError, match="fences changed"):
+        daemon.send_pool_metadata_request()
+    assert not sent and daemon._pool_publisher_custody.pending is request
+
+
+def test_uncomparable_unavailable_sources_never_authorize_an_empty_write(owner: Any) -> None:
+    daemon, queue, _calls = owner
+    _settle(daemon, queue)
+    _settle(daemon, queue)
+    daemon.overrides_source = lambda: {"invalid": 1}
+    request = daemon.prepare_pool_metadata_request()
+    assert request.reason and request.inputs.snapshot.observation_revision is None
+    before = queue.pool_catalog_snapshot()
+    sent = _sender(daemon, queue)
+    with pytest.raises(PoolPublicationError, match="fences changed"):
+        daemon.send_pool_metadata_request()
+    assert not sent and queue.pool_catalog_snapshot() == before
+    assert daemon._pool_publisher_custody.pending is request
+
+
+def test_delayed_waiter_returns_its_ack_after_newer_request_settles(
+    owner: Any, monkeypatch: Any,
+) -> None:
+    daemon, queue, _calls = owner
+    original = daemon.prepare_pool_metadata_request()
+    sent = _sender(daemon, queue)
+    start, finish, joined, release = Event(), Event(), Event(), Event()
+    read = daemon.client.pool_catalog_metadata
+    wait = daemon._wait_pool_metadata_result
+    reads, waits = 0, 0
+    counter_lock = Lock()
+
+    def slow_read() -> dict:
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            start.set()
+            assert finish.wait(2)
+        return read()
+
+    def slow_wait(flight: Any, deadline: float) -> Any:
+        nonlocal waits
+        with counter_lock:
+            waits += 1
+            delayed = waits == 2
+        if delayed:
+            joined.set()
+            assert release.wait(2)
+        return wait(flight, deadline)
+
+    daemon.client.pool_catalog_metadata = slow_read
+    monkeypatch.setattr(daemon, "_wait_pool_metadata_result", slow_wait)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(daemon.send_pool_metadata_request)
+        assert start.wait(1)
+        delayed = executor.submit(daemon.send_pool_metadata_request)
+        try:
+            assert joined.wait(1)
+            finish.set()
+            result = first.result(timeout=1)
+            newer = daemon.prepare_pool_metadata_request()
+            newer_result = daemon.send_pool_metadata_request()
+            assert daemon._pool_publisher_custody.settled == (newer, newer_result)
+            release.set()
+            assert delayed.result(timeout=1) == result
+            assert daemon._pool_publisher_custody.settled == (newer, newer_result)
+            assert sent == [original.to_dict(), newer.to_dict()]
+        finally:
+            finish.set()
+            release.set()
+
+
+def test_submission_registration_and_admission_close_share_one_short_guard(
+    owner: Any, monkeypatch: Any,
+) -> None:
+    from agent_dispatch import supervisor_daemon
+
+    daemon, queue, _calls = owner
+    request = daemon.prepare_pool_metadata_request()
+    sent = _sender(daemon, queue)
+    submitted, register, reading, finish, closing = (Event() for _ in range(5))
+    read = daemon.client.pool_catalog_metadata
+
+    class PausingInventory(set):
+        def add(self, future: Any) -> None:
+            submitted.set()
+            assert register.wait(2)
+            super().add(future)
+
+    def slow() -> dict:
+        reading.set()
+        assert finish.wait(2)
+        return read()
+
+    def shutdown() -> bool:
+        closing.set()
+        return daemon.shutdown()
+
+    daemon._probe_inflight = PausingInventory(daemon._probe_inflight)
+    daemon.client.pool_catalog_metadata = slow
+    monkeypatch.setattr(supervisor_daemon, "_SHUTDOWN_GRACE_SECONDS", 0.01)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        sender = executor.submit(daemon.send_pool_metadata_request)
+        try:
+            assert submitted.wait(1) and reading.wait(1)
+            drain = executor.submit(shutdown)
+            assert closing.wait(1) and not drain.done()
+            register.set()
+            assert not drain.result(timeout=1)
+            assert daemon._pool_metadata_flight.future in daemon._probe_inflight
+            finish.set()
+            with pytest.raises(PoolPublicationError, match="admission is closed"):
+                sender.result(timeout=1)
+            assert not sent and daemon._pool_publisher_custody.pending is request
+            with pytest.raises(PoolPublicationError, match="admission is closed"):
+                daemon.send_pool_metadata_request()
+        finally:
+            register.set()
+            finish.set()
 
 
 @pytest.mark.parametrize("field", [

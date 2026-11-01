@@ -288,17 +288,22 @@ class SupervisorSources(SupervisorPoolPublication):
                 desired, machine=self.machine, env=self.env, attempt=self._source_attempt,
                 observed_at=observed_at, observations=self._source_observations.values(), reasons=reasons,
             )
-            if self._pool_source_snapshot.complete:
-                try:
-                    revision = local_input_revision(
-                        self._local_source_inputs["declarations"], self._local_source_inputs["overrides"],
-                    )
-                except (KeyError, TypeError, ValueError):
-                    self._pool_source_snapshot = replace(
-                        self._pool_source_snapshot, definitions=(), reasons=("local-input-revision-unavailable",),
-                    )
-                else:
-                    self._pool_source_snapshot = replace(self._pool_source_snapshot, input_revision=revision)
+            try:
+                revision = local_input_revision(
+                    self._local_source_inputs["declarations"], self._local_source_inputs["overrides"],
+                )
+            except (KeyError, TypeError, ValueError):
+                self._pool_source_snapshot = replace(
+                    self._pool_source_snapshot, definitions=(),
+                    reasons=tuple(sorted(set(self._pool_source_snapshot.reasons) | {
+                        "local-input-revision-unavailable",
+                    })),
+                )
+            else:
+                self._pool_source_snapshot = replace(
+                    self._pool_source_snapshot, observation_revision=revision,
+                    input_revision=revision if self._pool_source_snapshot.complete else None,
+                )
             if (not self._pool_source_snapshot.complete
                     and self._pool_source_snapshot.reasons != self._last_pool_source_reasons):
                 log.warning("effective pool collection unavailable: reasons=%s", self._pool_source_snapshot.reasons)
