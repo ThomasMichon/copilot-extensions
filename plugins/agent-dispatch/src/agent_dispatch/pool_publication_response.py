@@ -3,10 +3,71 @@
 from __future__ import annotations
 
 import math
+import re
 
 from .pool_instances import PoolDefinitionError, PoolInstanceDefinition, ordered_pool_instances
 from .pool_publication_custody import PoolPublicationError
 from .queue_pool_catalog import PoolPublicationScope
+from .queue_pool_cohort import PoolConfiguredCohort
+from .registrar_configuration import ConfiguredSupervisorCohort, SupervisorScopeIntent
+
+
+def read_pool_configured_cohort(value: object) -> PoolConfiguredCohort:
+    """Read the whole retained observation; missing support is handled separately."""
+    if not isinstance(value, dict) or (
+        type(value.get("revision")) is not int or value["revision"] < 0
+        or "observation" not in value
+    ):
+        raise PoolPublicationError("pool catalog configured cohort is malformed")
+    revision = value["revision"]
+    raw = value["observation"]
+    if revision == 0 and raw is None:
+        return PoolConfiguredCohort(0, None)
+    if revision == 0 or not isinstance(raw, dict) or not {
+        "state", "source_revision", "revision", "members", "reason",
+    } <= raw.keys():
+        raise PoolPublicationError("pool catalog configured observation is malformed")
+    source = raw["source_revision"]
+    if (
+        source is not None and (
+            not isinstance(source, str) or re.fullmatch("[0-9a-f]{64}", source) is None
+        )
+        or not isinstance(raw["reason"], str) or not isinstance(raw["members"], list)
+    ):
+        raise PoolPublicationError("pool catalog configured observation has invalid evidence")
+    members = []
+    for member in raw["members"]:
+        if not isinstance(member, dict) or any(
+            not isinstance(member.get(key), str) or not member[key].strip()
+            or member[key] != member[key].strip()
+            for key in ("machine", "execution_machine", "env")
+        ):
+            raise PoolPublicationError("pool catalog configured member identity is malformed")
+        members.append(SupervisorScopeIntent(
+            member["machine"], member["execution_machine"], member["env"],
+        ))
+    if len({(member.execution_machine, member.env) for member in members}) != len(members):
+        raise PoolPublicationError("pool catalog configured cohort has duplicate execution scopes")
+    if raw["state"] == "complete":
+        if (
+            type(raw["revision"]) is not int or raw["revision"] < 0
+            or source is None or raw["reason"]
+        ):
+            raise PoolPublicationError("pool catalog complete cohort lacks configured evidence")
+        observation = ConfiguredSupervisorCohort(
+            "complete", source, raw["revision"],
+            tuple(sorted(members, key=lambda member: (member.execution_machine, member.env))),
+        )
+    elif raw["state"] in ("unconfirmed", "unavailable"):
+        if raw["revision"] is not None or members or not raw["reason"].strip():
+            raise PoolPublicationError("pool catalog uncertain cohort cannot present members")
+        observation = ConfiguredSupervisorCohort(
+            "unconfirmed" if raw["state"] == "unconfirmed" else "unavailable",
+            source, None, (), raw["reason"],
+        )
+    else:
+        raise PoolPublicationError("pool catalog configured observation has unsupported state")
+    return PoolConfiguredCohort(revision, observation)
 
 
 def read_pool_scope(value: object) -> PoolPublicationScope:

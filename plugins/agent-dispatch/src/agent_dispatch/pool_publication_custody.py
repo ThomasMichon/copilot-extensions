@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal
 
 from .pool_source_snapshot import PoolSourceSnapshot
 from .queue_pool_catalog import PoolPublicationScope
+from .queue_pool_cohort import PoolConfiguredCohort
 
 if TYPE_CHECKING:
     from .pool_instances import PoolInstanceDefinition
@@ -30,10 +31,21 @@ class PoolCatalogRead:
     registration_revision: int
     positions: tuple[PoolPublisherPosition, ...]
     scopes: tuple[PoolPublicationScope, ...] = ()
+    configured_cohort: PoolConfiguredCohort | None = None
+
+    def permits_scope(self, machine: str, env: str) -> bool:
+        cohort = self.configured_cohort
+        if cohort is None or cohort.revision == 0:
+            return True
+        observation = cohort.observation
+        return observation is not None and observation.complete and any(
+            (member.execution_machine, member.env) == (machine, env)
+            for member in observation.members
+        )
 
     @classmethod
     def from_dict(cls, value: object) -> PoolCatalogRead:
-        from .pool_publication_response import read_pool_scope
+        from .pool_publication_response import read_pool_configured_cohort, read_pool_scope
 
         if not isinstance(value, dict) or (
             value.get("protocol") != "pool_catalog_transport/v1"
@@ -64,7 +76,11 @@ class PoolCatalogRead:
                 *identity, scope["publisher_id"], scope["generation"], scope["revision"],
             ))
             scopes.append(read_pool_scope(scope))
-        return cls(value["registration_revision"], tuple(positions), tuple(scopes))
+        cohort = (
+            read_pool_configured_cohort(value["configured_cohort"])
+            if "configured_cohort" in value else None
+        )
+        return cls(value["registration_revision"], tuple(positions), tuple(scopes), cohort)
 
 
 @dataclass(frozen=True)
@@ -82,6 +98,7 @@ class PoolPublicationInputs:
         return (
             not self.reasons and self.snapshot.complete
             and self.snapshot.input_revision is not None and self.catalog is not None
+            and self.catalog.permits_scope(self.machine, self.env)
             and self.local_recheck_revision == self.snapshot.input_revision
         )
 
@@ -97,6 +114,12 @@ class PoolMetadataRequest:
     reason: str | None = None
 
     @property
+    def expected_cohort_revision(self) -> int | None:
+        catalog = self.inputs.catalog
+        cohort = None if catalog is None else catalog.configured_cohort
+        return cohort.revision if cohort is not None and cohort.revision > 0 else None
+
+    @property
     def input_revision(self) -> str:
         if self.reason is not None:
             return f"unavailable:{self.inputs.snapshot.attempt}"
@@ -110,6 +133,8 @@ class PoolMetadataRequest:
             "version": 1, "machine": self.inputs.machine, "env": self.inputs.env,
             "publisher_id": self.inputs.publisher_id,
         }
+        if self.expected_cohort_revision is not None:
+            body["expected_cohort_revision"] = self.expected_cohort_revision
         if self.operation == "begin":
             body["expected_generation"] = self.generation
         else:
@@ -148,6 +173,17 @@ class PoolPublisherCustody:
             raise PoolPublicationError("pool metadata requires current coordinator inputs from the original acquisition")
         catalog = inputs.catalog
         assert catalog is not None
+        if not catalog.permits_scope(inputs.machine, inputs.env):
+            raise PoolPublicationError("configured pool cohort is uncertain or excludes the execution scope")
+        if self.settled is not None:
+            original = self.settled[0].inputs.catalog
+            prior_cohort = None if original is None else original.configured_cohort
+            cohort = catalog.configured_cohort
+            if prior_cohort is not None and prior_cohort.revision > 0 and (
+                cohort is None or cohort.revision < prior_cohort.revision
+                or cohort.revision == prior_cohort.revision and cohort != prior_cohort
+            ):
+                raise PoolPublicationError("pool configured cohort changed without a current revision")
         current = next(
             (position for position in catalog.positions
              if (position.machine, position.env) == (inputs.machine, inputs.env)), None,
@@ -162,6 +198,12 @@ class PoolPublisherCustody:
             if current != self.position:
                 raise PoolPublicationError("pool publisher position changed; refusing revision rebase")
             assert current is not None
+            retained = next(
+                (scope for scope in catalog.scopes
+                 if (scope.machine, scope.env) == (inputs.machine, inputs.env)), None,
+            )
+            if self.settled is None or retained != self.settled[1]:
+                raise PoolPublicationError("pool publisher retained scope changed; refusing attribution rebase")
             reason = None if inputs.coherent else ";".join(inputs.reasons or inputs.snapshot.reasons)
             if reason == "":
                 raise PoolPublicationError("unavailable pool input observation has no reason")
@@ -177,11 +219,21 @@ class PoolPublisherCustody:
         if catalog is None:
             raise PoolPublicationError("pool metadata request has no original catalog observation")
         expected_generation = request.generation + (request.operation == "begin")
+        previous = next(
+            (scope for scope in catalog.scopes
+             if (scope.machine, scope.env) == (request.inputs.machine, request.inputs.env)), None,
+        )
+        if request.operation == "publish" and previous is None:
+            raise PoolPublicationError("pool metadata request has no original enrollment attribution")
+        expected_enrollment = (
+            request.expected_cohort_revision if request.operation == "begin"
+            else previous.enrollment_cohort_revision if previous is not None else None
+        )
         if (
             (result.machine, result.env, result.publisher_id)
             != (request.inputs.machine, request.inputs.env, self.publisher_id)
             or result.generation != expected_generation
-            or result.enrollment_cohort_revision is not None
+            or result.enrollment_cohort_revision != expected_enrollment
             or (request.operation == "begin" and (
                 result.revision != 0 or result.state != "pending" or result.reason is not None
             ))
@@ -195,10 +247,6 @@ class PoolPublisherCustody:
         ):
             raise PoolPublicationError("pool metadata result failed its original request fences")
         if request.operation == "begin":
-            previous = next(
-                (scope for scope in catalog.scopes
-                 if (scope.machine, scope.env) == (result.machine, result.env)), None,
-            )
             baseline = (
                 ((), None, None, None, None, None, None) if previous is None else (
                     previous.definitions, previous.definitions_generation,
@@ -220,7 +268,8 @@ class PoolPublisherCustody:
             ]
             if request.reason is None:
                 expected = (
-                    request.inputs.snapshot.definitions, result.generation, result.revision, None,
+                    request.inputs.snapshot.definitions, result.generation, result.revision,
+                    request.expected_cohort_revision,
                 )
             else:
                 if self.settled is None:
