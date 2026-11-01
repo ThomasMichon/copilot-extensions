@@ -14,9 +14,11 @@ def test_model_free_context_helpers():
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is required for the model-free SDK helper packet")
-    test_file = Path(__file__).parents[1] / "skill-selection-spike.test.mjs"
+    test_directory = Path(__file__).parents[1]
     result = subprocess.run(
-        [node, "--test", "--test-reporter=tap", str(test_file)],
+        [node, "--test", "--test-reporter=tap",
+         str(test_directory / "skill-selection-spike.test.mjs"),
+         str(test_directory / "skill-selection-contract.test.mjs")],
         capture_output=True,
         text=True,
         timeout=30,
