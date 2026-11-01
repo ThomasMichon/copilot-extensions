@@ -51,11 +51,14 @@ For an installer that can be killed while its incumbents are paused, use
 `retirement-custody` extra, and obtain context-managed pins with
 `custody.pin(pid, birth)`. One attributed finite worker owns the actual pins
 outside the production caller's Windows Jobs or Linux process group. Windows
-uses the already-adopted launch broker and authenticated private pipe; Linux
+uses the attributed native launch and authenticated private pipe; Linux
 inherits one anonymous socketpair and the original caller's pidfd. The worker
 never discovers targets or adds update authority. Caller death, a closed
-lifeline, or a 30-second idle deadline resumes all remaining originals before
+lifeline, or a 210-second idle deadline resumes all remaining originals before
 worker exit. Normal close confirms kernel exit and settles the instance record.
+The idle grace includes a finite 180-second Windows ownership census between
+control requests. Peer-death checks remain active during that wait; per-request
+control and native termination budgets are unchanged.
 An ambiguous native resume retains the live pin without blindly repeating
 Windows suspend-count changes; the worker waits for that original's exit and
 the caller reports unsettled custody. No hard-kill cleanup is permitted while

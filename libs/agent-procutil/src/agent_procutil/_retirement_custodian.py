@@ -46,7 +46,9 @@ def serve(channel, owner_pid: int) -> None:
     try:
         write_frame(channel, {"ready": True}, Deadline(10))
         while True:
-            deadline = Deadline(30)
+            # The caller may be completing a finite 180-second native census.
+            # Peer checks still detect caller loss while this idle grace runs.
+            deadline = Deadline(210)
             request = read_frame(channel, deadline)
             channel.check_peer(deadline)
             operation, pid = request.get("operation"), request.get("pid")

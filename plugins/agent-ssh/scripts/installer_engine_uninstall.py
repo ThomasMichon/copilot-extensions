@@ -722,7 +722,8 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
     if os.name == "nt":
         native = _load(_dependency(payload, "installer_engine_uninstall_windows.py"))
         rows = native.inspect_processes(
-            root, shell, profile.module, lambda command: _run(payload, command),
+            # Whole-census SID/birth queries need more time than single-operation probes.
+            root, shell, profile.module, lambda command: _run(payload, command, timeout=180),
             descendants=descendants,
         )
     elif sys.platform.startswith("linux") and Path("/proc").is_dir():
