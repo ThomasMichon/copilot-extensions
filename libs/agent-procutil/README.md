@@ -443,6 +443,10 @@ retains its strict owned Job. Ordinary callers keep the existing guardian.
 the enclosing read cutoff, reserving a quarter-second for its bounded completion
 frame and retaining cleanup time inside that earlier bound. POSIX callers pass
 that nested budget to the guardian, also capped by the individual call timeout.
+The target keeps its individual execution allowance; guardian read time adds
+only cleanup/publication allowance within the aggregate deadline. A short
+individual timeout does not subtract the aggregate cleanup reserve from the
+target's available execution time.
 Consumers align their own nested work with its `execution_deadline`, rather
 than merely advancing execution while allowing cleanup past the reader's cutoff. Confirmed-cleanup timeouts retain bounded raw
 partial streams; no partial result is treated as successful execution.

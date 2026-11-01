@@ -965,18 +965,14 @@ jobs:
           --test-file tests/test_reviewer_source.py
           -k test_windows_command_shim_uses_cmd
 
-  owned-budget-native:
+  owned-budget-native-linux:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.owned_budget }}
-    name: Borrowed budget native (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    name: Borrowed budget native (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
-    steps:
+    steps: &owned-budget-native-steps
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -1016,6 +1012,14 @@ jobs:
               )
           raise SystemExit(result)
           PY
+  owned-budget-native-macos:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.owned_budget }}
+    name: Borrowed budget native (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps: *owned-budget-native-steps
   interactive-completion-linux:
     if: ${{ inputs.interactive_completion }}
     name: Owned foreground completion (Linux)
