@@ -1662,6 +1662,16 @@ jobs:
           python tools/run-plugin-tests.py agent-codespaces --allow-explicit-tiers
           --test-file tests/test_installer_engine_adoption.py
           -k "native_batch_installs or library_install_order_retry_and_errors"
+      - name: Qualify coupled Codespaces preinstall source-closure and reinstall contracts
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp --allow-explicit-tiers
+          --test-file tests/test_source_install_transactions.py
+          -k codespaces_native_preinstall_accepts_noneditable_local_sources
+      - name: Qualify Dispatch retry, extras, cutoff and materialized-source arguments
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch --allow-explicit-tiers
+          --test-file tests/test_installer_engine_adoption.py
+          -k "package_retry_keeps_optional_extra_and_exact_exit_code or materialized_snapshot_admits_install_without_authoring_checkout"
       - name: Qualify the complete coupled Logger batch and offline first-use packet
         run: >-
           python tools/run-plugin-tests.py agent-logger --allow-explicit-tiers

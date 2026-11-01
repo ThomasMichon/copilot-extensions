@@ -356,7 +356,7 @@ exit $result.ExitCode
     calls = [json.loads(line) for line in Path(env["TEST_UV_LOG"]).read_text().splitlines()]
     assert len(calls) == (1 if mode == "fatal" else 3)
     for actual in calls:
-        assert actual[:-3] == ["pip", "install", *args, "--no-editable", "--link-mode", "copy"]
+        assert actual[:-3] == ["pip", "install", *args, "--link-mode", "copy"]
         assert actual[-3] == "--exclude-newer"
         assert actual[-1] == "--reinstall"
         cutoff = datetime.fromisoformat(actual[-2].replace("Z", "+00:00"))
@@ -1043,7 +1043,7 @@ exit $result.ExitCode
     assert len(calls) == 2
     assert calls[1][:-3] == [
         "pip", "install", "--python", sys.executable, f"{snapshot}[mcp]",
-        "--no-editable", "--link-mode", "copy",
+        "--link-mode", "copy",
     ]
     assert calls[1][-3] == "--exclude-newer"
     assert calls[1][-1] == "--reinstall"

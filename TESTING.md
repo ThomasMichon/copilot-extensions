@@ -1,13 +1,16 @@
 # Testing copilot-extensions
 
 The optional `uv_deployment_compatibility` native-acceptance selector runs the
-focused retained-dependency policy, Codespaces cold/warm installation and full
-coupled Logger batch/binstub packets on Linux and Windows at the exact dispatch
+focused retained-dependency policy, Codespaces cold/warm installation,
+MCP/Dispatch caller compatibility and full coupled Logger batch/binstub packets
+on Linux and Windows at the exact dispatch
 SHA. It covers canonical editable mappings frozen only for deployment, original
 manifest preservation, explicit editable refusal and unchanged developer APIs.
 Codespaces and the native Logger batch controls execute actual UV; Logger's
-offline first-use package-effects/backend fixture remains synthetic. The
-thirty-minute jobs and twenty-minute Logger packet allowance include existing
+offline first-use package-effects/backend fixture remains synthetic.
+MCP/Dispatch controls retain source-closure, reinstall, extras, cutoff, retry
+and exact-exit checks through their fixture UV capture.
+The thirty-minute jobs and twenty-minute Logger packet allowance include existing
 preparation and cleanup costs, not a production installer deadline or speed
 claim. Pair this selector with `source_cache=true` for the ordinary constructor's
 hash-pinned real-backend controls. Neither selector qualifies installed-host
