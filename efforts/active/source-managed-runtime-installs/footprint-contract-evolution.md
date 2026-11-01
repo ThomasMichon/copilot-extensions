@@ -151,7 +151,7 @@ nor a source merge qualifies native installation, live replacement or rollout.
   legacy dispositions or inventing an automatic migration chain.
 - [x] Wire construction, shared/native uninstall, source/materialization guards
   and canonical helper shipping to the same provider and document.
-- [ ] Qualify the matrix below, journal actual source closure and return to the
+- [x] Qualify the matrix below, journal actual source closure and return to the
   parent Plan/Validation Plan; do not declare installation/adoption complete.
 
 ## Validation Plan
@@ -174,15 +174,18 @@ nor a source merge qualifies native installation, live replacement or rollout.
   legacy-manifest reader; current-manifest size is independent of source history.
 - [x] Shared/native removers and constructors consume the same current contract;
   protected data, locks, provenance and uncertain native custody remain unchanged.
-- [ ] Canonical fan-out, packaging/materialization, installer-contract controls
+- [x] Canonical fan-out, packaging/materialization, installer-contract controls
   and the exact-source no-effect packet cover the changed implementation.
   Native and installed acceptance run only through their existing authorized lanes.
 
 The focused source packet passed 227 controls, including the real predecessor
 document/reader, copied constructor and inventory pairings, exact read boundaries,
 materialization and nine positively admitted no-effect unit additions. The
-install-contract guard passes for all 13 plugins. Full exact-source no-effect
-execution, implementation review/merge and parent reconciliation remain required.
+install-contract guard passes for all 13 plugins. The complete cold no-effect packet passed 3,184 controls against the exact
+published correction with one coverage collection and an empty effect ledger;
+independent packet verification passed. #9799 merged after exact-head approval
+and all required checks. Source implementation is closed; the parent installation,
+native footprint/effect, replacement and adopter gates remain open.
 
 The optional native removal portfolio is not this source packet. A developer-host
 run exposed the existing passwd-home isolation gap #9614 and non-isolated process
@@ -190,7 +193,8 @@ inspection refusals. Its incomplete payload fixtures now ship the actual invento
 helper and provider before ownership publication; that fixture correction is not
 positive native qualification. Complete native removal remains in the existing
 #7028 acceptance lane with an isolated account/process namespace and unchanged
-production admission. No real account, process, installation or rollout changed.
+production admission. No production account, process or installation changed,
+and no rollout was performed.
 
 ## See also
 
