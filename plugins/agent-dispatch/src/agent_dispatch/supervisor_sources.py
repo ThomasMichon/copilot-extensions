@@ -48,6 +48,8 @@ class SupervisorSources(SupervisorPoolPublication):
 
     def _init_source_collection(self) -> None:
         self._source_collection_lock = threading.RLock()
+        self._declaration_reader_lock = threading.Lock()
+        self._override_reader_lock = threading.Lock()
         self._pool_capture_deadline: ContextVar[float | None] = ContextVar("pool_capture_deadline", default=None)
         self._local_source_inputs: dict[str, object] = {}
         self._last_override_veto: set[str] | None = None
@@ -101,6 +103,25 @@ class SupervisorSources(SupervisorPoolPublication):
             if future.done():
                 self._discovery_futures.pop(key, None)
 
+    def _read_source_declarations(self, read: Callable[[], Iterable[Any]]) -> Iterable[Any]:
+        with self._declaration_reader_lock:
+            source = read()
+            values = tuple(source)
+            return DeclarationRead(values, source.complete, source.reason) if isinstance(source, DeclarationRead) else values
+
+    def _read_source_overrides(self) -> Mapping[str, dict]:
+        from . import overrides as ov
+
+        with self._override_reader_lock:
+            if self.overrides_source is not None:
+                data = self.overrides_source()
+                ov.validate_overrides(data)
+            else:
+                from .config import overrides_path
+
+                data = ov.load_overrides(overrides_path(), strict=True)
+            return {key: dict(record) for key, record in data.items()}
+
     def _store_registrations(self) -> list[dict]:
         publisher = self._declaration_publisher
         epoch = publisher.withdrawal_epoch if publisher is not None else 0
@@ -145,7 +166,7 @@ class SupervisorSources(SupervisorPoolPublication):
         from .registrar_reconcile import declared_registrations
 
         def read() -> tuple[list[dict], bool, str]:
-            source = declared_source()
+            source = self._read_source_declarations(declared_source)
             registrations = declared_registrations(list(source), machine=self.machine, env=self.env)
             return (
                 registrations, isinstance(source, DeclarationRead) and source.complete,
@@ -184,18 +205,8 @@ class SupervisorSources(SupervisorPoolPublication):
         """Read the same veto once; preserve legacy behavior on failed reads."""
         from . import overrides as ov
 
-        def read() -> Mapping[str, dict]:
-            if self.overrides_source is not None:
-                data = self.overrides_source()
-                ov.validate_overrides(data)
-            else:
-                from .config import overrides_path
-
-                data = ov.load_overrides(overrides_path(), strict=True)
-            return {key: dict(record) for key, record in data.items()}
-
         try:
-            data = self._bounded_read("overrides", read)
+            data = self._bounded_read("overrides", self._read_source_overrides)
         except (CancelledError, TimeoutError) as exc:
             self._observe_source("overrides", "cached" if self._last_override_veto is not None else "pending")
             if self._last_override_veto is None:

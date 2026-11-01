@@ -142,6 +142,12 @@ existing future owner, preserving every still-pending operation.
 Valid outer override mappings are normalized without dropping vetoes.
 If a valid record cannot be copied into revision evidence, its veto still
 applies to legacy desired state while complete publication stays unavailable.
+Collection and rechecks execute each stateful declaration/override callback
+through the same per-source reader guard, including lazy iterable consumption.
+A timed-out read remains tracked and serialized until it actually finishes;
+it cannot overwrite a newer confirmed deletion through another future key.
+Caller waits still consume their existing deadline instead of waiting
+synchronously for that reader guard.
 
 This is **optimistic observed coherence**, not an atomic filesystem transaction
 or a remote attestation. The digest includes the entire observed declaration

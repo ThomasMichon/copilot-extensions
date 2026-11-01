@@ -39,6 +39,8 @@ class SupervisorPoolPublication:
         _effective_registrations: Callable[[], dict[str, dict]]
         _bounded_read: Callable[[str, Callable], Any]
         _prune_probe_inflight: Callable[[], None]
+        _read_source_declarations: Callable[[Callable[[], Iterable[Any]]], Iterable[Any]]
+        _read_source_overrides: Callable[[], Mapping[str, dict]]
 
     def _init_pool_publication(self) -> None:
         self._pool_publisher_custody: PoolPublisherCustody | None = None
@@ -97,21 +99,14 @@ class SupervisorPoolPublication:
                 self._pool_capture_deadline.reset(token)
 
     def _read_pool_local_inputs(self) -> tuple[str, bool]:
-        from . import overrides as ov
         from .registrar_reconcile import declared_registrations
 
-        source = self.declared_source() if self.declared_source is not None else None
+        source = self._read_source_declarations(self.declared_source) if self.declared_source is not None else None
         declarations = declared_registrations(
             list(source) if source is not None else [], machine=self.machine, env=self.env,
         )
         complete = source is None or isinstance(source, DeclarationRead) and source.complete
-        if self.overrides_source is None:
-            from .config import overrides_path
-
-            overrides = ov.load_overrides(overrides_path(), strict=True)
-        else:
-            overrides = self.overrides_source()
-            ov.validate_overrides(overrides)
+        overrides = self._read_source_overrides()
         return local_input_revision(copy.deepcopy(declarations), copy.deepcopy(dict(overrides))), complete
 
     def capture_pool_publication_inputs(self) -> PoolPublicationInputs:
