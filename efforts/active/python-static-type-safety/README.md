@@ -268,3 +268,7 @@ composition prerequisites, and review/validation rules.
   length limit. Promotion commit and tag messages now use UTF-8 stdin, verified
   by a real oversized non-ASCII message round trip. No message truncation,
   alternative candidate, signing change or publication occurred.
+- Hosted P3 qualification exposed Linux's eager `ctypes` binding on collection.
+  Ownership mocking now belongs only to the promotion unit adapter and imports
+  the native owner only on Windows. The original library test is unchanged;
+  no shared-library payload changes or unnecessary consumer bumps are included.

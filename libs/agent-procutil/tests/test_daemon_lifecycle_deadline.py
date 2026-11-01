@@ -10,7 +10,6 @@ from types import SimpleNamespace
 import pytest
 
 from agent_procutil import _daemon_instance_store as store
-from agent_procutil import _daemon_instance_owner as owner
 from agent_procutil.daemon_instances import DaemonInstanceReceipt, InstanceCleanupResult, TEST_CONTEXT_ENV
 
 
