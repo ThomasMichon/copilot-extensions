@@ -4,10 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, reviewed PRs targeting `dev`; one active slice per worktree.
 - **Created:** 2026-10-31
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** Create or reuse a scoped issue before each implementation slice; #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation); create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -72,8 +72,8 @@ rewrite.
 
 ### Phase 0 - Reviewed campaign
 
-- [ ] Land this plan and the baseline through the normal review gate; verify the literal Request and confirmed policy before execution.
-- [ ] Publish the agreed decomposition on #9807 and create/reuse scoped implementation issues as slices are selected.
+- [x] Land this plan and the baseline through the normal review gate; verify the literal Request and confirmed policy before execution.
+- [x] Publish the agreed decomposition on #9807 and create/reuse scoped implementation issues as slices are selected.
 
 ### Phase 1 - Checker foundation and first admission
 
@@ -147,3 +147,9 @@ composition prerequisites, and review/validation rules.
 - Compatible target-owned efforts adoption was verified; this repository's flat effort layout and normal `dev` PR gate apply.
 - A read-only census and progressive checker baseline were captured before source implementation. The composition probe changed no runtime code.
 - The plan is proposed for review. No CI enforcement or project activation has been delivered yet.
+
+### 2026-10-31 - Reviewed plan and first implementation slice
+
+- #9829 merged after a current-head Copilot approval with no findings and green required CI. The source worktree was pulled forward onto the reviewed plan.
+- The reviewed decomposition and baseline were linked on #9807; #9831 owns P1's local checker, full inventory and initial strict source qualification.
+- The active slice transitions from `Phase 0 - Reviewed campaign` to `Phase 1 - Checker foundation and first admission`. P2/P3 retain actual PR/release enforcement; no implemented or live gate is claimed by plan completion.
