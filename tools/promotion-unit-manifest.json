@@ -3433,7 +3433,9 @@
         "tools/promotion_unit_tests/test_standalone_artifacts.py::test_construction_pair_source_binding_refuses_each_changed_included_member[True-streaming.py]",
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_streaming_packet_writer_settles_without_reopening_sources[False]",
         "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_streaming_packet_writer_settles_without_reopening_sources[True]",
-        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_relay_launch_uses_the_verified_bytes_not_its_file"
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_retained_relay_launch_uses_the_verified_bytes_not_its_file",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_canonical_streaming_implementations_are_measured[streaming]",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py::test_canonical_streaming_implementations_are_measured[relay]"
     ],
     "sources": {
         "libs/configuration-layers/src/configuration_layers/__init__.py": "e522797fe6207e3648705759db4234936df60bcf255b36deb23f8d400b52a890",
@@ -3757,7 +3759,7 @@
         "tools/promotion_unit_tests/test_chat_collaboration.py": "c0cb983e6dfd36ee892f825797c7be9de124626544f958f09d0179a81c8b9fbe",
         "tools/promotion_unit_tests/test_ci_contract.py": "7647bcab50ac82c4dedf740f21b49997fedd9b1e8d16d5aab5336771528ed7f4",
         "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py": "45dcd38499372b6e9cc055d05ea34b4d18f4788001fd23df6ecf3b0a684baf97",
-        "tools/promotion_unit_tests/test_client_guardian_resources.py": "8938d60e5bc582826f14ea0cf7f7d821ab2efdb2e48cb66b5df02d82ea311603",
+        "tools/promotion_unit_tests/test_client_guardian_resources.py": "64edaa19e02255e48e2e057ae8d3997f57437490a06b76ad28e4113ee578f841",
         "tools/promotion_unit_tests/test_collector.py": "1c37ceb50ff79dd135d4f27d6fc605accfab1899a0de03455bf1abb50a882ce4",
         "tools/promotion_unit_tests/test_complete_source.py": "a7967ba6269846c143078bdb774d2103273304538708e471be5b5d81aa1091be",
         "tools/promotion_unit_tests/test_complete_source_publication.py": "bd65baaf55b459a2bcb596b211d515fd02aa053e93961d96944c11f87abf3a91",

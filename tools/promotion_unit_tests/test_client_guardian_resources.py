@@ -79,7 +79,7 @@ def test_accounting_resource_defers_native_binding_and_reuses_one_layout(monkeyp
 
 @pytest.mark.parametrize("failed", [False, True])
 def test_retained_streaming_packet_writer_settles_without_reopening_sources(
-    installed, monkeypatch, failed,
+    installed, monkeypatch, failed, _canonical=False,
 ):
     construction, _, evidence = installed_procutil(installed, monkeypatch)
 
@@ -125,8 +125,14 @@ def test_retained_streaming_packet_writer_settles_without_reopening_sources(
         args=["fixture"], stdin=Input(), stdout=io.BytesIO(b"out"),
         stderr=io.BytesIO(b"err"), poll=lambda: 0, text_mode=False,
     )
-    with construction._procutil_resource(evidence) as package:
+    with construction._procutil_resource(evidence) as package, monkeypatch.context() as modules:
         streaming = sys.modules[package.__name__ + ".streaming"]
+        if _canonical:
+            name = package.__name__ + ".measured_streaming"
+            modules.setitem(sys.modules, name, ModuleType(name))
+            streaming = _load_source(
+                name, ROOT / "libs/agent-procutil/src/agent_procutil/streaming.py",
+            )
         monkeypatch.setattr(streaming.threading, "Thread", Thread)
         monkeypatch.setattr(streaming.selectors, "DefaultSelector", Selector)
         capture = streaming.SyncProcessOutput(process, input_bytes=b"complete packet")
@@ -142,7 +148,7 @@ def test_retained_streaming_packet_writer_settles_without_reopening_sources(
 
 
 def test_retained_relay_launch_uses_the_verified_bytes_not_its_file(
-    installed, monkeypatch,
+    installed, monkeypatch, _canonical=False,
 ):
     construction, _, evidence = installed_procutil(installed, monkeypatch)
     calls = []
@@ -151,9 +157,16 @@ def test_retained_relay_launch_uses_the_verified_bytes_not_its_file(
         calls.append((argv, options))
         raise RuntimeError("fixture launch stopped before native execution")
 
-    with construction._procutil_resource(evidence) as package:
+    with construction._procutil_resource(evidence) as package, monkeypatch.context() as modules:
         relay = sys.modules[package.__name__ + "._output_relay"]
         retained = relay._retained_source_bytes
+        if _canonical:
+            name = package.__name__ + ".measured_relay"
+            modules.setitem(sys.modules, name, ModuleType(name))
+            relay = _load_source(
+                name, ROOT / "libs/agent-procutil/src/agent_procutil/_output_relay.py",
+            )
+            relay._retained_source_bytes = retained
         monkeypatch.setattr(package, "spawn_sync_in_kill_on_close_job", launch)
         monkeypatch.setattr(relay, "Path", lambda *_: pytest.fail("reopened relay path"))
         with pytest.raises(RuntimeError, match="fixture launch stopped"):
@@ -164,6 +177,19 @@ def test_retained_relay_launch_uses_the_verified_bytes_not_its_file(
     assert base64.b64encode(retained).decode("ascii") in argv[4]
     assert argv[5] == "--copy"
     assert options["allow_breakaway"] is False
+
+
+@pytest.mark.parametrize("member", ["streaming", "relay"])
+def test_canonical_streaming_implementations_are_measured(installed, monkeypatch, member):
+    if member == "streaming":
+        for failed in (False, True):
+            test_retained_streaming_packet_writer_settles_without_reopening_sources(
+                installed, monkeypatch, failed, _canonical=True,
+            )
+    else:
+        test_retained_relay_launch_uses_the_verified_bytes_not_its_file(
+            installed, monkeypatch, _canonical=True,
+        )
 
 
 @pytest.mark.parametrize("platform", ["posix", "nt"])
