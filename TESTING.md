@@ -2269,19 +2269,21 @@ The selector also runs independent six-minute Logger Linux/Windows batch jobs.
 and materialized payloads must make two governed calls, retain every local
 root and named reinstall, stop before activation on either transaction's
 failure, and skip package work for a reused construction. Real UV installs
-fixture build prerequisites and eight local distributions into a fresh
+fixture build prerequisites and nine local distributions into a fresh
 unseeded slot, then refreshes a same-version source edit. Build isolation and
 seasoning remain enabled. The existing offline full-provision fixture checks
 the same batching against the real Logger package, health and publication flow.
 Its snapshot-only first-use control removes the original payload and libraries
 before invoking the compatibility wrapper. The UV emulator supplies private
-package effects and cache discovery, but uses the declared setuptools/wheel
-development inputs and native offline UV wheel builds. The actual foundation
+package effects and cache discovery, copies the fixture backend into a synthetic
+setuptools package, and invokes it directly through Python. It does not use the
+declared setuptools/wheel distributions or qualify native UV/backend execution.
+The actual foundation
 constructor, source/wheel verification, native custody and runtime health remain
 enabled; successful first use must include a recorded wheel build. Native stamp
 and first-use subprocess limits stay at 60 and 420 seconds.
-The outer observation window is 720 seconds to include release-payload
-materialization and real backend staging before those individually bounded calls;
+The outer observation window is 600 seconds to include release-payload
+materialization and synthetic backend staging before those individually bounded calls;
 it does not extend either native subprocess or constructor phase allowance.
 Logger's existing Windows retry fixtures allow 180 seconds for their native
 subprocess and 210 seconds per item: three/four-attempt cases exceeded the old

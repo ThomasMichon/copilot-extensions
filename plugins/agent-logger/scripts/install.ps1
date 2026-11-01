@@ -897,6 +897,7 @@ function Materialize-SnapshotLibs {
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
     $libraries = [ordered]@{
+        'agent-configuration-layers' = 'configuration-layers'
         'agent-config-migrate' = 'config-migrate'
         'agent-procutil' = 'agent-procutil'
         'agent-zdd' = 'zdd'
