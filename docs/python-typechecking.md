@@ -30,6 +30,12 @@ host platform and interpreter version. A check never silently installs packages
 or falls back to another interpreter; missing preparation prints the exact
 command to run.
 
+Preparation captures one immutable flat requirements export, then uses those
+same bytes for both the environment key and installation. Nested requirement
+includes are refused until a complete graph snapshot is qualified. The dependency
+install subprocess has a five-minute bound. Cache-path validation stays independent of Python
+3.11-only installer imports, preserving the checker's Python 3.10 bootstrap.
+
 `--enforced` is the default when no project name or selector is supplied. It
 validates the complete physical-Python inventory, then checks admitted projects
 at their declared levels and interpreter/platform targets. The summary keeps

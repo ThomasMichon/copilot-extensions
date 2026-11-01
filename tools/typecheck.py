@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "libs" / "installer-engine"))
 from tools._admission_protocol import acquire as acquire_environment  # noqa: E402
-from tools.plugin_test_cache import ordinary_cache_root  # noqa: E402
+from tools.cache_directory_paths import ordinary_cache_root  # noqa: E402
 from installer_dependency_policy import run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
 
@@ -138,7 +138,16 @@ def _run(argv: list[str], root: Path, *, env: dict[str, str] | None = None) -> s
 
 def python_paths(root: Path = ROOT) -> tuple[str, ...]:
     """Include staged, unstaged and untracked non-ignored developer files."""
-    result = _run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], root)
+    selectors = {
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    }
+    env = {
+        key: value for key, value in os.environ.items()
+        if key.upper() not in selectors and not key.upper().startswith("GIT_CONFIG")
+    }
+    env.update(GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1", GIT_OPTIONAL_LOCKS="0")
+    result = _run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], root, env=env)
     if result.returncode:
         raise TypecheckError(result.stderr.strip() or "Git inventory failed")
     paths = sorted({path for path in result.stdout.split("\0") if path.endswith(".py")})
@@ -164,12 +173,25 @@ def inventory(paths: tuple[str, ...], projects: tuple[Project, ...]) -> dict[str
     return owners
 
 
-def environment_path(root: Path, project: Project) -> tuple[Path, str]:
+def requirements_bytes(root: Path, project: Project) -> bytes:
+    """Capture one flat lock; includes need a separately qualified graph snapshot."""
     requirements = root.joinpath(*project.requirements.split("/"))
     if not requirements.is_file() or not requirements.resolve().is_relative_to(root.resolve()):
         raise TypecheckError(f"{project.name}: requirements must exist inside the repository")
+    contents = requirements.read_bytes()
+    for line in contents.splitlines():
+        option = line.strip()
+        if option.startswith(b"-") and not option.startswith(b"--hash=sha256:"):
+            raise TypecheckError(f"{project.name}: checker requirements must be a flat hash-locked export")
+    return contents
+
+
+def environment_path(
+    root: Path, project: Project, *, captured_lock: bytes | None = None,
+) -> tuple[Path, str]:
+    contents = requirements_bytes(root, project) if captured_lock is None else captured_lock
     digest = hashlib.sha256(
-        requirements.read_bytes()
+        contents
         + f"\n{sys.version_info[:2]!r}\n{sys.platform}".encode("ascii")
     ).hexdigest()
     path = root / ".test-venvs" / "typecheck" / sys.platform / digest[:20]
@@ -186,7 +208,8 @@ def prepare(root: Path, project: Project) -> None:
     uv = shutil.which("uv")
     if uv is None:
         raise TypecheckError("uv is required for --prepare")
-    path, digest = environment_path(root, project)
+    contents = requirements_bytes(root, project)
+    path, digest = environment_path(root, project, captured_lock=contents)
     path.mkdir(parents=True, exist_ok=True)
     lease = acquire_environment(0, path)
     try:
@@ -201,10 +224,12 @@ def prepare(root: Path, project: Project) -> None:
         after = path.stat()
         if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
             raise TypecheckError("uv replaced the leased checker environment directory")
+        snapshot = path / "typecheck-requirements.txt"
+        snapshot.write_bytes(contents)
         result = run_uv_install(
             uv, ["--python", str(environment_python(path)), "--require-hashes",
-                 "-r", str(root.joinpath(*project.requirements.split("/")))],
-            cwd=root, trusted_source_roots=(root,), check=True,
+                 "-r", str(snapshot)],
+            cwd=root, trusted_source_roots=(root,), check=True, timeout=300,
         )
         if result.returncode:
             raise TypecheckError("Checker dependency preparation failed")

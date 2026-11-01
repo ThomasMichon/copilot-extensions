@@ -41,6 +41,40 @@ def test_directory_prefixes_do_not_claim_neighboring_components() -> None:
     assert not item.owns("plugins/sample/tests/test_module.py")
 
 
+def test_checker_bootstrap_does_not_require_python311_imports() -> None:
+    """Exercise the import closure without the modules that broke Python 3.10."""
+    source = (
+        "import builtins, sys\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "original = builtins.__import__\n"
+        "def guarded(name, *args, **kwargs):\n"
+        "    if name in {'tomllib', 'installer_engine'}:\n"
+        "        raise ImportError('Python 3.11-only import reached')\n"
+        "    return original(name, *args, **kwargs)\n"
+        "builtins.__import__ = guarded\n"
+        "import tools.typecheck\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", source, str(typecheck.ROOT)],
+        capture_output=True, text=True, timeout=30,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_git_inventory_ignores_foreign_repository_selectors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The actual Git process inventories the explicit source root, not a wrapper's."""
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "foreign.git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(tmp_path / "foreign-index"))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.bare")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+    assert "tools/typecheck.py" in typecheck.python_paths(typecheck.ROOT)
+
+
 def test_manifest_rejects_duplicate_keys_and_path_escape(tmp_path: Path) -> None:
     """Malformed ownership cannot relax the checker policy."""
     tools = tmp_path / "tools"
@@ -109,15 +143,67 @@ class Lease:
         self.released = True
 
 
+def test_preparation_installs_the_same_lock_bytes_that_keyed_the_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A changed original cannot replace the snapshot admitted under the old digest."""
+    requirements = tmp_path / "requirements.txt"
+    initial = b"mypy==1.18.2\n"
+    requirements.write_bytes(initial)
+    lease = Lease()
+    captured: list[bytes] = []
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        requirements.write_bytes(b"mypy==0.1\n")
+        return lease
+
+    def which(_name: str) -> str:
+        return "uv"
+
+    def run(
+        argv: list[str], _root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def install(
+        _uv: str, arguments: list[str], *, cwd: Path,
+        trusted_source_roots: tuple[Path, ...], check: bool, timeout: int,
+    ) -> subprocess.CompletedProcess[str]:
+        captured.append(Path(arguments[arguments.index("-r") + 1]).read_bytes())
+        assert timeout == 300
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    monkeypatch.setattr(shutil, "which", which)
+    monkeypatch.setattr(typecheck, "_run", run)
+    monkeypatch.setattr(typecheck, "run_uv_install", install)
+    typecheck.prepare(tmp_path, project())
+    assert captured == [initial]
+    assert lease.released
+    requirements.write_bytes(initial)
+    path, digest = typecheck.environment_path(tmp_path, project())
+    assert (path / ".typecheck-prepared").read_text(encoding="utf-8").strip() == digest
+
+
+def test_preparation_refuses_unqualified_requirement_includes(tmp_path: Path) -> None:
+    """A mutable include graph cannot pretend to be a one-file lock snapshot."""
+    (tmp_path / "requirements.txt").write_text("-r elsewhere.txt\n", encoding="utf-8")
+    with pytest.raises(typecheck.TypecheckError, match="flat hash-locked export"):
+        typecheck.environment_path(tmp_path, project())
+
+
 def test_preparation_refuses_replaced_leased_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Preparation cannot switch filesystem identities beneath the shared lease."""
+    (tmp_path / "requirements.txt").write_text("mypy==1.18.2\n", encoding="utf-8")
     environment = tmp_path / "environment"
     environment.mkdir()
     lease = Lease()
 
-    def environment_path(_root: Path, _project: typecheck.Project) -> tuple[Path, str]:
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
         return environment, "test-context"
 
     def acquire(_wait: float, _path: Path) -> Lease:
@@ -150,7 +236,9 @@ def test_checker_timeout_settles_targets_and_environment_lease(
     (tmp_path / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
     lease = Lease()
 
-    def environment_path(_root: Path, _project: typecheck.Project) -> tuple[Path, str]:
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
         return tmp_path, "test-context"
 
     def environment_python(_path: Path) -> Path:
@@ -199,7 +287,9 @@ def test_actual_mypy_rejects_type_regressions(
     (environment / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
     lease = Lease()
 
-    def environment_path(_root: Path, _project: typecheck.Project) -> tuple[Path, str]:
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
         return environment, "test-context"
 
     def environment_python(_path: Path) -> Path:
