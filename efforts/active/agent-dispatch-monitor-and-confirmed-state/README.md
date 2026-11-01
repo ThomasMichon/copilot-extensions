@@ -1770,3 +1770,21 @@ explicit-target refusal. Ruff, focused placement typing, the enforced admitted
 type scopes, module-size ceilings, install contracts and documentation consistency
 pass. This remains prepared source evidence: current-head review/merge,
 supervisor caller migration, retry budgets and all parent/native gates remain open.
+
+### 2026-11-01 - Historical exclusive holder and pre-acceptance host correction prepared
+
+Fresh reservation now fences an accountable historical pool holder of the same
+exclusive key under the existing write lock, including pending native release
+with spare pool capacity. Active replay remains observation-only, and a fresh
+same-task attempt waits for its pending historical retirement. Exact retirement
+permits the sibling to proceed without changing the active-owner index.
+
+The existing retained-CLI location owner prefers validated `execution_machine`,
+so failed startup before affirmative acceptance can still probe the original
+native. Accepted owner/attachment evidence remains the legacy fallback, and
+invalid recorded machine data remains unknown rather than adopting the observer.
+Final contained validation passed **1192 controls** across the same sixteen
+selectors, with eleven added sibling/exact-retirement, pre-acceptance probe and
+legacy/invalid-location controls. Focused placement typing and changed Python
+lint pass. Current-head review, actual merge, caller/startup-policy integration
+and all canonical parent/native gates remain open.

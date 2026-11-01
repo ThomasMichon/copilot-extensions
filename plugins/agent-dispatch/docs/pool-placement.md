@@ -52,6 +52,10 @@ is still pending, without misclassifying that intent as proven absence.
 The supervisor observes that native without ending or concluding a successor's
 workspace. Historical retirement preserves workspace-cleanup metadata; cleanup,
 rearm and allocation replacement remain excluded while native release is pending.
+Fresh sibling reservation cannot overtake an unreleased historical exclusive-key
+holder whose native, startup or transport remains accountable, even with spare
+pool capacity. Existing active replay remains observation-only; a fresh attempt
+of the same task also waits while its historical native release is pending.
 Failure, rearm and native retirement alone do not prove original startup closure.
 Capacity is released only after its startup is completed or fenced and its
 native and transport evidence permits that release. An active replay returns
@@ -72,6 +76,10 @@ and native owner. Preparation records `execution_machine` independently of
 creation provenance instead of being relabeled as newly created. Workspace
 recording and start both recheck that execution machine and current exclusions
 against the retained supplied capabilities and current intrinsic requirements.
+Retained CLI liveness and cleanup use the validated recorded execution machine
+even before worker acceptance creates an owner or attachment. Legacy rows without
+that field still resolve location from their accepted owner/attachment evidence,
+never the observer's host.
 Native publication and start consult the shared driver-qualified retirement
 history. A distinct replacement native clears only a handleless inherited
 retirement marker; it cannot overwrite a retained native identity or revive a

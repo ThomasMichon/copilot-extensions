@@ -188,6 +188,25 @@ def select_pool(
     raise TaskError("no eligible pool instance has capacity")
 
 
+def require_historical_exclusivity(conn: sqlite3.Connection, task: Task) -> None:
+    """A fresh reservation cannot overtake an accountable historical holder."""
+    if conn.execute(
+        "SELECT 1 FROM spawn_reservations WHERE task_id = ? "
+        "AND native_release_pending = 1 LIMIT 1", (task.id,),
+    ).fetchone():
+        raise TaskError("task has pending historical native retirement; placement is waiting")
+    if task.exclusive_key is None:
+        return
+    holders = conn.execute(
+        "SELECT s.* FROM spawn_reservations s "
+        "JOIN pool_reservation_bindings p ON p.reservation_key = s.key "
+        "WHERE s.exclusive_key = ? AND s.task_id <> ? AND s.exclusive_released = 0",
+        (task.exclusive_key, task.id),
+    ).fetchall()
+    if any(reservation_accountable(conn, holder) for holder in holders):
+        raise TaskError("exclusive key has accountable historical execution; placement is waiting")
+
+
 def record_pool_claim(
     conn: sqlite3.Connection, task: Task, pool: PoolInstanceDefinition,
     key: str, catalog_revision: int, *, ts: float,

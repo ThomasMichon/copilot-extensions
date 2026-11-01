@@ -303,6 +303,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                             raise TaskError("active reservation conflicts with requested allocation revision")
                         conn.execute("COMMIT")
                         return SpawnReservation._from_row(row), False, assigned_pool
+            from .queue_pool_placement import require_historical_exclusivity
+            require_historical_exclusivity(conn, task)
             require_execution_send_reconciliation(
                 conn, task_id, exclusive_key=task.exclusive_key, creation_prefix=creation_prefix,
             )

@@ -142,6 +142,85 @@ def test_historical_release_and_current_replay_serialize_without_rebinding(q):
         place(q, task(q))
 
 
+@pytest.mark.parametrize("pending", [False, True])
+@pytest.mark.parametrize("legacy_reserve", [False, True])
+def test_spare_capacity_cannot_overtake_a_historical_sibling_exclusive_holder(q, pending, legacy_reserve):
+    publish(q, pool(capacity=3))
+    old_task = task(q, exclusive_key="shared")
+    old, _ = place(q, old_task)
+    record_native(q, old)
+    q.record_spawn(old.key, session_handle="native", startup_complete=True, startup_revision=1)
+    q.fail_spawn(old.key)
+    if pending:
+        q.request_spawn_release(old.key)
+    sibling = task(q, exclusive_key="shared")
+    before = q.get_reservation(old.key)
+    with pytest.raises(TaskError, match="accountable historical execution"):
+        if legacy_reserve:
+            q.reserve_spawn(sibling.id, reserved_by="legacy", driver="cli")
+        else:
+            place(q, sibling)
+    assert q.get(sibling.id) == sibling
+    assert q.task_pool_assignment(sibling.id) is None
+    assert q.list_reservations(task_id=sibling.id) == []
+    assert q.get_reservation(old.key) == before
+    if not pending:
+        q.request_spawn_release(old.key)
+    q.retire_spawn(old.key, exact_absence=True)
+    assert place(q, sibling)[1]
+
+
+def test_pending_historical_retirement_blocks_a_fresh_same_task_attempt(q):
+    publish(q, pool(capacity=3))
+    t = task(q)
+    old, _ = place(q, t)
+    record_native(q, old)
+    q.start(t.id, "host-a/worktree", owner_session_id="native",
+            expected_generation=q.get(t.id).generation)
+    q.fail_spawn(old.key)
+    q.yield_task(t.id, "host-a/worktree")
+    q.request_spawn_release(old.key, finished_startup_revision=1)
+    before = q.get(t.id)
+    with pytest.raises(TaskError, match="pending historical native retirement"):
+        place(q, before)
+    assert q.get(t.id) == before
+    assert q.task_pool_assignment(t.id).reservation_key == old.key
+    assert len(q.list_reservations(task_id=t.id)) == 1
+
+
+@pytest.mark.parametrize("verdict", [tracking.LIVE, tracking.UNKNOWN, tracking.GONE])
+def test_pre_acceptance_failure_probes_its_recorded_execution_host(q, verdict):
+    publish(q, pool(capacity=2))
+    t = task(q)
+    old, _ = place(q, t)
+    record_native(q, old)
+    q.record_spawn(old.key, session_handle="native", startup_complete=True, startup_revision=1)
+    q.fail_spawn(old.key)
+    q.request_spawn_release(old.key)
+    assert q.get(t.id).owner is None and q.get(t.id).owner_session_id is None
+    assert q.attachment_history(t.id) == []
+    probes = []
+    supervisor = Supervisor(
+        QueueBackedClient(q), machine="observer", supervisor_id="allocator",
+        spawn_fn=lambda _: pytest.fail("no spawn"),
+        verdict_fn=lambda *args: probes.append(args) or verdict,
+        attempt_conclusion_fn=lambda *args, **kw: pytest.fail("no workspace conclusion"),
+    )
+    assert supervisor.release_requested_bodies() == int(verdict == tracking.GONE)
+    assert probes == [("worktree", "host-a", "native")]
+    assert q.get_reservation(old.key).native_release_pending is (verdict != tracking.GONE)
+
+
+@pytest.mark.parametrize("recorded", [None, "", 3])
+def test_recorded_execution_host_preserves_legacy_fallback_but_rejects_invalid_values(q, recorded):
+    t, old, _ = carried_retry(q)
+    supervisor = Supervisor(QueueBackedClient(q), machine="observer", spawn_fn=lambda _: (False, {}))
+    snapshot = {**asdict(q.get_reservation(old.key)), "execution_machine": recorded}
+    assert supervisor._retained_cli_machine(snapshot, asdict(q.get(t.id))) == (
+        "host-a" if recorded is None else None
+    )
+
+
 @pytest.mark.parametrize("terminal", [False, True])
 def test_release_retains_a_late_handleless_replacement_without_retired_marker(q, terminal):
     _, _, retry = retired_predecessor_retry(q)
