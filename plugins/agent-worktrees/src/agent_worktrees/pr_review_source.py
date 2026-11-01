@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import base64
 import hashlib
 import json
 import math
@@ -13,7 +14,7 @@ import time
 
 from agent_procutil.owned_process import OutputLimitExceeded, OwnedCleanupError, run_caller_owned
 
-from .git_ops import _NO_HOOKS_PATH, repository_identity_env
+from .git_repository_environment import _NO_HOOKS_PATH, repository_identity_env
 from .git_tree_diff import _path_batches, parse as parse_tree_diff
 
 _OID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
@@ -34,6 +35,28 @@ def _path(value):
     ):
         raise SourceIncomplete("invalid_native_path")
     return value[1:]
+
+
+def _owned_git(root, checkpoint, deadline, environment, maximum, args,
+               *, limit=None, input_text=None, codes=(0,)):
+    checkpoint()
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SourceIncomplete("deadline_exhausted")
+    output = run_caller_owned(
+        ["git", "--no-lazy-fetch", "--no-replace-objects", "-c", "core.fsmonitor=false",
+         "-c", "core.longpaths=true", "-c", "protocol.allow=never",
+         "-c", f"core.hooksPath={_NO_HOOKS_PATH}", *args],
+        cwd=root, env=environment, timeout=remaining,
+        max_stdout_bytes=min(maximum, maximum if limit is None else limit),
+        max_stderr_bytes=8192, input_text=input_text, binary=True,
+    )
+    checkpoint()
+    if time.monotonic() >= deadline:
+        raise SourceIncomplete("deadline_exhausted")
+    if output.returncode not in codes:
+        raise SourceIncomplete("git_operation_failed")
+    return output
 
 
 class LocalReviewSource:
@@ -64,6 +87,129 @@ class LocalReviewSource:
             "backend_access": False, "fetch": False, "checkout": False,
             "retention": "immutable_git_refs", "resource_owner": "existing_workspace_owner",
         }
+
+    @staticmethod
+    def read_contract():
+        return {
+            "schema": "agent-pull-requests.local-source-read-contract", "version": 1,
+            "fetch": False, "checkout": False, "working_tree": False,
+            "range": "verified_retained_refs", "effects": "none",
+        }
+
+    def read_retained(self, manifest, path, side, *, budget, max_bytes=1024 * 1024):
+        self.checkpoint()
+        if (
+            not isinstance(manifest, dict) or manifest.get("complete") is not True
+            or manifest.get("schema") != "agent-pull-requests.local-source"
+            or type(manifest.get("version")) is not int or manifest["version"] != 1
+            or manifest.get("errors") != [] or not isinstance(manifest.get("files"), list)
+            or not isinstance(manifest.get("revision"), dict)
+            or manifest.get("scope") != self.scope or manifest.get("workspace_id") != self.workspace_id
+            or manifest.get("id") != _digest({k: v for k, v in manifest.items() if k != "id"})
+            or side not in ("before", "after")
+            or type(budget) not in (int, float) or not math.isfinite(budget) or budget <= 0
+            or type(max_bytes) is not int or max_bytes <= 0
+        ):
+            raise SourceIncomplete("invalid_source_read_selection")
+        selected_path = _path(path)
+        matches = [row for row in manifest.get("files", []) if isinstance(row, dict) and row.get("path") == selected_path]
+        if len(matches) != 1:
+            raise SourceIncomplete("source_path_not_selected")
+        revision = manifest.get("revision") or {}
+        head, common, iteration = (revision.get(k) for k in ("head_sha", "common_sha", "iteration"))
+        if (
+            not isinstance(head, str) or _OID.fullmatch(head) is None
+            or not isinstance(common, str) or _OID.fullmatch(common) is None
+            or len(head) != len(common) or type(iteration) is not int or iteration <= 0
+        ):
+            raise SourceIncomplete("invalid_retained_range")
+        prefix = "refs/agent-pull-requests/source/" + _digest({
+            "scope": self.scope, "workspace_id": self.workspace_id,
+            "head_sha": head, "common_sha": common, "iteration": iteration,
+        })
+        references = {role: {"ref": prefix + "/" + role, "object_id": oid}
+                      for role, oid in (("head", head), ("common", common))}
+        if manifest.get("retained_refs") != references:
+            raise SourceIncomplete("retained_range_mismatch")
+        environment = repository_identity_env()
+        environment.update(GIT_NO_LAZY_FETCH="1", GIT_OPTIONAL_LOCKS="0")
+        deadline = time.monotonic() + budget
+
+        def git(*args, **kwargs):
+            return _owned_git(self.root, self.checkpoint, deadline, environment,
+                              max_bytes + 512, args, **kwargs)
+
+        def finish(value):
+            self.checkpoint()
+            if time.monotonic() >= deadline:
+                raise SourceIncomplete("deadline_exhausted")
+            return value
+
+        for retained in references.values():
+            symbolic = git("symbolic-ref", "--quiet", retained["ref"], limit=256, codes=(0, 1, 128))
+            if symbolic.returncode == 0:
+                raise SourceIncomplete("symbolic_retained_ref")
+            observed = git("show-ref", "--verify", "--hash", retained["ref"], limit=128)
+            if observed.stdout.decode().strip() != retained["object_id"]:
+                raise SourceIncomplete("retained_ref_conflict")
+        commit = head if side == "after" else common
+        raw = git("ls-tree", "--full-tree", "-z", commit, "--", ":(literal)" + selected_path).stdout
+        metadata = matches[0].get(side)
+        result = {
+            "schema": "agent-pull-requests.local-source-read", "version": 1,
+            "source_id": manifest["id"], "path": path, "side": side,
+            "content": None, "encoding": None, "effects": "none",
+        }
+        if metadata is None and not raw:
+            return finish(dict(result, available=False, classification="absent"))
+        match = re.fullmatch(rb"([0-7]{6}) (blob|tree|commit) ([0-9a-f]+)\t(.+)\0", raw, re.DOTALL)
+        if match is None or match[4].decode("utf-8") != selected_path:
+            raise SourceIncomplete("source_tree_entry_mismatch")
+        mode, kind, oid = (part.decode() for part in match.group(1, 2, 3))
+        if metadata is None and mode == "040000" and kind == "tree":
+            return finish(dict(result, available=False, classification="container"))
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("classification") not in ("text", "binary", "symlink", "gitlink")
+            or (mode, kind, oid) != (
+            metadata.get("mode"), metadata.get("type"), metadata.get("object_id"),
+            )
+        ):
+            raise SourceIncomplete("source_blob_mapping_mismatch")
+        result.update(available=True, object_id=oid, mode=mode, classification=metadata["classification"])
+        if mode == "160000" and kind == "commit" and metadata["classification"] == "gitlink":
+            return finish(result)
+        if mode not in ("100644", "100755", "120000") or kind != "blob":
+            raise SourceIncomplete("unsupported_source_blob")
+        framed = git("cat-file", "--batch", input_text=oid + "\n").stdout
+        header, sep, remainder = framed.partition(b"\n")
+        parsed = re.fullmatch(rb"([0-9a-f]+) blob ([0-9]+)", header)
+        if not sep or parsed is None or parsed[1].decode() != oid:
+            raise SourceIncomplete("invalid_source_blob_frame")
+        size = int(parsed[2])
+        if size > max_bytes or size != metadata.get("size") or len(remainder) != size + 1 or remainder[-1:] != b"\n":
+            raise SourceIncomplete("source_blob_size_mismatch")
+        body = remainder[:-1]
+        algorithm = hashlib.sha1 if len(oid) == 40 else hashlib.sha256
+        if algorithm(b"blob " + str(size).encode() + b"\0" + body).hexdigest() != oid:
+            raise SourceIncomplete("source_blob_identity_mismatch")
+        try:
+            text = body.decode("utf-8")
+            classification = "binary" if b"\0" in body else "text"
+        except UnicodeError:
+            text, classification = None, "binary"
+        if mode == "120000":
+            classification = "symlink"
+        if metadata["classification"] != classification:
+            raise SourceIncomplete("source_blob_classification_mismatch")
+        result["size"] = size
+        if mode != "120000" and metadata["classification"] == "text":
+            if b"\0" in body:
+                raise SourceIncomplete("source_blob_classification_mismatch")
+            result.update(encoding="utf-8", content=text)
+        else:
+            result.update(encoding="base64", content=base64.b64encode(body).decode("ascii"))
+        return finish(result)
 
     def inspect_and_retain(
         self, request: dict, *, budget: float, max_paths: int = 20000,
@@ -101,24 +247,9 @@ class LocalReviewSource:
         environment.update(GIT_NO_LAZY_FETCH="1", GIT_OPTIONAL_LOCKS="0")
 
         def git(*args, limit=max_output_bytes, input_text=None, codes=(0,)):
-            self.checkpoint()
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise SourceIncomplete("deadline_exhausted")
-            output = run_caller_owned(
-                ["git", "--no-lazy-fetch", "--no-replace-objects", "-c", "core.fsmonitor=false",
-                 "-c", "core.longpaths=true", "-c", "protocol.allow=never",
-                 "-c", f"core.hooksPath={_NO_HOOKS_PATH}", *args],
-                cwd=self.root, env=environment, timeout=remaining,
-                max_stdout_bytes=min(limit, max_output_bytes), max_stderr_bytes=8192,
-                input_text=input_text, binary=True,
-            )
-            self.checkpoint()
-            if time.monotonic() >= deadline:
-                raise SourceIncomplete("deadline_exhausted")
-            if output.returncode not in codes:
-                raise SourceIncomplete("git_operation_failed")
-            return output
+            return _owned_git(self.root, self.checkpoint, deadline, environment,
+                              max_output_bytes, args, limit=limit,
+                              input_text=input_text, codes=codes)
 
         blobs = {}
         trees = {}

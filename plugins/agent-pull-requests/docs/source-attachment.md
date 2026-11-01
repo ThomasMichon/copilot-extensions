@@ -79,3 +79,9 @@ attachment reuse, eviction or installed-owner adoption.
 For file/directory transitions, an actual tree container at a path is not a file
 side. The manifest retains absent file sides plus the complete separately mapped
 child paths; it does not misclassify the container as a missing blob.
+## Tool-host retained reads
+
+The [workspace tool façade](workspace-tools.md) uses this same attachment envelope
+and the supplied LocalReviewSource's separate retained-read API. Source contents
+are read from exact verified refs/objects, not cached manifests or mutable files.
+This does not add workspace adoption, allocation or network preparation.

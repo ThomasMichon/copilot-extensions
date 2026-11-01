@@ -1,5 +1,9 @@
 # Existing-owner workspace service/client API
 
+The [source tool/CLI façade](workspace-tools.md) exposes these operations inside
+an actual existing host binding, with a separate existing-owner retained source
+reader. It adds no installed owner, service, credentials or acquisition fallback.
+
 `WorkspaceOperations` composes the existing `OwnerReadHandler`,
 `GenerationCache`, `ReplayStore` and protected `execute_review`. It performs no
 provisioning/adoption, source fetching, installation or credential acquisition.

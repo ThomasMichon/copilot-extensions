@@ -215,6 +215,22 @@ contract.
 
 ## Journal
 
+### 2026-11-01 - Reviewed tool/read source realization
+- #9832 merged as `a3c3d1bf977256b20454f2e61c5d576a3a8a2b51`
+  from head `c183a42fb55b3248fa9f1b600762201ebfbdf3c0` after actual approval
+  and required CI success. Implement its optional existing-CLI/tool façade over
+  the current workspace clients and exact retained-source reader.
+- Actual source CLI/module, tool dispatch, atomic owner and local Git consumers
+  pass 79 cases with existing CLI/native consumers. Existing source-inspector
+  controls pass 24 cases and Git environment alias/isolation controls pass four.
+  Source dependency failures exposed a heavy registry/auth import in the prepared
+  reader; extract the existing pure environment helper with original aliases,
+  not another credential client or added production dependency.
+- Exact shallow source acquisition remains unsupported: broad default-base
+  preparation/full-remote fetch is not a narrow review object factory. Actual
+  registered resource selection/preparation and host adoption remain external;
+  this source work performs no backend, service, installer or credential action.
+
 ### 2026-11-01 - Read completion disposition source boundary
 - #9822 merged as `a8bf25cf135cdf4f6a50df971fe13167464ff16b`
   from head `0f5074866439cc09f08f003ca60aef2f8e19e253` after actual approval

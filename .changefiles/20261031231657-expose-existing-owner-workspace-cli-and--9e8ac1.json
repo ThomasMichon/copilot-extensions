@@ -1,0 +1,9 @@
+{
+  "comment": "Expose existing-owner workspace CLI and callable tool surface",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
