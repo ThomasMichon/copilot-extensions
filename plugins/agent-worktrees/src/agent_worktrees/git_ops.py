@@ -23,6 +23,11 @@ from pathlib import Path
 from agent_procutil import no_window_kwargs
 
 from . import env_scrub, git_tree_diff, push_timeout
+from .git_repository_environment import (
+    _NO_HOOKS_PATH as _NO_HOOKS_PATH,
+    _REPOSITORY_CONTEXT_ENV as _REPOSITORY_CONTEXT_ENV,
+    repository_identity_env as repository_identity_env,
+)
 from .git_errors import GitError, _redact_args as _redact_args
 from .repos_registry_reader import RepositoryResolutionError
 from .github_credentials import (
@@ -32,47 +37,6 @@ from .github_credentials import (
 )
 
 log = logging.getLogger("agent-worktrees")
-
-_REPOSITORY_CONTEXT_ENV = frozenset({
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_CEILING_DIRECTORIES",
-    "GIT_COMMON_DIR",
-    "GIT_CONFIG",
-    "GIT_CONFIG_COUNT",
-    "GIT_CONFIG_PARAMETERS",
-    "GIT_DIR",
-    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-    "GIT_GRAFT_FILE",
-    "GIT_IMPLICIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_INTERNAL_SUPER_PREFIX",
-    "GIT_NAMESPACE",
-    "GIT_NO_REPLACE_OBJECTS",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_PREFIX",
-    "GIT_QUARANTINE_PATH",
-    "GIT_REPLACE_REF_BASE",
-    "GIT_SHALLOW_FILE",
-    "GIT_WORK_TREE",
-})
-
-
-def repository_identity_env(environment: dict[str, str] | None = None) -> dict[str, str]:
-    """Remove inherited Git context; probes supply their checkout via ``git -C``.
-    Other environment variables remain unchanged.
-    """
-    env = env_scrub.scrub_python_runtime_env(dict(os.environ if environment is None else environment))
-    for name in list(env):
-        upper = name.upper()
-        if (
-            upper in _REPOSITORY_CONTEXT_ENV
-            or upper.startswith("GIT_CONFIG_KEY_")
-            or upper.startswith("GIT_CONFIG_VALUE_")
-        ):
-            env.pop(name, None)
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    return env
-
 
 # --- Path helpers -----------------------------------------------------------
 
@@ -132,7 +96,6 @@ def resolve_to_anchor(repo_path: Path) -> Path:
 #: rebase -- NOT ``push()``, which must let a repo's real pre-push release
 #: guard run -- #3561; see :func:`git` ``no_hooks``). Server-side branch
 #: protection is unaffected. #3707.
-_NO_HOOKS_PATH = "/dev/null"
 
 
 def git(
