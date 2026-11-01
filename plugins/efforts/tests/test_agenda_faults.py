@@ -394,3 +394,116 @@ def test_malformed_import_cursor_is_diagnostic(
         STORE.mutate(tmp_path, request({"operation": "init", "documents": documents}, 0, "init"))
     with pytest.raises(AGENDA.AgendaError, match="no accepted initialization|uninitialized"):
         STORE.read(tmp_path)
+
+
+@pytest.fixture
+def provider_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    import agenda_provider
+
+    package = tmp_path / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "agenda_contract.py").write_text("CONTRACT_VERSIONS = (1, 2)\n")
+    (package / "__main__.py").write_text(
+        "import argparse\n"
+        "def build_parser():\n"
+        " p=argparse.ArgumentParser(); s=p.add_subparsers(dest='command')\n"
+        " a=s.add_parser('agenda-publish')\n"
+        " a.add_argument('--contract-version',type=int,choices=(1,2),default=1)\n"
+        " a.add_argument('--json',action='store_true'); return p\n")
+    health = {"capabilities": ["worktree-agendas-v2"],
+              "worktrees": {"status": "ready", "generation": "a" * 32}}
+    health_file = tmp_path / "health.json"
+    health_file.write_text(json.dumps(health))
+    calls = tmp_path / "calls.json"
+    mode = tmp_path / "reply-mode.txt"
+    mode.write_text("ok")
+    (package / "worktrees_client.py").write_text(
+        "import json\nfrom pathlib import Path\n"
+        f"HEALTH=Path({str(health_file)!r}); CALLS=Path({str(calls)!r}); MODE=Path({str(mode)!r})\n"
+        "def read_health(): return json.loads(HEALTH.read_text())\n"
+        "class Client:\n"
+        " def _request(self, action, payload, **bounds):\n"
+        "  CALLS.write_text(json.dumps({'action':action,'payload':payload,'bounds':bounds}))\n"
+        "  if MODE.read_text()=='unsupported':\n"
+        "   return {'ok':False,'contract_version':2,'error':{'code':'unsupported','message':'fixture unsupported'}}\n"
+        "  b=payload['observation']; s=b['source']\n"
+        "  return {'ok':True,'contract_version':2,'generation':payload['expected_generation'],\n"
+        "   'sequence':19,'project':payload['project'],'worktree_id':s['worktree'],\n"
+        "   'session_id':s['session'],'availability':'observed','observation':b}\n"
+        "def _control_client(): return Client()\n")
+    monkeypatch.setattr(agenda_provider, "PROVIDER",
+        f"import sys; sys.path.insert(0, {str(tmp_path)!r})\n" + agenda_provider.PROVIDER)
+    return {"package": package, "calls": calls, "mode": mode, "health": health_file,
+            "adapter": agenda_provider}
+
+
+def v2_observation(home: Path) -> bytes:
+    observation = STORE.delivery_record(home)[1]
+    observation["version"] = 2
+    observation["snapshot"]["cursor_version"] = 4
+    observation["source"]["session"] = "fixture-head"
+    return (STORE.encode(observation) + "\n").encode()
+
+
+def test_provider_v2_selected_interpreter_negotiates_then_sends_exact_payload(
+    home: Path, provider_fixture: dict[str, Any]
+) -> None:
+    payload = v2_observation(home)
+    reply = provider_fixture["adapter"].deliver(sys.executable, "fixture-project", payload)
+    assert reply["ok"] and reply["contract_version"] == 2 and reply["sequence"] == 19
+    calls = json.loads(provider_fixture["calls"].read_text())
+    assert calls == {"action": "agenda-publish", "payload": {
+        "contract_version": 2, "project": "fixture-project",
+        "expected_generation": "a" * 32, "observation": json.loads(payload)},
+        "bounds": {"max_response_bytes": 35 * 1024, "total_timeout": 1.0}}
+
+
+@pytest.mark.parametrize("unsupported", ["declaration", "capability", "unready", "generation", "parser"])
+def test_provider_v2_missing_support_never_enters_publication(
+    home: Path, provider_fixture: dict[str, Any], unsupported: str
+) -> None:
+    if unsupported == "declaration":
+        (provider_fixture["package"] / "agenda_contract.py").write_text("CONTRACT_VERSIONS=(1,)\n")
+    elif unsupported == "parser":
+        (provider_fixture["package"] / "__main__.py").write_text(
+            "import argparse\ndef build_parser(): return argparse.ArgumentParser()\n")
+    else:
+        health = json.loads(provider_fixture["health"].read_text())
+        if unsupported == "capability":
+            health["capabilities"] = ["worktree-agendas-v1"]
+        elif unsupported == "unready":
+            health["worktrees"]["status"] = "draining"
+        else:
+            health["worktrees"]["generation"] = "invalid"
+        provider_fixture["health"].write_text(json.dumps(health))
+    result = provider_fixture["adapter"].deliver(sys.executable, "fixture-project", v2_observation(home))
+    assert result["ok"] is False and result["error"]["message"]
+    assert not provider_fixture["calls"].exists()
+
+
+def test_provider_v2_structured_unsupported_is_visible(
+    home: Path, provider_fixture: dict[str, Any]
+) -> None:
+    provider_fixture["mode"].write_text("unsupported")
+    result = provider_fixture["adapter"].deliver(sys.executable, "fixture-project", v2_observation(home))
+    assert result["error"]["code"] == "unsupported"
+    assert provider_fixture["calls"].exists()
+
+
+def test_provider_probe_uses_actual_build_parser_without_main_project_option() -> None:
+    import ast
+    import agenda_provider
+
+    # This fixture requires the source provider test context. It never imports
+    # a real host endpoint or enters the provider's operational main routine.
+    main = pytest.importorskip("agent_worktrees.__main__", reason="actual provider test dependencies unavailable")
+    tree = ast.parse(agenda_provider.PROVIDER)
+    parse_call = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute) and node.func.attr == "parse_args")
+    argv = ast.literal_eval(parse_call.args[0])
+    assert argv == ["agenda-publish", "--contract-version", "2", "--json"]
+    parsed = main.build_parser().parse_args(argv)
+    assert parsed.command == "agenda-publish" and parsed.contract_version == 2
+    with pytest.raises(SystemExit):
+        main.build_parser().parse_args([*argv, "--project", "fixture-project"])

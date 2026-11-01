@@ -24,19 +24,21 @@ def add_parsers(sub) -> None:
             }[name],
         )
         parser.add_argument("--json", action="store_true")
+        parser.add_argument("--contract-version", type=int, choices=(1, 2), default=1)
         if name != "agenda-publish":
             parser.add_argument("--worktree", required=True)
             parser.add_argument("--session", required=True)
         parser.set_defaults(func=cmd_agenda)
 
 
-def _client():
+def _client(version=1):
     client = _control_client()
     health = client._request("health", max_response_bytes=contract.FRAME_BYTES, total_timeout=1.0)
+    required = contract.capability(version)
     if not isinstance(health.get("capabilities"), list) or (
-        contract.CAPABILITY not in health["capabilities"]
+        required not in health["capabilities"]
     ):
-        raise contract.AgendaError("resident lacks worktree-agendas-v1", "unsupported")
+        raise contract.AgendaError(f"resident lacks {required}", "unsupported")
     worktrees = health.get("worktrees")
     if not isinstance(worktrees, dict) or worktrees.get("status") != "ready":
         raise contract.AgendaError("resident agenda authority is not ready", "unavailable")
@@ -53,13 +55,13 @@ def project_unavailable(argv, message: str) -> int:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     add_parsers(parser.add_subparsers(dest="command", required=True))
     args = parser.parse_args(argv)
-    result = contract.failure("project-unavailable", message)
+    result = contract.failure("project-unavailable", message, version=args.contract_version)
     _emit({"type": "error", **result} if args.command == "agenda-feed" else result)
     sys.stderr.write(f"project-unavailable: {message}\n")
     return 1
 
 
-def _error(result) -> bool:
+def _error(result, version=1) -> bool:
     if not isinstance(result, dict):
         raise contract.AgendaError("non-object agenda response", "invalid-response")
     if result.get("ok") is not False:
@@ -69,7 +71,7 @@ def _error(result) -> bool:
     contract.exact(result["error"], {"code", "message"})
     if (
         type(result["contract_version"]) is not int
-        or result["contract_version"] != 1
+        or result["contract_version"] != version
         or any(
             not isinstance(result["error"][key], str) or not result["error"][key]
             for key in ("code", "message")
@@ -93,7 +95,7 @@ class Receiver:
             raise contract.AgendaError("agenda frame type must be text", "invalid-response")
         body = {key: value for key, value in frame.items() if key != "type"}
         if kind == "error":
-            if not _error(body):
+            if not _error(body, self.request["contract_version"]):
                 raise contract.AgendaError("invalid agenda feed error", "invalid-response")
             self.closed = True
             return
@@ -178,36 +180,38 @@ def relay(client, request, generation) -> int:
 
 def cmd_agenda(args) -> int:
     feed = args.command == "agenda-feed"
+    requested = getattr(args, "contract_version", 1)
     try:
+        version = contract.contract_version(requested)
         if args.command == "agenda-publish":
             stdin = getattr(sys.stdin, "buffer", sys.stdin)
             raw = stdin.read(contract.BODY_BYTES + 1)
             if isinstance(raw, str):
                 raw = raw.encode("utf-8")
             body = contract.decode(raw, contract.BODY_BYTES)
-            contract.observation(body)
+            contract.observation(body, version=version)
             request = {
-                "contract_version": 1,
+                "contract_version": version,
                 "project": cfg.project_name(),
                 "worktree_id": body["source"]["worktree"],
                 "session_id": body["source"]["session"],
             }
         else:
             request = {
-                "contract_version": 1,
+                "contract_version": version,
                 "project": cfg.project_name(),
                 "worktree_id": args.worktree,
                 "session_id": args.session,
             }
         contract.selection(request)
-        client, generation = _client()
+        client, generation = _client(version)
         if feed:
             return relay(client, request, generation)
         payload = (
             request
             if args.command == "agenda-read"
             else {
-                "contract_version": 1,
+                "contract_version": version,
                 "project": request["project"],
                 "expected_generation": generation,
                 "observation": body,
@@ -216,14 +220,18 @@ def cmd_agenda(args) -> int:
         result = client._request(
             args.command, payload, max_response_bytes=contract.FRAME_BYTES, total_timeout=1.0
         )
-        if _error(result):
+        if _error(result, version):
             _emit(result)
             sys.stderr.write(f"{result['error']['code']}: {result['error']['message']}\n")
             return 1
         _emit(contract.validate_reply(result, request, generation))
         return 0
     except (contract.AgendaError, OSError, ValueError, RuntimeError, RecursionError) as exc:
-        result = contract.failure(getattr(exc, "code", "unavailable"), str(exc))
+        result = contract.failure(
+            getattr(exc, "code", "unavailable"),
+            str(exc),
+            version=contract.error_version({"contract_version": requested}),
+        )
         _emit({"type": "error", **result} if feed else result)
         sys.stderr.write(f"{result['error']['code']}: {result['error']['message']}\n")
         return 1

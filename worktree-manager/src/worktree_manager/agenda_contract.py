@@ -23,6 +23,7 @@ _REPLY_FIELDS = {
 }
 _TRANSIENT_ERRORS = {"disconnected", "unavailable", "unready", "draining", "superseded"}
 _TEMPORARY_CLOSURES = _TRANSIENT_ERRORS - {"superseded"}
+CONTRACT_VERSIONS = (1, 2)
 
 
 class AgendaUnavailable(ValueError):
@@ -73,7 +74,9 @@ def _utc(value) -> bool:
         return False
 
 
-def validate_snapshot(frame: dict, project: str, worktree: str, session: str) -> None:
+def validate_snapshot(
+    frame: dict, project: str, worktree: str, session: str, *, contract_version: int = 1,
+) -> None:
     """Validate read and feed snapshots without importing the domain owner."""
     bounded_json(frame)
     if not isinstance(frame, dict):
@@ -85,7 +88,8 @@ def validate_snapshot(frame: dict, project: str, worktree: str, session: str) ->
         raise ValueError("agenda frame exceeds its bound")
     if (
         frame.get("ok") is not True or type(frame.get("contract_version")) is not int
-        or frame["contract_version"] != 1
+        or type(contract_version) is not int or contract_version not in CONTRACT_VERSIONS
+        or frame["contract_version"] != contract_version
         or (frame.get("project"), frame.get("worktree_id"), frame.get("session_id"))
         != (project, worktree, session)
         or not isinstance(frame.get("generation"), str) or not _HEX.fullmatch(frame["generation"])
@@ -109,7 +113,8 @@ def validate_snapshot(frame: dict, project: str, worktree: str, session: str) ->
         set(observation) != {"schema", "version", "source", "revision", "committed_at", "snapshot"}
         or
         observation.get("schema") != "efforts.agenda-observation"
-        or type(observation.get("version")) is not int or observation["version"] != 1
+        or type(observation.get("version")) is not int or observation["version"] not in (1, 2)
+        or (contract_version == 1 and observation["version"] != 1)
         or not isinstance(source, dict)
         or set(source) != {"worktree", "session", "store_id"}
         or (source.get("worktree"), source.get("session")) != (worktree, session)
@@ -120,9 +125,16 @@ def validate_snapshot(frame: dict, project: str, worktree: str, session: str) ->
         or snapshot["worktree"] != worktree or type(snapshot["revision"]) is not int
         or snapshot["revision"] != observation["revision"]
         or not isinstance(snapshot["status"], str) or not snapshot["status"]
-        or type(snapshot["cursor_version"]) is not int or snapshot["cursor_version"] not in {1, 2}
+        or type(snapshot["cursor_version"]) is not int
+        or snapshot["cursor_version"] not in (
+            (1, 2) if observation["version"] == 1 else (4,)
+        )
     ):
         raise ValueError("agenda observation has an invalid identity, revision or snapshot")
+    if observation["version"] == 2 and snapshot["status"] not in {
+        "working", "waiting", "complete", "replanning",
+    }:
+        raise ValueError("agenda observation has an invalid cursor-4 status")
     for field in (
         "stack", "exit_criteria", "queued", "notes", "deferred", "due_rechecks",
     ):
@@ -159,8 +171,10 @@ class AgendaPublicationFence:
             if frame["sequence"] < self.last["sequence"]:
                 raise ValueError("agenda reconnect regressed its resident sequence")
             if frame["sequence"] == self.last["sequence"] and self._content(
-                {key: value for key, value in frame.items() if key != "type"}
-            ) != self._content({key: value for key, value in self.last.items() if key != "type"}):
+                {key: value for key, value in frame.items() if key not in {"type", "contract_version"}}
+            ) != self._content({
+                key: value for key, value in self.last.items() if key not in {"type", "contract_version"}
+            }):
                 raise ValueError("agenda publication changed without advancing its resident sequence")
         observation = frame["observation"]
         if observation is not None and self.observed is not None:
@@ -184,12 +198,19 @@ class AgendaFeed:
     def __init__(
         self, project: str, worktree: str, session: str, *,
         fence: AgendaPublicationFence | None = None,
+        contract_version: int = 1,
     ) -> None:
         self.identity = (project, worktree, session)
         self.current: dict | None = None
         self.closed = False
         self.retired_generation: str | None = None
         self.fence = fence if fence is not None else AgendaPublicationFence()
+        self.set_contract_version(contract_version)
+
+    def set_contract_version(self, version: int) -> None:
+        if type(version) is not int or version not in CONTRACT_VERSIONS or self.current is not None:
+            raise ValueError("invalid or late agenda contract selection")
+        self.contract_version = version
 
     def receive(self, frame: dict) -> dict | None:
         bounded_json(frame)
@@ -203,7 +224,7 @@ class AgendaFeed:
             if (
                 set(frame) != {"type", "ok", "contract_version", "error"}
                 or frame.get("ok") is not False or type(frame.get("contract_version")) is not int
-                or frame["contract_version"] != 1 or not isinstance(error, dict)
+                or frame["contract_version"] != self.contract_version or not isinstance(error, dict)
                 or set(error) != {"code", "message"}
                 or not isinstance(error.get("code"), str) or not error["code"]
                 or not isinstance(error.get("message"), str) or not error["message"]
@@ -236,7 +257,7 @@ class AgendaFeed:
             return None
         if kind not in {"snapshot", "update"}:
             raise ValueError("agenda feed emitted an unknown frame type")
-        validate_snapshot(frame, *self.identity)
+        validate_snapshot(frame, *self.identity, contract_version=self.contract_version)
         if self.current is None:
             if kind != "snapshot":
                 raise ValueError("agenda feed did not start with an atomic snapshot")

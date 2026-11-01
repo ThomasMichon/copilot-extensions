@@ -14,6 +14,22 @@ has Python available. No sibling plugin, installation, Manager, daemon or
 agent-worktrees discovery is needed. An agenda is explicitly adopted; never
 initialize or import another active agent's home automatically.
 
+## Execution policy compatibility
+
+The command/request examples and operation table below document legacy request
+version 1 with cursor 1/2 and strict finite count admission. They remain valid;
+guidance about productive revisits does not disable their checks.
+
+The source context-qualified interface uses cursor 4, store generation 2 and
+request version 2, selected explicitly with fresh `init --mode
+context-qualified`. Version 3 remains the old-reader refusal marker, not
+executable state. Do not relabel or migrate an active legacy lane. Installed
+copies may predate the source contract.
+[Context-qualified source commands](context-qualified-commands.md) owns the
+exact new-mode fields, rich identity discovery and worked examples.
+[Queue and context qualification](context-qualified-continuations.md) owns the
+reasoning procedure; the operation table below remains the legacy request-1 API.
+
 ## Reading and initialization
 
 The explicit state home must already be an adopter-owned directory. Relative
@@ -116,8 +132,10 @@ and shape, **not the truth of a test or an external approval**.
 
 Every update validates the entire referenced board set, full active/deferred
 chains, root/return relationships, visits, depth, detours and deferred limits
-before committing. Reaching a limit requires steering/replanning, not replay
-or automatic completion. A deliberately recorded `progress` decision never
+before committing. Legacy limits remain strict. At a limit, preserve history
+and choose authorized bounded investigation/refinement, waiting or other
+assigned work; do not replay or claim completion. Involve the Operator only for
+an actual decision, authority/permission change or safety gate. A deliberately recorded `progress` decision never
 resets historical visits or wider approval requirements.
 
 Restoration reconciles the **entire chain, including ancestors**, against active,
@@ -255,6 +273,12 @@ For init/update or explicit publish, repeat `--publish-arg` for each token
 agenda-derived command, secret environment modification, daemon or file polling
 is involved. The finite adapter owns any descendant lifecycle; this core
 bounds its immediate process and reply, not a provider service lifecycle.
+This argv form is the legacy publication path. New-mode publication instead
+supplies `--publisher-python <absolute-owned-provider-interpreter>` and
+`--publisher-project <project>` together, never mixed with `--publish-arg`.
+The source adapter checks the declared provider contract, health and v2 parser
+before publishing the identical committed observation; no mutation is replayed.
+See [the new-mode guide](context-qualified-commands.md#delivery-and-validation-boundary).
 
 After commit, stdin carries one compact JSON observation followed by newline:
 
@@ -290,3 +314,5 @@ current head, permission, effects, canonical completion or Manager visibility.
 - [Driving effort agendas](../SKILL.md)
 - [Legacy board/cursor convention](agenda-format.md)
 - [Deferred branch procedure](deferred-branches.md)
+- [Queue and context-qualified continuations](context-qualified-continuations.md)
+- [Context-qualified source CLI and worked fixtures](context-qualified-commands.md)

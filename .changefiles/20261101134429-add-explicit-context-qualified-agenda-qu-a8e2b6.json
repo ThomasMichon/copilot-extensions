@@ -1,0 +1,17 @@
+{
+  "comment": "Add explicit context-qualified agenda queues and continuation history with negotiated live observation support.",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

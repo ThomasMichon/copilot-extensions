@@ -66,6 +66,7 @@ def subscribe(
         stream = agenda_transport.frames(
             project, worktree, session, cancelled=cancelled, cwd=cwd,
             on_supported=authenticated,
+            on_contract=receiver.set_contract_version,
         )
         try:
             with closing(stream):

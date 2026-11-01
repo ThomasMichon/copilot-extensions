@@ -1,0 +1,26 @@
+{
+  "context": {
+    "facts": [
+      {
+        "kind": "input",
+        "subject": "validation-input",
+        "value": {
+          "content": "fixture-input-A",
+          "uuid": "new-placeholder",
+          "timestamp": "later-placeholder",
+          "session": "new-placeholder"
+        },
+        "evidence_ref": "example:renamed-reference-to-unchanged-input"
+      }
+    ]
+  },
+  "judgment": {
+    "qualification": "agent-judgment",
+    "changed_subjects": ["validation-input"],
+    "causal_change": "This proposal asserts novelty but changes only metadata and wording; the relevant input is still unchanged.",
+    "evidence_refs": ["example:renamed-reference-to-unchanged-input"]
+  },
+  "approach": {
+    "action": "Run the same bounded validation command."
+  }
+}
