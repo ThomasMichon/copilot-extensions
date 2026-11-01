@@ -233,6 +233,10 @@ readiness or performing native apply. Exact retained native/material/network
 proofs still apply. A lost failure response after terminal publication replays
 that outcome; a failure publication still UNKNOWN retains the explicit
 `settle_failed` decision and original attempt rather than becoming a new apply.
+The original attempt retains its exact failure receipt before journal
+publication. Both recovery entry points finish that request-bound decision
+even if health improves; they verify the retained evidence digest and never
+borrow a failed outcome from an earlier operation.
 
 **Contract support:** this optional profile expands the source SDK's strict
 version-1 declaration reader; older readers reject the unknown `profile`

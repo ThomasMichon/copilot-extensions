@@ -297,6 +297,21 @@ class KomodoOwner:
             record["attempt"] = None
             state.save(record)
 
+    @staticmethod
+    def _reconcile_failed(state: KomodoState, record: dict[str, Any],
+                          journal: NodeJournal, request: OperationIntent) -> TargetReceipt:
+        attempt = record["attempt"]
+        outcome = TargetReceipt.from_dict(attempt["failure_outcome"])
+        outcome.check_intent(request)
+        if (attempt["request"] != request.to_dict() or record["failed"] is None
+                or outcome.to_dict()["status"] != "failed"
+                or outcome.to_dict()["result_ref"] != digest(record["failed"])):
+            raise PlanError("Komodo retained failure decision lacks original evidence")
+        settled = journal.reconcile(request, outcome)
+        record["attempt"] = None
+        state.save(record)
+        return settled
+
     def converge(self, request: OperationIntent, permit: Permit) -> TargetReceipt:
         """UNKNOWN is persisted before mutation; restart only inspects that original attempt."""
         try:
@@ -439,6 +454,11 @@ class KomodoOwner:
                     selected.declaration, selected.material, deadline=deadline),
                     selected, containers, attempt["network_before"],
                     created=attempt["fixed_profile"] and attempt["native_settled"])
+                if "failure_outcome" in attempt:
+                    verify_failed_candidate(containers, selected, images, profile, attempt)
+                    self._preserved(record, selected, containers)
+                    self._selected(request, content)
+                    return self._reconcile_failed(state, record, journal, request)
                 verify_candidate(containers, selected, images, profile, attempt)
                 health = self._ready(selected, containers, network, deadline=deadline)
                 verify_attempt_keys(attempt, selected)
@@ -515,6 +535,10 @@ class KomodoOwner:
                     raise PlanError("Komodo failed settlement requires the original uncertain attempt")
                 permit = self.admission.revalidate(permit, request)
                 self.admission.complete(permit, request)
+                if "failure_outcome" in attempt:
+                    self._preserved(record, selected, containers)
+                    self._selected(request, content)
+                    return self._reconcile_failed(state, record, journal, request)
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise PlanError("Komodo failure inspection requires remaining native deadline")
@@ -550,15 +574,13 @@ class KomodoOwner:
                     failed["partial_public_keys"] = {name: digest(value) for name, value in keys.items()}
                 record["failed"] = failed
                 result_ref = state.retain(failed)
-                state.save(record)
                 value = request.to_dict()
                 del value["parameters"]
                 value.update(schema="fleet-manager.target-receipt", sequence=3, status="failed",
                              request_digest=request.request_digest, result_ref=result_ref)
-                settled = journal.reconcile(request, TargetReceipt.from_dict(value))
-                record["attempt"] = None
+                record["attempt"]["failure_outcome"] = TargetReceipt.from_dict(value).to_dict()
                 state.save(record)
-                return settled
+                return self._reconcile_failed(state, record, journal, request)
         finally:
             self.admission.discard(permit)
 

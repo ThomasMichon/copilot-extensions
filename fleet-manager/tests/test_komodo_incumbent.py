@@ -331,6 +331,8 @@ def test_native_apply_refuses_incumbent_even_with_a_fixed_declaration(incumbent)
     "expired-during-selection",
     "refreshed-order", "failed-repeat-running", "failed-repeat-stopped",
     "failed-lost-terminal", "failed-pending-terminal", "failed-native-drift",
+    "failed-recovered-converge", "failed-recovered-settle",
+    "failed-recovered-foreign-request", "failed-recovered-changed-evidence",
 ])
 def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
     incumbent, keys, monkeypatch, scenario,
@@ -392,6 +394,7 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
     async def exercise():
         requests = []
         token = "original-fixture-local-token"
+        recovered = False
 
         async def handler(request):
             requests.append(request.path)
@@ -402,7 +405,9 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                 return web.json_response({"data": {"jwt": token}})
             assert request.headers.get("authorization") == token
             return web.json_response({
-                "/read/GetVersion": {"version": "9.0.0" if scenario.startswith("failed-") else "2.0.0"},
+                "/read/GetVersion": {
+                    "version": "9.0.0" if scenario.startswith("failed-") and not recovered else "2.0.0",
+                },
                 "/read/GetServer": {
                     "id": "original-server", "name": "example-host",
                     "config": {"enabled": True, "address": (
@@ -506,7 +511,11 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                     containers["core"]["State"].update(Status="exited", Running=False, Pid=0)
                 reconcile = NodeJournal.reconcile
                 settled = []
-                if scenario in ("failed-lost-terminal", "failed-pending-terminal"):
+                if scenario in (
+                    "failed-lost-terminal", "failed-pending-terminal",
+                    "failed-recovered-converge", "failed-recovered-settle",
+                    "failed-recovered-foreign-request", "failed-recovered-changed-evidence",
+                ):
                     def lost_failure(journal, original, outcome):
                         if scenario == "failed-lost-terminal":
                             settled.append(reconcile(journal, original, outcome))
@@ -517,6 +526,32 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                         await invoke(request, failed=True)
                     assert state_record[0]["failed"] is not None
                     monkeypatch.setattr(NodeJournal, "reconcile", reconcile)
+                if scenario.startswith("failed-recovered-"):
+                    from fleet_manager.planning import digest
+
+                    original_failed = deepcopy(state_record[0]["failed"])
+                    recovered = True
+                    containers["core"]["State"].update(Status="running", Running=True, Pid=1)
+                    if scenario in (
+                        "failed-recovered-foreign-request", "failed-recovered-changed-evidence",
+                    ):
+                        if scenario == "failed-recovered-foreign-request":
+                            state_record[0]["attempt"]["failure_outcome"]["request_digest"] = "0" * 64
+                        else:
+                            state_record[0]["failed"]["reason"] = "changed-evidence"
+                        with pytest.raises(PlanError):
+                            await invoke(request)
+                        assert state_record[0]["attempt"] is not None
+                        assert state_record[0]["good"] is None and native_calls == []
+                        return
+                    receipt = await invoke(request, failed=scenario == "failed-recovered-settle")
+                    assert receipt.to_dict()["status"] == "failed"
+                    assert receipt.to_dict()["result_ref"] == digest(original_failed)
+                    assert state_record[0]["attempt"] is None
+                    assert state_record[0]["failed"] == original_failed
+                    assert state_record[0]["good"] is None and native_calls == []
+                    assert await invoke(request) == receipt
+                    return
                 if not settled:
                     settled.append(await invoke(request, failed=True))
                 original_failed = deepcopy(state_record[0]["failed"])
