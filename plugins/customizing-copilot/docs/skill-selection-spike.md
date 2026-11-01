@@ -129,3 +129,58 @@ python tools/run-plugin-tests.py customizing-copilot --test-file tests/native/te
 
 Stage new source/tests before invoking the runner. This native Node packet is
 opt-in; it adds no inference or exhaustive subprocess matrix to required CI.
+
+## Canonical specialist and decision contracts
+
+The import-inert sibling `scripts/skill-selection-contract.mjs` defines the
+SDK specialist configuration and comparison result contract. It is not a
+registered extension or a selected production strategy. `selectionAgent()`
+has one read-only source tool and no model pin by default; an explicitly bound
+trial supplies `model` and `reasoningEffort`. Native `tasks.startAgent` supplies
+the actual agent identifier and optional model, not undocumented effort, tier,
+tool or result-schema arguments. Observe the resolved configuration:
+`CustomAgentConfig.model` permits fallback, so a requested model is not proof
+of a comparable arm.
+
+`selectionSnapshot()` preserves unique native identifiers, aliases, invocation
+metadata and argument hints. `selectionPrompt()` carries the current intent,
+purpose, frozen catalog digest and attributed context, including omissions.
+The specialist cannot execute recommendations or replace mandatory procedures.
+Its JSON result distinguishes selected, no-match, ambiguity and insufficient
+context. Acquisition failure remains a tool/runtime failure, not no-match.
+
+`selectionReader()` accepts source roots from the host's existing canonical
+source and filesystem-access policy, never the model or a guessed skill path.
+It reads necessary bodies on demand and only their explicitly declared local
+Markdown references. Contained parent-relative references are valid; undeclared,
+absolute, remote or escaping references are refused. No directory crawl,
+transitive guide traversal or skill execution occurs. Reads are byte/count
+bounded, reject non-UTF-8 sources, and return unavailable for pathless entries
+without excluding their advisory metadata.
+
+Reference extraction handles inline links and single-line reference definitions,
+balanced or escaped destination parentheses, angle-bracket paths and optional
+titles. Code spans, fenced/indented examples and comments do not declare guides.
+List-contained fences are classified before their contents, and link destinations
+and titles are consumed as one declaration. Bracket matching is linear; a finite
+work budget also bounds malformed destination parsing. Ambiguous or unsupported
+Markdown forms are not guessed. Source acquisition
+rejects non-regular files before opening, uses nonblocking opens on Unix and
+retains a descriptor-level file check. Acquisition compares the admitted target's
+file identity with the opened handle and rechecks its canonical path before
+reading bytes; Unix also refuses final-component symlink following. Missing
+file identity or protected-open capability is unavailable, not a permissive
+fallback. The opt-in packet includes a bounded
+FIFO control executed on Unix, not claimed as a Windows-native witness.
+
+Successful source reads retain catalog-bound body/guide digests.
+Supplied root aliases retain both their lexical and canonical containment
+boundaries. Observations bind canonical targets as well as content; retargeting
+an admitted symlink invalidates the decision even when skill text is unchanged.
+`validateSelection()` rejects unknown, disabled, duplicate or alias-substituted
+IDs, stale catalog digests, malformed outcomes and unread guide recommendations.
+Use the reader's asynchronous `validate()` to recheck inspected source bytes
+before returning the decision; source changes during inspection or validation
+fail explicitly. The integrating host must separately recheck its current
+native catalog and actual owned-task configuration/settlement. File digests
+prove observed byte consistency, not authority or model quality.
