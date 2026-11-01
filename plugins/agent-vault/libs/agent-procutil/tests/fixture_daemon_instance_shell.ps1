@@ -87,6 +87,7 @@ try {
 $ready = Join-Path $Root 'ready.json'
 [IO.File]::WriteAllText(($ready + '.pending'), ($outcome | ConvertTo-Json -Depth 5 -Compress))
 [IO.File]::Move(($ready + '.pending'), $ready)
+[IO.File]::WriteAllText((Join-Path $Root 'ready.closed'), 'closed')
 $clock = [Diagnostics.Stopwatch]::StartNew()
 while ($clock.Elapsed.TotalSeconds -lt 15) { Start-Sleep -Milliseconds 20 }
 throw 'Fixture observation deadline expired before its owner retired the original processes.'

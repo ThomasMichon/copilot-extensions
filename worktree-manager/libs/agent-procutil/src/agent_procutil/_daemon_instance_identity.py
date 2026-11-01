@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ctypes
 import os
 import select
 import signal
@@ -15,6 +14,7 @@ def path_identity(path: Path) -> tuple[str, str]:
     if os.name != "nt":
         info = path.stat()
         return str(info.st_dev), str(info.st_ino)
+    import ctypes
     from ctypes import wintypes
 
     class FileId(ctypes.Structure):
@@ -50,6 +50,7 @@ def delete_owned_file(path: Path, expected: tuple[str, str]) -> None:
             raise OSError("daemon artifact identity changed")
         path.unlink()
         return
+    import ctypes
     from ctypes import wintypes
 
     class FileId(ctypes.Structure):
@@ -96,6 +97,7 @@ def _windows_handle(pid: int):
 
 
 def _windows_birth(handle) -> str:
+    import ctypes
     from ctypes import wintypes
 
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -139,6 +141,7 @@ def birth_identity(pid: int, *, include_exited: bool = False) -> str:
         except FileNotFoundError:
             raise ProcessLookupError(pid) from None
     if sys.platform == "darwin":
+        import ctypes
         from ._darwin_caller_owned import _BSDInfo
 
         library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
@@ -167,6 +170,7 @@ def created_process_identity(process) -> tuple[int, str] | None:
             handle = getattr(process, "_handle", None)
             if not isinstance(handle, int) or not handle:
                 return None
+            import ctypes
             from ctypes import wintypes
             kernel = ctypes.WinDLL("kernel32", use_last_error=True)
             kernel.GetProcessId.argtypes = [wintypes.HANDLE]
@@ -231,6 +235,8 @@ def math_milliseconds(seconds: float) -> int:
 
 def retire_self() -> None:
     if os.name == "nt":
+        import ctypes
+
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel.GetCurrentProcess.restype = ctypes.c_void_p
         kernel.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]

@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-31
+- **Last revised:** 2026-11-01
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -27,25 +27,22 @@ portable, attributable, and intentionally budgeted.
   of defense when general upfront instructions and reactive skill selection
   are insufficient. Fact acquisition, event-time evaluation and contextual
   intervention remain distinct responsibilities.
-- **Coordinators and delegates** divide work by context cost and separability:
-  the coordinating agent owns decomposition, integration, synthesis, and
-  completion, while bounded delegates isolate independent evidence gathering,
-  domain-tool interaction, explicitly disjoint implementation, and independent
-  review roles.
-- **Role/model routing policy** classifies delegated work by purpose, risk,
-  execution surface, and demonstrated capability, then selects from an
-  evidence-backed mapping of acceptable models rather than treating every
-  worker as interchangeable.
+- **Delegated assignments** retain scoped authority, ownership, integration and
+  result verification when work is delegated. Generic guidance does not dictate
+  whether arbitrary work must or must not be delegated.
+- **Optional model configuration** offers inert, explicitly invoked mechanical
+  lookups without prescribing a driver/delegate hierarchy or requiring a model
+  chooser before work.
 - **Budget posture** combines finite allowance, consumption, reset horizon,
   recent pace, and projection into a sourced, freshness-bearing input that can
-  refine model-routing recommendations without becoming model eligibility.
+  inform optional monthly economy strategies without blocking requests or
+  becoming model/delegation selection.
 - **Budget adapters** obtain partial or complete posture from provider APIs,
   manual/static configuration, or explicitly configured external readers behind
   one portable contract. Each adapter remains attributable and reports
   unavailable or stale data honestly.
-- **Routing evidence** links model-purpose eligibility to reviewed outcomes,
-  including retries, discarded work, coordinator repair, and downstream
-  findings, so a cheap call is not mistaken for a cheap accepted result.
+- **Outcome economics** includes retries, discarded work and follow-up costs,
+  so a cheap call is not mistaken for an inexpensive accepted result.
 - **Operator policy** is personal ambient guidance that can follow an agent
   across target repositories. A plugin may explicitly delegate narrow
   configuration keys to a repository, but safety, publication, attribution,
@@ -282,14 +279,14 @@ their content-bearing filenames must not contain `.instructions.md` or otherwise
 match native instruction discovery. Thin recovery locators should not duplicate
 policy or cause an available projected body and its fallback to load together.
 
-### coordinator-first-task-routing
+### strategy-neutral-task-guidance
 
-Harnesses should provide model-neutral guidance that helps a coordinating agent
-route work by expected context consumption and separability. Broad independent
-research, comparisons, evaluations, bulk analysis, and disjoint bulk edits
-should move into bounded delegate contexts before their source material floods
-the coordinator, while small lookups, genuinely continuous traces, and cohesive
-implementation remain direct when splitting them would cost more than it saves.
+Generic guidance should not impose coordinator-first, driver/worker,
+count-based delegation, cheap-driver/smart-delegate or direct-work defaults.
+Scoped domain-tool flows, explicit assignments and required independent review
+remain governed by their owners rather than expanding into rules for arbitrary
+work. Optional capabilities should remain inert until selected for their actual
+purpose.
 
 ### bounded-delegate-contracts
 
@@ -300,20 +297,19 @@ Domain-specific service catalogs and verbose tool payloads should remain with
 the delegate that owns that domain; compact shared research and orchestration
 signals may remain with the coordinator.
 
-### evidence-calibrated-model-routing
+### optional-model-configuration
 
-Harnesses should help a coordinator choose the least-expensive available model
-that has demonstrated the capability, tools, context, and reliability required
-for the delegated role. Model choice should follow task classification and the
-direct-versus-delegate decision rather than becoming a reason to fragment
-cohesive work.
+Inert model APIs may expose configured capability and execution-surface facts
+when explicitly invoked. Their availability should not inject a model chooser,
+discovery hook or delegation policy into unrelated work.
 
-### budget-aware-model-routing
+### advisory-monthly-economy
 
-Harnesses should refine otherwise-eligible model choices against a finite,
-current budget posture. A coordinator should be able to distinguish sustainable
-pace from projected exhaustion or unused balance before committing to a model
-class, while preserving operator choice and every product gate.
+Budget guidance should help users read current usage and quota and understand
+monthly pace, projected exhaustion and remaining balance. Economic suggestions
+may encourage valid-result reuse or consideration of budget before a prolonged
+speculative detour, but never require a lookup, block honoring a request, select
+models, or route drivers and delegates.
 
 ### adapter-based-budget-posture
 
@@ -328,13 +324,13 @@ surface.
 The current posture should reach an applicable decision-maker as a concise,
 attributable cue and through equivalent machine-readable status. Detailed
 history and accounting remain external; the harness carries only enough current
-state to make the next routing decision responsibly.
+state to understand current usage and monthly pace.
 
 ### purpose-to-model-grounding
 
-Current model eligibility should be supplied through attributable, configurable
+Optional model eligibility lookups should use attributable, configurable
 grounding that distinguishes demonstrated choices from candidates, holds, and
-known failures. The portable strategy should remain stable while repositories
+known failures. The optional mechanical contract should remain stable while repositories
 and operators can update the models that satisfy it as providers, costs,
 capabilities, and execution surfaces change.
 
@@ -498,19 +494,11 @@ causing routine unnecessary exploration.
 Context reporting should distinguish known static and metadata costs from
 dynamic contributions whose emitted size cannot be known without execution.
 
-### delegate-before-broad-ingestion
+### assignment-retains-the-goal
 
-When work contains separable evidence tracks whose direct ingestion would
-materially consume the coordinator's context, delegation should happen before
-the coordinator opens the broad source bodies. A coordinator should not repeat
-a delegated investigation without a concrete verification reason.
-
-### coordinator-retains-the-goal
-
-Delegation should not turn the coordinating agent into a passive dispatcher.
-The coordinator remains responsible for the prompt's goal, chooses and adjusts
-the decomposition, integrates evidence, directly drives cohesive implementation
-by default, and produces the final synthesis and completion judgment.
+Delegation should retain the original objective, current authority and named
+integration owner. Completion depends on the accepted artifact and verification,
+not an agent's presence, transport receipt or self-report.
 
 ### proportional-independent-review
 
@@ -518,27 +506,13 @@ Independent review should preserve distinct required roles without becoming an
 unbounded loop. An unchanged artifact should not receive repeated same-role
 review unless a concrete defect or materially changed evidence justifies it.
 
-### routing-policy-before-delegation
+### budget-information-not-work-admission
 
-A Task-capable decision-maker should receive the compact model-routing policy
-before its first delegation decision. A worker that cannot delegate should
-receive its bounded assignment rather than paying the context cost of the
-complete routing catalog.
-
-### least-expensive-demonstrated-choice
-
-Selection should prefer the least-expensive available choice that has
-demonstrated the required task capability and execution-surface support. An
-unavailable preferred model may fall through to another demonstrated choice;
-an unproven candidate runs only as an explicit trial and never becomes a silent
-default.
-
-### budget-refines-but-never-qualifies
-
-Budget posture may reorder or discourage choices that are already eligible, but
-it cannot make an unproven, held, failed, or unavailable model eligible. When no
-qualified choice fits the desired budget posture, the result is an explicit
-escalation or no-fit decision rather than a fabricated cheap option.
+Usage and quota acquisition should validate evidence availability, freshness,
+privacy and access independently of user-work admission. Missing or denied
+budget evidence withholds the reading, not unrelated requested work. Budget
+guidance should supply no upfront enforcement, model/delegation chooser,
+driver/delegate ranks or automatic worker-control behavior.
 
 ### unavailable-is-not-zero
 
@@ -551,24 +525,24 @@ allowance, or another optimistic success-shaped default.
 Quota guidance belongs to the account serving the requesting agent, not an
 unverified default account in a new runtime. Monthly entitlement and reset are
 period-specific facts; acquisition time does not establish provider freshness.
-Run-rate projections inform autonomous concurrency and warn on operator-directed
-launches without imposing a harness budget refusal. Provider enforcement and
-product safety gates remain authoritative. Cooperative sleeps or suspensions are
-sparing, explicit, owner-controlled actions, never side effects of quota reads.
+Run-rate projections describe conditional monthly pace, not worker counts or
+delegation strategy. Provider access validation and product safety gates remain
+authoritative. Worker mutations, sleeps and suspensions are never side effects
+of quota reads.
 
 ### one-posture-many-surfaces
 
-Injected guidance, CLI status, dashboards, and routing consumers should derive
+Injected guidance, CLI status and economy information should derive
 from the same resolved budget posture. A presenter may reshape the result for
 its audience, but it should not independently recalculate or reinterpret the
 underlying balance and freshness.
 
 ### accepted-outcome-economics
 
-Model-routing decisions should be evaluated against accepted work products, not
-isolated call prices. Retries, abandoned output, coordinator repair, review
-findings, and attributable follow-up work remain visible so apparent savings
-cannot be created by moving cost or failure outside the selected worker's call.
+Economic comparisons should consider accepted work products, not isolated call
+prices. Retries, abandoned output, repair, review findings and follow-up work
+remain visible; generic guidance does not turn these facts into a model or
+delegation hierarchy.
 
 ### independent-promotion
 
@@ -576,11 +550,11 @@ The agents and pairs being evaluated should not validate themselves. Promotion
 into ordinary routing should derive from durable trial evidence and a separate
 reviewed decision with explicit uncertainty and applicability boundaries.
 
-### product-gates-outrank-routing
+### product-gates-remain-independent
 
-Routing optimization must not lower the correctness, safety, review, or
-publication requirements of the work being routed. A cheaper pair that fails
-the product's ordinary acceptance gate is not an optimization.
+Economy advice and optional model APIs must not lower correctness, safety,
+review or publication requirements. A cheap result that fails ordinary
+acceptance is not an optimization.
 
 ### configuration-is-inert-data
 
@@ -603,7 +577,8 @@ not recreate a second composition runtime beside the host.
 ### Additional boundaries
 
 - This vision does not prescribe one configuration schema or hook script.
-- It does not maximize sub-agent count or require delegation for every lookup.
+- It does not dictate arbitrary delegation or non-delegation, set count-based
+  thresholds, require a model/budget lookup, or prescribe a driver/delegate hierarchy.
 - It does not delegate final synthesis, goal ownership, or completion judgment.
 - It does not prescribe one model, task API, agent runtime, or orchestration
   transport.

@@ -292,14 +292,23 @@ def daemon_entrypoint(service: str, *, source, runtime_root=None, purpose: Purpo
 def daemon_test_lifecycle(
     *, owner: str, registry_root: Path, purpose: Purpose = "unattended-test",
     lease: DaemonLeasePolicy | None = None,
+    deadline: float | None = None, cleanup_results: list[InstanceCleanupResult] | None = None,
 ):
     """Context yielding an explicit test environment, renewed by this owner.
 
     The caller layers the yielded mapping into the actual test process's
     environment. No ambient environment is changed by entering this context.
+    An optional absolute monotonic deadline bounds lock, cleanup and monitor
+    settlement without a new grace period. ``cleanup_results`` receives the
+    actual per-record outcomes, including held cleanup; it does not retry them.
     """
     from ._daemon_instance_store import test_lifecycle
 
+    if deadline is not None or cleanup_results is not None:
+        return test_lifecycle(
+            owner, Path(registry_root), purpose, lease,
+            deadline=deadline, cleanup_results=cleanup_results,
+        )
     return test_lifecycle(owner, Path(registry_root), purpose, lease)
 
 

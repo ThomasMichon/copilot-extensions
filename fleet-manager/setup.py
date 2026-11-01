@@ -37,8 +37,20 @@ companions = {
     "_installer_process.py": (
         canonical.parent / "installer-engine" / "installer_engine_process.py" if canonical else None
     ),
-    "_construction_procutil.py": (
+    "_construction_procutil/__init__.py": (
         canonical.parent / "agent-procutil" / "src" / "agent_procutil" / "__init__.py" if canonical else None
+    ),
+    "_construction_procutil/_job_scopes.py": (
+        canonical.parent / "agent-procutil" / "src" / "agent_procutil" / "_job_scopes.py" if canonical else None
+    ),
+    "_construction_procutil/_windows_job_types.py": (
+        canonical.parent / "agent-procutil" / "src" / "agent_procutil" / "_windows_job_types.py" if canonical else None
+    ),
+    "_construction_procutil/streaming.py": (
+        canonical.parent / "agent-procutil" / "src" / "agent_procutil" / "streaming.py" if canonical else None
+    ),
+    "_construction_procutil/_output_relay.py": (
+        canonical.parent / "agent-procutil" / "src" / "agent_procutil" / "_output_relay.py" if canonical else None
     ),
 }
 setup(cmdclass=helpers["commands"](

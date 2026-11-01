@@ -189,6 +189,9 @@ function Read-DaemonInstanceResponse {
 function Invoke-DaemonInstanceRequest {
     param([Parameter(Mandatory)][hashtable]$Request)
     $gate = [string]::Intern('copilot-daemon-instance-shell-v1')
+    $pendingState = $null
+    $outcomeReceived = $false
+    $cleanupAttempted = $false
     [Threading.Monitor]::Enter($gate)
     try {
         $state = [AppDomain]::CurrentDomain.GetData($gate)
@@ -198,9 +201,11 @@ function Invoke-DaemonInstanceRequest {
                 diagnostics=$null; nonce=$null; sequence=0; broken=$true; offerPermitted=$false
             }
             [AppDomain]::CurrentDomain.SetData($gate, $state)
+            $pendingState = $state
             try { Start-DaemonInstanceWorker $state }
             catch {
                 $failure = $_
+                $cleanupAttempted = $true
                 try { Close-DaemonInstanceWorker $state }
                 catch { throw ($failure.Exception.Message + "`n" + $_.Exception.Message) }
                 throw $failure
@@ -209,6 +214,7 @@ function Invoke-DaemonInstanceRequest {
         if ($state.broken) {
             throw 'Daemon instance helper custody is unavailable. The prior outcome remains unconfirmed; automatic replay is refused.'
         }
+        $pendingState = $state
         $environment = @{}
         foreach ($name in @(
             'COPILOT_EXTENSIONS_DAEMON_INSTANCE', 'COPILOT_EXTENSIONS_DAEMON_REGISTRY',
@@ -223,6 +229,9 @@ function Invoke-DaemonInstanceRequest {
         $Request.nonce = $state.nonce
         $seconds = 30.0
         if ($Request.command -eq 'reconcile') { $seconds = [Math]::Max(30, $Request.parameters.max_seconds + 5) }
+        if ($Request.command -eq 'run-owned') {
+            $seconds = [Math]::Max(30, $Request.parameters.timeout_ms / 1000.0 + 15)
+        }
         $clock = [Diagnostics.Stopwatch]::StartNew()
         try {
             $json = $Request | ConvertTo-Json -Depth 8 -Compress
@@ -236,16 +245,33 @@ function Invoke-DaemonInstanceRequest {
                 $response.ok -isnot [bool]) {
                 throw 'Daemon instance helper returned an uncorrelated outcome.'
             }
+            $outcomeReceived = $true
         } catch {
             $state.broken = $true
             $failure = $_
+            $cleanupAttempted = $true
             try { Close-DaemonInstanceWorker $state }
             catch { throw ($failure.Exception.Message + "`n" + $_.Exception.Message) }
             throw $failure
         }
-        if (-not $response.ok) { throw ('Daemon instance operation refused: ' + $response.error) }
+        if (-not $response.ok) {
+            $failure = [InvalidOperationException]::new('Daemon instance operation refused: ' + $response.error)
+            if ($response.PSObject.Properties.Name -contains 'cleanup_confirmed' -and
+                $response.cleanup_confirmed -is [bool]) {
+                $failure.Data['CleanupConfirmed'] = $response.cleanup_confirmed
+            }
+            throw $failure
+        }
         return $response.result
-    } finally { [Threading.Monitor]::Exit($gate) }
+    } finally {
+        try {
+            # Runspace cancellation can bypass catch, but must retire pending work.
+            if ($null -ne $pendingState -and -not $outcomeReceived -and -not $cleanupAttempted) {
+                $pendingState.broken = $true
+                Close-DaemonInstanceWorker $pendingState
+            }
+        } finally { [Threading.Monitor]::Exit($gate) }
+    }
 }
 
 function Get-DaemonInstanceRoot {

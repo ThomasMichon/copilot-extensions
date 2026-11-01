@@ -37,13 +37,15 @@ def _render_human(posture: dict[str, Any]) -> str:
         if calculated["projected_consumption"] is not None
         else ", projection unavailable (no trailing rate)"
     )
+    suggestions = posture["economy_advice"]["suggestions"]
+    economy = " " + " ".join(suggestions) if suggestions else ""
     return (
         f"Budget posture: {calculated['warning_band']} ({availability}); "
         f"remaining {calculated['remaining']}, "
         f"{calculated['days_remaining']} days to reset, "
         f"sustainable/day {calculated['sustainable_daily_rate']}, "
         f"effective limit/day {calculated['effective_daily_limit']}"
-        f"{projection}; sources {', '.join(dict.fromkeys(sources))}"
+        f"{projection}; sources {', '.join(dict.fromkeys(sources))}{economy}"
     )
 
 

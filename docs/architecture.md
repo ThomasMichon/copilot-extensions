@@ -104,7 +104,6 @@ managed cutover; those remain separate slices of the
 | [wsl-setup](../plugins/wsl-setup/) | WSL2 setup / troubleshooting skills | Marketplace payload (skills) | Loaded on demand when a WSL-setup prompt matches; no runtime to install |
 | [harness-knowledge](../plugins/harness-knowledge/) | Stateless-harness → knowledge-repo binding skill (`binding-knowledge`) | Marketplace payload (skill + configurator script) | Loaded on demand when a harness-setup prompt matches; no runtime to install |
 | [ai-attribution](../plugins/ai-attribution/) | Ambient publication-policy hook + publication/setup skills | Marketplace payload (hooks + dependency-free scripts + skills/docs/examples) | The hook emits a concise payload-cwd-gated policy kernel at session start; setup reconciles the static fallback; detailed publication workflow loads on demand; no runtime to install |
-| [delegation-guidance](../plugins/delegation-guidance/) | **Deprecated** — no-op pointer at `agent-conduct-guidance` | Marketplace payload (README pointer only) | Ships no skills or instruction projections; kept installable so the name keeps resolving for existing adopters |
 | [agent-conduct-guidance](../plugins/agent-conduct-guidance/) | Independent ambient conduct modules and task-time procedures, including charter-bounded useful autonomy and persistent operator effect-scope pre-clearance; the plugin README owns the module list | Marketplace payload (static instruction projections + skills) | No grant broker, automatic tool approval or runtime; original evidence and current limits remain with existing effort/checkpoint/resource owners |
 | [agent-remote-driver](../plugins/agent-remote-driver/) | User-global SDK extension — baseline session drivability (attach/send/steer/abort) over a loopback HTTP surface, independent of agent-bridge | Marketplace payload (extension only) | Extension is auto-discovered from the enabled plugin's `extensions/` dir, same mechanism as `context-handoff`'s; no daemon, no runtime to install; not yet default-enabled (`cli-default-bridging` effort, pre-validation) |
 
@@ -175,7 +174,7 @@ flowchart TB
       AV["agent-vault/<br/>scripts • src"]
       AI["agent-index/<br/>scripts • src"]
       AK["agent-machines/<br/>scripts • src"]
-      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/ • ai-attribution/ • delegation-guidance/ (deprecated) • agent-conduct-guidance/ • agent-remote-driver/<br/>(payload-only: skills / hooks / extension)"]
+      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/ • ai-attribution/ • agent-conduct-guidance/ • agent-remote-driver/<br/>(payload-only: skills / hooks / extension)"]
     end
     subgraph RT["Local runtimes"]
       RW["~/.agent-worktrees/<br/>versions/ • current-version • bin"]
@@ -231,7 +230,7 @@ flowchart TB
 
 > The `PO` node — `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
 > `copilot-extensions-harness`, `wsl-setup`, `harness-knowledge`, and
-> `ai-attribution`, `delegation-guidance`, `agent-conduct-guidance`, and
+> `ai-attribution`, `agent-conduct-guidance`, and
 > `agent-remote-driver` —
 > deploy entirely from the marketplace payload — no installer, no
 > `~/.agent-*` runtime, no binstub.
@@ -815,6 +814,5 @@ closed; umbrella dotfiles#1081.)*
 - context-handoff [README](../plugins/context-handoff/README.md) · [context-handoff skill](../plugins/context-handoff/skills/context-handoff/SKILL.md)
 - customizing-copilot [README](../plugins/customizing-copilot/README.md) · [authoring-skills](../plugins/customizing-copilot/skills/authoring-skills/SKILL.md) · [defining-subagents](../plugins/customizing-copilot/skills/defining-subagents/SKILL.md) · [registering-mcp-servers](../plugins/customizing-copilot/skills/registering-mcp-servers/SKILL.md) · [installing-plugins](../plugins/customizing-copilot/skills/installing-plugins/SKILL.md) · [building-harnesses](../plugins/customizing-copilot/skills/building-harnesses/SKILL.md) · [reviewing-customizations](../plugins/customizing-copilot/skills/reviewing-customizations/SKILL.md) · [authoring-harness-plugins](../plugins/customizing-copilot/skills/authoring-harness-plugins/SKILL.md) · [diagnosing-copilot-cli-startup](../plugins/customizing-copilot/skills/diagnosing-copilot-cli-startup/SKILL.md) · [hoisting-plugin-agents](../plugins/customizing-copilot/skills/hoisting-plugin-agents/SKILL.md) · [componentizing-modules](../plugins/customizing-copilot/skills/componentizing-modules/SKILL.md) · [setting-up-instruction-sync-worker](../plugins/customizing-copilot/skills/setting-up-instruction-sync-worker/SKILL.md)
 - ai-attribution [README](../plugins/ai-attribution/README.md) · [configuration](../plugins/ai-attribution/docs/configuration.md) · [setup](../plugins/ai-attribution/skills/ai-attribution-setup/SKILL.md) · [publication workflow](../plugins/ai-attribution/skills/ai-attribution/SKILL.md)
-- delegation-guidance [README](../plugins/delegation-guidance/README.md) — deprecated, see agent-conduct-guidance
 - agent-conduct-guidance [README](../plugins/agent-conduct-guidance/README.md) · [spawning-headless-processes skill](../plugins/agent-conduct-guidance/skills/spawning-headless-processes/SKILL.md) · [delegating-work skill](../plugins/agent-conduct-guidance/skills/delegating-work/SKILL.md) · [using-scratch-space skill](../plugins/agent-conduct-guidance/skills/using-scratch-space/SKILL.md)
 - agent-remote-driver [README](../plugins/agent-remote-driver/README.md)

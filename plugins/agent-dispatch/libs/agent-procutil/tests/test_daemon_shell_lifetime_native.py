@@ -42,6 +42,12 @@ def _literal(value: Path | str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def _ready_report(root: Path) -> dict | None:
+    if not (root / "ready.closed").is_file():
+        return None
+    return json.loads((root / "ready.json").read_text(encoding="utf-8-sig"))
+
+
 def _pin(value: dict) -> WindowsDaemonProcess:
     process = WindowsDaemonProcess(value["pid"], ["instance-lifetime-fixture"])
     try:
@@ -81,15 +87,13 @@ def test_original_shell_lifetime_without_compilation(tmp_path, interpreter, host
     )
     pinned = []
     try:
-        ready = tmp_path / "ready.json"
         until = time.monotonic() + 10
-        while not ready.exists():
+        while (details := _ready_report(tmp_path)) is None:
             if parent.poll() is not None:
                 output, error = parent.communicate(timeout=5)
                 pytest.fail(f"fixture ended before observation: {output!r} {error!r}")
             assert time.monotonic() < until, "fixture did not publish original identities"
             time.sleep(.01)
-        details = json.loads(ready.read_text(encoding="utf-8-sig"))
         assert details["parent"]["pid"] == parent.pid
         for name in ("parent", "helper"):
             pinned.append(_pin(details[name]))
@@ -134,6 +138,7 @@ def test_original_shell_lifetime_without_compilation(tmp_path, interpreter, host
                 assert original.returncode == 1
         assert all(process.poll() is not None for process in pinned)
         assert (tmp_path / "ready.json").is_file(), "lifetime proof is not a GC artifact"
+        assert (tmp_path / "ready.closed").is_file(), "publication must close before cleanup"
     finally:
         if parent.poll() is None:
             parent.terminate()

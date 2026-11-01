@@ -27,6 +27,27 @@ requires actual exit for child completion. It does not reconstruct custody by
 reopening a reported child PID. Unknown launch outcomes retain their record.
 Missing or uncorrelated transport outcomes break the channel and refuse
 automatic replay.
+The same private transport serves `native_owned.ps1`'s finite process
+operation without creating an instance record or another helper service.
+Only a correlated response carrying a Boolean cleanup witness can attest a
+failed finite operation. Unconfirmed native cleanup retains its exact process
+and Job objects and fences the channel. Cancellation of an unfinished request
+closes helper custody from `finally`, including runspace stop that bypasses
+`catch`; an already-received uncertain outcome is retained, not replayed.
+Later correlated requests at that finite-cleanup fence return an explicit
+replay refusal without exiting the helper or retrying cleanup. The retained
+process, Job and failed-log objects remain owned by that original session.
+Unrelated fatal lifetime-admission failures retain their existing fatal path;
+a settled finite failure without retained log custody does not fence the
+session.
+The finite target's monotonic deadline starts before target creation and is
+never reset after spawning. A completion observed after that deadline remains
+a timeout; the separate ten-second retirement allowance does not grant more
+target execution time.
+Fully qualified, normalized UNC share-root working directories retain their
+original spelling, with or without a trailing backslash. The cwd exception
+does not admit a bare share root as an executable or log filename, or relax
+drive-relative, current-drive-rooted or unnormalized path refusal.
 Large outcomes use ordered, nonce/request-correlated fragments within the same
 request deadline. Each frame remains bounded; supported reconciliation batches
 and removed-artifact paths are reassembled without discarding outcomes after
@@ -61,5 +82,6 @@ shorter policy.
 
 Portable transaction/ABI-call doubles and PowerShell facade controls are
 distinct from actual Windows process/Job and desktop qualification. The retained
-compiled `native_daemon.ps1` and `native_owned.ps1` process launchers are separate
-migration boundaries; this adapter does not make their execution compiler-free.
+compiled `native_daemon.ps1` launcher remains a separate migration boundary.
+The compiler-free `native_owned.ps1` facade also uses this transport, but its
+actual process/desktop qualification is a separate gate.

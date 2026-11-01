@@ -59,6 +59,7 @@ def test_cue_reuses_status_posture_and_attribution(tmp_path, monkeypatch):
     assert data["adapters"][0]["captured_at"] == "2026-01-01T00:00:00Z"
     assert data["adapters"][0]["freshness_seconds"] == 86400
     assert written.stat().st_size <= MAX_GUIDANCE_BYTES
+    assert not {"routing_advice", "budgetAdvice", "model", "concurrency"} & data.keys()
 
 
 @pytest.mark.parametrize("source", ["startup", "resume", "acp", "unknown-future-source"])

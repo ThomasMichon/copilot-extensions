@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import ExitStack
 import csv
 import fnmatch
 import hashlib
@@ -34,7 +35,11 @@ COMPANIONS = (
 PROCESS_RESOURCES = {
     "_runtime_launcher.py": Path("installer-engine") / "runtime_launcher.py",
     "_installer_process.py": Path("installer-engine") / "installer_engine_process.py",
-    "_construction_procutil.py": Path("agent-procutil") / "src" / "agent_procutil" / "__init__.py",
+    "_construction_procutil/__init__.py": Path("agent-procutil") / "src" / "agent_procutil" / "__init__.py",
+    "_construction_procutil/_job_scopes.py": Path("agent-procutil") / "src" / "agent_procutil" / "_job_scopes.py",
+    "_construction_procutil/_windows_job_types.py": Path("agent-procutil") / "src" / "agent_procutil" / "_windows_job_types.py",
+    "_construction_procutil/streaming.py": Path("agent-procutil") / "src" / "agent_procutil" / "streaming.py",
+    "_construction_procutil/_output_relay.py": Path("agent-procutil") / "src" / "agent_procutil" / "_output_relay.py",
 }
 
 
@@ -368,6 +373,137 @@ def test_real_client_install_doctor_and_package_manager_removal_preserve_config(
     assert not list(state.glob("*komodo*"))
 
 
+def gateway_context_inputs(recipe: Path) -> tuple[set[str], list[str]]:
+    copied = set()
+    for line in (recipe / "Dockerfile").read_text(encoding="utf-8").replace("\\\n", " ").splitlines():
+        if not line.startswith("COPY "):
+            continue
+        words = shlex.split(line)
+        copied.update(
+            name for name in words[1:-1] if name.startswith(("libs/", "fleet-manager/"))
+        )
+    patterns = (recipe / "Dockerfile.dockerignore").read_text(encoding="utf-8").splitlines()
+    return copied, patterns
+
+
+def gateway_context_supplies(name: str, copied: set[str], patterns: list[str]) -> bool:
+    included = True
+    for pattern in patterns:
+        if pattern and not pattern.startswith("#"):
+            allow = pattern.startswith("!")
+            if fnmatch.fnmatchcase(name, pattern.removeprefix("!").rstrip("/")):
+                included = allow
+    return included and (
+        any(
+            fnmatch.fnmatchcase(name, source)
+            or source.endswith("/") and name.startswith(source)
+            for source in copied
+        )
+    )
+
+
+def test_gateway_docker_context_delivers_complete_procutil_source_closure(tmp_path):
+    repository = PROJECT.parent
+    path = repository / "tools" / "clean-room" / "gateway-role-tunnels" / "source.py"
+    spec = importlib.util.spec_from_file_location("gateway_procutil_source", path)
+    assert spec and spec.loader
+    source = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(source)
+    prefix = "libs/agent-procutil/src/agent_procutil/"
+    declared = {name for name in source.REQUIRED if name.startswith(prefix)}
+    actual = {
+        module.relative_to(repository).as_posix()
+        for module in (repository / prefix).glob("*.py")
+    }
+    assert {name for name in declared if name.endswith(".py")} == actual
+    copied, patterns = gateway_context_inputs(PROJECT / "containers" / "gateway")
+    missing = {name for name in declared if not gateway_context_supplies(name, copied, patterns)}
+    assert not missing, f"Gateway Docker context excludes procutil source: {sorted(missing)}"
+    inputs = {name for name in source.REQUIRED if name.startswith("libs/agent-procutil/")}
+    context = tmp_path / "context"
+    for name in inputs:
+        assert gateway_context_supplies(name, copied, patterns), name
+        target = context / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(repository / name, target)
+    output = tmp_path / "procutil-wheel"
+    result = build(context / "libs" / "agent-procutil", output)
+    assert result.returncode == 0, result.stderr
+    with zipfile.ZipFile(next(output.glob("*.whl"))) as artifact:
+        for name in declared:
+            member = "agent_procutil/" + name.removeprefix(prefix)
+            assert artifact.namelist().count(member) == 1, member
+            assert artifact.read(member) == (repository / name).read_bytes(), member
+
+
+@pytest.mark.parametrize("loader", ["package", "guardian"])
+def test_standalone_construction_resource_preserves_package_relative_job_scopes(tmp_path, monkeypatch, loader):
+    project, _library = project_at(tmp_path / "checkout")
+    output = tmp_path / "artifacts"
+    result = build(project, output)
+    assert result.returncode == 0, result.stderr
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    import promotion_python_artifacts as artifacts
+
+    wheel = next(output.glob("*.whl"))
+    with wheel.open("rb") as stream:
+        metadata, expanded = artifacts.inspect_wheel(
+            stream, {"filename": wheel.name}, source_dir=project,
+            component="fleet-manager", candidate_root=project.parent,
+        )
+    assert metadata["Name"] == "fleet-manager" and expanded > 0
+    extracted = tmp_path / "resources"
+    extracted.mkdir()
+    with zipfile.ZipFile(wheel) as archive:
+        names = {
+            name for name in archive.namelist()
+            if name.startswith("fleet_manager/_construction_procutil")
+            or name in {
+                "fleet_manager/_installer_process.py", "fleet_manager/_versioned_runtime.py",
+                *("fleet_manager/" + member for member in COMPANIONS),
+            }
+        }
+        for name in names:
+            target = extracted / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(archive.read(name))
+    entry = next(path for path in extracted.rglob("*.py") if path.name in {
+        "_construction_procutil.py", "__init__.py",
+    })
+    name = "standalone_construction_scope_fixture"
+    spec = importlib.util.spec_from_file_location(name, entry)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    with ExitStack() as retained:
+        retained.callback(
+            lambda: [sys.modules.pop(key, None) for key in tuple(sys.modules)
+                     if key == name or key.startswith(name + ".")],
+        )
+        if loader == "guardian":
+            guardian_path = extracted / "fleet_manager/_installer_process.py"
+            guardian_spec = importlib.util.spec_from_file_location("construction_guardian_fixture", guardian_path)
+            assert guardian_spec and guardian_spec.loader
+            guardian = importlib.util.module_from_spec(guardian_spec)
+            guardian_spec.loader.exec_module(guardian)
+            sources = {
+                member: (extracted / "fleet_manager" / member).read_bytes()
+                for member in guardian._GUARDIAN_MEMBERS
+            }
+            for member in sources:
+                (extracted / "fleet_manager" / member).write_text(
+                    "raise AssertionError('late guardian source executed')\n",
+                )
+            _runtime, module = retained.enter_context(guardian._load_guardian_resources(sources))
+        else:
+            spec.loader.exec_module(module)
+        original, appended = "Local\\ce-owned-job-" + "1" * 32, "Local\\ce-owned-job-" + "2" * 32
+        result = module._job_child_environment(
+            {module._JOB_SCOPES_ENV: original}, append=appended, inherit_current=False,
+        )
+        assert result[module._JOB_SCOPES_ENV] == original + ";" + appended
+
+
 @pytest.mark.parametrize("context_kind", ["repository", "pinned"])
 def test_gateway_build_inputs_deliver_the_complete_runtime_family(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, context_kind: str,
@@ -417,13 +553,7 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
         project, library = context / "fleet-manager", context / "libs" / "versioned-runtime"
         recipe = context / "fleet-manager" / "containers" / "gateway"
 
-    copied = set()
-    for line in (recipe / "Dockerfile").read_text(encoding="utf-8").replace("\\\n", " ").splitlines():
-        if not line.startswith("COPY "):
-            continue
-        words = shlex.split(line)
-        copied.update(name for name in words[1:-1] if name.startswith("libs/"))
-    patterns = (recipe / "Dockerfile.dockerignore").read_text(encoding="utf-8").splitlines()
+    copied, patterns = gateway_context_inputs(recipe)
     resources = {
         f"libs/versioned-runtime/{resource.name}": resource
         for resource in library.iterdir()
@@ -433,16 +563,7 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
         for relative in PROCESS_RESOURCES.values()
     })
     for name, resource in resources.items():
-        included = True
-        for pattern in patterns:
-            if pattern and not pattern.startswith("#"):
-                allow = pattern.startswith("!")
-                if fnmatch.fnmatchcase(name, pattern.removeprefix("!").rstrip("/")):
-                    included = allow
-        supplied = name in copied or any(
-            source.endswith("/") and name.startswith(source) for source in copied
-        )
-        if not supplied or not included:
+        if not gateway_context_supplies(name, copied, patterns):
             resource.unlink()
 
     output = tmp_path / "artifacts"
@@ -455,5 +576,13 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
     with zipfile.ZipFile(next(output.glob("*.whl"))) as artifact:
         for module in sorted((PROJECT / "src" / "fleet_manager").glob("*.py")):
             assert artifact.read("fleet_manager/" + module.name) == module.read_bytes()
+        contract = PROJECT / "src/fleet_manager/ssh-client-contract.json"
+        assert gateway_context_supplies(
+            "fleet-manager/src/fleet_manager/ssh-client-contract.json", copied, patterns,
+        )
+        assert not gateway_context_supplies(
+            "fleet-manager/src/fleet_manager/unregistered-contract.json", copied, patterns,
+        )
+        assert artifact.read("fleet_manager/" + contract.name) == contract.read_bytes()
         for name, member in runtime.RUNTIME_RESOURCES.items():
             assert artifact.read(f"fleet_manager/{member}") == (LIBRARY / name).read_bytes()

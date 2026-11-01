@@ -89,9 +89,12 @@ class ShellInstanceSession:
         self._tokens: set[str] = set()
         self._guard_lock = threading.RLock()
         self._failed = False
+        self._owned_cleanup: BaseException | None = None
 
     def dispatch(self, request: dict) -> dict | list | str | None:
         if self._failed:
+            if self._owned_cleanup is not None:
+                raise OSError("finite process cleanup is unsettled; replay is refused")
             raise RuntimeError("original shell lifetime admission failed; replay is refused")
         self.owner.require_live()
         command = request["command"]
@@ -102,6 +105,16 @@ class ShellInstanceSession:
         ):
             raise ValueError("invalid instance shell environment")
         parameters = request.get("parameters", {})
+        if command == "run-owned":
+            from ._native_owned import NativeOwnedFailure, run
+
+            try:
+                return {"returncode": run(parameters)}
+            except NativeOwnedFailure as error:
+                if not error.cleanup_confirmed or error.output is not None:
+                    self._owned_cleanup = error
+                    self._failed = True
+                raise
         if command == "reserve":
             receipt = reserve_for_process(
                 _spec(parameters, environment, admission=False), self.owner.identity,
@@ -290,6 +303,8 @@ def _serve_requests(session: ShellInstanceSession, nonce: str) -> int:
             result = session.dispatch(request)
         except (OSError, ValueError, KeyError, TypeError) as error:
             response = {"ok": False, "error": str(error)}
+            if request.get("command") == "run-owned":
+                response["cleanup_confirmed"] = getattr(error, "cleanup_confirmed", False)
         else:
             response = {"ok": True, "result": result}
         response.update(sequence=sequence, nonce=nonce)

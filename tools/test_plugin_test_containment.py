@@ -62,6 +62,10 @@ def test_fresh_stdlib_caller_imports_native_cleanup_in_both_modes(tmp_path, mode
     script = """
 import sys
 from pathlib import Path
+def refuse_native_loading(event, arguments):
+    if event == "ctypes.dlopen":
+        raise AssertionError("portable containment import must not load native bindings")
+sys.addaudithook(refuse_native_loading)
 root = Path(sys.argv[1])
 sys.path.insert(0, str(root))
 if sys.argv[2] == "package":
@@ -73,6 +77,10 @@ else:
     import plugin_test_containment as containment
     import plugin_test_cache
     assert containment.native_test_path.__module__ == "native_test_paths"
+from agent_procutil import _daemon_instance_store
+from agent_procutil import _windows_job_types
+assert "ctypes" not in sys.modules
+assert "_JobBasicAccountingInformation" not in vars(_windows_job_types)
 """
     result = subprocess.run(
         [sys.executable, "-I", "-S", "-c", script, str(root), mode],
@@ -588,7 +596,7 @@ def test_windows_job_reports_unproven_termination_instead_of_claiming_reaped(mon
     )
     clock = iter((0.0, 6.0))
     monkeypatch.setattr(plugin_test_containment.time, "monotonic", lambda: next(clock))
-    monkeypatch.setattr(plugin_test_containment.ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(plugin_test_containment, "_windows_last_error", lambda: 5)
     with pytest.raises(plugin_test_containment.UnreapedProcessError):
         job.close()
     assert closed == [7]

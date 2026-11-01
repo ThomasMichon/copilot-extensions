@@ -1,7 +1,7 @@
 {
   "name": "agent-conduct-guidance",
-  "description": "Consolidated, generally-good agent conduct guidance for Copilot CLI: independent ambient modules with task-time skills where needed. Covers charter-bounded useful autonomy and durable operator pre-clearance without default deployment/data grants; per-machine maintenance standby; consented Windows elevation; scoped multi-agent authority, custody and countermand; headless process-spawn hygiene; coordinator-first delegation and evidence-backed model routing; portable owner-stamped scratch-space hygiene; and secret-pattern masking avoidance. Each module has a declared instruction projection and keeps enforcement with the existing owner. No grant broker, automatic tool approval, runtime or required companion plugin.",
-  "version": "0.1.20-dev1",
+  "description": "Independent ambient conduct modules and scoped task-time procedures for Copilot CLI: charter-bounded useful autonomy, durable operator pre-clearance, maintenance standby, consented Windows elevation, multi-agent authority and custody, headless process hygiene, owner-stamped scratch space, and secret-pattern masking avoidance. Optional assignment prompt/contract authoring and inert model configuration do not impose a delegation strategy. Enforcement stays with existing owners; no grant broker, automatic tool approval, runtime or required companion plugin.",
+  "version": "0.1.21-dev1",
   "runtimeScope": "none",
   "author": {
     "name": "Thomas Michon"

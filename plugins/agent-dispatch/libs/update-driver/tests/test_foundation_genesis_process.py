@@ -1,4 +1,4 @@
-"""Opt-in real downloads/construction through the Python-free native front door."""
+"""Opt-in cold construction with the setup-provided Python prerequisite."""
 
 import ctypes
 from ctypes import wintypes
@@ -81,9 +81,11 @@ def test_real_cold_callers_converge_after_submitter_job_loss_and_source_removal(
     assert not root.exists()
     shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
     fixture = Path(__file__).with_name("fixture_foundation_submit.ps1")
-    env = dict(os.environ, PATH=str(Path(os.environ["SystemRoot"]) / "System32"))
+    env = dict(os.environ, PATH=os.pathsep.join((
+        str(Path(sys.executable).parent), str(Path(os.environ["SystemRoot"]) / "System32"),
+    )))
     env.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
-    # Do not borrow registry-installed Python or a shared interpreter/cache from the orchestrator.
+    # Helper Python is provisioned; runtime acquisition still owns its isolated closure/cache.
     env.update(UV_PYTHON_PREFERENCE="only-managed", UV_PYTHON_DOWNLOADS="automatic")
     workers, parents, jobs = [], [], []
 
