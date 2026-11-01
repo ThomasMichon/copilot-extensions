@@ -230,6 +230,15 @@ and required contracts. Legacy exact native hashes remain readable by the new
 SDK; older readers that cannot understand `mounts-v2:` must refuse rather than
 reinterpret it or apply over unproved custody.
 
+The selected [installed compatibility packet](../../TESTING.md) uses
+noneditable pre-repair, pre-checkpoint repair and current SDK cells with
+checkout reads denied. It covers baseline caller/current SDK, required new
+caller/unsupported repair SDK refusal before effects, and supported checkpoint
+status/terminal publication with distinct real machine proofs. Fresh-process
+interrupted publication and terminal verification retain the original journal,
+profile, native identities and data. Provider rollback that lacks required
+checkpoint support refuses rather than silently resuming with a whole permit.
+
 Contained synthetic process/HTTP/journal controls and noneditable installed-SDK
 qualification are development evidence, not official-image startup, production
 adoption or rollout authorization. The
