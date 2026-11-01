@@ -683,7 +683,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "immutable_runtime", "immutable_runtime_ref",
         "interactive_completion", "native_launch", "ssh_service",
         "ssh_headless", "update_diagnostics",
-        "runtime_removal", "source_cache",
+        "runtime_removal", "source_cache", "uv_deployment_compatibility",
         "windows_broker_probe", "windows_broker_consumers", "native_daemon_exit",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
@@ -708,6 +708,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "dependency-compile-linux", "dependency-compile-windows",
         "source-build-linux", "source-build-windows",
         "source-cache-linux", "source-cache-windows",
+        "uv-deployment-compatibility-linux", "uv-deployment-compatibility-windows",
         "marketplace-source-linux", "marketplace-source-windows",
         "packaging-seed-linux", "packaging-seed-windows",
         "installer-latency-linux", "installer-latency-windows",
@@ -740,7 +741,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             "${{ !inputs.interactive_completion && !inputs.native_launch && !inputs.immutable_runtime "
             "&& !inputs.guardian_followthrough && !inputs.watch_owner "
             "&& !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service "
-            "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache && !inputs.candidate_profiles "
+            "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.source_cache "
+            "&& !inputs.uv_deployment_compatibility && !inputs.candidate_profiles "
             "&& !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.ssh_headless "
             "&& !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics "
             "&& !inputs.runtime_removal && !inputs.windows_broker_probe && !inputs.windows_broker_consumers "
