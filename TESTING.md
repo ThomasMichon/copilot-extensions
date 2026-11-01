@@ -199,8 +199,17 @@ built pre-repair committed SDK (the pinned revision in
 discover unsupported repair from that actual
 installed control module without native effects, then use a distinct current
 noneditable SDK and fresh machine identity to settle the exact original grant.
-Grant/transition/executor skew refuses; interrupted state and journal publication
-resume in a fresh process with unchanged immutable original evidence.
+The same seven repair cases run with the baseline whole-operation permit and
+the explicit checkpoint producer. The checkpoint lane also builds the retained
+pre-checkpoint repair SDK and refuses required checkpoint behavior from its
+actual installed control module before owner construction or native work.
+Fresh machine proofs bind each status/terminal action, while one advancing
+resolver/native/health clock makes complete status and terminal work exceed
+30 seconds within the original fixture's 180-second deadline. No individual
+permit is extended. Grant/transition/executor skew refuses; interrupted state
+and journal publication resume in a fresh process with unchanged immutable
+original evidence, one native apply and one terminal row. Baseline fixture
+deadlines and whole-permit behavior remain unchanged.
 These are contained component/installed-SDK controls, not actual Docker,
 official-image, automatically constructed controller or production evidence.
 Native/network/build tests remain outside the required no-actor unit packet.

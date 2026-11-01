@@ -15,8 +15,9 @@ from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
 
 from test_continuity_installed import sdk_runtime as sdk_runtime
 from test_continuity_installed import baseline_sdk_runtime as baseline_sdk_runtime
+from test_continuity_installed import repair_baseline_sdk_runtime as repair_baseline_sdk_runtime
 from test_komodo_native import native_rig as native_rig
-from komodo_installed_repair_probe import REPAIR_PROBE, UNSUPPORTED_PROBE
+from komodo_installed_repair_probe import CHECKPOINT_UNSUPPORTED_PROBE, REPAIR_PROBE, UNSUPPORTED_PROBE
 
 pytestmark = [
     pytest.mark.client_distribution_full,
@@ -221,8 +222,10 @@ def test_noneditable_host_bootstrap_uses_common_verified_identity_and_fixed_nati
     "success", "changed-grant", "withdrawn-transition", "executor-skew",
     "save-after", "journal-after", "save-partial-renewed",
 ])
+@pytest.mark.parametrize("checkpoint_auth", [False, True], ids=["whole", "checkpoint"])
 def test_installed_current_executor_repairs_retained_baseline_original_without_replay(
-    tmp_path: Path, sdk_runtime: Any, baseline_sdk_runtime: Any, native_rig: Any, mode: str,
+    tmp_path: Path, sdk_runtime: Any, baseline_sdk_runtime: Any,
+    repair_baseline_sdk_runtime: Any, native_rig: Any, mode: str, checkpoint_auth: bool,
 ) -> None:
     from agent_procutil.owned_process import run_caller_owned
     from fleet_manager.planning import digest
@@ -269,7 +272,7 @@ def test_installed_current_executor_repairs_retained_baseline_original_without_r
             import time
 
             desired = rig["selected"].to_dict()
-            desired.update(core_port=server.port, outfitting_seconds=10)
+            desired.update(core_port=server.port, outfitting_seconds=180 if checkpoint_auth else 10)
             common = {
                 "declaration": desired, "host_runtime": str(runtime), "valid_until": int(time.time()) + 600,
                 "candidate_release": candidate_release, "executor_release": executor_release,
@@ -303,10 +306,19 @@ def test_installed_current_executor_repairs_retained_baseline_original_without_r
             assert unsupported["result"] == "unsupported-installed-repair"
             assert (rig["directory"] / "calls.jsonl").read_bytes() == calls_before
             assert owner_roots[0].read_bytes() == original_state
+            if checkpoint_auth:
+                previous_repair = json.loads(repair_baseline_sdk_runtime[1][-1])
+                unsupported = await probe(
+                    repair_baseline_sdk_runtime, SDK_GUARD + CHECKPOINT_UNSUPPORTED_PROBE,
+                    {**previous_repair, **common})
+                assert unsupported["result"] == "unsupported-installed-checkpoint"
+                assert (rig["directory"] / "calls.jsonl").read_bytes() == calls_before
+                assert owner_roots[0].read_bytes() == original_state
             health_failure[0] = False
             repair_context = {
                 **current, **common, "mode": mode, "original": original["request"],
                 "original_proof_key": original["proof_key"],
+                "checkpoint_auth": checkpoint_auth,
             }
             result = await probe(sdk_runtime, SDK_GUARD + REPAIR_PROBE, repair_context)
             if mode in ("save-after", "journal-after", "save-partial-renewed"):
@@ -338,6 +350,9 @@ def test_installed_current_executor_repairs_retained_baseline_original_without_r
                 assert owner_roots[0].read_bytes() == original_state
             assert result["baseline_contract"] == "fleet-manager.komodo-substrate-owner.v1"
             assert result["repair_contract"] == "fleet-manager.komodo-original-repair.v1"
+            assert result["checkpoint_auth"] is checkpoint_auth
+            assert bool(result["fresh_proofs"]) is (
+                checkpoint_auth and result["result"] == "original-repaired")
             journal_after = (owner_root / "node.sqlite").stat()
             assert (journal_before.st_dev, journal_before.st_ino) == (journal_after.st_dev, journal_after.st_ino)
             assert Path(original_profile).read_bytes() == profile_bytes

@@ -19,6 +19,7 @@ import test_continuity_bootstrap as consumer
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 KOMODO_BASELINE_REVISION = "b6937bd5441ee5896ae539487269f4af94603594"
+KOMODO_REPAIR_BASELINE_REVISION = "6512fce29329be80c93ed6c62343d63bf16aee37"
 pytestmark = [
     pytest.mark.client_distribution_full,
     pytest.mark.skipif(sys.platform != "linux", reason="Linux SDK qualification; native lanes are separate"),
@@ -126,17 +127,29 @@ def sdk_runtime(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, list[st
     return build_sdk_runtime(tmp_path_factory.mktemp("continuity-installed"), REPOSITORY)
 
 
-@pytest.fixture(scope="module")
-def baseline_sdk_runtime(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, list[str]]:
-    directory = tmp_path_factory.mktemp("retained-sdk-baseline")
+def _retained_sdk_runtime(
+    tmp_path_factory: pytest.TempPathFactory, name: str, revision: str,
+) -> tuple[Path, list[str]]:
+    directory = tmp_path_factory.mktemp(name)
     source = directory / "source"
     source.mkdir()
     archive = subprocess.run(
-        ["git", "archive", KOMODO_BASELINE_REVISION, "--", "fleet-manager", "libs"], cwd=REPOSITORY,
+        ["git", "archive", revision, "--", "fleet-manager", "libs"], cwd=REPOSITORY,
         check=True, capture_output=True, timeout=30, **no_window_kwargs())
     with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as retained:
         retained.extractall(source, filter="data")
     return build_sdk_runtime(directory, source)
+
+
+@pytest.fixture(scope="module")
+def baseline_sdk_runtime(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, list[str]]:
+    return _retained_sdk_runtime(tmp_path_factory, "retained-sdk-baseline", KOMODO_BASELINE_REVISION)
+
+
+@pytest.fixture(scope="module")
+def repair_baseline_sdk_runtime(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, list[str]]:
+    return _retained_sdk_runtime(
+        tmp_path_factory, "retained-repair-sdk-baseline", KOMODO_REPAIR_BASELINE_REVISION)
 
 
 def test_source_import_control_is_refused(
