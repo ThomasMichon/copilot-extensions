@@ -35,7 +35,8 @@ from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_
 from installer_wheel_inputs import _check_deadline
 from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs
 from installer_source_build import (
-    SourceWheelInputs, _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
+    SourceWheelInputs, _selected_extras as _selected_extras,
+    _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
     revalidate_input_content, check_dev_owner,
 )
 
@@ -89,31 +90,6 @@ class ContentRepairRequired(RuntimeError):
 
 class HealthRepairRequired(RuntimeError):
     """Published health needs a distinct generation, never an in-place rebuild."""
-
-
-def _selected_extras(plugin: Path, extras: tuple[str, ...]) -> tuple[str, ...]:
-    if not isinstance(extras, tuple) or any(
-        not isinstance(name, str)
-        or re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", name) is None
-        for name in extras
-    ):
-        raise ValueError("Runtime extras must be an immutable tuple of ordinary extra names")
-    normalized = tuple(sorted(re.sub(r"[-_.]+", "-", name).lower() for name in extras))
-    if len(set(normalized)) != len(normalized):
-        raise ValueError("Runtime extras contain duplicate selections")
-    if not normalized:
-        return ()
-    data = tomllib.loads((plugin / "pyproject.toml").read_text(encoding="utf-8"))
-    groups = data.get("project", {}).get("optional-dependencies", {})
-    if not isinstance(groups, dict):
-        raise ValueError("Runtime optional dependencies must be a table")
-    declared = [re.sub(r"[-_.]+", "-", name).lower() for name in groups]
-    if len(set(declared)) != len(declared):
-        raise ValueError("Runtime optional dependencies have ambiguous extra names")
-    missing = set(normalized) - set(declared)
-    if missing:
-        raise ValueError(f"Runtime extras are not declared: {', '.join(sorted(missing))}")
-    return normalized
 
 
 def _construction_hash(

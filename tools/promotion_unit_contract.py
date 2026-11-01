@@ -8,6 +8,7 @@ import math
 import re
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 PROFILE = "copilot-extensions.promotion-units/v1"
 CANDIDATE_PROFILE = "copilot-extensions.promotion-candidate-units/v1"
@@ -21,6 +22,22 @@ BUILD_SOURCE_DATA: frozenset[str] = frozenset()
 
 class UnitEvidenceError(ValueError):
     """The declared unit packet or its observed evidence is incomplete."""
+
+
+def read_bounded(stream: BinaryIO, limit: int) -> bytes:
+    """Read at most limit plus one byte from a blocking file with bounded buffers."""
+    chunks = []
+    remaining = limit + 1
+    while remaining > 0:
+        requested = min(remaining, 1 << 20)
+        chunk = stream.read(requested)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+        if len(chunk) < requested:
+            break
+    return b"".join(chunks)
 
 
 def decode_json(text: str | bytes, *, finite: bool = False) -> object:

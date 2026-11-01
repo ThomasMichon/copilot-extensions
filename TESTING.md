@@ -3190,6 +3190,10 @@ Git-storage, thread and sleep effects, including attempted effects caught by a
 test. Test writes are confined to synthetic temporary storage.
 Packet JSON rejects nonfinite numbers during decoding, including nested values
 and exponent overflow, without serializing another evidence-sized buffer.
+Local packet and qualification reads use at most one-MiB input chunks instead
+of reserving their full file allowance for every small source read. The existing
+file-boundary regression retains full-size archive/readback coverage and checks
+small-file allocations and growth across the unchanged byte limit.
 The retained client-resource units substitute fixture-confined artifact handles
 at the native open boundary. Resource framing, hashing and retention remain real;
 these units do not qualify Windows read-sharing fences.
