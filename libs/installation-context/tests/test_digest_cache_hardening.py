@@ -834,6 +834,15 @@ def test_posix_safe_open_rejects_fifo_without_blocking(tmp_path: Path, bash: str
         prefix
         + r'''
 shift
+REAPED_TIMER="$3"
+kill() {
+    if [[ -n "${open_timer:-}" && "${1:-}" == "$open_timer" ]] &&
+       ! jobs -pr | grep -Fxq -- "$open_timer"; then
+        printf '%s' "$open_timer" >"$REAPED_TIMER"
+        return 1
+    fi
+    builtin kill "$@"
+}
 capture_regular_file "$1" "Probe file" "$2" true true
 ''',
         encoding="utf-8",
@@ -841,10 +850,11 @@ capture_regular_file "$1" "Probe file" "$2" true true
     probe.chmod(0o755)
     fifo = tmp_path / "receipt.fifo"
     os.mkfifo(fifo)
+    reaped_timer = tmp_path / "reaped-timer"
     started = time.monotonic()
 
     result = subprocess.run(
-        (bash, str(probe), "status", str(fifo), str(tmp_path / "capture")),
+        (bash, str(probe), "status", str(fifo), str(tmp_path / "capture"), str(reaped_timer)),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -856,6 +866,7 @@ capture_regular_file "$1" "Probe file" "$2" true true
     assert time.monotonic() - started < 5
     assert result.returncode != 0
     assert "without blocking" in result.stderr.lower()
+    assert not reaped_timer.exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX file descriptors")
