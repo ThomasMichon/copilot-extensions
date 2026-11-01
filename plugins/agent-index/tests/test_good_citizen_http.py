@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Iterator
+from typing import Any
 
 import httpx
+import pytest
 
+from agent_index.indexing.work_counts import measure_reindex
 from agent_index.sources.good_citizen_http import GoodCitizenSession, _rate_reset_delay
 
 
@@ -131,3 +134,78 @@ def test_session_does_not_sleep_for_a_wildly_stale_reset_header(monkeypatch) -> 
 
     assert session.get_json("/items").data == {"ok": True}
     assert sleeps == [] or all(delay < 60 for delay in sleeps)
+
+
+def test_byte_requests_share_json_retry_and_purpose_accounting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(time, "sleep", lambda _delay: None)
+    payload = b"\xff\x00raw\r\ncontent"
+    raw_attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal raw_attempts
+        if request.url.path == "/items":
+            return _json_response(200, {"number": 1})
+        assert request.headers["Accept"] == "application/octet-stream"
+        assert request.url.params["ref"] == "pinned"
+        raw_attempts += 1
+        if raw_attempts == 1:
+            return httpx.Response(503, content=b"retry")
+        return httpx.Response(
+            200, content=payload, headers={"Content-Type": "application/octet-stream"},
+        )
+
+    session = GoodCitizenSession(
+        base_url="https://example.test", transport=httpx.MockTransport(handler),
+        min_interval_s=0, max_retries=1,
+    )
+
+    @measure_reindex
+    def run() -> dict[str, Any]:
+        assert session.get_json("/items", purpose="identity_page").data == {"number": 1}
+        result = session.get_bytes(
+            "/raw", params={"ref": "pinned"},
+            headers={"Accept": "application/octet-stream"}, purpose="item_body",
+        )
+        assert result.data == payload
+        assert result.headers["Content-Type"] == "application/octet-stream"
+        return {}
+
+    counts = run()["work_counts"]
+    assert counts["http"]["attempts"] == counts["http"]["responses"] == 3
+    assert counts["http"]["retries"] == counts["http"]["json_results"] == 1
+    raw = counts["http_by_purpose"]["item_body"]
+    assert raw["attempts"] == raw["responses"] == 2
+    assert raw["retries"] == 1 and raw["json_results"] == 0
+    assert raw["response_bytes"] == len(b"retry") + len(payload)
+    assert counts["http_by_purpose"]["identity_page"]["json_results"] == 1
+
+
+def test_byte_requests_preserve_conditional_response_semantics() -> None:
+    validators: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        validators.append(request.headers.get("If-None-Match"))
+        if len(validators) == 1:
+            return httpx.Response(200, content=b"raw", headers={"ETag": '"raw"'})
+        return httpx.Response(304)
+
+    session = GoodCitizenSession(
+        base_url="https://example.test", transport=httpx.MockTransport(handler),
+        min_interval_s=0,
+    )
+    assert session.get_bytes("/raw", etag=True).data == b"raw"
+    unchanged = session.get_bytes("/raw", etag=True)
+    assert unchanged.not_modified and unchanged.data is None
+    assert validators == [None, '"raw"']
+
+
+def test_byte_request_failure_does_not_become_empty_content() -> None:
+    session = GoodCitizenSession(
+        base_url="https://example.test",
+        transport=httpx.MockTransport(lambda _request: httpx.Response(404)),
+        min_interval_s=0, max_retries=0,
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        session.get_bytes("/missing")

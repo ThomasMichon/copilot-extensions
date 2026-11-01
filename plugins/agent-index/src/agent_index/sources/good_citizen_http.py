@@ -37,7 +37,7 @@ _RATE_RESET_HEADERS = (
 
 @dataclass(frozen=True)
 class ApiResult:
-    """JSON response plus headers from a polite upstream request."""
+    """Decoded JSON or raw bytes plus headers from a polite upstream request."""
 
     data: Any
     headers: httpx.Headers
@@ -118,6 +118,22 @@ class GoodCitizenSession:
             purpose=purpose,
         )
 
+    def get_bytes(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        etag: bool = False,
+        retry_status: Callable[[httpx.Response], bool] | None = None,
+        purpose: str = "unclassified",
+    ) -> ApiResult:
+        """GET exact response bytes with the same throttling and HTTP accounting."""
+        return self._request(
+            "GET", path, params=params, headers=headers, etag=etag,
+            retry_status=retry_status, purpose=purpose, decode_json=False,
+        )
+
     def request_json(
         self,
         method: str,
@@ -131,6 +147,24 @@ class GoodCitizenSession:
         purpose: str = "unclassified",
     ) -> ApiResult:
         """Request JSON with bounded retries and upstream-directed backoff."""
+        return self._request(
+            method, path, params=params, json=json, headers=headers, etag=etag,
+            retry_status=retry_status, purpose=purpose, decode_json=True,
+        )
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any | None = None,
+        headers: dict[str, str] | None = None,
+        etag: bool = False,
+        retry_status: Callable[[httpx.Response], bool] | None = None,
+        purpose: str = "unclassified",
+        decode_json: bool,
+    ) -> ApiResult:
         from agent_index.indexing.work_counts import observe_http, observe_http_purpose
 
         observations = [
@@ -201,9 +235,10 @@ class GoodCitizenSession:
             if etag and (response_etag := response.headers.get("ETag")):
                 self._etag_cache[cache_key] = response_etag
             self._respect_rate_limit(response)
-            data = response.json()
-            for counts in observations:
-                counts.json_results += 1
+            data = response.json() if decode_json else response.content
+            if decode_json:
+                for counts in observations:
+                    counts.json_results += 1
             return ApiResult(data=data, headers=response.headers, request=response.request)
 
     def paginate_continuation(
