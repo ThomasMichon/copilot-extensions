@@ -21,9 +21,11 @@ from worktree_manager import engine_posix_process as posix
 from worktree_manager import mux_companion as companion
 from worktree_manager.agenda_contract import AgendaFeed, AgendaUnavailable
 from test_agenda_contract import publication
+from test_agenda_end_to_end import SOURCE_PATHS, chain as chain
 from test_companion_agenda_live import current_data, until, widget
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="production POSIX group-owner path")
+_MODULE_HEALTH_ARGV = transport.health_argv
 
 
 @pytest.fixture
@@ -292,6 +294,145 @@ def test_noncontained_spawn_failure_has_explicit_receipt(
     assert not error.value.retry
     assert error.value.code == "spawn-failed"
     assert "error" in next(iter(reserved_owners.values()))["receipts"][0]
+
+
+def test_actual_helper_module_cannot_dispatch_and_is_rejected_despite_healthy_resident(
+    reserved_owners, chain, monkeypatch,
+):
+    base = [sys.executable, "-m", "agent_worktrees.current_roster_entry"]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(str(source) for source in SOURCE_PATHS)
+    raw = posix.run(
+        [*base, "agenda-feed", "--project", "example", "--worktree", "selected",
+         "--session", "head-a", "--json"],
+        timeout=3, text=True, env=env, stderr=subprocess.PIPE,
+    )
+    assert raw.returncode == 0 and raw.stdout == "" and raw.stderr == ""
+    # The real private resident can prove support, but that does not make the
+    # helper module an executable command entry.
+    transport.require_capability(chain["argv"], cancelled=Event(), cwd=str(chain["workdir"]))
+    probe_calls = []
+
+    def healthy_probe(_base):
+        probe_calls.append(True)
+        return [*chain["argv"], "--resident-health"]
+
+    monkeypatch.setattr(transport, "health_argv", healthy_probe)
+    monkeypatch.setattr(companion.ec, "engine_base_command", lambda: list(base))
+    admitted = []
+    stream = transport.frames(
+        "example", "selected", "head-a", cancelled=Event(), cwd=str(chain["workdir"]),
+        on_supported=lambda: admitted.append(True),
+    )
+    with pytest.raises(AgendaUnavailable, match="unsupported owned agenda module entry") as error:
+        next(stream)
+    assert error.value.code == "unsupported-entry" and not error.value.retry
+    assert not probe_calls and not admitted
+    assert len(reserved_owners) == 1
+    assert all(action == "health" for action, _payload in chain["actions"])
+
+
+@pytest.fixture
+def actual_module_runtime(chain, monkeypatch):
+    from agent_worktrees import status_monitor_cutover
+
+    bootstrap = chain["workdir"].parent / "module-imports"
+    bootstrap.mkdir()
+    runtime = chain["workdir"].parent / "module-route"
+    runtime.mkdir()
+    status_monitor_cutover.control_token_path(runtime).write_text(
+        chain["server"].token, encoding="utf-8",
+    )
+    startup = f"""
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+sys.path[:0]={list(map(str, SOURCE_PATHS))!r}
+from agent_worktrees import agenda_cli,config,front_door_cli,invocation_project,tracking,worktrees_client
+from agent_worktrees.status_monitor_cutover import ControlClient
+def client():
+    return ControlClient({chain["endpoint"]!r},token={chain["server"].token!r},timeout=2)
+def project_guard(project,command):
+    if project not in (None,"example"):
+        raise ValueError("fixture project selection mismatch")
+def project_discovery(args,project,*hooks):
+    project_guard(project,None)
+    return True
+config.project_name=lambda:"example"
+config.tracking_dir=lambda:Path({str(chain["record_path"].parent)!r})
+config.install_dir=lambda:Path({str(runtime)!r})
+front_door_cli._guard_project_scope=project_guard
+front_door_cli.resolve_invocation_project=project_discovery
+invocation_project.resolve_invocation_project=project_discovery
+agenda_cli._control_client=client
+worktrees_client._control_client=client
+worktrees_client.resident_endpoint=lambda root:SimpleNamespace(base_url={chain["endpoint"]!r})
+"""
+    (bootstrap / "sitecustomize.py").write_text(startup, encoding="utf-8")
+    actual_env = transport._engine_environment
+
+    def environment():
+        env = actual_env()
+        env["PYTHONPATH"] = os.pathsep.join([str(bootstrap), *map(str, SOURCE_PATHS)])
+        return env
+
+    monkeypatch.setattr(transport, "_engine_environment", environment)
+    monkeypatch.setattr(
+        transport, "_HEALTH_PROBE",
+        f"import sys; sys.path[:0]=[{str(bootstrap)!r}]; import sitecustomize\n" + transport._HEALTH_PROBE,
+    )
+    monkeypatch.setattr(transport, "health_argv", _MODULE_HEALTH_ARGV)
+    return chain
+
+
+@pytest.mark.parametrize("entry", ["agent_worktrees", "agent_worktrees.__main__", "console"])
+def test_actual_executable_module_and_declared_console_dispatch_agenda(
+    reserved_owners, actual_module_runtime, monkeypatch, entry,
+):
+    chain = actual_module_runtime
+    if entry == "console":
+        base = [
+            sys.executable, "-c",
+            "from agent_worktrees.current_roster_entry import console_entry; console_entry()",
+        ]
+        # This known fixture console callable declares its owned health argv;
+        # production never guesses a probe from an opaque -c/script command.
+        monkeypatch.setattr(
+            transport, "health_argv",
+            lambda selected: [selected[0], "-I", "-c", transport._HEALTH_PROBE],
+        )
+    else:
+        base = [sys.executable, "-m", entry]
+    monkeypatch.setattr(companion.ec, "engine_base_command", lambda: list(base))
+    stream = transport.frames(
+        "example", "selected", "head-a", cancelled=Event(), cwd=str(chain["workdir"]),
+    )
+    try:
+        snapshot = next(stream)
+        assert snapshot["type"] == "snapshot" and snapshot["availability"] == "not-published"
+        assert snapshot["generation"] == chain["owner"].store.generation
+        assert snapshot["project"] == "example" and snapshot["session_id"] == "head-a"
+        assert chain["owner"].agendas.feed.active_count() == 1
+    finally:
+        stream.close()
+    assert chain["owner"].agendas.feed.wait_closed(3)
+
+
+def test_actual_declared_console_preserves_original_roster_feed(
+    reserved_owners, actual_module_runtime,
+):
+    chain = actual_module_runtime
+    argv = [
+        sys.executable, "-c",
+        "from agent_worktrees.current_roster_entry import console_entry; console_entry()",
+        "--project", "example", "list", "--json", "--current", "--stream", "--follow",
+    ]
+    with transport._owned_process(argv, str(chain["workdir"])) as (output, _stderr, _completion):
+        ready, _, _ = select.select([output], [], [], 3)
+        assert ready, "the actual console roster entry did not dispatch"
+        frame = json.loads(output.readline(80 * 1024 + 1))
+        assert frame["type"] == "begin", frame
+        assert frame["projection"]["generation"] == chain["owner"].store.generation
 
 
 @pytest.mark.parametrize("spawn_error", [False, True])

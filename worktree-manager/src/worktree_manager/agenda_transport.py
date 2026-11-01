@@ -80,10 +80,21 @@ def _resolved_engine() -> list[str]:
     return base
 
 
+def validate_agenda_entry(base: list[str]) -> None:
+    """Admit executable module entries, not helper modules defining console callables."""
+    if "-m" in base[1:]:
+        index = base.index("-m", 1)
+        if index != len(base) - 2 or base[index + 1] not in {
+            "agent_worktrees", "agent_worktrees.__main__",
+        }:
+            raise AgendaUnavailable("unsupported owned agenda module entry", code="unsupported-entry")
+
+
 def health_argv(base: list[str]) -> list[str]:
     """Read in the owned runtime, never dispatch an unknown CLI verb."""
+    validate_agenda_entry(base)
     if len(base) < 3 or base[-2] != "-m" or base[-1] not in {
-        "agent_worktrees", "agent_worktrees.current_roster_entry",
+        "agent_worktrees", "agent_worktrees.__main__",
     }:
         raise AgendaUnavailable("resolved engine has no admitted read-only resident health probe")
     return [*base[:-2], "-I", "-c", _HEALTH_PROBE]
@@ -162,6 +173,7 @@ def feed_argv(
     project: str, worktree: str, session: str, *, engine_command: list[str] | None = None,
 ) -> list[str]:
     base = _resolved_engine() if engine_command is None else engine_command
+    validate_agenda_entry(base)
     return [
         *base, "agenda-feed", "--project", project, "--worktree", worktree,
         "--session", session, "--json",
@@ -237,6 +249,7 @@ def frames(
     if cancelled.is_set():
         return
     base = _resolved_engine()
+    validate_agenda_entry(base)
     require_capability(base, cancelled=cancelled, cwd=cwd, on_supported=on_supported)
     if cancelled.is_set():
         return

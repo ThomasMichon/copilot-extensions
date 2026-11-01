@@ -38,9 +38,19 @@ Manager probe/process. This permits bounded initial-unready recovery before any
 snapshot and continued recovery when a later reprobe temporarily goes offline.
 
 An unresolved or non-absolute executable refuses. The admitted normal argv
-shape ends in `-m agent_worktrees` or `-m agent_worktrees.current_roster_entry`.
-Other wrappers refuse explicitly because no safe existing health entry can be
-inferred. There is no bare-PATH fallback, in-process provider import, legacy
+shape ends in `-m agent_worktrees` or `-m agent_worktrees.__main__`, retaining
+the selected interpreter and its preceding flags. Module admission is checked
+before a probe or feed is invoked. `agent_worktrees.current_roster_entry` defines
+the shipped `console_entry` callable but has no module execution block: invoking
+it with `-m` cannot dispatch agenda commands and is an explicit terminal
+`unsupported-entry`, even when resident health advertises agenda support.
+Its registered console callable and the original roster selection remain
+unchanged; they are not interchangeable with executing the helper module.
+Opaque console/script argv retain their existing engine operations, but the
+optional agenda feature does not guess a health probe or rewrite them. An
+explicitly declared fixture-owned probe can qualify a known executable script/
+console entry; the actual CLI still performs its own contract negotiation.
+There is no bare-PATH fallback, in-process provider import, legacy
 agenda filesystem fallback, default-launch dispatch or provisioning command.
 Manager does not separately call resident control actions
 `agenda-read`, `agenda-publish` or `agenda-feed`, and never publishes or submits

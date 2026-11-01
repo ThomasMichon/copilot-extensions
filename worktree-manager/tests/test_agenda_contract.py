@@ -1,9 +1,11 @@
 """Synthetic admission controls, independent of the efforts/provider packages."""
 
 from copy import deepcopy
+import sys
 
 import pytest
 
+from worktree_manager import agenda_transport
 from worktree_manager.agenda_contract import (
     AgendaFeed, AgendaPublicationFence, AgendaUnavailable, MAX_INTEGER, validate_snapshot,
 )
@@ -247,3 +249,32 @@ def test_publication_fence_refuses_store_replacement_for_the_same_selected_head(
     with pytest.raises(ValueError, match="source store changed"):
         AgendaFeed("example", "selected", "head-a", fence=fence).receive(changed)
     assert fence.observed == first["observation"]
+
+
+@pytest.mark.parametrize("module", ["agent_worktrees", "agent_worktrees.__main__"])
+def test_executable_agenda_module_whitelist_preserves_the_resolved_argv(module):
+    base = [sys.executable, "-B", "-m", module]
+    assert agenda_transport.health_argv(base) == [
+        sys.executable, "-B", "-I", "-c", agenda_transport._HEALTH_PROBE,
+    ]
+    assert agenda_transport.feed_argv("example", "selected", "head-a", engine_command=base) == [
+        *base, "agenda-feed", "--project", "example", "--worktree", "selected",
+        "--session", "head-a", "--json",
+    ]
+
+
+@pytest.mark.parametrize("suffix", [
+    ["-m", "agent_worktrees.current_roster_entry"],
+    ["-m", "agent_worktrees.agenda_cli"],
+    ["-m", "unknown_provider"],
+    ["-m", "agent_worktrees.current_roster_entry", "--project", "example"],
+])
+def test_nonexecutable_agenda_modules_are_terminal_before_probe_or_feed(suffix):
+    base = [sys.executable, *suffix]
+    for build in (
+        lambda: agenda_transport.health_argv(base),
+        lambda: agenda_transport.feed_argv("example", "selected", "head-a", engine_command=base),
+    ):
+        with pytest.raises(AgendaUnavailable, match="unsupported owned agenda module entry") as error:
+            build()
+        assert error.value.code == "unsupported-entry" and not error.value.retry

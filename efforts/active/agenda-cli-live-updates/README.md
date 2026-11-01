@@ -163,6 +163,21 @@ proposal is claimed available merely because its intended name is described.
 
 ## Journal
 
+### 2026-11-01 - Executable module admission review
+
+- Re-review found an admitted module form that has no executable agenda
+  entry point: a successful provider health probe was followed by an empty
+  successful process exit, misclassified as a retrying disconnect.
+- Module admission now rejects the non-executable helper before probe/feed
+  execution and admits only the actual package and `__main__` module forms.
+  Original roster operations and the shipped console callable remain unchanged;
+  opaque scripts are not guessed or rewritten into agenda entry points.
+- The full contract/normal-POSIX/connected packet passed 110 cases independently
+  with cleanup verified. Actual processes demonstrate the helper's empty
+  successful exit, explicit terminal refusal despite healthy resident support,
+  supported module/console dispatch and unchanged roster dispatch. A fresh
+  current-head review remains required.
+
 ### 2026-11-01 - Consumer reconnect fence reconciliation
 
 - The next review listed no open findings and accepted initialization closure,

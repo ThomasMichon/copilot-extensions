@@ -169,7 +169,11 @@ def chain(tmp_path: Path, monkeypatch, request):
 
     def handle(action, payload):
         actions.append((action, deepcopy(payload)))
-        return owner.health() if action == "health" else owner.agenda_handle(action, payload)
+        if action == "health":
+            return owner.health()
+        if action == "worktrees-read":
+            return owner.handle(payload)
+        return owner.agenda_handle(action, payload)
 
     server = control.ControlServer(
         handle, token="synthetic-agenda-token", stream_handle=owner.stream,
