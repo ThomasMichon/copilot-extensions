@@ -1,5 +1,7 @@
 # agent-vault
 
+[Configuration reference](docs/configuration.md)
+
 Native `uninstall` removes explicitly named runtime slots, snapshots, selectors,
 generated resolvers and service launchers. Configuration, authentication,
 `run/`, `logs/`, `core/`, `cache/` and unknown files are retained by default.

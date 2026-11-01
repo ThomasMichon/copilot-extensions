@@ -317,17 +317,17 @@ def _repo_config_layers(root: Path) -> list[Path]:
     base = _repo_base_config_path(root)
     if base is not None:
         layers.append(base)
-    knowledge_root = _knowledge_root_for_repo(root)
-    if knowledge_root is not None:
-        knowledge = knowledge_root / REPO_CONFIG_RELPATH
-        if knowledge.exists():
-            layers.append(knowledge)
     overlay = _repo_local_overlay_path(root)
     if overlay is not None:
         layers.append(overlay)
     overlay = _repo_marketplace_overlay_path(root)
     if overlay is not None:
         layers.append(overlay)
+    knowledge_root = _knowledge_root_for_repo(root)
+    if knowledge_root is not None:
+        knowledge = knowledge_root / REPO_CONFIG_RELPATH
+        if knowledge.exists():
+            layers.append(knowledge)
     return layers
 
 
@@ -366,6 +366,11 @@ def _load_effective_repo_config(root: Path | None) -> dict:
         return _load_effective_config_path(Path(effective).expanduser())
     if root is None:
         return {}
+    from .configuration_layers import load_repository_layers
+
+    layered = load_repository_layers(root)
+    if layered is not None:
+        return layered["values"]
     layers = _repo_config_layers(root)
     if not layers:
         return {}

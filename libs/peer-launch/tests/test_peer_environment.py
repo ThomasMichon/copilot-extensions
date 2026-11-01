@@ -72,6 +72,20 @@ def test_other_peers_never_inherit_pr_owner_state():
     assert not any(name.startswith("AGENT_PULL_REQUESTS_") for name in env)
 
 
+def test_worktrees_read_does_not_inherit_mcp_or_vault_configuration():
+    env = peer_launch.peer_environment(_context("agent-worktrees"), {
+        "AGENT_MCP_PLUGIN_ROOTS": "/caller/payload",
+        "AGENT_MCP_SERVER": "caller-server",
+        "AGENT_VAULT_PORT": "9999",
+        "AGENT_VAULT_ENDPOINT": "caller-endpoint",
+        "AGENT_CONFIGURATION_CONTEXT": "ordinary-source-projection",
+        "HOME": "/user",
+    })
+    assert not any(name.startswith(("AGENT_MCP_", "AGENT_VAULT_")) for name in env)
+    assert env["AGENT_CONFIGURATION_CONTEXT"] == "ordinary-source-projection"
+    assert env["HOME"] == "/user"
+
+
 def test_machines_peer_rebinds_its_owner_without_foreign_runtime_overrides():
     assert peer_launch.PEERS["agent-machines"] == "agent_machines"
     env = peer_launch.peer_environment(_context("agent-machines"), {

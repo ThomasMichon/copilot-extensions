@@ -186,6 +186,9 @@ jobs:
     - name: Same-cell peer launcher vendoring
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/sync-peer-launch.py --check
+    - name: Standalone configuration reader vendoring
+      if: steps.code-impact.outputs.run == 'true'
+      run: python tools/sync-configuration-layers.py --check
     - name: Vendored library synchronization
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-vendored-libs-sync.py

@@ -151,6 +151,249 @@ def test_config_user_override(tmp_path: Path) -> None:
     assert cfg.voice_pack == "custom"
 
 
+@pytest.mark.parametrize("level", range(4))
+def test_native_organization_four_tiers_and_source_paths(
+    tmp_path, monkeypatch, level, qualified_owner_reply,
+):
+    from agent_logger import repo_trust
+
+    base, knowledge, home, local = (
+        tmp_path / name for name in ("base", "knowledge", "home", "project-local")
+    )
+    for path in (base, knowledge, home, local):
+        path.mkdir()
+    (base / ".git").mkdir()
+    (base / ".agent-logger.yaml").write_text("log:\n  note_marker: base\n", encoding="utf-8")
+    (knowledge / ".agent-logger.yaml").write_text(
+        "log:\n  note_marker: knowledge\n  root: knowledge-logs\n"
+        if level >= 1 else "{}\n", encoding="utf-8",
+    )
+    if level >= 2:
+        (home / "config.yaml").write_text("log:\n  note_marker: machine\n", encoding="utf-8")
+    if level >= 3:
+        (local / ".agent-logger.yaml").write_text(
+            "log:\n  note_marker: repository-machine\n", encoding="utf-8",
+        )
+    monkeypatch.setattr(repo_trust, "repo_config_is_trusted", lambda root: True)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "repo-registered", "execution_machine": "machine-a",
+            "installation_cell": "cell-a", "binding": "bound",
+            "base_root": str(base), "knowledge_root": str(knowledge),
+        },
+        "repository_machine_root": str(local),
+    }))
+    monkeypatch.chdir(base)
+
+    result = load_config(home=home)
+
+    assert result.note_marker == ("base", "knowledge", "machine", "repository-machine")[level]
+    assert result.configuration_provenance["/log/note_marker"]["id"] == (
+        "repository", "knowledge", "machine", "repository-machine",
+    )[level]
+    if level >= 1:
+        assert result.log_root == knowledge / "knowledge-logs"
+        assert result.configuration_provenance["/log/root"]["source"]["root"] == str(knowledge)
+
+
+def test_native_present_optional_binding_owner_refusal_fails_consumer(tmp_path, monkeypatch):
+    from configuration_layers import ConfigurationError
+
+    from agent_logger import configuration_layers
+
+    if os.name != "nt":
+        pytest.skip("Windows-native command-prefix control")
+    base = tmp_path / "base"
+    (base / ".git").mkdir(parents=True)
+    (base / ".agent-logger.yaml").write_text("log: {}\n", encoding="utf-8")
+    command = tmp_path / "owner.cmd"
+    command.write_text("@echo off\r\nexit /b 1\r\n", encoding="utf-8")
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(configuration_layers, "_legacy_owner_prefix", lambda: [str(command)])
+    monkeypatch.chdir(base)
+
+    with pytest.raises(ConfigurationError, match="refused"):
+        load_config(home=tmp_path / "home")
+
+
+@pytest.mark.no_autotrust
+def test_native_standalone_unbound_logger_never_bootstraps_owner(tmp_path, monkeypatch):
+    root = tmp_path / "base"
+    (root / ".git").mkdir(parents=True)
+    (root / ".agent-logger.yaml").write_text("log:\n  note_marker: standalone\n", encoding="utf-8")
+    owner_home = tmp_path / "unprovisioned-owner"
+    monkeypatch.setenv("AGENT_HOME", str(owner_home))
+    monkeypatch.setenv("AGENT_LOGGER_TRUST_REPO_CONFIG", str(root))
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail(
+        "an unready optional owner must not launch a bootstrap or command",
+    ))
+
+    result = load_config(home=tmp_path / "home", repo_start=root)
+
+    assert result.note_marker == "standalone"
+    assert result.configuration_provenance == {}
+    assert not owner_home.exists()
+
+
+def test_native_bound_organization_path_escape_is_not_hidden_by_machine_preference(
+    tmp_path, monkeypatch, qualified_owner_reply,
+):
+    from agent_logger import repo_trust
+
+    base, knowledge, home, local = (
+        tmp_path / name for name in ("base", "knowledge", "home", "local")
+    )
+    for root in (base, knowledge, home, local):
+        root.mkdir()
+    (base / ".git").mkdir()
+    (base / ".agent-logger.yaml").write_text("log: {}\n", encoding="utf-8")
+    (knowledge / ".agent-logger.yaml").write_text("log:\n  root: ../escape\n", encoding="utf-8")
+    (home / "config.yaml").write_text(f"log:\n  root: {home}\n", encoding="utf-8")
+    monkeypatch.setattr(repo_trust, "repo_config_is_trusted", lambda root: True)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "declared-repository", "execution_machine": "declared-machine",
+            "installation_cell": "declared-cell", "binding": "bound",
+            "base_root": str(base), "knowledge_root": str(knowledge),
+        },
+        "repository_machine_root": str(local),
+    }))
+    monkeypatch.chdir(base)
+
+    with pytest.raises(RepositoryConfigError, match="must not escape"):
+        load_config(home=home)
+
+
+def test_native_bound_knowledge_organization_without_base_file(
+    tmp_path, monkeypatch, qualified_owner_reply,
+):
+    from agent_logger import repo_trust
+
+    base, knowledge, local = (tmp_path / name for name in ("base", "knowledge", "local"))
+    for root in (base, knowledge, local):
+        root.mkdir()
+    (base / ".git").mkdir()
+    (knowledge / ".agent-logger.yaml").write_text(
+        "log:\n  note_marker: knowledge-only\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(repo_trust, "repo_config_is_trusted", lambda root: True)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "declared-repository", "execution_machine": "declared-machine",
+            "installation_cell": "declared-cell", "binding": "bound",
+            "base_root": str(base), "knowledge_root": str(knowledge),
+        },
+        "repository_machine_root": str(local),
+    }))
+    monkeypatch.chdir(base)
+
+    result = load_config(home=tmp_path / "home")
+    assert result.note_marker == "knowledge-only"
+    assert result.configuration_provenance["/log/note_marker"]["origin"] == "knowledge"
+
+
+@pytest.mark.parametrize("matching_cell", [True, False])
+def test_native_implicit_logger_cell_checked_before_projection(
+    tmp_path, monkeypatch, matching_cell, qualified_owner_reply,
+):
+    from agent_logger import configuration_layers
+
+    base = tmp_path / "base"
+    (base / ".git").mkdir(parents=True)
+    (base / ".agent-logger.yaml").write_text("log:\n  note_marker: scoped\n", encoding="utf-8")
+    own = tmp_path / "marketplaces" / "own-cell" / "plugins" / "agent-logger"
+    own.mkdir(parents=True)
+    cell = own.parent.parent
+    calls = []
+
+    def validate(owner, root, pointer):
+        calls.append((owner, root, pointer))
+        return {"cellRoot": str(cell), "pluginRoot": str(own)}
+
+    monkeypatch.setattr(configuration_layers._peer_launch, "validate_owner", validate)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "declared-repository", "execution_machine": "declared-machine",
+            "installation_cell": str(cell if matching_cell else tmp_path / "foreign-cell"),
+            "binding": "unbound", "base_root": str(base),
+        },
+        "repository_machine_root": str(tmp_path / "local"),
+    }))
+    if matching_cell:
+        assert load_config(home=own, repo_start=base).note_marker == "scoped"
+    else:
+        with pytest.raises(ValueError, match="another installation cell"):
+            load_config(home=own, repo_start=base)
+    assert calls == [("agent-logger", own, str(own / "install.json"))]
+
+
+@pytest.fixture
+def qualified_owner_reply(monkeypatch):
+    """Organization tests supply their qualified owner transport independently."""
+    from agent_logger import configuration_layers
+
+    monkeypatch.setattr(
+        configuration_layers, "read_owner_context",
+        lambda *args, **kwargs: json.loads(os.environ["AGENT_CONFIGURATION_CONTEXT"]),
+    )
+
+
+@pytest.mark.parametrize("peer", ["absent", "old", "refused"])
+@pytest.mark.parametrize("delivered", [False, True])
+def test_native_optional_namespaced_logger_owner_compatibility(
+    tmp_path, monkeypatch, peer, delivered,
+):
+    from configuration_layers import ConfigurationError
+
+    from agent_logger import configuration_layers
+
+    base = tmp_path / "base"
+    (base / ".git").mkdir(parents=True)
+    (base / ".agent-logger.yaml").write_text("log:\n  note_marker: native\n", encoding="utf-8")
+    own = tmp_path / "marketplaces" / "cell" / "plugins" / "agent-logger"
+    own.mkdir(parents=True)
+    cell = own.parent.parent
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    monkeypatch.setattr(configuration_layers._peer_launch, "validate_owner", lambda *args: {
+        "cellRoot": str(cell), "pluginRoot": str(own),
+    })
+    if peer != "absent":
+        receipt = cell / "plugins" / "agent-worktrees" / "install.json"
+        receipt.parent.mkdir()
+        receipt.write_text("{}\n", encoding="utf-8")
+    code = (
+        "import sys; print('unrecognized arguments: --configuration', file=sys.stderr); sys.exit(2)"
+        if peer == "old" else "import sys; sys.exit(1)"
+    )
+    monkeypatch.setattr(
+        configuration_layers._peer_launch, "launch_prefix",
+        lambda *args: [sys.executable, "-c", code],
+    )
+    if delivered:
+        monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps({
+            "schema": "agent-worktrees.configuration", "version": 1,
+            "context": {
+                "repository_id": "declared-repository", "execution_machine": "declared-machine",
+                "installation_cell": str(cell), "binding": "unbound", "base_root": str(base),
+            },
+            "repository_machine_root": str(tmp_path / "untrusted-exact"),
+        }))
+    if delivered or peer == "refused":
+        with pytest.raises(ConfigurationError):
+            load_config(home=own, repo_start=base)
+    else:
+        assert load_config(home=own, repo_start=base).note_marker == "native"
+
+
 def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -189,7 +432,7 @@ def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> N
     assert find_repo_config() == repo / ".agent-logger.yaml"
     assert cfg.sync_target == "onedrive"
     assert cfg.log_root == repo
-    assert cfg.log_path_template == "logs/{year}/{month}.{day} {title}.md"
+    assert cfg.log_path_template == "global/{title}.md"
     assert cfg.log_template is not None
     assert "**Date:** {date}" in cfg.log_template
     assert cfg.narration_style == "Use brief section introductions."

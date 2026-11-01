@@ -1,5 +1,8 @@
 # agent-codespaces
 
+See the [configuration reference](docs/configuration.md) for native files,
+fields, precedence, source-relative provisioning and credential boundaries.
+
 GitHub Codespaces lifecycle management, SSH transport, and credential relay
 for Copilot CLI.
 
@@ -168,7 +171,7 @@ readiness error rather than an alternate installer or completion parser.
 
 On Windows, initial installation `status` and selected-context `validate`
 reads may use the payload's canonical SDK in a fresh isolated, no-site Python
-process. The [independent bootstrap selector](../../docs/install-contract.md#independent-windows-evaluator-bootstrap)
+process. The [PATH Python bootstrap selector](../../docs/install-contract.md#path-python-evaluator-bootstrap)
 admits a registered signed CPython base before it executes; PATH and the
 addressed runtime do not establish admission. Missing optional support or an
 unavailable base selects native PowerShell before evaluation. Once selected,

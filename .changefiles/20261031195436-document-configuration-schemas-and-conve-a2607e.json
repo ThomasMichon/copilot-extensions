@@ -1,0 +1,9 @@
+{
+  "comment": "Document configuration schemas and converge eligible preferences on source-owned harness/knowledge, machine and exact-repository composition; preserve explicit selectors and protected authority.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

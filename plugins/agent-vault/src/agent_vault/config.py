@@ -357,6 +357,12 @@ def resolve_context(
                     "AGENT_VAULT_PORT environment override",
                 )
 
+    from .configuration import compose_preferences
+
+    ordinary = compose_preferences(cwd, repo_data, global_data, ext_data)
+    if ordinary is not None:
+        repo_data = {**repo_data, **ordinary["values"]}
+
     vault_name, vault_source = _pick_vault_name(registry, repo_data, global_data, ext_data)
     named_base = registry.get(vault_name or "")
     base = named_base or {}
@@ -424,13 +430,20 @@ def resolve_context(
         port = DEFAULT_TCP_PORT
         sources["port"] = "default"
 
-    return ResolvedVault(
+    resolved = ResolvedVault(
         vault_name=vault_name,
         kpdb=kpdb,
         group=group,
         port=port,
         sources=sources,
     )
+    if ordinary is not None:
+        provenance = {
+            pointer: owner for pointer, owner in ordinary["provenance"].items()
+            if sources.get(pointer.removeprefix("/")) in {"repo", "default"}
+        }
+        object.__setattr__(resolved, "configuration_provenance", provenance)
+    return resolved
 
 
 def list_vaults() -> dict[str, dict[str, Any]]:

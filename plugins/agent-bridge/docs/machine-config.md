@@ -1,5 +1,8 @@
 # Agent Bridge -- Machine Configuration
 
+See [configuration.md](configuration.md) for the service schema, ordinary
+spawn-default layering, source provenance and protected runtime distinctions.
+
 This guide covers the optional machine topology that agent-bridge uses to
 discover and connect to named machine/repo agents. The bridge itself is
 standalone: provider namespaces from `~/.agent-bridge/providers.d/` and explicit

@@ -267,6 +267,8 @@ class ProfileDeclaration:
     activation_scopes: tuple[str, ...] = ()
     title: str | None = None
     priority: int = 0
+    configuration_provenance: Mapping[str, object] = field(default_factory=dict)
+    configuration_layers: tuple[str, ...] = ()
 
     def to_supervise_args(self) -> list[str]:
         """Render the equivalent ``agent-dispatch supervise`` args (lossless).

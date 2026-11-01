@@ -14,6 +14,12 @@ from ._peer_launch import ContextRefused, launch_prefix, validate_owner
 
 def validate_context() -> dict | None:
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
+    implicit_root = Path(os.environ.get("AGENT_RT_ROOT") or (Path.home() / ".agent-ssh"))
+    if not raw and (
+        implicit_root.name == "agent-ssh" and implicit_root.parent.name == "plugins"
+        and implicit_root.parent.parent.parent.name == "marketplaces"
+    ):
+        raw = str(implicit_root / "install.json")
     if not raw:
         return None
     try:
@@ -33,7 +39,8 @@ def state_root(cwd: Path, own: dict | None) -> tuple[Path | None, str]:
             return None, "unavailable"
         argv = launch_prefix(
             "agent-ssh", Path(own["pluginRoot"]),
-            os.environ["COPILOT_EXTENSIONS_CONTEXT"], "agent-worktrees",
+            os.environ.get("COPILOT_EXTENSIONS_CONTEXT") or str(Path(own["pluginRoot"]) / "install.json"),
+            "agent-worktrees",
         )
         environment = os.environ.copy()
     else:
