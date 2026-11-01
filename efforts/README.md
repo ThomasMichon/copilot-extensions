@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Agent Configuration Reference](active/agent-configuration-reference/README.md) | Draft; reviewed four-tier runtime convergence and complete owner references across all agent plugins | #9776; preserves #2350/#4205 broader ownership and external contributor work, no rollout |
 | [Startup-Only Guidance](active/startup-only-guidance/README.md) | Active; declarations released, approved adoption held on installer prerequisites | Bounded #5993 follow-up; preserves periodic sync, existing delivery/native owners and separately owned #9489 repair |
 | [PR Review Workspaces](active/pr-review-workspaces/README.md) | Active; offline generations merged, finite acquisition source slice | #9535; successor PR plugin/service cache, existing #6007/#7188 and #7051 owners retained; no rollout |
 | [Native Startup Prompts](active/native-startup-prompts/README.md) | Active; ordinary cold-launch consumer #9374 merged, native POSIX/full-mux and installed qualification remain | #9364; preserves #7116/#8375/#7942/#8669/#5579 owners; no rollout or retained-session restart |
