@@ -163,6 +163,27 @@ proposal is claimed available merely because its intended name is described.
 
 ## Journal
 
+### 2026-11-01 - Review corrections across real boundaries
+
+- Current-head review identified four additional path, platform-timeout,
+  reconnect and cancellation defects. Relative homes are now normalized through
+  the existing absolute-path safety checks at every managed store/publisher
+  entry, without resolving away linked components or relaxing traversal checks.
+- The standalone publisher catches `asyncio.TimeoutError` explicitly, including
+  Python 3.10 where it differs from the built-in exception. Focused tests and an
+  actual read-only, disconnected Python 3.10 container retained accepted state,
+  history and original retry results while recording pending timeout delivery.
+- Known structured transient errors from the actual resident relay participate
+  in the existing bounded reconnect policy; unsupported/malformed failures remain
+  terminal. Real socket closure and CLI relay controls verify fresh-snapshot
+  recovery and exactly three retry opportunities, not just synthetic pipe EOF.
+- Health-completion cancellation now returns normally; unexpected interruption
+  remains visible. Real-child barriers verify Refresh joins the old worker, quit
+  settles it, and a canceled generation cannot invoke a feed or paint late data.
+- Targeted standalone and Manager packets passed with verified cleanup. The
+  corrected source still requires a fresh current-head review and merge; earlier
+  passing checks or an older verdict do not authorize completion.
+
 ### 2026-11-01 - Source implementation and connected validation
 
 - The standalone command now owns validated state, semantic movements, generated

@@ -16,7 +16,9 @@ initialize or import another active agent's home automatically.
 
 ## Reading and initialization
 
-The explicit state home must already be an adopter-owned directory. Symlink
+The explicit state home must already be an adopter-owned directory. Relative
+homes are lexically normalized to absolute paths at store entry points without
+resolving symlinks; this applies equally to CLI and direct API calls. Symlink
 roots, ancestors, board paths, database files and SQLite sidecars are refused,
 as are traversal, noncanonical board paths and shared/hardlinked state files.
 The home must be on a filesystem with SQLite locking and durability support.

@@ -10,11 +10,13 @@ from pathlib import Path
 import socket
 import sys
 import time
+from threading import Event
 from typing import Any
 
 import pytest
 from rich.text import Text
 from textual.widgets import Static, TabbedContent
+from textual.worker import WorkerCancelled
 
 from worktree_manager import agenda_transport, engine_client, mux_companion
 
@@ -193,13 +195,19 @@ def chain(tmp_path: Path, monkeypatch):
     cursor["worktree"] = record.worktree_id
     documents = {"cursor": cursor, "boards": {"agenda.json": board}}
 
-    def settled():
+    def settled(*, argv=None):
         if not trace.exists():
-            return True
+            return argv is None
+        children = [
+            child for child in map(json.loads, trace.read_text().splitlines())
+            if argv is None or child["argv"] == argv
+        ]
+        if argv is not None and not children:
+            return False
         return all(
             not locks.pid_alive(child["pid"])
             or locks.process_start_time(child["pid"]) != child["birth"]
-            for child in map(json.loads, trace.read_text().splitlines())
+            for child in children
         )
 
     try:
@@ -208,7 +216,7 @@ def chain(tmp_path: Path, monkeypatch):
             "tracking": tracking, "record_path": record_path, "workdir": workdir,
             "owner": owner, "server": server, "argv": argv, "endpoint": endpoint,
             "endpoint_discovery": endpoint_discovery, "actions": actions,
-            "settled": settled,
+            "settled": settled, "trace": trace,
         }
     finally:
         owner.close_admission("closed")
@@ -343,5 +351,234 @@ def test_actual_commits_publish_to_resident_and_textual_without_replay(chain):
         assert len(store.history(home)) == 3
         assert sum(action == "health" for action, _ in chain["actions"]) >= 7
         assert sum(action == "agenda-publish" for action, _ in chain["actions"]) == 3
+
+    asyncio.run(check())
+
+
+def feed_invocations(chain) -> list[dict]:
+    return [
+        child for child in map(json.loads, chain["trace"].read_text().splitlines())
+        if child["argv"] and child["argv"][0] == "agenda-feed"
+    ]
+
+
+def test_actual_relay_disconnect_reconnects_to_current_snapshot(chain, monkeypatch):
+    owner, server = chain["owner"], chain["server"]
+    original_stream = server.stream_handle
+    calls, disconnect = [], Event()
+
+    def stream(action, payload, disconnected):
+        if action != "agenda-feed":
+            return original_stream(action, payload, disconnected)
+        calls.append(1)
+        if len(calls) != 1:
+            return original_stream(action, payload, disconnected)
+
+        def close_after_snapshot():
+            inner = original_stream(action, payload, disconnected)
+            try:
+                yield next(inner)
+                assert disconnect.wait(5), "test did not request the actual socket closure"
+            finally:
+                inner.close()
+
+        return close_after_snapshot()
+
+    monkeypatch.setattr(server, "stream_handle", stream)
+
+    async def check():
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        try:
+            async with app.run_test() as pilot:
+                await eventually(
+                    pilot, lambda: app._data.agenda is not None,
+                    detail=f"first actual snapshot did not arrive: {widget(app)}",
+                )
+                data, worker = app._data, app._agenda_worker
+                assert data.agenda["availability"] == "not-published"
+                accepted, fresh = chain["store"].mutate(
+                    chain["home"],
+                    request({"operation": "init", "documents": chain["documents"]}, 0, "init"),
+                    session="head-a", actor="synthetic-test", publisher_configured=True,
+                )
+                assert fresh and accepted["revision"] == 1
+                delivery = await asyncio.to_thread(
+                    chain["publisher"].publish, chain["home"],
+                    [*chain["argv"], "agenda-publish", "--project", "example", "--json"],
+                )
+                assert delivery["state"] == "delivered"
+                assert data.agenda["availability"] == "not-published"
+                disconnect.set()
+                await eventually(
+                    pilot,
+                    lambda: "disconnected: agenda feed disconnected without terminal frame" in widget(app)
+                    and "reconnecting in 1s" in widget(app),
+                    detail=f"actual CLI structured disconnect did not enter bounded recovery: {widget(app)}",
+                )
+                assert data.agenda is None
+                await eventually(
+                    pilot, lambda: data.agenda is not None
+                    and data.agenda["availability"] == "observed",
+                    detail=f"actual reconnect snapshot did not arrive: {widget(app)}",
+                )
+                assert data.agenda["type"] == "snapshot"
+                assert data.agenda["observation"] == chain["store"].delivery_record(chain["home"])[1]
+                assert app._data is data and app._agenda_worker is worker
+                assert len(calls) == 2 and len(feed_invocations(chain)) == 2
+                await pilot.press("escape")
+                await eventually(
+                    pilot, lambda: owner.agendas.feed.active_count() == 0 and chain["settled"](),
+                    detail="actual reconnect retained a reader or child after cancellation",
+                )
+        finally:
+            disconnect.set()
+
+    asyncio.run(check())
+
+
+def test_actual_relay_disconnect_reconnects_at_most_three_times(chain, monkeypatch):
+    server = chain["server"]
+    original_stream = server.stream_handle
+    calls = []
+
+    def stream(action, payload, disconnected):
+        if action != "agenda-feed":
+            return original_stream(action, payload, disconnected)
+        calls.append(1)
+
+        def close_after_snapshot():
+            inner = original_stream(action, payload, disconnected)
+            try:
+                yield next(inner)
+            finally:
+                inner.close()
+
+        return close_after_snapshot()
+
+    monkeypatch.setattr(server, "stream_handle", stream)
+
+    async def check():
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        async with app.run_test() as pilot:
+            await eventually(
+                pilot, lambda: app._agenda_worker is not None,
+                detail="actual subscription worker did not start",
+            )
+            await app._agenda_worker.wait()
+            assert app._agenda_worker.error is None
+            assert len(calls) == 4 and len(feed_invocations(chain)) == 4
+            assert "disconnected: agenda feed disconnected without terminal frame" in widget(app)
+            assert "reconnecting" not in widget(app)
+            assert app._data.agenda is None
+            assert chain["owner"].agendas.feed.wait_closed(3)
+            assert chain["settled"]()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("action", ["refresh", "quit"])
+def test_cancellation_at_real_health_completion_settles_worker(chain, monkeypatch, action):
+    completed, release, returned = Event(), Event(), Event()
+    original_runner = agenda_transport.cancellable_read_runner
+    original_subscribe = mux_companion.subscribe
+    gated = []
+
+    def runner(cancelled, *, cwd):
+        execute = original_runner(cancelled, cwd=cwd)
+
+        def health_completion(argv, timeout):
+            result = execute(argv, timeout)
+            if "--resident-health" in argv and not gated:
+                gated.append(1)
+                assert result.returncode == 0
+                assert json.loads(result.stdout)["ok"] is True
+                completed.set()
+                assert release.wait(5), "test did not release the completed health result"
+            return result
+
+        return health_completion
+
+    def observed_subscribe(*args, **kwargs):
+        result = original_subscribe(*args, **kwargs)
+        returned.set()
+        return result
+
+    monkeypatch.setattr(agenda_transport, "cancellable_read_runner", runner)
+    monkeypatch.setattr(mux_companion, "subscribe", observed_subscribe)
+
+    async def check():
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        try:
+            async with app.run_test() as pilot:
+                assert await asyncio.to_thread(completed.wait, 3), "real health child did not finish"
+                data, worker = app._data, app._agenda_worker
+                cancelled = app._agenda_cancel
+                assert chain["settled"](argv=["--resident-health"]), (
+                    "health result returned before its exact child retired"
+                )
+                assert not feed_invocations(chain)
+                if action == "refresh":
+                    app.action_refresh()
+                else:
+                    await pilot.press("escape")
+                await eventually(
+                    pilot, cancelled.is_set, detail="Refresh/quit did not cancel the completed health read",
+                )
+                release.set()
+                assert await asyncio.to_thread(returned.wait, 3), "subscribe did not return normally"
+                try:
+                    await worker.wait()
+                except WorkerCancelled:
+                    assert action == "quit", "Refresh unexpectedly cancelled rather than joined its worker"
+                assert worker.error is None or (
+                    action == "quit" and isinstance(worker.error, asyncio.CancelledError)
+                )
+                assert data.agenda is None
+                if action == "refresh":
+                    await eventually(
+                        pilot, lambda: app._data is not data and app._data.agenda is not None,
+                        detail=f"Refresh failed to join/replace the cancelled worker: {widget(app)}",
+                    )
+                    assert app._data.agenda["availability"] == "not-published"
+                    assert len(feed_invocations(chain)) == 1, "cancelled generation invoked a feed"
+                    await pilot.press("escape")
+                else:
+                    assert not feed_invocations(chain)
+                await eventually(
+                    pilot, lambda: chain["owner"].agendas.feed.active_count() == 0
+                    and chain["settled"](), detail="health-completion cancellation leaked an owned child",
+                )
+        finally:
+            release.set()
+
+    asyncio.run(check())
+
+
+def test_unexpected_health_completion_interruption_is_visible(chain, monkeypatch):
+    original = agenda_transport.require_capability
+
+    def interrupted(*args, **kwargs):
+        original(*args, **kwargs)
+        assert not kwargs["cancelled"].is_set()
+        raise InterruptedError("synthetic unexpected health-completion interruption")
+
+    monkeypatch.setattr(agenda_transport, "require_capability", interrupted)
+
+    async def check():
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        async with app.run_test() as pilot:
+            await eventually(
+                pilot, lambda: "agenda read interrupted unexpectedly" in widget(app),
+                detail=f"unexpected interruption was not visibly classified: {widget(app)}",
+            )
+            await app._agenda_worker.wait()
+            assert app._agenda_worker.error is None
+            assert app._data.agenda is None
+            assert not feed_invocations(chain)
+            assert chain["settled"](argv=["--resident-health"])
+            await pilot.press("escape")
+            await eventually(
+                pilot, chain["settled"], detail="unexpected interruption retained a child after quit",
+            )
 
     asyncio.run(check())

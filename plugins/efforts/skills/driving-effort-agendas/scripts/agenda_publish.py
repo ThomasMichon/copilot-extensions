@@ -9,7 +9,7 @@ import subprocess
 from typing import Any
 
 from agenda import AgendaError, _text, decode
-from agenda_store import delivery_record, encode, record_delivery
+from agenda_store import delivery_record, encode, record_delivery, safe_path
 
 BODY_LIMIT = 32 * 1024
 REPLY_LIMIT = 35 * 1024
@@ -69,6 +69,7 @@ async def _invoke(argv: list[str], payload: bytes, *, timeout: float = 10) -> di
 
 
 def publish(home: Path, argv: list[str]) -> dict[str, Any]:
+    home = safe_path(home, directory=True)
     revision, observation = delivery_record(home)
     if not argv:
         status: dict[str, Any] = {"state": "not-configured", "error": {
@@ -85,7 +86,7 @@ def publish(home: Path, argv: list[str]) -> dict[str, Any]:
         else:
             try:
                 status = asyncio.run(_invoke(argv, payload))
-            except (OSError, AgendaError, TimeoutError) as exc:
+            except (OSError, AgendaError, asyncio.TimeoutError, TimeoutError) as exc:
                 status = {"state": "pending", "error": {
                     "code": "publisher-unavailable", "message": str(exc) or "Publisher timed out."}}
     return record_delivery(home, revision, status)

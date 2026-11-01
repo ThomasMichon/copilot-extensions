@@ -90,6 +90,10 @@ def subscribe(
             if cancelled.is_set():
                 return
             raise AgendaUnavailable("agenda feed ended without a terminal notice")
+        except InterruptedError as exc:
+            if not cancelled.is_set():
+                publish(None, f"agenda read interrupted unexpectedly: {exc}")
+            return
         except (AgendaUnavailable, engine_client.EngineError, ValueError, RecursionError) as exc:
             if cancelled.is_set():
                 return

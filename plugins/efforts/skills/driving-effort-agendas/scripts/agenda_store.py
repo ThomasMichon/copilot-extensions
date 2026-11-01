@@ -81,6 +81,7 @@ def board_name(home: Path, value: Any) -> str:
 
 
 def validate_documents(home: Path, documents: Any) -> Snapshot:
+    home = safe_path(home, directory=True)
     fields(documents, {"cursor", "boards"})
     cursor = _object(documents["cursor"], "cursor")
     _revision(cursor.get("revision"), "cursor revision")
@@ -232,6 +233,7 @@ def _state(db: sqlite3.Connection, home: Path) -> dict[str, Any]:
 
 def read(home: Path, expected_revision: int | None = None,
          worktree: str | None = None) -> dict[str, Any]:
+    home = safe_path(home, directory=True)
     if expected_revision is not None:
         _revision(expected_revision, "expected revision")
     with transaction(home) as db:
@@ -246,6 +248,7 @@ def read(home: Path, expected_revision: int | None = None,
 
 
 def history(home: Path, limit: int = 100, before_revision: int | None = None) -> list[dict[str, Any]]:
+    home = safe_path(home, directory=True)
     if not 1 <= _number(limit, "history limit", 1) <= 100:
         raise AgendaError("history limit must be <= 100; paginate with before-revision")
     if before_revision is not None:
@@ -261,6 +264,9 @@ def history(home: Path, limit: int = 100, before_revision: int | None = None) ->
 def mutate(home: Path, request: dict[str, Any], *, session: str | None = None,
            actor: str | None = None, publisher_configured: bool = False,
            import_home: Path | None = None) -> tuple[dict[str, Any], bool]:
+    home = safe_path(home, directory=True)
+    if import_home is not None:
+        import_home = safe_path(import_home, directory=True)
     fields(request, {"schema", "version", "expected_revision", "operation_id", "change"})
     if request["schema"] != SCHEMA or type(request["version"]) is not int or request["version"] != 1:
         raise AgendaError("unsupported agenda request schema/version")
@@ -401,6 +407,7 @@ def mutate(home: Path, request: dict[str, Any], *, session: str | None = None,
 
 
 def delivery_record(home: Path) -> tuple[int, dict[str, Any]]:
+    home = safe_path(home, directory=True)
     with transaction(home) as db:
         _state(db, home)
         row = db.execute("SELECT revision, observation FROM delivery").fetchone()
@@ -410,6 +417,7 @@ def delivery_record(home: Path) -> tuple[int, dict[str, Any]]:
 
 
 def record_delivery(home: Path, revision: int, status: dict[str, Any]) -> dict[str, Any]:
+    home = safe_path(home, directory=True)
     _revision(revision, "delivery revision")
     with transaction(home, write=True) as db:
         _state(db, home)

@@ -70,7 +70,10 @@ One owned Textual thread worker retains the subscription and reconnects. Each
 reconnect requires a new snapshot; previous presentation is cleared while
 unavailable. Once support has been observed, transient disconnect/deadline or
 going-away permits at most three retries, delayed 1, 2 and 4 seconds. Invalid
-data and unsupported errors are terminal. A going-away generation cannot be
+data and unsupported errors are terminal. Structured relay errors retain that
+policy: `disconnected`, `unavailable`, `unready`, `draining` and `superseded`
+are transient after support was observed; malformed/unsupported errors do not
+retry. A going-away generation cannot be
 re-admitted on a subsequent route. No automatic rapid retry or timer/file poll
 is used to obtain agenda data.
 
@@ -82,6 +85,9 @@ contained-test behavior. Late callbacks cannot replace a newer selection.
 `head-changed` clears the observation and ends the subscription with Refresh
 required; previous agenda data is never treated as active. No Agenda control
 executes, accepts, approves or changes planning state.
+Cancellation after a health child completes is a normal subscription return,
+so Refresh can join that worker. An unexpected interruption without a cancelled
+owner is an explicit unavailable error, not a silent cancellation.
 
 ## Source checks and deployment boundary
 

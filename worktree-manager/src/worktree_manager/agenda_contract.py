@@ -20,6 +20,7 @@ _REPLY_FIELDS = {
     "ok", "contract_version", "generation", "sequence", "project",
     "worktree_id", "session_id", "availability", "observation",
 }
+_TRANSIENT_ERRORS = {"disconnected", "unavailable", "unready", "draining", "superseded"}
 
 
 class AgendaUnavailable(ValueError):
@@ -165,7 +166,9 @@ class AgendaFeed:
                 or not isinstance(error.get("message"), str) or not error["message"]
             ):
                 raise ValueError("agenda feed omitted its structured error")
-            raise AgendaUnavailable(f"{error['code']}: {error['message']}")
+            raise AgendaUnavailable(
+                f"{error['code']}: {error['message']}", retry=error["code"] in _TRANSIENT_ERRORS,
+            )
         if kind in {"heartbeat", "going-away"}:
             if (
                 set(frame) != {"type", "generation", "sequence"} | ({"reason"} if kind == "going-away" else set())

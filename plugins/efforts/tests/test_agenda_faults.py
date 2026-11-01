@@ -7,6 +7,7 @@ import json
 import re
 from pathlib import Path
 import sys
+import subprocess
 from typing import Any
 from uuid import UUID
 
@@ -231,6 +232,125 @@ def test_managed_revision_exhausted_current_refuses_increment(
     assert len(STORE.history(tmp_path)) == 1
     assert STORE.history(tmp_path, before_revision=STORE.MAX_REVISION) == []
     assert STORE.mutate(tmp_path, init) == (accepted, False)
+
+
+def test_relative_home_actual_cli_init_read_update_check_history_publish(
+    tmp_path: Path, documents: dict[str, Any]
+) -> None:
+    (tmp_path / "lane").mkdir()
+    (tmp_path / "init.json").write_text(json.dumps(
+        request({"operation": "init", "documents": documents}, 0, "relative-cli-init")))
+
+    def invoke(command: str, *args: str) -> dict[str, Any]:
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        result = subprocess.run(
+            [sys.executable, "-B", str(SKILL / "scripts" / "agenda_cli.py"),
+             command, "--state-home", "lane", *args],
+            cwd=tmp_path, capture_output=True, text=True, timeout=10, creationflags=flags)
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    assert invoke("init", "--request", "init.json")["result"]["revision"] == 1
+    assert invoke("read")["snapshot"]["revision"] == 1
+    (tmp_path / "update.json").write_text(json.dumps(request({
+        "operation": "wait", "reason": "synthetic review",
+        "next_action": "relative-cli-revision-2", "evidence": proof()}, 1, "relative-cli-update")))
+    assert invoke("update", "--request", "update.json")["result"]["persisted"] is True
+    assert invoke("check")["next_action"] == "relative-cli-revision-2"
+    assert len(invoke("history")["history"]) == 2
+    assert invoke("publish")["delivery"]["state"] == "not-configured"
+
+
+def test_relative_home_direct_store_and_publisher_apis(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(home.parent)
+    relative = Path(home.name)
+    state = STORE.read(relative)
+    assert STORE.validate_documents(relative, state["documents"]).revision == 1
+    req = request({"operation": "park", "ref": "relative-api", "reason": "nonblocking"})
+    result, accepted = STORE.mutate(relative, req)
+    assert accepted and result["revision"] == 2
+    assert STORE.read(relative)["snapshot"]["parked"] == 1
+    assert len(STORE.history(relative)) == 2
+    assert STORE.delivery_record(relative)[0] == 2
+    assert PUBLISH.publish(relative, [sys.executable, "-B", "-c",
+                                    "print('{\"ok\":true}')"])["state"] == "delivered"
+    assert STORE.record_delivery(relative, 2, {"state": "pending"})["state"] == "pending"
+    assert STORE.mutate(home, req) == (result, False)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX legacy-adoption durability path")
+def test_relative_home_direct_same_home_import(
+    tmp_path: Path, documents: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    for name, value in {"cursor.json": documents["cursor"], **documents["boards"]}.items():
+        (legacy / name).write_text(json.dumps(value))
+    monkeypatch.chdir(tmp_path)
+    result, _ = STORE.mutate(Path("legacy"), request({"operation": "init"}, 0, "relative-import"),
+                             import_home=Path("legacy"))
+    assert result["persisted"] and STORE.read(Path("legacy"))["revision"] == 1
+
+
+@pytest.mark.parametrize("operation", ["read", "mutate", "history", "publish"])
+@pytest.mark.parametrize("path_kind", ["link", "ancestor", "traversal"])
+def test_relative_home_retains_symlink_ancestor_and_traversal_refusal(
+    home: Path, monkeypatch: pytest.MonkeyPatch, operation: str, path_kind: str
+) -> None:
+    before = STORE.read(home)
+    link = home.parent / f"{home.name}-linked"
+    link.symlink_to(home, target_is_directory=True)
+    monkeypatch.chdir(home.parent)
+    relative = (Path(link.name) if path_kind == "link" else
+                Path(link.name) / "descendant" if path_kind == "ancestor" else
+                Path(home.name) / ".." / home.name)
+    with pytest.raises(AGENDA.AgendaError, match="unsafe"):
+        if operation == "read":
+            STORE.read(relative)
+        elif operation == "mutate":
+            STORE.mutate(relative, request({"operation": "park", "ref": "fixture", "reason": "nonblocking"}))
+        elif operation == "history":
+            STORE.history(relative)
+        else:
+            PUBLISH.publish(relative, [])
+    assert STORE.read(home) == before
+
+
+@pytest.mark.parametrize("entry", ["api", "cli"])
+def test_distinct_asyncio_timeout_keeps_accepted_state_history_and_pending_delivery(
+    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], entry: str
+) -> None:
+    class DistinctAsyncioTimeout(Exception):
+        pass
+
+    assert not issubclass(DistinctAsyncioTimeout, (TimeoutError, OSError))
+    monkeypatch.setattr(PUBLISH.asyncio, "TimeoutError", DistinctAsyncioTimeout)
+
+    async def timeout(argv: list[str], payload: bytes) -> dict[str, Any]:
+        raise PUBLISH.asyncio.TimeoutError("synthetic Python 3.10 asyncio timeout")
+
+    monkeypatch.setattr(PUBLISH, "_invoke", timeout)
+    req = request({"operation": "park", "ref": "timeout-fixture", "reason": "nonblocking"})
+    if entry == "api":
+        result, accepted = STORE.mutate(home, req, publisher_configured=True)
+        assert accepted
+        delivery = PUBLISH.publish(home, [sys.executable])
+    else:
+        path = home / "request.json"
+        path.write_text(json.dumps(req))
+        assert CLI.main(["update", "--state-home", str(home), "--request", str(path),
+                         "--publish-arg", sys.executable]) == 0
+        output = json.loads(capsys.readouterr().out)
+        result, delivery = output["result"], output["delivery"]
+    assert result["persisted"] is True and delivery["state"] == "pending"
+    assert "asyncio timeout" in delivery["error"]["message"]
+    state = STORE.read(home)
+    assert state["revision"] == 2 and state["snapshot"]["parked"] == 1
+    assert state["delivery"] == delivery
+    assert STORE.history(home)[0] == result and len(STORE.history(home)) == 2
+    assert STORE.mutate(home, req, publisher_configured=True) == (result, False)
 
 
 def test_legacy_evidence_field_collision_is_explicit_not_dropped(

@@ -156,3 +156,20 @@ def test_revisit_offset_is_preserved_while_generated_commit_requires_utc():
     frame["observation"]["committed_at"] = revisit
     with pytest.raises(ValueError):
         validate_snapshot(frame, "example", "selected", "head-a")
+
+
+@pytest.mark.parametrize("code,retry", [
+    ("disconnected", True), ("unavailable", True), ("unready", True),
+    ("draining", True), ("superseded", True),
+    ("unsupported", False), ("invalid-response", False), ("invalid-request", False),
+    ("authentication", False), ("closed", False),
+])
+def test_structured_feed_errors_preserve_classified_retry_policy(code, retry):
+    feed = AgendaFeed("example", "selected", "head-a")
+    feed.receive(publication())
+    with pytest.raises(AgendaUnavailable) as failure:
+        feed.receive({
+            "type": "error", "ok": False, "contract_version": 1,
+            "error": {"code": code, "message": "provider-reported failure"},
+        })
+    assert failure.value.retry is retry
