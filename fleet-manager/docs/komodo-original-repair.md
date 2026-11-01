@@ -44,6 +44,65 @@ the transition or ordinary request grant refuses the next publication.
 Renewal cannot extend an existing permit's lifetime or substitute another
 executor. Retained transition/admission revision rollback refuses too.
 
+## Fresh checkpoint authorization
+
+`komodo_control.CHECKPOINT_REPAIR_CONTRACT` declares
+`fleet-manager.komodo-original-repair-checkpoint-auth.v1`. An embedding that
+requires this behavior discovers that constant from the qualified, actually
+executing SDK before constructing its repair owner. It code-registers the
+optional `fresh_identity` producer on that same `KomodoRepairOwner`:
+
+```python
+fresh_identity(original_identity, original_intent, role, installation, action)
+```
+
+The producer authenticates a fresh proof with the existing signer/verifier for
+the complete canonical original body and exact `status`, `succeeded` or `failed`
+action. It returns only the verified caller identity, not a permit or authority
+record. The current verifier/key-binding, configuration, source, runtime,
+credential and material owners still supply the resolver and admission checks.
+Requests and configuration cannot appoint this callable or select a verifier,
+signer or module. Proofs and credentials never enter outcomes or diagnostics.
+
+The SDK retains the initial identity profile/type, issuer, subject, audience,
+proof key, enrolled kind and machine resource/key binding. Each fresh permit
+must also retain the original authority, fleet, actor/account, role,
+installation, enrollment generation and exact operation grant. A current
+signature does not authorize substituting any of these bindings or the
+candidate/executor/resource transition. Policy and transition revisions may
+advance monotonically without extending their selected finite validity.
+
+Initialization, native inspection, readiness, evidence construction, immutable
+retention, state save, journal publication and cleanup use explicit admitted
+phases under the same physical lock, journal and original selected deadline.
+Each phase has one fresh decision and full custody/currentness checks before
+work and after all work. The existing common owner issues a distinct permit
+with its unchanged 30-second ceiling. Nested baseline checkpoint sites do not
+repeat the phase owner's paired checks or mint another proof. A completed fresh
+phase uses two resolver calls during authorization and two at each paired
+boundary; initialization uses four in total. The final phase always closes
+with full custody validation before consuming its exact permit through the
+common completion boundary, which performs two further resolver calls.
+Completing authority never suppresses the phase's closing custody checks.
+
+Only after the preceding phase's final validation succeeds may the SDK discard
+that exact local handle and reacquire. Expiry between completed phases is
+allowed; no effect occurs in the permit gap. Expiry or withdrawal during a
+phase aborts the invocation without an implicit retry or cached-identity
+fallback. Fresh authorization cannot excuse a failed final boundary, refund
+consumed proof evidence or reset the native deadline. Journal callbacks finish
+the current phase before freshly admitting append and commit work inside the
+existing transaction. Post-commit cleanup preserves the single immutable
+terminal decision and follows its existing supported recovery.
+
+Without the producer, the original whole-operation permit and expiry refusals
+are unchanged. Opt-in status cannot convert an aborted custody/authority phase
+into a drift report under another permit: it raises the original refusal,
+preserving UNKNOWN or the already-recorded terminal receipt. Missing or
+unsupported installed checkpoint support refuses this new requirement before
+effects; provider rollback must retain the required support or refuse, never
+substitute baseline convergence or silently disable the producer.
+
 ## Original physical custody and publication
 
 Repair opens only the existing original physical lock and schema-4 NodeJournal.

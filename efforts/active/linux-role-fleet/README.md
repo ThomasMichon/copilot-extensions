@@ -532,6 +532,10 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+### 2026-10-31 - Checkpoint authorization proposal reviewed
+
+See the [reviewed opt-in proposal and remaining implementation gates](komodo-repair-checkpoint-authorization.md#2026-10-31---checkpoint-authorization-proposal-reviewed).
+
 ### 2026-10-31 - Original-attempt repair SDK source merged
 
 See the [source qualification and remaining release/adopter gates](komodo-substrate-lifecycle.md#2026-10-31---original-attempt-repair-sdk-source-merged).

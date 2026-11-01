@@ -3,14 +3,62 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import contextmanager
 import json
 from pathlib import Path
-from typing import Any
+import time
+from typing import Any, Iterator
 
 from fleet_manager import komodo_repair
 from fleet_manager.komodo_profile import KomodoMaterialization
 from fleet_manager.komodo_evidence import native_fingerprint
 from fleet_manager.node_journal import NodeJournal
+
+
+class AdvancingRepairClock:
+    """One elapsed time source for signatures, admission and native deadlines."""
+
+    def __init__(self, epoch: int) -> None:
+        self.epoch = epoch
+        self.started = time.monotonic()
+        self.offset = 0.0
+
+    def monotonic(self) -> float:
+        return time.monotonic() + self.offset
+
+    def __call__(self) -> int:
+        return self.epoch + int(self.monotonic() - self.started)
+
+    @property
+    def value(self) -> int:
+        return self()
+
+    @value.setter
+    def value(self, value: int) -> None:
+        self.offset += value - self()
+
+
+def completion_phase_drift(
+    monkeypatch: Any, change: Callable[[], None], *, status: bool,
+) -> list[bool]:
+    phase = komodo_repair._Attempt.phase
+    entered = 0
+    fired: list[bool] = []
+
+    @contextmanager
+    def after_work(instance: Any) -> Iterator[None]:
+        nonlocal entered
+        with phase(instance):
+            entered += 1
+            current = entered
+            yield
+            if current == (5 if status else 9) and not fired:
+                assert not instance.authorization.completed
+                fired.append(True)
+                change()
+
+    monkeypatch.setattr(komodo_repair._Attempt, "phase", after_work)
+    return fired
 
 
 def late_publication_drift(monkeypatch: Any, change: Callable[[], None]) -> list[bool]:
