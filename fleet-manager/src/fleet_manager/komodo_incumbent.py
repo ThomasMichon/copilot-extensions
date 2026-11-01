@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import stat
 
 from .artifact_staging import _bytes
@@ -25,6 +25,10 @@ def mount_evidence(mounts: object) -> str:
                 or type(mount.get("Destination")) is not str
                 or not mount["Destination"].startswith("/")):
             raise PlanError("Komodo incumbent mount evidence is invalid")
+        destination = mount["Destination"]
+        if (destination.startswith("//") or ".." in PurePosixPath(destination).parts
+                or str(PurePosixPath(destination)) != destination):
+            raise PlanError("Komodo incumbent mount destination is not canonical")
         destinations.append(mount["Destination"])
     if len(set(destinations)) != len(destinations):
         raise PlanError("Komodo incumbent mount destinations are ambiguous")
@@ -103,6 +107,11 @@ class KomodoIncumbentMaterialization:
                 keys = [mount for mount in mounts if mount["Destination"] == "/config/keys"]
                 if len(keys) != 1 or keys[0]["Source"] != str(self.keys):
                     raise PlanError("Komodo incumbent public identity lacks its original mount")
+                if any(mount["Destination"] in {
+                    "/config/keys/" + name + suffix
+                    for name in ("core", "periphery") for suffix in (".key", ".pub")
+                } for mount in mounts):
+                    raise PlanError("Komodo incumbent required key-file overlays are unsupported")
         if used != set(volumes):
             raise PlanError("Komodo incumbent volume evidence contains unrelated storage")
         if (len(set(self.retained_files)) != len(self.retained_files)
@@ -143,16 +152,27 @@ class KomodoIncumbentMaterialization:
                 info = path.stat()
                 paths[str(path)] = {"device": info.st_dev, "inode": info.st_ino}
         files = {}
-        private_keys = {self.keys / "core.key", self.keys / "periphery.key"}
+        private_files = {
+            self.keys / "core.key", self.keys / "periphery.key",
+            self.admin_username, self.admin_password,
+        }
         for path in (*self.retained_files, self.admin_username, self.admin_password):
             ordinary_path(path)
             info = path.stat()
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise PlanError("Komodo incumbent retained file custody is ambiguous")
-            reader = read_private_file if path in private_keys else _bytes
+            content = (read_private_file(path, 1024 * 1024) if path in private_files
+                       else _bytes(path, 1024 * 1024, allow_empty=True))
+            try:
+                after = path.stat()
+            except OSError:
+                raise PlanError("Komodo incumbent retained file changed during observation") from None
+            if ((info.st_dev, info.st_ino) != (after.st_dev, after.st_ino)
+                    or not stat.S_ISREG(after.st_mode) or after.st_nlink != 1):
+                raise PlanError("Komodo incumbent retained file changed during observation")
             files[str(path)] = {
                 "device": info.st_dev, "inode": info.st_ino,
-                "sha256": hashlib.sha256(reader(path, 1024 * 1024)).hexdigest(),
+                "sha256": hashlib.sha256(content).hexdigest(),
             }
         info = self.keys.stat()
         return {

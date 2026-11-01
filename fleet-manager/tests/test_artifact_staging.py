@@ -751,6 +751,31 @@ def test_descriptor_is_closed_when_stream_construction_is_interrupted(
     assert not (tmp_path / "destination.artifact").exists()
 
 
+def test_bounded_reader_empty_mode_is_explicit_and_keeps_size_and_identity_checks(tmp_path, monkeypatch):
+    source = tmp_path / "empty-configuration"
+    source.write_bytes(b"")
+    with pytest.raises(PlanError, match="empty"):
+        staging._bytes(source, 1024)
+    assert staging._bytes(source, 1024, allow_empty=True) == b""
+    for invalid in (None, 0, "true"):
+        with pytest.raises(PlanError):
+            staging._bytes(source, 1024, allow_empty=invalid)
+    original = staging._reader
+
+    @contextmanager
+    def changed(path):
+        path.write_bytes(b"changed after original empty observation")
+        with original(path) as stream:
+            yield stream
+
+    monkeypatch.setattr(staging, "_reader", changed)
+    with pytest.raises(PlanError, match="changed during admission"):
+        staging._bytes(source, 1024, allow_empty=True)
+    monkeypatch.setattr(staging, "_reader", original)
+    with pytest.raises(PlanError):
+        staging._bytes(source, 1, allow_empty=True)
+
+
 def test_actual_installed_authenticated_artifact_staging_has_no_execution_or_network(
     tmp_path, request,
 ):

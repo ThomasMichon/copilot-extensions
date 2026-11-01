@@ -4,6 +4,7 @@ from copy import deepcopy
 from contextlib import contextmanager
 from dataclasses import replace
 import asyncio
+import hashlib
 import os
 from pathlib import Path
 import sys
@@ -207,6 +208,66 @@ def test_mandatory_private_key_permission_drift_refuses_unchanged_material(incum
     assert (path.read_bytes(), path.stat().st_ino) == original
     with pytest.raises(PlanError):
         incumbent.material.evidence()
+
+
+def test_empty_original_configuration_is_retained_but_empty_private_keys_refuse(incumbent):
+    material = incumbent.material
+    configuration = incumbent.files["core_config"]
+    configuration.write_bytes(b"")
+    refreshed = replace(material)
+    evidence = refreshed.evidence()
+    assert evidence == refreshed.evidence()
+    assert evidence["files"][str(configuration)]["sha256"] == hashlib.sha256(b"").hexdigest()
+    incumbent.files["core_key"].write_bytes(b"")
+    with pytest.raises(PlanError):
+        refreshed.evidence()
+
+
+@pytest.mark.parametrize("name", ["core_config", "core_key"])
+def test_same_content_replacement_between_recorded_stat_and_read_refuses(incumbent, monkeypatch, name):
+    import fleet_manager.komodo_incumbent as inputs
+
+    path = incumbent.files[name]
+    original = path.read_bytes(), path.stat().st_ino
+    replacement = path.with_suffix(".replacement")
+    descriptor = create_private_file(replacement)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(original[0])
+    attribute = "read_private_file" if name == "core_key" else "_bytes"
+    reader = getattr(inputs, attribute)
+    changed = []
+
+    def swapping(source, *arguments, **options):
+        if source == path and not changed:
+            replacement.replace(path)
+            changed.append(True)
+        return reader(source, *arguments, **options)
+
+    monkeypatch.setattr(inputs, attribute, swapping)
+    with pytest.raises(PlanError, match="changed during observation"):
+        incumbent.material.evidence()
+    assert changed and path.read_bytes() == original[0] and path.stat().st_ino != original[1]
+
+
+@pytest.mark.parametrize(("service", "name"), [
+    ("core", "core.key"), ("periphery", "periphery.key"),
+    ("periphery", "core.pub"), ("core", "periphery.pub"),
+])
+def test_required_key_file_overlays_refuse_even_when_the_overlay_source_is_retained(
+    incumbent, service, name,
+):
+    overlay = incumbent.material.keys.parent / "overlay"
+    descriptor = create_private_file(overlay)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(b"retained-overlay-fixture-material")
+    observed = decode(incumbent.material.encoded)
+    observed["mounts"][service].append({
+        "Type": "bind", "Source": str(overlay),
+        "Destination": "/config/keys/" + name, "RW": False,
+    })
+    with pytest.raises(PlanError, match="key-file overlays"):
+        replace(incumbent.material, encoded=canonical(observed),
+                retained_files=(*incumbent.material.retained_files, overlay))
 
 
 @pytest.mark.parametrize("change", [

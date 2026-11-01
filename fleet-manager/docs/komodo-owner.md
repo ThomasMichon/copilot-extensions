@@ -190,6 +190,13 @@ Both mandatory private keys are reread through the existing owner-private
 file reader, including current OS ownership/privacy and opened-file consistency.
 Unchanged bytes/inodes do not permit a newly shared permission or ACL grant.
 The SDK refuses that drift without repairing permissions or copying keys.
+The four required public/private key files must remain visible through the
+original directory mount; per-file overlays refuse rather than resolving the
+underlying, hidden file. Native mount destinations must be canonical.
+Retained configuration files may be empty, through an explicit bounded-reader
+mode; ordinary artifact reads and private key/login inputs remain nonempty.
+Recorded file identity is checked again after each read, so a same-content
+atomic replacement cannot reuse the inode captured before the read.
 
 Only existing ordinary bind paths or existing local named volumes with no
 driver options are accepted. Volume name, creation time, mountpoint, labels and
