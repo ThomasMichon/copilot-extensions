@@ -21,6 +21,10 @@ selects a substitute automatically. This still spawns a separate owned runtime,
 not an external connection. Private parent fields, provider endpoint guessing,
 global settings, shared services and foreground extension reload are forbidden.
 
+The lifecycle census classifies the SDK `sessions.fork()` site as
+caller-contained. It copies session data in the owned runtime, not an OS
+process fork; the native runtime remains under the caller's cleanup boundary.
+
 The process-global `CopilotRequestHandler` intercepts every model request.
 Chat Completions and Responses HTTP replies/usage are synthetic, including
 their distinct SSE formats; WebSocket is refused, never forwarded.
