@@ -226,3 +226,30 @@ def test_command_cutoff_never_spends_reserved_cleanup_on_create_or_resume(launch
     if created:
         assert ("terminate", 4) in launch.calls
         assert ("close", 601) in launch.calls
+
+
+@pytest.mark.parametrize("phase", ["attributes", "created"])
+def test_sdk_budget_also_refuses_execution_after_native_setup_cutoff(launch, monkeypatch, phase):
+    from agent_procutil import owned_budget
+
+    method = "UpdateProcThreadAttribute" if phase == "attributes" else "CreateProcessW"
+    original = getattr(launch.kernel, method)
+
+    def consume_budget(*args):
+        result = original(*args)
+        launch.clock[0] = 106
+        return result
+
+    monkeypatch.setattr(launch.kernel, method, consume_budget)
+    monkeypatch.setattr(owned_budget, "time", SimpleNamespace(monotonic=lambda: launch.clock[0]))
+    monkeypatch.setattr(
+        native._Process, "retire_job",
+        lambda process, job, timeout: job.terminate_and_wait(timeout),
+    )
+    with pytest.raises(subprocess.TimeoutExpired):
+        native.spawn(
+            ["git"], budget=owned_budget.OwnedExecutionBudget(110, 5),
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+    assert "resume" not in launch.calls
+    assert launch.jobs[0].closed and all(stream.closed for stream in launch.streams)

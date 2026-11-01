@@ -531,3 +531,33 @@ selection passes 13 cases, zero skipped, in 0.17 seconds (16.95 with managed
 preparation/cleanup). Worktrees again loads the canonical fixture directly.
 Receipt: `.venv-tools/r1a-canonical-fixture-20261031.log`. No shared SDK
 implementation was edited for this fixture correction.
+
+### 2026-10-31 preliminary dependency pairing and SDK cutoff fail-first
+
+The exact published `3ca081b23492e48918455a0094dc6c0d07ffd5f0` dependency was
+integrated while #9578 still awaited source acceptance. Its combined
+native/consumer selection passed 152 cases, zero skipped, in 176.22 seconds
+(215.81 including managed preparation/cleanup). Complete standalone procutil
+passed 553 + 269 + 284 = **1,106 cases**; 168 + 75 + 15 = **258 existing
+platform/opt-in cases** were skipped. Total managed runtime was 325.36 seconds.
+Receipts: `.venv-tools/r1a-combined-sdk-native-20261031.log` and
+`.venv-tools/r1a-combined-sdk-standalone-20261031.log`.
+
+These are preliminary, not final qualification: the owner superseded the SDK
+candidate to address source review. No Windows skip proves Linux/macOS
+containment, and no source or runtime merge is inferred.
+
+Two added canonical-fixture cases,
+`test_sdk_budget_also_refuses_execution_after_native_setup_cutoff[attributes]`
+and `[created]`, both fail against that SDK budget-only path with
+`DID NOT RAISE TimeoutExpired`. They construct `OwnedExecutionBudget(110, 5)`,
+advance the injected native setup clock from 100 to 106, and require no
+create/resume past cutoff 105. Only native cleanup is substituted; the actual
+factory and budget construction execute. The existing explicit observation
+cutoff cases remain separate.
+
+The contained fail-first selection completed two failures with 13 deselected,
+0.33 seconds pytest and 12.33 including managed preparation/cleanup. Receipt:
+`.venv-tools/r1a-sdk-native-cutoff-failfirst-20261031.log`. The existing #9578
+owner holds the SDK correction. No SDK source, deadline, assertion or admission
+gate was changed to make these tests pass.

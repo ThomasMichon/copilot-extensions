@@ -512,3 +512,27 @@ review-gated platform slice, not disabling ordinary POSIX classification.
   `c9f72e6704d20c741fa85eff2176d3bf64757e18`. Their source-only acceptance
   journals preserve broader production, platform and rollout gates. No sibling
   code or checkout was changed and no additional PR was opened.
+
+### 2026-10-31 - Exact dependency integration and native cutoff counterexamples
+
+- Integrated the existing #9578 owner's explicitly published SDK candidate
+  `3ca081b23492e48918455a0094dc6c0d07ffd5f0` under a preserved local backup,
+  before its source merge. The only SDK conflict was the private spawn
+  signature: retain `budget`, `cleanup_deadline` and `command_deadline`, and
+  both independently admitted cleanup branches. No additional SDK design was
+  introduced. All module ceilings pass; canonical procutil is 992 lines.
+- Preliminary combined qualification passed 152 actual native/consumer cases
+  and 1,106 standalone cases, with 258 existing platform/opt-in skips.
+  The source owner subsequently superseded that SDK candidate. These receipts
+  are not final source acceptance and will not be reused as final-current-base
+  proof.
+- Two additional injected native-setup regressions expose the SDK-only budget
+  path admitting creation/resume after its execution cutoff. They use only
+  `OwnedExecutionBudget(110, 5)` and a setup clock advancing from 100 to 106;
+  both fail before correction. The explicit observation-deadline controls
+  already refuse both orderings.
+- The existing #9578 SDK owner receives this exact counterexample and owns its
+  bounded correction before source merge. This source continuation adds tests
+  only, not a competing SDK implementation, API, PR or timing relaxation.
+  Final dependency merge, source qualification, review/CI and #8458 merge
+  remain open.
