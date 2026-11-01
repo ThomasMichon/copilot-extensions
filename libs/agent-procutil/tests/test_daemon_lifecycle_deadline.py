@@ -73,9 +73,10 @@ def test_lifecycle_exposes_held_cleanup_without_retrying_it(tmp_path: Path, monk
     def fixture_owner(path: Path) -> None:
         assert path.is_relative_to(tmp_path)
 
-    from agent_procutil import _daemon_instance_owner as owner
+    if store.os.name == "nt":
+        from agent_procutil import _daemon_instance_owner as owner
 
-    monkeypatch.setattr(owner, "assert_path_owner", fixture_owner)
+        monkeypatch.setattr(owner, "assert_path_owner", fixture_owner)
     monkeypatch.setattr(store, "_monotonic_clock", lambda: 20)
     monkeypatch.setattr(store, "birth_identity", lambda _pid: "fixture")
     monkeypatch.setattr(store, "_ensure_monitor", lambda: None)
