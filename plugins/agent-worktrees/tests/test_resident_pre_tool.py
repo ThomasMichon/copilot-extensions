@@ -686,3 +686,33 @@ def test_deferred_context_refusal_preserves_initial_decision(monkeypatch, tmp_pa
     )
     assert result["permissionDecision"] == "ask"
     assert "unavailable" in result["additionalContext"] or "failed" in result["additionalContext"]
+
+
+@pytest.mark.parametrize("initial", [{}, {"permissionDecision": "ask", "permissionDecisionReason": "confirmed parent"}])
+def test_successful_deferred_legacy_preserves_silent_noop_and_diagnostics(monkeypatch, capsys, initial):
+    import importlib.util
+    from agent_procutil import owned_process
+
+    loaded = {}
+    for name in ("hook_client", "hook_pre_policy", "hook_policy_process"):
+        spec = importlib.util.spec_from_file_location(name, PLUGIN / "scripts" / (name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        monkeypatch.setitem(sys.modules, name, module)
+        loaded[name] = module
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
+
+    def invoke(argv, **kwargs):
+        kwargs["on_settled"]()
+        return subprocess.CompletedProcess(argv, 0, "{}", "fixture observation warning\n")
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", invoke)
+    assert loaded["hook_policy_process"].execute(
+        b"{}", legacy=True, initial_decision=initial,
+    ) == 0
+    captured = capsys.readouterr()
+    assert captured.err == "fixture observation warning\n"
+    if initial:
+        assert json.loads(captured.out) == initial
+    else:
+        assert captured.out == ""

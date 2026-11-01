@@ -88,6 +88,7 @@ def test_policy_scope_retires_descendant(tmp_path, termination, consumer):
     home = tmp_path / "home"
     home.mkdir()
     marker = tmp_path / "descendant.json"
+    published = marker.with_suffix(".published")
     nonce = uuid.uuid4().hex
     (scripts / "hook_client.py").write_text(
         "import json,os,subprocess,sys,time\nfrom pathlib import Path\n"
@@ -102,6 +103,7 @@ def test_policy_scope_retires_descendant(tmp_path, termination, consumer):
         " birth=_windows_birth(int(p._handle))\n"
         + f"marker=Path({str(marker)!r});prepared=marker.with_suffix('.prepared')\n"
         + f"prepared.write_text(json.dumps({{'pid':p.pid,'birth':birth,'nonce':{nonce!r}}}),encoding='utf-8');prepared.replace(marker)\n"
+        + f"Path({str(published)!r}).touch()\n"
         + "time.sleep(120)\n",
         encoding="utf-8",
     )
@@ -140,6 +142,9 @@ console.log("policy timeout reported after its owned scope was retired");
         ambient.mkdir()
         (ambient / "python.cmd").write_text("@exit /b 92\n", encoding="utf-8")
         environment["PATH"] = str(ambient) + os.pathsep + environment.get("PATH", "")
+    crt = ctypes.CDLL("ucrtbase")
+    crt._get_doserrno.argtypes = [ctypes.POINTER(ctypes.c_ulong)]
+    crt._get_doserrno.restype = ctypes.c_int
     started = time.monotonic()
     process, job = spawn_sync_in_kill_on_close_job(
         command,
@@ -159,11 +164,32 @@ console.log("policy timeout reported after its owned scope was retired");
             process.stdin.close()
             process.stdin = None
         deadline = time.monotonic() + 15
-        while not marker.is_file():
+        # The renamed path can be visible before Windows closes its rename handle.
+        while not published.is_file():
             assert process.poll() is None, process.communicate(timeout=5)
             assert time.monotonic() < deadline, "policy descendant never started"
             time.sleep(0.02)
-        record = json.loads(marker.read_text(encoding="utf-8"))
+        try:
+            record = json.loads(marker.read_text(encoding="utf-8"))
+        except OSError as error:
+            native_error = ctypes.GetLastError()
+            dos_error = ctypes.c_ulong()
+            crt_result = crt._get_doserrno(ctypes.byref(dos_error))
+            error.add_note(json.dumps({
+                "phase": "first-marker-read-before-pin",
+                "consumer": consumer, "termination": termination,
+                "errno": error.errno, "winerror": getattr(error, "winerror", None),
+                "native_error": native_error, "crt_result": crt_result,
+                "dos_error": dos_error.value,
+                "caller_returncode": process.poll(),
+                "owned_job_handle": bool(job.handle),
+                "prepared_exists": marker.with_suffix(".prepared").exists(),
+            }))
+            try:
+                error.add_note(f"file_stat={tuple(marker.stat())!r}")
+            except OSError as inspection_error:
+                error.add_note(f"file_stat_unavailable={inspection_error.errno}")
+            raise
         assert record["nonce"] == nonce
         retired, close_observer = _pin_descendant(record["pid"], record["birth"])
         if termination == "caller-exit":

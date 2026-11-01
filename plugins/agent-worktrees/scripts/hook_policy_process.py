@@ -127,8 +127,7 @@ def execute(frame: bytes, *, legacy: bool = False, settlement_deadline=None, ini
             return failure("supersede output unavailable", 2)
         from hook_client import _merge_pre_decisions
 
-        print(json.dumps(_merge_pre_decisions(initial_decision, decision)), end="")
-        return 0
+        result.stdout = json.dumps(_merge_pre_decisions(initial_decision, decision))
     if result.stdout and not (legacy and result.stdout.strip() == "{}"):
         sys.stdout.write(result.stdout)
     if result.stderr:

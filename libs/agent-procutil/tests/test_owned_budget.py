@@ -186,3 +186,68 @@ def test_between_check_expiry_notifies_after_closing_lifetime_descriptors(monkey
         )
     assert caught.value.cmd == ["fixture"] and caught.value.timeout == 5
     assert settled == [True]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows Job preparation")
+@pytest.mark.parametrize("phase", ["environment", "allocation", "configuration"])
+def test_native_precreation_refusal_notifies_once_after_releasing_job(monkeypatch, phase):
+    from agent_procutil import _windows_caller_owned as windows
+
+    kernel = windows._api()
+    closed = []
+    original_close = kernel.CloseHandle
+
+    def close(handle):
+        result = original_close(handle)
+        assert result
+        closed.append(True)
+        return result
+
+    def refuse(*args):
+        raise OSError("fixture precreation refusal")
+
+    monkeypatch.setattr(kernel, "CloseHandle", close)
+    monkeypatch.setattr(kernel, "CreateProcessW", lambda *args: pytest.fail("refusal must not launch"))
+    if phase == "environment":
+        monkeypatch.setattr(windows, "_environment_block", refuse)
+    elif phase == "allocation":
+        monkeypatch.setattr(kernel, "CreateJobObjectW", refuse)
+    else:
+        monkeypatch.setattr(kernel, "SetInformationJobObject", refuse)
+    settled = []
+
+    def observe():
+        assert closed == ([True] if phase == "configuration" else [])
+        settled.append(True)
+
+    with pytest.raises(OSError, match="fixture precreation refusal"):
+        run_caller_owned(
+            ["fixture"], timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+            budget=OwnedExecutionBudget.from_timeout(5, cleanup_reserve=1),
+            on_settled=observe,
+        )
+    assert settled == [True]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows Job preparation")
+def test_precreation_failed_job_close_retains_custody_without_notifying(monkeypatch):
+    from agent_procutil import _windows_caller_owned as windows
+
+    kernel = windows._api()
+    original_close = kernel.CloseHandle
+    monkeypatch.setattr(kernel, "SetInformationJobObject", lambda *args: False)
+    monkeypatch.setattr(kernel, "CloseHandle", lambda handle: False)
+    settled = []
+    with pytest.raises(OwnedCleanupError) as caught:
+        run_caller_owned(
+            ["fixture"], timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+            on_settled=lambda: settled.append(True),
+        )
+    job = caught.value.job
+    try:
+        assert job.handle
+        assert caught.value.process is None
+        assert settled == []
+    finally:
+        assert original_close(job.handle)
+        job._handle = None

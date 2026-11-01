@@ -335,29 +335,29 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
     allow_breakaway = kwargs.get("allow_breakaway", False)
     if type(allow_breakaway) is not bool:
         raise ValueError("allow_breakaway must be a boolean")
-    job_name = _job_scopes.new_name()
-    environment = _environment_block(
-        _job_scopes.child_environment(
-            kwargs.get("env"), append=job_name,
-            inherit_current=kwargs.get("inherit_job_scopes", True),
-        ),
-    )
-    cwd = os.fspath(kwargs["cwd"]) if kwargs.get("cwd") is not None else None
-    if cwd is not None and (not isinstance(cwd, str) or "\0" in cwd):
-        raise ValueError("native child working directory must be NUL-free text")
-    kernel = _api()
-    handle = kernel.CreateJobObjectW(None, job_name)
-    if not handle:
-        raise ctypes.WinError(ctypes.get_last_error())
-    if ctypes.get_last_error() == 183:
-        kernel.CloseHandle(handle)
-        raise OSError("owned Job identity already exists")
-    job = JobHandle(handle, name=job_name)
+    job = None
     process = None
     creation_attempted = False
     info = _ProcessInfo()
     streams = []
     try:
+        job_name = _job_scopes.new_name()
+        environment = _environment_block(
+            _job_scopes.child_environment(
+                kwargs.get("env"), append=job_name,
+                inherit_current=kwargs.get("inherit_job_scopes", True),
+            ),
+        )
+        cwd = os.fspath(kwargs["cwd"]) if kwargs.get("cwd") is not None else None
+        if cwd is not None and (not isinstance(cwd, str) or "\0" in cwd):
+            raise ValueError("native child working directory must be NUL-free text")
+        kernel = _api()
+        handle = kernel.CreateJobObjectW(None, job_name)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        job = JobHandle(handle, name=job_name)
+        if ctypes.get_last_error() == 183:
+            raise OSError("owned Job identity already exists")
         limit = _build_job_extended_limit_info()()
         limit.BasicLimitInformation.LimitFlags = 0x2000
         if allow_breakaway:
@@ -472,8 +472,10 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
                 process.close()
             except BaseException as cleanup:
                 raise OwnedCleanupError(process, job) from cleanup
-        else:
-            job.close()
+        elif job is not None:
+            if not kernel.CloseHandle(job.handle):
+                raise OwnedCleanupError(None, job) from ctypes.WinError(ctypes.get_last_error())
+            job._handle = None
         if on_settled is not None and (process is not None or not creation_attempted):
             on_settled()
         raise
