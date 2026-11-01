@@ -129,6 +129,37 @@ def unresolved_wake_send(
     return None
 
 
+def reservation_wake_accountable(conn: sqlite3.Connection, reservation: sqlite3.Row) -> bool:
+    """A wake targets a native/workspace, independently of reservation lineage."""
+    from .ordinary_native_bindings import reservation_native_identity
+
+    native = reservation_native_identity(conn, reservation)
+    for table in TABLES:
+        wakes = conn.execute(
+            f"SELECT w.* FROM {table} w WHERE execution_send_state IN ('pending', 'unknown')"
+            " AND (w.task_id = ? OR w.owner_session_id = ?"
+            " OR substr(w.owner, instr(w.owner, '/') + 1) = ?)",
+            (reservation["task_id"], native, reservation["worktree"]),
+        ).fetchall()
+        for wake in wakes:
+            if native and wake["owner_session_id"]:
+                if native != wake["owner_session_id"]:
+                    continue
+            else:
+                worktree = wake["owner"].partition("/")[2]
+                if reservation["worktree"] and worktree:
+                    if reservation["worktree"] != worktree:
+                        continue
+                elif wake["task_id"] != reservation["task_id"]:
+                    continue
+            host = reservation["execution_machine"]
+            wake_host = wake["owner"].partition("/")[0]
+            if host and wake_host and host != wake_host:
+                continue
+            return True
+    return False
+
+
 class QueueExecutionWakesMixin:
     @staticmethod
     def _migrate_execution_wakes(conn: sqlite3.Connection) -> None:

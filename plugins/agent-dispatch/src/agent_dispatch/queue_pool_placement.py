@@ -130,10 +130,8 @@ def reservation_accountable(conn: sqlite3.Connection, row: sqlite3.Row) -> bool:
     """Terminal bookkeeping never substitutes for native or transport retirement."""
     if row["state"] in SpawnState.ACTIVE or row["native_release_pending"]:
         return True
-    from .queue_execution_custody import ExecutionSendUnresolved, require_execution_send_reconciliation
-    try:
-        require_execution_send_reconciliation(conn, row["task_id"], exclusive_key=row["exclusive_key"])
-    except ExecutionSendUnresolved:
+    from .queue_execution_custody import reservation_transport_accountable
+    if reservation_transport_accountable(conn, row):
         return True
     from .ordinary_native_bindings import is_native_retired, native_bindings, reservation_native_identity
     if not (row["startup_complete"] or row["startup_fenced"]):
@@ -205,6 +203,18 @@ def require_historical_exclusivity(conn: sqlite3.Connection, task: Task) -> None
     ).fetchall()
     if any(reservation_accountable(conn, holder) for holder in holders):
         raise TaskError("exclusive key has accountable historical execution; placement is waiting")
+
+
+def require_pool_recovery_retirement(conn: sqlite3.Connection, task: Task) -> None:
+    """Recovery cannot manufacture absence for an original pool-bound attempt."""
+    require_historical_exclusivity(conn, task)
+    rows = conn.execute(
+        "SELECT s.* FROM spawn_reservations s"
+        " JOIN pool_reservation_bindings p ON p.reservation_key = s.key"
+        " WHERE s.task_id = ?", (task.id,),
+    ).fetchall()
+    if any(reservation_accountable(conn, row) for row in rows):
+        raise TaskError("pool recovery requires retirement of accountable original reservations")
 
 
 def record_pool_claim(

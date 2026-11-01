@@ -43,6 +43,11 @@ Capacity counts accountable `reserving`, `spawned`, `cold` and `releasing`
 reservations, failed native/startup effects and unresolved transport custody,
 not caller estimates or task status. Immutable per-reservation pool bindings
 retain older attempts even when the task's current assignment advances.
+Unresolved launch/resume/delivery sends consume the slot of their recorded
+reservation, not every predecessor in the same lineage. Wake sends retain
+capacity for their actual native/workspace target; missing native identity
+keeps matching workspace custody ambiguous. Admission still reconciles the
+entire task/exclusive lineage before any fresh execution.
 A terminal pool attempt enters the existing release/retirement path with
 `native_release_pending`, retaining its historical state rather than becoming
 another active assignment. Release intent is not exact-absence evidence:
@@ -52,6 +57,10 @@ is still pending, without misclassifying that intent as proven absence.
 The supervisor observes that native without ending or concluding a successor's
 workspace. Historical retirement preserves workspace-cleanup metadata; cleanup,
 rearm and allocation replacement remain excluded while native release is pending.
+Operator rearm and fresh-conversation authorization also inspect every original
+pool-bound attempt before changing retirement markers: failed state or a
+no-live-holder attestation cannot replace qualified startup/native/transport
+retirement. Unassigned legacy recovery retains its existing behavior.
 Fresh sibling reservation cannot overtake an unreleased historical exclusive-key
 holder whose native, startup or transport remains accountable, even with spare
 pool capacity. Existing active replay remains observation-only; a fresh attempt
@@ -91,8 +100,9 @@ to create, recover or dispose them.
 Release identity checks use the original reservation's immutable pool binding,
 not its successor's current routing. A release cannot overwrite a retained native
 handle, including on failed or settled attempts. Unrelated pending cleanup may
-discard an untargeted affinity, but cannot discard an explicit target and commit
-a claim for a different workspace: placement refuses before reserving a slot.
+discard an optional affinity, but cannot discard an explicit target or a
+`worktree:` requirement and commit a claim for a different workspace: placement
+refuses before reserving a slot.
 A spawn record, reachability or delivery receipt is not an
 acceptance. Failed or stale starts leave the claim and slot intact.
 

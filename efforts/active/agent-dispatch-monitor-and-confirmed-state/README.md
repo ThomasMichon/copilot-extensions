@@ -1788,3 +1788,24 @@ selectors, with eleven added sibling/exact-retirement, pre-acceptance probe and
 legacy/invalid-location controls. Focused placement typing and changed Python
 lint pass. Current-head review, actual merge, caller/startup-policy integration
 and all canonical parent/native gates remain open.
+
+### 2026-11-01 - Recovery retirement and transport-owner correction prepared
+
+Rearm and fresh-conversation authorization inspect all original pool-bound
+reservations before changing retirement markers. Three completed failed
+attempts sharing a native cannot release its capacity or exclusive key without
+qualified retirement. Legacy unassigned recovery keeps its existing contract.
+Capacity attributes unresolved sends to their recorded reservation and wake
+native/workspace; an active successor's send no longer recounts its retired
+predecessor. Unknown native targeting retains ambiguous workspace custody,
+while fresh admission still reconciles the entire execution lineage.
+Unrelated cleanup may discard optional affinity, but cannot discard an explicit
+target or required `worktree:` selector before committing `CLAIMED`.
+
+Final contained validation passed **1388 controls**, with one existing skip,
+across twenty-one placement, startup, recovery and send/wake selectors.
+Focused placement typing, all four admitted strict projects on Linux/Windows,
+changed Python lint, installation and documentation contracts pass. Broader
+legacy mixin typing is not claimed as qualified. Current-head review, actual
+merge, caller/startup-policy integration and every canonical parent/native
+gate remain open.

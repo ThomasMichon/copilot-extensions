@@ -480,6 +480,11 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                             f"explicit target worktree {task.target_worktree!r} "
                             f"has in-flight cleanup {cleanup_claim['key']}; target is retained"
                         )
+                    if f"worktree:{carried_worktree}" in task.requires:
+                        raise TaskError(
+                            f"required worktree {carried_worktree!r} "
+                            f"has in-flight cleanup {cleanup_claim['key']}; requirement is retained"
+                        )
                     carried_worktree = carried_session = None
                     carried_path = carried_host = carried_driver = None
                     carried_project = latest_allocation["allocation_project"] if latest_allocation else None

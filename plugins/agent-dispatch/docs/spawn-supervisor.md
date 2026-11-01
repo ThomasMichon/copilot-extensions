@@ -331,6 +331,9 @@ reservation still has `conclusion_state=pending`, the entire rearm transaction
 is rejected: pending session/worktree cleanup remains durable and continues to
 fence that worktree until a claimed cleanup result reaches `complete` or
 `held`.
+Pool-bound recovery additionally requires qualified retirement of every
+accountable original attempt before rearm or fresh-conversation authorization
+can write retirement markers; see [pool placement](pool-placement.md).
 
 - **Exactly-one invariant.** `reserve_spawn(task_id)` is a single
   `BEGIN IMMEDIATE` transaction: if any reservation for the task is **active**

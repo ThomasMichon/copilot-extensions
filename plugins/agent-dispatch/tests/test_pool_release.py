@@ -1,5 +1,7 @@
 """Pool retirement preserves historical native and explicit workspace custody."""
 
+from __future__ import annotations
+
 from dataclasses import asdict
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
@@ -8,7 +10,11 @@ import pytest
 
 from agent_dispatch import tracking
 from agent_dispatch.ordinary_native_bindings import is_native_retired
-from agent_dispatch.queue import SpawnState, Status, TaskError
+from agent_dispatch.queue import SpawnReservation, SpawnState, Status, TaskError, TaskQueue
+from agent_dispatch.queue_execution_custody import (
+    ExecutionSendUnresolved, require_execution_send_reconciliation, reservation_transport_accountable,
+)
+from agent_dispatch.queue_pool_placement import reservation_accountable
 from agent_dispatch.supervisor import Supervisor
 from tests import test_pool_placement as placement_controls
 from tests.test_pool_placement import place, pool, publish, record_native, retired_predecessor_retry, task
@@ -241,8 +247,8 @@ def test_release_retains_a_late_handleless_replacement_without_retired_marker(q,
     assert place(q, task(q))[1]
 
 
-@pytest.mark.parametrize("explicit", [False, True])
-def test_unrelated_cleanup_cannot_discard_an_explicit_target(q, explicit):
+@pytest.mark.parametrize("selector", ["affinity", "explicit", "required"])
+def test_unrelated_cleanup_preserves_required_worktrees_and_optional_affinity(q, selector):
     publish(q, pool(capacity=2))
     old_task = task(q, target_worktree="wanted")
     old, _ = place(q, old_task)
@@ -252,9 +258,12 @@ def test_unrelated_cleanup_cannot_discard_an_explicit_target(q, explicit):
     q.request_spawn_release(old.key)
     q.retire_spawn(old.key, exact_absence=True)
     before = q.get_reservation(old.key)
-    t = task(q, **({"target_worktree": "wanted"} if explicit else {"affinity": {"worktree": "wanted"}}))
-    if explicit:
-        with pytest.raises(TaskError, match="explicit target worktree"):
+    options = {"target_worktree": "wanted"} if selector == "explicit" else {"affinity": {"worktree": "wanted"}}
+    if selector == "required":
+        options["requires"] = ["worktree:wanted"]
+    t = task(q, **options)
+    if selector != "affinity":
+        with pytest.raises(TaskError, match="explicit target worktree|required worktree"):
             place(q, t)
         assert q.get(t.id) == t and q.get(t.id).status == Status.QUEUED
         assert q.task_pool_assignment(t.id) is None
@@ -298,3 +307,134 @@ def test_reopen_does_not_turn_historical_release_intent_into_retirement(q):
     with reopened._connect() as conn:
         row = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (old.key,)).fetchone()
         assert not is_native_retired(row)
+
+
+def failed_pool_attempts(q: TaskQueue) -> tuple[str, list[SpawnReservation]]:
+    publish(q, pool(capacity=4))
+    t = task(q, exclusive_key="shared")
+    attempts = []
+    for _ in range(3):
+        r, _ = place(q, q.get(t.id))
+        record_native(q, r)
+        q.record_spawn(r.key, session_handle="native", startup_complete=True, startup_revision=1)
+        q.start(t.id, "host-a/worktree", owner_session_id="native",
+                expected_generation=q.get(t.id).generation)
+        q.fail_spawn(r.key)
+        q.yield_task(t.id, "host-a/worktree")
+        attempts.append(q.get_reservation(r.key))
+    return t.id, attempts
+
+
+def test_rearm_cannot_certify_a_live_shared_pool_native(q: TaskQueue) -> None:
+    task_id, attempts = failed_pool_attempts(q)
+    before = q.get(task_id)
+    assignment = q.task_pool_assignment(task_id)
+    with pytest.raises(TaskError, match="accountable original reservations"):
+        q.rearm_spawn(task_id, permitted=True, reason="three failed attempts")
+    assert q.get(task_id) == before
+    assert q.task_pool_assignment(task_id) == assignment
+    assert q.list_reservations(task_id=task_id) == attempts
+    with q._connect() as conn:
+        rows = conn.execute("SELECT * FROM spawn_reservations WHERE task_id=?", (task_id,)).fetchall()
+        assert all(reservation_accountable(conn, row) and not is_native_retired(row) for row in rows)
+    sibling = task(q, exclusive_key="shared")
+    with pytest.raises(TaskError, match="accountable historical execution"):
+        place(q, sibling)
+    assert q.list_reservations(task_id=sibling.id) == []
+    assert place(q, task(q))[1]
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+
+
+def test_rearm_preserves_pool_history_after_qualified_shared_native_retirement(q: TaskQueue) -> None:
+    task_id, attempts = failed_pool_attempts(q)
+    latest = attempts[-1]
+    q.request_spawn_release(latest.key)
+    q.retire_spawn(latest.key, exact_absence=True)
+    result = q.rearm_spawn(task_id, permitted=True, reason="native retired")
+    assert result["rearmed"] == 3 and result["next_attempt"] == 4
+    histories = q.list_reservations(task_id=task_id)
+    assert all(r.state == SpawnState.REARMED and r.session_handle == "native" for r in histories)
+    assert q.task_pool_assignment(task_id).reservation_key == latest.key
+    assert place(q, task(q, exclusive_key="shared"))[1]
+
+
+def test_fresh_authorization_cannot_retire_earlier_pool_native(q: TaskQueue) -> None:
+    t, old, retry = carried_retry(q, exclusive_key="shared")
+    q.start(t.id, "host-a/worktree", owner_session_id="native",
+            expected_generation=q.get(t.id).generation)
+    q.fail_spawn(retry.key)
+    q.yield_task(t.id, "host-a/worktree")
+    with q._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET session_handle=NULL WHERE key=?", (retry.key,))
+        conn.execute("UPDATE spawn_reservations SET reserved_at=99 WHERE key=?", (old.key,))
+    before = q.get(t.id)
+    histories = q.list_reservations(task_id=t.id)
+    with pytest.raises(TaskError, match="accountable original reservations"):
+        q.authorize_fresh_acquisition(
+            t.id, reservation_key=retry.key, worktree="worktree",
+            expected_generation=before.generation, permitted=True,
+            confirmed_no_live_holder=True, reason="operator recovery",
+        )
+    assert q.get(t.id) == before and q.list_reservations(task_id=t.id) == histories
+    assert not q.get_reservation(old.key).conversation_retired
+
+
+@pytest.mark.parametrize("state", ["pending", "unknown"])
+def test_successor_send_does_not_recount_a_retired_predecessor(q: TaskQueue, state: str) -> None:
+    t, old, retry = retired_predecessor_retry(q)
+    with q._connect() as conn:
+        conn.execute("UPDATE tasks SET source='test-producer' WHERE id=?", (t.id,))
+        conn.execute(
+            "INSERT INTO execution_send_custody"
+            " (scope_key, send_id, repo, source, producer_generation, task_id, reservation_key,"
+            " task_generation, kind, identity, state, detail, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("scope", "successor-send", t.repo, "test-producer", 1, t.id, retry.key,
+             q.get(t.id).generation, "launch", "{}", state, "transport in flight", 100, 100),
+        )
+        predecessor = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (old.key,)).fetchone()
+        current = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (retry.key,)).fetchone()
+        assert not reservation_accountable(conn, predecessor)
+        assert reservation_accountable(conn, current)
+        with pytest.raises(ExecutionSendUnresolved, match="successor-send"):
+            require_execution_send_reconciliation(conn, t.id, exclusive_key=t.exclusive_key)
+    assert place(q, task(q))[1]
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+
+
+@pytest.mark.parametrize("state", ["pending", "unknown"])
+@pytest.mark.parametrize("outbox", ["wake_outbox", "run_waiter_wakes"])
+def test_successor_wake_accounts_its_native_without_recounting_retired_predecessor(
+    q: TaskQueue, state: str, outbox: str,
+) -> None:
+    t, old, retry = retired_predecessor_retry(q)
+    record_native(q, retry, native="replacement")
+    q.start(t.id, "host-a/worktree", owner_session_id="replacement",
+            expected_generation=q.get(t.id).generation)
+    q.suspend(t.id, "host-a/worktree", reason="external wait")
+    if outbox == "wake_outbox":
+        q.resume(t.id, "host-a/worktree", wake_requested=True, wake_message="continue")
+    else:
+        waiter = q.register_run_waiter(
+            t.id, pid=123, host="host-a", start_token="synthetic-waiter",
+            resume_worktree="host-a/worktree", command=["synthetic-wait"],
+        )
+        q.recover_dead_run_waiter(
+            t.id, generation=waiter["generation"], reason="external",
+            message="continue", sender="recovery",
+        )
+    with q._connect() as conn:
+        conn.execute(f"UPDATE {outbox} SET execution_send_state=? WHERE task_id=?", (state, t.id))
+        predecessor = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (old.key,)).fetchone()
+        current = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (retry.key,)).fetchone()
+        assert not reservation_transport_accountable(conn, predecessor)
+        assert reservation_transport_accountable(conn, current)
+        assert not reservation_accountable(conn, predecessor)
+        with pytest.raises(ExecutionSendUnresolved, match="unresolved execution wake"):
+            require_execution_send_reconciliation(conn, t.id, exclusive_key=t.exclusive_key)
+        # Without a named native, a same-workspace send remains ambiguous,
+        # not proof that historical effects have gone away.
+        conn.execute(f"UPDATE {outbox} SET owner_session_id=NULL WHERE task_id=?", (t.id,))
+        assert reservation_transport_accountable(conn, predecessor)

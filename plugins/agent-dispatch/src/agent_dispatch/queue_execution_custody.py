@@ -150,6 +150,17 @@ def require_execution_send_reconciliation(
         )
 
 
+def reservation_transport_accountable(conn: sqlite3.Connection, row: sqlite3.Row) -> bool:
+    """Attribute capacity to the retained send owner, not every lineage member."""
+    if conn.execute(
+        "SELECT 1 FROM execution_send_custody WHERE reservation_key = ?"
+        " AND state IN ('pending', 'unknown') LIMIT 1", (row["key"],),
+    ).fetchone():
+        return True
+    from .queue_execution_wakes import reservation_wake_accountable
+    return reservation_wake_accountable(conn, row)
+
+
 def _result(row: sqlite3.Row, identity: ExecutionSendIdentity, replayed: bool) -> ExecutionSend:
     return ExecutionSend(
         identity,
