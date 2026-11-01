@@ -520,6 +520,9 @@ The short-lived containment helpers and their typed process-creation errors
 remain self-contained. Bundles calling `python_cache_args` also carry the
 canonical sibling `python_cache.py`; calling `spawn_daemon` requires the full
 package.
+Job-scope construction and lazy native accounting also belong to that single
+file. The full-package scope and ABI adapters delegate to the same primitives;
+minimal consumers do not need sibling modules to start or retire a finite child.
 
 `agent_procutil.owned_process.run_owned()` executes a finite command with
 captured UTF-8 output, optional `input_text`, and a required positive `timeout`.
