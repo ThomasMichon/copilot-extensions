@@ -80,7 +80,7 @@ Set-Item Function:Invoke-NativeInstall -Value ${{function:Invoke-UvPipInstallRes
 function Invoke-UvPipInstallResilient {{
     param($UvCommand,$Arguments,$PayloadDirToScrub)
     Add-Content '{log}' (ConvertTo-Json -InputObject @($Arguments) -Compress)
-    if ('{failure}' -eq 'bootstrap' -or ('{failure}' -eq 'closure' -and $Arguments -contains '--no-editable')) {{
+    if ('{failure}' -eq 'bootstrap' -or ('{failure}' -eq 'closure' -and $Arguments -contains '--reinstall-package')) {{
         return @{{ExitCode=23;Output='permanent failure'}}
     }}
     if (${str(native).lower()}) {{
@@ -115,7 +115,7 @@ _fail() {{ echo "$*" >&2; }}
 eval "$(declare -f invoke_uv_pip_install_resilient | sed '1s/invoke_uv_pip_install_resilient/invoke_native_install/')"
 invoke_uv_pip_install_resilient() {{
     '{sys.executable}' -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${{@:2}}" >> '{log}'
-    if [[ '{failure}' == bootstrap || ( '{failure}' == closure && " $* " == *' --no-editable '* ) ]]; then
+    if [[ '{failure}' == bootstrap || ( '{failure}' == closure && " $* " == *' --reinstall-package '* ) ]]; then
         echo 'permanent failure'; return 23
     fi
     if [[ '{int(native)}' == 1 ]]; then invoke_native_install "$@"; fi
@@ -192,7 +192,7 @@ def _assert_batches(calls, sources):
     assert len(calls) == 2
     assert calls[0][-3:] == ["setuptools>=83.0.0", "pyyaml>=6.0", "--quiet"]
     batch = calls[1]
-    assert "--no-editable" in batch and "--editable" not in batch
+    assert "--no-editable" not in batch and "--editable" not in batch
     assert set(sources) == {
         batch[i + 1] for i, argument in enumerate(batch) if argument == "--reinstall-package"
     }

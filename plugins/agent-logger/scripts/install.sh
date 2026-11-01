@@ -1330,7 +1330,7 @@ install_package() {
   fi
   # Local first-party code still resolves its external and build dependencies
   # through the configured, seasoned index, in one retained transaction.
-  local -a install_args=(--python "${VENV}/bin/python" --no-editable)
+  local -a install_args=(--python "${VENV}/bin/python")
   local lib_spec lib_dir lib_package
   for lib_spec in \
     config-migrate:agent-config-migrate \

@@ -10,6 +10,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .pool_instances import PoolInstanceDefinition, ordered_pool_instances
+from .queue_pool_cohort import (
+    PoolConfiguredCohort, QueuePoolCohortMixin, cohort_from_clock, require_cohort_scope,
+)
 from .queue_records import TaskError
 
 POOL_CATALOG_VERSION = 1
@@ -51,6 +54,8 @@ class PoolPublicationScope:
     definitions_generation: int | None
     definitions_revision: int | None
     reason: str | None
+    enrollment_cohort_revision: int | None
+    definitions_cohort_revision: int | None
 
 
 @dataclass(frozen=True)
@@ -61,14 +66,21 @@ class PoolCatalogSnapshot:
     scopes: tuple[PoolPublicationScope, ...]
     definitions: tuple[PoolInstanceDefinition, ...]
     blockers: tuple[str, ...]
+    configured_cohort: PoolConfiguredCohort
 
     @property
     def ready(self) -> bool:
-        """Metadata is current for every enrolled scope, not execution support."""
+        """Retained metadata readiness, not current-file or execution support."""
         return bool(self.scopes) and not self.blockers
 
+    @property
+    def configured_ready(self) -> bool:
+        """Configured coverage only; explicit empty intent can be confirmed."""
+        observation = self.configured_cohort.observation
+        return observation is not None and observation.complete and not self.blockers
 
-class QueuePoolCatalogMixin:
+
+class QueuePoolCatalogMixin(QueuePoolCohortMixin):
     """Internal primitives for the control-authenticated reconciliation owner.
 
     Only that owner may account for a publisher and publish its effective set.
@@ -88,7 +100,10 @@ class QueuePoolCatalogMixin:
             " singleton INTEGER PRIMARY KEY CHECK(singleton = 1),"
             " revision INTEGER NOT NULL, registration_revision INTEGER NOT NULL)"
         )
-        conn.execute("INSERT OR IGNORE INTO pool_catalog_clock VALUES (1, 0, 0)")
+        conn.execute(
+            "INSERT OR IGNORE INTO pool_catalog_clock"
+            " (singleton, revision, registration_revision) VALUES (1, 0, 0)"
+        )
         conn.execute(
             "CREATE TABLE IF NOT EXISTS pool_publication_scopes ("
             " machine TEXT NOT NULL, env TEXT NOT NULL, publisher_id TEXT NOT NULL,"
@@ -110,6 +125,7 @@ class QueuePoolCatalogMixin:
             " revision INTEGER NOT NULL, request TEXT NOT NULL, accepted_at REAL NOT NULL,"
             " PRIMARY KEY(machine, env, generation, revision))"
         )
+        QueuePoolCohortMixin._migrate_pool_cohort(conn)
 
     @staticmethod
     def _pool_scope_from_row(row: sqlite3.Row) -> PoolPublicationScope:
@@ -123,6 +139,7 @@ class QueuePoolCatalogMixin:
             ),
             row["definitions_generation"], row["definitions_revision"],
             row["reason"],
+            row["enrollment_cohort_revision"], row["definitions_cohort_revision"],
         )
 
     def pool_registration_revision(self) -> int:
@@ -135,6 +152,7 @@ class QueuePoolCatalogMixin:
     def begin_pool_publication(
         self, machine: str, env: str, publisher_id: str, *,
         expected_generation: int, now: float | None = None,
+        expected_cohort_revision: int | None = None,
     ) -> PoolPublicationScope:
         """CAS a new lock-holder incarnation; never auto-take over from age.
 
@@ -145,6 +163,8 @@ class QueuePoolCatalogMixin:
         machine, env = _identity(machine, "machine"), _identity(env, "environment")
         publisher_id = _identity(publisher_id, "publisher_id")
         expected_generation = _revision(expected_generation, "expected_generation")
+        if expected_cohort_revision is not None:
+            expected_cohort_revision = _revision(expected_cohort_revision, "cohort revision")
         ts = self._now(now)
         if not math.isfinite(ts):
             raise TaskError("pool publication requires a finite observation time")
@@ -158,8 +178,10 @@ class QueuePoolCatalogMixin:
             if row is not None and (
                 row["publisher_id"] == publisher_id
                 and expected_generation + 1 == generation
+                and row["enrollment_cohort_revision"] == expected_cohort_revision
             ):
                 return self._pool_scope_from_row(row)
+            require_cohort_scope(conn, machine, env, expected_cohort_revision)
             if expected_generation != generation:
                 raise TaskError("pool publisher generation changed; refusing enrollment")
             seen = conn.execute(
@@ -175,12 +197,14 @@ class QueuePoolCatalogMixin:
             )
             conn.execute(
                 "INSERT INTO pool_publication_scopes"
-                " (machine, env, publisher_id, generation, revision, state, definitions)"
-                " VALUES (?, ?, ?, ?, 0, 'pending', '[]')"
+                " (machine, env, publisher_id, generation, revision, state, definitions,"
+                " enrollment_cohort_revision)"
+                " VALUES (?, ?, ?, ?, 0, 'pending', '[]', ?)"
                 " ON CONFLICT(machine, env) DO UPDATE SET"
                 " publisher_id = excluded.publisher_id, generation = excluded.generation,"
-                " revision = 0, state = 'pending', request = NULL, reason = NULL",
-                (machine, env, publisher_id, generation + 1),
+                " revision = 0, state = 'pending', request = NULL, reason = NULL,"
+                " enrollment_cohort_revision = excluded.enrollment_cohort_revision",
+                (machine, env, publisher_id, generation + 1, expected_cohort_revision),
             )
             conn.execute("UPDATE pool_catalog_clock SET revision = revision + 1 WHERE singleton = 1")
             row = conn.execute(
@@ -194,6 +218,7 @@ class QueuePoolCatalogMixin:
         generation: int, expected_revision: int, registration_revision: int,
         input_revision: str, definitions: tuple[PoolInstanceDefinition, ...],
         reason: str | None = None, now: float | None = None,
+        expected_cohort_revision: int | None = None,
     ) -> PoolPublicationScope:
         """Atomically replace the entire scope, or record unavailable inputs.
 
@@ -207,6 +232,8 @@ class QueuePoolCatalogMixin:
         generation = _revision(generation, "generation")
         expected_revision = _revision(expected_revision, "expected_revision")
         registration_revision = _revision(registration_revision, "registration_revision")
+        if expected_cohort_revision is not None:
+            expected_cohort_revision = _revision(expected_cohort_revision, "cohort revision")
         if not isinstance(definitions, tuple) or any(
             not isinstance(value, PoolInstanceDefinition) for value in definitions
         ):
@@ -221,9 +248,10 @@ class QueuePoolCatalogMixin:
         encoded = json.dumps(
             [value.to_dict() for value in definitions], sort_keys=True, separators=(",", ":")
         )
-        request = json.dumps(
-            [registration_revision, input_revision, encoded, reason], separators=(",", ":")
-        )
+        request_fields = [registration_revision, input_revision, encoded, reason]
+        if expected_cohort_revision is not None:
+            request_fields.append(expected_cohort_revision)
+        request = json.dumps(request_fields, separators=(",", ":"))
         ts = self._now(now)
         if not math.isfinite(ts):
             raise TaskError("pool publication requires a finite observation time")
@@ -239,6 +267,7 @@ class QueuePoolCatalogMixin:
                 if row["revision"] == expected_revision + 1 and row["request"] == request:
                     return self._pool_scope_from_row(row)
                 raise TaskError("pool publication revision changed; refusing stale snapshot")
+            require_cohort_scope(conn, machine, env, expected_cohort_revision)
             current = conn.execute(
                 "SELECT registration_revision FROM pool_catalog_clock WHERE singleton = 1"
             ).fetchone()["registration_revision"]
@@ -250,11 +279,13 @@ class QueuePoolCatalogMixin:
                 " definitions = CASE WHEN ? IS NULL THEN ? ELSE definitions END,"
                 " definitions_generation = CASE WHEN ? IS NULL THEN ? ELSE definitions_generation END,"
                 " definitions_revision = CASE WHEN ? IS NULL THEN ? ELSE definitions_revision END,"
+                " definitions_cohort_revision = CASE WHEN ? IS NULL THEN ? ELSE definitions_cohort_revision END,"
                 " reason = ?, request = ? WHERE machine = ? AND env = ?",
                 (
                     "complete" if reason is None else "unavailable", input_revision,
                     registration_revision, ts + POOL_PUBLICATION_TTL_SECONDS,
                     reason, encoded, reason, generation, reason, expected_revision + 1,
+                    reason, expected_cohort_revision,
                     reason, request, machine, env,
                 ),
             )
@@ -278,7 +309,23 @@ class QueuePoolCatalogMixin:
             for row in conn.execute("SELECT * FROM pool_publication_scopes ORDER BY machine, env")
         )
         blockers: list[str] = []
-        if not scopes:
+        cohort = cohort_from_clock(clock)
+        observation = cohort.observation
+        if cohort.revision:
+            if observation is None or not observation.complete:
+                blockers.append("configured pool cohort is unconfirmed or unavailable")
+            else:
+                expected = {(member.execution_machine, member.env) for member in observation.members}
+                enrolled = {(scope.machine, scope.env) for scope in scopes}
+                blockers.extend(
+                    f"{machine}/{env}: configured scope has not enrolled"
+                    for machine, env in sorted(expected - enrolled)
+                )
+                blockers.extend(
+                    f"{machine}/{env}: enrolled scope is not configured"
+                    for machine, env in sorted(enrolled - expected)
+                )
+        elif not scopes:
             blockers.append("no enrolled pool publication scopes")
         for scope in scopes:
             problem = (
@@ -289,6 +336,8 @@ class QueuePoolCatalogMixin:
                 )
                 else "registration inputs changed"
                 if scope.registration_revision != clock["registration_revision"]
+                else "configured cohort changed"
+                if cohort.revision and scope.definitions_cohort_revision != cohort.revision
                 else "publication expired"
                 if scope.valid_until is None or now >= scope.valid_until
                 else None
@@ -298,7 +347,7 @@ class QueuePoolCatalogMixin:
         return PoolCatalogSnapshot(
             POOL_CATALOG_VERSION, clock["revision"], clock["registration_revision"],
             scopes, ordered_pool_instances(value for scope in scopes for value in scope.definitions),
-            tuple(blockers),
+            tuple(blockers), cohort,
         )
 
     def pool_catalog_snapshot(self, *, now: float | None = None) -> PoolCatalogSnapshot:

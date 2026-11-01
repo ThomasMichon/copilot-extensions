@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","deliveryKind":"selector","destination":".github/instructions/agent-dispatch/blocked-task-fallback.instructions.md","plugin":"agent-dispatch@copilot-extensions","pluginVersion":"0.18.182-dev1","renderedBytes":1285,"schema":"copilot-extensions.instruction-projection","sourceId":"blocked-task-fallback","templateSha256":"f8521aeb78c58bf04ed5e6dd755dc8a0fcd2c0899e29698091e7e2ceb849cfed","version":2} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","deliveryKind":"selector","destination":".github/instructions/agent-dispatch/blocked-task-fallback.instructions.md","plugin":"agent-dispatch@copilot-extensions","pluginVersion":"0.18.183-dev1","renderedBytes":1285,"schema":"copilot-extensions.instruction-projection","sourceId":"blocked-task-fallback","templateSha256":"f8521aeb78c58bf04ed5e6dd755dc8a0fcd2c0899e29698091e7e2ceb849cfed","version":2} -->
 
 Guidance locator only; no instruction body is delivered here.
 Managed candidate: `.github/instructions/agent-worktrees-generated/copilot-extensions/agent-dispatch/blocked-task-fallback.local.instructions.md`; reviewed fallback: `.github/copilot/context-fallbacks/agent-dispatch/blocked-task-fallback.md`.

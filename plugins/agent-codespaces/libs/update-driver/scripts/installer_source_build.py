@@ -79,7 +79,7 @@ def retained_input_graph(
     selected = engine._installed_packages(inputs)
     with engine.retain_uv_install(
         str(Path(engine._select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)),
-        ["--python", str(python), "--no-editable", "--link-mode", "copy" if refresh else "hardlink",
+        ["--python", str(python), "--link-mode", "copy" if refresh else "hardlink",
          *(["--reinstall"] if refresh else []),
          *(argument for package in selected
            for argument in ("-r", str(package / "pyproject.toml"))),
@@ -88,6 +88,7 @@ def retained_input_graph(
          ) for package in selected)],
         env=environment, cwd=inputs.plugin,
         trusted_source_roots=inputs.packages,
+        non_editable=True,
         excluded_local_packages=tuple(engine._excluded_packages(inputs)),
         on_progress=on_progress,
     ) as transaction:
@@ -194,11 +195,18 @@ class _SourceProgress:
     timeout: float
     deadline: float
     units: int = 0
+    reported_at: float | None = None
 
     def renew(self) -> None:
         now = time.monotonic()
         self.deadline = now + self.timeout
         self.units += 1
+        if self.reported_at is not None and now - self.reported_at < min(1.0, self.timeout / 4):
+            print(".", end="", file=sys.stderr, flush=True)
+            return
+        if self.reported_at is not None:
+            print(file=sys.stderr)
+        self.reported_at = now
         print(
             f"Source wheel progress: phase={self.name} completed-units={self.units}",
             file=sys.stderr, flush=True,
@@ -468,7 +476,8 @@ def _source_phase(name: str, timeout: float, elapsed: dict[str, float]):
     finally:
         elapsed[name] = time.monotonic() - started
         print(
-            f"Source wheel phase: phase={name} state={state} elapsed={elapsed[name]:.3f}s",
+            f"\nSource wheel phase: phase={name} state={state} elapsed={elapsed[name]:.3f}s "
+            f"completed-units={progress.units}",
             file=sys.stderr, flush=True,
         )
 
