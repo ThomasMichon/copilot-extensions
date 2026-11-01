@@ -43,6 +43,7 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Callable
+from dataclasses import replace
 
 from .queue_allocation_revisions import revision_disposed
 from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
@@ -336,7 +337,6 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 catalog = self._pool_catalog_from_conn(conn, now=ts)
                 if catalog.revision != pool_catalog_revision or not catalog.configured_ready:
                     raise TaskError("pool placement requires the current complete configured catalog")
-                selected_pool = select_pool(conn, task, catalog.definitions)
             attempt = (max(r["attempt"] for r in rows) + 1) if rows else 1
             key = spawn_key(task_id, attempt)
             allocation_reservation_key = (
@@ -344,7 +344,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 if latest_allocation is not None and not new_allocation else key
             )
             carried_worktree = (
-                task.target_worktree if selected_pool is not None and task.target_worktree is not None
+                task.target_worktree if pool_catalog_revision is not None and task.target_worktree is not None
                 else task.affinity.get("worktree")
             )
             if new_allocation and carried_worktree:
@@ -503,6 +503,12 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     conversation_retired, creation_key=creation_key)
                 if prior is not None and carried_worktree == prior["worktree"]:
                     allocation_reservation_key = prior["allocation_reservation_key"] or prior["key"]
+            if pool_catalog_revision is not None:
+                resolved_task = replace(
+                    task, target_worktree=carried_worktree,
+                    affinity={key: value for key, value in task.affinity.items() if key != "worktree"},
+                )
+                selected_pool = select_pool(conn, resolved_task, catalog.definitions)
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "

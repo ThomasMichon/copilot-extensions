@@ -21,13 +21,17 @@ HTTP placement uses the same in-flight claim/drain gate as direct claims: a
 draining provider refuses admission and drain waits for already-admitted writes.
 Intrinsic `requires` selectors (`machine:`, `repo:`, `env:`, `pool:` and
 `worktree:`) match the actual selected execution identity separately from hard
-capabilities. A worktree selector needs a known target or retained affinity;
+capabilities. A worktree selector needs a known target, affinity or carried workspace;
 placement cannot invent a future workspace to satisfy it. Other requirements
 must be explicitly supplied by the selected pool's capability predicate;
 an unconstrained filter does not invent worker capabilities.
 Exclusions match all supplied capabilities and the execution repo, machine,
 environment, pool and worktree selectors, not only the task's requirements.
-It selects the first matching instance in published priority order with free
+After resolving carry-forward, cleanup and driver compatibility, selection checks
+the actual retained workspace under the same lock. An excluded carried checkout
+cannot acquire a claim or slot merely because the task has no explicit target
+or affinity. Discarded optional affinity is not routing evidence for the resulting
+workspace. It selects the first matching instance in published priority order with free
 capacity, writes its reservation and retained pool assignment and changes the
 task to `CLAIMED`. The assignment contains the actual registration, execution
 machine, environment, reservation key, catalog revision and task generation.
@@ -53,6 +57,10 @@ A terminal pool attempt enters the existing release/retirement path with
 `native_release_pending`, retaining its historical state rather than becoming
 another active assignment. Release intent is not exact-absence evidence:
 historical capacity stays accountable until its original native is retired.
+An identical release replay after qualified retirement preserves that evidence
+instead of reasserting pending native retirement. Newly returned workspace/native
+effects remain accountable, and replay never clears the reservation's unresolved
+transport custody.
 Publication and affirmative start refuse a native whose historical retirement
 is still pending, without misclassifying that intent as proven absence.
 The supervisor observes that native without ending or concluding a successor's
@@ -84,7 +92,11 @@ native acquisition authority. Only the successful transition binds the worker
 and native owner. Preparation records `execution_machine` independently of
 `creating_host`: targeted/reused workspaces retain their real ownership and
 creation provenance instead of being relabeled as newly created. Workspace
-recording and start both recheck that execution machine and current exclusions
+preparation and response validation compare execution hosts with the same
+strip/lower normalization, while keeping the original recorded host spelling
+immutable. Equivalent casing/whitespace is replay, not a different execution
+machine; a genuinely different host still refuses preparation.
+Workspace recording and start both recheck that execution machine and current exclusions
 against the retained supplied capabilities and current intrinsic requirements.
 Retained CLI liveness and cleanup use the validated recorded execution machine
 even before worker acceptance creates an owner or attachment. Legacy rows without

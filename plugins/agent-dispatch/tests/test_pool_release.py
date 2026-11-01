@@ -228,18 +228,22 @@ def test_recorded_execution_host_preserves_legacy_fallback_but_rejects_invalid_v
 
 
 @pytest.mark.parametrize("terminal", [False, True])
-def test_release_retains_a_late_handleless_replacement_without_retired_marker(q, terminal):
+@pytest.mark.parametrize("after_retirement", [False, True])
+def test_release_retains_a_late_handleless_replacement_without_retired_marker(q, terminal, after_retirement):
     _, _, retry = retired_predecessor_retry(q)
     q.record_spawn_worktree(retry.key, "worktree", ownership="reused",
                             execution_machine="host-a", driver="cli")
     if terminal:
         q.fail_spawn(retry.key)
     q.request_spawn_release(retry.key)
+    if after_retirement:
+        q.request_spawn_release(retry.key, finished_startup_revision=1)
+        q.retire_spawn(retry.key, exact_absence=True)
     released = q.request_spawn_release(
         retry.key, session_handle="replacement", finished_startup_revision=1,
     )
     assert released.session_handle == "replacement" and not released.conversation_retired
-    assert released.release_requested and released.native_release_pending is terminal
+    assert released.release_requested and released.native_release_pending is (terminal or after_retirement)
     assert place(q, task(q))[1]
     with pytest.raises(TaskError, match="capacity"):
         place(q, task(q))

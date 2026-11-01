@@ -45,6 +45,7 @@ class SpawnWorkspaceMixin:
                     f"reservation {key} is {row['state']!r}, not {SpawnState.RESERVING!r}"
                 )
             from .queue_pool_placement import require_pool_workspace
+            from .bridge_remote import normalize_host
             task = self._fetch(conn, row["task_id"])
             if execution_machine is not None and (
                 not isinstance(execution_machine, str) or not execution_machine.strip()
@@ -52,10 +53,10 @@ class SpawnWorkspaceMixin:
                 raise TaskError("execution machine must be non-empty")
             if (
                 row["execution_machine"] is not None and execution_machine is not None
-                and row["execution_machine"] != execution_machine
+                and normalize_host(row["execution_machine"]) != normalize_host(execution_machine)
             ):
                 raise TaskError("recorded execution machine cannot change")
-            execution_machine = execution_machine or row["execution_machine"]
+            execution_machine = row["execution_machine"] or execution_machine
             require_pool_workspace(
                 conn, task, worktree, execution_machine, driver=driver,
             )

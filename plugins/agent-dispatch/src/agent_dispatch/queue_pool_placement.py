@@ -308,6 +308,14 @@ def pool_native_publication(
         raise TaskError("pool publication cannot replace its retained native identity")
     if releasing and previous is not None and previous == native:
         return False
+    if (
+        releasing and previous is None and row["worktree"] is None
+        and row["allocation_reservation_key"] in (None, row["key"])
+        and not row["conversation_retired"] and not row["session_handle"]
+    ):
+        # A late first response has no retired workspace/native to inherit.
+        # The release owner must retain its identity as pending retirement.
+        return False
     _, retired = native_bindings(
         conn, row, task, require_owned_workspace=False,
         reject_pending_native=None if releasing else native,

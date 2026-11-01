@@ -58,6 +58,14 @@ class SpawnReleaseMixin:
                 clear_retirement = pool_native_publication(
                     conn, task, row, session_handle, releasing=True,
                 )
+            from .ordinary_native_bindings import is_native_retired
+            retired_replay = bool(
+                terminal_pool and row["release_requested"] and not row["native_release_pending"]
+                and (row["startup_complete"] or row["startup_fenced"])
+                and is_native_retired(row) and not clear_retirement
+                and session_handle in (None, row["session_handle"])
+                and worktree in (None, row["worktree"])
+            )
             if finished_startup_revision is not None:
                 if row["startup_revision"] != finished_startup_revision:
                     raise TaskError("startup revision changed before failed startup closure")
@@ -81,7 +89,7 @@ class SpawnReleaseMixin:
                     "worktree = COALESCE(?, worktree), "
                     "updated_at = ? WHERE key = ?",
                     (
-                        int(terminal_pool),
+                        int(terminal_pool and not retired_replay),
                         clear_retirement,
                         release_disposition,
                         detail,

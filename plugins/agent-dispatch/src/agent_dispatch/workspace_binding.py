@@ -6,6 +6,18 @@ import json
 import subprocess
 
 from .client import DispatchError
+from .bridge_remote import normalize_host
+
+
+def _prepared_facts_match(recorded: dict, facts: dict) -> bool:
+    for key, value in facts.items():
+        actual = recorded.get(key)
+        if key == "execution_machine" and isinstance(actual, str) and isinstance(value, str):
+            if normalize_host(actual) != normalize_host(value):
+                return False
+        elif actual != value:
+            return False
+    return True
 
 
 def hold(message: str) -> None:
@@ -78,7 +90,7 @@ def record_prepared(
     )
     if conflicting_project:
         facts["allocation_project"] = None
-    if any(reservation.get(key) != value for key, value in facts.items()):
+    if not _prepared_facts_match(reservation, facts):
         try:
             recorded = client.record_spawn_worktree(
                 reservation["key"], worktree, ownership=ownership,
@@ -88,7 +100,7 @@ def record_prepared(
             )
         except DispatchError as exc:
             hold(f"workspace {worktree} could not be recorded; retained for repair: {exc}")
-        if not isinstance(recorded, dict) or any(recorded.get(key) != value for key, value in facts.items()):
+        if not isinstance(recorded, dict) or not _prepared_facts_match(recorded, facts):
             hold(f"coordinator did not retain exact workspace {worktree} provenance")
     project, path = facts["allocation_project"], facts["worktree_path"]
     if conflicting_project:

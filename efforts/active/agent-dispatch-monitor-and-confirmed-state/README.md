@@ -1822,3 +1822,29 @@ Final contained validation passed **1396 controls**, with one existing skip,
 across the same twenty-one selectors. The correction is source-only; current
 review/merge, caller integration and all canonical parent/native gates remain
 open.
+
+### 2026-11-01 - Release, carried routing and preparation replay correction prepared
+
+An identical release retry after qualified retirement preserves native absence
+instead of restoring pending retirement and recounting capacity/exclusivity.
+Newly returned workspace/native effects still enter accountable release, including
+a late first-native response for an originally unbound root allocation.
+Unresolved sends retain their own reservation's transport capacity independently.
+
+Pool selection now follows final carry-forward, cleanup and driver resolution
+inside the same write lock. It checks the actual workspace before committing
+the claim and slot, including a retained retry with no explicit target/affinity.
+An excluded carried checkout refuses without mutation; a matching required
+worktree may use proven carry-forward. Retained pool identity and priority
+selection remain with the existing allocator.
+
+Prepared workspace replay normalizes execution host comparison at both the
+coordinator's immutable binding and the caller's cached/returned fact checks.
+The originally recorded host spelling remains unchanged; different hosts and
+other workspace identity mismatches still refuse.
+Final contained validation passed **1436 controls**, with one existing skip,
+across twenty-two coupled selectors. Focused placement typing, all four admitted
+strict projects on Linux/Windows, changed Python lint, installation contracts
+and documentation consistency pass. Broader legacy workspace/mixin typing is
+not claimed as qualified. Current-head review, actual merge, caller/startup
+policy integration and every canonical parent/native gate remain open.
