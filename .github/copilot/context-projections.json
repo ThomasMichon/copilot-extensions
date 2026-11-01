@@ -8,12 +8,12 @@
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/agent-dispatch/blocked-task-fallback.md",
         "renderedBytes": 2744,
-        "renderedSha256": "13f8d75a2aae836d2830630f09d42079edc37a2f89a856bcc029bb1906cfaf13"
+        "renderedSha256": "7f59bba06ae103b284d1fcffb01156243e956a0671c3b35c859bb6151d1442f3"
       },
       "plugin": "agent-dispatch@copilot-extensions",
-      "pluginVersion": "0.18.185-dev1",
+      "pluginVersion": "0.18.186-dev1",
       "renderedBytes": 1285,
-      "renderedSha256": "aa0d531385c0c1df4d04c4f1e546a08f2b3fca8e6949371eb7a068dcd84e75d7",
+      "renderedSha256": "0e079912e8b07ec2bffa83f0ba6566c04d48c47fbff141ac0c7f9a6aa1fd2c7e",
       "sourceId": "blocked-task-fallback",
       "template": "instructions/blocked-task-fallback.instructions.md",
       "templateBytes": 1958,
@@ -27,12 +27,12 @@
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/agent-dispatch/session-guidance.md",
         "renderedBytes": 1014,
-        "renderedSha256": "179b47fa52e87afe8217596ac743121809c26371e58bd828868ecffbfa8af976"
+        "renderedSha256": "dafa21875ac746d3c0feadef2d5e3596281384b6430fbb2667fdec3471f240bf"
       },
       "plugin": "agent-dispatch@copilot-extensions",
-      "pluginVersion": "0.18.185-dev1",
+      "pluginVersion": "0.18.186-dev1",
       "renderedBytes": 1260,
-      "renderedSha256": "a43a631a6c542adf1a384341dc32b5a6904c89dd4466f61753846da663295c94",
+      "renderedSha256": "546cf6183c75ea2c2e7fb7e86de648ff5447c98d5f4870b38049a89c33d73aa0",
       "sourceId": "session-guidance",
       "template": "instructions/session-guidance.instructions.md",
       "templateBytes": 244,
@@ -122,12 +122,12 @@
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/customizing-copilot/local-cache-catchall.md",
         "renderedBytes": 2917,
-        "renderedSha256": "5ac2e69ad564d3feb40c5e16f42969f0c831ed3f00f7fd083664d563d3413dd1"
+        "renderedSha256": "23d49ffad8a52ff9a37fe751263f5e9a45c61be71b0d399c7c5709cf40f169fc"
       },
       "plugin": "customizing-copilot@copilot-extensions",
-      "pluginVersion": "0.2.49-dev1",
+      "pluginVersion": "0.2.50-dev1",
       "renderedBytes": 1303,
-      "renderedSha256": "0fd501b96b96eb3a89490ea5b87d4c6bfc093c427bfdb9506d3987d9d50f3464",
+      "renderedSha256": "d51e3a8c83a8069d2fcedd963104f72bdcf5df5157ce22546e03b31b7b3838f2",
       "sourceId": "local-cache-catchall",
       "template": "instructions/local-cache-catchall.instructions.md",
       "templateBytes": 2126,

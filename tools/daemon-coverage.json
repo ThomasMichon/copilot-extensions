@@ -337,6 +337,7 @@
       "t:clean-room/scenarios/plugin-process-hygiene-convergence/fixtures/plugin_process_hygiene_convergence.py::_spawn::Popen": 1
     },
     "caller-contained": {
+      "r:plugins/customizing-copilot/scripts/run-skill-selection-spike.mjs::<script>::fork": 1,
       "r:plugins/agent-bridge/scripts/daemon_instances.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-codespaces/scripts/daemon_instances.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-containers/scripts/daemon_instances.ps1::<script>::Process.Start": 1,
