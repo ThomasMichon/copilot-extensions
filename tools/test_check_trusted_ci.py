@@ -34,6 +34,34 @@ def test_repository_workflow_is_valid() -> None:
     assert MODULE.validate_workflow() == []
 
 
+@pytest.mark.parametrize("mutation", ["missing", "reversed", "ignored", "gated"])
+def test_required_mypy_steps_cannot_be_weakened(tmp_path: Path, mutation: str) -> None:
+    workflows = MODULE.WORKFLOW.parent
+    trusted = tmp_path / "trusted-ci.yml"
+    trusted.write_bytes(MODULE.WORKFLOW.read_bytes())
+    text = (workflows / "ci.yml").read_text(encoding="utf-8")
+    command = "      run: python tools/typecheck.py --enforced"
+    if mutation == "missing":
+        text = text.replace(command, "      run: echo omitted")
+    elif mutation == "reversed":
+        text = text.replace("typecheck.py --prepare", "typecheck.py --placeholder")
+        text = text.replace("typecheck.py --enforced", "typecheck.py --prepare")
+        text = text.replace("typecheck.py --placeholder", "typecheck.py --enforced")
+    elif mutation == "ignored":
+        text = text.replace(command, "      continue-on-error: true\n" + command)
+    else:
+        text = text.replace(
+            "    - name: Admitted Python type contracts\n"
+            "      if: steps.code-impact.outputs.run == 'true'",
+            "    - name: Admitted Python type contracts\n      if: false",
+        )
+    (tmp_path / "ci.yml").write_text(text, encoding="utf-8")
+    assert (
+        "MyPy must prepare then enforce the admitted portfolio with bounded required steps"
+        in MODULE.validate_workflow(trusted)
+    )
+
+
 def test_default_labels_are_not_accepted(tmp_path: Path) -> None:
     path = _workflow(
         tmp_path,

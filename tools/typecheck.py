@@ -136,8 +136,8 @@ def _run(argv: list[str], root: Path, *, env: dict[str, str] | None = None) -> s
     )
 
 
-def python_paths(root: Path = ROOT) -> tuple[str, ...]:
-    """Include staged, unstaged and untracked non-ignored developer files."""
+def git_environment() -> dict[str, str]:
+    """Keep repository selectors from redirecting inventory or change comparison."""
     selectors = {
         "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
         "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
@@ -147,16 +147,47 @@ def python_paths(root: Path = ROOT) -> tuple[str, ...]:
         if key.upper() not in selectors and not key.upper().startswith("GIT_CONFIG")
     }
     env.update(GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1", GIT_OPTIONAL_LOCKS="0")
+    return env
+
+
+def changed_paths(root: Path, base: str, head: str | None = None) -> tuple[str, ...]:
+    """Compare verified commits, or the base against staged and unstaged source."""
+    revisions: list[str] = []
+    env = git_environment()
+    for ref in (base,) if head is None else (base, head):
+        result = _run(["git", "rev-parse", "--verify", "--end-of-options", ref + "^{commit}"], root, env=env)
+        if result.returncode or not re.fullmatch(r"[0-9a-f]{40,64}\n?", result.stdout):
+            raise TypecheckError(f"Cannot resolve change-comparison commit: {ref!r}")
+        revisions.append(result.stdout.strip())
+    result = _run(
+        ["git", "diff", "--name-only", "--no-renames", "-z", *revisions, "--"], root, env=env,
+    )
+    if result.returncode:
+        raise TypecheckError(result.stderr.strip() or "Git change comparison failed")
+    return tuple(_relative(path) for path in result.stdout.split("\0") if path)
+
+
+def python_paths(root: Path = ROOT) -> tuple[str, ...]:
+    """Include staged, unstaged and untracked non-ignored developer files."""
+    env = git_environment()
     result = _run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], root, env=env)
     if result.returncode:
         raise TypecheckError(result.stderr.strip() or "Git inventory failed")
+    deleted = _run(["git", "ls-files", "--deleted", "-z"], root, env=env)
+    if deleted.returncode:
+        raise TypecheckError(deleted.stderr.strip() or "Git deletion inventory failed")
+    missing = set(deleted.stdout.split("\0"))
     paths = sorted({path for path in result.stdout.split("\0") if path.endswith(".py")})
+    present: list[str] = []
     for path in paths:
         _relative(path)
         source = root.joinpath(*path.split("/"))
+        if path in missing and not source.exists():
+            continue
         if not source.is_file() or not source.resolve().is_relative_to(root.resolve()):
             raise TypecheckError(f"Python source is missing or outside the repository: {path}")
-    return tuple(paths)
+        present.append(path)
+    return tuple(present)
 
 
 def inventory(paths: tuple[str, ...], projects: tuple[Project, ...]) -> dict[str, Project]:
@@ -302,14 +333,19 @@ def main(argv: list[str] | None = None) -> int:
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--all", action="store_true", help="probe all projects, including pending")
     selection.add_argument("--enforced", action="store_true", help="check admitted projects (default)")
+    selection.add_argument("--changed", action="store_true", help="conservatively check all admitted consumers")
     selection.add_argument("--inventory", action="store_true", help="classify Python without checking")
+    parser.add_argument("--base", help="--changed comparison base (default: origin/dev)")
+    parser.add_argument("--head", help="--changed pinned head (default: current staged/unstaged files)")
     parser.add_argument("--prepare", action="store_true", help="explicitly prepare selected environments")
     parser.add_argument("--strict", action="store_true", help="probe strictness without changing admission")
     parser.add_argument("--require-complete", action="store_true", help="require every project to be strict")
     parser.add_argument("--json", action="store_true", help="machine-readable --inventory output")
     args = parser.parse_args(argv)
-    if args.projects and (args.all or args.enforced or args.inventory):
+    if args.projects and (args.all or args.enforced or args.changed or args.inventory):
         parser.error("choose project names or a portfolio selector, not both")
+    if (args.base or args.head) and not args.changed:
+        parser.error("--base and --head require --changed")
     if args.inventory and (args.prepare or args.strict):
         parser.error("--inventory does not prepare or run a checker")
     if args.json and not args.inventory:
@@ -317,6 +353,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         projects = load_projects()
         owners = inventory(python_paths(), projects)
+        if args.changed:
+            changes = changed_paths(ROOT, args.base or "origin/dev", args.head)
+            print(
+                f"Compared {len(changes)} changed paths; checking every admitted project "
+                "(conservative dependency impact; untracked Python included in inventory)."
+            )
         counts = Counter(project.level for project in projects)
         if not args.json:
             print(

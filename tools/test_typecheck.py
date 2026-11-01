@@ -103,6 +103,63 @@ def test_manifest_rejects_duplicate_keys_and_path_escape(tmp_path: Path) -> None
         typecheck.load_projects(tmp_path)
 
 
+def test_git_comparison_and_physical_inventory_cover_developer_edits(tmp_path: Path) -> None:
+    """Real Git covers staged/unstaged edits, pinned comparison and add/delete paths."""
+    env = typecheck.git_environment()
+    for command in (["init"], ["config", "user.name", "Example"], ["config", "user.email", "example@example.com"]):
+        assert typecheck._run(["git", *command], tmp_path, env=env).returncode == 0
+    for name in ("staged.py", "unstaged.py", "removed.py"):
+        (tmp_path / name).write_text("value: int = 1\n", encoding="utf-8")
+    assert typecheck._run(["git", "add", "."], tmp_path, env=env).returncode == 0
+    assert typecheck._run(["git", "commit", "-m", "Synthetic base"], tmp_path, env=env).returncode == 0
+    (tmp_path / "staged.py").write_text("value: int = 2\n", encoding="utf-8")
+    assert typecheck._run(["git", "add", "staged.py"], tmp_path, env=env).returncode == 0
+    (tmp_path / "unstaged.py").write_text("value: int = 3\n", encoding="utf-8")
+    (tmp_path / "added.py").write_text("value: int = 4\n", encoding="utf-8")
+    (tmp_path / "removed.py").unlink()
+    assert set(typecheck.changed_paths(tmp_path, "HEAD")) == {"staged.py", "unstaged.py", "removed.py"}
+    assert typecheck.changed_paths(tmp_path, "HEAD", "HEAD") == ()
+    assert set(typecheck.python_paths(tmp_path)) == {"staged.py", "unstaged.py", "added.py"}
+    with pytest.raises(typecheck.TypecheckError, match="Cannot resolve"):
+        typecheck.changed_paths(tmp_path, "missing-comparison-base")
+
+
+def test_changed_selection_conservatively_checks_all_admitted_consumers(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Even an empty diff cannot omit a consumer before dependency qualification."""
+    first = project()
+    caller = typecheck.Project(
+        "caller", ("caller.py",), (), "strict", "3.10", ("linux",), "requirements.txt",
+    )
+    checked: list[str] = []
+
+    def load_projects() -> tuple[typecheck.Project, ...]:
+        return first, caller
+
+    def python_paths() -> tuple[str, ...]:
+        return "sample.py", "caller.py"
+
+    def changed_paths(_root: Path, base: str, head: str | None) -> tuple[str, ...]:
+        assert base == "origin/dev" and head is None
+        return ()
+
+    def check_project(
+        _root: Path, item: typecheck.Project, _files: tuple[str, ...], *,
+        all_paths: tuple[str, ...], strict: bool = False,
+    ) -> int:
+        checked.append(item.name)
+        return 0
+
+    monkeypatch.setattr(typecheck, "load_projects", load_projects)
+    monkeypatch.setattr(typecheck, "python_paths", python_paths)
+    monkeypatch.setattr(typecheck, "changed_paths", changed_paths)
+    monkeypatch.setattr(typecheck, "check_project", check_project)
+    assert typecheck.main(["--changed"]) == 0
+    assert checked == ["sample", "caller"]
+    assert "conservative dependency impact" in capsys.readouterr().out
+
+
 def test_missing_preparation_is_actionable_and_does_not_create_environment(
     tmp_path: Path,
 ) -> None:
