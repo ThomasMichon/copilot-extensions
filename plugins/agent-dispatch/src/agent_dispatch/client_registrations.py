@@ -68,7 +68,7 @@ class RegistrationClientMixin:
             params["env"] = env
         return self._unwrap(self._http.get("/registrations", params=params))
 
-    def _require_pool_metadata_transport(self) -> None:
+    def _require_pool_metadata_transport(self, *, configured_cohort: bool = False) -> None:
         health = self.health()
         contract = health.get("pool_catalog_transport") if isinstance(health, dict) else None
         if not isinstance(contract, dict) or (
@@ -80,6 +80,14 @@ class RegistrationClientMixin:
             or contract.get("control_authority_configured") is not True
         ):
             raise DispatchUpgradeRequired("running coordinator lacks control-authorized pool catalog metadata")
+        if configured_cohort and (
+            not isinstance(contract.get("configured_cohort_fencing_versions"), list)
+            or not any(
+                type(version) is int and version == 1
+                for version in contract["configured_cohort_fencing_versions"]
+            )
+        ):
+            raise DispatchUpgradeRequired("running coordinator lacks original configured-cohort request fences")
 
     def pool_catalog_metadata(self) -> dict:
         """Explicit preparation read; ordinary reconciliation never calls it."""
@@ -93,7 +101,9 @@ class RegistrationClientMixin:
         boundary: Callable[[], AbstractContextManager[None]],
     ) -> PoolPublicationScope:
         """Send the retained body only after running-peer and local admission."""
-        self._require_pool_metadata_transport()
+        self._require_pool_metadata_transport(
+            configured_cohort=request.expected_cohort_revision is not None,
+        )
         body = request.to_dict()
         headers = self._control_headers()
         with boundary():

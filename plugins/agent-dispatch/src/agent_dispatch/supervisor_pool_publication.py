@@ -147,6 +147,8 @@ class SupervisorPoolPublication(SupervisorPoolSender):
                     reasons.append("coordinator-input-recheck-not-fresh")
                 if before != catalog:
                     reasons.append("coordinator-inputs-changed")
+                if not catalog.permits_scope(self.machine or "", self.env):
+                    reasons.append("coordinator-configured-cohort-unavailable-or-excluded")
                 reasons.extend(self._pool_source_snapshot.reasons)
             except Exception as exc:
                 # This observation authorizes no effects; failures remain explicit.
