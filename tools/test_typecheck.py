@@ -106,12 +106,20 @@ def test_manifest_rejects_duplicate_keys_and_path_escape(tmp_path: Path) -> None
 def test_git_comparison_and_physical_inventory_cover_developer_edits(tmp_path: Path) -> None:
     """Real Git covers staged/unstaged edits, pinned comparison and add/delete paths."""
     env = typecheck.git_environment()
-    for command in (["init"], ["config", "user.name", "Example"], ["config", "user.email", "example@example.com"]):
+    for command in (
+        ["init"], ["config", "user.name", "Example"],
+        ["config", "user.email", "example@example.com"],
+        ["config", "commit.gpgsign", "true"],
+        ["config", "gpg.program", "missing-fixture-signer"],
+    ):
         assert typecheck._run(["git", *command], tmp_path, env=env).returncode == 0
     for name in ("staged.py", "unstaged.py", "removed.py"):
         (tmp_path / name).write_text("value: int = 1\n", encoding="utf-8")
     assert typecheck._run(["git", "add", "."], tmp_path, env=env).returncode == 0
-    assert typecheck._run(["git", "commit", "-m", "Synthetic base"], tmp_path, env=env).returncode == 0
+    assert typecheck._run(
+        ["git", "-c", "commit.gpgsign=false", "commit", "-m", "Synthetic base"],
+        tmp_path, env=env,
+    ).returncode == 0
     (tmp_path / "staged.py").write_text("value: int = 2\n", encoding="utf-8")
     assert typecheck._run(["git", "add", "staged.py"], tmp_path, env=env).returncode == 0
     (tmp_path / "unstaged.py").write_text("value: int = 3\n", encoding="utf-8")
