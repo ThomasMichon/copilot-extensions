@@ -283,6 +283,7 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
     required = {
         "agent-worktrees": {
             "tests/test_update_driver_json.py", "tests/test_provision_hook_cwd.py",
+            "tests/test_global_binstub_publication.py",
         },
         "worktree-manager": {
             "tests/test_update_driver_cli.py", "tests/test_manager_broker_installation.py",

@@ -80,6 +80,9 @@ def test_manual_selection_preserves_every_existing_route_and_default():
             "marketplace-source-linux", "marketplace-source-windows",
         },
         "source_cache": {"source-cache-linux", "source-cache-windows"},
+        "uv_deployment_compatibility": {
+            "uv-deployment-compatibility-linux", "uv-deployment-compatibility-windows",
+        },
         "candidate_profiles": {"candidate-profiles-linux", "candidate-profiles-windows"},
         "chat_construction": {"chat-construction-linux", "chat-construction-windows"},
         "ssh_snapshot": {"ssh-snapshot-native-linux", "ssh-snapshot-native-windows"},
