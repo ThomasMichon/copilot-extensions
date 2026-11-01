@@ -163,6 +163,21 @@ proposal is claimed available merely because its intended name is described.
 
 ## Journal
 
+### 2026-11-01 - Agenda initialization failure review
+
+- Fresh review accepted shared-root history preservation and the resident
+  activation-error/replacement closure. It then identified a separate failure
+  inside agenda initialization: recorded SQLite/schema errors could still
+  activate the agenda feed, leaving an already-held subscriber on stale data.
+- Feed activation now follows successful cache initialization, observer
+  registration and a fresh owner fence. Unsuccessful initialization closes held
+  streams even when an unexpected defect propagates; expected agenda faults
+  remain explicit without disabling the ordinary roster service.
+- The provider/current-runtime packet passed 112 cases independently, with
+  cleanup verified. Real held-schema-fault/repair, storage and observer-failure
+  controls retain same-generation recovery, sequence/revision fences and
+  permanent retirement. Fresh source review remains open.
+
 ### 2026-11-01 - Restoration preserves consumed shared-root history
 
 - The exact shipped deferred sequence reproduced declining visit counts on

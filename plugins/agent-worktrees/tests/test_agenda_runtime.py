@@ -574,6 +574,111 @@ def held_terminal(reader):
     pytest.fail("held agenda continued heartbeats after owner admission closed")
 
 
+def test_agenda_schema_initialization_failure_retires_held_feed_but_keeps_roster_healthy(
+    owned,
+    monkeypatch,
+):
+    from agent_worktrees import agenda_runtime
+
+    owner, _head, elected, _path = owned
+    body = observation(2)
+    accepted = owner.agendas.publish(publication(owner, body))
+    owner.publish("other-project", [{"id": "other-worktree"}], observed_at=1)
+    accepted = owner.agendas.read(request())
+    monkeypatch.setattr(agenda_feed, "HEARTBEAT_SECONDS", 0.02)
+    with socket_feed(owner) as (client, reader):
+        assert contract.decode(reader.readline()) == {"type": "snapshot", **accepted}
+        with sqlite3.connect(owner.store.db_path) as conn:
+            saved = conn.execute("SELECT * FROM worktrees_agenda_cache").fetchall()
+            conn.execute("DROP TABLE worktrees_agenda_cache")
+            conn.execute(
+                "CREATE INDEX worktrees_agenda_cache ON worktrees_agenda_source(project)",
+            )
+        owner.activate()
+        assert elected[0] and owner._admitting
+        assert client.health()["worktrees"]["status"] == "ready"
+        assert "index" in owner.agendas._activation_error.lower()
+        assert owner.agendas.read(request())["error"]["code"] == "unavailable"
+        assert owner.handle(
+            {
+                "contract_version": 1,
+                "project": "other-project",
+            }
+        )["worktrees"] == [{"id": "other-worktree"}]
+        assert held_terminal(reader) == {
+            "type": "going-away",
+            "generation": accepted["generation"],
+            "sequence": accepted["sequence"],
+            "reason": "unavailable",
+        }
+    assert owner.agendas.feed.wait_closed(1)
+    with sqlite3.connect(owner.store.db_path) as conn:
+        conn.execute("DROP INDEX worktrees_agenda_cache")
+        conn.execute(agenda_runtime._SCHEMA)
+        conn.executemany("INSERT INTO worktrees_agenda_cache VALUES (?, ?, ?)", saved)
+        assert conn.execute("SELECT revision FROM worktrees_agenda_source").fetchone()[0] == 2
+    owner.activate()
+    assert owner.store.generation == accepted["generation"]
+    assert owner.agendas._activation_error is None
+    with socket_feed(owner) as (client, reader):
+        assert contract.decode(reader.readline()) == {"type": "snapshot", **accepted}
+        assert client._request("agenda-publish", publication(owner, body)) == accepted
+        assert (
+            client._request(
+                "agenda-publish",
+                publication(owner, observation(1)),
+            )["error"]["code"]
+            == "stale-revision"
+        )
+
+
+@pytest.mark.parametrize("failure", ["storage", "registration", "unexpected-registration"])
+def test_other_agenda_initialization_failures_close_held_feed_and_recover(
+    owned,
+    monkeypatch,
+    failure,
+):
+    owner, _head, elected, _path = owned
+    accepted = owner.agendas.publish(publication(owner))
+    original_fence = owner.agendas._fence
+    original_observe = record_cache.observe_writes
+
+    def fail(*args, **kwargs):
+        if failure == "unexpected-registration":
+            raise TypeError("synthetic observer initialization defect")
+        raise OSError("synthetic agenda initialization storage failure")
+
+    monkeypatch.setattr(agenda_feed, "HEARTBEAT_SECONDS", 0.02)
+    with socket_feed(owner) as (_client, reader):
+        assert contract.decode(reader.readline()) == {"type": "snapshot", **accepted}
+        if failure == "storage":
+            monkeypatch.setattr(owner.agendas, "_fence", fail)
+        else:
+            owner.agendas._unsubscribe()
+            owner.agendas._unsubscribe = None
+            monkeypatch.setattr(record_cache, "observe_writes", fail)
+        if failure == "unexpected-registration":
+            with pytest.raises(TypeError, match="synthetic observer initialization defect"):
+                owner.activate()
+        else:
+            owner.activate()
+        assert elected[0] and owner._admitting
+        assert owner.agendas._activation_error
+        assert held_terminal(reader) == {
+            "type": "going-away",
+            "generation": accepted["generation"],
+            "sequence": accepted["sequence"],
+            "reason": "unavailable",
+        }
+    assert owner.agendas.feed.wait_closed(1)
+    monkeypatch.setattr(owner.agendas, "_fence", original_fence)
+    monkeypatch.setattr(record_cache, "observe_writes", original_observe)
+    owner.activate()
+    assert owner.agendas._activation_error is None
+    with socket_feed(owner) as (_client, reader):
+        assert contract.decode(reader.readline()) == {"type": "snapshot", **accepted}
+
+
 @pytest.mark.parametrize(
     "error_type",
     [

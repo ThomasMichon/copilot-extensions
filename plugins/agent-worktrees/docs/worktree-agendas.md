@@ -166,6 +166,13 @@ reconciles, including across same-generation drain/reactivation. Another
 project's success cannot clear the failure or expose the failed project's old
 body. A new generation resets these failure latches but must requalify its own
 current project rosters and committed cache data.
+Agenda cache initialization, observer registration and the fresh owner fence
+must all succeed before agenda feed admission reopens. Any initialization
+failure closes already-held agenda streams; known agenda initialization faults
+leave the resident's ordinary roster service available. Unexpected defects
+propagate after stream closure rather than becoming a successful initialization.
+A repaired same-generation retry can admit a fresh snapshot without resetting
+sequence, source-store or project-failure fences.
 
 ## Evidence and limits
 

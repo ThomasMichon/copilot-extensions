@@ -67,29 +67,37 @@ class AgendaRuntime:
 
     def activate(self) -> None:
         with self._lock:
-            if self._generation != self.owner.store.generation:
-                self._rows.clear()
-                self._paths = {}
-                self._qualified.clear()
-                with self._pending_lock:
-                    self._pending.clear()
-                self._sequence = 0
-                self._generation = self.owner.store.generation
-                self._project_errors.clear()
+            initialized = False
             self._activation_error = None
             try:
+                if self._generation != self.owner.store.generation:
+                    self._rows.clear()
+                    self._paths = {}
+                    self._qualified.clear()
+                    with self._pending_lock:
+                        self._pending.clear()
+                    self._sequence = 0
+                    self._generation = self.owner.store.generation
+                    self._project_errors.clear()
                 with closing(sqlite3.connect(self.owner.store.db_path, timeout=0.2)) as conn, conn:
                     conn.execute("BEGIN IMMEDIATE")
                     self._fence(conn)
                     conn.execute(_SCHEMA)
                     conn.execute(_SOURCE_SCHEMA)
+                if self._unsubscribe is None:
+                    from . import record_cache
+
+                    self._unsubscribe = record_cache.observe_writes(self.record_written)
+                self._fresh_fence(self._generation)
+                self.feed.activate()
+                initialized = True
             except (contract.AgendaError, OSError, sqlite3.Error) as exc:
                 self._activation_error = str(exc)[:1024]
-            if self._unsubscribe is None:
-                from . import record_cache
-
-                self._unsubscribe = record_cache.observe_writes(self.record_written)
-            self.feed.activate()
+            finally:
+                if not initialized:
+                    if self._activation_error is None:
+                        self._activation_error = "agenda initialization did not complete"
+                    self.feed.close("unavailable")
 
     def close(self, reason) -> None:
         self.feed.close(reason)
