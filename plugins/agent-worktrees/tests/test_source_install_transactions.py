@@ -92,6 +92,51 @@ def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_python_frontend_keeps_selected_bash_when_path_changes(tmp_path):
+    assert _BASH is not None, "native frontend qualification requires Bash"
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    result = tmp_path / "frontend.json"
+    (scripts / "runtime_install.py").write_text(
+        "import json,pathlib,sys\n"
+        "args=sys.argv[1:]\n"
+        f"pathlib.Path({str(result)!r}).write_text(args[args.index('--frontend')+1])\n"
+        "pathlib.Path(args[args.index('--result')+1]).write_text(json.dumps({\n"
+        " 'deployment_manifest_published':True,'runtime_version':'fixture',\n"
+        " 'runtime_python':sys.executable,'helpers_published':True}))\n",
+        encoding="utf-8",
+    )
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    (shadow / "bash").write_text("#!/bin/sh\nexit 92\n", encoding="utf-8")
+    (shadow / "bash").chmod(0o755)
+    script = f"""
+set -euo pipefail
+SCRIPT_DIR={_sh(scripts)}
+PLUGIN_DIR=$SCRIPT_DIR
+INSTALL_DIR={_sh(tmp_path / "runtime")}
+VENV_DIR=$INSTALL_DIR/absent
+ACTION=dev
+OWNER_ARG=''
+CONTEXTUAL_INSTALL=false
+_bootstrap_python() {{ printf '%s\\n' {_sh(sys.executable)}; }}
+_ensure_uv() {{ :; }}
+_ensure_uv_index() {{ :; }}
+_assert_source_runtime() {{ :; }}
+ok() {{ :; }}
+err() {{ printf '%s\\n' "$*" >&2; }}
+PATH={_sh(shadow)}:$PATH
+{_function("_deploy_python_runtime", "sh")}
+_deploy_python_runtime
+printf '%s\\n' "$BASH"
+"""
+    completed = _run([str(_BASH), "-c", script], tmp_path)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    frontend = json.loads(result.read_text(encoding="utf-8"))
+    assert Path(frontend["executable"]).resolve() == Path(completed.stdout.strip()).resolve()
+    assert frontend["shell"] == "sh"
+
+
 def _ps_setup(payload: Path, root: Path, *, real_bootstrap: bool = False) -> str:
     bootstrap = (
         _function("Get-ApplicationPath", "ps1") + "\n" + _function("Get-BootstrapPython", "ps1")
