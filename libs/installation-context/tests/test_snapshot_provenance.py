@@ -1276,22 +1276,46 @@ def test_agent_machines_powershell_watchdog_bounds_cell_lock_wait(tmp_path):
     witness = tmp_path / "entered"
     waiting = tmp_path / "waiting"
     script = installed / "scripts/init.ps1"
+    probe = installed / "scripts/lock-watchdog-probe.ps1"
     marker = "    while (-not $lock) {"
-    script.write_text(script.read_text().replace(
+    lock_wait = _function_source(
+        script, "    $lockPath = Join-Path $lockPluginRoot", "    $lockForward = @()",
+    ).replace(
         marker, f"    [IO.File]::WriteAllText('{str(waiting).replace(chr(39), chr(39) * 2)}', 'waiting')\n" + marker, 1,
-    ))
+    )
+    watchdog = _function_source(
+        script, "if ($cellSlotAction) {", "\n# Review finding (round 10)",
+    )
+    probe.write_text(
+        "\n".join((
+            "param([string]$Action, [string]$Context, [string]$ExpectedMarketplaceId,",
+            "      [string]$DurableHome, [switch]$CellWatchdogChild)",
+            "Set-StrictMode -Version 2.0",
+            "$ErrorActionPreference = 'Stop'",
+            "$probeHost = (Get-Process -Id $PID).Path",
+            "$cellSlotAction = $true",
+            watchdog,
+            "$lockPluginRoot = '" + str(layout["plugin_root"]).replace("'", "''") + "'",
+            lock_wait,
+            "try {",
+            "    [IO.File]::WriteAllText('" + str(witness).replace("'", "''") + "', 'entered')",
+            "} finally { $lock.Dispose() }",
+        )),
+        encoding="utf-8",
+    )
     _reserve_exemplar_completion_slot(installed, layout, version)
     inspected = _run_exemplar_slot_action(exemplar, "slot-validate", layout, tmp_path)
     assert inspected.returncode == 0, inspected.stderr
     assert json.loads(inspected.stdout)["reason"] == "runtime-slot-ownership-valid"
     assert not waiting.exists()
     assert not witness.exists()
+    lock_exemplar = (exemplar[0], (*exemplar[1][:-1], str(probe)), exemplar[2])
     lock_path = Path(layout["plugin_root"]) / ".payload-provision.lock"
     with lock_path.open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         started = time.monotonic()
         result = _run_exemplar_slot_action(
-            exemplar, "cell-provision", layout, tmp_path,
+            lock_exemplar, "cell-provision", layout, tmp_path,
             environment_overrides={
                 "AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE": str(witness),
                 "AGENT_MACHINES_INSTALL_DEADLINE_SEC": "4",

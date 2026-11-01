@@ -6140,9 +6140,11 @@ and exercise both actual native cutovers; native completion/cutover sequences
 remain covered by rollback and interoperability controls. The slots diagnostic
 also exercises the actual PowerShell cell-lock watchdog on POSIX.
 That lock-wait control first inspects its prepared slot through the actual native
-entry; cold source discovery must not consume its four-second lock-wait deadline
-before the independently held lock is reached. The native watchdog result,
-waiting/entry witnesses and outer bound remain unchanged.
+entry, then invokes the unchanged installer watchdog and kernel lock loop extracted
+from that entry. This separates source/receipt setup from the four-second
+lock-wait measurement, without mocking the process owner or native lock.
+The native watchdog result, waiting/entry witnesses and outer bound remain
+unchanged; the separate cell-transaction controls still exercise the whole entry.
 Regular-file capture controls retain the two-second blocking-open watchdog,
 settle its timer on cancellation and close inherited capture channels. Repeated
 native captures preserve trailing bytes without paying every watchdog deadline;
