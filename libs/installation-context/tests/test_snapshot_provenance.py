@@ -1486,13 +1486,22 @@ def _reserve_exemplar_completion_slot(
     snapshot_root = Path(layout["snapshot_root"])
     (snapshot_root / "payload-content.txt").unlink()
     shutil.copytree(installed_plugin, snapshot_root, dirs_exist_ok=True)
-    _stamp_with_python(layout, snapshot_id=version)
-    provisioned = _run(
-        ALL_RUNNERS[0], "slot-provision", layout,
+    module = _load_python_module()
+    module.stamp_snapshot_provenance(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=layout["plugin_id"],
+        expected_namespace_generation=1, expected_install_generation=2,
+        snapshot_id=version, durable_home=layout["durable"], environment={},
+    )
+    module.provision_runtime_slot(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=layout["plugin_id"],
         snapshot_id=version, runtime_version=version,
         expected_payload_root=installed_plugin, expected_payload_version=version,
+        durable_home=layout["durable"], environment={},
     )
-    assert provisioned.returncode == 0, provisioned.stderr
 
 
 def _activation_tail_source(script: Path, plugin_id: str, style: str) -> str:
