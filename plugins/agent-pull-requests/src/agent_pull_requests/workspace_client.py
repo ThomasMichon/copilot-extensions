@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 
 from fleet_manager.gateway_service_channel import BODY_BYTES, TransportError
 
@@ -23,7 +24,7 @@ class WorkspaceClient:
 
     def __init__(self, caller, *, route_prefix, binding: ReplayBinding, scope):
         # Reuse the existing path/binding validator; do not duplicate auth.
-        replay = ReplayClient(
+        ReplayClient(
             caller, route_prefix=route_prefix, target=binding.target,
             repo=binding.repo, binding=binding,
         )
@@ -31,7 +32,7 @@ class WorkspaceClient:
         from .review_workspace import _scope
         self._scope = _scope({**scope, "number": 1})
         self._scope.pop("number")
-        self._path = replay._path.replace("/v2/watch/", "/v2/review/")
+        self._path = route_prefix + "/v2/review/" + binding.target
         self._capabilities = None
 
     async def _exchange(self, operation, payload):
@@ -65,6 +66,7 @@ class WorkspaceClient:
             raise WorkspaceClientError("invalid_workspace_response", outcome_unknown=operation == "submit") from None
 
     async def capabilities(self):
+        self._capabilities = None
         value = await self._exchange("capabilities", {})
         if (
             value.get("generation_versions") != [1] or value.get("owner_store_versions") != [2]
@@ -74,7 +76,7 @@ class WorkspaceClient:
             or any(not isinstance(name, str) for name in value["operations"])
         ):
             raise WorkspaceClientError("unsupported_workspace_contract")
-        self._capabilities = value
+        self._capabilities = copy.deepcopy(value)
         return value
 
     async def exchange(self, operation, payload):
@@ -90,7 +92,7 @@ class WorkspaceClient:
 
     async def materialize(self, number, generation_id):
         lookup = await self.exchange("lookup", {"number": number, "generation_id": generation_id})
-        descriptor = lookup["result"]["descriptor"]
+        descriptor = lookup["result"].get("descriptor")
         # The same validator assembles both native and remote generations. Network
         # IO stays asynchronous, with no implicit retry after a lost chunk.
         if (

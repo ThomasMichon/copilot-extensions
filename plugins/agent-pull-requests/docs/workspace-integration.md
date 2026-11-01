@@ -56,6 +56,12 @@ generation ID and full encoded-content hash. Both clients use the same bounded
 schema/content validator. Old generations stay selectable when current advances;
 eviction/disconnect/corruption never substitutes current or silently re-observes.
 Fleet's existing 32 KiB physical frame is unchanged.
+The executing owner memoizes validated immutable bytes within one bounded
+16 MiB total read buffer. Each chunk rechecks the existing cache descriptor,
+plain file identity and caller/owner lifetime, not the whole generation.
+Changed/evicted files refuse rather than borrowing another scope or current ID.
+The buffer has no durable file, effect receipt or new lifecycle; final assembly
+still verifies the complete hash/schema. This avoids quadratic disk/JSON work.
 
 Client `attach_source(generation, source_owner, **limits)` uses the merged local
 attachment API in the reviewer venue. Its actual selected source owner verifies
@@ -84,6 +90,9 @@ but the existing gateway keeps its admitted worker through drain; no replacement
 writer or untracked thread is created. Explicit v2 adoption still belongs to the
 normal lifecycle owner after actual old-reader drain/transition, not startup or
 an HTTP operation.
+The existing read owner's optional request checkpoint is composed into its
+remaining-work callback, retaining caller lifetime through physical-page reads
+without changing legacy native callers or actual operation budgets.
 
 Executing capability support does not prove backend availability, actual pinned
 write-owner adoption or installed serving readiness. Missing owners return

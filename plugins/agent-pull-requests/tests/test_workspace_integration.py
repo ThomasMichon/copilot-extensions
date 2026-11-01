@@ -79,6 +79,11 @@ def integration(environment):
                 CallerContext("fleet-a", "gateway-a", "service-a", "caller-a", int(time.time()) + 600),
                 method, target, tuple((k.lower(), v) for k, v in request_headers), body,
             ))
+            if self.corrupt == "missing_descriptor" and target.endswith("/lookup"):
+                from dataclasses import replace
+                value = json.loads(response.body)
+                value["result"].pop("descriptor", None)
+                return replace(response, body=json.dumps(value).encode())
             if self.corrupt and target.endswith("/chunk"):
                 from dataclasses import replace
                 data = json.loads(response.body)
@@ -190,7 +195,7 @@ def test_transport_corruption_and_oversized_submit_refuse_without_effect(environ
     asyncio.run(scenario())
 
 
-def test_large_generation_is_framed_and_old_reader_remains_pinned_after_current_moves(environment, integration):
+def test_large_generation_is_framed_and_old_reader_remains_pinned_after_current_moves(environment, integration, monkeypatch):
     _, _, generation, _, backend, _ = environment
     gateway, client, _, _, _, _ = integration
     backend.pr["description"] = "Synthetic large description " * 3000
@@ -201,7 +206,16 @@ def test_large_generation_is_framed_and_old_reader_remains_pinned_after_current_
             "number": 42, "expected_current": generation["id"], "budget_seconds": 120,
         }))["result"]
         assert loaded["descriptor"]["bytes"] > 32768
+        original = GenerationCache._load_generation
+        reads = []
+
+        def counted(cache, identity, scope):
+            reads.append(identity)
+            return original(cache, identity, scope)
+
+        monkeypatch.setattr(GenerationCache, "_load_generation", counted)
         expanded = await client.materialize(42, loaded["descriptor"]["id"])
+        assert reads == [expanded["id"]]
         assert expanded["sections"]["pull_request"]["data"]["description"] == backend.pr["description"]
         assert await client.materialize(42, generation["id"]) == generation
         conflict = (await client.exchange("load", {
@@ -273,6 +287,23 @@ def test_unexpanded_peer_and_absent_write_context_do_not_claim_support(environme
         gateway.workspaces = {}
         with pytest.raises(WorkspaceClientError, match="unsupported"):
             await client.capabilities()
+        with pytest.raises(WorkspaceClientError, match="capability"):
+            await client.exchange("lookup", {"number": 42})
+        assert backend.threads == []
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_missing_lookup_descriptor_is_a_structured_client_refusal(environment, integration):
+    _, _, generation, _, backend, _ = environment
+    gateway, client, _, _, caller, _ = integration
+
+    async def scenario():
+        await client.capabilities()
+        caller.corrupt = "missing_descriptor"
+        with pytest.raises(WorkspaceClientError, match="invalid_workspace_descriptor"):
+            await client.materialize(42, generation["id"])
         assert backend.threads == []
         await gateway.drain(timeout=2)
 

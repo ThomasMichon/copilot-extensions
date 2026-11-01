@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import base64
+from collections import OrderedDict
 import copy
 import hashlib
 import json
 import math
+import threading
 
 from .generation_cache import GenerationCache
 from .owner_read import OwnerReadHandler, REQUEST_SCHEMA
@@ -59,6 +61,8 @@ class WorkspaceOperations:
         self.read_owner, self.binding_ref = read_owner, binding_ref
         self.write_context, self.checkpoint = write_context, checkpoint
         self.max_work_seconds = max_work_seconds
+        self._materializations = OrderedDict()
+        self._materialization_lock = threading.Lock()
 
     def execute(self, operation, payload, *, expires_at, checkpoint):
         if operation not in OPERATIONS or not isinstance(payload, dict):
@@ -122,7 +126,7 @@ class WorkspaceOperations:
                 "schema": REQUEST_SCHEMA, "version": 1, "binding_ref": self.binding_ref,
                 "number": number, "budget_seconds": seconds,
                 "expected_principal": scope["principal_id"],
-            })
+            }, request_checkpoint=check)
             generation = observed["generation"]
             _generation(generation, scope)
             check()
@@ -136,14 +140,10 @@ class WorkspaceOperations:
                 result["comparison"].pop("generation")
                 result["comparison"]["generation_id"] = generation["id"]
         elif operation in ("lookup", "chunk"):
-            retained = cache.lookup(scope, generation_id=payload.get("generation_id"))
-            generation = retained["generation"]
-            if generation is None:
-                raise WorkspaceUnavailable("selected immutable generation unavailable")
-            result = {"descriptor": self._descriptor(generation), "current_id": retained["current_id"]}
+            descriptor, data = self._materialized(cache, scope, payload.get("generation_id"))
+            result = {"descriptor": descriptor}
             if operation == "chunk":
                 offset = payload["offset"]
-                data = encoded(generation)
                 if type(offset) is not int or not 0 <= offset < len(data) or offset % CHUNK_BYTES:
                     raise ValueError("invalid immutable chunk offset")
                 result.update(offset=offset, data=base64.b64encode(data[offset:offset + CHUNK_BYTES]).decode("ascii"))
@@ -165,6 +165,51 @@ class WorkspaceOperations:
             )
         check()
         return {"protocol": PROTOCOL, "scope": scope, "result": copy.deepcopy(result)}
+
+    def _materialized(self, cache, scope, generation_id):
+        from .generation_cache import _plain
+        from .review_workspace import _digest
+
+        with self._materialization_lock:
+            key = (_digest(scope), generation_id)
+            retained = self._materializations.get(key) if generation_id is not None else None
+            if retained is not None:
+                descriptor, data, stamp = retained
+                # Small descriptor/file-identity checks retain the existing owner
+                # boundary without reparsing/reserializing the full object N times.
+                with cache._transaction():
+                    path = cache.generations / (generation_id + ".json")
+                    try:
+                        _plain(path)
+                        current = path.stat()
+                    except FileNotFoundError:
+                        del self._materializations[key]
+                        raise WorkspaceUnavailable("selected immutable generation unavailable") from None
+                    if (current.st_ino, current.st_size, current.st_mtime_ns) != stamp:
+                        del self._materializations[key]
+                        raise WorkspaceUnavailable("immutable generation changed")
+                self._materializations.move_to_end(key)
+                return copy.deepcopy(descriptor), data
+            with cache._transaction() as lock:
+                selected_id = generation_id if generation_id is not None else cache._current(scope)
+                if selected_id is None:
+                    raise WorkspaceUnavailable("selected immutable generation unavailable")
+                path = cache.generations / (selected_id + ".json")
+                if not path.exists():
+                    raise WorkspaceUnavailable("selected immutable generation unavailable")
+                selected = cache._load_generation(selected_id, scope)
+                _plain(path)
+                state = path.stat()
+                stamp = (state.st_ino, state.st_size, state.st_mtime_ns)
+                cache._check(lock)
+            descriptor, data = self._descriptor(selected), encoded(selected)
+            key = (_digest(scope), selected["id"])
+            while self._materializations and (
+                sum(len(value[1]) for value in self._materializations.values()) + len(data) > MAX_GENERATION_BYTES
+            ):
+                self._materializations.popitem(last=False)
+            self._materializations[key] = (descriptor, data, stamp)
+            return copy.deepcopy(descriptor), data
 
     @staticmethod
     def _descriptor(generation):
