@@ -148,6 +148,10 @@ A timed-out read remains tracked and serialized until it actually finishes;
 it cannot overwrite a newer confirmed deletion through another future key.
 Caller waits still consume their existing deadline instead of waiting
 synchronously for that reader guard.
+A new synchronous source observation supersedes any older cached discovery
+result for that key, so a later bounded read cannot restore an obsolete worker
+or clear a newer veto. The original future remains in shutdown accounting until
+its actual completion; discarding cached read data is not release of its work.
 
 This is **optimistic observed coherence**, not an atomic filesystem transaction
 or a remote attestation. The digest includes the entire observed declaration

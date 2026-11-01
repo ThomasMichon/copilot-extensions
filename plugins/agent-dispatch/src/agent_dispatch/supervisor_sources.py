@@ -78,6 +78,9 @@ class SupervisorSources(SupervisorPoolPublication):
         self._observe_source(key, "pending")
         deadline = self._source_read_deadline()
         if deadline is None:
+            # A new synchronous observation supersedes the cached result, not
+            # the original operation's tracked lifetime in _probe_inflight.
+            self._discovery_futures.pop(key, None)
             try:
                 result = read()
             except Exception:
