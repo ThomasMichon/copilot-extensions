@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Reviewed proposal, owner-reference delivery and completion PRs to `dev`
 - **Created:** 2026-10-31
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `documentation` and `repository-topology`: owner references and consistent scoped configuration composition
 - **Umbrella issue:** #9776
 - **Sub-issues:** None initially
@@ -190,12 +190,16 @@ installation ownership or claim unavailable resources.
 
 ### Phase 5 - Validate and close delivery
 
-- [ ] Complete the Validation Plan, address review findings and merge the
+- [x] Complete the Validation Plan, address review findings and merge the
   owner-reference and suite-navigation changes with required CI green.
-- [ ] Record actual release/publication state without installing or activating
+- [x] Record actual release/publication state without installing or activating
   runtimes; retain any separately scoped runtime gap with its existing owner.
-- [ ] Archive this effort as Done after all source acceptance is resolved,
-  close #9776, release its completed focus and finalize the controlled worktree.
+- [x] Prepare this effort's Done archive after all source acceptance is
+  resolved.
+
+After the archive record clears its normal review and merge gate, close #9776,
+release the completed focus and finalize the controlled worktree. These native
+closure actions remain with the source driver until independently verified.
 
 ## Validation Plan
 
@@ -223,9 +227,9 @@ installation ownership or claim unavailable resources.
 - [x] Review every precedence/support claim against consumer evidence,
   distinguish activation from configuration, and preserve repository vetoes,
   secret-state boundaries and unsupported layers.
-- [ ] Verify final-head review, required CI and actual merge for each delivery
+- [x] Verify final-head review, required CI and actual merge for each delivery
   PR; an open PR is not completion.
-- [ ] Preserve public-neutral examples and one-way downstream traceability;
+- [x] Preserve public-neutral examples and one-way downstream traceability;
   publish no private identities, paths, topology, links or operator state.
 
 ## Proposal
@@ -436,3 +440,25 @@ their implementation and validation gates actually pass.
   Machines 19 and SSH 30 cases. The install contract, documentation and lint
   passed. Source publication and a fresh accepted review still precede merge;
   no installed-host behavior or rollout is claimed.
+
+### 2026-11-01 - Source acceptance complete
+
+- #9823 merged to `dev` at `d28235d96cdfae63e0159009ca60c549ba4231a4`
+  after Copilot approved the exact published head, every required CI check
+  passed, and all review threads were resolved. The failed informational
+  review-request job was a runner timestamp check; a repository-scoped
+  explicit request produced the successful current-head approval.
+- Registered the new shared Python library in the existing type-ownership
+  inventory without changing the migration campaign's enforced levels.
+  All 7,288 physical Python files have one owner; the four existing strict
+  cohorts pass both Linux and Windows targets.
+- Selected downstream examples and owner-reference pointers are also
+  published after current-head review and required CI. Public artifacts keep
+  their traceability one-way and contain no private destination or identity.
+- All source Plan and Validation Plan items are resolved. This is source
+  delivery, not an installed-host rollout: normal release promotion remains
+  pipeline-owned, its current completion is not asserted here, and no operator
+  configuration, runtime, service or external venue was changed.
+- Prepared the dated Done archive. Its reviewed publication, coordination
+  issue closure, completed-focus release and managed worktree finalization
+  remain the source driver's final administrative closure sequence.
