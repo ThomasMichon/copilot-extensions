@@ -232,8 +232,9 @@ cannot qualify merely because its reason and earlier collection stayed equal.
 The original capture deadline is checked again immediately before POST admission,
 after parsing and final comparisons, not just before source collection.
 That final closed-state/deadline decision shares the short shutdown admission
-guard, which is released before I/O; an admitted operation stays tracked even
-if shutdown closes immediately afterward. The
+guard. Native acquisition and source guards are also released after that
+decision, before blocking I/O; an admitted operation stays tracked even if
+shutdown closes or the acquisition is released immediately afterward. The
 request body retains its original generation, revisions and definitions; an
 unavailable request still carries an empty definition array.
 These are bounded, optimistic source checks, not atomic external-file fencing
@@ -241,14 +242,19 @@ or remote OS-lock verification.
 
 Shutdown closes metadata-send admission before draining existing futures.
 Submission and future registration share a short admission guard with that
-close, separate from the source guard held by an admitted POST. Closed admission
+close, separate from source collection. Closed admission
 refuses a new flight; it does not prevent a retained flight from settling.
 A delayed preflight cannot initiate a new write after that close. An
-already-admitted POST remains under the original guard and future owner until it
-finishes; its caller's bounded wait and shutdown drain may return with visible
+already-admitted POST remains under its original request-bound future owner until
+it finishes, not under the singleton release mutex. Its caller's bounded wait
+and shutdown drain may return with visible
 pending custody. A later matching result can settle that custody, but cannot
 reopen send admission or the original acquisition. No new lease, registry,
 executor, timer or durable history store is introduced.
+The actual self-update/release path can therefore proceed after its bounded
+drain without waiting for that RPC's network timeout. The provider's original
+generation/revision fences and retained request still govern the late result;
+this is not remote OS-lock verification or permission for replacement work.
 
 Control credentials authorize metadata only. Missing/unsupported running-peer
 support, authentication refusals, conflicts, malformed replies and transport

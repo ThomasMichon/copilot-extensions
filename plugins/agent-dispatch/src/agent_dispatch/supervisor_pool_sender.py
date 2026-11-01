@@ -105,7 +105,7 @@ class SupervisorPoolSender:
                     raise PoolPublicationError("pool metadata send deadline exhausted before POST")
             finally:
                 self._pool_metadata_admission_lock.release()
-            yield
+        yield
 
     def _run_pool_metadata_send(
         self, request: PoolMetadataRequest, deadline: float,
