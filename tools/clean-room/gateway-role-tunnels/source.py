@@ -22,7 +22,7 @@ gateway_service_caller gateway_service_channel gateway_service_connector gateway
 gateway_service_listener gateway_service_policy gateway_service_server
 gateway_ssh_policy gateway_ssh_provider gateway_ssh_runtime gateway_transport gateway_worker host_profile komodo_roles ledger
 komodo_control komodo_declaration komodo_evidence komodo_health komodo_identity komodo_inspection komodo_native komodo_network
-komodo_owner komodo_profile komodo_repair komodo_repair_evidence komodo_repair_selection komodo_retirement komodo_selection komodo_state
+komodo_owner komodo_profile komodo_repair komodo_repair_authorization komodo_repair_evidence komodo_repair_selection komodo_retirement komodo_selection komodo_state
 loadout_gateway loadout_preparation loadout_sources loadout_templates loadouts
 machine_identity node_journal observation_reader observation_store observations operations planning private_state release release_assembly release_auth
 release_selection reverse_listener_reservations role_bindings role_deployment role_plan runtime_admission runtime_identity ssh_approval ssh_directory ssh_machine ssh_machine_config staging_cleanup trusted_systemd_profile
@@ -40,9 +40,9 @@ __init__ _async _caller_owned _daemon_instance_child _daemon_instance_cli _daemo
 _daemon_instance_identity _daemon_instance_linux _daemon_instance_native _daemon_instance_owner
 _daemon_instance_records _daemon_instance_shell _daemon_instance_shell_windows
 _daemon_instance_store _darwin_caller_owned _interactive_groups _job_scopes
-_interactive_session _interactive_terminal _interpreter _linux_pidfd
+_interactive_session _interactive_terminal _interpreter _linux_pidfd _native_owned _output_relay
 _retirement_channel _retirement_custodian _shell_caller_owned _windows_parent_job
-_windows_caller_owned daemon daemon_broker daemon_instances diagnostics
+_windows_caller_owned _windows_job_types daemon daemon_broker daemon_instances diagnostics
 interactive metrics metrics_accounting native_child owned_process process_retirement retirement_custody
 startup streaming windows_broker_cell windows_broker_entry windows_broker_installation
 windows_broker_native windows_broker_protocol windows_broker_retention windows_task_broker wsl
@@ -55,6 +55,7 @@ windows_broker_task.ps1
 """.split())
 REQUIRED = frozenset({
     "fleet-manager/pyproject.toml", "fleet-manager/setup.py", "fleet-manager/README.md",
+    "fleet-manager/src/fleet_manager/ssh-client-contract.json",
     *(f"fleet-manager/src/fleet_manager/{name}.py" for name in PACKAGE_MODULES),
     *(f"libs/versioned-runtime/{name}" for name in RESOURCES),
     "libs/installer-engine/installer_engine_process.py",

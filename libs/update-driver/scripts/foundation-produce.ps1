@@ -27,8 +27,9 @@ function Invoke-FoundationChild {
     } catch {
         $errorValue = $_.Exception
         while ($null -ne $errorValue) {
-            if ($errorValue -is [CopilotExtensions.NativeOwnedProcessException]) {
-                $script:descendantsSettled = $errorValue.CleanupConfirmed
+            if ($errorValue.Data.Contains('CleanupConfirmed')) {
+                $confirmation = $errorValue.Data['CleanupConfirmed']
+                $script:descendantsSettled = $confirmation -is [bool] -and $confirmation -ceq $true
                 break
             }
             $errorValue = $errorValue.InnerException

@@ -221,7 +221,8 @@ owns the revised implementation and validation boundary.
   changed common archive: all 107 native installer, instance and SDK cases pass
   with independent source, desktop and retirement reconciliation. See the
   [slice journal](journal/2026/10.30%20powershell-instance-custody.md);
-  current-head source review/CI/merge and remaining compiled launchers stay open.
+  merged in #9628 after current-head approval and required CI. Remaining
+  compiled launchers and whole-campaign acceptance stay open.
 - [ ] Replace remaining executable embedded Windows helper compilation and runtime code
   emission through their existing installation-context, operation-lock,
   update-driver, process and session-host owners. Establish the existing
@@ -370,6 +371,8 @@ from #6767: no rejected routing broker or shared mutable venv, and no claimed
 transfer without acceptance by a named tracked objective.
 
 ## Journal
+
+- [2026-10-30 - compiler-free finite process custody](journal/2026/10.30%20finite-owned-process.md)
 
 - [2026-10-30 - compiler-free PowerShell instance custody](journal/2026/10.30%20powershell-instance-custody.md)
 

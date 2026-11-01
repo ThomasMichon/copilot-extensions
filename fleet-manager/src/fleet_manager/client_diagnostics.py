@@ -38,7 +38,10 @@ def diagnose_client():
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime_publication.py",
-        "_installer_process.py", "_construction_procutil.py", "_runtime_launcher.py",
+        "_installer_process.py", "_runtime_launcher.py",
+        "_construction_procutil/__init__.py", "_construction_procutil/_job_scopes.py",
+        "_construction_procutil/_windows_job_types.py",
+        "_construction_procutil/streaming.py", "_construction_procutil/_output_relay.py",
     )
     resource_digests = {}
     for name in required:

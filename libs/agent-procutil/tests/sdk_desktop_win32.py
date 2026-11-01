@@ -223,7 +223,7 @@ class WinAPI:
         ), "window station/desktop name")
         return name.value
 
-    def facts(self) -> dict:
+    def console_facts(self) -> dict:
         token, elevation, size = wt.HANDLE(), wt.DWORD(), wt.DWORD()
         self.check(self.advapi.OpenProcessToken(
             self.kernel.GetCurrentProcess(), 8, ct.byref(token),
@@ -249,11 +249,6 @@ class WinAPI:
             )
         finally:
             self.check(self.user.CloseDesktop(desktop), "close owned input-desktop handle")
-        foreground, shell = self.foreground(), int(self.user.GetShellWindow() or 0)
-        if not foreground or not shell:
-            raise ObservationBlocked("shell or foreground window is unobservable")
-        foreground_pid, _ = self.window_identity(foreground)
-        shell_pid, _ = self.window_identity(shell)
         session = self.session(os.getpid())
         return {
             "elevated": bool(elevation.value),
@@ -263,28 +258,41 @@ class WinAPI:
             "station": self.object_name(station), "station_visible": bool(flags[2] & 1),
             "thread_desktop": thread_name, "input_desktop": input_name,
             "session": session, "console_session": int(self.kernel.WTSGetActiveConsoleSessionId()),
-            "foreground_visible": bool(self.user.IsWindowVisible(foreground)),
-            "same_session": self.session(foreground_pid) == self.session(shell_pid) == session,
         }
 
-    def require_desktop(self) -> dict:
+    def facts(self) -> dict:
+        facts = self.console_facts()
+        foreground, shell = self.foreground(), int(self.user.GetShellWindow() or 0)
+        if not foreground or not shell:
+            raise ObservationBlocked("shell or foreground window is unobservable")
+        foreground_pid, _ = self.window_identity(foreground)
+        shell_pid, _ = self.window_identity(shell)
+        return {
+            **facts, "foreground_visible": bool(self.user.IsWindowVisible(foreground)),
+            "same_session": self.session(foreground_pid) == self.session(shell_pid) == facts["session"],
+        }
+
+    def require_console(self, *, desktop: bool = False) -> dict:
         contained = wt.BOOL()
         self.check(self.kernel.IsProcessInJob(
             self.kernel.GetCurrentProcess(), None, ct.byref(contained),
         ), "verify inherited test containment")
         if not contained.value:
             raise ObservationBlocked("desktop qualification requires its admitted outer Job owner")
-        facts = self.facts()
+        facts = self.facts() if desktop else self.console_facts()
         facts["inherited_job_membership"] = True
         if (
             facts["elevated"] or facts["ssh"] or facts["remote_session"] or facts["remote_control"]
             or facts["station"] != "WinSta0" or not facts["station_visible"]
             or facts["thread_desktop"] != "Default" or facts["input_desktop"] != "Default"
             or not facts["session"] or facts["session"] != facts["console_session"]
-            or not facts["foreground_visible"] or not facts["same_session"]
+            or desktop and (not facts["foreground_visible"] or not facts["same_session"])
         ):
             raise ObservationBlocked(f"normal local console is not admitted: {facts}")
         return facts
+
+    def require_desktop(self) -> dict:
+        return self.require_console(desktop=True)
 
     def foreground(self) -> int:
         return int(self.user.GetForegroundWindow() or 0)

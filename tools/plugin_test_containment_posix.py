@@ -7,11 +7,11 @@ import subprocess
 import time
 
 if __package__:
-    from .plugin_test_containment_darwin import GroupObservationChanged as GroupObservationChanged
-    from .plugin_test_containment_darwin import _ObservationDeadline
+    from .plugin_test_containment_observation import GroupObservationChanged as GroupObservationChanged
+    from .plugin_test_containment_observation import _ObservationDeadline
 else:
-    from plugin_test_containment_darwin import GroupObservationChanged as GroupObservationChanged
-    from plugin_test_containment_darwin import _ObservationDeadline
+    from plugin_test_containment_observation import GroupObservationChanged as GroupObservationChanged
+    from plugin_test_containment_observation import _ObservationDeadline
 
 
 def _ps_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int] | None:

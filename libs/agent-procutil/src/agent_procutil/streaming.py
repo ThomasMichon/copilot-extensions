@@ -31,10 +31,18 @@ class SyncProcessOutput:
         self, process: subprocess.Popen, *,
         on_output: Callable[[str, bytes], None] | None = None,
         output_fds: Mapping[str, int] | None = None, capture: bool = True,
+        input_bytes: bytes | None = None,
     ) -> None:
         from ._output_relay import ByteRelay
 
+        if input_bytes is not None and (
+            type(input_bytes) is not bytes or len(input_bytes) > 12 * 1024 * 1024
+            or process.stdin is None
+        ):
+            raise ValueError("captured input requires a bounded byte packet and a stdin pipe")
         self.process = process
+        self._input_writer = None
+        self._input_errors = []
         self.on_output = on_output
         self._notified = False
         self._finished = False
@@ -78,6 +86,37 @@ class SyncProcessOutput:
         if not self._streams:
             self._abort_relays()
             raise ValueError("progress capture requires at least one captured output stream")
+        if input_bytes is not None:
+            writer = threading.Thread(
+                target=self._write_input, args=(input_bytes,),
+                name="process-input", daemon=False,
+            )
+            try:
+                writer.start()
+            except BaseException as error:
+                self._startup_errors.append(error)
+                process.stdin.close()
+            else:
+                self._input_writer = writer
+
+    def _write_input(self, content: bytes) -> None:
+        stream = self.process.stdin
+        try:
+            binary = getattr(stream, "buffer", stream)
+            remaining = memoryview(content)
+            while remaining:
+                count = binary.write(remaining[:4096])
+                if count is None or count <= 0:
+                    raise OSError("captured input made no progress")
+                remaining = remaining[count:]
+            binary.flush()
+        except BaseException as error:
+            self._input_errors.append(error)
+        finally:
+            try:
+                stream.close()
+            except BaseException as error:
+                self._input_errors.append(error)
 
     def _read(self, name, stream) -> None:
         try:
@@ -160,6 +199,8 @@ class SyncProcessOutput:
             if self._startup_errors:
                 raise self._startup_errors.pop(0)
             while True:
+                if self._input_errors:
+                    raise self._input_errors.pop(0)
                 for _ in range(64):
                     try:
                         event = self._pending or self._events.get_nowait()
@@ -256,6 +297,12 @@ class SyncProcessOutput:
             reader.join(max(0, deadline - time.monotonic()))
             if reader.is_alive():
                 raise TimeoutError("captured output reader did not settle")
+        if self._input_writer is not None:
+            self._input_writer.join(max(0, deadline - time.monotonic()))
+            if self._input_writer.is_alive():
+                raise TimeoutError("captured input writer did not settle")
+        if self._input_errors:
+            raise self._input_errors.pop(0)
         for stream in self._streams.values():
             stream.close()
         self._finished = True

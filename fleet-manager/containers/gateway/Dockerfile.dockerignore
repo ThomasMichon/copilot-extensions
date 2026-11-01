@@ -9,6 +9,7 @@ fleet-manager/src/**
 !fleet-manager/src/fleet_manager/
 fleet-manager/src/fleet_manager/**
 !fleet-manager/src/fleet_manager/*.py
+!fleet-manager/src/fleet_manager/ssh-client-contract.json
 !libs/
 libs/**
 !libs/versioned-runtime/
@@ -53,10 +54,13 @@ libs/agent-procutil/src/agent_procutil/**
 !libs/agent-procutil/src/agent_procutil/_interpreter.py
 !libs/agent-procutil/src/agent_procutil/_job_scopes.py
 !libs/agent-procutil/src/agent_procutil/_linux_pidfd.py
+!libs/agent-procutil/src/agent_procutil/_native_owned.py
+!libs/agent-procutil/src/agent_procutil/_output_relay.py
 !libs/agent-procutil/src/agent_procutil/_retirement_channel.py
 !libs/agent-procutil/src/agent_procutil/_retirement_custodian.py
 !libs/agent-procutil/src/agent_procutil/_shell_caller_owned.py
 !libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py
+!libs/agent-procutil/src/agent_procutil/_windows_job_types.py
 !libs/agent-procutil/src/agent_procutil/_windows_parent_job.py
 !libs/agent-procutil/src/agent_procutil/daemon.py
 !libs/agent-procutil/src/agent_procutil/daemon_broker.py
