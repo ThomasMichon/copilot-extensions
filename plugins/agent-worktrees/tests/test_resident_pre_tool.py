@@ -765,6 +765,44 @@ def test_deferred_context_refusal_preserves_initial_decision(monkeypatch, tmp_pa
     assert "unavailable" in result["additionalContext"] or "failed" in result["additionalContext"]
 
 
+@pytest.mark.parametrize("permission", ["deny", "ask"])
+def test_classifier_failure_cannot_suppress_independent_legacy_protection(monkeypatch, tmp_path, capsys, permission):
+    import importlib.util
+    import io
+    from types import SimpleNamespace
+
+    loaded = {}
+    for name in ("hook_client", "hook_pre_policy"):
+        spec = importlib.util.spec_from_file_location(name, PLUGIN / "scripts" / (name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        loaded[name + ".py"] = module
+    def broken_classifier(payload):
+        raise RuntimeError("fixture unavailable supersede classifier")
+    loaded.update({
+        "pretool_killswitch.py": SimpleNamespace(is_active=lambda: False),
+        "statelessness_guard.py": SimpleNamespace(decide=lambda *a, **k: {
+            "permissionDecision": permission, "permissionDecisionReason": "intact cheap guard",
+        }),
+        "cross_repo_guard.py": SimpleNamespace(decide=lambda *a, **k: None),
+        "anchor_write_guard.py": SimpleNamespace(decide=lambda *a, **k: None),
+        "pr_supersede_guard.py": SimpleNamespace(needs_observations=broken_classifier, decide=lambda *a, **k: None),
+    })
+    client = loaded["hook_client.py"]
+    def load(name):
+        assert name != "hook_policy_process.py", "failed classification selected supervision"
+        return loaded.get(name)
+    monkeypatch.setattr(client, "_load_sibling", load)
+    monkeypatch.delenv("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
+        "toolName": "powershell", "cwd": str(tmp_path),
+        "toolArgs": {"command": "gh pr close 41 --repo example/project"},
+    })))
+    assert client.main(["preToolUse"]) == 0
+    assert json.loads(capsys.readouterr().out)["permissionDecision"] == permission
+
+
 @pytest.mark.parametrize("initial", [{}, {"permissionDecision": "ask", "permissionDecisionReason": "confirmed parent"}])
 def test_successful_deferred_legacy_preserves_silent_noop_and_diagnostics(monkeypatch, capsys, initial):
     import importlib.util

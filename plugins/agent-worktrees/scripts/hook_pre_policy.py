@@ -57,7 +57,13 @@ def execute_owned_observations(payload, raw, load_sibling, merge_decisions):
     """Give legacy PR observations the same enclosing settlement owner."""
     guard = load_sibling("pr_supersede_guard.py")
     needs = getattr(guard, "needs_observations", None)
-    if not callable(needs) or not needs(payload):
+    if not callable(needs):
+        return None
+    try:
+        if not needs(payload):
+            return None
+    except Exception:
+        # Ordinary evaluation isolates the failed component from intact guards.
         return None
     deadline = time.monotonic() + 23.0
     initial = decide(
