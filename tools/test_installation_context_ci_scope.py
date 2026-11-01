@@ -706,6 +706,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     assert inputs["ssh_service"]["default"] is False
     assert inputs["update_diagnostics"]["type"] == "boolean"
     assert inputs["update_diagnostics"]["default"] is False
+    assert inputs["uv_deployment_compatibility"]["type"] == "boolean"
+    assert inputs["uv_deployment_compatibility"]["default"] is False
     routes = {
         "derived-diagnostics-posix": "ubuntu-latest",
         "derived-diagnostics-windows": "windows-latest",
@@ -748,6 +750,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "windows-broker-portable", "windows-broker-probe", "windows-broker-consumers",
         "windows-native-process",
         "native-daemon-exit-windows",
+        "uv-deployment-compatibility-linux", "uv-deployment-compatibility-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]

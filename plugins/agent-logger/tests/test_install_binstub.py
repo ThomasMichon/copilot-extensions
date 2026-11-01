@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import time
 import venv
 import zipfile
 from importlib import metadata
@@ -198,6 +199,7 @@ if args[:1] == ['venv']:
         venv.EnvBuilder(with_pip=False, symlinks=False).create(target)
     raise SystemExit(0)
 assert args[:2] == ['pip', 'install'], args
+assert '--no-editable' not in args and '--editable' not in args, args
 if '--show-settings' in args:
     assert not any(a == '--quiet' or re.fullmatch('-q+', a) for a in args)
     print('''PipInstallSettings {{ settings: PipSettings {{
@@ -1141,7 +1143,13 @@ def test_provision_publishes_durable_compatibility_wrappers(
 # Keep fixture headroom above the combined internal ceiling.
 @pytest.mark.timeout(550 if os.name == "nt" else 520)
 def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -> None:
+    started = time.monotonic()
+
+    def completed(phase: str) -> None:
+        print(f"snapshot fixture: {phase}; elapsed={time.monotonic() - started:.2f}s", flush=True)
+
     payload = _stage_release_payload(tmp_path)
+    completed("release payload materialized")
     home = tmp_path / "home"
     version = next(
         line.split('"')[1]
@@ -1150,6 +1158,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     )
     env = _isolated_install_env(home)
     calls = _offline_uv(tmp_path, env)
+    completed("offline tools prepared")
 
     if os.name == "nt":
         powershell = shutil.which("pwsh") or shutil.which("powershell")
@@ -1189,6 +1198,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     assert stamped.returncode == 0, stamped.stderr
     assert not calls.exists(), "stamp must defer dependency installation"
     assert not (home / ".agent-logger" / ".venv").exists()
+    completed("native stamp completed")
 
     snapshot = Path(
         (home / ".agent-logger" / "payload-dir").read_text(encoding="utf-8").strip()
@@ -1216,6 +1226,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     shutil.rmtree(payload)
     shutil.rmtree(tmp_path / "plugins")
     shutil.rmtree(tmp_path / "libs")
+    completed("original source removed")
 
     output = tmp_path / "first-use.stdout"
     errors = tmp_path / "first-use.stderr"
