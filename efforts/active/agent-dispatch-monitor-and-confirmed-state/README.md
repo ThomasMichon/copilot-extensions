@@ -20,6 +20,15 @@ queued due-time admission fix merged in
 atomic placement and the remaining design are not implemented or installed-qualified.
 Existing submission/conversation phases and their custodians remain unchanged.
 
+**Priority clarification (2026-10-31):** drive the
+[five lifecycle outcomes](assignment-startup-amendment.md#prioritized-lifecycle-clarification):
+claim/spawn/affirmative start ordering, explicit rejection and attempt/timeout
+semantics, reserved-slot/work-start deadline consistency, suspended recovery
+with retry/backoff, and finalize-before-`SUBMITTED`. Automatic finalization
+before evaluators remains a design option. An opt-in worktree-owned agenda
+keeps this roster ahead of nonblocking discoveries without changing the
+canonical completion gate or existing source/native ownership.
+
 **Current direction (2026-10-08):** extend the existing lifecycle, result
 storage, evaluator, and steering machinery into a durable task conversation.
 Workers only SUBMIT; independent policy-driven confirmation makes a task
@@ -209,6 +218,8 @@ live claim token. No new blanket ACK or executor appointment is created.
       #9826 and #9834; cohort-aware original request custody merged in #9837.
       Fresh configured-owner preparation and original projection-result accounting
       merged in #9840.
+      Explicit local original-request projection merged in #9843; no automatic
+      publisher or admission caller is enabled.
       Fresh owner publication, external atomicity, mixed writers and placement remain separate
       acceptance gates.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
@@ -226,6 +237,10 @@ live claim token. No new blanket ACK or executor appointment is created.
       [#9773](https://github.com/ThomasMichon/copilot-extensions/pull/9773).
 - [ ] Resolve the amendment's remaining policy choices and complete its validation matrix
       at the stated source, mixed-version and installed/native evidence tiers.
+- [ ] Implement and qualify the prioritized suspended-recovery and
+      finalize-before-submission contracts through existing wake, worker,
+      submission/evaluation and Worktrees owners; preserve every unrelated
+      conversation/confirmation and native-custody gate.
 
 ### Phase 1 — The monitor vocabulary only (data only, no `Status`/table change)
 _(agent-recommended: sequencing shape, revised 2026-09-25 after actually
@@ -1612,3 +1627,36 @@ No automatic publisher, live configuration setter, ordinary caller, enrollment,
 activation, rollout, placement, old-writer adoption or protected reconciliation
 is enabled. External atomicity, mixed-writer exclusion, executable rollback and
 all original Plan/Validation gates remain open. The parent remains **Active**.
+
+### 2026-10-31 - Explicit local original-request projection
+
+[#9843](https://github.com/ThomasMichon/copilot-extensions/pull/9843) actually
+merged as `6452a04c0356be1e35352600d0a5e76d147ebeb7` after current-head
+Copilot approval and all three required checks passed. The complete approval
+has no active or missed findings and there are no inline threads.
+The preceding #9840 journal was delivered with this substantive source batch.
+
+An explicit local projection now accepts only its exact pending request,
+recovers accepted original history before current-source I/O or another write,
+and otherwise uses the existing registrar pointer-writer lock. Whole original
+source and owner-target rechecks bracket the existing coordinator CAS.
+Changed sources, targets, stale CAS, lock failure and unknown write outcomes
+preserve the original request. Post-write refusal does not undo an accepted
+projection; later recovery accounts for that historical result without
+renewal or current-file attestation.
+
+The final bounded packet passed 89 cases across projection, preparation/custody
+and configured-provider files. One earlier failure was a test's shared clock
+replacement; restricting that fixture to the registrar clock fixed it without
+changing production timing. Ruff, focused mypy, install contract and module
+guards passed. Managed reconciliation preserved its backup and the qualified
+source/test/doc bytes match the actual merge.
+
+This remains source-only optimistic publication, not admission. The next
+bounded investigation qualifies original source/coordinator target identity
+when filesystem aliases or same-path replacement are involved, using existing
+owner identity primitives and contained negative controls before any change.
+No automatic publisher, config setter, ordinary caller, enrollment, activation,
+rollout, placement, unmanaged-writer adoption or protected reconciliation was
+enabled. External atomicity, mixed writers, executable rollback and every
+original Plan/Validation gate remain open; the parent remains **Active**.
