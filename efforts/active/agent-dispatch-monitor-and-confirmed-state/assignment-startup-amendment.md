@@ -94,6 +94,45 @@ mixed-cohort fencing remain separate reviewed source gates.
 
 ## Current foundations and discrepancy
 
+### Prioritized lifecycle clarification
+
+**Operator-directed summary, 2026-10-31:** prioritize the lifecycle behavior over
+further speculative metadata prerequisites. The assigned outcomes are:
+
+1. Make allocator-owned claiming, agent spawning and affirmative task start
+   explicit and consistent across the state machine and its actual consumers.
+2. Distinguish rejected claim attempts, worker declines, startup timeouts and
+   attempt exhaustion; none is a transport receipt or successful acceptance.
+3. Reconcile reserved-slot startup deadlines with the deadline for starting
+   work, preserving one assignment and accountable in-flight effects.
+4. Recover `SUSPENDED` work affirmatively to `STARTED`, or fence exhausted
+   recovery before returning it to `QUEUED` with attempt counters and backoffs.
+5. Require worktree-backed agents to finalize before posting `SUBMITTED`.
+   Calling finalization automatically before evaluators is a design option,
+   not unconditional permission for a foreign evaluator to finalize a workspace.
+
+The selected three-attempt, five-minute nudge, thirty-minute decision and
+task-wide 1/3/6/12-hour cooldown policy above remains authoritative.
+Recovery attempts must not erase startup history, reset counters on prompt
+delivery or override a later scheduled `not_before`. Uncertain native effects
+remain accountable until cancellation/fencing permits replacement capacity.
+
+**Source findings, not installed qualification:** fresh reservation currently
+does not transition the task to `CLAIMED`; worker `claim` and `start` remain
+separate from supervisor `reserve -> spawn -> record`. The supervisor's
+reservation/startup deadline, failed-reservation cap and stall nudge are
+different mechanisms from the selected claim-episode decision policy.
+Existing suspended/wake and confirmed-gone reconciliation owners preserve
+important native custody but do not implement the complete requested
+affirmative recovery/backoff policy. Existing completion/evaluator machinery
+also lacks a unified finalize-before-submission contract.
+Implementation must reconcile these existing owners rather than add another
+timer, retry registry or parallel completion mechanism.
+
+An adopted worktree-local agenda tracks these five outcomes and parks
+nonblocking discoveries. It does not replace this canonical Plan/Validation,
+reserve another participant's source, grant effects or declare completion.
+
 `Supervisor._eligible` filters future `Task.not_before` values.
 `QueueClaimQueriesMixin.claim_one` enforces the same due-time condition in its
 write transaction, alongside routing and ownership checks. This is useful
@@ -154,14 +193,35 @@ they implement the requested guarantees without claiming these APIs exist.
    attachments. Keep retry eligibility separate from wake-delivery backoff
    and monitored suspension. A reset clears this retry policy's counters,
    not another owner's scheduled deadline or unresolved effect custody.
+7. Apply the same explicit recovery contract to suspended assigned work through
+   the existing wake/resume and supervision owners. An affirmative current
+   worker/native result may resume `STARTED`; prompt/wake delivery alone may
+   not. Retry within the accountable assignment and selected budget. On
+   exhaustion, cancel or fence outstanding startup/wake effects before releasing
+   capacity and returning `QUEUED` with the task-wide cooldown and retained
+   historical evidence. Preserve intentional monitored waits and operator holds:
+   being suspended is not itself a recovery failure.
+8. Require worktree-backed workers to finalize their own correct workspace
+   before submitting. Keep finalization and task submission separate
+   authoritative operations; a finalized-but-retained checkout is not proof of
+   process termination. Failed finalization must visibly block submission
+   without losing the result or task ownership. Qualify task-aware closeout
+   against its inbound task/session and preserve source, PR, outbound claim,
+   foreign/shared workspace, pairing, follow-up and runtime-effect gates.
+   Assess automatic finalize-before-evaluators at the existing worker/evaluation
+   boundary; do not let a remote evaluator silently finalize a different owner's
+   worktree. Explicitly define the equivalent applicability/readiness result
+   for tasks without a managed worktree.
 
 ## Remaining policy choices
 
 - Result rejection from `SUBMITTED`: returning work to its retained worker
   versus explicit fenced reassignment or assignment reconsideration.
-- Terminal worktree closeout and whether submission should require closeout
-  readiness. This amendment does not impose finalize-before-submission or
-  reopen completed tasks for housekeeping.
+- Finalize-before-`SUBMITTED` is now required for worktree-backed workers.
+  Automatic finalization before evaluators and the supported no-worktree
+  applicability contract still need a reviewed integration design. This does
+  not reopen completed tasks for housekeeping or require physical checkout
+  deletion before submission.
 
 These remain independent policy decisions; neither is resolved by the selected
 startup/cooldown policy. Unsatisfiable retained routing must remain visible,
@@ -226,6 +286,17 @@ not resolve the selected retry scope, atomic placement or mixed-runtime matrix.
 - [ ] Separate source/unit acceptance from authorized installed/native
   forward-progress qualification. Source merge, release and running adoption
   remain distinct; no production root-cause claim follows from this proposal.
+- [ ] SUSPENDED recovery distinguishes intentional waits, current affirmative
+  worker/native recovery, transport-only delivery, failed startup and exhausted
+  recovery. Preserve owner/generation/reservation fences and later due times;
+  prove selected counters/backoffs survive restart and late effects cannot
+  manufacture `STARTED` or prematurely release capacity.
+- [ ] Worktree-backed worker guidance and supported submission/evaluation
+  consumers agree on finalize-before-`SUBMITTED`. Failed closeout retains result
+  and task custody; successful finalized-but-retained state does not imply the
+  process stopped. Own inbound-task/session integration does not deadlock, and
+  foreign/shared, source, PR, claim, follow-up and effect gates remain enforced.
+  Qualify no-managed-worktree applicability explicitly.
 
 ## Review and completion
 
