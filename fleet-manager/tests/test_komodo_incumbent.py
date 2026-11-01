@@ -16,12 +16,14 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 from fleet_manager.komodo_declaration import KomodoDeclaration
-from fleet_manager.komodo_incumbent import KomodoIncumbentMaterialization, mount_evidence
+from fleet_manager.komodo_incumbent import (
+    KomodoConfigUsername, KomodoIncumbentMaterialization, mount_evidence,
+)
 from fleet_manager.komodo_native import KomodoNative, KomodoTooling, KomodoImage
 from fleet_manager.komodo_evidence import native_fingerprint
 from fleet_manager.komodo_health import identity_digest
 from fleet_manager.komodo_identity import effective_global_key
-from fleet_manager.komodo_network import network_fingerprint
+from fleet_manager.komodo_network import network_fingerprint, same_network_observation, verify_network
 from fleet_manager.komodo_owner import KomodoOwner
 from fleet_manager.komodo_repair import KomodoRepairOwner
 from fleet_manager.komodo_repair_selection import KomodoRepairSelection
@@ -123,6 +125,155 @@ def test_incumbent_observation_retains_originals_without_synthesizing_fresh_cred
     selected["images"]["mongo"]["version"] = "7.0.45"
     with pytest.raises(PlanError, match="cannot render"):
         render_profile(KomodoDeclaration.from_dict(selected), material, owner="a" * 64)
+
+
+def test_incumbent_reads_username_from_retained_core_config_without_a_username_file(incumbent):
+    path = incumbent.files["core_config"]
+    path.write_bytes(b'init_admin_username = "original-admin"\nlocal_auth = true\n')
+    incumbent.files["admin_username"].unlink()
+    material = replace(incumbent.material, admin_username=KomodoConfigUsername(path))
+    assert material.credential_bytes()["admin_username"] == b"original-admin"
+    before = material.evidence()
+    assert before["username_source"] == {"config": str(path), "field": "init_admin_username"}
+    assert b"original-admin" not in material.profile()
+    path.write_bytes(b'init_admin_username = "another-admin"\nlocal_auth = true\n')
+    assert material.credential_bytes()["admin_username"] == b"another-admin"
+    assert material.evidence() != before
+    assert not incumbent.files["admin_username"].exists()
+
+
+@pytest.mark.parametrize("content", [
+    b"", b"invalid toml", b'init_admin_username = ""', b"init_admin_username = 123",
+    b'init_admin_username = "a"\ninit_admin_username = "b"',
+    b'init_admin_username = "a\\nb"', b'init_admin_username = "\\u0000"',
+])
+def test_config_username_refuses_missing_ambiguous_or_unsupported_values(incumbent, content):
+    path = incumbent.files["core_config"]
+    path.write_bytes(content)
+    with pytest.raises(PlanError, match="username|login"):
+        replace(incumbent.material, admin_username=KomodoConfigUsername(path))
+
+
+def test_config_username_cannot_select_an_unmounted_configuration(incumbent):
+    path = incumbent.files["periphery_config"]
+    path.write_bytes(b'init_admin_username = "another-admin"')
+    with pytest.raises(PlanError, match="retained Core"):
+        replace(incumbent.material, admin_username=KomodoConfigUsername(path))
+
+
+def test_config_username_change_between_login_read_and_evidence_read_refuses(incumbent, monkeypatch):
+    import fleet_manager.komodo_incumbent as inputs
+
+    path = incumbent.files["core_config"]
+    path.write_bytes(b'init_admin_username = "original-admin"\n')
+    material = replace(incumbent.material, admin_username=KomodoConfigUsername(path))
+    reader = inputs.read_private_file
+    reads = []
+
+    def changing(source, *args, **options):
+        if source == path:
+            reads.append(source)
+            if len(reads) == 2:
+                path.write_bytes(b'init_admin_username = "changed-admin"\n')
+        return reader(source, *args, **options)
+
+    monkeypatch.setattr(inputs, "read_private_file", changing)
+    with pytest.raises(PlanError, match="login changed during observation"):
+        material.evidence()
+
+
+def _two_networks():
+    networks, containers = {}, {}
+    for index, name in enumerate(("original-management", "original-egress"), 1):
+        networks[name] = {
+            "Name": name, "Id": str(index) * 64, "Driver": "bridge", "Scope": "local",
+            "Internal": index == 1, "Attachable": False, "Ingress": False, "ConfigOnly": False,
+            "ConfigFrom": {"Network": ""}, "Options": {}, "Labels": {"original-owner": "example"},
+            "IPAM": {"Driver": "default"}, "Containers": {},
+        }
+    attachments = {}
+    for index, service in enumerate(("core", "mongo", "periphery"), 3):
+        names = ["original-management", "original-egress"] if service == "core" else ["original-management"]
+        attachments[service] = names
+        node = str(index) * 64
+        connections = {}
+        for name in names:
+            connections[name] = {"NetworkID": networks[name]["Id"], "EndpointID": service + "-" + name}
+            networks[name]["Containers"][node] = {"EndpointID": service + "-" + name}
+        containers[service] = {
+            "Id": node, "State": {"Running": True, "Status": "running"},
+            "HostConfig": {"NetworkMode": "original-management"},
+            "NetworkSettings": {"Networks": connections},
+        }
+    return {
+        "networks": networks, "attachments": attachments,
+        "modes": dict.fromkeys(containers, "original-management"),
+    }, containers
+
+
+@pytest.mark.parametrize("change", ["alias", "host-mode", "duplicate", "missing", "redirect", "unused"])
+def test_incumbent_topology_refuses_ambiguous_or_unsupported_owner_observations(incumbent, change):
+    topology, _ = _two_networks()
+    if change == "alias":
+        topology["networks"]["original-egress"]["Id"] = topology["networks"]["original-management"]["Id"]
+    elif change == "host-mode":
+        topology["modes"]["core"] = "host"
+    elif change == "duplicate":
+        topology["attachments"]["core"].append("original-egress")
+    elif change == "missing":
+        topology["attachments"].pop("mongo")
+    elif change == "redirect":
+        topology["networks"]["original-egress"]["ConfigFrom"] = {"Network": "foreign"}
+    else:
+        topology["attachments"]["core"] = ["original-management"]
+    with pytest.raises(PlanError, match="topology"):
+        replace(incumbent.material, topology=canonical(topology))
+
+
+@pytest.mark.parametrize("change", [
+    None, "reverse", "missing-network", "replacement", "policy", "foreign-endpoint",
+    "extra-service", "missing-membership", "endpoint", "mode", "attachment",
+])
+def test_incumbent_topology_retains_internal_bridge_and_core_only_egress(incumbent, change):
+    topology, containers = _two_networks()
+    material = replace(incumbent.material, topology=canonical(topology))
+    selected = SimpleNamespace(declaration=SimpleNamespace(preserving=True), material=material)
+    observed = {"networks": deepcopy(topology["networks"])}
+    expected = network_fingerprint(observed)
+    original = deepcopy(observed)
+    if change == "reverse":
+        topology["attachments"]["core"].reverse()
+        assert replace(material, topology=canonical(topology)).evidence() == material.evidence()
+    elif change == "missing-network":
+        del observed["networks"]["original-egress"]
+    elif change == "replacement":
+        observed["networks"]["original-egress"]["Id"] = "9" * 64
+    elif change == "policy":
+        observed["networks"]["original-management"]["Internal"] = False
+    elif change == "foreign-endpoint":
+        observed["networks"]["original-egress"]["Containers"]["9" * 64] = {"EndpointID": "foreign"}
+    elif change == "extra-service":
+        observed["networks"]["original-egress"]["Containers"][containers["mongo"]["Id"]] = {
+            "EndpointID": "unselected-mongo"}
+    elif change == "missing-membership":
+        observed["networks"]["original-egress"]["Containers"].clear()
+    elif change == "endpoint":
+        containers["core"]["NetworkSettings"]["Networks"]["original-egress"]["EndpointID"] = "changed"
+    elif change == "mode":
+        containers["core"]["HostConfig"]["NetworkMode"] = "original-egress"
+    elif change == "attachment":
+        del containers["core"]["NetworkSettings"]["Networks"]["original-egress"]
+    if change in (None, "reverse"):
+        assert verify_network(observed, selected, containers, expected) == expected
+        assert same_network_observation(original, observed)
+        assert material.network_mode("core", "unused-project") == "original-management"
+        with pytest.raises(PlanError):
+            verify_network(observed, selected, containers, expected, created=True)
+    else:
+        with pytest.raises(PlanError, match="topology|attachment|membership|endpoints"):
+            verify_network(observed, selected, containers, expected)
+    observed["networks"]["original-management"]["Containers"].clear()
+    assert not same_network_observation(original, observed)
 
 
 @pytest.mark.parametrize("change", ["driver", "source", "unrelated", "config", "duplicate"])
@@ -327,8 +478,47 @@ def test_native_apply_refuses_incumbent_even_with_a_fixed_declaration(incumbent)
                        checkpoint=lambda: pytest.fail("no incumbent native effect is admitted"))
 
 
+@pytest.mark.parametrize("change", [None, "missing", "duplicate", "foreign"])
+def test_native_incumbent_network_inspection_uses_exact_selected_names(incumbent, change):
+    from agent_procutil.owned_process import run_caller_owned
+
+    topology, _ = _two_networks()
+    material = replace(incumbent.material, topology=canonical(topology))
+    actual = list(deepcopy(topology["networks"]).values())
+    if change == "missing":
+        actual.pop()
+    elif change == "duplicate":
+        actual[1] = deepcopy(actual[0])
+    elif change == "foreign":
+        actual[1]["Name"] = "unselected-network"
+    calls = []
+
+    def invoke(argv, **options):
+        calls.append(argv)
+        child = ("import json, sys; assert sys.argv[1:] == " + repr(argv[1:])
+                 + "; json.dump(" + repr(actual) + ", sys.stdout)")
+        return run_caller_owned([sys.executable, "-I", "-c", child, *argv[1:]], **options)
+
+    native = object.__new__(KomodoNative)
+    native.native_failure = None
+    native.tooling = SimpleNamespace(
+        docker=Path(sys.executable), client_config=incumbent.files["core_config"].parent,
+        run=invoke, check_client=lambda: None,
+    )
+    if change is None:
+        assert native.network(KomodoDeclaration.from_dict({**declaration(), "profile": "preserve-incumbent"}),
+                              material, deadline=time.monotonic() + 10) == {"networks": topology["networks"]}
+    else:
+        with pytest.raises(PlanError, match="network evidence"):
+            native.network(KomodoDeclaration.from_dict({**declaration(), "profile": "preserve-incumbent"}),
+                           material, deadline=time.monotonic() + 10)
+    assert len(calls) == 1
+    assert calls[0][-4:] == ["network", "inspect", "original-egress", "original-management"]
+
+
 @pytest.mark.parametrize("scenario", [
     "adopt-repeat-status", "update", "stopped", "mount-drift", "credential-drift",
+    "adopt-two-networks", "lost-terminal-two-networks",
     "native-drift", "missing", "missing-adoption", "private-key-drift", "lost-terminal", "global-trust",
     "expired-during-selection",
     "refreshed-order", "failed-repeat-running", "failed-repeat-stopped",
@@ -350,6 +540,12 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
 ):
     """Real admission, SQLite and HTTP; native observations/state lock are fixtures."""
     material = incumbent.material
+    if scenario.endswith("two-networks"):
+        topology, network_containers = _two_networks()
+        incumbent.files["core_config"].write_bytes(b'init_admin_username = "original-admin"\n')
+        incumbent.files["admin_username"].unlink()
+        material = replace(material, topology=canonical(topology),
+                           admin_username=KomodoConfigUsername(incumbent.files["core_config"]))
     runtime = material.keys.parent / "host-runtime"
     client = material.keys.parent / "native-client"
     private_directory(runtime)
@@ -531,6 +727,13 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                 "Containers": {item["Id"]: {"EndpointID": "endpoint-" + name}
                                for name, item in containers.items()},
             }
+            if scenario.endswith("two-networks"):
+                for name, item in containers.items():
+                    observed = network_containers[name]
+                    item["Id"] = observed["Id"]
+                    item["HostConfig"]["NetworkMode"] = observed["HostConfig"]["NetworkMode"]
+                    item["NetworkSettings"] = deepcopy(observed["NetworkSettings"])
+                network = {"networks": deepcopy(topology["networks"])}
             selection = KomodoSelection(
                 KomodoDeclaration.from_dict(desired), "fleet-a", "install-a", 1, "policy-1",
                 1900001000, "e" * 64, runtime, tooling, fixed_material if fixed else material,
@@ -848,14 +1051,15 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                 observed["volumes"].reverse()
                 current[0] = replace(selection, material=replace(material, encoded=canonical(observed)))
                 assert current[0].deployment_digest == selection.deployment_digest
-            if scenario in ("adopt-repeat-status", "lost-terminal", "global-trust", "refreshed-order"):
+            if scenario in ("adopt-repeat-status", "lost-terminal", "global-trust", "refreshed-order",
+                            "adopt-two-networks", "lost-terminal-two-networks"):
                 assert await invoke(request) == receipt
                 result = await invoke(request, status=True)
                 assert result["converged"] and result["currently_healthy"]
                 assert result["native_mutations_performed"] is False
                 assert state_record[0]["good"]["fixed_profile"] is False
                 assert state_record[0]["good"]["selection"]["declaration"]["images"]["mongo"]["version"] == "7.0.45"
-                assert len(requests) == (20 if scenario == "lost-terminal" else 15)
+                assert len(requests) == (20 if scenario.startswith("lost-terminal") else 15)
             else:
                 if scenario == "update":
                     revised = selection.declaration.to_dict()

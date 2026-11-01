@@ -1,0 +1,9 @@
+{
+  "comment": "Retain explicitly selected incumbent bridges and read local-auth usernames from retained Core configuration.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
