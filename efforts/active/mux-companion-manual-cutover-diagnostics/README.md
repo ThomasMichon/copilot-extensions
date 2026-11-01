@@ -389,6 +389,12 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
 ### Step 6 - Purpose-first Summary and Claims continuation (#8811)
 
+The [timeline/subway and live-worktree guidance](timeline-guidance.md) supplies
+generic presentation examples for this same continuation. It mixes lifecycle
+events with work packages while keeping the current bound effort primary and
+creation context secondary. This documentation contribution does not close
+topology, native chrome, manual/head, app-input, relay or rollout acceptance.
+
 - [x] Land reviewed [purpose-first intent and sequence](purpose-first.md)
       and the revised `visions/mux-companion` before implementation.
 - [x] Reuse existing authoritative purpose, summary and claims sources in
@@ -474,6 +480,18 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-10-31 - Timeline and current-worktree presentation guidance
+
+- Added generic fictional timeline/subway examples, expandable parallel Task
+  work and child agendas, blocked/deferred paths and current-position variants
+  to this existing effort's purpose-first guidance.
+- Current accepted effort purpose leads the heading; initial request is a
+  summarized, expandable creation-context record. Worktree/claim/binding/PR
+  events retain their owner meaning and do not become completion or approval.
+- This is a bounded documentation contribution under #8811. Existing source/UI,
+  native/relay and manual/head custodians retain the complete Active root;
+  no implementation, runtime, source replay, native action or rollout occurred.
 
 ### 2026-10-25 - Operator selected keyboard guides instead of click tabs
 

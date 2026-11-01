@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** One coordinator-owned, `dev`-based worktree; incremental reviewed PRs
 - **Created:** 2026-10-31
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Harness Guidance](../../../visions/harness-guidance/README.md): authoritative ownership, concise context, reusable current discovery and evidence-backed routing; vision-closing
 - **Umbrella issue:** [#9809](https://github.com/ThomasMichon/copilot-extensions/issues/9809)
 
@@ -92,7 +92,8 @@ cached or unavailable quota evidence.
 
 ### Phase 1 - Reviewed contract and reusable source shape
 
-- [ ] Land this proposal and reconcile the final contract with its owning
+- [x] Land this proposal.
+- [ ] Refine callable contract bindings with their owning
   customization, native catalog, SDK and model-policy interfaces.
 - [ ] Specify one exposed tool, one canonical specialist and concise preference
   guidance in the existing customization payload; no additional service,
@@ -112,7 +113,7 @@ cached or unavailable quota evidence.
 - [ ] Use an owned isolated SDK runtime and synthetic fixtures to witness task
   context inclusion/order, effective tools, result attribution and model
   fallback. Interception is process-global and must not attach to production.
-- [ ] Exercise full/event-boundary forks only through a supported host-owned
+- [x] Exercise full/event-boundary forks only through a supported host-owned
   server client. Record absent ordinary-extension access explicitly; never use
   private connection fields or silently substitute another context strategy.
 - [ ] Compare bounded automatic context and explicit-brief controls, including
@@ -204,3 +205,128 @@ owned-session alternative or name the SDK dependency before adopting it.
   interfaces and unresolved inheritance, capacity and lifecycle witnesses.
 - This proposal precedes prototype and model trials. No source implementation,
   default model change, instruction-budget override or shared rollout is claimed.
+
+### 2026-10-31 - Proposal reviewed and native spike admitted
+
+- PR #9812 merged after current-head Copilot approval with no open findings and
+  successful required checks. Reconciled the source worktree onto `dev` and
+  reread this Plan and Validation Plan.
+- Only the proposal gate is closed. Next is the owned SDK transport/context
+  witness and native catalog/model preflight, not a production selector or
+  demonstrated model profile. Candidate selection and independent evaluation
+  remain prerequisites for real comparative arms.
+
+### 2026-10-31 - Model-free SDK startup witness and focused controls
+
+- Added an opt-in, payload-owned [SDK spike](../../../plugins/customizing-copilot/docs/skill-selection-spike.md)
+  with reusable native-descriptor freezing, durable tail-first bounded primary
+  text collection, assembled-request accounting, synthetic-only interception
+  and own-task lifecycle observation. No selector, specialist registration,
+  main preference or production model pin is installed.
+- Executed one owned-runtime startup with SDK `1.0.100-1`. Its public default
+  stdio launch failed before session creation with the literal error:
+  `Could not resolve @github/copilot-sdk-win32-arm64. Reinstall @github/copilot-sdk so its platform package is installed.`
+  The witness retained that failure; it did not inspect private connections,
+  select a substitute binary, install dependencies or forward any model request.
+- Measured zero intercepted and zero forwarded model requests. Public client
+  `stop()` returned an empty cleanup-error list. Native catalog/model/agent
+  preflight, all context arms, actual child configuration and cancellation
+  settlement remain **unavailable**, not demonstrated. No candidate capability
+  IDs or model limits were discovered; candidate/evaluator binding remains open.
+- The bounded plugin runner passed one Python wrapper containing eleven Node
+  controls for descriptor preservation, UTF-8 input bounds, exclusive boundaries,
+  request versus prompt overhead, unknown model metadata, own-event attribution,
+  missed/late output, timeout versus abort, local buffered/SSE replies and
+  no-forwarding refusals. A first wrapper failure was solely a reporter-format
+  assumption; selecting TAP made the actual Node result machine-readable.
+  Focused Python lint, JavaScript syntax and documentation consistency passed.
+- These are synthetic helper controls plus a native startup blocker, **not**
+  native context qualification or model-quality evidence. Keep this effort Active
+  and every remaining Plan/Validation gate open. The coordinator owns publication
+  and the supported native-runtime/candidate/evaluator binding before further arms.
+
+### 2026-10-31 - Explicit runtime and native transport witnessed
+
+- The public SDK supports an explicitly supplied owned stdio executable.
+  Qualified that option without reinstalling the SDK, attaching to an external
+  runtime or changing global settings. The native transport witness completed;
+  its synthetic interceptor forwarded no inference requests.
+- Native full and event-boundary forks preserved their respective persisted
+  prefixes. The exclusive fork omitted the later sentinel. Automatically
+  bounded history retained the latest relevant message and explicitly reported
+  an oversized omitted message; explicit-brief and native-task controls did not
+  inherit the synthetic parent history in this owned host.
+- Native task completion and cancellation were observed under their own IDs;
+  cancellation acknowledgement and terminal cancellation remained distinct.
+  The only exposed tool was the synthetic read-only catalog tool. Parent model
+  state and text prefix remained unchanged; public abort/stop returned no errors
+  and the bounded caller verified process cleanup.
+- An oversized provider descriptor initially produced an empty native catalog.
+  Shorter descriptors produced all three expected entries, including the
+  disabled entry and enabled non-user-invocable pathless entry, without reading
+  skill bodies. Added provider-call and incomplete-catalog evidence rather
+  than reporting missing fixtures as complete coverage. This does not qualify
+  a complete adopter roster or every metadata limit.
+- A separate prompt-free `client.listModels()` preflight successfully retrieved
+  native model metadata. The synthetic interceptor itself refuses that request;
+  retrieval is explicitly distinguished from synthetic zero-forwarding evidence.
+  Supported context-tier metadata and actual child effort/tier remain unproven.
+  Exact candidate/evaluator binding, matched quality/cost arms and implementation
+  remain open; no model profile is selected or promoted by this witness.
+
+### 2026-10-31 - Bound profile and Responses fixture qualified
+
+- Bound the explicitly selected candidate and independent evaluator for the
+  upcoming comparison; this is a contained trial, not a production default.
+  Optional model/effort/tier arguments restrict the owned sessions and dispatch
+  the candidate explicitly rather than copying foreground defaults.
+- The candidate's native request used Responses input, not Chat Completions.
+  Added a local buffered/SSE Responses fixture after content-free structural
+  diagnosis. The native witness then completed with the requested model,
+  medium effort and long context in session snapshots and child configuration.
+- The native task received the supplied descriptor catalog without synthetic
+  parent history; whole/event-boundary forks retained the respective prefixes.
+  Native child completion, cancellation and bounded process cleanup passed.
+  Helper controls cover both wire formats without forwarding or fallback.
+- Effective prompt-limit telemetry differed from the separate model catalog.
+  Preserve that discrepancy: a configured long tier is not proof of prospective
+  capacity, and synthetic usage is not cost or model-quality evidence. Complete
+  adopter catalog, independent quality judgment and real accounting remain open.
+
+### 2026-10-31 - Transport reporting and regression coverage corrected
+
+- Corrected the current review's transport-reporting findings: redaction covers
+  arbitrary absolute paths and URIs, bounded history is a contiguous newest
+  suffix with omission evidence supplied to the child, an expired cancellation
+  hold fails, and an unsettled task prevents another arm on the same parent.
+  Aggregate status retains failed/incomplete arms and cleanup errors; provider
+  counters are captured after arm and cleanup activity.
+- Added a model-free fake-SDK orchestration control covering all context arms,
+  exclusive fork history, task attribution, owned cleanup, resume acquisition
+  failure and an unsettled task. Twenty-four Node controls passed through the
+  bounded Python wrapper. The initial fake used a shared event-array reference;
+  returning an RPC-style detached snapshot corrected the fixture rather than
+  weakening the exclusive-prefix assertion.
+- Repeated the corrected owned native transport witness with the bound profile.
+  Every arm completed, cancellation settled under its own ID, parent state
+  remained unchanged, no model request was forwarded and public lifecycle
+  cleanup plus the bounded caller's process-cleanup verification passed.
+  This closes no quality, actual-cost, full-catalog or production-selector gate.
+
+### 2026-10-31 - Comparison evidence made fail-closed
+
+- A fresh review identified further success-shaped evidence gaps. Completed
+  arms now require attributed request captures, normal tasks require an
+  uncancelled observed result, and both fork histories must match their expected
+  frozen event IDs. Parent preservation covers the complete seeded prefix,
+  including the boundary and response.
+- Catalog availability checks complete descriptions, enabled state and explicit
+  fixture invocation metadata rather than names alone. Argument errors enter
+  the structured failure envelope; path redaction consumes quoted filenames
+  containing apostrophes instead of exposing a suffix.
+- Twenty-seven model-free Node controls passed through the bounded Python
+  wrapper, including absent captures/results, unexpected cancellation and
+  corrupted fork/parent histories. The corrected native witness completed all
+  arms with ten locally intercepted requests, zero forwarding, complete fixture
+  metadata, unchanged parent state and verified lifecycle/process cleanup.
+  Synthetic success remains separate from quality and billed accounting.
