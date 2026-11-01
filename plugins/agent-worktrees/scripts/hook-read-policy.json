@@ -5,6 +5,6 @@
     "statelessness_guard.py": "c8a135b668c48477191b0776e4d2efc8734da4782a39a4bc6bbeeade33ae00cd",
     "cross_repo_guard.py": "3496ba5c829c84e0bcd80c1bbf91da236cebf8191adc1168ef4f3786736bed19",
     "anchor_write_guard.py": "2a30cb671d5eabc13edba7f1eb682635847a65915f38a0923b6f946736240766",
-    "pr_supersede_guard.py": "6504bfbda3a590a56690278edf5422f664a9f5feb2ca31a76d1ad484670ffbd0"
+    "pr_supersede_guard.py": "405514834a48658e8006ee226d838a4305a70eff0d539ab274670c21013bf140"
   }
 }

@@ -29,25 +29,37 @@ def _watch_legacy_parent(stop):
     from hook_client import _load_sibling
 
     identity = _load_sibling("hook_process_identity.py")
-    birth_token = getattr(identity, "process_start_time", None)
-    active = getattr(identity, "process_is_alive", None)
-    parent = os.getppid()
-    birth = birth_token(parent) if callable(birth_token) else None
-    if parent <= 1 or birth is None or not callable(active) or not active(parent, birth) or os.getppid() != parent:
-        raise RuntimeError("legacy caller identity unavailable")
+    if os.name == "nt":
+        live_caller, close = identity.open_windows_caller_lifetime()
+    else:
+        birth_token = getattr(identity, "process_start_time", None)
+        active = getattr(identity, "process_is_alive", None)
+        parent = os.getppid()
+        birth = birth_token(parent) if callable(birth_token) else None
+        if parent <= 1 or birth is None or not callable(active) or not active(parent, birth) or os.getppid() != parent:
+            raise RuntimeError("legacy caller identity unavailable")
+        live_caller = lambda: os.getppid() == parent and active(parent, birth)
+        close = lambda: None
 
     def watch():
-        while not stop.wait(.05):
-            try:
-                live = os.getppid() == parent and active(parent, birth)
-            except Exception:
-                live = False
-            if not live and not stop.is_set():
-                # Exit closes the SDK lifetime handles; it does not attest settlement.
-                os._exit(3)
+        try:
+            while not stop.wait(.05):
+                try:
+                    live = live_caller()
+                except Exception:
+                    live = False
+                if not live and not stop.is_set():
+                    # Exit closes the SDK lifetime handles; it does not attest settlement.
+                    os._exit(3)
+        finally:
+            close()
 
     watcher = threading.Thread(target=watch, name="legacy-policy-caller", daemon=True)
-    watcher.start()
+    try:
+        watcher.start()
+    except BaseException:
+        close()
+        raise
     return watcher
 
 

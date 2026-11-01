@@ -152,6 +152,8 @@ def _find_close_attempts(cmd: str) -> list[dict]:
 
 def needs_observations(payload: dict) -> bool:
     """Classify the same shell/argument aliases used by the live guard."""
+    if _truthy_off(os.environ.get("PR_SUPERSEDE_GUARD")) or _mode(os.environ) == "off":
+        return False
     tool = str(payload.get("toolName") or payload.get("tool_name") or "")
     if tool not in SHELL_TOOLS:
         return False

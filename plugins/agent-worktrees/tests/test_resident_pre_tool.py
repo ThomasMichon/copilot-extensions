@@ -370,11 +370,17 @@ def test_pretool_preserves_accumulated_ask_across_later_lookup(tmp_path, consume
     import time
     import uuid
 
-    from agent_procutil import spawn_sync_in_kill_on_close_job
+    from agent_procutil import direct_python, spawn_sync_in_kill_on_close_job
     from test_hook_policy_lifetime import _pin_descendant
     from test_hook_pre_relevance import _pretool_recovery_fixture
 
     home, cwd, scripts, env = _pretool_recovery_fixture(tmp_path, "none")
+    interpreter, overrides = direct_python(sys.executable)
+    env.update(overrides)
+    (scripts / "resolve-runtime.ps1").write_text(
+        "param([string]$TraceMode)\n$AwPy = '" + interpreter.replace("'", "''") + "'\n",
+        encoding="utf-8-sig",
+    )
     (scripts.parent / "repos.yaml").write_text(
         "repos:\n  fixture:\n    class: worktree\n    windows: '" + str(cwd) + "'\n", encoding="utf-8",
     )
@@ -432,11 +438,21 @@ def local_gh(args, *positional, **kwargs):
         emit({'event': 'gh-call', 'args': list(args[1:]), 'timeout': kwargs.get('timeout'),
               'deadline': budget.deadline, 'cleanup_reserve': budget.cleanup_reserve,
               'time': time.monotonic()})
+        if args[1:4] == ['pr', 'view', '41']:
+            marker = _root / 'budget.json'
+            marker.with_suffix('.prepared').write_text(json.dumps({
+                'nonce': os.environ['PRETOOL_TEST_NONCE'],
+                'execution_deadline': budget.execution_deadline,
+            }), encoding='utf-8')
+            marker.with_suffix('.prepared').replace(marker)
+            marker.with_suffix('.published').touch()
         if os.environ['PRETOOL_TEST_LATE_RESULT'] == 'cleanup-error' and args[1:3] == ['pr', 'view'] and args[3] == '42':
-            from agent_procutil import spawn_sync_in_kill_on_close_job
+            from agent_procutil import direct_python, spawn_sync_in_kill_on_close_job
+            python, overrides = direct_python(sys.executable)
+            environment = dict(kwargs['env']); environment.update(overrides)
             process, job = spawn_sync_in_kill_on_close_job(
-                [sys.executable, os.environ['PRETOOL_TEST_GH_CHILD'], *args[1:]],
-                require_job=True, allow_breakaway=False, env=kwargs['env'], cwd=kwargs['cwd'],
+                [python, os.environ['PRETOOL_TEST_GH_CHILD'], *args[1:]],
+                require_job=True, allow_breakaway=False, env=environment, cwd=kwargs['cwd'],
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
@@ -489,9 +505,9 @@ sys.setprofile(observe)
             encoding="utf-8",
         )
         command = [node, str(driver), str(PLUGIN / "extensions" / "agent-worktrees" / "resident-pre-tool.mjs"),
-                   str(scripts), sys.executable, str(event_path)]
+                   str(scripts), interpreter, str(event_path)]
     elif consumer == "legacy":
-        command = [sys.executable, str(scripts / "hook_client.py"), "preToolUse"]
+        command = [interpreter, str(scripts / "hook_client.py"), "preToolUse"]
     else:
         command = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(scripts / "pre-tool-hook.ps1")]
     started = time.monotonic()
@@ -508,7 +524,16 @@ sys.setprofile(observe)
             process.stdin = None
         if late_result != "deny":
             marker = observations / "gh-42.json"
-            deadline = time.monotonic() + 15
+            budget_marker = observations / "budget.json"
+            admission_deadline = min(time.monotonic() + 15, started + 25)
+            while not budget_marker.with_suffix(".published").is_file():
+                assert process.poll() is None, process.communicate(timeout=5)
+                assert time.monotonic() < admission_deadline, "first lookup budget never published"
+                time.sleep(0.02)
+            bound = json.loads(budget_marker.read_text(encoding="utf-8"))
+            assert bound["nonce"] == nonce
+            deadline = bound["execution_deadline"]
+            assert type(deadline) in (int, float) and time.monotonic() < deadline <= started + 25
             while not marker.with_suffix(".published").is_file():
                 assert process.poll() is None, process.communicate(timeout=5)
                 assert time.monotonic() < deadline, "second local lookup never started"
@@ -668,6 +693,55 @@ def test_owned_legacy_retains_initial_after_preparation_or_settled_failure(monke
     assert result == 0
     decision = json.loads(capsys.readouterr().out)
     assert decision["permissionDecision"] == ("deny" if fault == "timeout-deny" else "ask")
+
+
+@pytest.mark.parametrize("setting,value", [
+    ("PR_SUPERSEDE_GUARD", "off"), ("PR_SUPERSEDE_GUARD", "0"),
+    ("PR_SUPERSEDE_GUARD", "false"), ("PR_SUPERSEDE_GUARD", " No "),
+    ("PR_SUPERSEDE_GUARD_MODE", "off"), ("PR_SUPERSEDE_GUARD_MODE", " OFF "),
+])
+def test_disabled_supersede_keeps_cheap_decision_without_owned_supervision(monkeypatch, tmp_path, capsys, setting, value):
+    import builtins
+    import importlib.util
+    import io
+    from types import SimpleNamespace
+
+    modules = {}
+    for name in ("hook_client", "hook_pre_policy", "pr_supersede_guard"):
+        spec = importlib.util.spec_from_file_location(name, PLUGIN / "scripts" / (name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        modules[name + ".py"] = module
+    client = modules["hook_client.py"]
+    modules.update({
+        "pretool_killswitch.py": SimpleNamespace(is_active=lambda: False),
+        "statelessness_guard.py": SimpleNamespace(decide=lambda *a, **k: {
+            "permissionDecision": "ask", "permissionDecisionReason": "confirmed cheap guard",
+        }),
+        "cross_repo_guard.py": SimpleNamespace(decide=lambda *a, **k: None),
+        "anchor_write_guard.py": SimpleNamespace(decide=lambda *a, **k: None),
+    })
+    def load(name):
+        assert name != "hook_policy_process.py", "disabled guard selected supervision"
+        return modules.get(name)
+    original_import = builtins.__import__
+    def no_sdk(name, *args, **kwargs):
+        assert not name.startswith("agent_procutil"), "disabled guard acquired the SDK"
+        return original_import(name, *args, **kwargs)
+    monkeypatch.setattr(client, "_load_sibling", load)
+    monkeypatch.setattr(builtins, "__import__", no_sdk)
+    for name in ("PR_SUPERSEDE_GUARD", "PR_SUPERSEDE_GUARD_MODE",
+                 "AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", "COPILOT_EXTENSIONS_CONTEXT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(setting, value)
+    payload = {"tool_name": "powershell", "cwd": str(tmp_path),
+               "tool_input": json.dumps({"script": "gh pr close 41 --repo example/project"})}
+    assert not modules["pr_supersede_guard.py"].needs_observations(payload)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    assert client.main(["preToolUse"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "permissionDecision": "ask", "permissionDecisionReason": "confirmed cheap guard",
+    }
 
 
 @pytest.mark.parametrize("fault", ["missing", "invalid"])

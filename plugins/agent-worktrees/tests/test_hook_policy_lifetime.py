@@ -210,3 +210,136 @@ console.log("policy timeout reported after its owned scope was retired");
             close_observer()
         job.terminate_and_wait(5)
         process.wait(timeout=5)
+
+
+@pytest.mark.parametrize("consumer", ["powershell.exe", "pwsh"])
+def test_legacy_venv_redirector_does_not_outlive_original_caller(tmp_path, consumer):
+    from agent_procutil._daemon_instance_identity import _windows_birth
+
+    interpreter = Path(sys.prefix) / "Scripts" / "python.exe"
+    assert interpreter.is_file() and (interpreter.parent.parent / "pyvenv.cfg").is_file()
+    shell = shutil.which(consumer)
+    assert shell
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("hook_policy_process.py", "hook_process_identity.py"):
+        shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
+    nonce = uuid.uuid4().hex
+    (scripts / "hook_client.py").write_text("""
+import importlib.util,json,os,subprocess,sys,time
+from pathlib import Path
+def _load_sibling(name):
+    spec=importlib.util.spec_from_file_location('fixture_identity',Path(__file__).with_name(name))
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    return module
+if __name__=='__main__':
+    from agent_procutil import direct_python,no_window_kwargs
+    from agent_procutil._daemon_instance_identity import _windows_birth
+    python,overrides=direct_python(sys.executable)
+    environment=dict(os.environ);environment.update(overrides)
+    child=subprocess.Popen([python,'-c','import time;time.sleep(60)'],env=environment,
+        stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,**no_window_kwargs())
+    marker=Path(os.environ['LEGACY_NATIVE_ROOT'])/'lookup.json'
+    marker.with_suffix('.prepared').write_text(json.dumps({
+        'pid':os.getpid(),'birth':_windows_birth(__import__('ctypes').WinDLL('kernel32').GetCurrentProcess()),
+        'child':child.pid,'child_birth':_windows_birth(int(child._handle)),
+        'nonce':os.environ['LEGACY_NATIVE_NONCE']}))
+    marker.with_suffix('.prepared').replace(marker)
+    marker.with_suffix('.published').touch()
+    time.sleep(60)
+""", encoding="utf-8")
+    supervisor = tmp_path / "supervisor.py"
+    supervisor.write_text("""
+import ctypes,json,os,sys,time
+from pathlib import Path
+sys.path[:0]=[sys.argv[1],sys.argv[2]]
+from agent_procutil import owned_process,_windows_caller_owned
+from agent_procutil._daemon_instance_identity import _windows_birth
+import hook_policy_process as policy
+import hook_process_identity as identity
+root=Path(os.environ['LEGACY_NATIVE_ROOT'])
+def refuse_confirmation(job,timeout):
+    marker=root/'pending.json'
+    marker.with_suffix('.prepared').write_text(json.dumps({
+        'pid':os.getpid(),'birth':_windows_birth(ctypes.WinDLL('kernel32').GetCurrentProcess()),
+        'launcher':os.getppid(),'launcher_birth':'windows:'+identity.process_start_time(os.getppid()),
+        'nonce':os.environ['LEGACY_NATIVE_NONCE']}))
+    marker.with_suffix('.prepared').replace(marker)
+    marker.with_suffix('.published').touch()
+    raise OSError('fixture unconfirmed native retirement')
+_windows_caller_owned._retire_job=refuse_confirmation
+real_run=owned_process.run_caller_owned
+def observe_settlement(*args,**kwargs):
+    original=kwargs['on_settled']
+    def settled():
+        (root/'settled').touch();original()
+    kwargs['on_settled']=settled
+    return real_run(*args,**kwargs)
+owned_process.run_caller_owned=observe_settlement
+policy.execute(b'{}',legacy=True,settlement_deadline=time.monotonic()+2,
+    initial_decision={'permissionDecision':'ask','permissionDecisionReason':'confirmed fixture'})
+raise AssertionError('unconfirmed cleanup must not return a decision')
+""", encoding="utf-8")
+    wrapper = tmp_path / "wrapper.ps1"
+    wrapper.write_text(
+        "param($Python,$Supervisor,$Source,$Scripts)\n"
+        "& $Python -I $Supervisor $Source $Scripts\nexit $LASTEXITCODE\n",
+        encoding="utf-8-sig",
+    )
+    source = PLUGIN.parents[1] / "libs" / "agent-procutil" / "src"
+    environment = dict(os.environ, LEGACY_NATIVE_ROOT=str(tmp_path), LEGACY_NATIVE_NONCE=nonce)
+    environment["PYTHONPATH"] = str(source) + os.pathsep + environment.get("PYTHONPATH", "")
+    process, job = spawn_sync_in_kill_on_close_job(
+        [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(wrapper),
+         str(interpreter), str(supervisor), str(source), str(scripts)],
+        require_job=True, allow_breakaway=False, env=environment, cwd=tmp_path,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    observers = []
+    try:
+        observers.append(_pin_descendant(process.pid, _windows_birth(int(process._handle))))
+        records = {}
+        deadline = time.monotonic() + 10
+        for name in ("lookup", "pending"):
+            marker = tmp_path / (name + ".json")
+            while not marker.with_suffix(".published").is_file():
+                assert process.poll() is None, process.communicate(timeout=5)
+                assert time.monotonic() < deadline, "legacy native custody witness never published"
+                time.sleep(.02)
+            record = records[name] = json.loads(marker.read_text(encoding="utf-8"))
+            assert record["nonce"] == nonce
+            observers.append(_pin_descendant(record["pid"], record["birth"]))
+            if name == "lookup":
+                observers.append(_pin_descendant(record["child"], record["child_birth"]))
+        assert records["pending"]["launcher"] != process.pid, "fixture bypassed the real venv redirector"
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.QueryFullProcessImageNameW.argtypes = [
+            wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x1000, False, records["pending"]["launcher"])
+        assert handle
+        try:
+            image, size = ctypes.create_unicode_buffer(32768), wintypes.DWORD(32768)
+            assert kernel.QueryFullProcessImageNameW(handle, 0, image, ctypes.byref(size))
+            assert os.path.samefile(image.value, interpreter)
+        finally:
+            assert kernel.CloseHandle(handle)
+        observers.append(_pin_descendant(
+            records["pending"]["launcher"], records["pending"]["launcher_birth"],
+        ))
+        assert not (tmp_path / "settled").exists()
+        process.kill()
+        for retired, _ in observers:
+            assert retired(), "legacy supervisor or descendant survived the original shell"
+        assert not (tmp_path / "settled").exists(), "caller exit falsely attested settlement"
+        process.communicate(timeout=5)
+    finally:
+        for _, close in observers:
+            close()
+        job.terminate_and_wait(5)
+        process.wait(timeout=5)

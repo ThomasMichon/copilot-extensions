@@ -137,6 +137,9 @@ def decide(
         try:
             kwargs = {"deadline": execution_deadline} if name == "cross_repo_guard.py" else {}
             if name == "pr_supersede_guard.py":
+                needs = getattr(module, "needs_observations", None)
+                if callable(needs) and not needs(payload):
+                    continue
                 try:
                     from agent_procutil.owned_budget import OwnedExecutionBudget
                 except Exception:

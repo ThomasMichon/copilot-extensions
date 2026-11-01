@@ -50,6 +50,40 @@ class ExitPin:
 
 
 @pytest.mark.integration
+def test_normal_legacy_completion_stops_its_native_caller_watch(monkeypatch, capsys):
+    import importlib.util
+    from types import SimpleNamespace
+    from agent_procutil import owned_process
+
+    scripts = Path(__file__).resolve().parents[3] / "plugins" / "agent-worktrees" / "scripts"
+    loaded = {}
+    for name in ("hook_policy_process", "hook_process_identity"):
+        spec = importlib.util.spec_from_file_location(name, scripts / (name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        loaded[name + ".py"] = module
+    monkeypatch.setitem(sys.modules, "hook_client", SimpleNamespace(
+        _load_sibling=lambda name: loaded[name],
+    ))
+    policy = loaded["hook_policy_process.py"]
+    watchers = []
+    original_watch = policy._watch_legacy_parent
+    def watch(stop):
+        thread = original_watch(stop)
+        watchers.append(thread)
+        return thread
+    def settled(argv, **kwargs):
+        kwargs["on_settled"]()
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
+    monkeypatch.setattr(policy, "_watch_legacy_parent", watch)
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
+    monkeypatch.setattr(owned_process, "run_caller_owned", settled)
+    assert policy.execute(b"{}", legacy=True) == 0
+    assert len(watchers) == 1 and not watchers[0].is_alive()
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.integration
 @pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="native POSIX enclosing group")
 @pytest.mark.parametrize("outcome", ["timeout", "caller-exit"])
 def test_borrowed_observations_keep_one_deadline_and_enclosing_descendant_custody(tmp_path, outcome):
