@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from threading import Event, Lock
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -465,6 +467,78 @@ def test_submission_registration_and_admission_close_share_one_short_guard(
         finally:
             register.set()
             finish.set()
+
+
+@pytest.mark.parametrize("failure", ["wait", "ack-lock"])
+def test_successful_reply_survives_wait_or_ack_lock_timeout_then_shutdown(
+    owner: Any, monkeypatch: Any, failure: str,
+) -> None:
+    daemon, queue, calls = owner
+    request = daemon.prepare_pool_metadata_request()
+    sent = _sender(daemon, queue)
+    wait = daemon._wait_pool_metadata_result
+    state = daemon._pool_request_state
+    entries = 0
+
+    def timed_out_wait(flight: Any, deadline: float) -> Any:
+        wait(flight, deadline)
+        raise TimeoutError("synthetic wait timeout racing successful completion")
+
+    @contextmanager
+    def timed_out_state(deadline: float) -> Any:
+        nonlocal entries
+        entries += 1
+        if entries == 2:
+            raise PoolPublicationError("synthetic acknowledgment lock timeout")
+        with state(deadline):
+            yield
+
+    if failure == "wait":
+        monkeypatch.setattr(daemon, "_wait_pool_metadata_result", timed_out_wait)
+    else:
+        monkeypatch.setattr(daemon, "_pool_request_state", timed_out_state)
+    with pytest.raises((TimeoutError, PoolPublicationError)):
+        daemon.send_pool_metadata_request()
+    flight = daemon._pool_metadata_flight
+    assert flight is not None and flight.request is request
+    assert flight.future.done() and flight.future.exception() is None
+    assert flight.acknowledged is None and daemon._pool_publisher_custody.pending is request
+    expected = flight.future.result()
+    assert daemon.shutdown()
+    assert daemon._pool_metadata_closed.is_set()
+    calls_before = len(calls)
+    monkeypatch.setattr(daemon, "_wait_pool_metadata_result", wait)
+    monkeypatch.setattr(daemon, "_pool_request_state", state)
+    assert daemon.send_pool_metadata_request() == expected
+    assert len(calls) == calls_before and sent == [request.to_dict()]
+    assert daemon._pool_publisher_custody.settled == (request, expected)
+    assert queue.pool_catalog_snapshot().scopes[0] == expected
+
+
+def test_final_source_recheck_crossing_deadline_never_admits_post(
+    owner: Any, monkeypatch: Any,
+) -> None:
+    from agent_dispatch import supervisor_pool_sender
+
+    daemon, queue, _calls = owner
+    request = daemon.prepare_pool_metadata_request()
+    sent = _sender(daemon, queue)
+    capture = daemon.capture_pool_publication_inputs
+    deadline = time.monotonic() + 1
+
+    def final_capture() -> Any:
+        current = capture()
+        assert current.coherent
+        monkeypatch.setattr(
+            supervisor_pool_sender, "time", SimpleNamespace(monotonic=lambda: deadline + 1),
+        )
+        return current
+
+    monkeypatch.setattr(daemon, "capture_pool_publication_inputs", final_capture)
+    with pytest.raises(PoolPublicationError, match="deadline exhausted before POST"):
+        daemon._run_pool_metadata_send(request, deadline)
+    assert not sent and not queue.pool_catalog_snapshot().scopes
+    assert daemon._pool_publisher_custody.pending is request
 
 
 @pytest.mark.parametrize("field", [

@@ -91,6 +91,9 @@ class SupervisorPoolSender:
                 raise SingletonAdmissionError("pool send changed the original singleton scope")
             if self._pool_metadata_closed.is_set():
                 raise PoolPublicationError("pool metadata send admission is closed")
+            deadline = self._pool_capture_deadline.get()
+            if deadline is None or time.monotonic() >= deadline:
+                raise PoolPublicationError("pool metadata send deadline exhausted before POST")
             yield
 
     def _run_pool_metadata_send(
@@ -165,13 +168,20 @@ class SupervisorPoolSender:
             with self._pool_request_state(deadline):
                 if flight.acknowledged is not None:
                     return flight.acknowledged
-                custody.acknowledge(request, result)
+                try:
+                    custody.acknowledge(request, result)
+                except PoolPublicationError:
+                    if self._pool_metadata_flight is flight:
+                        self._pool_metadata_flight = None
+                    raise
                 flight.acknowledged = result
                 if self._pool_metadata_flight is flight:
                     self._pool_metadata_flight = None
         except Exception as exc:
             log.warning("pool metadata result unresolved: error_type=%s", type(exc).__name__)
-            if flight.future.done():
+            if flight.future.done() and (
+                flight.future.cancelled() or flight.future.exception() is not None
+            ):
                 with self._pool_request_state(deadline):
                     if self._pool_metadata_flight is flight:
                         self._pool_metadata_flight = None

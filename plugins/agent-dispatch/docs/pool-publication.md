@@ -193,6 +193,9 @@ probe/retirement/shutdown accounting. Concurrent callers reuse that future.
 A bounded caller timeout does not cancel, replace or forget the original RPC.
 Completed failures leave the immutable request pending; the next explicit
 invocation recovers it, not a newer input revision.
+Successful completed flights stay retained until acknowledgment, including a
+timeout racing completion or an unavailable acknowledgment lock. They can
+settle after shutdown without needing another recovery read.
 Validated acknowledgment stays on that request-bound flight, so a delayed
 waiter cannot acknowledge an old result against a newer pending request.
 
@@ -211,6 +214,8 @@ singleton acquisition and pending request, fresh complete local sources (or
 the same whole-scope unavailable observation), coordinator registration revision
 and every original publisher position. Changed sources, delayed observations,
 withdrawals, a changed publisher or closed admission refuse the write. The
+original capture deadline is checked again immediately before POST admission,
+after parsing and final comparisons, not just before source collection. The
 request body retains its original generation, revisions and definitions; an
 unavailable request still carries an empty definition array.
 These are bounded, optimistic source checks, not atomic external-file fencing
