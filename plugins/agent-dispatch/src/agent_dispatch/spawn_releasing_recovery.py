@@ -27,6 +27,42 @@ log = logging.getLogger("agent-dispatch.supervisor")
 STRANDED_RELEASING_TIMEOUT_SECONDS = 600.0
 
 
+def retire_historical_native(supervisor: Any, reservation: dict, task: dict) -> int:
+    """Observe the original native, never conclude its successor's workspace."""
+    if (
+        reservation.get("startup_complete") is not True
+        and reservation.get("startup_fenced") is not True
+        or reservation.get("cooling_token")
+    ):
+        supervisor._retain_terminal_startup(reservation, task, "historical startup or cooling unresolved")
+        return 0
+    from . import tracking
+    from .spawn_factories import _parse_fleet_body_handle, _parse_local_body_handle
+    handle = reservation.get("session_handle")
+    if not isinstance(handle, str) or not handle:
+        return 0
+    fleet = _parse_fleet_body_handle(handle)
+    local = _parse_local_body_handle(handle)
+    try:
+        if fleet is not None:
+            verdict = supervisor.fleet_verdict_fn(*fleet)
+        elif local is not None:
+            verdict = supervisor.local_body_verdict_fn(local)
+        else:
+            machine = supervisor._retained_cli_machine(reservation, task)
+            worktree = reservation.get("worktree")
+            if not machine or not worktree:
+                return 0
+            verdict = supervisor.verdict_fn(worktree, machine, handle)
+        if verdict != tracking.GONE:
+            return 0
+        supervisor.client.retire_spawn(reservation["key"], exact_absence=True)
+    except (DispatchError, OSError) as exc:
+        log.warning("historical native retirement %s remains pending: %s", reservation["key"], exc)
+        return 0
+    return 1
+
+
 def recover_stranded_releasing_reservations(
     supervisor: Any, *, now: float | None = None
 ) -> int:

@@ -833,7 +833,7 @@ def test_late_exact_retirement_of_a_carried_native_prevents_retry_acceptance(q):
     record_native(q, retry)
     assert not q.get_reservation(retry.key).conversation_retired
     q.request_spawn_release(old.key, finished_startup_revision=1)
-    q.retire_spawn(old.key, exact_absence=True, conclusion_state="skipped")
+    q.retire_spawn(old.key, exact_absence=True)
     with pytest.raises(TaskError, match="retired native"):
         q.start(t.id, "host-a/worktree", owner_session_id="native",
                 expected_generation=q.get(t.id).generation)

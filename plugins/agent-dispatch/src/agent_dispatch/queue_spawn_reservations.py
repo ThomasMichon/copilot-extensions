@@ -398,7 +398,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                         retired = conn.execute(
                             "SELECT 1 FROM spawn_reservations "
                             f"WHERE {lineage_column} = ? AND session_handle = ? "
-                            "AND release_requested = 1 AND state IN (?, ?, ?) LIMIT 1",
+                            "AND release_requested = 1 AND native_release_pending = 0 "
+                            "AND state IN (?, ?, ?) LIMIT 1",
                             (
                                 lineage_value,
                                 carried_session,
@@ -472,6 +473,11 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                         )
                     # An independent logical request may reserve its own key,
                     # but cannot inherit a predecessor's cleaning allocation.
+                    if task.target_worktree is not None:
+                        raise TaskError(
+                            f"explicit target worktree {task.target_worktree!r} "
+                            f"has in-flight cleanup {cleanup_claim['key']}; target is retained"
+                        )
                     carried_worktree = carried_session = None
                     carried_path = carried_host = carried_driver = None
                     carried_project = latest_allocation["allocation_project"] if latest_allocation else None
@@ -832,7 +838,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         conclusion_detail: str | None = None,
         now: float | None = None,
     ) -> SpawnReservation:
-        """Atomically retire a RELEASING reservation on exact absence proof."""
+        """Retire a release on exact absence without reviving historical ownership."""
         if not exact_absence:
             raise TaskError("spawn retirement requires exact absence proof")
         ts = self._now(now)
@@ -845,19 +851,27 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             if row is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such reservation: {key}")
-            if row["state"] != SpawnState.RELEASING:
+            historical = bool(row["native_release_pending"]) and row["state"] not in SpawnState.ACTIVE
+            if row["state"] != SpawnState.RELEASING and not historical:
                 conn.execute("COMMIT")
                 raise TaskError(f"reservation {key} is {row['state']!r}, not releasing")
             require_no_cooling(row)
             if not row["startup_complete"] and not row["startup_fenced"]:
                 raise TaskError("spawn retirement requires completed startup; original caller remains unresolved")
-            to_state = (
-                SpawnState.SETTLED
-                if row["release_disposition"] == "settled"
-                else SpawnState.FAILED
+            if historical and (conclusion_state is not None or conclusion_detail is not None):
+                if _newer_worktree_reservation(conn, row, key) is not None:
+                    raise TaskError("historical native retirement cannot mutate carried workspace cleanup")
+                _validate_conclusion_claim(
+                    row["cleanup_claim_token"], row["cleanup_claim_expires_at"], None,
+                    now=ts, required=row["conclusion_state"] == "pending",
+                )
+            to_state = row["state"] if historical else (
+                SpawnState.SETTLED if row["release_disposition"] == "settled" else SpawnState.FAILED
             )
             conn.execute(
                 "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
+                "native_release_pending = 0, "
+                "conversation_retired = CASE WHEN ? THEN 1 ELSE conversation_retired END, "
                 "detail = COALESCE(?, detail), "
                 "conclusion_state = CASE WHEN ? IS NOT NULL THEN ? "
                 "ELSE conclusion_state END, "
@@ -866,6 +880,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 (
                     to_state,
                     ts,
+                    historical,
                     detail,
                     conclusion_state,
                     conclusion_state,

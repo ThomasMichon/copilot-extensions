@@ -13,6 +13,7 @@ def is_native_retired(row: Any) -> bool:
     """Use the reservation owner's marker or completed exact-absence release."""
     return bool(row["conversation_retired"]) or bool(
         row["release_requested"]
+        and not ("native_release_pending" in row.keys() and row["native_release_pending"])
         and row["state"] in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.REARMED}
     )
 
@@ -83,6 +84,7 @@ def _validate_origin(conn: Any, row: Any, origin: str | None) -> None:
 
 def native_bindings(
     conn: Any, row: Any, task: Any, *, require_owned_workspace: bool = True,
+    reject_pending_native: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Classify driver identities; creation/recovery callers also require origin ownership.
 
@@ -121,6 +123,11 @@ def native_bindings(
     for history, native in evidence:
         handle = history["session_handle"]
         native = native or handle_natives.get(handle)
+        if (
+            reject_pending_native is not None and native == reject_pending_native
+            and history["native_release_pending"]
+        ):
+            raise TaskError("native has pending retirement")
         is_retired = is_native_retired(history)
         if native:
             known.add(native)

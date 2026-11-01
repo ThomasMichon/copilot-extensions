@@ -43,8 +43,16 @@ Capacity counts accountable `reserving`, `spawned`, `cold` and `releasing`
 reservations, failed native/startup effects and unresolved transport custody,
 not caller estimates or task status. Immutable per-reservation pool bindings
 retain older attempts even when the task's current assignment advances.
-A terminal pool attempt may enter the existing release/retirement path; failure,
-rearm and native retirement alone do not prove original startup closure.
+A terminal pool attempt enters the existing release/retirement path with
+`native_release_pending`, retaining its historical state rather than becoming
+another active assignment. Release intent is not exact-absence evidence:
+historical capacity stays accountable until its original native is retired.
+Publication and affirmative start refuse a native whose historical retirement
+is still pending, without misclassifying that intent as proven absence.
+The supervisor observes that native without ending or concluding a successor's
+workspace. Historical retirement preserves workspace-cleanup metadata; cleanup,
+rearm and allocation replacement remain excluded while native release is pending.
+Failure, rearm and native retirement alone do not prove original startup closure.
 Capacity is released only after its startup is completed or fenced and its
 native and transport evidence permits that release. An active replay returns
 the same reservation with `reserved: false`; even an expired catalog cannot
@@ -72,6 +80,11 @@ replacement identity without clearing release intent. Capacity still waits for
 that replacement's own completed/fenced startup and retirement. History
 classification for targeted/reused external workspaces does not grant ownership
 to create, recover or dispose them.
+Release identity checks use the original reservation's immutable pool binding,
+not its successor's current routing. A release cannot overwrite a retained native
+handle, including on failed or settled attempts. Unrelated pending cleanup may
+discard an untargeted affinity, but cannot discard an explicit target and commit
+a claim for a different workspace: placement refuses before reserving a slot.
 A spawn record, reachability or delivery receipt is not an
 acceptance. Failed or stale starts leave the claim and slot intact.
 

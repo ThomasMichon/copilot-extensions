@@ -467,6 +467,12 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 state=(f"{SpawnState.RESERVING},{SpawnState.SPAWNED},{SpawnState.RELEASING},{SpawnState.COLD}"),
                 strict=True,
             )
+            reservations.extend(
+                reservation for reservation in self._pool_reservations(
+                    state=f"{SpawnState.FAILED},{SpawnState.SETTLED},{SpawnState.REARMED},{SpawnState.DEFERRED}",
+                    strict=True,
+                ) if reservation.get("native_release_pending")
+            )
         except _ReservationsUnavailable as exc:
             # Capacity-critical: unlike every other _pool_reservations caller
             # (which only skips optional work on an empty result), this count
@@ -488,7 +494,10 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             except DispatchError:
                 active.append(reservation)
                 continue
-            if self._matches_pool(task) and self._reservation_has_live_process(reservation, task):
+            if self._matches_pool(task) and (
+                reservation.get("native_release_pending")
+                or self._reservation_has_live_process(reservation, task)
+            ):
                 active.append(reservation)
         return active
 
@@ -1423,9 +1432,11 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             )
         )
         reservations.extend(
-            self._pool_reservations(
-                state=(f"{SpawnState.FAILED},{SpawnState.SETTLED}"),
-                conclusion_state=_CONCLUSION_PENDING,
+            reservation for reservation in self._pool_reservations(
+                state=f"{SpawnState.FAILED},{SpawnState.SETTLED},{SpawnState.REARMED},{SpawnState.DEFERRED}",
+            ) if reservation.get("native_release_pending") or (
+                reservation.get("state") in {SpawnState.FAILED, SpawnState.SETTLED}
+                and reservation.get("conclusion_state") == _CONCLUSION_PENDING
             )
         )
         for res in reservations:
@@ -1436,6 +1447,10 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             except DispatchError:
                 continue
             if not self._matches_pool(task):
+                continue
+            if res.get("native_release_pending"):
+                from .spawn_releasing_recovery import retire_historical_native
+                released += retire_historical_native(self, res, task)
                 continue
             body_already_released = res.get("state") in SpawnState.RELEASABLE
             if not body_already_released and (

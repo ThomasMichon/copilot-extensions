@@ -260,6 +260,7 @@ class SpawnReservation:
     allocation_reservation_key: str | None = None
     conversation_retired: bool = False
     release_requested: bool = False
+    native_release_pending: bool = False
     release_disposition: str | None = None
     exclusive_released: bool = False
     detail: str | None = None
@@ -301,6 +302,8 @@ class SpawnReservation:
             conversation_retired=bool(row["conversation_retired"])
             if "conversation_retired" in row.keys() else False,
             release_requested=bool(row["release_requested"]),
+            native_release_pending=bool(row["native_release_pending"])
+            if "native_release_pending" in row.keys() else False,
             release_disposition=row["release_disposition"],
             exclusive_released=bool(row["exclusive_released"]),
             detail=row["detail"],

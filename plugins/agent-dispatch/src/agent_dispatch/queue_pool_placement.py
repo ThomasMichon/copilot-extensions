@@ -128,7 +128,7 @@ def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
 
 def reservation_accountable(conn: sqlite3.Connection, row: sqlite3.Row) -> bool:
     """Terminal bookkeeping never substitutes for native or transport retirement."""
-    if row["state"] in SpawnState.ACTIVE:
+    if row["state"] in SpawnState.ACTIVE or row["native_release_pending"]:
         return True
     from .queue_execution_custody import ExecutionSendUnresolved, require_execution_send_reconciliation
     try:
@@ -255,24 +255,36 @@ def require_pool_workspace(
 
 def pool_native_publication(
     conn: sqlite3.Connection, task: Task, row: sqlite3.Row, session_handle: str,
+    *, releasing: bool = False,
 ) -> bool:
     """Clear only inherited retirement when publishing a distinct live native."""
-    if pool_assignment(conn, task.id) is None:
+    if conn.execute(
+        "SELECT 1 FROM pool_reservation_bindings WHERE reservation_key = ?", (row["key"],),
+    ).fetchone() is None:
         return False
-    if not row["worktree"]:
+    if not releasing and not row["worktree"]:
         raise TaskError("pool publication requires its recorded workspace")
-    require_pool_workspace(
-        conn, task, row["worktree"], row["execution_machine"], driver=row["driver"],
-    )
+    if not releasing:
+        require_pool_workspace(
+            conn, task, row["worktree"], row["execution_machine"], driver=row["driver"],
+        )
     from .ordinary_native_bindings import native_bindings, reservation_native_identity
-    _, retired = native_bindings(conn, row, task, require_owned_workspace=False)
     candidate = {**dict(row), "session_handle": session_handle, "conversation_retired": 0}
     native = reservation_native_identity(conn, candidate)
+    previous = reservation_native_identity(conn, row)
+    if (
+        previous is not None and previous != native
+        or releasing and row["session_handle"] and row["session_handle"] != session_handle
+    ):
+        raise TaskError("pool publication cannot replace its retained native identity")
+    if releasing and previous is not None and previous == native:
+        return False
+    _, retired = native_bindings(
+        conn, row, task, require_owned_workspace=False,
+        reject_pending_native=None if releasing else native,
+    )
     if native is not None and native in retired:
         raise TaskError("pool publication cannot revive a retired native")
-    previous = reservation_native_identity(conn, row)
-    if previous is not None and previous != native:
-        raise TaskError("pool publication cannot replace its retained native identity")
     if row["conversation_retired"]:
         if not retired or native is None or row["session_handle"] or row["agent_info"]:
             raise TaskError("pool publication requires a distinct proven replacement native")
@@ -309,7 +321,9 @@ def require_pool_start(
     from .ordinary_native_bindings import native_bindings, reservation_native_identity
     if reservation_native_identity(conn, row) != native_id:
         raise TaskError("pool start native does not match retained startup identity")
-    _, retired = native_bindings(conn, row, task, require_owned_workspace=False)
+    _, retired = native_bindings(
+        conn, row, task, require_owned_workspace=False, reject_pending_native=native_id,
+    )
     if native_id in retired:
         raise TaskError("pool start cannot accept a retired native")
     return True

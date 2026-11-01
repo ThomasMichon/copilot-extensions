@@ -51,6 +51,13 @@ class SpawnReleaseMixin:
                     f"reservation {key} worktree is {row['worktree']!r}, "
                     f"not {worktree!r}"
                 )
+            clear_retirement = False
+            if session_handle is not None:
+                from .queue_pool_placement import pool_native_publication
+                task = self._fetch(conn, row["task_id"])
+                clear_retirement = pool_native_publication(
+                    conn, task, row, session_handle, releasing=True,
+                )
             if finished_startup_revision is not None:
                 if row["startup_revision"] != finished_startup_revision:
                     raise TaskError("startup revision changed before failed startup closure")
@@ -59,7 +66,7 @@ class SpawnReleaseMixin:
                 conn.execute(
                     "UPDATE spawn_reservations SET startup_fenced = 1 WHERE key = ?", (key,),
                 )
-            if row["state"] == SpawnState.RELEASING:
+            if row["state"] == SpawnState.RELEASING or terminal_pool:
                 release_disposition = (
                     "failed"
                     if "failed" in {row["release_disposition"], disposition}
@@ -67,11 +74,15 @@ class SpawnReleaseMixin:
                 )
                 conn.execute(
                     "UPDATE spawn_reservations SET release_requested = 1, "
+                    "native_release_pending = ?, "
+                    "conversation_retired = CASE WHEN ? THEN 0 ELSE conversation_retired END, "
                     "release_disposition = ?, detail = COALESCE(?, detail), "
                     "session_handle = COALESCE(?, session_handle), "
                     "worktree = COALESCE(?, worktree), "
                     "updated_at = ? WHERE key = ?",
                     (
+                        int(terminal_pool),
+                        clear_retirement,
                         release_disposition,
                         detail,
                         session_handle,
@@ -84,6 +95,7 @@ class SpawnReleaseMixin:
                 conn.execute(
                     "UPDATE spawn_reservations SET state = ?, "
                     "release_requested = 1, release_disposition = ?, "
+                    "conversation_retired = CASE WHEN ? THEN 0 ELSE conversation_retired END, "
                     "detail = COALESCE(?, detail), "
                     "session_handle = COALESCE(?, session_handle), "
                     "worktree = COALESCE(?, worktree), "
@@ -92,6 +104,7 @@ class SpawnReleaseMixin:
                     (
                         SpawnState.RELEASING,
                         disposition,
+                        clear_retirement,
                         detail,
                         session_handle,
                         worktree,

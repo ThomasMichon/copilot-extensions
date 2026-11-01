@@ -1748,3 +1748,25 @@ source evidence, not current-head review approval, merge, release or running
 adoption. The claim/start work unit and canonical parent remain **Active**;
 caller migration, selected startup/retry policy and every remaining parent
 qualification gate remain open.
+
+### 2026-11-01 - Historical native release and explicit-target correction prepared
+
+The #9859 correction retains terminal pool reservations as historical records
+while `native_release_pending` accounts for their unresolved original native.
+Requesting a predecessor's release cannot resurrect another active assignment
+or replace its retained native handle. Current publication/acceptance rejects
+that native while retirement is pending, independently of the later
+exact-absence classification. The supervisor observes the historical native
+without ending or concluding a successor's workspace; startup, cleanup, rearm,
+allocation and transport fences remain independent.
+
+An explicit target with unrelated pending cleanup now refuses placement before
+claim/reservation commit; untargeted affinity can still be discarded. Final
+contained validation passed **1181 controls** across sixteen lifecycle,
+workspace, catalog, authority and recovery selectors, including active-successor
+release/replay with and without exclusivity, handle retention across terminal
+states, late handleless replacement, original startup closure, reopen and
+explicit-target refusal. Ruff, focused placement typing, the enforced admitted
+type scopes, module-size ceilings, install contracts and documentation consistency
+pass. This remains prepared source evidence: current-head review/merge,
+supervisor caller migration, retry budgets and all parent/native gates remain open.
