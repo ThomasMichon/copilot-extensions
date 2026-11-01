@@ -6,38 +6,25 @@ from pathlib import Path
 import textwrap
 
 
-def write_procutil(
-    destination: Path, *, procutil: Path, runtime: Path, root: Path,
+def fault_source(
+    *, root: Path,
     frozen: Path, marker: Path, observations: Path, writer: str,
-) -> None:
+) -> bytes:
     configuration = {
-        "procutil": str(procutil), "runtime": str(runtime), "root": str(root),
+        "root": str(root),
         "frozen": str(frozen), "marker": str(marker), "observations": str(observations),
         "writer": writer,
     }
     program = r'''
-import importlib.util,json,sys,time
+import json,sys,time
 from pathlib import Path
 
-def load(name,path):
-    spec=importlib.util.spec_from_file_location(name,path)
-    module=importlib.util.module_from_spec(spec)
-    sys.modules[name]=module
-    spec.loader.exec_module(module)
-    return module
-
-procutil=load("fault_procutil",CONFIG["procutil"])
-runtime=load("fault_runtime",CONFIG["runtime"])
+runtime=sys.modules[__name__.removesuffix("_procutil")+"_runtime"]
 root=Path(CONFIG["root"])
 report=Path(CONFIG["observations"])
 marker=Path(CONFIG["marker"])
-SyncProcessLaunchError=procutil.SyncProcessLaunchError
-__path__=procutil.__path__
-no_window_kwargs=procutil.no_window_kwargs
-original=procutil.JobHandle.terminate_and_wait
-
-def __getattr__(name):
-    return getattr(procutil,name)
+original=JobHandle.terminate_and_wait
+original_spawn=spawn_sync_in_kill_on_close_job
 
 def terminate_and_wait(job,timeout):
     entries=json.loads(report.read_text()) if report.exists() else []
@@ -77,15 +64,10 @@ def terminate_and_wait(job,timeout):
 
 def spawn_sync_in_kill_on_close_job(argv,**kwargs):
     if list(argv[1:4]) != ["-I","-m","venv"]:
-        return procutil.spawn_sync_in_kill_on_close_job(argv,**kwargs)
-    process,job=procutil.spawn_sync_in_kill_on_close_job(
+        return original_spawn(argv,**kwargs)
+    process,job=original_spawn(
         [sys.executable,"-I","-c",CONFIG["writer"]],**kwargs)
     job.terminate_and_wait=lambda timeout: terminate_and_wait(job,timeout)
     return process,job
 '''
-    destination.write_text(
-        "CONFIG = " + repr(configuration) + "\n" + textwrap.dedent(program),
-        encoding="utf-8",
-    )
-    for name in ("_job_scopes.py", "_windows_job_types.py", "streaming.py", "_output_relay.py"):
-        destination.with_name(name).write_bytes(procutil.with_name(name).read_bytes())
+    return ("\nCONFIG = " + repr(configuration) + "\n" + textwrap.dedent(program)).encode("utf-8")

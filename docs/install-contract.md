@@ -4994,6 +4994,12 @@ their finite startup checks in either mode.
 If the parent's quiet window expires first, it closes its liveness pipe and
 continues draining the guardian's settled completion before propagating the
 timeout, preserving the child's original stdout and stderr channels.
+The guardian executes the same bounded, frozen source closure delivered over
+stdin, including for whole-operation co-retention; it never reopens a mutable
+helper path to obtain control code. Streaming output renews only the quiet
+window. An explicit absolute deadline remains a hard bound regardless of
+progress, and non-streaming children retain their original wall-clock bound.
+The production whole-operation watchdog remains 480 seconds.
 The explicit `allow_breakaway` option is reserved for a whole-operation lifecycle
 owner that launches durable services, not ordinary constructors. An optional
 Windows `retention_scope` lets that same finite guardian co-retain each nested
