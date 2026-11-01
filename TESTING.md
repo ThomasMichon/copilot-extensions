@@ -1,5 +1,17 @@
 # Testing copilot-extensions
 
+The manual `Installation context full` workflow's `komodo-recovery` portfolio
+runs one bounded Linux job at the exact dispatch SHA. It exercises the existing
+native subprocess protocol fixture, real physical-owner locks, immutable
+state/profile/outcome files and SQLite publication across lost failure
+publication, recovered health, pending attachments and native/repair
+entry-point switches. Compose 2/5 protocol cases retain their original native
+process custody and verify no replayed apply. The job fails rather than crediting
+skipped or empty test selection, and uses the standalone runner's environment
+lease, sandbox and whole-process cleanup.
+This is opt-in source qualification, not a required unit-CI expansion, actual
+Docker/official-image startup, installed-service adoption or rollout proof.
+
 The optional `uv_deployment_compatibility` native-acceptance selector runs the
 focused retained-dependency policy, Codespaces cold/warm installation,
 MCP/Dispatch caller compatibility and full coupled Logger batch/binstub packets

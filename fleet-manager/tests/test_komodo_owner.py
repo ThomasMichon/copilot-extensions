@@ -40,6 +40,9 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
 @pytest.mark.parametrize("scenario", [
     "fresh-repeat", "lost-reply", "recovery", "update", "adoption", "foreign",
     "failed-recovery", "unsettled-restart", "lost-terminal-receipt",
+    "failed-retained-health-converge", "failed-retained-health-settle",
+    "first-complete-unstarted-lost-failure-publication",
+    "first-partial-created-lost-failure-publication",
     "credential-drift", "native-drift", "network-drift", "foreign-endpoint",
     "foreign-network", "adoption-drift", "adoption-update", "adoption-update-corrupt", "adoption-failed-drift",
     "retire-reinstall", "retire-lost-reply", "retire-partial",
@@ -354,7 +357,7 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     return
             if scenario.startswith("first-"):
                 marker = rig["directory"] / "fail-create.json"
-                complete_unstarted = scenario == "first-complete-unstarted"
+                complete_unstarted = scenario.startswith("first-complete-unstarted")
                 services = (["core", "mongo", "periphery"] if complete_unstarted
                             else [] if scenario.startswith("first-empty") else ["core", "mongo"]
                             if scenario in ("first-partial-core", "first-partial-key-drift") else ["mongo"])
@@ -399,7 +402,28 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                         await invoke(owner(), original, failed=True)
                     assert effects() == 1 and not health_requests
                     return
-                failed = await invoke(owner(), original, failed=True)
+                if scenario.endswith("lost-failure-publication"):
+                    reconcile = NodeJournal.reconcile
+                    outcomes = []
+
+                    def lost_failure(journal, operation, outcome, **options):
+                        outcomes.append(outcome)
+                        raise PlanError("fixture-lost-failure-publication")
+
+                    monkeypatch.setattr(NodeJournal, "reconcile", lost_failure)
+                    with pytest.raises(PlanError, match="fixture-lost-failure-publication"):
+                        await invoke(owner(), original, failed=True)
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        retained_failure = state.read()["failed"]
+                        assert state.read()["attempt"]["failure_outcome"] == outcomes[0].to_dict()
+                    monkeypatch.setattr(NodeJournal, "reconcile", reconcile)
+                    failed = await invoke(owner(), original)
+                    assert failed == outcomes[0]
+                    with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                        assert state.read()["failed"] == retained_failure
+                        assert state.read()["attempt"] is None
+                else:
+                    failed = await invoke(owner(), original, failed=True)
                 assert failed.to_dict()["status"] == "failed"
                 assert await invoke(owner(), original) == failed
                 status = await invoke(owner(), original, status=True)
@@ -540,6 +564,35 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
 
             first = owner()
             original = request()
+            if scenario.startswith("failed-retained-health-"):
+                health_failure[0] = True
+                with pytest.raises(PlanError, match="current Core version"):
+                    await invoke(first, original)
+                original_native = live()
+                reconcile = NodeJournal.reconcile
+                outcomes = []
+
+                def lost_failure(journal, operation, outcome, **options):
+                    outcomes.append(outcome)
+                    raise PlanError("fixture-lost-failure-publication")
+
+                monkeypatch.setattr(NodeJournal, "reconcile", lost_failure)
+                with pytest.raises(PlanError, match="fixture-lost-failure-publication"):
+                    await invoke(owner(), original, failed=True)
+                with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                    retained_failure = state.read()["failed"]
+                    assert state.read()["attempt"]["failure_outcome"] == outcomes[0].to_dict()
+                monkeypatch.setattr(NodeJournal, "reconcile", reconcile)
+                health_failure[0] = False
+                before_http = len(health_requests)
+                recovered = await invoke(owner(), original, failed=scenario.endswith("-settle"))
+                assert recovered == outcomes[0] and recovered.to_dict()["status"] == "failed"
+                assert await invoke(owner(), original) == recovered
+                with KomodoState.open(runtime, daemon="daemon-a", project=desired["project"]) as state:
+                    assert state.read()["failed"] == retained_failure
+                    assert state.read()["attempt"] is None and state.read()["good"] is None
+                assert effects() == 1 and live() == original_native and len(health_requests) == before_http
+                return
             if scenario in ("missing-membership-before-health", "mismatched-attachment-before-health"):
                 def omit_membership(arguments: list[str], **kwargs: Any) -> Any:
                     result = rig["tooling"].run(arguments, **kwargs)
