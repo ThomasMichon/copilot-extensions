@@ -99,6 +99,15 @@ Executing capability support does not prove backend availability, actual pinned
 write-owner adoption or installed serving readiness. Missing owners return
 unavailable. Existing watch clients keep their exact strict capability shape.
 Neither package equality nor a new source library upgrades a running service.
+Expand the optional receiver first; migrate clients only after that running
+receiver advertises workspace/v1 and the requested operation. No watch form is
+deprecated or removed by this expansion. Disabling/rolling back the optional
+workspace binding makes new clients report unsupported and leaves watch requests
+unchanged; clients clear negotiated support on a failed rediscovery.
+Any binary rollback must retain running v2-compatible store readers or use the
+existing lifecycle owner's drain/transition procedure. Downgrading the durable
+envelope, discarding unknown receipts or guessing legacy reader compatibility is
+never a supported rollback. This source change performs none of those operations.
 
 Source tests exercise real atomic cache/store, unchanged strict watch clients,
 actual handler/native client/Fleet-shaped framing, protected synthetic transport,
