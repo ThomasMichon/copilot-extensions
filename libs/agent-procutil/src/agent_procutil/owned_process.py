@@ -462,6 +462,7 @@ def _run_owned(
         **({"pass_fds": pass_fds} if pass_fds else {}),
         **({"cwd": cwd} if cwd is not None else {}),
         **({"env": env} if env is not None else {}),
+        **({"budget": budget} if bounded_windows and budget is not None else {}),
     )
     retained = False
     try:

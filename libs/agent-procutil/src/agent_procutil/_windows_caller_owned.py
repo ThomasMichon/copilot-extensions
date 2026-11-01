@@ -316,7 +316,7 @@ def _environment_block(environment):
     return ctypes.create_unicode_buffer("\0".join(entries) + "\0\0")
 
 
-def spawn(argv: list[str], **kwargs):
+def spawn(argv: list[str], *, budget=None, **kwargs):
     """Create the target in its caller-owned Job atomically, before it can run."""
     import msvcrt
     from agent_procutil.owned_process import OwnedCleanupError
@@ -437,8 +437,11 @@ def spawn(argv: list[str], **kwargs):
             process = _Process(argv, info, streams)
         if process is not None:
             try:
-                job.terminate_and_wait(2.0)
-                process.wait(2.0)
+                if budget is None:
+                    job.terminate_and_wait(2.0)
+                else:
+                    process.retire_job(job, budget.cleanup_timeout())
+                process.wait(budget.cleanup_timeout() if budget else 2.0)
             except BaseException as cleanup:
                 raise OwnedCleanupError(process, job) from cleanup
             try:
