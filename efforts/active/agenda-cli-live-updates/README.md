@@ -163,6 +163,58 @@ proposal is claimed available merely because its intended name is described.
 
 ## Journal
 
+### 2026-11-01 - Restoration preserves consumed shared-root history
+
+- The exact shipped deferred sequence reproduced declining visit counts on
+  restore. Stable frame correlation, retained imported visit origins and unique
+  managed entry logs now reconcile the entire continuing chain, including
+  ancestors, against deferred, restored and completed history.
+- Distinct managed fork occurrences are counted once each rather than reduced
+  to the largest counter. Continuing evidence, execution links and holds remain
+  available; original saved positions, returns, pending decisions and tighter
+  limits are preserved. Ambiguous legacy histories, conflicting occurrences,
+  missing history and exhausted budgets refuse before transaction acceptance.
+- The standalone store/fault/restoration packet passed 122 cases. The initial
+  worker container snapshot failed before testing; its bounded source-runner
+  result was independently verified through the full isolated container using
+  the coordinator's per-invocation temporary directory. The actual connected
+  Manager/held-consumer/contract packet passed 117 cases with cleanup verified.
+  Idempotent results and the single SQLite commit barrier remain unchanged.
+  Fresh current-head review and normal source merge remain required.
+
+### 2026-11-01 - Activation failure closes held agenda streams
+
+- Activation-error and writer-replacement paths now use the owning
+  `close_admission` seam to close agenda streams alongside the roster feed.
+  Later temporary failures cannot downgrade an already-permanent subscriber
+  retirement reason.
+- Seven real private-socket regressions failed before the correction. They now
+  verify terminal going-away followed by EOF, successful/failed writer
+  replacement, same-generation recovery, new-generation requalification and
+  permanent shutdown refusal.
+- The provider/current-runtime packet passed 108 cases both for the scoped
+  worker and independent coordinator, with cleanup verified. The coordinator's
+  first attempt exhausted the host temporary filesystem before tests began;
+  the unchanged isolated runner succeeded using a private per-invocation
+  temporary directory on another filesystem, without deletion or global changes.
+  Shared-root restoration and fresh review remain blocking.
+
+### 2026-11-01 - Shared-root restoration and resident closure review
+
+- Fresh review accepted the Unicode and buffered-frame corrections, then found
+  that restoring a deferred shared-root chain can reduce previously consumed
+  visits and omit intervening evidence. The standalone owner is reproducing the
+  shipped version-2 sequence and must reconcile that history or visibly refuse
+  an ambiguous restoration before accepting it.
+- The resident owner is correcting activation-error and writer-replacement
+  paths that close the roster feed but leave an already-held agenda feed alive.
+  Regression coverage must prove closure and preserve legitimate temporary
+  same-generation recovery, project isolation and source/sequence fences.
+- Concurrent contribution-base edits caused an additive test-documentation
+  conflict. Both independent integration-portfolio descriptions were retained;
+  source history was rebased without discarding either owner's content.
+  These new findings remain blocking pending fixes, validation and fresh review.
+
 ### 2026-11-01 - Buffered protocol frames before exit fallback
 
 - A paused consumer could previously let the child-exit grace expire before

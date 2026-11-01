@@ -25,7 +25,8 @@ class AgendaFeed:
         with self._condition:
             self._closed = reason
             for subscriber in self._subscribers.values():
-                subscriber["closed"] = reason
+                if subscriber["closed"] not in {"superseded", "shutdown", "closed"}:
+                    subscriber["closed"] = reason
             self._condition.notify_all()
 
     def changed(self, project: str) -> None:

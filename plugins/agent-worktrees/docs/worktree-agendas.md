@@ -109,6 +109,12 @@ Non-text frame types are rejected with a structured `invalid-response` error,
 not a traceback or an empty successful relay.
 There are at most 32 held agenda subscriptions, accounted in the existing
 monitor drain and retirement path; no additional listener or daemon is created.
+Activation failures and writer replacement close agenda admission and already
+held streams alongside the roster feed. A writer replacement's terminal
+retirement reason cannot be downgraded by a subsequent activation failure.
+Temporary same-generation recovery admits a new snapshot without resetting
+sequence or source-store fences; a replaced writer remains fenced and its new
+generation must requalify current roster/cache data before observation.
 
 ## Ownership, durability and recovery
 

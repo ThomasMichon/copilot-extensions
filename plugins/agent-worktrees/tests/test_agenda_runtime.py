@@ -15,6 +15,7 @@ import pytest
 from agent_worktrees import agenda_contract as contract
 from agent_worktrees import agenda_feed, record_cache, tracking
 from agent_worktrees import status_monitor_cutover as control
+from agent_worktrees import worktrees_projection as projection
 from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
 
@@ -561,6 +562,175 @@ def socket_feed(owner, payload=None):
             reader.close()
             owner.close_admission()
     server.close()
+
+
+def held_terminal(reader):
+    for _ in range(3):
+        frame = contract.decode(reader.readline(contract.FRAME_BYTES + 1))
+        if frame["type"] == "going-away":
+            assert reader.readline(contract.FRAME_BYTES + 1) == b""
+            return frame
+        assert frame["type"] == "heartbeat"
+    pytest.fail("held agenda continued heartbeats after owner admission closed")
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [
+        projection.ProjectionError,
+        projection.ProjectionUnavailable,
+        projection.ProjectionOwnershipChanged,
+        sqlite3.OperationalError,
+        OSError,
+    ],
+)
+def test_activation_failure_retires_already_held_agenda_and_allows_same_generation_recovery(
+    owned,
+    monkeypatch,
+    error_type,
+):
+    owner, _head, elected, _path = owned
+    body = observation(2)
+    accepted = owner.agendas.publish(publication(owner, body))
+    original_activate = owner.store.activate
+
+    def fail(**kwargs):
+        raise error_type("synthetic activation failure")
+
+    monkeypatch.setattr(agenda_feed, "HEARTBEAT_SECONDS", 0.02)
+    with socket_feed(owner) as (_client, reader):
+        snapshot = contract.decode(reader.readline())
+        assert snapshot == {"type": "snapshot", **accepted}
+        monkeypatch.setattr(owner.store, "activate", fail)
+        with pytest.raises((projection.ProjectionError, projection.ProjectionUnavailable)):
+            owner.activate()
+        assert elected[0] is True and owner._admitting is False
+        terminal = held_terminal(reader)
+        assert terminal == {
+            "type": "going-away",
+            "generation": snapshot["generation"],
+            "sequence": snapshot["sequence"],
+            "reason": "unavailable",
+        }
+    assert owner.agendas.feed.wait_closed(1)
+    monkeypatch.setattr(owner.store, "activate", original_activate)
+    owner.activate()
+    assert owner.store.generation == accepted["generation"]
+    with socket_feed(owner) as (client, reader):
+        assert contract.decode(reader.readline()) == {"type": "snapshot", **accepted}
+        assert client._request("agenda-publish", publication(owner, body)) == accepted
+        assert (
+            client._request(
+                "agenda-publish",
+                publication(owner, observation(1)),
+            )["error"]["code"]
+            == "stale-revision"
+        )
+
+
+@pytest.mark.parametrize("replacement_fails", [False, True])
+def test_writer_replacement_retires_held_old_generation_and_requalifies_new_generation(
+    owned,
+    monkeypatch,
+    replacement_fails,
+):
+    owner, _head, elected, _path = owned
+    body = observation(2)
+    accepted = owner.agendas.publish(publication(owner, body))
+    old_store = owner.store
+    takeover = projection.WorktreesProjection(owner.store.db_path)
+    original_activate = projection.WorktreesProjection.activate
+    monkeypatch.setattr(agenda_feed, "HEARTBEAT_SECONDS", 0.02)
+    try:
+        with socket_feed(owner) as (_client, reader):
+            snapshot = contract.decode(reader.readline())
+            assert snapshot == {"type": "snapshot", **accepted}
+            takeover.activate(
+                expected_generation=old_store.generation, authority_check=lambda: True
+            )
+            if replacement_fails:
+
+                def activate(store, **kwargs):
+                    if store is not old_store:
+                        raise projection.ProjectionUnavailable("synthetic replacement failure")
+                    return original_activate(store, **kwargs)
+
+                monkeypatch.setattr(projection.WorktreesProjection, "activate", activate)
+                with pytest.raises(projection.ProjectionUnavailable):
+                    owner.activate()
+            else:
+                owner.activate()
+            assert elected[0] is True and owner.store is not old_store
+            terminal = held_terminal(reader)
+            assert terminal == {
+                "type": "going-away",
+                "generation": snapshot["generation"],
+                "sequence": snapshot["sequence"],
+                "reason": "superseded",
+            }
+        assert owner.agendas.feed.wait_closed(1)
+        monkeypatch.setattr(projection.WorktreesProjection, "activate", original_activate)
+        owner.activate()
+        assert owner.store.generation != accepted["generation"]
+        assert owner.agendas.read(request())["error"]["code"] == "unready"
+        owner.publish("project", [{"id": "full-worktree-id"}], observed_at=2)
+        current = owner.agendas.read(request())
+        assert current["observation"] == body
+        with socket_feed(owner) as (client, reader):
+            assert contract.decode(reader.readline()) == {"type": "snapshot", **current}
+            assert (
+                client._request(
+                    "agenda-publish",
+                    publication(owner, observation(1)),
+                )["error"]["code"]
+                == "stale-revision"
+            )
+        with pytest.raises(projection.ProjectionUnavailable):
+            old_store.activate(
+                expected_generation=owner.store.generation, authority_check=lambda: True
+            )
+    finally:
+        takeover.close()
+
+
+@pytest.mark.parametrize("reason", ["draining", "unready", "unavailable", "disconnected"])
+def test_temporary_admission_closure_retires_held_stream_without_retiring_owner(
+    owned,
+    monkeypatch,
+    reason,
+):
+    owner, *_rest = owned
+    accepted = owner.agendas.publish(publication(owner))
+    monkeypatch.setattr(agenda_feed, "HEARTBEAT_SECONDS", 0.02)
+    with socket_feed(owner) as (_client, reader):
+        assert contract.decode(reader.readline()) == {"type": "snapshot", **accepted}
+        owner.close_admission(reason)
+        assert held_terminal(reader) == {
+            "type": "going-away",
+            "generation": accepted["generation"],
+            "sequence": accepted["sequence"],
+            "reason": reason,
+        }
+    owner.activate()
+    with socket_feed(owner) as (_client, reader):
+        assert contract.decode(reader.readline()) == {"type": "snapshot", **accepted}
+
+
+def test_shutdown_retires_already_held_agenda_and_cannot_reactivate(owned, monkeypatch):
+    owner, *_rest = owned
+    accepted = owner.agendas.publish(publication(owner))
+    monkeypatch.setattr(agenda_feed, "HEARTBEAT_SECONDS", 0.02)
+    with socket_feed(owner) as (_client, reader):
+        assert contract.decode(reader.readline()) == {"type": "snapshot", **accepted}
+        owner.shutdown()
+        assert held_terminal(reader) == {
+            "type": "going-away",
+            "generation": accepted["generation"],
+            "sequence": accepted["sequence"],
+            "reason": "closed",
+        }
+    with pytest.raises(projection.ProjectionUnavailable):
+        owner.activate()
 
 
 @pytest.fixture

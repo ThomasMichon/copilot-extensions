@@ -109,7 +109,7 @@ and shape, **not the truth of a test or an external approval**.
 | `defer` | `id`, `reason`, `decision_ref`, `decision_packet_ref`, `revisit_at`, `recheck_action`, `next_action`, `evidence` | Save the entire chain, original returns, evidence and budgets. Generate actual attempt time; require a later revisit. Empty active stack enters steering, not completion. |
 | `response` | `id`, `response_ref` | Preserve an actual response reference; make an unchecked response eligible for reinspection, never approval. |
 | `recheck` | `id`, `revisit_at`, `evidence` | Require due time or an unchecked response; retain check/evidence, generate actual check time and require a later next revisit. |
-| `restore` | `id`, `acceptance_ref`, `evidence` | Require an empty active stack and an eligible recheck accepted by this store (imported check text does not count). Deliberately restore the original chain, retain full branch history and tighter limits, and increment detours without resetting visits. |
+| `restore` | `id`, `acceptance_ref`, `evidence` | Require an empty active stack and an eligible recheck accepted by this store (imported check text does not count). Restore the original positions/returns, reconcile every frame's shared-root visits/evidence, retain pending chains and tighter limits, and increment detours without resetting visits. |
 | `progress` | `reason`, `evidence` | With the original root active and no child, record explicitly demonstrated parent progress and its previous detour count, then reset only the no-progress detour counter. Outcomes/returns never implicitly reset it. |
 | `limits` | `limits`, `evidence` | Tighten one or more positive integer `max_depth`, `max_detours_without_progress`, `max_deferred` limits; never loosen them or discard work to fit. |
 | `park` | `ref`, `reason` | Append a nonblocking tracked discovery; neither assign it nor interrupt active work. |
@@ -119,6 +119,25 @@ chains, root/return relationships, visits, depth, detours and deferred limits
 before committing. Reaching a limit requires steering/replanning, not replay
 or automatic completion. A deliberately recorded `progress` decision never
 resets historical visits or wider approval requirements.
+
+Restoration reconciles the **entire chain, including ancestors**, against active,
+deferred, restored and completed frame history. Stable `frame_id` values identify
+continuing frame instances; distinct assigned instances remain separate even
+when they share a board. These are correlation identifiers, not authentication
+or new authority. Legacy copies are correlated only when their ancestry,
+assignments, returns, cumulative visits and evidence establish a common baseline.
+Incomparable or conflicting legacy history refuses movement rather than guessing.
+
+`visit_origin` retains the known imported visit baseline without inventing entry
+times; `visit_log` records unique managed node-entry occurrences. Reconciliation
+counts the union of distinct occurrences, not merely the maximum of forked
+counters. Shared evidence, execution links and holds remain available on the
+continuing frame, while original deferred decision packets and saved positions
+remain preserved. Conflicting occurrences, missing history or consumed shared
+budgets fail before acceptance, with the state/history transaction unchanged.
+Child returns reconcile parent progress too. Neither restoration nor a new
+session reopens a visit budget or authorizes replay of an uncertain external
+effect; requalify and observe that effect independently.
 
 Example movement after reading the current revision:
 

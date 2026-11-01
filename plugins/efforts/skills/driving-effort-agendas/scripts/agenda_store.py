@@ -15,7 +15,7 @@ from typing import Any, Iterator
 from uuid import uuid4
 
 from agenda import AgendaError, Snapshot, _number, _object, _read, _text, decode, inspect_documents
-from agenda_operations import apply_operation, chains, fields
+from agenda_operations import apply_operation, chains, fields, validate_frame_histories
 import agenda_migration
 
 DATABASE = "agenda.sqlite3"
@@ -112,6 +112,7 @@ def validate_documents(home: Path, documents: Any) -> Snapshot:
     snapshot = inspect_documents(home, cursor, load)
     for name in references(cursor):
         load(name)
+    validate_frame_histories(cursor, boards)
     return snapshot
 
 

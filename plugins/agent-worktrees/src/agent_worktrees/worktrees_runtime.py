@@ -134,9 +134,7 @@ class WorktreesRuntime:
                             or self._elected is None or not self._elected()
                         ):
                             raise
-                        with self._lock:
-                            self._admitting = False
-                        self.feed.close("superseded")
+                        self.close_admission("superseded")
                         # Rollback elects the resident again, not its fenced writer.
                         self.store = WorktreesProjection(self.store.db_path)
             except (ProjectionError, ProjectionUnavailable, sqlite3.Error, OSError) as exc:
@@ -144,7 +142,7 @@ class WorktreesRuntime:
                     self._admitting = False
                     self._error = str(exc)
                     self._reason = "unavailable"
-                self.feed.close("unavailable")
+                self.close_admission("unavailable")
                 if isinstance(exc, (sqlite3.Error, OSError)):
                     raise ProjectionUnavailable(str(exc)) from exc
                 raise
