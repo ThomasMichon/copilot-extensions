@@ -67,6 +67,7 @@ def _settle(daemon: Any, queue: TaskQueue) -> Any:
 @pytest.mark.parametrize("operation,field", [
     ("begin", "enrollment_cohort_revision"),
     ("begin", "definitions_cohort_revision"),
+    ("publish", "enrollment_cohort_revision"),
     ("publish", "definitions_cohort_revision"),
 ])
 def test_unfenced_original_request_cannot_acknowledge_fabricated_cohort_attribution(

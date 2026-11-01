@@ -181,7 +181,7 @@ class PoolPublisherCustody:
             (result.machine, result.env, result.publisher_id)
             != (request.inputs.machine, request.inputs.env, self.publisher_id)
             or result.generation != expected_generation
-            or (request.operation == "begin" and result.enrollment_cohort_revision is not None)
+            or result.enrollment_cohort_revision is not None
             or (request.operation == "begin" and (
                 result.revision != 0 or result.state != "pending" or result.reason is not None
             ))
