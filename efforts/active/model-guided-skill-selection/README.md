@@ -330,3 +330,35 @@ owned-session alternative or name the SDK dependency before adopting it.
   arms with ten locally intercepted requests, zero forwarding, complete fixture
   metadata, unchanged parent state and verified lifecycle/process cleanup.
   Synthetic success remains separate from quality and billed accounting.
+
+### 2026-10-31 - Transport spike merged; catalog and comparison next
+
+- PR #9830 merged into `dev` after a clean current-head Copilot comment verdict
+  with no open findings and successful required checks. Reconciled the source
+  worktree and reread this full Plan and Validation Plan; the effort stays Active.
+- The reusable synthetic transport witness is reviewed and persistent. Complete
+  requesting-host catalog coverage, replacement lifecycle, prospective context
+  fit, independent model-quality judgment and actual accounting remain open.
+- Next is bounded native file-source catalog qualification and the matched
+  comparison, followed by the exposed tool/specialist/preference implementation.
+  Use supported discovery-only SDK inputs without effectful configuration
+  discovery or a reconstructed catalog. No shared rollout or production model
+  qualification is implied by this merge.
+
+### 2026-10-31 - Discovery-only skill roots observed without inference
+
+- Added an opt-in native catalog mode using explicit canonical skill roots,
+  configuration/file-hook discovery disabled, no custom agents, no configured
+  MCP servers and no tools. It never seeds history, sends prompts or dispatches
+  tasks. Unexpected model requests invalidate the observation.
+- An owned native runtime returned complete descriptors from the supplied
+  roots, with zero intercepted or forwarded model requests and verified
+  lifecycle/process cleanup. Explicit SDK roots classified the entries as
+  `custom` without plugin qualification. This is an observed catalog in a
+  different source scope, not proof of foreground identity or precedence.
+- Counts, source categories and a full-descriptor digest are reported without
+  adopter text or paths. Model-free controls cover conflicting modes, invalid
+  or missing roots, empty catalogs, no-dispatch configuration and cleanup.
+- Foreground-catalog equivalence, real matched quality/cost comparison and the
+  exposed selector remain open. Do not reconstruct plugin identities to make
+  this discovery witness appear equivalent.

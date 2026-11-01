@@ -1,5 +1,6 @@
 /** Model-free context helpers. No SDK import, runtime connection, or inference on import. */
 import { isAbsolute } from "node:path";
+import { createHash } from "node:crypto";
 
 export const SENTINELS = Object.freeze({
     old: "SPIKE_OLD_8d256a",
@@ -45,6 +46,10 @@ export function spikeStatus(report) {
     if (report.error || ["taskCancellationErrors", "abortErrors", "runtimeStopErrors"]
         .some(key => cleanup?.[key]?.length)) return "failed";
     if (cleanup?.runtimeStopped === false) return "incomplete";
+    if (report.mode === "catalog-discovery") {
+        return report.native.interceptedRequests === 0 && report.forwardedModelRequests === 0
+            ? report.status : "failed";
+    }
     if (report.mode === "model-enumeration") return report.status;
     const arms = Object.values(report.arms);
     if (arms.some(arm => ["failed", "unavailable"].includes(arm.status))
@@ -65,26 +70,53 @@ export function spikeInputs(args) {
     const firstOption = args.findIndex(value => typeof value === "string" && value.startsWith("--"));
     const paths = firstOption < 0 ? args : args.slice(0, firstOption);
     if (![2, 3].includes(paths.length) || !paths.every(value => typeof value === "string" && isAbsolute(value))) {
-        throw new Error("Usage: node run-skill-selection-spike.mjs <absolute-sdk-directory> <fresh-absolute-fixture-root> [absolute-runtime-executable] [--list-models] [--model id] [--reasoning-effort level] [--context-tier tier]");
+        throw new Error("Usage: node run-skill-selection-spike.mjs <absolute-sdk-directory> <fresh-absolute-fixture-root> [absolute-runtime-executable] [--list-models | --catalog-only --skill-directory absolute-root] [--model id] [--reasoning-effort level] [--context-tier tier]");
     }
     const profile = {}, seen = new Set();
-    let modelsOnly = false;
+    const skillDirectories = [];
+    let modelsOnly = false, catalogOnly = false;
     for (let index = paths.length; index < args.length; index++) {
         const option = args[index];
-        if (seen.has(option)) throw new Error("duplicate spike option");
+        if (seen.has(option) && option !== "--skill-directory") throw new Error("duplicate spike option");
         seen.add(option);
         if (option === "--list-models") { modelsOnly = true; continue; }
-        if (!["--model", "--reasoning-effort", "--context-tier"].includes(option)) throw new Error("unsupported spike option");
+        if (option === "--catalog-only") { catalogOnly = true; continue; }
+        if (!["--model", "--reasoning-effort", "--context-tier", "--skill-directory"].includes(option)) throw new Error("unsupported spike option");
         const value = args[++index];
         if (typeof value !== "string" || !value.trim() || value.startsWith("--")) throw new Error("missing spike option value");
-        if (option === "--model") profile.model = value;
+        if (option === "--skill-directory") {
+            if (!isAbsolute(value) || skillDirectories.includes(value)) throw new Error("skill roots must be unique absolute paths");
+            skillDirectories.push(value);
+        }
+        else if (option === "--model") profile.model = value;
         else if (option === "--reasoning-effort" && ["none", "low", "medium", "high", "xhigh", "max"].includes(value)) profile.reasoningEffort = value;
         else if (option === "--context-tier" && ["default", "long_context"].includes(value)) profile.contextTier = value;
         else throw new Error("unsupported spike option or value");
     }
     if (!profile.model && Object.keys(profile).length) throw new Error("effort and context tier require an explicit model");
+    if (catalogOnly && (modelsOnly || !skillDirectories.length || Object.keys(profile).length)
+        || skillDirectories.length && !catalogOnly) throw new Error("catalog-only requires skill roots and excludes other modes and model profiles");
     const [sdkDirectory, root, runtimePath] = paths;
-    return { sdkDirectory, root, runtimePath, modelsOnly, profile };
+    return { sdkDirectory, root, runtimePath, modelsOnly, catalogOnly, skillDirectories, profile };
+}
+
+/** Counts and a frozen-descriptor digest only; never print adopter catalog text or paths. */
+export function catalogSummary(catalog) {
+    const categories = ["project", "inherited", "personal-copilot", "personal-agents",
+        "plugin", "custom", "builtin", "sdk", "provider"];
+    const sources = {};
+    for (const skill of catalog) {
+        const category = categories.includes(skill.source) ? skill.source : "other";
+        sources[category] = (sources[category] ?? 0) + 1;
+    }
+    return {
+        count: catalog.length, bytes: bytes(catalog),
+        disabled: catalog.filter(skill => !skill.enabled).length,
+        pathless: catalog.filter(skill => !skill.path).length,
+        pluginQualified: catalog.filter(skill => typeof skill.pluginName === "string").length,
+        sources,
+        digest: createHash("sha256").update(JSON.stringify(catalog)).digest("hex"),
+    };
 }
 
 /** Freeze the native identities and descriptors, not a reconstructed eligible-skill list. */

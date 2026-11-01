@@ -9,17 +9,18 @@ import { promisify } from "node:util";
 import { freezeCatalog, collectHistory, bytes, spikeInputs, summarizeRequest, SENTINELS,
     modelSummary, modelCatalogSummary, runtimeEnvironment, observeOwnTask, deadline,
     syntheticHandler, safeError, spikeStatus, armStatus, catalogMatches,
-    historyMatches } from "../scripts/skill-selection-spike.mjs";
+    historyMatches, catalogSummary } from "../scripts/skill-selection-spike.mjs";
 
 const event = (id, type, content, extra = {}) => ({ id, type, data: { content }, ...extra });
 test("runtime selection is explicit, absolute and never a silent bundled fallback", () => {
     const sdk = process.cwd();
     const root = process.cwd();
     const runtime = process.execPath;
-    assert.deepEqual(spikeInputs([sdk, root]), { sdkDirectory: sdk, root, runtimePath: undefined, modelsOnly: false, profile: {} });
-    assert.deepEqual(spikeInputs([sdk, root, runtime]), { sdkDirectory: sdk, root, runtimePath: runtime, modelsOnly: false, profile: {} });
+    const base = { sdkDirectory: sdk, root, modelsOnly: false, catalogOnly: false, skillDirectories: [], profile: {} };
+    assert.deepEqual(spikeInputs([sdk, root]), { ...base, runtimePath: undefined });
+    assert.deepEqual(spikeInputs([sdk, root, runtime]), { ...base, runtimePath: runtime });
     assert.deepEqual(spikeInputs([sdk, root, runtime, "--list-models"]),
-        { sdkDirectory: sdk, root, runtimePath: runtime, modelsOnly: true, profile: {} });
+        { ...base, runtimePath: runtime, modelsOnly: true });
     assert.throws(() => spikeInputs([sdk, root, "relative-runtime"]), /absolute-runtime-executable/);
     assert.throws(() => spikeInputs([sdk, root, runtime, "extra"]), /Usage/);
     assert.throws(() => spikeInputs([sdk, root, "--other-mode"]), /unsupported/);
@@ -30,6 +31,35 @@ test("runtime selection is explicit, absolute and never a silent bundled fallbac
     assert.throws(() => spikeInputs([sdk, root, "--model", "synthetic", "--context-tier", "invented"]), /unsupported/);
     assert.throws(() => spikeInputs([sdk, root, "--reasoning-effort", "medium"]), /explicit model/);
     assert.throws(() => spikeInputs([sdk, root, "--list-models", "--list-models"]), /duplicate/);
+});
+test("catalog discovery admits only explicit roots without model inference modes", () => {
+    const sdk = process.cwd(), root = process.cwd(), other = join(root, "other");
+    const result = spikeInputs([sdk, root, "--catalog-only", "--skill-directory", root, "--skill-directory", other]);
+    assert(result.catalogOnly && !result.modelsOnly);
+    assert.deepEqual(result.skillDirectories, [root, other]);
+    for (const options of [
+        ["--catalog-only"], ["--skill-directory", root],
+        ["--catalog-only", "--list-models", "--skill-directory", root],
+        ["--catalog-only", "--model", "synthetic", "--skill-directory", root],
+        ["--catalog-only", "--skill-directory", "relative"],
+        ["--catalog-only", "--skill-directory", root, "--skill-directory", root],
+    ]) assert.throws(() => spikeInputs([sdk, root, ...options]));
+});
+test("catalog summaries disclose counts, not private descriptors, and bind the full catalog", () => {
+    const catalog = freezeCatalog([{ name: "private-id", description: "private description",
+        enabled: true, source: "plugin", pluginName: "private-plugin", path: "private-path" },
+    { name: "other-id", description: "other description", enabled: false, source: "provider" }]);
+    const summary = catalogSummary(catalog);
+    assert.equal(summary.count, 2);
+    assert.equal(summary.disabled, 1);
+    assert.equal(summary.pathless, 1);
+    assert.equal(summary.pluginQualified, 1);
+    assert.deepEqual(summary.sources, { plugin: 1, provider: 1 });
+    assert(!JSON.stringify(summary).includes("private"));
+    assert.notEqual(summary.digest, catalogSummary([{ ...catalog[0], description: "changed" }, catalog[1]]).digest);
+    const unknownSource = catalogSummary([{ ...catalog[0], source: "private-source" }]);
+    assert.deepEqual(unknownSource.sources, { other: 1 });
+    assert(!JSON.stringify(unknownSource).includes("private"));
 });
 test("durable tail pages keep chronology/exclusive boundary and exclude tools/reasoning/children", async () => {
     const calls = [];
@@ -129,6 +159,11 @@ test("aggregate status cannot conceal failed, unfinished or unsettled arms and c
     report.arms.one = { status: "completed" };
     report.cleanup.abortErrors.push("synthetic abort failure");
     assert.equal(spikeStatus(report), "failed");
+    const discovery = { mode: "catalog-discovery", status: "catalog-only",
+        native: { interceptedRequests: 0 }, forwardedModelRequests: 0, cleanup: { runtimeStopped: true } };
+    assert.equal(spikeStatus(discovery), "catalog-only");
+    assert.equal(spikeStatus({ ...discovery, native: { interceptedRequests: 1 } }), "failed");
+    assert.equal(spikeStatus({ ...discovery, forwardedModelRequests: undefined }), "failed");
 });
 test("expired or unobserved frozen boundary is unavailable, not a brief fallback", async () => {
     await assert.rejects(collectHistory({ read: async () => ({ cursorStatus: "expired" }) }), /expired/);
@@ -343,8 +378,12 @@ const fakeSdk = `
                 on: listener => { listeners.add(listener); return () => listeners.delete(listener); },
                 abort: async () => { this.trace.aborted.push(id); },
                 rpc: {
-                    skills: { list: async () => ({ skills: config.skillProvider.listSkills().map(skill =>
-                        ({ ...skill, enabled: !config.disabledSkills.includes(skill.name), source: "provider" })) }) },
+                    skills: { list: async () => ({ skills: config.skillProvider
+                        ? config.skillProvider.listSkills().map(skill =>
+                            ({ ...skill, enabled: !config.disabledSkills.includes(skill.name), source: "provider" }))
+                        : this.scenario === "catalog-empty" ? [] : [{
+                            name: "private-id", description: "private description", enabled: true, source: "project",
+                        }] }) },
                     agent: { list: async () => ({ agents: [{ id: "synthetic-selector" }] }) },
                     model: { list: async () => ({ list: [] }), getCurrent: async () => {
                         if (this.scenario === "history-corrupt" && ++modelReads === 5) events.at(-1).id = "changed-boundary-response";
@@ -396,7 +435,8 @@ const fakeSdk = `
                         { id: "event-" + ++this.sequence, type: "assistant.message", data: { content: "synthetic reply" } });
                 },
             };
-            config.skillProvider.listSkills();
+            if (config.skillProvider) config.skillProvider.listSkills();
+            else this.trace.catalogConfig = config;
             this.config = config; this.sessions.set(id, session);
             return session;
         }
@@ -423,7 +463,7 @@ const fakeSdk = `
             return this.makeSession(id, config, this.sessions.get(id).events);
         }
         async stop() {
-            this.config?.skillProvider.listSkills();
+            this.config?.skillProvider?.listSkills();
             await writeFile(join(this.options.baseDirectory, "fake-witness.json"), JSON.stringify(this.trace));
             return [];
         }
@@ -492,6 +532,51 @@ test("model-free SDK orchestration covers all arms, owned cleanup and acquisitio
             assert.equal(invalid.report.native.parentTextPrefixUnchanged, false);
         }
     }
+});
+
+test("catalog-only orchestration cannot dispatch, load other discovery or omit owned cleanup", async t => {
+    const root = await mkdtemp(join(tmpdir(), "skill-spike-catalog-"));
+    t.after(() => rm(root, { recursive: true }));
+    const sdk = join(root, "fake-sdk");
+    await mkdir(sdk);
+    await writeFile(join(sdk, "package.json"), '{"type":"module"}');
+    await writeFile(join(sdk, "index.js"), fakeSdk);
+    const runner = fileURLToPath(new URL("../scripts/run-skill-selection-spike.mjs", import.meta.url));
+    for (const scenario of ["catalog", "catalog-empty"]) {
+        const fixture = join(root, scenario);
+        const { stdout } = await promisify(execFile)(process.execPath,
+            [runner, sdk, fixture, "--catalog-only", "--skill-directory", sdk],
+            { windowsHide: true, timeout: 3000 });
+        const report = JSON.parse(stdout);
+        const trace = JSON.parse(await readFile(join(fixture, "owned-home", "fake-witness.json"), "utf8"));
+        assert.equal(report.status, scenario === "catalog" ? "catalog-only" : "incomplete");
+        assert.equal(report.native.catalog.foregroundScopeEquivalent, null);
+        assert.equal(report.native.interceptedRequests, 0);
+        assert.equal(report.forwardedModelRequests, 0);
+        assert.deepEqual(report.native.catalog.providerCalls, { list: 0, read: 0 });
+        assert(!stdout.includes("private"));
+        assert.equal(trace.created.length, 1);
+        assert.deepEqual(trace.aborted, trace.created);
+        for (const field of ["dispatched", "prompts", "forks", "resumed", "cancelled"]) {
+            assert.deepEqual(trace[field], []);
+        }
+        assert.deepEqual(trace.catalogConfig.skillDirectories, [sdk]);
+        assert.equal(trace.catalogConfig.enableConfigDiscovery, false);
+        assert.equal(trace.catalogConfig.enableFileHooks, false);
+        assert.equal(trace.catalogConfig.requestExtensions, false);
+        assert.deepEqual(trace.catalogConfig.mcpServers, {});
+        for (const field of ["availableTools", "tools", "customAgents"]) {
+            assert.deepEqual(trace.catalogConfig[field], []);
+        }
+        assert(report.cleanup.runtimeStopped);
+    }
+    const { stdout } = await promisify(execFile)(process.execPath,
+        [runner, sdk, join(root, "missing-root"), "--catalog-only", "--skill-directory", join(root, "absent")],
+        { windowsHide: true, timeout: 3000 });
+    const invalid = JSON.parse(stdout);
+    assert.equal(invalid.status, "failed");
+    assert(!invalid.cleanup.clientCreated);
+    assert(!stdout.includes(root));
 });
 
 test("startup failures stay structured and late owned startup is awaited before cleanup", async t => {
