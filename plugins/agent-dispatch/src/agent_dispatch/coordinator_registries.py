@@ -13,6 +13,7 @@ import secrets
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, FiniteFloat
 
+from .coordinator_pool_catalog import register_pool_catalog_routes
 from .registrations import RegistrationKind
 from .queue import TaskError, TaskQueue
 
@@ -78,6 +79,8 @@ def register_registry_routes(
     *,
     control_token: str | None = None,
 ) -> None:
+    register_pool_catalog_routes(app, queue, control_token=control_token)
+
     # -- schedule registry ---------------------------------------------------
 
     @app.post("/schedules")
