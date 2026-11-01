@@ -73,6 +73,9 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+# Keep native staging and the updater on the same declared installation budget.
+if (-not $env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC -and -not $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC) { $env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC = '900' }
+
 function Resolve-InstallerProjectName {
     param([AllowEmptyString()][string]$Name)
     if (-not $Name -and (Get-Location).Path -match '[\\/]([^\\/]+)$') {

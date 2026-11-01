@@ -133,6 +133,14 @@ for its bounded scope and remaining takeover/foundation limitations.
 `--supervised-debug` uses the same exclusive authority under foreground
 supervision, never a second installation writer.
 
+The default installation watchdog is **900 seconds** on both native shell
+front doors; the updater reserves another 30 seconds for cleanup. An explicit
+`AGENT_WORKTREES_INSTALL_DEADLINE_SEC` overrides
+`COPILOT_PLUGIN_INSTALL_DEADLINE_SEC`, and neither is overwritten by the default.
+Disabling the inner watchdog does not disable the updater's finite safety bound.
+A post-installer custody failure includes the native child exit code, but does
+not establish settled cleanup or authorize replay of an interrupted request.
+
 ### Diagnose one update phase
 
 `update --phase` selects a fixed piece of the existing updater without running

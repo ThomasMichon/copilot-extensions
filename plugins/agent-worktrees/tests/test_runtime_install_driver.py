@@ -42,6 +42,35 @@ def _arguments(tmp_path, **values):
     })
 
 
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_post_child_custody_failure_preserves_native_exit_status(
+    adapter, tmp_path, monkeypatch, exit_code,
+):
+    from contextlib import nullcontext
+    from update_driver import ParticipantError
+
+    failure = ParticipantError("participant owner refused custody")
+    owner = SimpleNamespace(
+        request_id="request", root=tmp_path,
+        assert_owned=Mock(side_effect=[None, failure]),
+    )
+    monkeypatch.setattr(adapter, "custody", lambda **kwargs: nullcontext(owner))
+    monkeypatch.setattr(core, "status", lambda *args, **kwargs: SimpleNamespace(
+        state="running", spec=SimpleNamespace(backend="engine"),
+    ))
+    child = SimpleNamespace(wait=Mock(return_value=exit_code))
+    monkeypatch.setattr(adapter.subprocess, "Popen", Mock(return_value=child))
+    monkeypatch.setattr(adapter.subprocess, "CREATE_NO_WINDOW", 0, raising=False)
+
+    with pytest.raises(ParticipantError) as caught:
+        adapter._execute(_arguments(tmp_path))
+
+    assert caught.value is failure
+    child.wait.assert_called_once_with()
+    assert owner.assert_owned.call_count == 2
+    assert f"installer child exited {exit_code}; transaction custody is unconfirmed" in "\n".join(caught.value.__notes__)
+
+
 def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, tmp_path, monkeypatch):
     monkeypatch.setattr(adapter, "_source_digest", lambda payload: "a" * 64)
     args = _arguments(
@@ -417,13 +446,18 @@ def test_installer_runner_reexports_only_the_scoped_witness(adapter, tmp_path, m
 
 
 @pytest.mark.skipif(os.name != "nt", reason="actual Windows native driver entry")
-def test_real_cold_driver_and_native_reentry_use_the_same_owner(adapter, tmp_path, monkeypatch):
+@pytest.mark.parametrize("abandoned", [False, True])
+def test_real_cold_driver_and_native_reentry_use_the_same_owner(
+    adapter, tmp_path, monkeypatch, abandoned,
+):
     """Use a copied fixed no-install shell, never the product installer."""
     from agent_procutil.owned_process import run_owned
 
     shell = shutil.which("powershell.exe")
     if shell is None:
         pytest.skip("native PowerShell is unavailable")
+    monkeypatch.setenv("AGENT_WORKTREES_INSTALL_DEADLINE_SEC", "7")
+    monkeypatch.setenv("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC", "500")
     engine = importlib.import_module("installer_engine")
     minimal = tmp_path / "minimal"
     scripts = minimal / "scripts"
@@ -459,17 +493,50 @@ def test_real_cold_driver_and_native_reentry_use_the_same_owner(adapter, tmp_pat
         "[Console]::Out.WriteLine('fixed-native-out')\n"
         "[Console]::Error.WriteLine('fixed-native-error')\n"
         f"@{{root=$InstallDir;driver=$env:AGENT_WORKTREES_NATIVE_INSTALLATION;"
-        f"witness=[bool]$env:UPDATE_DRIVER_WITNESS}} | ConvertTo-Json | Set-Content -LiteralPath '{receipt}'\n",
+        f"witness=[bool]$env:UPDATE_DRIVER_WITNESS;deadline=$env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC;"
+        f"globalDeadline=$env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC}} | ConvertTo-Json | Set-Content -LiteralPath '{receipt}'\n",
         encoding="utf-8",
     )
+    if abandoned:
+        child = payload / "abandon.py"
+        child.write_text(
+            "import importlib.util,os\nfrom pathlib import Path\n"
+            f"spec=importlib.util.spec_from_file_location('native_fixture_driver', {str(entry)!r})\n"
+            "driver=importlib.util.module_from_spec(spec)\nspec.loader.exec_module(driver)\n"
+            f"driver.bootstrap(Path({str(payload)!r}))\n"
+            "from update_driver import borrowed_custody\n"
+            "with borrowed_custody() as custody, custody.execution_scope():\n"
+            "    os._exit(7)\n",
+            encoding="utf-8",
+        )
+        script.write_text(
+            "param([string]$Action,[string]$InstallDir)\n"
+            "$ErrorActionPreference='Stop'\n"
+            f". '{helper}'\n"
+            f"Invoke-Hidden -FilePath '{sys.executable}' -StreamOutput "
+            f"-ArgList @('-I','-S','-B','{child}')\n"
+            "exit $LASTEXITCODE\n",
+            encoding="utf-8",
+        )
     result = run_owned([
         sys.executable, "-I", "-S", "-B", str(entry),
         "--payload", str(payload), "--root", str(tmp_path / "runtime"),
         "--shell", shell, "--action", "install",
     ], timeout=30)
+    if abandoned:
+        assert result.returncode != 0
+        assert not receipt.exists()
+        rows = core.status(root=Path.home() / ".copilot-extensions" / "update-driver")
+        assert len(rows) == 1 and rows[0].state == "interrupted"
+        assert rows[0].exit_code is None and rows[0].settled_at is None
+        log = rows[0].log_path.read_text(encoding="utf-8")
+        assert "participant owner refused custody" in log
+        assert "installer child exited 7; transaction custody is unconfirmed" in log
+        return
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(receipt.read_text(encoding="utf-8-sig")) == {
         "root": str(tmp_path / "runtime"), "driver": "1", "witness": True,
+        "deadline": "7", "globalDeadline": "500",
     }
     rows = core.status(root=Path.home() / ".copilot-extensions" / "update-driver")
     assert len(rows) == 1 and rows[0].state == "completed"
