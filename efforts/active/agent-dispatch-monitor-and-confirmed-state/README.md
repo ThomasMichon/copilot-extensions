@@ -1470,3 +1470,33 @@ configured-cohort membership through its existing owner and qualifies mixed
 cohorts before ordinary caller migration. External source atomicity, installed
 publisher qualification, atomic placement and the original Plan/Validation
 matrix remain open. No pool was activated and this parent remains **Active**.
+
+### 2026-10-31 - Explicit configured-cohort source intent
+
+The next direct source trace distinguished every enrolled publisher and every
+reported registration from the complete configured supervisor roster. The
+existing registrar/configuration owner now reads explicit revisioned cohort
+intent from an optional envelope in its existing pointer registry. Logical
+machine identity remains separate from intended execution machine/environment;
+no runtime or scope is inferred from a label, local host or enrollment.
+Missing/legacy intent is unconfirmed, malformed input is unavailable, and a
+failed read never substitutes an earlier complete membership tuple.
+
+[#9826](https://github.com/ThomasMichon/copilot-extensions/pull/9826) actually
+merged as `be588f7ac886d91e4c1c077426b9c1e4df94165f` after current-head
+independent Copilot approval and all three successful required checks.
+The contained 353-case packet covers whole-cohort refusal, exact-byte revision
+correlation, pointer-writer preservation and existing registrar/template paths.
+Review caught duplicate JSON keys concealing members; the shared strict field
+decoder now refuses those inputs before observation or any pointer rewrite,
+with raw-JSON controls preserving the original bytes. Its resolved review
+thread and post-merge backup remain retained.
+
+This closes the explicit configuration-source prerequisite, not coordinator
+membership admission or executing-runtime qualification. The next source slice
+fences configured membership through the existing coordinator/registration owner
+without wiring ordinary callers. External-file atomicity, mixed-reader/writer
+qualification, scope withdrawal, installed adoption and atomic placement remain
+open. No configuration was migrated, no publisher was enrolled and the running
+descriptor still advertises `configured_scope_membership: false`. This parent
+and its entire original Plan/Validation matrix remain **Active**.

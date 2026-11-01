@@ -1,0 +1,9 @@
+{
+  "comment": "Fence pool catalog metadata against the registrar configured supervisor cohort without activating runtime membership or placement",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
