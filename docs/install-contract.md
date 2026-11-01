@@ -4605,6 +4605,11 @@ Windows retention guardian keeps the final completion JSON on stdout and
 relays progress separately on stderr. Each completed source-phase renewal
 flushes its progress to stderr, keeping the native observer's allowance from
 lagging the local deadline when a quick unit precedes a longer productive unit.
+Frequent completed units emit a compact flushed progress byte rather than a
+full diagnostic line each time. Detailed reports use a minimum interval of one
+second or one quarter of the quiet allowance, whichever is shorter; the terminal phase reports the
+complete unit count. Every completed unit still renews and emits progress,
+without periodic keepalives or changing parsed stdout or native capture limits.
 A silent child still times out and must
 settle every owned writer before construction or retention custody is released.
 Native relay errors preserve their error codes; failed strict Job confirmation

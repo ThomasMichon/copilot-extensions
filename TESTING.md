@@ -18,6 +18,10 @@ native runner. Constructor/item deadlines and the Linux job are unchanged.
 The Logger Linux fixture explicitly qualifies its daemon-supervision interpreter
 through the shipped custody checks, rather than weakening those checks when a
 hosted toolcache interpreter is writable.
+The source-phase regression advances20,000 controlled completed-unit notifications
+beyond the quiet allowance, retaining a flushed byte and deadline renewal for
+each unit while detailed diagnostics coalesce below64 KiB. Terminal counts,
+unchanged stdout and subsequent silent expiry are checked independently.
 
 The optional `update_diagnostics` lane runs the native installer inactivity
 packet separately from the focused constructor packet on Linux and Windows.

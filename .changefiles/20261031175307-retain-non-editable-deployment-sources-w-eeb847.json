@@ -1,5 +1,5 @@
 {
-  "comment": "Retain non-editable deployment sources without unsupported UV pip options while preserving developer editable APIs",
+  "comment": "Retain non-editable deployments with supported UV pip options and compact every completed-work heartbeat within native capture limits",
   "changes": [
     {
       "plugin": "agent-bridge",
