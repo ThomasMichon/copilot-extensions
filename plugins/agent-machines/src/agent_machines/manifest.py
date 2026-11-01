@@ -166,6 +166,7 @@ class RequirementPackage:
     source_repo: str = ""
     source_path: Path | None = None
     source_anchor: Path | None = None
+    ordinary_defaults: dict[str, Any] | None = None
 
     def applies_to(
         self,
@@ -804,4 +805,5 @@ def resolve_for_machine(
         source_repo=pkg.source_repo,
         source_path=pkg.source_path,
         source_anchor=pkg.source_anchor,
+        ordinary_defaults=copy.deepcopy(pkg.ordinary_defaults),
     )

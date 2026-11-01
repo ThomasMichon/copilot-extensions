@@ -13,6 +13,78 @@ from agent_worktrees import config as cfg
 from agent_worktrees.repos import read_registry as _knowledge_read_registry
 
 
+@pytest.mark.parametrize("level", range(5))
+def test_native_ordinary_four_tiers_use_registered_context(tmp_path, monkeypatch, capsys, level):
+    import yaml
+
+    from agent_worktrees import repos, state_root
+
+    base, knowledge, local = (tmp_path / name for name in ("base", "knowledge", "local"))
+    for root in (base, knowledge, local):
+        cfg.inrepo_config_path(root).parent.mkdir(parents=True)
+    cfg.inrepo_config_path(base).write_text(
+        "stateless: true\nheadless: false\npr:\n  enabled: true\n  provider: github\n"
+        "  strategy: keep-alive\n  source_attribution: codename\n", encoding="utf-8",
+    )
+    cfg.inrepo_config_path(knowledge).write_text(
+        "headless: true\n" if level >= 1 else "{}\n", encoding="utf-8",
+    )
+    registry = repos.ReposRegistry(repos={
+        name: repos.RepoEntry(
+            name=name, remote=f"https://example.test/{name}/shared.git", repo_class="worktree",
+            paths={"windows": str(root)}, default_branch="main",
+        )
+        for name, root in (("sample", base), ("knowledge", knowledge))
+    })
+    monkeypatch.setattr(repos, "read_registry", lambda **kwargs: registry)
+    monkeypatch.setattr(state_root, "_git_toplevel", lambda cwd=None: str(base))
+    monkeypatch.setattr(cfg, "project_dir", lambda project=None: local)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    global_path = tmp_path / "global.yaml"
+    global_path.write_text("headless: false\n" if level >= 2 else "{}\n", encoding="utf-8")
+    monkeypatch.setattr(cfg, "global_config_path", lambda: global_path)
+    document = {
+        "repo_name": "wrong-selector", "machine": "machine-a", "platform": "windows",
+        "knowledge_repo": "knowledge",
+        "repos": {"sample": {"anchor": str(base), "session_env": {"TERM": "xterm-256color"}}},
+    }
+    if level >= 3:
+        document["headless"] = True
+    if level >= 4:
+        document["repos"]["sample"]["headless"] = False
+    path = local / "config.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+    result = cfg.load_config(path, project="sample", include_control_plane_related_pr=False)
+
+    assert result.repo_name == "sample"
+    assert result.default_repo.pr.provider == "github"
+    assert result.default_repo.pr.source_attribution == "codename"
+    assert result.default_repo.session_env["TERM"] == "xterm-256color"
+    assert result.headless is (level % 2 == 1)
+    owner = result.ordinary_provenance["/headless"]
+    assert owner["id"] == (
+        "base", "knowledge", "machine-wide", "project-local", "selected-repository",
+    )[level]
+    assert owner["repository_id"].startswith("repo-") if level != 2 else (
+        owner["execution_machine"] == "machine-a"
+    )
+    assert owner["source"]["root"] == str((base, knowledge, tmp_path, local, local)[level])
+    from agent_worktrees import context_cli
+
+    document["repo_name"] = "sample"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    monkeypatch.setattr(cfg, "default_config_path", lambda: path)
+    assert context_cli.cmd_state_root_dispatch(["--configuration", "--json"]) == 0
+    import json
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["context"]["base_root"] == str(base)
+    assert report["context"]["knowledge_root"] == str(knowledge)
+    assert report["context"]["execution_machine"] == result.machine
+    assert report["repository_machine_root"] == str(local)
+
+
 @pytest.mark.parametrize("body", ["repos: [\n", "- not-a-mapping\n"])
 def test_config_acquisition_report_retains_yaml_failure(tmp_path, body):
     from dropin_registry import ScanAuthority
@@ -29,6 +101,7 @@ def test_config_acquisition_report_retains_yaml_failure(tmp_path, body):
 
 def test_config_acquisition_report_retains_dropin_findings_and_positive_config(tmp_path, monkeypatch):
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_dropins
 
     directory = tmp_path / "config.d"
@@ -54,6 +127,7 @@ def test_config_acquisition_report_retains_dropin_findings_and_positive_config(t
 
 def test_config_acquisition_report_required_knowledge_unavailable_keeps_base(tmp_path, monkeypatch):
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_sources, machine_config, state_root
 
     base = str(tmp_path / "base")
@@ -1022,8 +1096,7 @@ class TestControlPlaneRelatedPRTier:
         self, tmp_path, monkeypatch
     ):
         from agent_worktrees import related as _related
-        from agent_worktrees import repos
-        from agent_worktrees import state_root
+        from agent_worktrees import repos, state_root
 
         cp = tmp_path / "harness"
         knowledge = tmp_path / "knowledge"
@@ -1666,7 +1739,8 @@ class TestInRepoConfigCommittedRefResolution:
         past the shared budget (the per-probe cap alone allowed ~8 x 15 s)."""
         import types
 
-        from agent_worktrees import git_ops, inrepo_config_source as src
+        from agent_worktrees import git_ops
+        from agent_worktrees import inrepo_config_source as src
 
         clock = {"t": 1000.0}
         timeouts: list[float] = []
@@ -1692,7 +1766,8 @@ class TestInRepoConfigCommittedRefResolution:
         """Several repos resolved in one load_config() spend one budget, not one each."""
         import types
 
-        from agent_worktrees import git_ops, inrepo_config_source as src
+        from agent_worktrees import git_ops
+        from agent_worktrees import inrepo_config_source as src
 
         clock = {"t": 1000.0}
         timeouts: list[float] = []
@@ -1716,7 +1791,8 @@ class TestInRepoConfigCommittedRefResolution:
         repos stays within one budget with no caller-provided scope."""
         import types
 
-        from agent_worktrees import git_ops, inrepo_config_source as src
+        from agent_worktrees import git_ops
+        from agent_worktrees import inrepo_config_source as src
 
         clock = {"t": 1000.0}
         timeouts: list[float] = []
@@ -1782,7 +1858,8 @@ class TestInRepoConfigCommittedRefResolution:
     ):
         from types import SimpleNamespace
 
-        from agent_worktrees import git_ops, inrepo_config_source as src
+        from agent_worktrees import git_ops
+        from agent_worktrees import inrepo_config_source as src
 
         marker, reads = ["first"], []
 
@@ -1825,7 +1902,8 @@ class TestInRepoConfigCommittedRefResolution:
     ):
         from types import SimpleNamespace
 
-        from agent_worktrees import git_ops, inrepo_config_source as src
+        from agent_worktrees import git_ops
+        from agent_worktrees import inrepo_config_source as src
 
         reads = []
 
@@ -1976,7 +2054,8 @@ class TestInRepoConfigCommittedRefResolution:
         import subprocess
         import types
 
-        from agent_worktrees import git_ops, inrepo_config_source as src
+        from agent_worktrees import git_ops
+        from agent_worktrees import inrepo_config_source as src
 
         clock, calls = {"t": 1000.0}, []
 
@@ -2411,13 +2490,20 @@ class TestKnowledgeConfigOverlay:
         override = {
             "explicit": "knowledge", "explicit-missing": "missing",
         }.get(scenario)
-        full = cfg.load_config(mfile, include_control_plane_related_pr=False)
+        if scenario == "unregistered":
+            from configuration_layers import ConfigurationError
+
+            with pytest.raises(ConfigurationError, match="binding is unresolved"):
+                cfg.load_config(mfile, include_control_plane_related_pr=False)
+            full = None
+        else:
+            full = cfg.load_config(mfile, include_control_plane_related_pr=False)
         narrow = cfg.load_config(
             mfile,
             include_control_plane_related_pr=False,
             include_knowledge_preferences=False,
         )
-        expected = state_root.resolve_state_root(full, repo_override=override)
+        expected = state_root.resolve_state_root(full or narrow, repo_override=override)
         assert state_root.resolve_state_root(
             narrow, repo_override=override
         ).as_dict() == expected.as_dict()
@@ -2449,7 +2535,7 @@ class TestKnowledgeConfigOverlay:
         # machine-local headless:false beats the knowledge overlay's true.
         assert cfg.load_config(mfile).headless is False
 
-    def test_non_stateless_harness_ignores_overlay(self, tmp_path, monkeypatch):
+    def test_non_stateless_harness_grafts_explicit_bound_preferences(self, tmp_path, monkeypatch):
         h = self._mk_harness(tmp_path, stateless=False)  # NOT stateless
         k = self._mk_knowledge(tmp_path, "headless: true\n")
         self._registry(monkeypatch, harness=h, knowledge=k)
@@ -2459,8 +2545,8 @@ class TestKnowledgeConfigOverlay:
             "knowledge_repo: knowledge\n"
             f"repos:\n  harness:\n    anchor: {h}\n    worktree_root: /tmp/wt\n",
             encoding="utf-8")
-        # Not stateless -> overlay never consulted -> default false.
-        assert cfg.load_config(mfile).headless is False
+        # Explicit binding selects ordinary preferences; it is not write authority.
+        assert cfg.load_config(mfile).headless is True
 
     def test_overlay_excludes_machine_specifics(self, tmp_path, monkeypatch):
         # Even if the knowledge config.yaml sets srcroot, it must NOT graft.
@@ -2763,6 +2849,7 @@ def test_own_checked_in_config_resolves_strategy_keep_alive():
 @pytest.mark.parametrize("entry_observed", [True, False], ids=["entry-uncertain", "registry-unavailable"])
 def test_config_acquisition_report_retains_owner_verdict_for_last_known_data(tmp_path, monkeypatch, entry_observed):
     from dropin_registry import EntryDecision, EntryStatus, Finding, ScanAuthority, ScanSnapshot
+
     from agent_worktrees import config_dropins
 
     entry = tmp_path / "config.d" / "managed.json"
@@ -2809,6 +2896,7 @@ def _machine_overlay_report_config(base: Path, tmp_path: Path):
 
 def test_config_source_report_retains_suppressed_project_root_failure(tmp_path, monkeypatch):
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_sources
 
     base = tmp_path / "base"
@@ -2834,6 +2922,7 @@ def test_config_source_report_retains_suppressed_marker_stat_failure(tmp_path, m
     import os
 
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_sources, machine_config
 
     base, overlay = tmp_path / "base", tmp_path / "overlay"
@@ -2868,6 +2957,7 @@ def test_config_source_report_retains_suppressed_marker_stat_failure(tmp_path, m
 def test_config_yaml_report_retains_bool_suppressed_source_lookup_error(tmp_path, monkeypatch):
     import errno
     import os
+
     from dropin_registry import ScanAuthority
 
     path = tmp_path / "config.yaml"
@@ -2891,7 +2981,9 @@ def test_config_yaml_report_retains_bool_suppressed_source_lookup_error(tmp_path
 @pytest.mark.parametrize("outcome", ["timeout", "os-error", "not-repo-nonzero", "other-nonzero", "empty-success"])
 def test_config_source_report_retains_default_root_lookup_uncertainty(tmp_path, monkeypatch, outcome):
     import subprocess
+
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_sources, machine_config, state_root
     from agent_worktrees.acquisition_report import AcquisitionReport
 
@@ -2936,6 +3028,7 @@ def test_config_source_report_retains_default_root_lookup_uncertainty(tmp_path, 
 @pytest.mark.parametrize("selection", ["explicit-base", "git-success", "missing-default"])
 def test_config_source_report_default_selection_preserves_bypass_and_fallback_controls(tmp_path, monkeypatch, selection):
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_sources, machine_config, state_root
     from agent_worktrees.acquisition_report import AcquisitionReport
 
@@ -3009,6 +3102,7 @@ def test_full_config_report_preserves_partial_layers_and_precedence(tmp_path, mo
 
 def test_full_config_report_cache_hit_without_provenance_never_reacquires(tmp_path, monkeypatch):
     from dropin_registry import ScanAuthority
+
     from agent_worktrees.config_cache import cached_load_config_scope
 
     value = cfg.Config(srcroot="", machine="fixture", platform="windows", repo_name="sample")
@@ -3080,6 +3174,7 @@ def test_config_report_nested_requests_and_exceptions_restore_collection(tmp_pat
 def test_config_report_copied_context_does_not_share_collectors_between_threads(tmp_path, monkeypatch):
     import contextvars
     from concurrent.futures import ThreadPoolExecutor
+
     from agent_worktrees import config_acquisition as acquisition
 
     path = tmp_path / "worker.yaml"
@@ -3112,7 +3207,9 @@ def test_config_report_copied_context_does_not_share_collectors_between_threads(
 
 @pytest.mark.parametrize("mode", ["owner", "failure", "replacement", "projects-failure"])
 def test_registered_config_helpers_preserve_owner_calls_and_independent_defaults(tmp_path, monkeypatch, mode):
-    from agent_worktrees import config_acquisition as acquisition, installer, repos as repos_mod, repos_registry_reader
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees import installer, repos_registry_reader
+    from agent_worktrees import repos as repos_mod
 
     path = tmp_path / "repos.yaml"
     path.write_text("repos:\n  sample:\n    default_branch: main\n    linux: /synthetic/anchor\n", encoding="utf-8")
@@ -3155,7 +3252,8 @@ def test_registered_config_helpers_preserve_owner_calls_and_independent_defaults
 
 @pytest.fixture
 def projects_acquisition_sources(tmp_path, monkeypatch):
-    from agent_worktrees import installer, repos as repos_mod, repos_registry_reader
+    from agent_worktrees import installer, repos_registry_reader
+    from agent_worktrees import repos as repos_mod
 
     anchor = tmp_path / "anchor"
     anchor.mkdir()
@@ -3206,6 +3304,7 @@ def test_projects_acquisition_original_outcomes_reach_full_config_report(
     import os
 
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_migrations, strict_yaml
 
     machine, projects, calls, options = projects_acquisition_sources
@@ -3288,6 +3387,7 @@ def test_projects_acquisition_replacements_keep_value_identity_but_not_coverage(
     monkeypatch, projects_acquisition_sources, replacement,
 ):
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import installer, projects_registry
 
     machine, projects, calls, options = projects_acquisition_sources
@@ -3382,7 +3482,9 @@ def test_projects_acquisition_original_migration_fallback_retains_input_identity
     monkeypatch, projects_acquisition_sources, mode,
 ):
     from dropin_registry import ScanAuthority
-    from agent_worktrees import config_acquisition as acquisition, config_migrations, projects_registry, strict_yaml
+
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees import config_migrations, projects_registry, strict_yaml
 
     machine, projects, calls, options = projects_acquisition_sources
     projects.write_text("schema_version: 2\nprojects: {sample: {base_repo: true}}\n", encoding="utf-8")
@@ -3423,6 +3525,7 @@ def test_projects_acquisition_partial_callbacks_cannot_borrow_original_completio
     monkeypatch, projects_acquisition_sources, replacement,
 ):
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_migrations, projects_registry
 
     machine, projects, calls, options = projects_acquisition_sources
@@ -3457,7 +3560,9 @@ def test_projects_acquisition_same_globals_migration_wrapper_cannot_borrow_compl
     monkeypatch, projects_acquisition_sources,
 ):
     from types import FunctionType
+
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_migrations
 
     machine, projects, calls, options = projects_acquisition_sources
@@ -3495,6 +3600,7 @@ def test_projects_acquisition_self_restoring_loader_cannot_borrow_completion(
     monkeypatch, projects_acquisition_sources,
 ):
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import projects_registry
 
     machine, projects, calls, options = projects_acquisition_sources
@@ -3527,6 +3633,7 @@ def test_projects_acquisition_read_time_loader_swap_preserves_original_evaluatio
     monkeypatch, projects_acquisition_sources,
 ):
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import projects_registry, strict_yaml
 
     machine, projects, calls, options = projects_acquisition_sources
@@ -3595,6 +3702,7 @@ def test_knowledge_acquisition_original_gate_outcomes(
     import builtins
 
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_acquisition as acquisition
     from agent_worktrees.acquisition_report import AcquisitionReport
 
@@ -3619,8 +3727,11 @@ def test_knowledge_acquisition_original_gate_outcomes(
     with acquisition.capture_config_observations() as observations:
         value = cfg._load_knowledge_overlay_config(machine, {}, "launch", "windows")
     report = AcquisitionReport("knowledge-preferences", value, tuple(observations))
-    assert value == {}
-    assert opened == ([] if mode in ("unbound", "invalid-binding") else [launch])
+    assert value == ({"headless": True} if mode == "stateful" else {})
+    assert opened == (
+        [] if mode in ("unbound", "invalid-binding")
+        else [launch, knowledge] if mode == "stateful" else [launch]
+    )
     assert report.reusable is False
     owned = [o for o in report.observations if o.stage == "knowledge-preferences"]
     assert owned, "the original knowledge owner did not report its terminal outcome"
@@ -3637,6 +3748,7 @@ def test_knowledge_acquisition_original_data_and_uncertainty(
     import builtins
 
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_acquisition as acquisition
     from agent_worktrees.acquisition_report import AcquisitionReport
 
@@ -3697,6 +3809,7 @@ def test_knowledge_acquisition_original_data_and_uncertainty(
 
 def test_knowledge_acquisition_late_callable_selection_keeps_identity_and_uncertainty(monkeypatch):
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_acquisition as acquisition
     from agent_worktrees.acquisition_report import AcquisitionReport
 
@@ -3772,7 +3885,9 @@ def test_knowledge_acquisition_wrappers_cannot_borrow_original_completion(
 
 def test_installation_acquisition_original_unselected_outcome_has_no_child_effects(monkeypatch):
     from dropin_registry import ScanAuthority
-    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees import registry_paths
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "  ")
     calls = []
@@ -3795,7 +3910,9 @@ def test_installation_acquisition_original_selected_keeps_identity_and_no_result
     import os
 
     from dropin_registry import ScanAuthority
-    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees import registry_paths
     from agent_worktrees.acquisition_report import AcquisitionReport
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
@@ -3828,7 +3945,9 @@ def test_installation_acquisition_original_selected_keeps_identity_and_no_result
 @pytest.mark.parametrize("failure_at", ["helper", "resolve"])
 def test_installation_acquisition_original_errors_keep_exception_identity(tmp_path, monkeypatch, failure_at):
     from dropin_registry import ScanAuthority
-    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees import registry_paths
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
     error = ValueError("synthetic private context failure")
@@ -3862,7 +3981,9 @@ def test_installation_acquisition_late_selection_preserves_overlay_read_parse_or
     import builtins
 
     from dropin_registry import ScanAuthority
-    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees import registry_paths
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "")
     overlay = tmp_path / cfg.MARKETPLACE_OVERLAYS_DIR / "example" / "config.yaml"
@@ -3916,7 +4037,9 @@ def test_installation_acquisition_self_restoring_callback_cannot_borrow_original
     from types import FunctionType
 
     from dropin_registry import ScanAuthority
-    from agent_worktrees import config_acquisition as acquisition, registry_paths
+
+    from agent_worktrees import config_acquisition as acquisition
+    from agent_worktrees import registry_paths
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "")
     original = registry_paths.installation_context
@@ -4044,6 +4167,7 @@ def test_control_plane_acquisition_original_decision_preserves_order_and_values(
     control_plane_acquisition_sources, selected,
 ):
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_acquisition as acquisition
     from agent_worktrees.acquisition_report import AcquisitionReport
 
@@ -4080,6 +4204,7 @@ def test_control_plane_acquisition_caught_errors_keep_fallback_and_type_only_out
     control_plane_acquisition_sources, failure_at,
 ):
     from dropin_registry import ScanAuthority
+
     from agent_worktrees import config_acquisition as acquisition
     from agent_worktrees.acquisition_report import AcquisitionReport
 

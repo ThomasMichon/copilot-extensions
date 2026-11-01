@@ -602,7 +602,12 @@ def derive_topology_agents(
 def _effective_spawn_defaults(
     profile: Any, repo_cfg: Any,
 ) -> tuple[list[str], dict[str, str]]:
-    """Resolve the spawn defaults for a profile: machine-local wins, else in-repo."""
+    """Resolve ordinary defaults, preserving the legacy unscoped profile path."""
+    from .configuration import effective_spawn_defaults
+
+    composed = effective_spawn_defaults(profile, repo_cfg)
+    if composed is not None:
+        return composed
     profile_set = getattr(profile, "model_fields_set", set())
 
     def _pick(field: str, repo_value: object) -> object:

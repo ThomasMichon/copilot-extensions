@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-bridge"
-version = "0.9.240-dev1"
+version = "0.9.241-dev1"
 description = "Persistent inter-agent communication service for Copilot CLI"
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-configuration-layers",
     "agent-update-driver",
     "agent-repository-policy",
     "agent-process-telemetry",
@@ -53,6 +54,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agent-configuration-layers = { path = "libs/configuration-layers" }
 agent-repository-policy = { path = "libs/repository-policy" }
 agent-process-telemetry = { path = "libs/process-telemetry" }
 agent-worktree-identity = { path = "libs/worktree-identity" }

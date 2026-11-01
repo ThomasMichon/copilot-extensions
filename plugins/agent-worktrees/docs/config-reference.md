@@ -4,6 +4,67 @@ Every configuration option for a repo adopted by agent-worktrees.
 
 ## Config sources (layered)
 
+### Ordinary preferences and protected policy
+
+Ordinary launch preferences compose **built-in defaults → selected repository
+base → explicitly bound knowledge graft → machine-wide preferences → selected
+repository+machine overrides**. `headless`, `auto_fast_forward` and the atomic
+`copilot_profiles` list use this order. The profile-assignment parser remains a
+separate admission boundary: committed repository templates cannot arm a pool,
+and knowledge binding does not grant credential, installation, hosting, review,
+merge, or resource-custody authority. The source-specific protected readers
+described below are not replaced by an unrestricted preferences graft.
+
+The four portable knowledge keys are `copilot_profiles`, `profile_assignment`,
+`headless`, and `auto_fast_forward`. Machine paths, `knowledge_repo`, credential
+selection, `repos` blocks, and executable/policy hooks do not become portable
+knowledge preferences. A missing optional binding is different from a named
+binding that cannot resolve: the latter fails configuration-context acquisition.
+
+Ordinary `related.yaml` reads use base → explicitly bound knowledge →
+machine-wide → exact repository+machine sources, including stateful/converged
+repositories. Knowledge source selection is independent of personal-state
+write-policy flags. A named unresolved binding is a refusal, never an absent
+optional layer or silent base fallback.
+
+The machine-wide source is `<validated-registry-root>/related.yaml`, a native
+configuration directory, not HOME or a repository checkout. Exact overrides
+retain the canonical/legacy related paths below `get config-dir`. Source-tier
+observations distinguish the two machine scopes; narrative paths remain relative
+to the actual supplying file directory. Explicit foreign repository targets
+use their own existing project/anchor resolver and project configuration; an
+unregistered reference never borrows the launch repository's binding.
+
+Machine-identity readers explicitly retain `family="registry"` source selection.
+Their existing registry membership, precedence, aliases, write-state policy,
+hosting admission and policy-trust classification are not ordinary preferences
+and are not changed by the related-source graft.
+
+### Read-data projection for other consumers
+
+`agent-worktrees state-root --configuration --json` returns the read-only
+`agent-worktrees.configuration` version-1 report. It contains:
+
+| Field | Type and meaning |
+|---|---|
+| `context.repository_id` | Exact `repo-<normalized-remote-digest>` from the registered repository identity owner, never a directory basename. |
+| `context.execution_machine` | Owner-resolved logical execution-machine identity. |
+| `context.installation_cell` | Validated selected cell root; legacy mode uses its registry root. |
+| `context.binding` | `bound` or `unbound`; unresolved explicit bindings fail rather than invent a source. |
+| `context.base_root` | Absolute selected source checkout. |
+| `context.knowledge_root` | Absolute read source, present only for a distinct bound knowledge checkout. It is **not** a writable-worktree grant. |
+| `repository_machine_root` | Absolute owner-selected project configuration root, preserving normalized-remote identity receipts and installation-cell separation. |
+
+The native launcher reserves `AGENT_CONFIGURATION_CONTEXT` after repository
+and profile environment merging and projects this same JSON data. The shared
+[`configuration_context`](../../../libs/configuration-layers/src/configuration_context/__init__.py)
+adapter reads a matching-root projection without starting Worktrees, or reads
+the CLI through a caller's existing qualified peer-launch prefix. Explicit
+query/target selectors must not reuse another repository's projection.
+Malformed projections and explicit binding/cell failures are errors; absence
+of an optional legacy owner retains standalone defaults without fabricated IDs.
+Source roots and JSON-pointer provenance are data, not trust or execution authority.
+
 agent-worktrees merges configuration from the layers below at load time.
 **Highest precedence wins**, per key (deep merge):
 
@@ -21,9 +82,9 @@ Copilot session database remains outside this path.
 | Precedence | Source | Path | Scope | Committed? |
 |------------|--------|------|-------|-----------|
 | **Highest** | **Machine-local** | legacy `~/.{project}/config.yaml`; namespaced `<cell>/repos/<repository-id>/agent-worktrees/config.yaml` | Per-machine overrides + machine paths (anchor, custom worktree_root). The **adapter** that makes a *foreign* repo compatible. | No |
-| *(conditional)* | **Knowledge overlay** | bound knowledge repo's config | For a **stateless harness** bound to a knowledge repo, portable operator-preference keys only (`copilot_profiles`, `profile_assignment`, `headless`, `auto_fast_forward`). Machine-specifics and the binding never graft. | Yes |
+| **Repository graft** | **Knowledge overlay** | explicitly bound knowledge repo's config | Portable preference keys only (`copilot_profiles`, `profile_assignment`, `headless`, `auto_fast_forward`); a standalone or converged repo may bind too. Machine-specifics and the binding never graft. Profile assignment retains its separate admission parser. | Yes |
 | **Middle** | **In-repo** | `<anchor>/.copilot-extensions/agent-worktrees/config.yaml` | The repo's **own** committed settings — the base, shared by every machine. Legacy `<anchor>/.agent-worktrees/config.yaml` and `<anchor>/.agent-worktrees.yaml` remain readable. | Yes |
-| **Lowest** | **Global** | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles`. | No |
+| **Machine tier** | **Global** | `~/.agent-worktrees/config.yaml` | Machine-wide preferences, above portable repository/knowledge preferences; protected machine identity and paths retain their native readers. | No |
 
 **A repo designed for this system needs no machine-local file.** Its anchor
 resolves from the repos registry (`~/.agent-worktrees/repos.yaml`), its settings
@@ -34,16 +95,46 @@ that carries no in-repo config.
 
 - **Portable top-level fields** (`srcroot`/`machine`/`platform`/
   `copilot_profiles`/`profile_assignment`/`headless`/`auto_fast_forward`)
-  resolve **machine-local > knowledge overlay (portable prefs
-  only) > global > detected/default**.
+  resolve **machine-local > global > knowledge overlay (portable prefs
+  only) > selected repository > detected/default** for ordinary preferences.
 - **Per-repo settings** merge **in-repo flat settings < machine-local
   `repos.<name>` block**. The global tier carries *only* machine-wide top-level
   settings — never per-repo settings.
 - No file holds the "full stack": the complete merged config for a target repo
   is **computed on-demand** by the loader from these layers. `agent-worktrees
   get …` reads through that on-demand merge.
-- A missing or malformed file at any tier is skipped safely — config loading
-  never breaks the CLI on a bad file.
+- Legacy malformed optional YAML retains its native tolerant read. Explicit
+  binding/installation errors and protected-policy parser failures are not
+  converted into an optional missing layer.
+
+### File inventory and reload contract
+
+The field tables in this reference cover global/project `config.yaml`,
+canonical in-repo `config.yaml`, legacy `.agent-worktrees/config.yaml` and
+`.agent-worktrees.yaml`, marketplace config overlays, and `config.d` pointers.
+Additional human-authored registries retain their dedicated schemas:
+[`repos.yaml`](../skills/agent-worktrees-repos/SKILL.md),
+[`projects.yaml`](../src/agent_worktrees/projects_registry.py),
+[`related.yaml`](../src/agent_worktrees/related.py),
+[`machines.yaml`](../src/agent_worktrees/machine_identity.py), and
+[`accounts.yaml`](../src/agent_worktrees/accounts.py). Registry records are
+identity/adoption/credential-routing data, not unrestricted ordinary preferences.
+Generated tracking JSON, claims, worktree receipts, handoff journals, native
+session databases and credentials are state and never configuration grafts.
+
+Nested mappings deep-merge; ordinary lists/scalars/null replace atomically.
+Each native parser determines whether a resulting null means default, absence
+or invalid input. Unknown legacy optional fields retain native compatibility;
+strict policy/identity schemas retain strict validation. Namespaced roots never
+fall back across cells. Explicit `--project` and configuration-path selection
+retain their precedence; no new basename/hostname selector is introduced.
+
+Reads occur at command/launch acquisition. `cached_load_config_scope()` only
+memoizes inside its explicit owner scope; a later command reacquires sources.
+Changing files does not restart a daemon, reinstall a payload or change an
+existing session's reserved projection. Acquisition reports retain uncertainty
+and source-specific evidence; ordinary provenance does not certify protected
+source completeness.
 
 > **Version note:** the in-repo canonical path
 > (`<anchor>/.copilot-extensions/agent-worktrees/config.yaml`) and the global tier are read by
@@ -53,6 +144,34 @@ that carries no in-repo config.
 > back-compat fallbacks when the canonical file is absent.
 
 ---
+
+### Minimal public-safe examples
+
+Repository preferences in `.copilot-extensions/agent-worktrees/config.yaml`
+(native flat YAML mapping; no new schema wrapper):
+
+```yaml
+pr:
+  enabled: true
+  provider: github
+  strategy: keep-alive
+  source_attribution: codename
+```
+
+Local terminal environment in `<agent-worktrees get config-dir>/config.yaml`.
+Replace `example-project` with the already-registered project alias; the owner
+resolves its remote identity and cell. This is not a binding or an install:
+
+```yaml
+repos:
+  example-project:
+    session_env:
+      TERM: xterm-256color
+```
+
+These blocks are inert examples, not publication/merge permission or a request
+to change an operator's active configuration. `session_env` remains machine
+owned; secret values and credential expressions do not belong in shared examples.
 
 ## Acquisition reports (Python owners)
 
@@ -729,7 +848,9 @@ commands. Omission preserves existing defaults.
 
 Controls whether sign-off goes through a pull request instead of direct-push
 finalization. This block can be set in the machine-local config **or** in the
-in-repo overlay (below); the in-repo version wins when both are present.
+in-repo overlay (below); the native config loader overlays machine preferences.
+Protected repository policy remains independently authoritative at operation
+admission and is not waived by this ordinary merge.
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|

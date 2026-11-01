@@ -52,9 +52,11 @@ def _assembled_python_source() -> str:
 
 def _posix_source() -> str:
     source = POSIX_SCRIPT.read_text(encoding="utf-8")
-    assignment = 'SCRIPT_DIR="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"'
-    assert source.count(assignment) == 1
-    return source.replace(assignment, f"SCRIPT_DIR={shlex.quote(str(LIB))}", 1)
+    initialization = 'dirname_into SCRIPT_DIR "${BASH_SOURCE[0]}"\n'
+    assert source.count(initialization) == 1
+    start = source.index(initialization)
+    end = source.index("JSON_QUERY=", start)
+    return source[:start] + f"SCRIPT_DIR={shlex.quote(str(LIB))}\n" + source[end:]
 
 
 def _run_canonical_shell_digest(
@@ -139,6 +141,141 @@ def test_python_completion_publication_never_replaces_existing_identity(
     assert list(tmp_path.iterdir()) == [target]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows path comparison")
+@pytest.mark.parametrize(("left", "right", "equivalent"), (
+    (r"C:\example\receipt", r"\\?\C:\example\receipt", True),
+    (r"\\example.invalid\share\receipt", r"\\?\UNC\example.invalid\share\receipt", True),
+    (r"C:\example\receipt", r"\\?\C:\other\receipt", False),
+    (r"C:\example\receipt", r"\\?\GLOBALROOT\Device\C:\example\receipt", False),
+))
+def test_windows_path_comparison_retains_extended_io_paths(
+    left: str, right: str, equivalent: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_python_module()
+    resolved = []
+
+    def physical_path(path):
+        resolved.append(path)
+        return path
+
+    monkeypatch.setattr(module, "canonical_path", physical_path)
+    assert module.paths_equal(left, right) is equivalent
+    assert resolved == [Path(left), Path(right)]
+
+
+@pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
+@pytest.mark.parametrize("path_units", (259, 260, 280))
+def test_powershell_safe_open_preserves_extended_length_file_reads(
+    tmp_path: Path, path_units: int,
+) -> None:
+    directory = tmp_path / "long-open"
+    prefix_units = lambda value: len(str(value).encode("utf-16le")) // 2
+    while path_units - prefix_units(directory) - 1 > 240:
+        directory /= "component"
+    filename_units = path_units - prefix_units(directory) - 1
+    assert 5 <= filename_units <= 255
+    filename = ("x" * (filename_units - 4)) + ".txt"
+    directory.mkdir(parents=True)
+    target = directory / filename
+    target.write_text("native long-path contents\n", encoding="utf-8")
+    assert prefix_units(target) == path_units
+    result = _run_owner_probe(
+        tmp_path / "long-open-probe",
+        f"contents, identity = _read_regular_file(Path({str(target)!r}), "
+        "label='Long-path contents', require_stable_identity=True)\n"
+        "sys.stdout.buffer.write(contents)",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "native long-path contents\n"
+
+
+@pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
+@pytest.mark.parametrize("path_units", (247, 248, 260, 280))
+def test_powershell_atomic_directory_preserves_extended_length_paths(
+    tmp_path: Path, path_units: int,
+) -> None:
+    parent = tmp_path / "atomic-directory"
+    prefix_units = lambda value: len(str(value).encode("utf-16le")) // 2
+    while path_units - prefix_units(parent) - 1 > 240:
+        parent /= "component"
+    parent.mkdir(parents=True)
+    target = parent / ("d" * (path_units - prefix_units(parent) - 1))
+    assert prefix_units(target) == path_units
+    result = _run_owner_probe(
+        tmp_path / "atomic-directory-probe",
+        f"path = Path({str(target)!r})\n"
+        "lock = _DirectoryLock(path, kind='installation', marketplace_id='example')\n"
+        "lock._create(time.monotonic() + 5)\n"
+        "try:\n"
+        "    assert path.is_dir()\n"
+        "    identity = _stat_identity(path.stat())\n"
+        "    before = lock.owner_path.read_bytes()\n"
+        "    try:\n"
+        "        lock._create(time.monotonic() + 5)\n"
+        "    except FileExistsError:\n"
+        "        pass\n"
+        "    else:\n"
+        "        raise AssertionError('Directory replaced')\n"
+        "    assert _stat_identity(path.stat()) == identity\n"
+        "    assert lock.owner_path.read_bytes() == before\n"
+        "finally:\n"
+        "    lock.release()",
+    )
+    assert result.returncode == 0, result.stderr
+    assert not target.exists()
+
+
+@pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
+@pytest.mark.parametrize("path_units", (259, 260, 280))
+def test_powershell_atomic_publication_preserves_long_paths_without_replacement(
+    tmp_path: Path, path_units: int,
+) -> None:
+    parent = tmp_path / "atomic-move"
+    prefix_units = lambda value: len(str(value).encode("utf-16le")) // 2
+    while path_units - prefix_units(parent) - 1 > 240:
+        parent /= "component"
+    parent.mkdir(parents=True)
+    filename_units = path_units - prefix_units(parent) - 1
+    original = parent / ("s" * filename_units)
+    destination = parent / ("d" * filename_units)
+    original.write_bytes(b"original completion\n")
+    assert prefix_units(original) == prefix_units(destination) == path_units
+    result = _run_owner_probe(
+        tmp_path / "atomic-publication-probe",
+        f"source = Path({str(original)!r})\n"
+        f"destination = Path({str(destination)!r})\n"
+        "assert _publish_json_no_replace(destination, "
+        "{'contents': source.read_text(encoding='utf-8')}, locks=())\n"
+        "identity = _stat_identity(destination.stat())\n"
+        "before = destination.read_bytes()\n"
+        "source.write_bytes(b'must not replace')\n"
+        "assert not _publish_json_no_replace(destination, {'replaced': True}, locks=())\n"
+        "assert _stat_identity(destination.stat()) == identity\n"
+        "assert destination.read_bytes() == before",
+    )
+    assert result.returncode == 0, result.stderr
+    assert original.read_bytes() == b"must not replace"
+    assert _load_python_module().read_json(destination) == {"contents": "original completion\n"}
+
+
+@pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
+def test_powershell_long_snapshot_directory_matches_reference(tmp_path: Path) -> None:
+    root = tmp_path / "snapshot"
+    while len(str(root).encode("utf-16le")) // 2 < 280:
+        root /= "component"
+    root.mkdir(parents=True)
+    (root / "a").write_bytes(b"x")
+    expected = _load_python_module()._snapshot_content_sha256(
+        root, max_entries=1, max_path_bytes=1, max_content_bytes=1,
+    )
+    result = _run_canonical_shell_digest(
+        "powershell", root, tmp_path / "digest",
+        max_entries=1, max_path_bytes=1, max_content_bytes=1,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
+
+
 def test_shell_metadata_tokens_retain_posix_subsecond_precision() -> None:
     module = _load_python_module()
     posix = POSIX_SCRIPT.read_text(encoding="utf-8")
@@ -156,6 +293,7 @@ def test_shell_metadata_tokens_retain_posix_subsecond_precision() -> None:
     assert "digest_safe_file_fd_into verification_digest" in posix
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX executable probe")
 def test_posix_cache_hit_hashes_same_size_same_second_rewrite(
     tmp_path: Path,
 ) -> None:
@@ -718,6 +856,15 @@ def test_posix_safe_open_rejects_fifo_without_blocking(tmp_path: Path, bash: str
         prefix
         + r'''
 shift
+REAPED_TIMER="$3"
+kill() {
+    if [[ -n "${open_timer:-}" && "${1:-}" == "$open_timer" ]] &&
+       ! jobs -pr | grep -Fxq -- "$open_timer"; then
+        printf '%s' "$open_timer" >"$REAPED_TIMER"
+        return 1
+    fi
+    builtin kill "$@"
+}
 capture_regular_file "$1" "Probe file" "$2" true true
 ''',
         encoding="utf-8",
@@ -725,10 +872,11 @@ capture_regular_file "$1" "Probe file" "$2" true true
     probe.chmod(0o755)
     fifo = tmp_path / "receipt.fifo"
     os.mkfifo(fifo)
+    reaped_timer = tmp_path / "reaped-timer"
     started = time.monotonic()
 
     result = subprocess.run(
-        (bash, str(probe), "status", str(fifo), str(tmp_path / "capture")),
+        (bash, str(probe), "status", str(fifo), str(tmp_path / "capture"), str(reaped_timer)),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -740,6 +888,39 @@ capture_regular_file "$1" "Probe file" "$2" true true
     assert time.monotonic() - started < 5
     assert result.returncode != 0
     assert "without blocking" in result.stderr.lower()
+    assert not reaped_timer.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX file descriptors")
+def test_posix_regular_captures_settle_watchdogs_without_waiting_for_deadlines(
+    tmp_path: Path,
+) -> None:
+    prefix, marker, _ = _posix_source().partition('\nACTION="${1:-}"')
+    assert marker
+    probe = tmp_path / "capture-probe.sh"
+    probe.write_text(
+        prefix
+        + r'''
+shift
+for ((index = 0; index < 6; index++)); do
+    captured="$(capture_regular_file "$1" "Probe file" "$2" true true; cat "$2"; printf x)"
+    printf '%s' "${captured%x}"
+done
+''',
+        encoding="utf-8",
+    )
+    target = tmp_path / "receipt"
+    target.write_bytes(b"receipt\n\n")
+    result = subprocess.run(
+        (shutil.which("bash"), str(probe), "status", str(target), str(tmp_path / "capture")),
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == target.read_bytes() * 6
+    assert result.stderr == b""
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")

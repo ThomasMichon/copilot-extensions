@@ -1,5 +1,7 @@
 # agent-machines
 
+[Configuration reference](docs/configuration.md)
+
 Portable **`restore-machinestate`** for the Copilot CLI. `agent-machines`
 discovers machine-state **requirement packages** from adopted projects on the
 current machine and reconciles the machine-global `~/.copilot/` state to their
@@ -283,6 +285,11 @@ an activation or migrates legacy state. `slot-cutover` provides the same
 ownership-checked marker transaction for an explicitly selected completed
 historical slot, enabling rollback without changing another cell; after a
 successful cutover it atomically republishes schema-4 `deploy-manifest.json`.
+Cell-slot actions move the process/provider working directory off the replaceable
+payload before dispatch and bypass legacy staging even for an installed
+payload or an already-prepared invocation. They neither create nor reap the
+legacy `.agent-machines/.install-stage` tree; the original payload identity
+remains bound to the explicit installation context.
 The manifest keeps the latest reconciled payload provenance in `source` and the
 active slot in `runtime` (`version`, slot/interpreter paths, and selecting
 payload). Historical rollback changes only `runtime`, so session-start bootstrap

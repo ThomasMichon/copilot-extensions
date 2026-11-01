@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
-from . import config as cfg, tracking, worktree_identity
+from . import config as cfg
+from . import tracking, worktree_identity
 
 
 def _core():
@@ -54,6 +56,7 @@ def _build_env(
     launched worktree's owner identity use the selected config when available.
     """
     env: dict[str, str] = {}
+    launch_config = config
     env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = str(cfg.project_dir())
     try:
         launch_config = config if config is not None else cfg.load_config()
@@ -76,4 +79,24 @@ def _build_env(
                 env[key] = env[key] + os.pathsep + value
             else:
                 env[key] = value
+    # This is read-data, not authority, and cannot be replaced by repo/profile env.
+    from configuration_context import CONTEXT_ENV
+
+    from . import project_state
+    from .config_sources import configuration_report
+
+    env[CONTEXT_ENV] = ""
+    if launch_config is not None:
+        try:
+            report = configuration_report(launch_config, base_anchor=work_dir or None)
+        except (ValueError, TypeError):
+            if launch_config.knowledge_repo or project_state.namespaced():
+                report = {
+                    "schema": "agent-worktrees.configuration", "version": 1,
+                    "error": "configuration-context-unavailable",
+                }
+            else:
+                report = None
+        if report is not None:
+            env[CONTEXT_ENV] = json.dumps(report, separators=(",", ":"))
     return env

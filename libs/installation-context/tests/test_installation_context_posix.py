@@ -1428,16 +1428,19 @@ def test_unparseable_conflicting_declaration_cannot_be_skipped(
     assert not durable.exists()
 
 
-def test_python_and_posix_directory_resolution_match(tmp_path: Path) -> None:
-    marketplace = tmp_path / "marketplace"
-    payload = marketplace / "payloads" / "plugins" / "agent-example"
+@pytest.mark.parametrize("suffix", ["", "\n", "\n\n"])
+def test_python_and_posix_directory_resolution_match(tmp_path: Path, suffix: str) -> None:
+    if suffix and os.name == "nt":
+        pytest.skip("Windows paths cannot contain newlines")
+    marketplace = tmp_path / f"marketplace{suffix}"
+    payload = marketplace / "payloads" / "plugins" / f"agent-example{suffix}"
     payload.mkdir(parents=True)
     _write_json(
         marketplace / ".plugin" / "marketplace.json",
         {
             "name": "Example Directory",
             "metadata": {"pluginRoot": "payloads"},
-            "plugins": [{"name": "agent-example", "source": "plugins/agent-example"}],
+            "plugins": [{"name": "agent-example", "source": f"plugins/agent-example{suffix}"}],
         },
     )
     outputs = []
@@ -1458,6 +1461,57 @@ def test_python_and_posix_directory_resolution_match(tmp_path: Path) -> None:
     assert outputs and all(output == outputs[0] for output in outputs[1:])
     assert outputs[0]["source"]["canonical"] == f"directory:{marketplace.resolve()}"
     assert outputs[0]["locator"]["marketplaceRoot"] == str(marketplace.resolve())
+    assert outputs[0]["payloadRoot"] == str(payload.resolve())
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows paths cannot contain newlines")
+@pytest.mark.parametrize("suffix", ["\n", "\n\n"])
+def test_trailing_path_bytes_survive_receipt_validation(tmp_path: Path, suffix: str) -> None:
+    layout = _receipt_layout(tmp_path)
+    payload = Path(layout["payload"])
+    renamed_payload = payload.with_name(payload.name + suffix)
+    payload.rename(renamed_payload)
+    install = Path(layout["install"])
+    receipt = json.loads(install.read_text(encoding="utf-8"))
+    receipt["payload"]["root"] = str(renamed_payload)
+    receipt["roots"] = {name: name + suffix for name in receipt["roots"]}
+    _write_json(install, receipt)
+    outputs = [
+        json.loads(
+            _run(
+                command, "validate", "--context", install,
+                "--durable-home", layout["durable"],
+            ).stdout
+        )
+        for _, command in RUNNERS
+    ]
+    assert outputs and all(value == outputs[0] for value in outputs[1:])
+    assert outputs[0]["payloadRoot"] == str(renamed_payload.resolve())
+    for name, relative in receipt["roots"].items():
+        assert outputs[0][f"{name}Root"] == str(
+            (Path(layout["plugin_root"]) / relative).resolve()
+        )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows paths cannot contain newlines")
+def test_posix_helper_bootstraps_from_a_trailing_newline_directory(tmp_path: Path) -> None:
+    if BASH is None:
+        pytest.skip("Bash runner is unavailable")
+    helper = tmp_path / "helper\n\n"
+    shutil.copytree(LIB, helper, ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    source = tmp_path / "source\n\n"
+    source.mkdir()
+    arguments = (
+        "source-id", "--source-json",
+        json.dumps({"source": "directory", "path": str(source)}),
+        "--marketplace-key", "trailing-path",
+    )
+    expected = json.loads(_run(PYTHON_COMMAND, *arguments).stdout)
+    actual = json.loads(
+        _run((BASH, str(helper / POSIX_SCRIPT.name)), *arguments).stdout
+    )
+    assert actual == expected
+    assert actual["canonical"] == f"directory:{source.resolve()}"
 
 
 @pytest.mark.skipif(POWERSHELL_COMMAND is None, reason="PowerShell is not installed")

@@ -1703,6 +1703,8 @@ class CodespacesConfig:
 
     # Source tracking
     source_paths: list[Path] = field(default_factory=list)
+    configuration_provenance: dict[str, Any] = field(default_factory=dict)
+    configuration_layers: list[str] = field(default_factory=list)
 
     @property
     def effective_acp_command(self) -> str:
@@ -1939,7 +1941,7 @@ def _repo_base_config_path(repo_path: Path) -> Path | None:
         repo_path / LEGACY_CONFIG_DIR_NAME / CONFIG_FILE_IN_DIR,
         repo_path / CONFIG_FILENAME,
     ):
-        if candidate.exists():
+        if candidate.exists() or candidate.is_symlink():
             return candidate
     return None
 
@@ -1949,7 +1951,7 @@ def _repo_marketplace_overlay_path(repo_path: Path) -> Path | None:
     if not marketplace_id:
         return None
     candidate = repo_path / MARKETPLACE_OVERLAYS_DIR / marketplace_id / CONFIG_FILE_IN_DIR
-    return candidate if candidate.exists() else None
+    return candidate if candidate.exists() or candidate.is_symlink() else None
 
 
 def _repo_config_layers(repo_path: Path) -> list[Path]:
@@ -2242,60 +2244,17 @@ def load_repo_config(repo_path: Path) -> dict[str, Any] | None:
 
 
 def _state_root_config_dir(repo_path: Path) -> Path | None:
-    """Resolve the bound knowledge repo's dir when it carries a CodeSpace config.
+    """Select a native knowledge source from qualified read-only owner data.
 
-    The citadel E1e **knowledge overlay** (config-graft, #947): a stateless
-    harness carries no CodeSpace config of its own -- personal CodeSpace
-    topology is reference config that lives in the bound knowledge repo. This asks
-    ``agent-worktrees state-root`` (run with cwd=repo_path) only to LOCATE the
-    knowledge checkout -- the config-READ axis, distinct from where personal state
-    is written -- returning it only when it actually declares a CodeSpace config
-    (canonical ``.copilot-extensions/agent-codespaces/config.yaml`` or legacy
-    fallbacks).
-
-    Best-effort + fail-open: a missing ``agent-worktrees`` binstub, a
-    non-stateless / unbound repo, or legacy error yields ``None``. Explicit
-    installation context refusals propagate instead of selecting legacy state.
-    Only the config *content* + its ``src``/provision ``repo_dir`` graft here;
-    plugin-settings sourcing (``source_paths``) stays the harness's own, so
-    generic CodeSpace plugins remain harness-sourced.
+    Optional absence/unbound is distinct from explicit refusal. Activation
+    source_paths stay base-owned while provisioning paths remain source-owned.
     """
-    import json
-    import shutil
-    import subprocess
+    from .configuration_layers_adapter import configuration_report
 
-    from . import worktrees
-
-    if worktrees.explicit_context():
-        proc = worktrees.run("state-root", "--json", cwd=str(repo_path), timeout=20)
-        if proc is None:
-            return None
-    else:
-        exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow no-context legacy state-root lookup; explicit context uses worktrees.run
-        if not exe:
-            return None
-        try:
-            proc = subprocess.run(
-                [exe, "state-root", "--json"], cwd=str(repo_path),
-                capture_output=True, text=True, timeout=20,
-                **no_window_kwargs(),
-            )
-        except (OSError, subprocess.SubprocessError):
-            return None
-    if proc.returncode != 0 or not (proc.stdout or "").strip():
+    report = configuration_report(repo_path)
+    if report is None or report["context"]["binding"] != "bound":
         return None
-    try:
-        data = json.loads(proc.stdout)
-    except ValueError:
-        return None
-    # Only graft when the launch repo actually requires an external state root
-    # (a stateless harness); a self-hosted repo resolves to itself.
-    if not data.get("requires_external") or not data.get("bound"):
-        return None
-    root = data.get("state_root")
-    if not root:
-        return None
-    kroot = Path(root)
+    kroot = Path(report["context"]["knowledge_root"])
     return kroot if repo_has_config(kroot) else None
 
 
@@ -2396,8 +2355,19 @@ def load_merged_config(
     ``include_cwd=False`` so they stay driven purely by the adoption manifest.
     """
     roots: list[Path] = [entry.path for entry in load_adopted_repos()]
+    selected_report = None
     if include_cwd:
         cwd_root = cwd_repo_root()
+        if cwd_root is None:
+            from configuration_context import delivered_context
+
+            delivered = delivered_context(repository_root=Path.cwd())
+            if delivered is not None:
+                cwd_root = Path(delivered["context"]["base_root"])
+        if cwd_root is not None:
+            from .configuration_layers_adapter import configuration_report
+
+            selected_report = configuration_report(cwd_root)
         if (
             cwd_root is not None
             and cwd_root not in roots
@@ -2415,6 +2385,17 @@ def load_merged_config(
     # below repository-owned config; active payload declarations outrank stale
     # user-level pointers for the same provider.
     sources: list[tuple[dict[str, Any], Path, Path]] = []
+    if selected_report is not None:
+        from .configuration_layers_adapter import compose_documents
+
+        result = compose_documents(selected_report, RUNTIME_DIR)
+        selected_root = Path(selected_report["context"]["base_root"])
+        merged.configuration_provenance = result["provenance"]
+        merged.configuration_layers = result["layers"]
+        sources.append((result["values"], selected_root, selected_root))
+        # Keep adoption discovery for distinct targets, below this selected
+        # context; source_paths still names only activation-owning base roots.
+        roots = [root for root in roots if root != selected_root]
     for repo_root in roots:
         # E1e knowledge overlay (config-graft, #947): read the config from the
         # repo itself, or -- when it has none and is a stateless harness -- from
@@ -2478,16 +2459,17 @@ def load_merged_config(
         # Credentials (union sources across repos)
         creds_raw = raw.get("credentials", {})
         if creds_raw:
-            merged.credentials.relay_port = creds_raw.get(
-                "relay_port", merged.credentials.relay_port
-            )
-            merged.credentials.ado_host = creds_raw.get(
-                "ado_host", merged.credentials.ado_host
-            )
-            merged.credentials.enforce_ado_rest_login = bool(creds_raw.get(
-                "enforce_ado_rest_login",
-                merged.credentials.enforce_ado_rest_login,
-            ))
+            if selected_report is None or source_path == selected_root:
+                merged.credentials.relay_port = creds_raw.get(
+                    "relay_port", merged.credentials.relay_port
+                )
+                merged.credentials.ado_host = creds_raw.get(
+                    "ado_host", merged.credentials.ado_host
+                )
+                merged.credentials.enforce_ado_rest_login = bool(creds_raw.get(
+                    "enforce_ado_rest_login",
+                    merged.credentials.enforce_ado_rest_login,
+                ))
             for attr in ("feed_token_env", "identity_env"):
                 target = getattr(merged.credentials, attr)
                 for _var in creds_raw.get(attr, []) or []:
