@@ -128,6 +128,53 @@ def owned_command_names(root: Path) -> tuple[str, ...]:
     return names
 
 
+def _command_identity(path: Path) -> tuple:
+    _plain(path)
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        raise RuntimeError("Logger command is not an ordinary unshared file")
+    content = path.read_bytes()
+    after = path.lstat()
+    fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+    identity = tuple(getattr(before, field) for field in fields)
+    if identity != tuple(getattr(after, field) for field in fields):
+        raise RuntimeError("Logger command changed during inspection")
+    return (*identity, content)
+
+
+def remove_owned_commands(root: Path) -> tuple[str, ...]:
+    """Keep publication custody from command selection through identity-checked removal."""
+    binding = _load("_logger_uninstall_binding", "command_binding.py")
+    primitive = binding._load_primitive(SCRIPTS.parent)
+    lifecycle = binding._load_lifecycle()
+    payload = Path(os.environ.get("COPILOT_PLUGIN_STAGED_FROM") or SCRIPTS.parent)
+    with lifecycle.legacy_lifecycle(
+        binding._rules(), primitive, reserve=False, teardown=True, lock_timeout=5,
+        payload_root=payload, plugin_id="agent-logger", legacy_root=root,
+        project_root=Path.cwd(),
+    ) as lease:
+        validate(root)
+        inventory = _load("_logger_uninstall_inventory", "installer_engine_uninstall.py")
+        profile = inventory.profile_for(SCRIPTS.parent, "agent-logger")
+        directory = Path.home() / ".local" / "bin"
+        _plain(directory)
+        identities = {
+            name: _command_identity(directory / name)
+            for name in profile.local_bin_entries if os.path.lexists(directory / name)
+        }
+        names = tuple(
+            name for name in owned_command_names(root)
+            if name.endswith((".ps1", ".cmd")) == (os.name == "nt")
+        )
+        for name in names:
+            lease.assert_owned()
+            path = directory / name
+            if name not in identities or _command_identity(path) != identities[name]:
+                raise RuntimeError("Logger command identity changed during uninstall")
+            path.unlink()
+        return names
+
+
 def refuse_live_runtime(root: Path) -> None:
     runtime = _load("_logger_uninstall_runtime", "versioned_runtime.py")
     pids = runtime._iter_all_pids()
@@ -333,6 +380,7 @@ def main() -> int:
     parser.add_argument("--unit-names", action="store_true")
     parser.add_argument("--unit-dir", type=Path)
     parser.add_argument("--command-names", action="store_true")
+    parser.add_argument("--remove-commands", action="store_true")
     parser.add_argument("--idle", action="store_true")
     parser.add_argument("--prepare", action="store_true")
     parser.add_argument("--remove-runtime", action="store_true")
@@ -347,6 +395,9 @@ def main() -> int:
             print(root)
         if args.command_names:
             for name in owned_command_names(root):
+                print(name)
+        if args.remove_commands:
+            for name in remove_owned_commands(root):
                 print(name)
         if args.unit_names:
             if args.unit_dir is None:

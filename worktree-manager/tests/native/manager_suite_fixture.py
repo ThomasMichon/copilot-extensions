@@ -746,6 +746,11 @@ def prepare(directory: Path, mode: str) -> None:
               "--payload", case / "manager-payload", "--", "--version"], case)
         payload = Path(env["HOME"]) / ".copilot" / "installed-plugins" / "copilot-extensions" / "agent-worktrees"
         _run([shutil.which("pwsh"), "-NoProfile", "-File", payload / "scripts" / "install.ps1", "install"], case)
+        configuration = json.loads(_run(
+            _command(case, "agent-worktrees", "state-root", "--configuration", "--json"), case,
+        ).stdout)
+        if Path(configuration["context"]["base_root"]).resolve() != (case / "project").resolve():
+            raise RuntimeError("Baseline configuration owner selected another repository")
         _run(_command(case, "worktree-manager", "update", "--project", "example"), case, timeout=840)
         _run([shutil.which("pwsh"), "-NoProfile", "-File", payload.with_name("agent-index") / "scripts" / "install.ps1",
               "engine"], case, timeout=600)

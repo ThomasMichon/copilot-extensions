@@ -197,9 +197,14 @@ def test_engine_endpoint_env(monkeypatch):
 
 def test_engine_command_targets_durable_venv(tmp_path):
     cmd = daemon.engine_command(tmp_path)
-    from agent_procutil import python_cache_args
-    assert cmd[1:] == [*python_cache_args(tmp_path), "-m", "agent_index_engine.app", "--host",
-                        daemon.engine_endpoint()[0], "--port", str(daemon.engine_endpoint()[1])]
+    assert cmd[1] == "-X"
+    prefix = Path(cmd[2].removeprefix("pycache_prefix="))
+    cache_root = tmp_path / "cache" / "python"
+    cache_root.mkdir(parents=True)
+    assert os.path.samefile(prefix.parent, cache_root)
+    assert prefix.name.startswith("unsealed-")
+    assert cmd[3:] == ["-m", "agent_index_engine.app", "--host",
+                      daemon.engine_endpoint()[0], "--port", str(daemon.engine_endpoint()[1])]
     assert str(tmp_path) in cmd[0]
 
 

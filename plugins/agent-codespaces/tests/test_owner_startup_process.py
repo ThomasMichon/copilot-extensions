@@ -37,6 +37,7 @@ def test_owner_startup_caches_isolated_imports_in_durable_state(monkeypatch, tmp
     monkeypatch.setattr(agent_procutil, "spawn_daemon", spawn)
     owner_startup.spawn_owner_process(root, source=__file__, installed=True)
     command = captured["command"]
+    selected_prefix = command[command.index("-X") + 1].removeprefix("pycache_prefix=")
     assert captured["env_overrides"]["AGENT_CODESPACES_HOME"] == str(root)
     program = (
         "import json,sys;sys.path.insert(0,sys.argv[1]);import owner_cache_probe;"
@@ -58,7 +59,8 @@ def test_owner_startup_caches_isolated_imports_in_durable_state(monkeypatch, tmp
         assert observed["enabled"] and observed["value"] == 7
         assert observed["isolated"] == 1
         assert cache.is_relative_to(Path(observed["prefix"])) and cache.is_file()
-        assert observed["prefix"] == agent_procutil.python_cache_args(root)[1].partition("=")[2]
+        assert observed["prefix"] == selected_prefix
+        assert os.path.samefile(Path(selected_prefix).parent, root / "cache" / "python")
         current = cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino
         if previous is not None:
             assert current == previous
@@ -110,7 +112,9 @@ def test_source_owner_launch_preserves_package_discovery(tmp_path, monkeypatch, 
             assert Path(witness["module"]).parent == package
             assert Path(witness["cwd"]) == Path.home()
             assert witness["isolated"] == 0 and witness["args"] == ["owner"]
-            assert os.path.samefile(witness["cache"], root / "cache" / "python")
+            prefix = Path(witness["cache"])
+            assert os.path.samefile(prefix.parent, root / "cache" / "python")
+            assert prefix.name.startswith("unsealed-")
             assert not list(package_root.rglob("*.pyc"))
         finally:
             if child.poll() is None:

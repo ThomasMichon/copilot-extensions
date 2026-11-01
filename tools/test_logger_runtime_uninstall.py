@@ -378,6 +378,75 @@ def test_failed_stamped_teardown_cannot_authorize_foreign_command_publication(tm
     assert all((root / name).read_bytes() == value for name, value in durable.items())
 
 
+@pytest.mark.parametrize("replacement", ["publisher", "identity"])
+def test_logger_command_removal_preserves_publication_custody_and_identity(tmp_path, monkeypatch, replacement):
+    root, durable, environment = _fixture(tmp_path, "owned")
+    default = root.parent / ".agent-logger"
+    root.rename(default)
+    root = default
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    for key in ("COPILOT_PLUGIN_ROOT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
+                "COPILOT_PLUGIN_STAGED_FROM", "AGENT_LOGGER_HOME"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.chdir(INSTALLERS.parent)
+    command = root.parent / ".local" / "bin" / ("agent-logger.ps1" if os.name == "nt" else "agent-logger")
+    command.parent.mkdir(parents=True)
+    preserved = command.with_name("agent-logger" if os.name == "nt" else "agent-logger.ps1")
+    spec = importlib.util.spec_from_file_location("logger_command_custody_test", INSTALLERS / "uninstall_guard.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    templates = helper._load("_logger_command_templates", "installer_engine_commands.py")._templates(
+        INSTALLERS.parent, root, "agent-logger", home=root.parent,
+    )
+    content = templates[command.name][0].encode()
+    command.write_bytes(content)
+    preserved_content = templates[preserved.name][0].encode()
+    preserved.write_bytes(preserved_content)
+    inventory = helper.owned_command_names
+
+    def concurrent_replacement(selected_root):
+        names = inventory(selected_root)
+        assert command.name in names
+        if replacement == "identity":
+            candidate = command.with_name("replacement.ps1")
+            candidate.write_bytes(command.read_bytes())
+            os.replace(candidate, command)
+        else:
+            script = (
+                "import importlib.util,sys\nfrom pathlib import Path\n"
+                "spec=importlib.util.spec_from_file_location('binding',sys.argv[1])\n"
+                "binding=importlib.util.module_from_spec(spec); spec.loader.exec_module(binding)\n"
+                "payload=Path(sys.argv[2]); root=Path(sys.argv[3])\n"
+                "primitive=binding._load_primitive(payload)\n"
+                "with binding._load_lifecycle().legacy_lifecycle("
+                "binding._rules(),primitive,reserve=False,lock_timeout=0,"
+                "payload_root=payload,plugin_id='agent-logger',legacy_root=root,project_root=payload):\n"
+                " Path(sys.argv[4]).write_bytes(b'replacement publisher command')\n"
+            )
+            result = subprocess.run(
+                [sys.executable, "-I", "-B", "-c", script, str(INSTALLERS / "command_binding.py"),
+                 str(INSTALLERS.parent), str(root), str(command)],
+                capture_output=True, text=True, timeout=15, env=dict(os.environ),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            assert result.returncode != 0, result.stdout + result.stderr
+            assert "lock" in result.stderr.lower(), result.stdout + result.stderr
+            assert command.read_bytes() == content
+        return names
+
+    monkeypatch.setattr(helper, "owned_command_names", concurrent_replacement)
+    if replacement == "identity":
+        with pytest.raises(RuntimeError, match="command identity changed"):
+            helper.remove_owned_commands(root)
+        assert command.read_bytes() == content
+    else:
+        assert helper.remove_owned_commands(root) == (command.name,)
+        assert not command.exists()
+    assert preserved.read_bytes() == preserved_content
+    _assert_state(root, durable, removed=False)
+
+
 @pytest.mark.parametrize("host", ["pwsh", "bash"])
 @pytest.mark.parametrize("custody", ["snapshot", "retention"])
 def test_logger_preserves_busy_generation_custody(tmp_path, host, custody):
@@ -629,8 +698,14 @@ def test_posix_logger_default_root_alias_uses_default_units_and_commands(tmp_pat
         "session-sync", "agent-logger", "collate-session", "read-session-digest",
         "prepare-session-log", "ramp-up-session",
     )
+    spec = importlib.util.spec_from_file_location(
+        "logger_posix_default_command_templates", REPO / "libs" / "installer-engine" / "installer_engine_commands.py",
+    )
+    renderer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(renderer)
+    templates = renderer._templates(INSTALLERS.parent, root, "agent-logger", home=root.parent)
     for name in names:
-        (commands / name).write_text("default compatibility command")
+        (commands / name).write_text(templates[name][0], encoding="utf-8")
     fakebin = tmp_path / "fakebin"
     fakebin.mkdir()
     log = tmp_path / "systemctl-calls"
@@ -925,9 +1000,16 @@ def test_native_logger_default_root_alias_uses_default_task_and_commands(tmp_pat
         "session-sync", "agent-logger", "collate-session", "read-session-digest",
         "prepare-session-log", "ramp-up-session",
     )
+    spec = importlib.util.spec_from_file_location(
+        "logger_default_command_templates", REPO / "libs" / "installer-engine" / "installer_engine_commands.py",
+    )
+    renderer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(renderer)
+    templates = renderer._templates(INSTALLERS.parent, root, "agent-logger", home=root.parent)
     for name in names:
         for extension in ("ps1", "cmd"):
-            (commands / f"{name}.{extension}").write_text("default compatibility command")
+            command_name = f"{name}.{extension}"
+            (commands / command_name).write_text(templates[command_name][0], encoding="utf-8")
     disabled = tmp_path / "task-disabled"
     removed = tmp_path / "task-removed"
     env.update(

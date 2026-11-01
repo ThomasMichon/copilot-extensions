@@ -1733,12 +1733,8 @@ case "${ACTION}" in
       systemctl --user daemon-reload || true
       chg "timer removed (config at ${INSTALL_DIR} kept)"
       if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
-        owned_commands="$("$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" \
-            --root "$INSTALL_DIR" --command-names)" || exit 1
-        while IFS= read -r name; do
-          [[ -n "$name" && "$name" != *.ps1 && "$name" != *.cmd ]] || continue
-          rm -f "${LOCAL_BIN}/${name}" || exit 1
-        done <<< "$owned_commands"
+        "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" \
+            --root "$INSTALL_DIR" --remove-commands >/dev/null || exit 1
         chg "binstubs removed from ${LOCAL_BIN}"
       else
         chg "scoped install left legacy global binstubs unchanged"

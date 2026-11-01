@@ -6481,6 +6481,11 @@ use `INSTALLATION_CONTEXT_POWERSHELL=powershell`; an explicitly requested
 unavailable shell fails rather than silently supplying evidence. The Windows
 derived-diagnostic step propagates both dependency-construction and pytest
 failures explicitly. None of these jobs gates ordinary PR or promotion snapshots.
+The legacy/no-pointer cell also runs Logger's two real-process command-removal
+regressions once per OS: a held publication lease blocks a competing publisher,
+and removal refuses a same-byte replacement file. They retain each platform's
+command-family scope and run in this native lane, never in the subprocess-free
+promotion-unit packet. Existing matrix and job budgets are unchanged.
 
 `tools/test_installation_context_ci_scope.py` checks the current unit-only
 boundary, explicit manual matrix/selector bounds and real PowerShell failure

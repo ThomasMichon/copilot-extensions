@@ -203,10 +203,12 @@ def _configuration(case: Path, declared: dict[str, Any]) -> None:
         "repos": {"example": {"anchor": str(project), "default_branch": "main",
                              "pr": {"enabled": False}}},
     })
-    _write(state / "projects.yaml", {"projects": {"example": {
-        "config_dir": str(config), "anchor": str(project), "display_name": "Example",
+    _write(state / "projects.yaml", {"schema_version": 2, "projects": {"example": {
+        "config_dir": str(config), "display_name": "Example",
     }}})
-    _write(state / "repos.yaml", {"schema_version": 1, "repos": {}})
+    _write(state / "repos.yaml", {"schema_version": 1, "repos": {"example": {
+        "class": "worktree", "remote": str(project), "windows": str(project),
+    }}})
     # Explicit native host role: do not silently turn the heavy Index producer
     # into a client-only or dependency-suppressed component fixture.
     index = home / ".agent-index"
