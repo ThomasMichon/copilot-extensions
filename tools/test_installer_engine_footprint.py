@@ -224,6 +224,18 @@ def test_equivalent_legacy_effect_can_move_to_an_explicit_named_rule() -> None:
     subject.require_transition(previous, current, "agent-mcp")
 
 
+def test_unrelated_producer_scope_is_not_retained_coverage() -> None:
+    previous, current = _record(), _record()
+    del current["producers"]["src"]
+    _assess(previous, current)
+    current["change"]["dispositions"]["producers:src"] = {
+        "action": "retained", "reason": "Different scopes cannot prove equivalent coverage.",
+        "target": "producers:scripts",
+    }
+    with pytest.raises(subject.FootprintError, match="not retained"):
+        subject.require_transition(previous, current, "agent-mcp")
+
+
 def test_retiring_a_layout_selects_fresh_without_discarding_the_incumbent(tmp_path: Path) -> None:
     _seed(tmp_path)
     previous = _record()

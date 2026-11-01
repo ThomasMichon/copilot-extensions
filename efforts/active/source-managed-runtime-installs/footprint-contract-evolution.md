@@ -178,9 +178,9 @@ nor a source merge qualifies native installation, live replacement or rollout.
   and the exact-source no-effect packet cover the changed implementation.
   Native and installed acceptance run only through their existing authorized lanes.
 
-The focused source packet passed 225 controls, including the real predecessor
+The focused source packet passed 227 controls, including the real predecessor
 document/reader, copied constructor and inventory pairings, exact read boundaries,
-materialization and eight positively admitted no-effect unit additions. The
+materialization and nine positively admitted no-effect unit additions. The
 install-contract guard passes for all 13 plugins. Full exact-source no-effect
 execution, implementation review/merge and parent reconciliation remain required.
 

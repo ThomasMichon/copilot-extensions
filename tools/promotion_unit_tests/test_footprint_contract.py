@@ -127,6 +127,25 @@ def test_unknown_required_incoming_semantics_are_not_ignored(provider: ModuleTyp
         provider.decode('{"version":3,"version":2}')
 
 
+def test_unrelated_producer_scope_cannot_satisfy_retention(provider: ModuleType) -> None:
+    old, current = record(), record()
+    del current["producers"]["src"]
+    assessment = provider.contract_delta(provider.parse(old, "example"), provider.parse(current, "example"))
+    assert assessment == {"introduced": [], "changed": [], "retired": ["producers:src"]}
+    current["revision"] = 3
+    current["change"] = {
+        "from_revision": 2, "delta": assessment,
+        "dispositions": {
+            "producers:src": {
+                "action": "retained", "target": "producers:scripts",
+                "reason": "An unrelated scope does not preserve producer coverage.",
+            },
+        },
+    }
+    with pytest.raises(provider.FootprintError, match="not retained"):
+        provider.require_transition(old, current, "example")
+
+
 def test_incoming_revision_is_not_an_incumbent_layout_version(provider: ModuleType) -> None:
     manifest = provider.parse(record(), "example")
     recognized = provider.recognize(manifest, Path("/not-read"), footprint_revision=True)

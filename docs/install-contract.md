@@ -2566,6 +2566,9 @@ remnants (`action: preserve-unknown`, `reason`). Neither action grants deletion
 authority. Only the current assessment ships; Git owns earlier source assessments.
 The source guard compares normalized contracts against the real published baseline
 and continues to reject omitted producer scopes or stale source hashes.
+Producer scope identity remains part of the comparison even though digest values
+do not: retiring `src` cannot claim equivalent retention in the unrelated
+`scripts` scope.
 
 Named layout recognizers and the finite reset inventory are the explicit support
 portfolio: supported predecessor artifacts such as `.venv` and `venv` remain

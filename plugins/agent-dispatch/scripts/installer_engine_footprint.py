@@ -277,7 +277,7 @@ def _contract_items(manifest: Manifest) -> dict[str, Any]:
             } | {"entry": entry}
     # Scope coverage changes matter; source hash refreshes do not.
     for name in manifest.producers:
-        items[f"producers:{name}"] = True
+        items[f"producers:{name}"] = {"scope": name}
     return items
 
 

@@ -3183,6 +3183,7 @@
         "tools/promotion_unit_tests/test_footprint_contract.py::test_semantic_changes_require_revision_assessment_and_dispositions[legacy-rule]",
         "tools/promotion_unit_tests/test_footprint_contract.py::test_semantic_changes_require_revision_assessment_and_dispositions[producer-scope]",
         "tools/promotion_unit_tests/test_footprint_contract.py::test_unknown_required_incoming_semantics_are_not_ignored",
+        "tools/promotion_unit_tests/test_footprint_contract.py::test_unrelated_producer_scope_cannot_satisfy_retention",
         "tools/promotion_unit_tests/test_footprint_contract.py::test_incoming_revision_is_not_an_incumbent_layout_version"
     ],
     "sources": {
@@ -3571,8 +3572,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/creation_diagnostics.py": "9e9df2522173fa739ada6c7201d37e63c17d19c9a75de215eb176304a86e8940",
         "plugins/agent-worktrees/src/agent_worktrees/creation_owner_claim.py": "aea9f0de14e962099fb1c70b139d9c62a0ae0051c6cd3174683fe13d534acffa",
         "plugins/agent-worktrees/src/agent_worktrees/launch_progress.py": "b44ba6207d319af74ecbf40a0324ad0126a7415573b15b564b107002f16431c8",
-        "libs/installer-engine/installer_engine_footprint.py": "3890367f8c163a5bf487dafc56d6eb0c3beeb139fd89d97c6a05596b6f2d5a76",
-        "tools/promotion_unit_tests/test_footprint_contract.py": "39c39f363a0b75a7577000898738a9166faf1cfee9a28e4c47cf224d4151a8fc"
+        "libs/installer-engine/installer_engine_footprint.py": "6c69271e043d7fb34c682e094539ece36db88ff4c955c7fac8d7b02696b4cff4",
+        "tools/promotion_unit_tests/test_footprint_contract.py": "df9a34fe5400b712350ea1f62196f0043d45cedcd17f1637c486f46455c1f253"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_engine_footprint.py",
