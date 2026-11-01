@@ -74,8 +74,12 @@ selecting it; actual managed lifecycle and production readiness remain separate.
 
 The explicit Linux host [Komodo substrate owner](docs/komodo-owner.md) supplies
 fixed native Core/Periphery/Mongo convergence, preserving adoption, current
-authenticated status and receipt-owned container withdrawal. Its installed SDK
-bootstrap works independently of Core/Gateway and may register with the
+authenticated status and receipt-owned container withdrawal. It also exposes
+an explicitly preserving-only incumbent materialization for
+original local named volumes, files and MongoDB 7.0 without rendering a fresh
+profile or permitting native apply. That selection does not provide updates
+or withdrawal.
+Its installed SDK bootstrap works independently of Core/Gateway and may register with the
 existing service Gateway. This opt-in API does not activate the ordinary CLI;
 actual adopter construction and official-image/live qualification remain open.
 

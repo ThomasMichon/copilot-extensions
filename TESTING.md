@@ -265,6 +265,14 @@ deadlines and whole-permit behavior remain unchanged.
 These are contained component/installed-SDK controls, not actual Docker,
 official-image, automatically constructed controller or production evidence.
 Native/network/build tests remain outside the required no-actor unit packet.
+`test_komodo_incumbent.py` adds original named-volume/file materialization,
+batched real subprocess readback, authenticated preserving-only adoption,
+unchanged repeat/status and lost-terminal-receipt controls. Its platform-neutral
+composition fixtures mock Linux stat/native observations and the state lock;
+they do not qualify Linux custody. `test_komodo_owner.py` separately adds
+real Linux protocol/lock adoption, volume-drift and update-refusal cases on
+Compose 2 and 5. Neither packet proves official-image startup or live adoption;
+the existing fixed-profile and broader lifecycle proofs remain distinct.
 The original-attempt repair packet adds distinct candidate/executor and current
 transition admission, exact same-journal settlement, immutable prior-failure
 history, process/key drift and interrupted publication controls.

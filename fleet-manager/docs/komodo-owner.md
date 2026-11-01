@@ -27,10 +27,11 @@ The canonical `fleet-manager.komodo-substrate`, version 1 declaration contains:
 | `provider`, `instance`, `target`, `configuration_ref`, `revision` | Bounded non-secret references; provider tuple must match the selected role provider |
 | `project`, `architecture`, `server_name` | Bounded native project, `amd64` or `arm64`, selected Periphery registration name |
 | `references` | Exactly `artifact`, `credentials`, `host`, `runtime`, `storage`; existing-owner references, not paths or inline credentials |
-| `images` | Exactly `core`, `mongo`, `periphery`, each with `image` and `version`; official digest-pinned repositories, matching Komodo 2.x and MongoDB 8.0.x |
+| `images` | Exactly `core`, `mongo`, `periphery`, each with `image` and `version`; official digest-pinned repositories, matching Komodo 2.x and MongoDB 8.0.x in the fixed profile |
 | `resources` | Per-service `cpu_millis` (100-64000) and `memory_bytes` (128 MiB-128 GiB) |
 | `core_port`, `outfitting_seconds` | Loopback port 1024-65535 and total finite operation deadline 1-1800 seconds |
 | `desired_state` | Optional `present` (default) or explicit `absent`; absence is a separately content-admitted withdrawal |
+| `profile` | Optional `fixed` (default) or explicit `preserve-incumbent`; the latter also accepts MongoDB 7.0.x but permits no native apply, recreation or withdrawal |
 
 No shell, executable, arbitrary Compose/environment/mount/module override,
 mutable image tag or inline secret is accepted. An image version declaration
@@ -162,6 +163,71 @@ fingerprints, not a permanently relaxed validator. Once an admitted managed
 update actually invokes the fixed profile, `fixed_profile` evidence requires
 strict image environment, entrypoint, command, labels, storage and isolation.
 Original adoption provenance remains immutable across later updates.
+
+### Explicit incumbent-only storage contract
+
+An explicitly selected `profile: preserve-incumbent` uses the separate
+`KomodoIncumbentMaterialization`, not the six-file fresh materialization.
+It can record and inspect a healthy, exactly adopted Komodo 2.x/MongoDB
+7.0.x or 8.0.x installation without converting its database, remapping
+named volumes, generating a webhook secret or rotating its retained keys.
+The ordinary omitted-profile declaration and fixed Compose bytes are unchanged.
+
+The code-registered producer supplies immutable canonical
+`fleet-manager.komodo-incumbent-material`, version 1 bytes with exactly
+`mounts` (the complete native mount arrays for all three services) and
+`volumes` (the complete original Docker inspection records for every mounted
+named volume), plus existing Docker socket, keys directory, private admin
+username/password files and an explicit bounded tuple of retained files.
+Every mounted regular configuration file and the original `core.key` and
+`periphery.key` must be retained. The producer must additionally include every
+credential/configuration file used by its incumbent contract, including inputs
+inside directory mounts; the SDK cannot infer those dependencies from a directory.
+It authenticates those observations through its existing host/storage/release/
+credential authorities before constructing the record. The record itself
+authenticates nothing and transfers no incumbent writer custody.
+
+Only existing ordinary bind paths or existing local named volumes with no
+driver options are accepted. Volume name, creation time, mountpoint, labels and
+all other inspection fields are compared exactly through read-only
+`docker volume inspect`, batching the bounded selected names in one call per
+native checkpoint. Native mount comparison retains every field and
+multiplicity, ignoring only mount-array order. Device/inode identities of
+mount sources and retained file identities/content bind the selected operation.
+Both Core and Periphery must use the same original `/config/keys` mount.
+Volume mountpoints are read locations, never replacements for native volume mounts.
+An existing Core global `file:/config/keys/periphery.pub` reference may resolve
+through that exact adopted named-volume mount. Changed volume names or any other
+mount field refuse; the existing explicit reverse-connection and live-key checks
+still apply. Current selection expiry is checked after material hashing, so a
+long observation cannot reuse the clock from before those reads.
+
+The same current admission, physical resource journal, original-operation
+settlement, exact container/network adoption, public identity and authenticated
+health checks remain in force. Incumbent `profile()` returns a non-executable
+observation, not Compose. Fresh rendering and the native `_apply` boundary
+independently refuse this materialization. A missing/stopped resource or a
+changed selected deployment refuses before accepting an apply attempt; it
+cannot become a repair/update by adding a data-compatibility assertion.
+Explicit absence likewise refuses. This first incumbent-only contract does
+not provide managed update, removal, onboarding-key issuance, legacy-journal
+conversion, a concrete credential provider or live adoption qualification.
+
+**Contract support:** this optional profile expands the source SDK's strict
+version-1 declaration reader; older readers reject the unknown `profile`
+field. Consumers select it only with an installed SDK exposing
+`KomodoIncumbentMaterialization`. There is no new CLI or Gateway wire verb and
+no blind fallback to a fresh declaration on refusal. Existing fixed-profile
+callers retain their supported behavior. Rolling back to an older SDK makes
+the new selection unavailable; it does not authorize changing or converting
+the retained installation.
+
+Platform-neutral fixtures exercise real private files, inode/content drift,
+original-operation admission/SQLite and authenticated HTTP, with mocked
+native observations and the Linux state lock. Separate Linux native-protocol
+cases use actual contained subprocesses and the real journal lock, including
+named-volume drift and update refusal on Compose 2 and 5. These are synthetic
+protocol contracts, not official-image startup or production adoption proof.
 
 The private owner root is canonical to physical daemon/project and guarded by
 the existing private-path primitives and a kernel lock. Its same `NodeJournal`

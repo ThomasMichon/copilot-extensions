@@ -15,6 +15,7 @@ import time
 from typing import Any
 
 from .komodo_declaration import KomodoDeclaration, SERVICES
+from .komodo_incumbent import KomodoIncumbentMaterialization, KomodoMaterial
 from .komodo_profile import KomodoMaterialization, ordinary_path
 from .planning import PlanError, decode, identifier
 from .private_state import read_private_file
@@ -93,7 +94,7 @@ class KomodoNative:
         self.tooling = tooling
         self.native_failure: subprocess.SubprocessError | OSError | UnicodeError | None = None
 
-    def _call(self, material: KomodoMaterialization, arguments: list[str], *,
+    def _call(self, material: KomodoMaterial, arguments: list[str], *,
               deadline: float) -> str:
         if self.native_failure is not None:
             raise PlanError("Komodo native process custody remains unsettled")
@@ -128,7 +129,7 @@ class KomodoNative:
             raise PlanError("Komodo native operation failed or is uncertain")
         return result.stdout
 
-    def verify_host(self, declaration: KomodoDeclaration, material: KomodoMaterialization,
+    def verify_host(self, declaration: KomodoDeclaration, material: KomodoMaterial,
                     *, deadline: float) -> None:
         value = declaration.to_dict()
         info = decode(self._call(material, ["info", "--format", _INFO], deadline=deadline).encode())
@@ -138,8 +139,24 @@ class KomodoNative:
                 or type(info["architecture"]) is not str
                 or architecture.get(info["architecture"]) != value["architecture"]):
             raise PlanError("Komodo native daemon differs from admitted physical host")
+        self.verify_storage(material, deadline=deadline)
 
-    def prerequisites(self, declaration: KomodoDeclaration, material: KomodoMaterialization,
+    def verify_storage(self, material: KomodoMaterial, *, deadline: float) -> None:
+        if type(material) is not KomodoIncumbentMaterialization:
+            return
+        material.evidence()
+        volumes = material.volumes()
+        if not volumes:
+            return
+        actual = decode(self._call(material, ["volume", "inspect", *(
+            volume["Name"] for volume in volumes)], deadline=deadline).encode())
+        if (not isinstance(actual, list) or len(actual) != len(volumes)
+                or any(not isinstance(item, dict) or type(item.get("Name")) is not str for item in actual)
+                or sorted(actual, key=lambda item: item["Name"])
+                != sorted(volumes, key=lambda item: item["Name"])):
+            raise PlanError("Komodo incumbent native volume changed")
+
+    def prerequisites(self, declaration: KomodoDeclaration, material: KomodoMaterial,
                       *, deadline: float) -> dict[str, KomodoImage]:
         self.verify_host(declaration, material, deadline=deadline)
         version = self._call(material, ["compose", "version", "--short"], deadline=deadline).strip()
@@ -150,7 +167,7 @@ class KomodoNative:
             raise PlanError("Komodo requires an admitted Compose 2 or stable Compose 5 toolchain")
         return self.selected_images(declaration, material, deadline=deadline)
 
-    def selected_images(self, declaration: KomodoDeclaration, material: KomodoMaterialization,
+    def selected_images(self, declaration: KomodoDeclaration, material: KomodoMaterial,
                         *, deadline: float) -> dict[str, KomodoImage]:
         value = declaration.to_dict()
         selected = {}
@@ -187,8 +204,9 @@ class KomodoNative:
             selected[service] = KomodoImage(result["id"], *values, user)
         return selected
 
-    def inspect(self, declaration: KomodoDeclaration, material: KomodoMaterialization,
+    def inspect(self, declaration: KomodoDeclaration, material: KomodoMaterial,
                 *, deadline: float) -> dict[str, dict[str, Any]]:
+        self.verify_storage(material, deadline=deadline)
         project = declaration.to_dict()["project"]
         listed = self._call(material, [
             "container", "ls", "--all", "--no-trunc", "--filter",
@@ -223,10 +241,12 @@ class KomodoNative:
             result[service] = item
         return result
 
-    def _apply(self, declaration: KomodoDeclaration, material: KomodoMaterialization,
+    def _apply(self, declaration: KomodoDeclaration, material: KomodoMaterial,
                *, profile: Path, expected: bytes, deadline: float,
                checkpoint: Callable[[], None] | None = None) -> None:
         """Only the admitted owner calls this after persisting UNKNOWN."""
+        if declaration.preserving or type(material) is not KomodoMaterialization:
+            raise PlanError("Komodo preserving profile cannot apply or recreate native resources")
         ordinary_path(profile)
         if read_private_file(profile, 1024 * 1024) != expected:
             raise PlanError("Komodo generated deployment slot changed before native effect")
@@ -242,7 +262,7 @@ class KomodoNative:
         if read_private_file(profile, 1024 * 1024) != expected:
             raise PlanError("Komodo generated deployment slot changed during native effect")
 
-    def network(self, declaration: KomodoDeclaration, material: KomodoMaterialization, *,
+    def network(self, declaration: KomodoDeclaration, material: KomodoMaterial, *,
                 deadline: float) -> dict[str, Any] | None:
         name = declaration.to_dict()["project"] + "_default"
         identities = self._call(material, [
@@ -260,8 +280,10 @@ class KomodoNative:
             raise PlanError("Komodo native network identity differs from selection")
         return raw[0]
 
-    def _retire(self, material: KomodoMaterialization, identities: list[str], *,
+    def _retire(self, material: KomodoMaterial, identities: list[str], *,
                 deadline: float, checkpoint: Callable[[], None]) -> None:
+        if type(material) is not KomodoMaterialization:
+            raise PlanError("Komodo preserving profile cannot withdraw native resources")
         if not identities or len(identities) > 3 or any(_ID.fullmatch(item) is None for item in identities):
             raise PlanError("Komodo retirement requires exact retained container identities")
         checkpoint()
@@ -269,7 +291,7 @@ class KomodoNative:
         checkpoint()
         self._call(material, ["container", "rm", *identities], deadline=deadline)
 
-    def identities_absent(self, material: KomodoMaterialization, identities: list[str], *,
+    def identities_absent(self, material: KomodoMaterial, identities: list[str], *,
                           deadline: float) -> bool:
         if len(identities) > 3 or any(_ID.fullmatch(item) is None for item in identities):
             raise PlanError("Komodo retirement requires exact retained container identities")

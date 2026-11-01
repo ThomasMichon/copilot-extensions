@@ -64,9 +64,14 @@ def verify_native(containers: dict[str, dict[str, Any]], selected: KomodoSelecti
         raise PlanError("Komodo native substrate is incomplete")
     if not complete and (not owned or ready):
         raise PlanError("Komodo partial evidence requires fixed-profile failure inspection")
-    desired = decode(profile)["services"]
+    preserving = selected.declaration.preserving
+    if preserving and owned:
+        raise PlanError("Komodo incumbent cannot become a fixed native profile")
+    desired = {} if preserving else decode(profile)["services"]
     for name in containers:
-        item, expected, image = containers[name], desired[name], images[name]
+        item, image = containers[name], images[name]
+        expected = ({"mem_limit": selected.declaration.to_dict()["resources"][name]["memory_bytes"]}
+                    if preserving else desired[name])
         config, host = item["Config"], item["HostConfig"]
         if (item.get("Image") != image.identity
                 or (ready and not native_running(item))
@@ -79,22 +84,10 @@ def verify_native(containers: dict[str, dict[str, Any]], selected: KomodoSelecti
                 or host.get("NanoCpus") != (
                     selected.declaration.to_dict()["resources"][name]["cpu_millis"] * 1000000)):
             raise PlanError("Komodo native runtime differs from selected images or isolation")
-        required_mounts = {
-            entry["target"]: (entry["source"], not entry["read_only"])
-            for entry in expected["volumes"]
-        }
-        for secret in expected.get("secrets", []):
-            required_mounts["/run/secrets/" + secret] = (
-                str(getattr(selected.material, secret)), False)
-        actual_mounts = {}
-        for mount in item["Mounts"]:
-            destination = mount.get("Destination")
-            if (destination in actual_mounts or mount.get("Type") != "bind"
-                    or type(mount.get("RW")) is not bool):
-                raise PlanError("Komodo native mount custody is ambiguous")
-            actual_mounts[destination] = (mount.get("Source"), mount["RW"])
-        if actual_mounts != required_mounts:
-            raise PlanError("Komodo native storage or credential mounts differ from selection")
+        if preserving:
+            selected.material.check_mounts(name, item["Mounts"])
+        else:
+            _verify_fixed_mounts(item, expected, selected)
         ports = host.get("PortBindings") or {}
         expected_ports = ({"9120/tcp": [{"HostIp": "127.0.0.1",
                                         "HostPort": str(selected.declaration.to_dict()["core_port"])}]}
@@ -113,6 +106,25 @@ def verify_native(containers: dict[str, dict[str, Any]], selected: KomodoSelecti
                     or tuple(config.get("Entrypoint") or ()) != image.entrypoint
                     or tuple(config.get("Cmd") or ()) != command):
                 raise PlanError("Komodo native fixed configuration differs from selection")
+
+
+def _verify_fixed_mounts(item: dict, expected: dict, selected: KomodoSelection) -> None:
+    required_mounts = {
+        entry["target"]: (entry["source"], not entry["read_only"])
+        for entry in expected["volumes"]
+    }
+    for secret in expected.get("secrets", []):
+        required_mounts["/run/secrets/" + secret] = (
+            str(getattr(selected.material, secret)), False)
+    actual_mounts = {}
+    for mount in item["Mounts"]:
+        destination = mount.get("Destination")
+        if (destination in actual_mounts or mount.get("Type") != "bind"
+                or type(mount.get("RW")) is not bool):
+            raise PlanError("Komodo native mount custody is ambiguous")
+        actual_mounts[destination] = (mount.get("Source"), mount["RW"])
+    if actual_mounts != required_mounts:
+        raise PlanError("Komodo native storage or credential mounts differ from selection")
 
 
 def verify_candidate(containers: dict[str, dict[str, Any]], selected: KomodoSelection,
@@ -167,9 +179,9 @@ class KomodoOwner:
         if type(selected) is not KomodoSelection:
             raise PlanError("Komodo current owner resolution is unavailable")
         value = request.to_dict()
+        content = selected.deployment_digest
         now = self.clock()
         integer(now, "Komodo current owner time")
-        content = selected.deployment_digest
         if (now >= selected.valid_until or value["command"] != "manager.converge"
                 or value["authority"] != self.authority
                 or value["target"] != selected.declaration.to_dict()["target"]
@@ -310,6 +322,11 @@ class KomodoOwner:
                 images = self.native.prerequisites(selected.declaration, selected.material, deadline=deadline)
                 containers = self.native.inspect(selected.declaration, selected.material, deadline=deadline)
                 record = self._baseline(state, selected, containers)
+                if selected.declaration.preserving:
+                    verify_native(containers, selected, images, selected.profile(), owned=False)
+                    if (record["failed"] is not None or record["good"] is not None
+                            and record["good"]["deployment"] != content):
+                        raise PlanError("Komodo preserving profile cannot apply or recreate native resources")
                 pending = bool(record["failed"] is not None
                                and "partial_public_keys" in record["failed"])
                 network = self.native.network(selected.declaration, selected.material, deadline=deadline)
@@ -360,11 +377,13 @@ class KomodoOwner:
                             raise PlanError("Komodo accepted native attempt was replaced or changed")
                         verify_network(network, selected, containers,
                                        attempt["network_before"], pending=pending)
-                    slot = state.profile(profile)
                     needs_apply = (not containers or record["good"] is not None and (
                         record["good"]["deployment"] != content or set(containers) != set(SERVICES)
                         or not all(map(native_running, containers.values())))
                         or record["failed"] is not None)
+                    if selected.declaration.preserving and needs_apply:
+                        raise PlanError("Komodo preserving profile cannot apply or recreate native resources")
+                    slot = state.profile(profile)
                     retained = record["failed"] or record["good"]
                     record["attempt"] = {"request": request.to_dict(), "deployment": content,
                                          "profile": str(slot),

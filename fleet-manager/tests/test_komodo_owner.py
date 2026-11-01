@@ -17,14 +17,15 @@ import pytest
 from fleet_manager.komodo_declaration import KomodoDeclaration
 from fleet_manager.komodo_evidence import FIELDS
 from fleet_manager.komodo_health import identity_digest
+from fleet_manager.komodo_incumbent import KomodoIncumbentMaterialization
 from fleet_manager.komodo_network import network_fingerprint
 from fleet_manager.komodo_native import KomodoNative
 from fleet_manager.komodo_owner import KomodoOwner, native_fingerprint
-from fleet_manager.komodo_profile import render_profile
+from fleet_manager.komodo_profile import SECRET_NAMES, render_profile
 from fleet_manager.komodo_selection import KomodoSelection
 from fleet_manager.komodo_state import KomodoState
 from fleet_manager.node_journal import NodeJournal
-from fleet_manager.planning import PlanError, digest
+from fleet_manager.planning import PlanError, canonical, digest
 from fleet_manager.runtime_admission import AdmissionError, OperationGrant
 from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
 from test_komodo_declaration import intent
@@ -60,6 +61,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux host subs
     "missing-membership-before-health", "repeat-missing-network-membership", "status-missing-network-membership",
     "failed-short-native-1",
     "mismatched-attachment-before-health", "repeat-mismatched-attachment", "status-mismatched-attachment",
+    "adoption-incumbent", "adoption-incumbent-volume-drift", "adoption-incumbent-update",
 ])
 def test_composed_owner_preserves_original_operation_and_real_native_custody(
     native_rig: Any, keys: Any, scenario: str, monkeypatch: Any, compose_version: str,
@@ -222,6 +224,50 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     rig["native"]._apply, selected.declaration, selected.material,
                     profile=profile, expected=raw, deadline=time.monotonic() + 5)
                 original_native = live()
+                if scenario.startswith("adoption-incumbent"):
+                    volumes = {}
+                    storage = {str(getattr(selected.material, name)): name for name in (
+                        "mongo_data", "mongo_config", "keys", "backups",
+                    )}
+                    for container in original_native.values():
+                        for mount in container["Mounts"]:
+                            name = storage.get(mount["Source"])
+                            if name is None:
+                                continue
+                            volume_name = "original-" + name.replace("_", "-")
+                            mount.update(Type="volume", Name=volume_name, Driver="local")
+                            volumes[volume_name] = {
+                                "Name": volume_name, "Mountpoint": mount["Source"],
+                                "Driver": "local", "Scope": "local", "Options": None,
+                                "CreatedAt": "2026-01-01T00:00:00Z", "Labels": {},
+                            }
+                    private_keys = tuple(selected.material.keys / (name + ".key")
+                                         for name in ("core", "periphery"))
+                    for path in private_keys:
+                        path.write_bytes(b"original-private-key-fixture")
+                        path.chmod(0o600)
+                    material = KomodoIncumbentMaterialization(
+                        selected.material.docker_socket, selected.material.keys,
+                        selected.material.admin_username, selected.material.admin_password,
+                        (*tuple(getattr(selected.material, name) for name in SECRET_NAMES), *private_keys),
+                        canonical({
+                            "schema": "fleet-manager.komodo-incumbent-material", "version": 1,
+                            "mounts": {name: item["Mounts"] for name, item in original_native.items()},
+                            "volumes": list(volumes.values()),
+                        }),
+                    )
+                    desired = selected.declaration.to_dict()
+                    desired["profile"] = "preserve-incumbent"
+                    desired["images"]["mongo"]["version"] = "7.0.45"
+                    selected = replace(selected, declaration=KomodoDeclaration.from_dict(desired),
+                                       material=material, adoption=tuple(
+                                           (name, native_fingerprint(item))
+                                           for name, item in original_native.items()),
+                                       adopted_public_identity=identity_digest(material),
+                                       adopted_network=network_fingerprint(json.loads(
+                                           (rig["directory"] / "network.json").read_text())))
+                    (rig["directory"] / "live.json").write_text(json.dumps(original_native))
+                    (rig["directory"] / "volumes.json").write_text(json.dumps(list(volumes.values())))
                 if scenario == "foreign-network":
                     (rig["directory"] / "live.json").write_text("{}")
                     with pytest.raises(PlanError, match="network requires exact existing-owner adoption"):
@@ -239,6 +285,29 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                     adopted_public_identity=identity_digest(selected.material),
                     adopted_network=network_fingerprint(json.loads(
                         (rig["directory"] / "network.json").read_text())))
+                if scenario.startswith("adoption-incumbent"):
+                    original = request()
+                    receipt = await invoke(owner(), original)
+                    assert receipt.to_dict()["status"] == "succeeded"
+                    assert await invoke(owner(), original) == receipt
+                    assert (await invoke(owner(), original, status=True))["converged"] is True
+                    if scenario.endswith("volume-drift"):
+                        values = list(volumes.values())
+                        values[0]["CreatedAt"] = "fixture-recreated"
+                        (rig["directory"] / "volumes.json").write_text(json.dumps(values))
+                        with pytest.raises(PlanError, match="volume changed"):
+                            await invoke(owner(), original)
+                    elif scenario.endswith("update"):
+                        changed = current[0].declaration.to_dict()
+                        changed["revision"] = "config-2"
+                        current[0] = replace(
+                            current[0], declaration=KomodoDeclaration.from_dict(changed),
+                            compatible_with=(current[0].deployment_digest,),
+                        )
+                        with pytest.raises(PlanError, match="cannot apply"):
+                            await invoke(owner(), request("update-1"))
+                    assert effects() == 1 and live() == original_native
+                    return
                 if scenario.startswith("adoption-accepted-"):
                     begin = NodeJournal.begin_external
 
