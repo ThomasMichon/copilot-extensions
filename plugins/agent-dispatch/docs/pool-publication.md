@@ -236,7 +236,10 @@ original coordinator target even if another database returns identical data.
 Before clearing custody it also verifies that exact result in the original
 coordinator history and rechecks the target after the read. A caller-supplied
 lookalike is not accepted-result evidence. Unknown or mismatched results retain
-custody. Recovery reads the existing coordinator cohort history
+custody. Result observations pass the coordinator's canonical shape validation
+before equality checks; booleans or floats cannot stand in for integer
+configured revisions, even when Python compares their values as equal.
+Recovery reads the existing coordinator cohort history
 for that original observation and CAS, including after a newer projection or
 queue reopen. It neither reads a newer source nor writes, advances clocks,
 renews freshness or erases retained publication/startup history.

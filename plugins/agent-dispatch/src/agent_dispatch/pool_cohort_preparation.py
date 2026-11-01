@@ -149,8 +149,13 @@ class PoolCohortPreparation:
             not isinstance(result, PoolConfiguredCohort)
             or type(result.revision) is not int
             or result.revision != expected
-            or result.observation != request.observation
+            or result.observation is None
         ):
+            raise PoolPublicationError(
+                "cohort result failed the original observation and CAS fences"
+            )
+        _comparable_observation(result.observation)
+        if result.observation != request.observation:
             raise PoolPublicationError(
                 "cohort result failed the original observation and CAS fences"
             )

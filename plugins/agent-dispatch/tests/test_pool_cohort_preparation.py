@@ -314,6 +314,28 @@ def test_forged_subset_same_revision_cannot_acknowledge_or_recover(owner):
     assert custody.pending is request
 
 
+@pytest.mark.parametrize("revision, malformed", [(0, False), (1, True), (0, 0.0), (1, 1.0)])
+def test_equal_but_malformed_configured_revision_cannot_settle_custody(
+    owner, revision, malformed
+):
+    base, _sources, queue, custody = owner
+    _write(base, revision=revision)
+    first = custody.prepare()
+    accepted = _project(queue, first)
+    custody.acknowledge(first, accepted)
+    request = custody.prepare()
+    forged = replace(
+        accepted,
+        observation=replace(request.observation, revision=malformed),
+    )
+    assert forged == accepted
+    with pytest.raises(PoolPublicationError, match="observation is malformed"):
+        custody.acknowledge(request, forged)
+    assert custody.pending is request and custody.settled == (first, accepted)
+    assert custody.recover() == accepted
+    assert custody.pending is None and custody.settled == (request, accepted)
+
+
 @pytest.mark.parametrize("change", [{"revision": 0}, {"observation": None}])
 def test_settled_projection_cannot_regress_or_reuse_coordinator_revision(
     owner, monkeypatch, change
