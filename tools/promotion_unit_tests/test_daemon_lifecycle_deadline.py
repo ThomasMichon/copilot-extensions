@@ -19,10 +19,12 @@ spec.loader.exec_module(original)
 
 @pytest.fixture(autouse=True)
 def actor_free_registry_owner(monkeypatch, tmp_path):
+    from agent_procutil import _daemon_instance_owner as owner
+
     def owned(path):
         assert Path(path).resolve().is_relative_to(tmp_path.resolve())
 
-    monkeypatch.setattr(original.store, "assert_path_owner", owned)
+    monkeypatch.setattr(owner, "assert_path_owner", owned)
 
 for name in (
     "test_expired_lifecycle_lock_never_creates_or_deletes_inventory_files",
