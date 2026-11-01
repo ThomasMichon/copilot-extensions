@@ -73,12 +73,17 @@ def publish(home: Path, argv: list[str], *, provider_python: str | None = None,
             provider_project: str | None = None) -> dict[str, Any]:
     home = safe_path(home, directory=True)
     revision, observation = delivery_record(home)
+    if observation.get("schema") == "efforts.agenda-undeliverable":
+        return record_delivery(home, revision, {"state": "pending", "error": observation["error"]})
     if observation.get("version") == 2:
         if argv or provider_python is None or provider_project is None:
             return record_delivery(home, revision, {"state": "pending", "error": {
                 "code": "publisher-v2-not-configured",
                 "message": "Observation-v2 requires explicit provider interpreter/project, not unnegotiated argv."}})
-        argv = [sys.executable, "-B", str(Path(__file__).with_name("agenda_provider.py")),
+        source = str(Path(__file__).absolute().parent)
+        bootstrap = ("import sys; sys.path.insert(0," + repr(source) + "); "
+                     "from agenda_provider import main; raise SystemExit(main())")
+        argv = [sys.executable, "-I", "-B", "-c", bootstrap,
                 "--provider-python", provider_python, "--project", provider_project]
     elif provider_python is not None or provider_project is not None:
         raise AgendaError("provider-v2 configuration does not alter legacy publication")
@@ -87,9 +92,7 @@ def publish(home: Path, argv: list[str], *, provider_python: str | None = None,
             "code": "not-configured", "message": "No explicit publisher argv was supplied."}}
     else:
         payload = (encode(observation) + "\n").encode()
-        if observation.get("schema") == "efforts.agenda-undeliverable":
-            status = {"state": "pending", "error": observation["error"]}
-        elif len(payload) > BODY_LIMIT:
+        if len(payload) > BODY_LIMIT:
             status = {"state": "pending", "error": {
                 "code": "observation-too-large", "message": "Observation exceeds 32 KiB; no argv invoked."}}
         elif any(not isinstance(token, str) or not token or "\x00" in token for token in argv):

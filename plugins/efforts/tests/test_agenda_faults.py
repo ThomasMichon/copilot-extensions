@@ -507,3 +507,23 @@ def test_provider_probe_uses_actual_build_parser_without_main_project_option() -
     assert parsed.command == "agenda-publish" and parsed.contract_version == 2
     with pytest.raises(SystemExit):
         main.build_parser().parse_args([*argv, "--project", "fixture-project"])
+
+
+def test_provider_isolated_child_ignores_cwd_and_pythonpath_shadow_modules(
+    home: Path, provider_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shadow = home / "untrusted-cwd"
+    shadow.mkdir()
+    touched = home / "shadow-executed"
+    malicious = f"open({str(touched)!r},'w').write('executed')\nraise RuntimeError('shadow import')\n"
+    (shadow / "json.py").write_text(malicious)
+    (shadow / "re.py").write_text(malicious)
+    package = shadow / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text(malicious)
+    monkeypatch.chdir(shadow)
+    monkeypatch.setenv("PYTHONPATH", str(shadow))
+    result = provider_fixture["adapter"].deliver(sys.executable, "fixture-project", v2_observation(home))
+    assert result["ok"] is True
+    assert not touched.exists()
+    assert provider_fixture["calls"].exists()

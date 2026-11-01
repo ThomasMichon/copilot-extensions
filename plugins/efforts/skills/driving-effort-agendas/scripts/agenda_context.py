@@ -73,6 +73,12 @@ def signature(values: dict[str, Any], subjects: set[str]) -> str:
                       sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
+def canonical_equal(left: Any, right: Any) -> bool:
+    """Keep JSON booleans and numbers distinct, including in nested containers."""
+    return json.dumps(left, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False) == (
+        json.dumps(right, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
+
+
 def qualification(
     proposed: dict[str, Any], current: dict[str, Any], used: list[dict[str, Any]],
     subjects: set[str], judgment: Any,
@@ -93,7 +99,7 @@ def qualification(
         _text(ref, "judgment evidence reference")
     old = {key: item for key, item in current.items() if key in subjects}
     added = sorted(proposed.keys() - old.keys())
-    changed = sorted(key for key in proposed.keys() & old.keys() if proposed[key] != old[key])
+    changed = sorted(key for key in proposed.keys() & old.keys() if not canonical_equal(proposed[key], old[key]))
     removed = sorted(old.keys() - proposed.keys())
     delta = {"added": added, "changed": changed, "removed": removed}
     if not added and not changed:

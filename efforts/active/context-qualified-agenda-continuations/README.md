@@ -191,6 +191,35 @@ grants, native qualification or claims of implementation.
 
 ## Journal
 
+### 2026-11-01 - First implementation review corrections
+
+- Review identified four coupled defects: stale ambient-policy assertions,
+  provider imports exposed to the invoking checkout, boolean/number equality
+  erasing meaningful context changes, and oversized observations dispatched as
+  legacy records before their pending-delivery reason was handled.
+- The policy tests now exercise the intended semantics and the existing
+  1,024-byte bound, including valid manifest-version extremes. The bounded
+  producer packet passed 65 cases with one explicit PowerShell-unavailable skip;
+  that run does not claim live cross-producer parity.
+- Both publication subprocesses now use isolated Python startup. The outer
+  adapter explicitly binds its trusted payload directory; the selected provider
+  uses its interpreter's own installed context, not checkout imports or ambient
+  `PYTHONPATH`. Shadow-module regressions verify no checkout side effects.
+- Context qualification and integrity checks now compare canonical JSON values,
+  preserving boolean/number distinctions inside nested containers without
+  crediting metadata churn. Oversized new-mode observations retain the original
+  `observation-too-large` pending reason without invoking a provider or replaying
+  their committed mutation.
+- The bounded core/fault/store packet passed 185 cases with one isolated
+  provider-dependency skip. The combined coordinator packet then passed 259 cases
+  with two explicit provider-dependency/PowerShell skips, including the existing
+  producer tests and worked guidance.
+- The connected consumer was rerun against the isolated provider invocation:
+  five joined cases passed without skips, and the complete Manager packet
+  passed 176 cases without skips. The coordinator independently repeated the
+  actual five-case joined sequence. Every bounded run verified cleanup.
+  Fresh review, required CI, merge, canonical completion and archival remain open.
+
 ### 2026-11-01 - Cohesive source validation
 
 - The coordinator independently ran the final source packets: 179 passed with

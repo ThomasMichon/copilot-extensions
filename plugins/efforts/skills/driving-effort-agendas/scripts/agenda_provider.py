@@ -82,7 +82,8 @@ try:
             raise ValueError("provider reply changed selected source or generation")
         if type(result["sequence"]) is not int or not 0 <= result["sequence"] < 2**63:
             raise ValueError("provider sequence is invalid")
-        if result["availability"] != "observed" or result["observation"] != body:
+        if result["availability"] != "observed" or json.dumps(
+                result["observation"],sort_keys=True,allow_nan=False) != json.dumps(body,sort_keys=True,allow_nan=False):
             raise ValueError("provider did not acknowledge this identical committed observation")
     encoded = json.dumps(result, ensure_ascii=False, separators=(",",":"), allow_nan=False)
     if len(encoded.encode())+1 > 35*1024:
@@ -101,7 +102,7 @@ def deliver(provider_python: str, project: str, body: bytes) -> dict:
         raise AgendaError("publisher project must be nonempty text")
     decode(body, "committed observation", limit=32 * 1024)
     # Leave settlement time inside the outer publisher's ten-second deadline.
-    status = asyncio.run(_invoke([str(interpreter), "-B", "-c", PROVIDER, project], body, timeout=7))
+    status = asyncio.run(_invoke([str(interpreter), "-I", "-B", "-c", PROVIDER, project], body, timeout=7))
     if status["state"] == "delivered":
         return status["reply"]
     return {"ok": False, "contract_version": 2, "error": status["error"]}

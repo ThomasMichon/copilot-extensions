@@ -467,7 +467,8 @@ def test_v2_actual_committed_publisher_adapter_preserves_original_result(
     wrapper = package_root / "selected-python"
     wrapper.write_text(f"#!{sys.executable}\nimport sys\n"
         f"sys.path.insert(0,{str(package_root)!r})\n"
-        "code=sys.argv[3]; sys.argv=['-c',*sys.argv[4:]]\nexec(compile(code,'<selected-provider>','exec'))\n")
+        "assert sys.argv[1:4]==['-I','-B','-c']\n"
+        "code=sys.argv[4]; sys.argv=['-c',*sys.argv[5:]]\nexec(compile(code,'<selected-provider>','exec'))\n")
     wrapper.chmod(0o700)
     if unsupported:
         health = json.loads(provider_fixture["health"].read_text())
@@ -749,3 +750,128 @@ def test_v2_child_return_does_not_reset_no_parent_progress_cap(tmp_path: Path) -
     assert STORE.read(tmp_path)["documents"]["cursor"]["item_state"][root[1]]["decompositions"] == 0
     admitted = expand(tmp_path, ["new-investigation"])
     assert admitted["transition"]["decision"] == "expanded"
+
+
+@pytest.mark.parametrize(("initial", "replacement"), [
+    (True, 1), (False, 0), (1, True), (0, False),
+    ({"nested": [True, {"flag": False}]}, {"nested": [1, {"flag": 0}]}),
+    ({"nested": [1, {"flag": 0}]}, {"nested": [True, {"flag": False}]}),
+])
+def test_v2_boolean_number_changes_are_type_aware(
+    tmp_path: Path, initial: Any, replacement: Any
+) -> None:
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture", "board": board(),
+        "baseline_context": context(initial), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    result = revisit(tmp_path, replacement)
+    assert result["transition"]["decision"] == "revisit-admitted"
+    state = STORE.read(tmp_path)
+    assert state["records"][result["transition"]["context_id"]]["body"]["delta"]["changed"] == ["dataset"]
+    outcome(tmp_path)
+    recycled = revisit(tmp_path, initial)
+    assert recycled["transition"]["reason_code"] == "previously-used-context"
+
+
+@pytest.mark.parametrize("value", [True, False, 1, 0, {"nested": [True, False, 1, 0]}])
+def test_v2_typed_values_with_metadata_churn_remain_duplicate(tmp_path: Path, value: Any) -> None:
+    baseline = {"payload": value}
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture", "board": board(),
+        "baseline_context": context(baseline), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    result = revisit(tmp_path, {"payload": value, "uuid": "new-uuid", "timestamp": "later"})
+    assert result["transition"]["decision"] == "not-admitted"
+
+
+def test_v2_record_semantic_comparison_refuses_boolean_numeric_substitution(lane: Path) -> None:
+    from agenda_v2_schema import validate
+    state = STORE.read(lane)
+    _, item, _ = current(lane)
+    baseline_id = state["documents"]["cursor"]["item_state"][item]["baseline_context_id"]
+    documents, records = deepcopy(state["documents"]), deepcopy(state["records"])
+    baseline = records[baseline_id]["body"]
+    baseline["facts"] = context({"flag": True})["facts"]
+    baseline["semantic"] = {"dataset": {"value": {"flag": 1}}}
+    with pytest.raises(AGENDA.AgendaError, match="semantic facts"):
+        validate(documents, records)
+
+
+def test_v2_oversized_publish_with_documented_provider_options_keeps_original_reason(
+    lane: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from test_agenda_store import CLI
+
+    frame, item, _ = current(lane)
+    req = v2({"operation": "wait", "frame_id": frame, "item_id": item,
+        "reason_kind": "external", "reason_ref": "bounded fixture",
+        "next_action": "x" * 33000, "evidence": proof()}, 1, "oversized-new-mode")
+    accepted, fresh = STORE.mutate(lane, req, session="fixture-head", publisher_configured=True)
+    assert fresh and accepted["delivery"]["error"]["code"] == "observation-too-large"
+    calls = []
+
+    async def forbidden(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((args, kwargs))
+        pytest.fail("oversized observation invoked a provider")
+
+    monkeypatch.setattr(PUBLISH, "_invoke", forbidden)
+    assert CLI.main(["publish", "--state-home", str(lane),
+        "--publisher-python", sys.executable, "--publisher-project", "fixture-project"]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["persisted"] is True
+    assert output["delivery"]["state"] == "pending"
+    assert output["delivery"]["error"]["code"] == "observation-too-large"
+    assert calls == []
+    assert STORE.read(lane)["revision"] == 2 and STORE.read(lane)["delivery"] == output["delivery"]
+    assert STORE.history(lane)[0] == accepted
+    assert STORE.mutate(lane, req, session="fixture-head", publisher_configured=True) == (accepted, False)
+
+
+def test_v2_actual_publisher_outer_adapter_is_isolated_from_shadow_cwd(
+    lane: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import venv
+
+    # Bind the synthetic provider via the selected interpreter's own site context.
+    # Production code never consumes this fixture path or ambient PYTHONPATH.
+    isolated = lane / "selected-test-context"
+    venv.EnvBuilder(with_pip=False).create(isolated)
+    interpreter = isolated / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    purelib = subprocess.run([str(interpreter), "-I", "-B", "-c",
+        "import sysconfig; print(sysconfig.get_path('purelib'))"], capture_output=True,
+        text=True, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+    assert purelib.returncode == 0, purelib.stderr
+    library = Path(purelib.stdout.strip())
+    package = library / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "agenda_contract.py").write_text("CONTRACT_VERSIONS=(1,2)\n")
+    (package / "__main__.py").write_text(
+        "import argparse\n"
+        "def build_parser():\n"
+        " p=argparse.ArgumentParser(); s=p.add_subparsers(dest='command'); a=s.add_parser('agenda-publish')\n"
+        " a.add_argument('--contract-version',type=int); a.add_argument('--json',action='store_true'); return p\n")
+    (package / "worktrees_client.py").write_text(
+        "def read_health(): return {'capabilities':['worktree-agendas-v2'],"
+        "'worktrees':{'status':'ready','generation':'a'*32}}\n"
+        "class Client:\n"
+        " def _request(self, action, payload, **kw):\n"
+        "  body=payload['observation']; source=body['source']\n"
+        "  return {'ok':True,'contract_version':2,'generation':payload['expected_generation'],"
+        "'sequence':3,'project':payload['project'],'worktree_id':source['worktree'],"
+        "'session_id':source['session'],'availability':'observed','observation':body}\n"
+        "def _control_client(): return Client()\n")
+    shadow = lane / "shadow-cwd"
+    shadow.mkdir()
+    touched = lane / "unexpected-shadow-execution"
+    malicious = f"open({str(touched)!r},'w').write('executed')\nraise RuntimeError('shadow import')\n"
+    (shadow / "json.py").write_text(malicious)
+    (shadow / "re.py").write_text(malicious)
+    fake_package = shadow / "agent_worktrees"
+    fake_package.mkdir()
+    (fake_package / "__init__.py").write_text(malicious)
+    monkeypatch.chdir(shadow)
+    monkeypatch.setenv("PYTHONPATH", str(shadow))
+    result = PUBLISH.publish(lane, [], provider_python=str(interpreter), provider_project="fixture-project")
+    assert result["state"] == "delivered"
+    assert not touched.exists()
+    assert STORE.read(lane)["revision"] == 1

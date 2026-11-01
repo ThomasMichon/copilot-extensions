@@ -7,7 +7,6 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import importlib
 import json
-import os
 from pathlib import Path
 import socket
 import subprocess
@@ -211,11 +210,13 @@ def chain(tmp_path: Path, monkeypatch, request):
     argv = [sys.executable, str(entry), str(configuration)]
     monkeypatch.setattr(engine_client, "engine_base_command", lambda: list(argv))
     monkeypatch.setattr(agenda_transport, "health_argv", lambda base: [*base, "--resident-health"])
+    provider_python = sys.executable
     if getattr(request, "param", None) == "context-qualified":
         bootstrap = tmp_path / "provider-binding"
         bootstrap.mkdir()
         binding = (
             "import json,sys\nfrom pathlib import Path\n"
+            "assert sys.flags.isolated == 1\n"
             f"configuration=json.loads(Path({str(configuration)!r}).read_text(encoding='utf-8'))\n"
             "sys.path[:0]=configuration['source_paths']\n"
             "from agent_worktrees import agenda_cli,config,locks,tracking,worktrees_client\n"
@@ -234,11 +235,19 @@ def chain(tmp_path: Path, monkeypatch, request):
             "    trace.write(json.dumps({'pid':__import__('os').getpid(),"
             "'birth':locks.process_start_time(__import__('os').getpid()),'argv':sys.argv})+'\\n')\n"
         )
-        (bootstrap / "sitecustomize.py").write_text(binding, encoding="utf-8")
-        inherited = os.environ.get("PYTHONPATH")
-        monkeypatch.setenv(
-            "PYTHONPATH", os.pathsep.join([str(bootstrap), *([inherited] if inherited else [])]),
+        selected = bootstrap / "selected-python"
+        selected.write_text(
+            f"#!{sys.executable} -I\n"
+            "import os,sys\n"
+            "assert sys.flags.isolated == 1\n"
+            "assert sys.argv[1:4] == ['-I','-B','-c']\n"
+            f"binding={binding!r}\n"
+            "code=binding+'\\n'+sys.argv[4]\n"
+            "os.execv(sys.executable,[sys.executable,'-I','-B','-c',code,*sys.argv[5:]])\n",
+            encoding="utf-8",
         )
+        selected.chmod(0o700)
+        provider_python = str(selected)
 
     board = json.loads((SKILL / "assets/agenda.example.json").read_text())
     cursor = json.loads((SKILL / "assets/cursor.example.json").read_text())
@@ -267,7 +276,7 @@ def chain(tmp_path: Path, monkeypatch, request):
             "owner": owner, "server": server, "argv": argv, "endpoint": endpoint,
             "endpoint_discovery": endpoint_discovery, "actions": actions,
             "settled": settled, "trace": trace, "wake": wake,
-            "provider_python": sys.executable, "configuration": configuration,
+            "provider_python": provider_python, "configuration": configuration,
         }
     finally:
         owner.close_admission("closed")

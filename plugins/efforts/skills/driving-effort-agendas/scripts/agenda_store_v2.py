@@ -127,13 +127,16 @@ def mutate(
             "source": {"worktree": queue.cursor["worktree"], "session": session, "store_id": store_id},
             "revision": revision, "committed_at": now, "snapshot": asdict(project(queue.documents, queue.records))}
         observation_text = common.encode(observation)
-        if len(observation_text.encode()) + 1 > 32768:
+        oversized = len(observation_text.encode()) + 1 > 32768
+        if oversized:
             observation_text = common.encode({"schema": "efforts.agenda-undeliverable", "version": 1,
                 "revision": revision, "error": {"code": "observation-too-large",
                     "message": "Observation exceeds 32 KiB; no argv invoked."}})
         delivery = {"state": "pending" if publisher_configured else "not-configured",
                     "error": {"code": "awaiting-publish" if publisher_configured else "not-configured",
                               "message": "No delivery has been confirmed."}}
+        if oversized and publisher_configured:
+            delivery["error"] = decode(observation_text.encode())["error"]
         result = {"schema": "efforts.agenda-result", "version": 2, "mode": MODE,
             "persisted": True, "store_id": store_id, "revision": revision, "operation_id": identity,
             "operation": change["operation"], "source": observation["source"], "committed_at": now,
