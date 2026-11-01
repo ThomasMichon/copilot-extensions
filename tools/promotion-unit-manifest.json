@@ -3472,7 +3472,7 @@
         ".devcontainer/trusted-harness-base/install.py": "5818d4f7a7dad564cb28496b42a3774d4f924afb95f91d65e1d46629bd05c845",
         ".devcontainer/trusted-harness-base/tests/test_contract.py": "f193ecfa91ba4b24406d38103c1f357367d0229c4d4e036e08f6cb3b9d5deeb4",
         "fleet-manager/src/fleet_manager/__init__.py": "77743b7e007c45bfd4b89c830ddc8ca3030758f739d3451f6efb7e1f20eca02d",
-        "fleet-manager/src/fleet_manager/artifact_staging.py": "3ba4bf484fdfbb6d4016a4df3a781b2ae6b04e1bc4b3f48e2e3cbab02aded454",
+        "fleet-manager/src/fleet_manager/artifact_staging.py": "1552abfe9b6825152e0932f0cc50da99d6adb5834e9336aa0ab65173d3a8ee3f",
         "fleet-manager/src/fleet_manager/artifacts.py": "3d8233f1994c6620b55a664e4c0b6b944beb54263c415be38a22f5af00c5b10d",
         "fleet-manager/src/fleet_manager/client_activation.py": "19a88ca51204454e83c3f3741cf9049869f25e41e4d672f28c0c5c6564cefabe",
         "fleet-manager/src/fleet_manager/client_admission.py": "63b630a495f7fc1d2a43b9c681e43525558d3dd94b54c78ef1f21010cc643da4",

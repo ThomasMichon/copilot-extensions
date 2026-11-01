@@ -92,6 +92,8 @@ class KomodoMaterialization:
 def render_profile(declaration: KomodoDeclaration, material: KomodoMaterialization,
                    *, owner: str, network_external: bool = False) -> bytes:
     """Render only the selected fixed profile; no Docker or credential production."""
+    if declaration.preserving or type(material) is not KomodoMaterialization:
+        raise PlanError("Komodo incumbent observations cannot render a native apply profile")
     fingerprint(owner)
     desired = declaration.to_dict()
     platform = "linux/" + desired["architecture"]

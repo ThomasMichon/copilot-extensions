@@ -97,6 +97,7 @@ REFUSALS = [
 
 
 REPAIR_MODES = ("success", "failed", "mount-order", "renewed", "prior-failed",
+                "native-failure-to-repair", "repair-failure-to-native",
                 "status-late-network",
                 "status-endpoint-drift", "status-missing-network-membership",
                 "status-mismatched-network-attachment", *REFUSALS, *CRASHES, *PARTIAL_SAVES,
@@ -336,6 +337,53 @@ def test_original_unknown_uses_current_repair_without_native_replay(
                 return await asyncio.to_thread(call, status=True)
 
             selected_request = original
+            if mode in ("native-failure-to-repair", "repair-failure-to-native"):
+                original_health_failure[0] = True
+                reconcile = NodeJournal.reconcile
+
+                def lost_failure(journal, request, receipt, **options):
+                    raise PlanError("fixture-lost-failure-publication")
+
+                monkeypatch.setattr(NodeJournal, "reconcile", lost_failure)
+                with pytest.raises(PlanError, match="fixture-lost-failure-publication"):
+                    if mode == "native-failure-to-repair":
+                        await asyncio.to_thread(
+                            baseline.settle_failed, original, harness.admit(original))
+                    else:
+                        await asyncio.to_thread(
+                            repair_bootstrap, repair_owner(), harness.identity(), original,
+                            role="client", installation="client-a", failed=True)
+                retained_bytes = (owner_root / "selection.json").read_bytes()
+                retained_failure = decode(retained_bytes)["failed"]
+                monkeypatch.setattr(NodeJournal, "reconcile", reconcile)
+                original_health_failure[0] = False
+                before_http = len(health_requests)
+                for decision in (False, True):
+                    with pytest.raises(PlanError, match="terminal decision.*owner"):
+                        if mode == "native-failure-to-repair":
+                            await asyncio.to_thread(
+                                repair_bootstrap, repair_owner(), harness.identity(), original,
+                                role="client", installation="client-a", failed=decision)
+                        else:
+                            await asyncio.to_thread(
+                                baseline.settle_failed if decision else baseline.converge,
+                                original, harness.admit(original))
+                    assert (owner_root / "selection.json").read_bytes() == retained_bytes
+                    assert journal.inspect(original) == uncertain
+                if mode == "native-failure-to-repair":
+                    receipt = await asyncio.to_thread(baseline.converge, original, harness.admit(original))
+                else:
+                    receipt = await asyncio.to_thread(
+                        repair_bootstrap, repair_owner(), harness.identity(), original,
+                        role="client", installation="client-a", failed=True)
+                assert receipt.to_dict()["status"] == "failed"
+                assert receipt.to_dict()["result_ref"] == digest(retained_failure)
+                record = decode((owner_root / "selection.json").read_bytes())
+                assert record["failed"] == retained_failure and record["attempt"] is None
+                assert live() == native_before and sentinel.read_text() == "original-data"
+                assert (rig["directory"] / "effects").read_text() == expected_effects
+                assert len(health_requests) == before_http
+                return
             if mode in ("missing-network-membership", "status-missing-network-membership"):
                 (rig["directory"] / "excluded-endpoints.json").write_text(json.dumps([live()["core"]["Id"]]))
             elif mode in ("mismatched-network-attachment", "status-mismatched-network-attachment"):

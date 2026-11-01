@@ -1,5 +1,20 @@
 # Testing copilot-extensions
 
+The manual `Installation context full` workflow's `komodo-recovery` portfolio
+runs one bounded Linux job at the exact dispatch SHA. It exercises the existing
+native subprocess protocol fixture, real physical-owner locks, immutable
+state/profile/outcome files and SQLite publication across lost failure
+publication, recovered health, pending attachments and native/repair
+entry-point switches. Missing or corrupted immutable outcomes refuse both
+UNKNOWN and already-published terminal recovery without clearing the original
+attempt; restoring exact evidence permits the original receipt to finish.
+Compose 2/5 protocol cases retain their original native
+process custody and verify no replayed apply. The job fails rather than crediting
+skipped or empty test selection, and uses the standalone runner's environment
+lease, sandbox and whole-process cleanup.
+This is opt-in source qualification, not a required unit-CI expansion, actual
+Docker/official-image startup, installed-service adoption or rollout proof.
+
 The optional `uv_deployment_compatibility` native-acceptance selector runs the
 focused retained-dependency policy, Codespaces cold/warm installation,
 MCP/Dispatch caller compatibility and full coupled Logger batch/binstub packets
@@ -265,6 +280,14 @@ deadlines and whole-permit behavior remain unchanged.
 These are contained component/installed-SDK controls, not actual Docker,
 official-image, automatically constructed controller or production evidence.
 Native/network/build tests remain outside the required no-actor unit packet.
+`test_komodo_incumbent.py` adds original named-volume/file materialization,
+batched real subprocess readback, authenticated preserving-only adoption,
+unchanged repeat/status and lost-terminal-receipt controls. Its platform-neutral
+composition fixtures mock Linux stat/native observations and the state lock;
+they do not qualify Linux custody. `test_komodo_owner.py` separately adds
+real Linux protocol/lock adoption, volume-drift and update-refusal cases on
+Compose 2 and 5. Neither packet proves official-image startup or live adoption;
+the existing fixed-profile and broader lifecycle proofs remain distinct.
 The original-attempt repair packet adds distinct candidate/executor and current
 transition admission, exact same-journal settlement, immutable prior-failure
 history, process/key drift and interrupted publication controls.

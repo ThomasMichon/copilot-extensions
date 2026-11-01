@@ -11,7 +11,8 @@ import aiohttp
 from .artifact_staging import _bytes
 from .komodo_declaration import KomodoDeclaration
 from .komodo_identity import effective_global_key, public_identity
-from .komodo_profile import KomodoMaterialization, ordinary_path
+from .komodo_incumbent import KomodoMaterial
+from .komodo_profile import ordinary_path
 from .planning import PlanError, decode, digest, identifier
 
 MAX_RESPONSE = 64 * 1024
@@ -21,7 +22,7 @@ class _Starting(Exception):
     pass
 
 
-def public_keys(material: KomodoMaterialization, *, missing_ok: bool = False) -> dict[str, str]:
+def public_keys(material: KomodoMaterial, *, missing_ok: bool = False) -> dict[str, str]:
     result = {}
     try:
         ordinary_path(material.keys)
@@ -45,11 +46,11 @@ def public_keys(material: KomodoMaterialization, *, missing_ok: bool = False) ->
     return result
 
 
-def public_key_fingerprints(material: KomodoMaterialization) -> dict[str, str]:
+def public_key_fingerprints(material: KomodoMaterial) -> dict[str, str]:
     return {name: digest(value) for name, value in public_keys(material, missing_ok=True).items()}
 
 
-def identity_digest(material: KomodoMaterialization) -> str:
+def identity_digest(material: KomodoMaterial) -> str:
     return digest(public_keys(material))
 
 
@@ -82,7 +83,7 @@ async def _request(client: aiohttp.ClientSession, base: str, endpoint: str,
         raise _Starting from None
 
 
-async def current_health(declaration: KomodoDeclaration, material: KomodoMaterialization,
+async def current_health(declaration: KomodoDeclaration, material: KomodoMaterial,
                          *, deadline: float, core: dict[str, Any] | None = None) -> dict[str, str]:
     """Call only after exact native ownership, image and loopback-port inspection.
 
