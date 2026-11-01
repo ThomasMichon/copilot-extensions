@@ -432,11 +432,14 @@ an admission gate. Explicit uninstall or independently scoped reclamation is a
 separate operation, not a prerequisite for updating.
 
 ### installation-refusal-boundary
-Only actual I/O failures, such as file locks or insufficient write permissions,
-may block applying an explicitly requested installation. Unknown layouts,
+Incumbent inspection may block applying an explicitly requested installation
+only for actual I/O failures, such as file locks or insufficient write permissions.
+Unknown incumbent layouts,
 missing or contradictory metadata, failed recognition and old-version contract
 disagreements do not confer a veto. They select fresh installation rather than
 permission checks against the incumbent.
+Independent source, integrity and installation-authority requirements retain
+their scopes; incumbent recognition cannot supply or veto that authority.
 
 Installation and runtime readiness are separate outcomes. Validation and
 diagnostics describe what was installed and whether it works; they must not
@@ -590,7 +593,7 @@ Selecting a runtime source alone never changes the plugin-content source.
 An update pursues a verified good, current state rather than treating one
 best-effort pass as success. Costly preparation precedes short publication and
 local integration; installation application obeys the
-[I/O-only refusal boundary](#installation-refusal-boundary). Runtime health,
+[incumbent I/O-only refusal boundary](#installation-refusal-boundary). Runtime health,
 compatibility and convergence remain separately observed outcomes, not
 additional installer admission gates. Verified progress survives retry;
 transient I/O failures receive safe retry and mitigation. Diagnostics stay

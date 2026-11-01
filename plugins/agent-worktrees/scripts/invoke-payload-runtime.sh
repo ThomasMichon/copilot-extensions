@@ -264,7 +264,7 @@ run_runtime() {
             *) python_cache='\\?\'"$python_cache" ;;
         esac
     fi
-    selected_cache="$("$AGENT_RT_PY" -I -X "pycache_prefix=$python_cache" -c '
+    selected_cache="$("$AGENT_RT_PY" -I -B -X "pycache_prefix=$python_cache" -c '
 import sys
 try:
     from agent_procutil.python_cache import cache_arguments

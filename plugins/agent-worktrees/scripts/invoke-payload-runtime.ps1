@@ -480,7 +480,7 @@ except ImportError:
 else:
     print(cache_arguments(sys.argv[1], runtime=sys.executable)[1].split("=", 1)[1])
 '@
-        $selectedCache = & $Python -I -X "pycache_prefix=$pythonCache" -c $cacheSelector $runtimeRoot
+        $selectedCache = & $Python -I -B -X "pycache_prefix=$pythonCache" -c $cacheSelector $runtimeRoot
         if ($LASTEXITCODE -ne 0 -or @($selectedCache).Count -ne 1 -or -not $selectedCache) {
             [Console]::Error.WriteLine('[agent-worktrees] Runtime cache selection failed.')
             exit 126

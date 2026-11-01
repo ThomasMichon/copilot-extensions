@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import json
 import subprocess
 import stat
@@ -109,14 +110,17 @@ def test_ordinary_start_anchors_relative_cwd_before_instance_spec(tmp_path, monk
 
 @pytest.mark.parametrize("with_root", [False, True])
 def test_detached_child_uses_its_durable_external_cache(tmp_path, with_root):
-    from agent_procutil import python_cache_args
-
     root = tmp_path / "manager" if with_root else None
-    assert mux_daemon_process.detached_child_argv(root) == [
-        sys.executable, *python_cache_args(mux_daemon_process.selected_root(root)),
+    command = mux_daemon_process.detached_child_argv(root)
+    assert command[:2] == [sys.executable, "-X"]
+    assert command[3:] == [
         "-m", "worktree_manager", "mux-daemon", "run",
         *([f"--root={root}"] if root is not None else []),
     ]
+    cache = Path(command[2].removeprefix("pycache_prefix=").removeprefix("\\\\?\\"))
+    assert cache.parent == mux_daemon_process.selected_root(root) / "cache" / "python"
+    assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
+    assert mux_daemon_process.detached_child_argv(root)[2] != command[2]
 
 
 @pytest.mark.parametrize("gui_name", ["pythonw.exe", "gui-host.exe"], ids=["relocated", "renamed"])

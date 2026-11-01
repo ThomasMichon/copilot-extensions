@@ -336,6 +336,48 @@ def test_logger_stamp_retry_survives_partial_snapshot_removal(tmp_path, host):
     _assert_state(root, durable, removed=True, ownership="stamped")
 
 
+def test_failed_stamped_teardown_cannot_authorize_foreign_command_publication(tmp_path, monkeypatch, capsys):
+    root, durable, environment = _fixture(tmp_path, "stamped")
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    for key in ("COPILOT_PLUGIN_ROOT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
+                "COPILOT_PLUGIN_STAGED_FROM", "AGENT_LOGGER_HOME"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.chdir(INSTALLERS.parent)
+    spec = importlib.util.spec_from_file_location("logger_retry_authority_test", INSTALLERS / "uninstall_guard.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    primitive, receipt = helper.validate(root)
+    assert receipt is not None
+
+    def fail_removal(_root, _shell):
+        (root / "snapshots" / "1.0.0" / "pyproject.toml").unlink()
+        raise OSError("injected partial snapshot removal")
+
+    monkeypatch.setattr(helper, "remove_runtime", fail_removal)
+    monkeypatch.setattr(sys, "argv", [
+        "uninstall_guard.py", "--root", str(root), "--idle", "--prepare",
+        "--remove-runtime", "--shell", "must-not-launch",
+    ])
+    assert helper.main() == 1
+    assert "injected partial snapshot removal" in capsys.readouterr().err
+    manifest = root / "deploy-manifest.json"
+    assert json.loads(manifest.read_text()) == {"schema_version": 3, "service": "agent-logger"}
+    assert helper.validate(root) is not None
+    foreign = root.parent / ".local" / "bin" / ("agent-logger.ps1" if os.name == "nt" else "agent-logger")
+    foreign.parent.mkdir(parents=True)
+    foreign.write_bytes(b"foreign command")
+    before = {path: path.read_bytes() for path in (manifest, foreign)}
+    binding = helper._load("_logger_retry_authority_binding", "command_binding.py")
+    with pytest.raises(binding.CommandOwnershipConflict, match="Unrecognized global commands"):
+        binding.publish_legacy_binding(
+            primitive, payload_root=INSTALLERS.parent, plugin_id="agent-logger",
+            legacy_root=root, project_root=INSTALLERS.parent, environment=environment,
+        )
+    assert all(path.read_bytes() == value for path, value in before.items())
+    assert all((root / name).read_bytes() == value for name, value in durable.items())
+
+
 @pytest.mark.parametrize("host", ["pwsh", "bash"])
 @pytest.mark.parametrize("custody", ["snapshot", "retention"])
 def test_logger_preserves_busy_generation_custody(tmp_path, host, custody):

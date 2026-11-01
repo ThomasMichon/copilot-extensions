@@ -62,9 +62,12 @@ def _manifest(tmp_path: Path) -> Path:
     return path
 
 
-@pytest.mark.parametrize("kind", ["sh", "ps1", "cmd", "dispatcher"] if os.name == "nt"
-                         else ["sh", "ps1", "dispatcher"])
+@pytest.mark.parametrize("kind", ["sh", "ps1", "cmd", "dispatcher", "dispatcher-installed"] if os.name == "nt"
+                         else ["sh", "ps1", "dispatcher", "dispatcher-installed",
+                               "dispatcher-sh", "dispatcher-sh-installed"])
 def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
+    dispatcher = kind.startswith("dispatcher")
+    installed = kind.endswith("-installed")
     manifest = _manifest(tmp_path)
     (manifest.parent / "plugin.json").write_text('{"name":"agent-example"}', encoding="utf-8")
     profile = tmp_path / "profile"
@@ -77,7 +80,7 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
         "Lib/site-packages" if os.name == "nt"
         else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
     )
-    package_name = "agent_worktrees" if kind == "dispatcher" else "agent_example"
+    package_name = "agent_worktrees" if dispatcher else "agent_example"
     package = site / package_name
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("VALUE = 42\n", encoding="utf-8")
@@ -87,6 +90,20 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
         "sys.dont_write_bytecode, sys.argv[1:]]))\n",
         encoding="utf-8",
     )
+    if installed:
+        procutil = site / "agent_procutil"
+        procutil.mkdir()
+        (procutil / "__init__.py").touch()
+        shutil.copyfile(
+            REPO / "libs" / "agent-procutil" / "src" / "agent_procutil" / "python_cache.py",
+            procutil / "python_cache.py",
+        )
+        (slot / ".install-complete.json").write_text(json.dumps({
+            "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
+        }), encoding="utf-8")
+        record = site / "fixture.dist-info" / "RECORD"
+        record.parent.mkdir()
+        record.write_text("fixture.py,sha256=" + "a" * 43 + ",1\n", encoding="utf-8")
     scripts = manifest.parent / "scripts"
     (scripts / "resolve-runtime.ps1").write_text(
         "$AgentRtPy = '" + str(python).replace("'", "''") + "'\n", encoding="utf-8",
@@ -98,12 +115,12 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
     shim = manifest.parent / "bin" / ("agent-example" + ("" if kind == "sh" else "." + kind))
     if kind == "cmd":
         argv = [os.environ["COMSPEC"], "/d", "/c", str(shim)]
-    elif kind in ("ps1", "dispatcher"):
+    elif kind in ("ps1", "dispatcher", "dispatcher-installed"):
         host = shutil.which("pwsh") or shutil.which("powershell")
         if not host and os.name != "nt":
             pytest.skip("PowerShell unavailable on this POSIX host")
         assert host, "native PowerShell is required"
-        if kind == "dispatcher":
+        if dispatcher:
             source = (REPO / "plugins" / "agent-worktrees" / "scripts"
                       / "invoke-payload-runtime.ps1").read_text(encoding="utf-8")
             start = source.index("function Invoke-AgentWorktreesRuntime(")
@@ -119,6 +136,18 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
                 encoding="utf-8",
             )
         argv = [host, "-NoProfile", "-NonInteractive", "-File", str(shim)]
+    elif kind.startswith("dispatcher-sh"):
+        source = (REPO / "plugins" / "agent-worktrees" / "scripts"
+                  / "invoke-payload-runtime.sh").read_text(encoding="utf-8")
+        start = source.index("run_runtime() {")
+        end = source.index('[[ -f "$MODE_RUNNER"', start)
+        shim = tmp_path / "dispatcher-cache.sh"
+        shim.write_text(
+            "set -eu\nCONTEXT=''\nRUNTIME_ROOT=" + shlex.quote(str(root)) + "\n"
+            "AGENT_RT_PY=" + shlex.quote(str(python)) + "\n"
+            + source[start:end] + '\nrun_runtime "$@"\n', encoding="utf-8",
+        )
+        argv = ["bash", str(shim)]
     else:
         if os.name == "nt":
             git = shutil.which("git")
@@ -162,14 +191,18 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
         if cached_before is not None:
             assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
                     previous_cache.stat().st_ino) == cached_before
-            assert cached != previous_cache
+            assert (cached == previous_cache) is installed
         cached_before = current
         previous_cache = cached
         assert snapshot() == before
+        if installed:
+            assert all(path.name.startswith("installed-") for path in (root / "cache" / "python").iterdir())
     module = package / "__init__.py"
     previous_stat = module.stat()
     module.write_text("VALUE = 84\n", encoding="utf-8")
     os.utime(module, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
+    if installed:
+        record.write_text("fixture.py,sha256=" + "b" * 43 + ",1\n", encoding="utf-8")
     result = subprocess.run(
         [*argv, "argument with spaces"], cwd=tmp_path, env=child_env,
         capture_output=True, text=True, timeout=30,

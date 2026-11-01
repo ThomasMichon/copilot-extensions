@@ -1789,4 +1789,9 @@ captures the reconciled source history, all six fixes, actual bounded local
 results and the remaining exact-head Windows/POSIX/review gates. No local result
 or earlier hosted head substitutes for qualification of the integrated changes.
 
+The [November 1 qualification correction](<journal/2026/11.01 replacement-qualification.md>)
+records the new review fixes and the dependency-free Index activation diagnosis.
+The corrected integrated head still requires exact-head whole-suite acceptance
+and actual review; the earlier passing packets do not close those gates.
+
 The [dated journal](journal.md) retains the complete implementation, qualification and review history. The Plan and Validation Plan above remain the completion gate.

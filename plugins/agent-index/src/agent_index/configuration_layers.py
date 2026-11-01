@@ -14,9 +14,9 @@ from configuration_layers import compose, read_source
 from . import config as cfg
 
 
-def owner_report(root):
+def owner_report(root, *, state_policy=None):
     raw = os.environ.get(cfg.INSTALLATION_CONTEXT_ENV, "").strip()
-    policy, _external = cfg._requires_external(root)
+    policy, _external = (state_policy or cfg._requires_external)(root)
     if policy != "ready":
         raise ValueError("repository state policy is invalid")
     own = None
@@ -96,8 +96,8 @@ def _repository_paths(root):
     ]
 
 
-def load_repository_layers(root, *, parser=None):
-    report = owner_report(root)
+def load_repository_layers(root, *, parser=None, state_policy=None):
+    report = owner_report(root, state_policy=state_policy)
     if report is None:
         # Optional absent/older owner retains native files without a second
         # binding lookup through a legacy or cross-cell front door.
@@ -107,7 +107,12 @@ def load_repository_layers(root, *, parser=None):
         if marketplace is not None:
             paths.append(marketplace)
         for path in paths:
-            merged = cfg._merge_repo_config_dicts(merged, cfg._load_yaml(path))
+            if parser is None:
+                value = cfg._load_yaml(path)
+            else:
+                source = read_source(str(root), str(path.relative_to(root)), parser=parser)
+                value = source["values"] if source is not None else {}
+            merged = cfg._merge_repo_config_dicts(merged, value)
         return {"values": merged, "provenance": {}, "layers": []}
     context = context_from_owner(report)
     context["base_root"] = str(root.absolute())
@@ -194,7 +199,9 @@ def load_repository_candidate(root, native, *, knowledge_root=None, compose_pref
         primary = native["_primary_repo_config_path"](root) or layers[0][1]
         native["_validate_config"](merged)  # Native activation veto precedes preferences.
         if compose_preferences:
-            layered = load_repository_layers(root, parser=native["_parse_yaml_for_layers"])
+            layered = load_repository_layers(
+                root, parser=native["_parse_yaml_for_layers"], state_policy=native["_requires_external"],
+            )
             if layered is not None:
                 merged = layered["values"]
         return "ready", primary.resolve(), native["_validate_config"](merged)
@@ -219,7 +226,9 @@ def knowledge_root_from_owner(root):
 def external_configuration_result(root, external_path, native):
     """Apply preferences only after the caller qualified the external candidate."""
     try:
-        layered = load_repository_layers(root, parser=native["_parse_yaml_for_layers"])
+        layered = load_repository_layers(
+            root, parser=native["_parse_yaml_for_layers"], state_policy=native["_requires_external"],
+        )
         if layered is None:
             raise native["ConfigError"]("configuration owner became unavailable")
         external = native["_validate_config"](layered["values"])

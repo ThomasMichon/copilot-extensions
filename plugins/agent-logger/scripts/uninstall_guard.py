@@ -360,12 +360,10 @@ def main() -> int:
                 raise RuntimeError("Logger uninstall preparation requires runtime-use admission")
             manifest = root / "deploy-manifest.json"
             if owner is not None and not manifest.exists():
-                primitive, receipt = owner
+                primitive, _ = owner
                 record = {"schema_version": 3, "service": "agent-logger"}
-                if receipt is not None:
-                    record["commandBinding"] = receipt
                 # Preserve authenticated stamped ownership even if snapshot
-                # deletion fails after removing its project metadata.
+                # deletion fails, without granting global command ownership.
                 primitive._atomic_write_json(manifest, record)
         if args.remove_runtime:
             if not args.prepare or not args.shell:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -74,3 +75,27 @@ def test_unrecorded_completion_uses_fresh_external_namespace(cache, tmp_path, ev
     assert all("unsealed-" in arguments[1] for arguments in (first, second))
     assert all(str(target) not in arguments[1] for arguments in (first, second))
     assert not (root / "cache").exists()
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_minimal_loader_keeps_cache_and_cleanup_metadata_without_resident_modules(tmp_path, monkeypatch, registered):
+    package = tmp_path / "minimal"
+    package.mkdir()
+    source = package / "__init__.py"
+    source.write_bytes(SOURCE.with_name("__init__.py").read_bytes())
+    (package / "python_cache.py").write_bytes(SOURCE.read_bytes())
+    spec = importlib.util.spec_from_file_location("unit_minimal_procutil", source)
+    module = importlib.util.module_from_spec(spec)
+    if registered:
+        monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    first = module.python_cache_args(tmp_path, runtime=tmp_path / "uninstalled")
+    assert first != module.python_cache_args(tmp_path, runtime=tmp_path / "uninstalled")
+    assert "unsealed-" in first[1]
+    outer, inner = ("Local\\ce-owned-job-" + character * 32 for character in ("a", "b"))
+    monkeypatch.setenv(module._JOB_SCOPES_ENV, outer)
+    assert module._job_child_environment({"literal": "kept"}, append=inner) == {
+        "literal": "kept", module._JOB_SCOPES_ENV: outer + ";" + inner,
+    }
+    assert spec.name + ".daemon" not in sys.modules
+    assert spec.name + "._job_scopes" not in sys.modules

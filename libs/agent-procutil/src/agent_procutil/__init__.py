@@ -1,15 +1,7 @@
 """Windows-headless / detached process-spawn helpers (shared, vendored per plugin).
 
-A copilot-extensions runtime frequently runs **windowless**: under a hidden
-Windows Scheduled Task launched via ``conhost --headless``, inside the
-agent-bridge daemon, or from a session-start hook whose parent has no console of
-its own. When such a windowless parent shells out to a *console* program -- a
-``.cmd`` binstub that re-execs ``python.exe``, or ``git.exe`` / ``ssh.exe`` /
-``pwsh.exe`` -- Windows allocates a fresh console **window** for the child, which
-flashes on screen once per spawn.
-
-These helpers standardize the fix across every plugin so the behavior (and the
-exact creation flags) can't drift between copies:
+Windowless runtimes must not allocate a console when spawning console programs.
+These helpers keep the creation flags consistent across plugins:
 
 * :func:`no_window_kwargs` -- ``CREATE_NO_WINDOW`` for a non-interactive child
   whose output is still captured over pipes (the common case: git/gh/az checks).
@@ -37,9 +29,7 @@ Development uses canonical editable references; release materializes consumer
 copies. See ``README.md`` for vendoring and
 ``tools/check-vendored-libs-sync.py`` for source consistency.
 
-Synchronous imports do not load asyncio. Accessing the async spawn helper
-loads its implementation; the asyncio module attribute remains available for
-callers that patch subprocess creation.
+Synchronous imports stay asyncio-free; accessing the async helper loads it lazily.
 """
 
 from __future__ import annotations
@@ -119,7 +109,17 @@ def python_cache_args(
     ``runtime`` is the target interpreter or venv, not the current redirect.
     Omit it only when launching this process's own installed environment.
     """
-    from .python_cache import cache_arguments
+    if __name__ in sys.modules:
+        from .python_cache import cache_arguments
+    else:
+        import importlib.util
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location(
+            __name__ + ".python_cache", Path(__file__).with_name("python_cache.py"),
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cache_arguments = module.cache_arguments
 
     return cache_arguments(root, runtime=runtime)
 
@@ -155,9 +155,20 @@ def _job_scope_names(environment) -> tuple[str, ...]:
 def _job_child_environment(
     environment=None, *, append: str | None = None, inherit_current: bool = True,
 ) -> dict[str, str]:
-    from ._job_scopes import child_environment
-
-    return child_environment(environment, append=append, inherit_current=inherit_current)
+    if type(inherit_current) is not bool:
+        raise ValueError("owned Job scope inheritance must be a boolean")
+    child = dict(os.environ if environment is None else environment)
+    names = list(_job_scope_names(os.environ)) if inherit_current else []
+    for key in tuple(child):
+        if key.upper() == _JOB_SCOPES_ENV:
+            names.extend(_job_scope_names({_JOB_SCOPES_ENV: child.pop(key)}))
+    names = list(dict.fromkeys(names))
+    if append is not None:
+        names.append(append)
+    if names:
+        child[_JOB_SCOPES_ENV] = ";".join(names)
+        _job_scope_names(child)
+    return child
 
 
 def _publish_job_scope(name: str) -> None:
