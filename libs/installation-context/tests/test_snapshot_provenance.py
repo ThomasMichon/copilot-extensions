@@ -2876,7 +2876,7 @@ def test_runtime_slot_preserves_markerless_or_malformed_existing_slot(
     if marker_kind == "malformed":
         expected = (
             "unsupported schema or version"
-            if runner[0] == "python"
+            if runner[0] in {"python", "powershell"}
             else "unknown or missing fields"
         )
     assert expected in result.stderr
@@ -2939,16 +2939,18 @@ def test_runtime_slot_validation_rejects_unknown_ownership_fields(
     ownership = json.loads(marker.read_text(encoding="utf-8"))
     ownership["unexpected"] = "value"
     _write_json(marker, ownership)
+    before = marker.read_bytes()
 
     result = _run_slot(runner, "slot-validate", layout, check=False)
 
     assert result.returncode != 0
     expected = (
         "does not match the validated snapshot"
-        if runner[0] == "python"
+        if runner[0] in {"python", "powershell"}
         else "unknown or missing fields"
     )
     assert expected in result.stderr
+    assert marker.read_bytes() == before
 
 
 @pytest.mark.parametrize(
