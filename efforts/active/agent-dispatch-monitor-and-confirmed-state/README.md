@@ -1347,3 +1347,44 @@ controls. Metadata completion now compares the complete current target set,
 not just each ledger entry's confirmation state: settling an older unknown
 write or exhausting the publication budget cannot confirm a changed, removed
 or newly added declaration. Five controls cover those cases and fresh recovery.
+
+The local collection prerequisite actually merged in
+[#9784](https://github.com/ThomasMichon/copilot-extensions/pull/9784) as
+`30bc5824ecd2ea78481a445f53889119de54438b` after current-head approval
+and successful required checks. A bounded, explicitly authorized pull-forward
+preserved the recovery reference after normal sync tried to replay the already
+squashed incremental commits; managed sync then completed cleanly. The
+superseded observed-check diagnostic is tracked separately in
+[#9794](https://github.com/ThomasMichon/copilot-extensions/issues/9794);
+the stricter required-CI merge boundary remains unchanged. Authenticated
+provider transport and actual complete-source publication authority are next;
+this local observer does not complete placement or running qualification.
+
+### 2026-10-31 - Control-authorized pool catalog metadata transport
+
+Implemented provider-first control-only whole-catalog inspection and
+generation/revision-fenced begin/publication routes through the existing
+coordinator owners. The running `/health` response advertises the metadata
+protocol, explicitly without supervisor lock-holder verification, complete
+configured membership or atomic-placement support. Metadata authorization
+does not attest a remote process or an allocator's preferred pool subset.
+
+The bounded HTTP/catalog/registration packet passes 197 cases, including 64
+transport controls; eight incumbent health/authentication controls pass
+separately. Strict write envelopes retain every required fence and reject caller
+clocks, slot counts and completeness flags. Unknown-response replay retains its
+original request and freshness. Invalid arrays and unavailable/expired scopes
+cannot produce a usable partial view; legacy registration semantics remain
+unchanged.
+
+This closes the transport implementation prerequisite only after source review
+and merge. Actual admitted lock-holder publication, local/coordinator coherent
+input rechecks, complete expected-scope membership and mixed-cohort qualification
+remain the next integration stretch. The parent and amendment remain Active;
+there is no publisher enrollment, caller migration, placement or live rollout.
+
+The final HTTP transport packet passes 73 controls. The documentation
+distinguishes inherited API `401` string-detail failures from the structured
+catalog `403`/`503` failures, including the configuration refusal reached only
+after valid ordinary authentication. This preserves the existing app-wide
+authentication boundary rather than overriding it for the new routes.

@@ -930,7 +930,7 @@ def create_app(
         )
 
 
-    register_status_routes(app, queue, bus)
+    register_status_routes(app, queue, bus, control_token=control_token)
     register_directory_routes(app, directory)
     register_task_routes(
         app,
