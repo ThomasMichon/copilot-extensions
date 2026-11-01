@@ -2854,6 +2854,10 @@ whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
 or phase rejects the result. Each admitted file is collected once; an exact
 node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
+Its actor-free PowerShell SDK controls compare Windows physical-path spellings
+through a synthetic resolver boundary, including DOS/UNC aliases and unrelated
+roots. Native path reads and concurrent first publication remain separate
+integration controls.
 `test_materialized_local_sources.py` supplies bounded synthetic closure controls
 for missing/editable/escaping local sources, literal conditional paths, standalone
 manifests, and root/nested requirement declarations. Real Git promotion and

@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import ntpath
+import os
 import sys
 from argparse import Namespace
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -21,6 +23,28 @@ def sdk() -> ModuleType:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.parametrize(("left", "right", "equivalent"), [
+    (r"C:\example\receipt", r"\\?\C:\example\receipt", True),
+    (r"\\example.invalid\share\receipt", r"\\?\UNC\example.invalid\share\receipt", True),
+    (r"C:\example\receipt", r"\\?\C:\other\receipt", False),
+    (r"C:\example\receipt", r"\\?\GLOBALROOT\Device\C:\example\receipt", False),
+])
+def test_physical_windows_path_keys_preserve_io_spelling(
+    sdk: ModuleType, monkeypatch: pytest.MonkeyPatch,
+    left: str, right: str, equivalent: bool,
+) -> None:
+    seen: list[str] = []
+
+    def physical_path(path: Path) -> PureWindowsPath:
+        seen.append(os.fspath(path))
+        return PureWindowsPath(path)
+
+    monkeypatch.setattr(sdk, "canonical_path", physical_path)
+    monkeypatch.setattr(sdk, "os", SimpleNamespace(name="nt", fspath=os.fspath, path=ntpath))
+    assert sdk.paths_equal(left, right) is equivalent
+    assert seen == [left, right]
 
 
 def _parameters(**values: object) -> dict[str, object]:
