@@ -116,6 +116,9 @@ def test_native_and_wire_materialize_same_generation_and_strict_watch_remains_co
         with pytest.raises(WorkspaceClientError, match="capability"):
             await client.exchange("lookup", {"number": 42})
         await client.capabilities()
+        assert await client.exchange("capabilities", {}) == native.exchange("capabilities", {})
+        with pytest.raises(WorkspaceClientError, match="invalid_workspace_capability_request"):
+            await client.exchange("capabilities", {"number": 42})
         remote = await client.materialize(42, generation["id"])
         assert remote == native.materialize(42, generation["id"]) == generation
         legacy = ReplayClient(caller, route_prefix="", target="project", repo=binding.repo, binding=binding)

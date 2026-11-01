@@ -84,6 +84,10 @@ class WorkspaceClient:
         return value
 
     async def exchange(self, operation, payload):
+        if operation == "capabilities":
+            if payload != {}:
+                raise WorkspaceClientError("invalid_workspace_capability_request")
+            return await self.capabilities()
         if self._capabilities is None or operation not in self._capabilities["operations"]:
             raise WorkspaceClientError("workspace_capability_required", outcome_unknown=False)
         value = await self._exchange(operation, payload)
