@@ -191,6 +191,27 @@ grants, native qualification or claims of implementation.
 
 ## Journal
 
+### 2026-11-01 - Context novelty review follow-up
+
+- The next current-head review exposed two additional novelty loopholes:
+  equivalent numeric representations could create new signatures, and dropping
+  then restoring an already-known fact could appear novel when whole bundles
+  differed. Both need same-lineage regressions and corrections before merge.
+- Exact integer-ratio comparison now normalizes numeric equivalence in equality
+  and historical signatures without rounding large integers or conflating
+  booleans. Novelty checks retain scoped known leaves/structure across the full
+  item lineage, including nested facts; dropping and re-adding known information
+  cannot create another attempt or reset decomposition bounds.
+- Reproductions first failed as incorrectly admitted revisits. Corrected
+  regressions preserve genuine changed-input positives, prior attempts/history
+  and explicit counters. The coordinator's combined packet passed 274 cases with
+  two explicit dependency/platform skips; the actual isolated connected sequence
+  passed five cases without skips. Both bounded runs verified cleanup.
+  Fresh review, required CI, merge and canonical completion remain open.
+- The policy assertion finding was carried over despite its actual correction
+  and passing existing producer packet. An inline response anchors the fix to
+  its commit and test locations; no redundant producer rewrite is warranted.
+
 ### 2026-11-01 - First implementation review corrections
 
 - Review identified four coupled defects: stale ambient-policy assertions,

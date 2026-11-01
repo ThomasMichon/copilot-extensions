@@ -68,15 +68,51 @@ def facts(value: Any, subjects: set[str]) -> tuple[list[dict[str, Any]], dict[st
     return original, normalized
 
 
+def comparison(value: Any) -> tuple[Any, ...]:
+    """Compare exact numbers without converting integers to lossy floats."""
+    if value is None:
+        return ("null",)
+    if type(value) is bool:
+        return ("boolean", value)
+    if type(value) is int:
+        return ("number", value, 1)
+    if type(value) is float and math.isfinite(value):
+        numerator, denominator = value.as_integer_ratio()
+        return ("number", numerator, denominator)
+    if isinstance(value, str):
+        return ("string", value)
+    if isinstance(value, list):
+        return ("array", tuple(comparison(item) for item in value))
+    if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+        return ("object", tuple((key, comparison(item)) for key, item in sorted(value.items())))
+    raise AgendaError("context comparison requires finite JSON")
+
+
 def signature(values: dict[str, Any], subjects: set[str]) -> str:
-    return json.dumps({key: item for key, item in values.items() if key in subjects},
-                      sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    return json.dumps(comparison({key: item for key, item in values.items() if key in subjects}),
+                      ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
 def canonical_equal(left: Any, right: Any) -> bool:
-    """Keep JSON booleans and numbers distinct, including in nested containers."""
-    return json.dumps(left, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False) == (
-        json.dumps(right, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
+    """Numerically equivalent JSON values agree, but booleans stay distinct."""
+    return comparison(left) == comparison(right)
+
+
+def knowledge(value: Any, path: tuple[Any, ...] = ()) -> set[tuple[Any, ...]]:
+    """Retain known scoped leaf values/structure without crediting bundle churn."""
+    if not nonempty(value):
+        return set()
+    if isinstance(value, dict):
+        result = {(path, "object")}
+        for key, child in value.items():
+            result.update(knowledge(child, path + (("key", key),)))
+        return result
+    if isinstance(value, list):
+        result = {(path, "array")}
+        for index, child in enumerate(value):
+            result.update(knowledge(child, path + (("index", index),)))
+        return result
+    return {(path, "value", comparison(value))}
 
 
 def qualification(
@@ -109,7 +145,16 @@ def qualification(
     candidate = signature(proposed, subjects)
     if any(signature(previous, subjects) == candidate for previous in used):
         return False, "previously-used-context", delta
-    return True, "qualified-agent-judgment", delta
+    for subject in added + changed:
+        known: set[tuple[Any, ...]] = set()
+        for previous in [current, *used]:
+            if subject in previous:
+                known.update(knowledge(previous[subject]))
+        if knowledge(proposed[subject]) - known:
+            return True, "qualified-agent-judgment", delta
+    # Omission never erases learned facts. A different bundle of known values
+    # needs a genuinely new scoped relationship/insight, not a new wrapper.
+    return False, "previously-known-facts", delta
 
 
 def context_body(value: Any, subjects: set[str]) -> dict[str, Any]:

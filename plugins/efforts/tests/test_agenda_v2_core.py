@@ -875,3 +875,123 @@ def test_v2_actual_publisher_outer_adapter_is_isolated_from_shadow_cwd(
     assert result["state"] == "delivered"
     assert not touched.exists()
     assert STORE.read(lane)["revision"] == 1
+
+
+@pytest.mark.parametrize(("initial", "replacement"), [
+    (1, 1.0), (0.0, -0.0), (-0.0, 0), (int(1e40), 1e40),
+    ({"nested": [1, {"zero": 0.0}]}, {"nested": [1.0, {"zero": -0.0}]}),
+])
+def test_v2_equivalent_numeric_context_does_not_create_attempt_or_reset_decomposition(
+    tmp_path: Path, initial: Any, replacement: Any
+) -> None:
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture", "board": board(),
+        "baseline_context": context(initial), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    root = current(tmp_path)
+    child = expand(tmp_path, ["nested"])["transition"]
+    outcome(tmp_path, "done")
+    update(tmp_path, {"operation": "return", "frame_id": child["frame_id"],
+        "expansion_id": child["expansion_id"], "acceptance_ref": "bounded investigation accepted",
+        "evidence": proof()})
+    before = STORE.read(tmp_path)["documents"]["cursor"]["item_state"][root[1]]
+    assert before["decompositions"] == 1
+    result = revisit(tmp_path, replacement)
+    assert result["transition"]["decision"] == "not-admitted"
+    after = STORE.read(tmp_path)["documents"]["cursor"]["item_state"][root[1]]
+    assert after["attempts"] == before["attempts"]
+    assert after["current_attempt_id"] == root[2] and after["decompositions"] == 1
+
+
+def test_v2_omitted_known_fact_readdition_is_not_new_information(tmp_path: Path) -> None:
+    configured = board()
+    for item in configured["items"].values():
+        item["relevant_subjects"].append("condition")
+    def candidate(value: str, include_condition: bool) -> dict[str, Any]:
+        data = context({"input": value})
+        if include_condition:
+            data["facts"].append({"kind": "condition", "subject": "condition", "value": "ready",
+                                  "evidence_ref": "same-condition-new-reference"})
+        return data
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture", "board": configured,
+        "baseline_context": candidate("A", True), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    frame, item, attempt = current(tmp_path)
+    changed = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": attempt, "context": candidate("B", False),
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["dataset"],
+                     "causal_change": "New B input enables another approach.", "evidence_refs": ["input-B"]},
+        "approach": {"action": "Run parent"}})
+    assert changed["transition"]["decision"] == "revisit-admitted"
+    outcome(tmp_path)
+    child = expand(tmp_path, ["nested"])["transition"]
+    outcome(tmp_path, "done")
+    update(tmp_path, {"operation": "return", "frame_id": child["frame_id"],
+        "expansion_id": child["expansion_id"], "acceptance_ref": "child accepted", "evidence": proof()})
+    before = STORE.read(tmp_path)["documents"]["cursor"]["item_state"][item]
+    restored = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": before["current_attempt_id"], "context": candidate("B", True),
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["condition"],
+                     "causal_change": "Restating an omitted known condition is not learning.", "evidence_refs": ["new-label"]},
+        "approach": {"action": "Run parent"}})
+    assert restored["transition"]["decision"] == "not-admitted"
+    after = STORE.read(tmp_path)["documents"]["cursor"]["item_state"][item]
+    assert after["attempts"] == before["attempts"] and after["decompositions"] == before["decompositions"] == 1
+    actually_new = update(tmp_path, {"operation": "revisit", "frame_id": frame, "item_id": item,
+        "predecessor_attempt_id": before["current_attempt_id"],
+        "context": {"facts": [
+            {"kind": "input", "subject": "dataset", "value": {"input": "B"}, "evidence_ref": "input-B"},
+            {"kind": "condition", "subject": "condition", "value": "newly-unblocked", "evidence_ref": "condition-change"}]},
+        "judgment": {"qualification": "agent-judgment", "changed_subjects": ["condition"],
+                     "causal_change": "The condition actually changed, enabling the same command.",
+                     "evidence_refs": ["condition-change"]},
+        "approach": {"action": "Run parent"}})
+    assert actually_new["transition"]["decision"] == "revisit-admitted"
+    assert STORE.read(tmp_path)["documents"]["cursor"]["item_state"][item]["decompositions"] == 0
+
+
+@pytest.mark.parametrize(("initial", "replacement"), [
+    (2**53 + 1, float(2**53)),
+    (10**100 + 1, 10**100),
+    ({"nested": [2**53 + 1]}, {"nested": [float(2**53)]}),
+    (False, 0.0), (True, 1.0),
+])
+def test_v2_exact_large_integer_and_boolean_numeric_changes_remain_substantive(
+    tmp_path: Path, initial: Any, replacement: Any
+) -> None:
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture", "board": board(),
+        "baseline_context": context(initial), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    assert revisit(tmp_path, replacement)["transition"]["decision"] == "revisit-admitted"
+
+
+@pytest.mark.parametrize(("initial", "known_return"), [
+    (1, 1.0), (0.0, -0.0),
+    ({"nested": [1, 0.0]}, {"nested": [1.0, -0.0]}),
+])
+def test_v2_historical_context_signatures_share_numeric_equivalence(
+    tmp_path: Path, initial: Any, known_return: Any
+) -> None:
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture", "board": board(),
+        "baseline_context": context(initial), "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    assert revisit(tmp_path, {"new": "substantive-input"})["transition"]["decision"] == "revisit-admitted"
+    outcome(tmp_path)
+    result = revisit(tmp_path, known_return)
+    assert result["transition"]["reason_code"] == "previously-used-context"
+
+
+def test_v2_nested_omitted_knowledge_readdition_cannot_reset_parent_budget(tmp_path: Path) -> None:
+    STORE.mutate(tmp_path, v2({"operation": "init", "worktree": "fixture", "board": board(),
+        "baseline_context": context({"nested": {"input": "A", "condition": "ready"}}),
+        "resource_caps": CAPS}, 0, "init"))
+    outcome(tmp_path)
+    assert revisit(tmp_path, {"nested": {"input": "B"}})["transition"]["decision"] == "revisit-admitted"
+    outcome(tmp_path)
+    root = current(tmp_path)
+    child = expand(tmp_path, ["nested"])["transition"]
+    outcome(tmp_path, "done")
+    update(tmp_path, {"operation": "return", "frame_id": child["frame_id"],
+        "expansion_id": child["expansion_id"], "acceptance_ref": "child accepted", "evidence": proof()})
+    result = revisit(tmp_path, {"nested": {"input": "B", "condition": "ready"}})
+    assert result["transition"]["reason_code"] == "previously-known-facts"
+    assert STORE.read(tmp_path)["documents"]["cursor"]["item_state"][root[1]]["decompositions"] == 1
