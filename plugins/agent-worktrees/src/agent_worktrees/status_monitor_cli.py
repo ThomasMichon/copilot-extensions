@@ -9,7 +9,6 @@ import os
 import sys
 
 from . import config as cfg
-from .status_monitor_retirement import surface_busy
 from .sessions_pane_args import sweep_registered_mux_pane_args as sweep_mux_pane_args
 
 _DEFAULT_SWEEP_INTERVAL_S = 30
@@ -171,6 +170,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import handoff_prompt_receipt_control as receipt_control
     from . import worktree_status_daemon
     from .status_monitor_drain import DrainTrace, drain_with_diagnostics
+    from .status_monitor_retirement import surface_busy
     from .worktrees_runtime import READ_ACTION, WorktreesRuntime
     from .worktrees_projection_index import ProjectionError, ProjectionUnavailable
     from .worktrees_producer import publish_active_project
