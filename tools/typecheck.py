@@ -217,6 +217,7 @@ def prepare(root: Path, project: Project) -> None:
         if marker.is_file() and marker.read_text(encoding="utf-8").strip() == digest:
             if environment_python(path).is_file():
                 return
+        marker.unlink(missing_ok=True)
         before = path.stat()
         result = _run([uv, "venv", "--allow-existing", "--python", sys.executable, str(path)], root)
         if result.returncode:

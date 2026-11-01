@@ -218,6 +218,59 @@ def test_preparation_installs_the_same_lock_bytes_that_keyed_the_cache(
     assert (path / ".typecheck-prepared").read_text(encoding="utf-8").strip() == digest
 
 
+def test_failed_cache_repair_cannot_preserve_preparation_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A restored interpreter alone must not certify a failed dependency repair."""
+    (tmp_path / "requirements.txt").write_bytes(b"mypy==1.18.2\n")
+    path, digest = typecheck.environment_path(tmp_path, project())
+    path.mkdir(parents=True)
+    marker = path / ".typecheck-prepared"
+    marker.write_text(digest + "\n", encoding="utf-8")
+    leases: list[Lease] = []
+    installs: list[bool] = []
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        lease = Lease()
+        leases.append(lease)
+        return lease
+
+    def which(_name: str) -> str:
+        return "uv"
+
+    def run(
+        argv: list[str], _root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert not marker.exists()
+        python = typecheck.environment_python(path)
+        python.parent.mkdir(parents=True, exist_ok=True)
+        python.touch()
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def install(
+        _uv: str, arguments: list[str], *, cwd: Path,
+        trusted_source_roots: tuple[Path, ...], check: bool, timeout: int,
+    ) -> subprocess.CompletedProcess[str]:
+        installs.append(True)
+        if len(installs) == 1:
+            raise subprocess.TimeoutExpired(arguments, timeout)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    monkeypatch.setattr(shutil, "which", which)
+    monkeypatch.setattr(typecheck, "_run", run)
+    monkeypatch.setattr(typecheck, "run_uv_install", install)
+    with pytest.raises(subprocess.TimeoutExpired):
+        typecheck.prepare(tmp_path, project())
+    assert not marker.exists()
+    with pytest.raises(typecheck.TypecheckError, match="--prepare"):
+        typecheck.check_project(tmp_path, project(), ("sample.py",), all_paths=("sample.py",))
+    typecheck.prepare(tmp_path, project())
+    assert len(installs) == 2
+    assert all(lease.released for lease in leases)
+    assert marker.read_text(encoding="utf-8").strip() == digest
+
+
 def test_preparation_refuses_unqualified_requirement_includes(tmp_path: Path) -> None:
     """A mutable include graph cannot pretend to be a one-file lock snapshot."""
     (tmp_path / "requirements.txt").write_text("-r elsewhere.txt\n", encoding="utf-8")
