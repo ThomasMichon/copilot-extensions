@@ -1600,6 +1600,10 @@ it does not weaken the guard or skip the case. Legacy macOS keeps stock Bash.
 The Worktrees installer carries its already-selected Bash into context queries,
 staged children and helper publication instead of rediscovering a different
 `bash` after a PATH change. Missing supported native tooling fails qualification.
+The lane never installs Homebrew Bash to satisfy that prerequisite. Copied POSIX
+fixtures redirect the SDK's current `canonical_path_into` account-home seam;
+they leave the source SDK and the runner's actual account profile unchanged.
+The PowerShell transport uses the already-redirected Python SDK resolution.
 
 ```bash
 gh workflow run installation-context-acceptance.yml --ref <published-workflow-branch> \

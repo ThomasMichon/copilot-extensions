@@ -37,6 +37,44 @@ def load(path: Path, name: str):
     return module
 
 
+def test_copied_posix_account_profile_uses_current_sdk_output_assignment(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import runtime_install_fixture as fixture
+
+    sdk = PLUGIN / "scripts" / "installation-context"
+    copied = tmp_path / "payload" / "scripts" / "installation-context"
+    shutil.copytree(sdk, copied)
+    home = tmp_path / "isolated account's home"
+    home.mkdir()
+    original = (sdk / "installation-context.sh").read_bytes()
+    monkeypatch.setattr(fixture, "os", SimpleNamespace(name="posix"))
+    fixture.isolate_account_profile(copied.parents[1], home, runtime_package=None)
+    source = (copied / "installation-context.sh").read_text(encoding="utf-8")
+    start = source.index("\nresolve_current_environment() {")
+    function = source[start:source.index("\n}\n\n", start) + 3]
+    bash = shutil.which("bash")
+    if os.name == "nt":
+        git = shutil.which("git")
+        assert git
+        bash = str(Path(git).resolve().parent.parent / "bin" / "bash.exe")
+    assert bash
+    result = subprocess.run(
+        [bash, "-c", """
+set -e
+normalized_short_host() { printf fixture; }
+id() { printf 1000; }
+getent() { printf 'fixture:x:1000:1000::/unredirected-account:/bin/bash'; }
+canonical_path_into() { printf -v "$1" '%s' "$2"; }
+guest_resolve_distribution() { :; }
+""" + function + '\nresolve_current_environment\nprintf "%s" "$CURRENT_PROFILE_HOME"\n'],
+        capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == str(home)
+    assert (sdk / "installation-context.sh").read_bytes() == original
+
+
 @pytest.fixture
 def engine(monkeypatch):
     monkeypatch.syspath_prepend(str(PLUGIN / "scripts"))

@@ -3976,7 +3976,7 @@
         "tools/seasoned_public_feed.py": "ee4caa163a7fa9effa12aca5f5019ec5a038fbf5d94cf6a767a981d3ef4a4c33",
         "tools/seasoned_uv.py": "a4e0cf269da3eff0833188b69b5ccfe3445f17fc8a3b814923273559dc0c31d9",
         "tools/standalone_consumers.py": "a038f31678a998c632b1090a5bb0c07377babe618ee36bf940536ea9b55285b5",
-        "tools/standalone_python_artifacts.py": "f3b12d7df049e1c3453d23509b63b01f707260d3c993b11afc1304d016d6831e",
+        "tools/standalone_python_artifacts.py": "56f59f6fbf86c649b9c3b248f40de05622fed031bbf7b8ae69cc97f38cbb2b63",
         "tools/tag_promotion.py": "06ffc590cf6a32a4e20ff226b76d49e88b7bf7b33e4eeeb3e08a269b20d96ae9",
         "tools/test_check_docs_consistency.py": "18746b96d0ddd72d1750fffb1149921cd002434bde1781cbaa8791646903626b",
         "tools/test_native_qualification_owner.py": "325786511669ba666a36944d4899bb70a99e15952718075fdcd481e80f2dc0cc",

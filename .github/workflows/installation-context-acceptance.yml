@@ -795,7 +795,10 @@ jobs:
         run: |
           if [ "$NATIVE_OS" = macOS ]; then
             prefix="$(brew --prefix bash)"
-            test -x "$prefix/bin/bash"
+            test -x "$prefix/bin/bash" || {
+              printf '%s\n' 'Native namespaced acceptance requires an existing Homebrew Bash executable; no installation is authorized.' >&2
+              exit 1
+            }
             printf '%s\n' "$prefix/bin" >> "$GITHUB_PATH"
             export PATH="$prefix/bin:$PATH"
           fi

@@ -25,7 +25,8 @@ _LIFECYCLE_FILES = (
     "runtime_install_driver.py",
     "installer_engine_process.py", "installer_dependency_policy.py",
     "installer_wheel_snapshot.py", "installer_wheel_inputs.py",
-    "installer_dependency_config.py", "registry_root.py", "command_binding.py", "command_lifecycle.py",
+    "installer_dependency_config.py", "installer_dependency_arguments.py",
+    "registry_root.py", "command_binding.py", "command_lifecycle.py",
     "installer_source_build.py", "installer_source_wheel_cache.py",
 )
 
