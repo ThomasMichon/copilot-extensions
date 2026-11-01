@@ -697,6 +697,7 @@ jobs:
           python tools/run-plugin-tests.py agent-mcp --allow-explicit-tiers
           --test-file tests/test_reap_versions.py
           --test-file tests/test_runtime_control_reset.py
+          --subsuite-timeout ${{ runner.os == 'Windows' && 600 || 300 }}
       - name: Qualify native process pause rollback and exit proof
         if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-
