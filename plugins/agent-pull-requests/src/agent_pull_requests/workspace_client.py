@@ -35,6 +35,7 @@ class WorkspaceClient:
         self._scope.pop("number")
         self._path = route_prefix + "/v2/review/" + binding.target
         self._capabilities = None
+        self._discovery_epoch = 0
         if read_admission is not None and not callable(read_admission):
             raise ValueError("invalid existing transport read-admission callback")
         self._read_admission = read_admission
@@ -72,6 +73,8 @@ class WorkspaceClient:
             raise WorkspaceClientError("invalid_workspace_response", outcome_unknown=operation == "submit") from None
 
     async def capabilities(self):
+        self._discovery_epoch += 1
+        epoch = self._discovery_epoch
         self._capabilities = None
         value = await self._exchange("capabilities", {})
         if (
@@ -82,6 +85,8 @@ class WorkspaceClient:
             or any(not isinstance(name, str) for name in value["operations"])
         ):
             raise WorkspaceClientError("unsupported_workspace_contract")
+        if epoch != self._discovery_epoch:
+            raise WorkspaceClientError("workspace_discovery_superseded")
         self._capabilities = copy.deepcopy(value)
         return value
 

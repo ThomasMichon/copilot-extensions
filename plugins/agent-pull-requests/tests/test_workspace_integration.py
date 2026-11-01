@@ -74,6 +74,7 @@ def integration(environment):
         after_chunk = None
         before_request = None
         transport_error = None
+        pause_capability = None
         calls = []
 
         async def request(self, method, target, *, request_headers, body, response_limit):
@@ -86,6 +87,11 @@ def integration(environment):
                 CallerContext("fleet-a", "gateway-a", "service-a", "caller-a", int(time.time()) + 600),
                 method, target, tuple((k.lower(), v) for k, v in request_headers), body,
             ))
+            if self.pause_capability is not None and target.endswith("/capabilities"):
+                entered, release = self.pause_capability
+                self.pause_capability = None
+                entered.set()
+                await release.wait()
             if self.after_chunk is not None and target.endswith("/chunk"):
                 callback, self.after_chunk = self.after_chunk, None
                 callback()
@@ -221,6 +227,48 @@ def test_actual_owner_denial_is_not_a_temporary_outage_or_effect_rollback(enviro
         if after_effect:
             state = store.inspect_review(selected["operation_id"], selected["scope"], expires_at=int(time.time()) + 600)
             assert state["actions"][0]["state"] == "unknown" and error.value.outcome_unknown
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("state", ["cache", "replay"])
+def test_corrupt_owner_state_is_not_invalid_caller_input(environment, integration, state):
+    store, _, _, _, backend, _ = environment
+    gateway, client, native, _, _, _ = integration
+
+    async def scenario():
+        await client.capabilities()
+        if state == "cache":
+            native.operations.cache.descriptor.write_text('{"corrupt":true}', encoding="utf-8")
+            operation, payload = "lookup", {"number": 42}
+        else:
+            store.path.write_text('{"corrupt":true}', encoding="utf-8")
+            operation, payload = "inspect", {"number": 42, "operation_id": "retained-operation"}
+        with pytest.raises(WorkspaceClientError) as error:
+            await client.exchange(operation, payload)
+        assert error.value.http_status == 503 and backend.threads == []
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_older_overlapping_discovery_cannot_restore_support_after_newer_failure(environment, integration):
+    gateway, client, _, _, caller, _ = integration
+
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+        caller.pause_capability = (entered, release)
+        older = asyncio.create_task(client.capabilities())
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        gateway.workspaces = {}
+        with pytest.raises(WorkspaceClientError, match="unsupported"):
+            await client.capabilities()
+        release.set()
+        with pytest.raises(WorkspaceClientError, match="superseded"):
+            await older
+        with pytest.raises(WorkspaceClientError, match="capability"):
+            await client.exchange("lookup", {"number": 42})
         await gateway.drain(timeout=2)
 
     asyncio.run(scenario())
