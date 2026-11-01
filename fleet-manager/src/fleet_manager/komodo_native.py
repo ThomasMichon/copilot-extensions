@@ -15,7 +15,7 @@ import time
 from typing import Any
 
 from .komodo_declaration import KomodoDeclaration, SERVICES
-from .komodo_incumbent import KomodoIncumbentMaterialization, KomodoMaterial
+from .komodo_incumbent import KomodoIncumbentMaterialization, KomodoMaterial, incumbent_topology
 from .komodo_profile import KomodoMaterialization, ordinary_path
 from .planning import PlanError, decode, identifier
 from .private_state import read_private_file
@@ -264,6 +264,15 @@ class KomodoNative:
 
     def network(self, declaration: KomodoDeclaration, material: KomodoMaterial, *,
                 deadline: float) -> dict[str, Any] | None:
+        if type(material) is KomodoIncumbentMaterialization and material.topology is not None:
+            networks = incumbent_topology(material.topology)["networks"]
+            actual = decode(self._call(material, ["network", "inspect", *sorted(networks)],
+                                       deadline=deadline).encode())
+            if (type(actual) is not list or len(actual) != len(networks)
+                    or any(type(item) is not dict or item.get("Name") not in networks for item in actual)
+                    or len({item["Name"] for item in actual}) != len(networks)):
+                raise PlanError("Komodo incumbent native network evidence is incomplete")
+            return {"networks": {item["Name"]: item for item in actual}}
         name = declaration.to_dict()["project"] + "_default"
         identities = self._call(material, [
             "network", "ls", "--no-trunc", "--filter", "name=^" + re.escape(name) + "$",

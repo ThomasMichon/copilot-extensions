@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from .komodo_incumbent import incumbent_topology
 from .komodo_selection import KomodoSelection
 from .planning import PlanError, digest
 
 
 def network_fingerprint(network: dict[str, Any]) -> str:
+    if set(network) == {"networks"}:
+        return digest({name: network_fingerprint(item) for name, item in network["networks"].items()})
     return digest({key: value for key, value in network.items() if key != "Containers"})
 
 
@@ -16,6 +19,8 @@ def same_network_observation(before: dict[str, Any] | None, after: dict[str, Any
     """Compare paired verified bridge identity and complete endpoint observations."""
     if before is None or after is None:
         return before is after
+    if set(before) == {"networks"} or set(after) == {"networks"}:
+        return before == after
     return (network_fingerprint(before) == network_fingerprint(after)
             and before["Containers"] == after["Containers"])
 
@@ -23,6 +28,8 @@ def same_network_observation(before: dict[str, Any] | None, after: dict[str, Any
 def verify_network(network: dict[str, Any] | None, selected: KomodoSelection,
                    containers: dict[str, dict[str, Any]], expected: str | None, *,
                    created: bool = False, pending: bool = False) -> str | None:
+    if selected.declaration.preserving and selected.material.topology is not None:
+        return _verify_incumbent(network, selected, containers, expected, created=created)
     if network is None:
         if expected is not None or containers:
             raise PlanError("Komodo retained native network is missing")
@@ -74,6 +81,43 @@ def verify_network(network: dict[str, Any] | None, selected: KomodoSelection,
         }.items())):
             raise PlanError("Komodo created network lacks fixed owner evidence")
     return actual
+
+
+def _verify_incumbent(network: dict[str, Any] | None, selected: KomodoSelection,
+                      containers: dict[str, dict[str, Any]], expected: str | None, *,
+                      created: bool) -> str:
+    topology = incumbent_topology(selected.material.topology)
+    snapshots = {"networks": topology["networks"]}
+    if (created or expected is None or type(network) is not dict or set(network) != {"networks"}
+            or type(network["networks"]) is not dict
+            or set(network["networks"]) != set(topology["networks"])
+            or any(type(item) is not dict or type(item.get("Containers")) is not dict
+                   for item in network["networks"].values())
+            or network_fingerprint(network) != network_fingerprint(snapshots)
+            or network_fingerprint(network) != expected):
+        raise PlanError("Komodo retained incumbent topology was replaced or changed")
+    for service, item in containers.items():
+        names = topology["attachments"][service]
+        attachments = item.get("NetworkSettings", {}).get("Networks")
+        if (type(attachments) is not dict or set(attachments) != set(names)
+                or item["HostConfig"].get("NetworkMode") != topology["modes"][service]):
+            raise PlanError("Komodo incumbent service network attachment changed")
+        for name in names:
+            observed = network["networks"][name]
+            attachment = attachments[name]
+            endpoint = observed["Containers"].get(item["Id"])
+            if (type(attachment) is not dict or attachment.get("NetworkID") != observed["Id"]
+                    or (item["State"].get("Running") is True and (
+                        type(endpoint) is not dict or type(attachment.get("EndpointID")) is not str
+                        or not attachment["EndpointID"]
+                        or endpoint.get("EndpointID") != attachment["EndpointID"]))):
+                raise PlanError("Komodo incumbent network membership or attachment identity differs")
+    for name, observed in network["networks"].items():
+        allowed = {item["Id"] for service, item in containers.items()
+                   if name in topology["attachments"][service]}
+        if not set(observed["Containers"]) <= allowed:
+            raise PlanError("Komodo incumbent network has foreign service endpoints")
+    return network_fingerprint(network)
 
 
 def retained_network(record: dict[str, Any], selected: KomodoSelection) -> str | None:
