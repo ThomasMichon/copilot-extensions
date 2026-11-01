@@ -232,10 +232,11 @@ class BoundedReconciliation(SupervisorSources):
             self._publication_executor = ThreadPoolExecutor(
                 max_workers=1, thread_name_prefix="dispatch-publication",
             )
+        deadline = self._source_read_deadline()
         try:
             return self._declaration_publisher.poll(
                 self.client, registrations, executor=self._publication_executor,
-                deadline=self._reconcile_deadline if self._reconcile_deadline is not None
+                deadline=deadline if deadline is not None
                 else time.monotonic() + self._reconcile_call_budget,
             )
         finally:
