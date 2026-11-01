@@ -7,7 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
-from threading import Event, Lock
+from threading import Event, Lock, get_ident
 from types import SimpleNamespace
 from typing import Any
 
@@ -535,10 +535,117 @@ def test_final_source_recheck_crossing_deadline_never_admits_post(
         return current
 
     monkeypatch.setattr(daemon, "capture_pool_publication_inputs", final_capture)
-    with pytest.raises(PoolPublicationError, match="deadline exhausted before POST"):
+    with pytest.raises(PoolPublicationError, match="deadline exhausted"):
         daemon._run_pool_metadata_send(request, deadline)
     assert not sent and not queue.pool_catalog_snapshot().scopes
     assert daemon._pool_publisher_custody.pending is request
+
+
+def test_changed_final_unavailable_recheck_is_refused_before_request_custody(owner: Any) -> None:
+    daemon, queue, _calls = owner
+    _settle(daemon, queue)
+    _settle(daemon, queue)
+    reads = 0
+
+    def changes() -> DeclarationRead:
+        nonlocal reads
+        reads += 1
+        return DeclarationRead(
+            (_declaration(priority=reads if reads % 2 == 0 else 0),),
+            False, "source-scan-unavailable",
+        )
+
+    daemon.declared_source = changes
+    observed = daemon.capture_pool_publication_inputs()
+    assert observed.snapshot.observation_revision
+    assert "local-inputs-changed" in observed.reasons
+    before = queue.pool_catalog_snapshot()
+    with pytest.raises(PoolPublicationError, match="unchanged final local inputs"):
+        daemon.prepare_pool_metadata_request()
+    assert daemon._pool_publisher_custody.pending is None
+    assert queue.pool_catalog_snapshot() == before
+
+
+def test_unavailable_send_refuses_changes_only_in_final_recheck(owner: Any) -> None:
+    daemon, queue, _calls = owner
+    _settle(daemon, queue)
+    _settle(daemon, queue)
+    reads = 0
+
+    def changes() -> DeclarationRead:
+        nonlocal reads
+        reads += 1
+        return DeclarationRead(
+            (_declaration(priority=9 if reads == 4 else 0),),
+            False, "source-scan-unavailable",
+        )
+
+    daemon.declared_source = changes
+    request = daemon.prepare_pool_metadata_request()
+    assert request.reason and "local-inputs-changed" not in request.inputs.reasons
+    original = request.inputs.snapshot.observation_revision
+    sent = _sender(daemon, queue)
+    with pytest.raises(PoolPublicationError, match="fences changed"):
+        daemon.send_pool_metadata_request()
+    current = daemon.pool_source_snapshot()
+    assert current.observation_revision == original
+    assert reads == 4 and not sent
+    assert daemon._pool_publisher_custody.pending is request
+
+
+def test_final_admission_decision_serializes_close_without_holding_post(
+    owner: Any, monkeypatch: Any,
+) -> None:
+    from agent_dispatch import supervisor_daemon, supervisor_pool_sender
+
+    daemon, queue, _calls = owner
+    request = daemon.prepare_pool_metadata_request()
+    deciding, decide, posting, finish, closing = (Event() for _ in range(5))
+    writer_id = None
+    clock = time.monotonic
+    sent = []
+
+    def decision_clock() -> float:
+        if get_ident() == writer_id and daemon._pool_metadata_admission_lock.locked():
+            deciding.set()
+            assert decide.wait(2)
+        return clock()
+
+    def send(request: Any, *, boundary: Any) -> Any:
+        nonlocal writer_id
+        writer_id = get_ident()
+        with boundary():
+            sent.append(request.to_dict())
+            posting.set()
+            assert finish.wait(2)
+            return _apply(queue, request)
+
+    def shutdown() -> bool:
+        closing.set()
+        return daemon.shutdown()
+
+    daemon.client.send_pool_metadata = send
+    monkeypatch.setattr(supervisor_pool_sender, "time", SimpleNamespace(monotonic=decision_clock))
+    monkeypatch.setattr(supervisor_daemon, "_SHUTDOWN_GRACE_SECONDS", 0.01)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        sender = executor.submit(daemon.send_pool_metadata_request)
+        try:
+            assert deciding.wait(1)
+            drain = executor.submit(shutdown)
+            assert closing.wait(1) and not drain.done()
+            assert not daemon._pool_metadata_closed.is_set()
+            decide.set()
+            assert posting.wait(1)
+            assert not drain.result(timeout=1)
+            assert daemon._pool_metadata_closed.is_set()
+            assert daemon._pool_metadata_flight.future in daemon._probe_inflight
+            finish.set()
+            result = sender.result(timeout=1)
+            assert sent == [request.to_dict()]
+            assert daemon._pool_publisher_custody.settled == (request, result)
+        finally:
+            decide.set()
+            finish.set()
 
 
 @pytest.mark.parametrize("field", [

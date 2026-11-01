@@ -79,6 +79,8 @@ class SupervisorPoolSender:
             if (
                 current.catalog != original.catalog
                 or any(reason.startswith("coordinator-") for reason in current.reasons)
+                or "local-inputs-changed" in current.reasons
+                or "local-inputs-changed" in original.reasons
                 or original.snapshot.observation_revision is None
                 or current.snapshot.observation_revision != original.snapshot.observation_revision
                 or current.snapshot.input_revision != original.snapshot.input_revision
@@ -89,11 +91,18 @@ class SupervisorPoolSender:
                 raise PoolPublicationError("pool send original source or coordinator fences changed")
             if self._pool_lock() is not lock or lock.acquisition != acquisition:
                 raise SingletonAdmissionError("pool send changed the original singleton scope")
-            if self._pool_metadata_closed.is_set():
-                raise PoolPublicationError("pool metadata send admission is closed")
             deadline = self._pool_capture_deadline.get()
-            if deadline is None or time.monotonic() >= deadline:
-                raise PoolPublicationError("pool metadata send deadline exhausted before POST")
+            if deadline is None or not self._pool_metadata_admission_lock.acquire(
+                timeout=max(0.0, deadline - time.monotonic()),
+            ):
+                raise PoolPublicationError("pool metadata POST admission deadline exhausted")
+            try:
+                if self._pool_metadata_closed.is_set():
+                    raise PoolPublicationError("pool metadata send admission is closed")
+                if time.monotonic() >= deadline:
+                    raise PoolPublicationError("pool metadata send deadline exhausted before POST")
+            finally:
+                self._pool_metadata_admission_lock.release()
             yield
 
     def _run_pool_metadata_send(

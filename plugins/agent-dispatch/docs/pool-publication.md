@@ -160,6 +160,8 @@ does not renew freshness. A separate observation revision is retained even
 when complete definitions are unavailable. Unreadable, cached or uncopyable
 local inputs have no comparable observation revision and cannot authorize a
 write; equal unavailable reasons are not evidence that inputs stayed unchanged.
+An observed final digest change refuses preparation before retaining a request
+and refuses sending any older request, including an unavailable publication.
 External file writers and the complete configured cohort remain integration
 gates; the explicit sender's final recheck below is still optimistic, not an
 atomic filesystem fence.
@@ -215,7 +217,10 @@ the same whole-scope unavailable observation), coordinator registration revision
 and every original publisher position. Changed sources, delayed observations,
 withdrawals, a changed publisher or closed admission refuse the write. The
 original capture deadline is checked again immediately before POST admission,
-after parsing and final comparisons, not just before source collection. The
+after parsing and final comparisons, not just before source collection.
+That final closed-state/deadline decision shares the short shutdown admission
+guard, which is released before I/O; an admitted operation stays tracked even
+if shutdown closes immediately afterward. The
 request body retains its original generation, revisions and definitions; an
 unavailable request still carries an empty definition array.
 These are bounded, optimistic source checks, not atomic external-file fencing

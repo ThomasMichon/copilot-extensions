@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from .pool_source_snapshot import PoolSourceSnapshot
 from .queue_pool_catalog import PoolPublicationScope
+
+if TYPE_CHECKING:
+    from .pool_instances import PoolInstanceDefinition
 
 
 class PoolPublicationError(RuntimeError):
@@ -130,6 +133,8 @@ class PoolPublisherCustody:
     def prepare(self, inputs: PoolPublicationInputs) -> PoolMetadataRequest:
         if self.pending is not None:
             raise PoolPublicationError("original pool metadata request remains unresolved")
+        if "local-inputs-changed" in inputs.reasons:
+            raise PoolPublicationError("pool metadata requires unchanged final local inputs")
         if inputs.publisher_id != self.publisher_id or inputs.catalog is None or any(
             reason.startswith("coordinator-") for reason in inputs.reasons
         ):
@@ -182,6 +187,7 @@ class PoolPublisherCustody:
         ):
             raise PoolPublicationError("pool metadata result failed its original request fences")
         if request.operation == "publish":
+            expected: tuple[tuple[PoolInstanceDefinition, ...], int | None, int | None]
             if request.reason is None:
                 expected = (request.inputs.snapshot.definitions, result.generation, result.revision)
             else:
