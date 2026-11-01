@@ -18,6 +18,9 @@ The public contract is `agent-pull-requests.workspace-tools/v1`. Discovery repor
 the actual supplied client's supported operations and source-read descriptor.
 Unsupported/missing bindings do not choose an ambient backend or command.
 All original CLI/watch interfaces and defaults remain unchanged.
+Overlapping service tool calls share negotiation through the existing client's
+`ensure_capabilities()`; explicit rediscovery remains separate and can withdraw
+cached support. This orders metadata, not caller authority or effect admission.
 
 ## Existing CLI frontdoor
 
@@ -79,9 +82,13 @@ budget=..., max_bytes=...)`. Repository-rooted path and `before`/`after` choose 
 one path/side already present in the verified manifest. The owner checks scope,
 workspace, exact head/common refs, tree mode/object mapping and actual Git blob
 hash before returning bounded UTF-8 text or explicit base64 binary/symlink data.
+Both outer attachment and nested manifest must match the generation's native
+scope/revision; relabeling a stale retained range does not make it current.
 Gitlinks and absent/container sides are explicit and not expanded. Mutable work
 files, replacement refs, hooks, lazy network fetch and link following are not used.
 The existing checkpoint/process owner enforces work/byte and cleanup boundaries.
+Bounded Git timeout/capture failures become value-free incomplete-source errors;
+they do not print a private command traceback or prove cleanup/effect completion.
 
 The new retained-read descriptor is separate; the prior strict source-attachment
 contract remains unchanged. Source Git environment isolation was moved into a

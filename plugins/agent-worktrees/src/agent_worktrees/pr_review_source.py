@@ -43,14 +43,17 @@ def _owned_git(root, checkpoint, deadline, environment, maximum, args,
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise SourceIncomplete("deadline_exhausted")
-    output = run_caller_owned(
-        ["git", "--no-lazy-fetch", "--no-replace-objects", "-c", "core.fsmonitor=false",
-         "-c", "core.longpaths=true", "-c", "protocol.allow=never",
-         "-c", f"core.hooksPath={_NO_HOOKS_PATH}", *args],
-        cwd=root, env=environment, timeout=remaining,
-        max_stdout_bytes=min(maximum, maximum if limit is None else limit),
-        max_stderr_bytes=8192, input_text=input_text, binary=True,
-    )
+    try:
+        output = run_caller_owned(
+            ["git", "--no-lazy-fetch", "--no-replace-objects", "-c", "core.fsmonitor=false",
+             "-c", "core.longpaths=true", "-c", "protocol.allow=never",
+             "-c", f"core.hooksPath={_NO_HOOKS_PATH}", *args],
+            cwd=root, env=environment, timeout=remaining,
+            max_stdout_bytes=min(maximum, maximum if limit is None else limit),
+            max_stderr_bytes=8192, input_text=input_text, binary=True,
+        )
+    except (OutputLimitExceeded, subprocess.TimeoutExpired):
+        raise SourceIncomplete("git_io_budget_exhausted") from None
     checkpoint()
     if time.monotonic() >= deadline:
         raise SourceIncomplete("deadline_exhausted")

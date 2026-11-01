@@ -59,7 +59,8 @@ class WorkspaceTools:
         operations = ["capabilities"]
         backend = None
         if self.client is not None:
-            backend = await _call(self.client.exchange, "capabilities", {})
+            ensure = getattr(self.client, "ensure_capabilities", None)
+            backend = await _call(ensure) if callable(ensure) else await _call(self.client.exchange, "capabilities", {})
             if not isinstance(backend, dict) or backend.get("protocol") != PROTOCOL:
                 raise WorkspaceToolUnavailable("workspace_contract_unsupported")
             available = backend.get("operations", [])
@@ -144,6 +145,9 @@ class WorkspaceTools:
             or attachment.get("generation_id") != generation["id"]
             or attachment.get("scope") != generation["scope"]
             or attachment.get("revision") != generation["revision"] or attachment.get("state") != "ready"
+            or not isinstance(attachment.get("source"), dict)
+            or attachment["source"].get("scope") != generation["scope"]
+            or attachment["source"].get("revision") != generation["revision"]
         ):
             raise ValueError("source attachment differs from selected generation")
         return self.source_owner.read_retained(

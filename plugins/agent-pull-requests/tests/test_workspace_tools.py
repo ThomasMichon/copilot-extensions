@@ -258,3 +258,75 @@ def test_cli_sync_preserves_normalized_observations_and_section_delta(environmen
         assert current["sections"]["discussions"]["complete"] is False
         assert current["sections"]["discussions"]["errors"] == ["synthetic_partial"]
     assert backend.vote is None
+
+
+def test_current_outer_envelope_cannot_relabel_an_old_retained_manifest(environment, integration, tools):
+    _, _, initial, _, backend, _ = environment
+    _, _, _, evidence, _, _ = integration
+    host, git, root = tools
+
+    async def scenario():
+        first = await host.invoke("load", {"number": 42, "expected_current": initial["id"], "budget_seconds": 60})
+        old_id = first["result"]["descriptor"]["id"]
+        old_source = await host.invoke("source", {"number": 42, "generation_id": old_id, "budget_seconds": 60})
+        (root / "note.txt").write_text("a newer reviewed source", encoding="utf-8")
+        git("add", ".")
+        git("commit", "--quiet", "-m", "synthetic next head")
+        head = git("rev-parse", "HEAD")
+        latest = max(backend.iterations, key=lambda item: item["id"])
+        latest["sourceRefCommit"]["commitId"] = backend.pr["lastMergeSourceCommit"]["commitId"] = head
+        evidence["sections"]["changes"]["revision"]["head_sha"] = head
+        evidence["sections"]["changes"]["data"][0]["item"]["objectId"] = git("rev-parse", head + ":note.txt")
+        current = await host.invoke("load", {"number": 42, "expected_current": old_id, "budget_seconds": 60})
+        current_id = current["result"]["descriptor"]["id"]
+        generation = await host.invoke("materialize", {"number": 42, "generation_id": current_id})
+        relabeled = copy.deepcopy(old_source)
+        relabeled.update(generation_id=current_id, revision=generation["revision"], scope=generation["scope"])
+        with pytest.raises(ValueError, match="differs from selected generation"):
+            await host.invoke("source-read", {
+                "number": 42, "generation_id": current_id, "source_attachment": relabeled,
+                "path": "/note.txt", "side": "after", "budget_seconds": 60,
+            })
+
+    asyncio.run(scenario())
+
+
+def test_overlapping_service_tool_calls_share_capability_negotiation(environment, integration):
+    _, _, generation, _, _, _ = environment
+    _, client, _, _, caller, _ = integration
+    host = WorkspaceTools(client)
+
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+        caller.pause_capability = (entered, release)
+        first = asyncio.create_task(host.invoke("materialize", {"number": 42, "generation_id": generation["id"]}))
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        second = asyncio.create_task(host.invoke("materialize", {"number": 42, "generation_id": generation["id"]}))
+        await asyncio.sleep(0)
+        release.set()
+        values = await asyncio.gather(first, second)
+        assert values == [generation, generation]
+        assert sum(path.endswith("/capabilities") for path in caller.calls) == 1
+
+    asyncio.run(scenario())
+
+
+def test_read_budget_failure_is_json_not_a_private_git_traceback(environment, tools, monkeypatch, capsys):
+    import subprocess
+    from agent_worktrees import pr_review_source
+    _, _, initial, _, _, _ = environment
+    host, _, _ = tools
+    _, loaded = invoke_cli(host, "load", {"number": 42, "expected_current": initial["id"], "budget_seconds": 60}, monkeypatch, capsys)
+    identity = loaded["result"]["descriptor"]["id"]
+    _, attachment = invoke_cli(host, "source", {"number": 42, "generation_id": identity, "budget_seconds": 60}, monkeypatch, capsys)
+
+    def fail(*args, **kwargs):
+        raise subprocess.TimeoutExpired(["git", "private-root"], 1, output=b"buffered")
+
+    monkeypatch.setattr(pr_review_source, "run_caller_owned", fail)
+    code, value = invoke_cli(host, "source-read", {
+        "number": 42, "generation_id": identity, "source_attachment": attachment,
+        "path": "/note.txt", "side": "after", "budget_seconds": 60,
+    }, monkeypatch, capsys)
+    assert code == 1 and value["effect_completion"] == "not_inferred"
+    assert "private-root" not in json.dumps(value)
