@@ -36,7 +36,7 @@ FRAGMENT_FILES = (
 )
 RUNNER_FILES = (
     "sdk_visibility.py", "sdk_desktop_observer.py", "sdk_desktop_win32.py",
-    "sdk_visibility_sources.py", "sdk_visibility_cases.py",
+    "sdk_native_win32.py", "sdk_visibility_sources.py", "sdk_visibility_cases.py",
 )
 SDK_FILES = (
     *(f"libs/agent-procutil/tests/{name}" for name in RUNNER_FILES),

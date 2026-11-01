@@ -8,6 +8,7 @@ import os
 import threading
 
 from sdk_desktop_observer import ObservationBlocked
+from sdk_native_win32 import NativeProcessAPI, ProcessPin as ProcessPin
 
 
 Callback = getattr(ct, "WINFUNCTYPE", ct.CFUNCTYPE)
@@ -15,40 +16,6 @@ EventCallback = Callback(
     None, wt.HANDLE, wt.DWORD, wt.HWND, wt.LONG, wt.LONG, wt.DWORD, wt.DWORD,
 )
 WindowCallback = Callback(wt.BOOL, wt.HWND, wt.LPARAM)
-
-
-class ProcessPin:
-    def __init__(self, api, pid: int, birth: int | None = None, *, owned: bool = False):
-        self.api, self.pid, self.owned = api, pid, owned
-        self.handle = api.kernel.OpenProcess(0x1000 | 0x100000 | (1 if owned else 0), False, pid)
-        api.check(self.handle, "pin process")
-        try:
-            self.birth = api.birth(self.handle)
-            if birth is not None and birth != self.birth:
-                raise ObservationBlocked("process birth changed before pin admission")
-        except BaseException:
-            self.close()
-            raise
-
-    def gone(self) -> bool:
-        state = self.api.kernel.WaitForSingleObject(self.handle, 0)
-        if state not in (0, 0x102):
-            raise ObservationBlocked(f"process wait is unobservable: {state}")
-        return state == 0
-
-    def terminate_owned(self) -> None:
-        if not self.owned:
-            raise ObservationBlocked("foreign process termination is not authorized")
-        if not self.gone():
-            terminated = self.api.kernel.TerminateProcess(self.handle, 125)
-            error = ct.get_last_error() if not terminated else 0
-            if not terminated and not self.gone():
-                raise ObservationBlocked(f"retire owned fixture: WinError {error}")
-
-    def close(self) -> None:
-        if self.handle:
-            handle, self.handle = self.handle, None
-            self.api.check(self.api.kernel.CloseHandle(handle), "close pinned process")
 
 
 class EventHooks:
@@ -99,34 +66,15 @@ class EventHooks:
             raise ObservationBlocked("; ".join(failures))
 
 
-class WinAPI:
+class WinAPI(NativeProcessAPI):
     def __init__(self):
         if os.name != "nt":
             raise ObservationBlocked("native Windows desktop required")
+        super().__init__()
         self.user = ct.WinDLL("user32", use_last_error=True)
-        self.kernel = ct.WinDLL("kernel32", use_last_error=True)
-        self.advapi = ct.WinDLL("advapi32", use_last_error=True)
         self._bind(self.kernel, {
-            "GetCurrentProcess": ([], wt.HANDLE),
-            "GetCurrentThreadId": ([], wt.DWORD),
-            "GetTickCount64": ([], ct.c_ulonglong),
             "WTSGetActiveConsoleSessionId": ([], wt.DWORD),
-            "OpenProcess": ([wt.DWORD, wt.BOOL, wt.DWORD], wt.HANDLE),
-            "CloseHandle": ([wt.HANDLE], wt.BOOL),
-            "WaitForSingleObject": ([wt.HANDLE, wt.DWORD], wt.DWORD),
-            "TerminateProcess": ([wt.HANDLE, wt.UINT], wt.BOOL),
             "ProcessIdToSessionId": ([wt.DWORD, ct.POINTER(wt.DWORD)], wt.BOOL),
-            "IsProcessInJob": ([wt.HANDLE, wt.HANDLE, ct.POINTER(wt.BOOL)], wt.BOOL),
-            "GetProcessTimes": ([wt.HANDLE] + [ct.POINTER(wt.FILETIME)] * 4, wt.BOOL),
-            "PeekNamedPipe": ([wt.HANDLE, wt.LPVOID, wt.DWORD, ct.POINTER(wt.DWORD),
-                               ct.POINTER(wt.DWORD), ct.POINTER(wt.DWORD)], wt.BOOL),
-            "GetNamedPipeServerProcessId": ([wt.HANDLE, ct.POINTER(wt.ULONG)], wt.BOOL),
-        })
-        self._bind(self.advapi, {
-            "OpenProcessToken": ([wt.HANDLE, wt.DWORD, ct.POINTER(wt.HANDLE)], wt.BOOL),
-            "GetTokenInformation": (
-                [wt.HANDLE, ct.c_int, wt.LPVOID, wt.DWORD, ct.POINTER(wt.DWORD)], wt.BOOL,
-            ),
         })
         self._bind(self.user, {
             "GetForegroundWindow": ([], wt.HWND),
@@ -160,57 +108,6 @@ class WinAPI:
             "DestroyWindow": ([wt.HWND], wt.BOOL),
         })
 
-    @staticmethod
-    def _bind(library, signatures) -> None:
-        for name, (arguments, result) in signatures.items():
-            function = getattr(library, name)
-            function.argtypes, function.restype = arguments, result
-
-    @staticmethod
-    def check(result, operation: str) -> None:
-        if not result:
-            raise ObservationBlocked(f"{operation}: WinError {ct.get_last_error()}")
-
-    def birth(self, handle: int) -> int:
-        times = [wt.FILETIME() for _ in range(4)]
-        self.check(self.kernel.GetProcessTimes(handle, *(ct.byref(t) for t in times)), "process birth")
-        return (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
-
-    def identity(self) -> dict:
-        return {"pid": os.getpid(), "birth": self.birth(self.kernel.GetCurrentProcess())}
-
-    def pin(self, pid: int, birth: int | None = None, *, owned: bool = False) -> ProcessPin:
-        return ProcessPin(self, pid, birth, owned=owned)
-
-    def require_parent_pipe(self, request: dict) -> ProcessPin:
-        import msvcrt
-
-        parent = ProcessPin(self, request["parent_pid"], request["parent_birth"])
-        try:
-            server = wt.ULONG()
-            self.check(self.kernel.GetNamedPipeServerProcessId(
-                msvcrt.get_osfhandle(0), ct.byref(server),
-            ), "input pipe server identity")
-            if server.value != parent.pid or parent.gone():
-                raise ObservationBlocked("private input pipe does not name its original live caller")
-            return parent
-        except BaseException:
-            parent.close()
-            raise
-
-    def pipe_bytes(self) -> int | None:
-        import msvcrt
-
-        available = wt.DWORD()
-        if not self.kernel.PeekNamedPipe(
-            msvcrt.get_osfhandle(0), None, 0, None, ct.byref(available), None,
-        ):
-            error = ct.get_last_error()
-            if error == 109:
-                return None
-            raise ObservationBlocked(f"private command pipe: WinError {error}")
-        return int(available.value)
-
     def session(self, pid: int) -> int:
         result = wt.DWORD()
         self.check(self.kernel.ProcessIdToSessionId(pid, ct.byref(result)), "process session")
@@ -224,16 +121,7 @@ class WinAPI:
         return name.value
 
     def console_facts(self) -> dict:
-        token, elevation, size = wt.HANDLE(), wt.DWORD(), wt.DWORD()
-        self.check(self.advapi.OpenProcessToken(
-            self.kernel.GetCurrentProcess(), 8, ct.byref(token),
-        ), "read own token")
-        try:
-            self.check(self.advapi.GetTokenInformation(
-                token, 20, ct.byref(elevation), ct.sizeof(elevation), ct.byref(size),
-            ), "read elevation")
-        finally:
-            self.check(self.kernel.CloseHandle(token), "close own token")
+        elevated, size = self.elevated(), wt.DWORD()
         station = self.user.GetProcessWindowStation()
         self.check(station, "window station")
         flags = (wt.DWORD * 3)()
@@ -251,7 +139,7 @@ class WinAPI:
             self.check(self.user.CloseDesktop(desktop), "close owned input-desktop handle")
         session = self.session(os.getpid())
         return {
-            "elevated": bool(elevation.value),
+            "elevated": elevated,
             "ssh": any(os.environ.get(k) for k in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")),
             "remote_session": bool(self.user.GetSystemMetrics(0x1000)),
             "remote_control": bool(self.user.GetSystemMetrics(0x2001)),

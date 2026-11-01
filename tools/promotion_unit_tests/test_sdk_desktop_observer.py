@@ -666,7 +666,7 @@ def test_manifest_for_one_sdk_cannot_label_another_tree_verified(tmp_path):
 @pytest.mark.parametrize("operation", ["probe", "worker"])
 @pytest.mark.parametrize("foreign", [
     "sdk_visibility.py", "sdk_desktop_observer.py", "sdk_desktop_win32.py",
-    "sdk_visibility_sources.py", "sdk_visibility_cases.py",
+    "sdk_native_win32.py", "sdk_visibility_sources.py", "sdk_visibility_cases.py",
 ])
 def test_running_runner_and_loaded_helpers_cannot_qualify_another_sdk(
     tmp_path, monkeypatch, operation, foreign,
