@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import json
 import os
+from queue import Queue
 import select
 import subprocess
 import sys
@@ -170,6 +172,111 @@ def test_noncontained_structured_error_precedes_exit_status(
             receiver.receive(next(stream))
         assert error.value.retry
     finally:
+        stream.close()
+
+
+def test_noncontained_paused_consumer_receives_queued_error_before_exit_fallback(
+    reserved_owners, provider, tmp_path,
+):
+    first, update = publication(), publication(1, kind="update", revision=2)
+    error_frame = {
+        "type": "error", "ok": False, "contract_version": 1,
+        "error": {"code": "unavailable", "message": "queued transient failure"},
+    }
+    provider(
+        f"print({json.dumps(first)!r},flush=True)\n"
+        f"print({json.dumps(update)!r},flush=True)\n"
+        f"print({json.dumps(error_frame)!r},flush=True)\n"
+        "sys.exit(1)"
+    )
+    stream = transport.frames("example", "selected", "head-a", cancelled=Event(), cwd=str(tmp_path))
+    receiver = AgendaFeed("example", "selected", "head-a")
+    try:
+        assert receiver.receive(next(stream)) == first
+        # Ensure the actual child completion is known before yielding the update.
+        deadline = time.monotonic() + 2
+        while not next(iter(reserved_owners.values()))["receipts"] and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert next(iter(reserved_owners.values()))["receipts"] == [{"returncode": 1}]
+        for thread in threads():
+            if thread.name == "agenda-feed-completion":
+                thread.join(timeout=1)
+                assert not thread.is_alive()
+        assert receiver.receive(next(stream)) == update
+        time.sleep(transport.EXIT_GRACE_SECONDS + 0.2)
+        assert next(stream) == error_frame
+        with pytest.raises(AgendaUnavailable, match="queued transient failure") as error:
+            receiver.receive(error_frame)
+        assert error.value.retry and error.value.code == "unavailable"
+    finally:
+        stream.close()
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_noncontained_backlog_stays_bounded_and_preserves_delayed_frames(
+    reserved_owners, provider, monkeypatch, tmp_path, cancel,
+):
+    frames = [publication()] + [
+        publication(sequence, kind="update", revision=sequence + 1)
+        for sequence in range(1, 64)
+    ]
+    error_frame = {
+        "type": "error", "ok": False, "contract_version": 1,
+        "error": {"code": "disconnected", "message": "end of bounded backlog"},
+    }
+    provider(
+        f"frames=json.loads({json.dumps(frames + [error_frame])!r})\n"
+        "for frame in frames:\n    print(json.dumps(frame),flush=True)\n"
+        "sys.exit(1)"
+    )
+    queues = []
+
+    class BoundedQueue(Queue):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.high_watermark = 0
+            queues.append(self)
+
+        def put(self, *args, **kwargs):
+            value = super().put(*args, **kwargs)
+            self.high_watermark = max(self.high_watermark, self.qsize())
+            return value
+
+    actual_owned = transport._owned_process
+
+    class DelayedReader:
+        def __init__(self, output):
+            self.output = output
+
+        def readline(self, size):
+            value = self.output.readline(size)
+            time.sleep(0.01)
+            return value
+
+    @contextmanager
+    def delayed_owned(*args, **kwargs):
+        with actual_owned(*args, **kwargs) as (output, stderr, completion):
+            yield DelayedReader(output), stderr, completion
+
+    monkeypatch.setattr(transport, "Queue", BoundedQueue)
+    monkeypatch.setattr(transport, "_owned_process", delayed_owned)
+    cancelled = Event()
+    stream = transport.frames("example", "selected", "head-a", cancelled=cancelled, cwd=str(tmp_path))
+    try:
+        assert next(stream) == frames[0]
+        assert next(stream) == frames[1]
+        time.sleep(transport.EXIT_GRACE_SECONDS + 0.2)
+        assert len(queues) == 1 and queues[0].maxsize == 2 and queues[0].high_watermark == 2
+        if cancel:
+            cancelled.set()
+            assert next(stream, None) is None
+        else:
+            for frame in frames[2:]:
+                assert next(stream) == frame
+            assert next(stream) == error_frame
+        assert queues[0].high_watermark == 2
+    finally:
+        cancelled.set()
         stream.close()
 
 

@@ -311,10 +311,13 @@ class ControlClient:
         max_response_bytes: int | None = None, total_timeout: float | None = None,
         read_timeout: float | None = None,
     ) -> dict:
-        body = json.dumps(
-            {"version": 1, "token": self.token, "action": action, "payload": payload or {}},
-            separators=(",", ":"),
-        ).encode("utf-8") + b"\n"
+        envelope = {"version": 1, "token": self.token, "action": action, "payload": payload or {}}
+        if action in {"agenda-read", "agenda-publish"}:
+            from .agenda_contract import encode
+
+            body = encode(envelope).encode("utf-8") + b"\n"
+        else:
+            body = json.dumps(envelope, separators=(",", ":")).encode("utf-8") + b"\n"
         deadline = None if total_timeout is None else time.monotonic() + total_timeout
         with socket.create_connection((self.host, self.port), timeout=self.timeout) as sock:
             sock.settimeout(self.timeout if read_timeout is None else read_timeout)

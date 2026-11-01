@@ -24,6 +24,9 @@ against the existing authenticated resident health and its current
 `worktrees.generation`. Missing capability, credentials, route or readiness is a
 structured failure, not an empty successful projection. There is no advisory
 fallback, automatic ensure/provisioning or alternate runtime selection.
+Agenda read/publish control request envelopes use bounded compact UTF-8 JSON,
+so non-ASCII text is measured as transmitted UTF-8 bytes rather than expanded
+ASCII escapes. Existing non-agenda control encoding is unchanged.
 Valid reads, publications and initial feed requests retain the existing owner's
 bounded project demand. An unpublished current project roster returns
 `error.code: "unready"` and coalesces a wake of the existing producer; demand

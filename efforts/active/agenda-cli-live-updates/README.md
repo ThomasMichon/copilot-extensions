@@ -163,6 +163,35 @@ proposal is claimed available merely because its intended name is described.
 
 ## Journal
 
+### 2026-11-01 - Buffered protocol frames before exit fallback
+
+- A paused consumer could previously let the child-exit grace expire before
+  receiving its already-buffered structured error. Complete queued frames and
+  the stdout reader's one bounded pending line now precede exit-status fallback.
+  Only remaining reader settlement consumes the bounded completion grace.
+- Actual normal POSIX controls preserve a transient error after snapshot/update,
+  child exit and a consumer pause longer than the grace. A 64-frame backlog and
+  delayed reader retain ordering, bounded capacity and cancellation settlement.
+- The focused worker packet passed 30 cases. Independent coordinator verification
+  of the full process-owner, synchronous-engine and connected Manager packet
+  passed 45 cases with one Windows-only skip and cleanup verified. Existing
+  fatal diagnostics, EOF classification, receipt faults and owner reservation
+  remain covered. A fresh passing review and implementation merge remain open.
+
+### 2026-11-01 - Bounded Unicode control publication
+
+- Review found that legacy ASCII-escaped control serialization expanded a valid
+  near-limit Unicode agenda beyond the control frame budget. Agenda read/publish
+  requests now use the existing compact UTF-8 contract encoder; unrelated control
+  requests retain their original encoding and behavior.
+- The actual CLI/client/server/runtime regression publishes a near-32-KiB
+  CJK/non-BMP observation whose escaped envelope exceeds 35 KiB, verifies exact
+  transmitted bytes and held-update content, and retains strict text, collection,
+  nesting, nonfinite, body and frame limits.
+- The provider/control packet passed 136 cases. Independent coordinator
+  verification of the resident packet passed 73 cases with cleanup verified.
+  Publication and a fresh passing current-head review remain required.
+
 ### 2026-11-01 - Normal POSIX completion and diagnostic delivery
 
 - Review found a normal, noncontained POSIX path absent from the earlier

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import io
 import json
 import socket
 import sqlite3
@@ -560,6 +561,157 @@ def socket_feed(owner, payload=None):
             reader.close()
             owner.close_admission()
     server.close()
+
+
+@pytest.fixture
+def captured_control_requests(monkeypatch):
+    sent = []
+    connect = control.socket.create_connection
+
+    class Capture:
+        def __init__(self, sock):
+            self.sock = sock
+
+        def __enter__(self):
+            self.sock.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.sock.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self.sock, name)
+
+        def sendall(self, data):
+            sent.append(bytes(data))
+            return self.sock.sendall(data)
+
+    monkeypatch.setattr(
+        control.socket,
+        "create_connection",
+        lambda *args, **kwargs: Capture(connect(*args, **kwargs)),
+    )
+    return sent
+
+
+def test_unicode_control_publication_fits_utf8_bounds_and_reaches_held_feed(
+    owned,
+    captured_control_requests,
+    monkeypatch,
+    capsys,
+):
+    from agent_worktrees import agenda_cli
+
+    owner, *_rest = owned
+    body = observation()
+    text = "\u6f22\U0001f680" * 500
+    body["snapshot"]["notes"] = [text] * 9
+    assert len(text.encode("utf-8")) == 3500
+    encoded_body = contract.observation(body)
+    assert (
+        contract.BODY_BYTES - 1024 <= len(encoded_body.encode("utf-8")) + 1 <= contract.BODY_BYTES
+    )
+    with socket_feed(owner) as (client, reader):
+        assert contract.decode(reader.readline())["availability"] == "not-published"
+        envelope = {
+            "version": 1,
+            "token": client.token,
+            "action": "agenda-publish",
+            "payload": publication(owner, body),
+        }
+        expected = contract.encode(envelope).encode("utf-8") + b"\n"
+        escaped = json.dumps(envelope, separators=(",", ":")).encode("utf-8") + b"\n"
+        assert len(expected) <= contract.FRAME_BYTES < len(escaped)
+        monkeypatch.setattr(agenda_cli, "_control_client", lambda: client)
+        monkeypatch.setattr(agenda_cli.cfg, "project_name", lambda: "project")
+        monkeypatch.setattr(agenda_cli.sys, "stdin", io.StringIO(encoded_body + "\n"))
+        assert agenda_cli.cmd_agenda(SimpleNamespace(command="agenda-publish", json=True)) == 0
+        output = capsys.readouterr()
+        accepted = json.loads(output.out)
+        assert not output.err and accepted["ok"] is True
+        assert accepted["observation"] == body
+        publications = [
+            raw
+            for raw in captured_control_requests
+            if json.loads(raw)["action"] == "agenda-publish"
+        ]
+        assert publications == [expected]
+        assert text.encode("utf-8") in publications[0]
+        assert b"\\u6f22" not in publications[0]
+        assert (
+            client._request(
+                "agenda-read",
+                request(),
+                max_response_bytes=contract.FRAME_BYTES,
+                total_timeout=1.0,
+            )
+            == accepted
+        )
+        while True:
+            raw = reader.readline(contract.FRAME_BYTES + 1)
+            frame = contract.decode(raw)
+            if frame["type"] != "heartbeat":
+                break
+        assert frame == {"type": "update", **accepted}
+        assert len(raw) <= contract.FRAME_BYTES
+        assert raw == contract.encode(frame).encode("utf-8") + b"\n"
+        assert text.encode("utf-8") in raw
+    assert owner.agendas.feed.wait_closed(1)
+
+
+@pytest.mark.parametrize("action", ["health", "worktrees-read", control.RECEIPT_ACTION])
+def test_legacy_control_request_encoding_remains_ascii_escaped(action, captured_control_requests):
+    server = control.ControlServer(
+        lambda action, payload: {"ok": True, "echo": payload},
+        token="synthetic-token",
+    )
+    server.start()
+    try:
+        client = control.ControlClient(f"http://127.0.0.1:{server.port}", token=server.token)
+        payload = {"text": "\u6f22\U0001f680"}
+        assert client._request(action, payload) == {"ok": True, "echo": payload}
+        envelope = {"version": 1, "token": server.token, "action": action, "payload": payload}
+        assert captured_control_requests == [
+            json.dumps(envelope, separators=(",", ":")).encode("utf-8") + b"\n",
+        ]
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize(
+    "fault", ["text", "collection", "depth", "nonfinite", "frame", "body", "schema"]
+)
+def test_agenda_control_encoding_does_not_weaken_validation_bounds(owned, fault):
+    owner, *_rest = owned
+    body = observation()
+    if fault == "text":
+        body["snapshot"]["notes"] = ["\U0001f680" * 1025]
+    elif fault == "collection":
+        body["snapshot"]["notes"] = ["x"] * 129
+    elif fault == "depth":
+        value = "x"
+        for _ in range(20):
+            value = [value]
+        body["snapshot"]["deferred"] = value
+    elif fault == "nonfinite":
+        body["snapshot"]["notes"] = [float("nan")]
+    elif fault == "frame":
+        body["snapshot"]["notes"] = ["x" * 4000] * 9
+    elif fault == "body":
+        body["snapshot"]["notes"] = ["x" * 4000] * 8 + ["x" * 1000]
+        size = len(json.dumps(body, separators=(",", ":")).encode("utf-8")) + 1
+        assert contract.BODY_BYTES < size < contract.FRAME_BYTES - 1024
+    else:
+        body["schema"] = "malformed-schema"
+    with socket_feed(owner) as (client, reader):
+        assert contract.decode(reader.readline())["availability"] == "not-published"
+        if fault in {"body", "schema"}:
+            rejected = client._request("agenda-publish", publication(owner, body))
+            assert rejected["ok"] is False and rejected["error"]["code"] == "invalid-request"
+        else:
+            with pytest.raises(contract.AgendaError):
+                client._request("agenda-publish", publication(owner, body))
+        assert owner.agendas.read(request())["availability"] == "not-published"
 
 
 def test_current_new_head_waits_on_held_socket_for_its_first_publication(owned, monkeypatch):

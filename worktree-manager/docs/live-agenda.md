@@ -102,8 +102,13 @@ reading that receipt never polls or reaps the reserved owner. Stderr drains
 incrementally, without waiting for the owner's pipe EOF. EOF/completion settlement
 has a bounded one-second grace per phase: missing, truncated or malformed receipts fail explicitly,
 nonzero exits preserve their diagnostic as terminal failures, and exit-zero EOF
-without a protocol terminal notice remains a classified disconnect. A complete
-structured feed error is delivered before fallback exit-status judgment.
+without a protocol terminal notice remains a classified disconnect. Queued
+complete frames and the stdout reader's single pending line are delivered before
+fallback exit-status judgment, including when the consumer pauses at a yield.
+The queue remains capped at two entries plus that one bounded reader-pending
+line. Completion fallback waits only for bounded remaining reader settlement
+when no complete frame is ready; paused-consumer time does not expire buffered
+frames. Cancellation still discards the cancelled scope and settles its readers.
 `head-changed` clears the observation and ends the subscription with Refresh
 required; previous agenda data is never treated as active. No Agenda control
 executes, accepts, approves or changes planning state.

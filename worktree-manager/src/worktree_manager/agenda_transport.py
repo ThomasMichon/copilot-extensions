@@ -12,7 +12,7 @@ import select
 import signal
 import subprocess
 import sys
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 import time
 
 from agent_procutil import contained_test_mode, detached_kwargs, spawn_sync_in_kill_on_close_job
@@ -247,6 +247,20 @@ def frames(
     completed, stderr_drained = Event(), Event()
     receipt, receipt_error = [], []
     stderr_error = []
+    stdout_drained = Event()
+    pending_lock = Lock()
+    stdout_pending = [None]
+    not_ready = object()
+
+    def take_ready():
+        with pending_lock:
+            try:
+                return queue.get_nowait()
+            except Empty:
+                if stdout_pending[0] is not None:
+                    value, stdout_pending[0] = stdout_pending[0], None
+                    return value
+        return not_ready
 
     def deliver(value):
         while not stopped.is_set():
@@ -260,12 +274,27 @@ def frames(
         try:
             while not stopped.is_set():
                 line = output.readline(MAX_FRAME_BYTES + 1)
-                deliver(line)
+                with pending_lock:
+                    stdout_pending[0] = line
+                while not stopped.is_set():
+                    with pending_lock:
+                        if stdout_pending[0] is None:
+                            break
+                        try:
+                            queue.put_nowait(stdout_pending[0])
+                        except Full:
+                            pass
+                        else:
+                            stdout_pending[0] = None
+                            break
+                    stopped.wait(0.01)
                 if not line or len(line) > MAX_FRAME_BYTES or not line.endswith(b"\n"):
                     return
         except (OSError, ValueError) as exc:
             if not stopped.is_set():
                 deliver(OSError(str(exc)))
+        finally:
+            stdout_drained.set()
 
     def read_errors(output):
         try:
@@ -350,28 +379,33 @@ def frames(
             for reader in readers:
                 reader.start()
             deadline = time.monotonic() + STARTUP_TIMEOUT
-            exit_deadline = None
+            reader_deadline = None
             try:
                 while not cancelled.is_set():
-                    if completed.is_set() and exit_deadline is None:
-                        exit_deadline = time.monotonic() + EXIT_GRACE_SECONDS
-                    if exit_deadline is not None and time.monotonic() >= exit_deadline:
-                        failure = ended()
-                        if failure is None:
-                            return
-                        raise failure
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        if completed.is_set():
-                            failure = ended()
-                            if failure is None:
-                                return
-                            raise failure
-                        raise AgendaUnavailable("agenda feed missed its frame deadline", retry=True)
-                    try:
-                        line = queue.get(timeout=min(remaining, 0.1))
-                    except Empty:
-                        continue
+                    line = take_ready()
+                    if line is not_ready:
+                        if completed.is_set() and reader_deadline is None:
+                            reader_deadline = time.monotonic() + EXIT_GRACE_SECONDS
+                        remaining = (
+                            reader_deadline if reader_deadline is not None else deadline
+                        ) - time.monotonic()
+                        if stdout_drained.is_set() or remaining <= 0:
+                            # A completed line may have arrived while checking
+                            # settlement; it always precedes completion fallback.
+                            line = take_ready()
+                            if line is not_ready and (completed.is_set() or stdout_drained.is_set()):
+                                failure = ended()
+                                if failure is None:
+                                    return
+                                raise failure
+                            if line is not_ready:
+                                raise AgendaUnavailable("agenda feed missed its frame deadline", retry=True)
+                        if line is not_ready:
+                            try:
+                                line = queue.get(timeout=min(remaining, 0.1))
+                            except Empty:
+                                continue
+                    reader_deadline = None
                     if cancelled.is_set():
                         return
                     if isinstance(line, OSError):
@@ -383,8 +417,6 @@ def frames(
                         raise failure
                     if len(line) > MAX_FRAME_BYTES or not line.endswith(b"\n"):
                         raise ValueError("agenda feed exceeded its atomic frame bound")
-                    if time.monotonic() >= deadline:
-                        raise AgendaUnavailable("agenda feed exceeded its frame deadline", retry=True)
                     frame = json.loads(line, object_pairs_hook=_object)
                     if not isinstance(frame, dict):
                         raise ValueError("agenda feed emitted a non-object frame")
