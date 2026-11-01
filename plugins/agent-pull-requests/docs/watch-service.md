@@ -11,6 +11,11 @@ This is the embedding API used by the separate
 The core does not install or activate a fleet role, register a supervisor,
 issue credentials, execute placement, migrate storage or select runtimes.
 
+The optional source-only `workspaces` binding extends this same handler/lifetime
+with the [workspace service/client API](workspace-integration.md). It does not
+alter existing watch responses or add a connector, observer or deployment recipe.
+The standalone launcher has not adopted arbitrary protected workspace factories.
+
 ## Trusted construction and adoption
 
 Construct `WatchService` with an already provisioned `ReplayStore`, fixed

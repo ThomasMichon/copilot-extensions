@@ -7,7 +7,8 @@ Install the PR package's optional `fleet` extra for this adapter or its client. 
 ordinary CLI, process waiter and native callback daemon stay independent of
 Fleet. Importing this module requires that explicit optional dependency.
 
-This is a source-level serving adapter, **not an activated service**. It adds no
+This is a source-level serving adapter, **not an activated service**. Its default
+replay binding adds no
 listener, daemon, installer, placement assignment, forge client, remote PR
 mutation or Dispatch consumer. It does not replace the native watch owner.
 
@@ -273,3 +274,11 @@ These synthetic checks are not installed-service, production forge-credential, D
 container placement, first-provision installer, live-edge or fleet acceptance.
 Those remain separate activation requirements; no such production capability
 is advertised by this adapter.
+## Optional workspace source binding
+
+The same handler optionally hosts the
+[workspace service/client API](workspace-integration.md) through trusted
+`workspaces` entries associated with existing caller/target scopes and ReplayStore.
+All existing watch routes/capability response fields remain unchanged. Workspace
+discovery uses its own read-only route; a legacy/unexpanded handler returns 404,
+not a watch fallback. Request admission, cancellation and drain stay with this owner.

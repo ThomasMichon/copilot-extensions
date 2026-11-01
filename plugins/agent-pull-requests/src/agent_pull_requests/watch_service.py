@@ -34,6 +34,7 @@ class WatchService:
         gateway_origin: str, access_token_callback: Callable[[], Awaitable[str]],
         proof_key: Any, authority: Callable[[], int], checkpoint: Callable[[], None],
         gateway_ca: str | None = None, interval: float = 5,
+        workspaces=None,
     ) -> None:
         if not callable(authority) or not callable(checkpoint):
             raise ValueError("current service authority is required")
@@ -54,6 +55,7 @@ class WatchService:
         self.gateway = WatchGateway(
             store, fleet=fleet, gateway=gateway, slot=slot, bindings=bindings,
             checkpoint=self._check,
+            workspaces=workspaces,
         )
         self.observer = ReplayObserver(store, bindings=observations)
         if any(
