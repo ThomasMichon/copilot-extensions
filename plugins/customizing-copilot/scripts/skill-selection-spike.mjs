@@ -12,8 +12,33 @@ export const bytes = value => Buffer.byteLength(typeof value === "string" ? valu
 const textTypes = ["user.message", "assistant.message"];
 
 export const safeError = error => String(error?.message ?? error)
-    .replace(/(?:[a-z][a-z0-9+.-]*:\/\/|[A-Za-z]:[\\/]|\\\\|\/)[^\r\n"']+/gi, "<local-path>")
+    .replace(/(?:[a-z][a-z0-9+.-]*:\/\/|[A-Za-z]:[\\/]|\\\\|\/)[^\r\n]+/gi, "<local-path>")
     .replace(/\b[\w.+-]+@[\w.-]+\.\w+\b/g, "<account>").slice(0, 500);
+
+export function armStatus(name, result) {
+    if (result.settled === false) return "incomplete";
+    if (result.terminal === "subagent.failed" || result.inheritedPrefixIdsMatch === false
+        || (name === "nativeTask" && result.cancelled === true)
+        || (name === "cancellation" && result.cancelled !== true)) return "failed";
+    if (name === "nativeTask" && result.resultObserved !== true) return "incomplete";
+    if (!result.requests?.length || result.requests.some(request =>
+        !request.attributedSession || (["nativeTask", "cancellation"].includes(name) && !request.attributedAgent))) {
+        return "incomplete";
+    }
+    return "completed";
+}
+
+export function catalogMatches(catalog, expected, disabled) {
+    return expected.every(fixture => catalog.some(skill => skill.name === fixture.name
+        && skill.description === fixture.description && skill.enabled === !disabled.includes(fixture.name)
+        && (fixture.userInvocable === undefined || skill.userInvocable === fixture.userInvocable)));
+}
+
+export function historyMatches(page, expectedIds, allowAppended = false) {
+    return page.cursorStatus === "ok" && !page.hasMore
+        && (allowAppended || page.events.length === expectedIds.length)
+        && JSON.stringify(page.events.slice(0, expectedIds.length).map(event => event.id)) === JSON.stringify(expectedIds);
+}
 
 export function spikeStatus(report) {
     const cleanup = report.cleanup;

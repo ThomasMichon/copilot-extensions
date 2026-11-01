@@ -87,7 +87,13 @@ known ID. An expired synthetic cancellation hold fails instead of generating
 a normal completion. Aggregate status distinguishes failed/incomplete runs from
 completed transport witnesses, includes cleanup failures and captures provider
 counters after all arm and cleanup activity. Error reports redact absolute
-paths (including nonstandard mounts, spaces and URIs) and account identifiers.
+paths (including nonstandard mounts, spaces, apostrophes and URIs) and account
+identifiers; argument failures use the same structured envelope, not a local
+stack trace. Completed comparison arms require an attributed request capture;
+normal tasks also require an uncancelled result. Catalog completeness validates
+full descriptions and expected descriptor states, not just names. Both forks
+validate their expected frozen IDs, and parent preservation covers the entire
+frozen text prefix including the boundary and its response.
 
 Limitations: forks require the owned server client and do not establish access
 from an ordinary joined extension. Native task input has no isolation promise.

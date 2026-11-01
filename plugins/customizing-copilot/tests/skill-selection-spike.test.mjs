@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { freezeCatalog, collectHistory, bytes, spikeInputs, summarizeRequest, SENTINELS,
     modelSummary, modelCatalogSummary, runtimeEnvironment, observeOwnTask, deadline,
-    syntheticHandler, safeError, spikeStatus } from "../scripts/skill-selection-spike.mjs";
+    syntheticHandler, safeError, spikeStatus, armStatus, catalogMatches,
+    historyMatches } from "../scripts/skill-selection-spike.mjs";
 
 const event = (id, type, content, extra = {}) => ({ id, type, data: { content }, ...extra });
 test("runtime selection is explicit, absolute and never a silent bundled fallback", () => {
@@ -73,10 +74,46 @@ test("bounded history stops at an oversized message rather than resurrecting sta
 });
 test("structured errors redact arbitrary absolute paths, mounts, spaces, URIs and accounts", () => {
     for (const path of ["/mnt/team data/session.json", "/opt/private/session.json",
-        "Z:\\team data\\session.json", "\\\\server\\share name\\session.json", "file:///Volumes/team data/session.json"]) {
+        "Z:\\team data\\session.json", "\\\\server\\share name\\session.json", "file:///Volumes/team data/session.json",
+        "/mnt/owner's confidential-fixture", "Z:\\owner's confidential-fixture"]) {
         const result = safeError(new Error(`acquisition failed at "${path}" for synthetic@example.invalid`));
-        assert.equal(result, 'acquisition failed at "<local-path>" for <account>');
+        assert.equal(result, 'acquisition failed at "<local-path>');
     }
+});
+test("arm completion requires attributed capture, normal result and expected fork history", () => {
+    const result = { settled: true, terminal: "subagent.completed", resultObserved: true,
+        requests: [{ attributedSession: true, attributedAgent: true }] };
+    assert.equal(armStatus("nativeTask", result), "completed");
+    assert.equal(armStatus("nativeTask", { ...result, cancelled: true }), "failed");
+    assert.equal(armStatus("nativeTask", { ...result, resultObserved: false }), "incomplete");
+    assert.equal(armStatus("fullFork", { ...result, requests: [] }), "incomplete");
+    assert.equal(armStatus("nativeTask", { ...result, requests: [{ attributedSession: true }] }), "incomplete");
+    assert.equal(armStatus("boundaryFork", { ...result, inheritedPrefixIdsMatch: false }), "failed");
+    assert.equal(armStatus("cancellation", { ...result, cancelled: true, resultObserved: false }), "completed");
+});
+test("catalog completeness includes full descriptions and explicit fixture state", () => {
+    const expected = [{ name: "review", description: "full review", userInvocable: false },
+        { name: "disabled", description: "full disabled" }];
+    const catalog = [{ ...expected[0], enabled: true }, { ...expected[1], enabled: false }];
+    assert(catalogMatches(catalog, expected, ["disabled"]));
+    for (const [index, change] of [[0, { description: "truncated" }],
+        [0, { userInvocable: undefined }], [1, { enabled: true }]]) {
+        const changed = structuredClone(catalog);
+        Object.assign(changed[index], change);
+        assert(!catalogMatches(changed, expected, ["disabled"]));
+    }
+});
+test("frozen history checks include boundary events and reject incomplete reads", () => {
+    const ids = ["old", "recent", "boundary", "boundary-response"];
+    const page = { events: ids.map(id => ({ id })), cursorStatus: "ok", hasMore: false };
+    assert(historyMatches(page, ids));
+    assert(!historyMatches({ ...page, events: [] }, ids));
+    assert(!historyMatches({ ...page, hasMore: true }, ids));
+    page.events.at(-1).id = "changed-boundary-response";
+    assert(!historyMatches(page, ids, true));
+    page.events = [...ids, "appended"].map(id => ({ id }));
+    assert(!historyMatches(page, ids));
+    assert(historyMatches(page, ids, true));
 });
 test("aggregate status cannot conceal failed, unfinished or unsettled arms and cleanup", () => {
     const report = { mode: "synthetic-transport", arms: { one: { status: "completed" } },
@@ -289,12 +326,18 @@ const fakeSdk = `
             const parent = this.sessions.get(sessionId);
             const end = toEventId ? parent.events.findIndex(event => event.id === toEventId) : parent.events.length;
             const id = "fork-" + ++this.sequence;
-            this.sessions.set(id, { events: parent.events.slice(0, end) });
+            const events = parent.events.slice(0, end);
+            if (this.scenario === "history-corrupt") {
+                if (toEventId) events.push(parent.events[end]);
+                else events.pop();
+            }
+            this.sessions.set(id, { events });
             this.trace.forks.push({ id, toEventId: toEventId ?? null });
             return { sessionId: id };
         } } };
         makeSession(id, config, events = []) {
             const listeners = new Set();
+            let modelReads = 0;
             const emit = event => { for (const listener of listeners) listener(event); };
             const session = { sessionId: id, capabilities: { tasks: true }, events,
                 on: listener => { listeners.add(listener); return () => listeners.delete(listener); },
@@ -303,7 +346,10 @@ const fakeSdk = `
                     skills: { list: async () => ({ skills: config.skillProvider.listSkills().map(skill =>
                         ({ ...skill, enabled: !config.disabledSkills.includes(skill.name), source: "provider" })) }) },
                     agent: { list: async () => ({ agents: [{ id: "synthetic-selector" }] }) },
-                    model: { list: async () => ({ list: [] }), getCurrent: async () => ({ model: config.model ?? "synthetic" }) },
+                    model: { list: async () => ({ list: [] }), getCurrent: async () => {
+                        if (this.scenario === "history-corrupt" && ++modelReads === 5) events.at(-1).id = "changed-boundary-response";
+                        return { model: config.model ?? "synthetic" };
+                    } },
                     eventLog: { read: async () => ({ events: structuredClone(events),
                         cursor: "end", cursorStatus: "ok", hasMore: false }) },
                     tasks: {
@@ -322,8 +368,11 @@ const fakeSdk = `
                                 emit({ type: "subagent.configured", agentId, data: { model: config.model ?? "synthetic" } });
                                 this.respond(id, prompt, abort.signal, agentId).then(() => {
                                     if (!abort.signal.aborted) {
-                                        emit({ type: "assistant.message", agentId, data: { content: "synthetic result" } });
-                                        emit({ type: "subagent.completed", agentId, data: { model: config.model ?? "synthetic" } });
+                                        if (!["task-cancelled", "task-no-result"].includes(this.scenario)) {
+                                            emit({ type: "assistant.message", agentId, data: { content: "synthetic result" } });
+                                        }
+                                        emit({ type: "subagent.completed", agentId, data: {
+                                            model: config.model ?? "synthetic", cancelled: this.scenario === "task-cancelled" } });
                                     }
                                 });
                             }
@@ -352,8 +401,14 @@ const fakeSdk = `
             return session;
         }
         async respond(sessionId, prompt, signal, agentId) {
+            if (this.scenario === "no-capture" && sessionId.startsWith("fork-")) {
+                return { synthetic: true };
+            }
+            const history = agentId ? [] : (this.sessions.get(sessionId)?.events ?? []).map(event =>
+                ({ role: event.type === "user.message" ? "user" : "assistant", content: event.data.content }));
             const response = await this.options.requestHandler.sendRequest(new Request("https://synthetic.invalid/model", {
-                method: "POST", body: JSON.stringify({ model: "synthetic", messages: [{ role: "user", content: prompt }] }),
+                method: "POST", body: JSON.stringify({ model: "synthetic",
+                    messages: [...history, { role: "user", content: prompt }] }),
             }), { sessionId, agentId, signal });
             return response.json();
         }
@@ -396,6 +451,9 @@ test("model-free SDK orchestration covers all arms, owned cleanup and acquisitio
     assert.equal(trace.forks[0].toEventId, null);
     assert(trace.forks[1].toEventId);
     assert(report.arms.boundaryFork.exclusivePrefixIdsMatch);
+    assert(report.arms.fullFork.inheritedPrefixIdsMatch);
+    assert(report.arms.fullFork.requests[0].sentinels.boundary);
+    assert(!report.arms.boundaryFork.requests[0].sentinels.boundary);
     assert.equal(trace.dispatched.length, 2);
     assert.equal(trace.dispatched[1].prompt, SENTINELS.cancel);
     const bounded = trace.prompts.find(item => item.id === trace.created[1]);
@@ -422,6 +480,18 @@ test("model-free SDK orchestration covers all arms, owned cleanup and acquisitio
     assert.equal(unsettled.trace.dispatched.length, 1);
     assert.deepEqual(unsettled.trace.cancelled, [unsettled.trace.dispatched[0].id]);
     assert(unsettled.report.cleanup.runtimeStopped);
+    for (const [scenario, status] of [["task-cancelled", "failed"], ["task-no-result", "incomplete"],
+        ["no-capture", "incomplete"], ["history-corrupt", "failed"]]) {
+        const invalid = await run(scenario);
+        assert.equal(invalid.report.status, status);
+        assert(invalid.report.cleanup.runtimeStopped);
+        if (scenario === "no-capture") assert.equal(invalid.report.arms.fullFork.status, "incomplete");
+        if (scenario === "history-corrupt") {
+            assert.equal(invalid.report.arms.fullFork.status, "failed");
+            assert.equal(invalid.report.arms.boundaryFork.status, "failed");
+            assert.equal(invalid.report.native.parentTextPrefixUnchanged, false);
+        }
+    }
 });
 
 test("startup failures stay structured and late owned startup is awaited before cleanup", async t => {
@@ -434,6 +504,11 @@ test("startup failures stay structured and late owned startup is awaited before 
             { windowsHide: true, timeout: 3000 });
         return JSON.parse(stdout);
     };
+    const invalid = await promisify(execFile)(process.execPath, [runner, "relative-sdk", "relative-fixture"],
+        { windowsHide: true, timeout: 3000 });
+    assert.equal(JSON.parse(invalid.stdout).status, "failed");
+    assert.equal(invalid.stderr, "");
+    assert(!invalid.stdout.includes(runner));
     const missing = await run(join(root, "missing-sdk"), "missing-fixture");
     assert.equal(missing.native.startup.status, "unavailable");
     assert.equal(missing.cleanup.clientCreated, false);

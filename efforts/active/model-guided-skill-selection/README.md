@@ -312,3 +312,21 @@ owned-session alternative or name the SDK dependency before adopting it.
   remained unchanged, no model request was forwarded and public lifecycle
   cleanup plus the bounded caller's process-cleanup verification passed.
   This closes no quality, actual-cost, full-catalog or production-selector gate.
+
+### 2026-10-31 - Comparison evidence made fail-closed
+
+- A fresh review identified further success-shaped evidence gaps. Completed
+  arms now require attributed request captures, normal tasks require an
+  uncancelled observed result, and both fork histories must match their expected
+  frozen event IDs. Parent preservation covers the complete seeded prefix,
+  including the boundary and response.
+- Catalog availability checks complete descriptions, enabled state and explicit
+  fixture invocation metadata rather than names alone. Argument errors enter
+  the structured failure envelope; path redaction consumes quoted filenames
+  containing apostrophes instead of exposing a suffix.
+- Twenty-seven model-free Node controls passed through the bounded Python
+  wrapper, including absent captures/results, unexpected cancellation and
+  corrupted fork/parent histories. The corrected native witness completed all
+  arms with ten locally intercepted requests, zero forwarding, complete fixture
+  metadata, unchanged parent state and verified lifecycle/process cleanup.
+  Synthetic success remains separate from quality and billed accounting.

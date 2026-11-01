@@ -4,21 +4,19 @@ import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { SENTINELS, bytes, spikeInputs, freezeCatalog, collectHistory, syntheticHandler,
     modelCatalogSummary, runtimeEnvironment, observeOwnTask, deadline, safeError,
-    spikeStatus } from "./skill-selection-spike.mjs";
+    spikeStatus, armStatus, catalogMatches, historyMatches } from "./skill-selection-spike.mjs";
 
-const { sdkDirectory, root, runtimePath, modelsOnly, profile } = spikeInputs(process.argv.slice(2));
-const home = join(root, "owned-home"), workspace = join(root, "synthetic-workspace");
-let sdk, client;
+let sdkDirectory, root, runtimePath, modelsOnly = false, profile = {}, home, workspace;
+let sdk, client, config;
 const requests = [], sessions = [], taskOwners = [], owned = new Set();
 let heldRequestResolve;
 const heldRequest = new Promise(resolve => { heldRequestResolve = resolve; });
 const report = {
     schema: "copilot-extensions.skill-selection-spike", version: 1,
     status: "unavailable",
-    mode: modelsOnly ? "model-enumeration" : "synthetic-transport",
+    mode: "unavailable",
     requestedProfile: profile,
     liveInferenceDispatched: false, qualityEvidence: false,
-    ...(modelsOnly ? { vendorModelEnumeration: true } : { modelFree: true, forwardedModelRequests: 0 }),
     native: {
         startup: { status: "not-reached" },
         catalog: { status: "not-reached" }, models: { status: "not-reached" },
@@ -43,7 +41,7 @@ const provider = {
     listSkills: () => { providerCalls.list++; return fixtureSkills; },
     readSkill: () => { providerCalls.read++; throw new Error("spike must not fetch skill bodies"); },
 };
-const config = {
+function sessionConfig() { return {
     ...profile, ...(profile.model ? { allowedModels: [profile.model] } : {}),
     workingDirectory: workspace, configDirectory: home, enableConfigDiscovery: false,
     availableTools: ["synthetic_catalog_read"], enableSkills: true, skillProvider: provider,
@@ -61,7 +59,7 @@ const config = {
         ...(profile.model ? { model: profile.model } : {}),
         ...(profile.reasoningEffort ? { reasoningEffort: profile.reasoningEffort } : {}),
     }],
-};
+}; }
 async function create() {
     const session = await client.createSession(config);
     sessions.push(session); owned.add(session.sessionId);
@@ -78,14 +76,17 @@ async function turn(session, prompt) {
 async function attempt(name, action) {
     try {
         const result = await action();
-        const status = result.settled === false ? "incomplete"
-            : result.terminal === "subagent.failed" || (name === "cancellation" && result.cancelled !== true)
-                ? "failed" : "completed";
-        report.arms[name] = { ...result, status };
+        report.arms[name] = { ...result, status: armStatus(name, result) };
     }
     catch (error) { report.arms[name] = { status: "unavailable", error: safeError(error) }; }
 }
 try {
+    ({ sdkDirectory, root, runtimePath, modelsOnly, profile } = spikeInputs(process.argv.slice(2)));
+    home = join(root, "owned-home"); workspace = join(root, "synthetic-workspace");
+    config = sessionConfig();
+    report.mode = modelsOnly ? "model-enumeration" : "synthetic-transport";
+    report.requestedProfile = profile;
+    Object.assign(report, modelsOnly ? { vendorModelEnumeration: true } : { modelFree: true, forwardedModelRequests: 0 });
     await mkdir(root); // Refuse reuse of existing session state.
     await mkdir(home);
     await mkdir(workspace);
@@ -118,7 +119,7 @@ try {
             .filter(([, value]) => typeof value === "boolean"));
         const catalog = freezeCatalog((await deadline(parent.rpc.skills.list())).skills);
         report.native.catalog = {
-            status: fixtureSkills.every(expected => catalog.some(skill => skill.name === expected.name)) ? "available" : "incomplete",
+            status: catalogMatches(catalog, fixtureSkills, config.disabledSkills) ? "available" : "incomplete",
             count: catalog.length, bytes: bytes(catalog),
             disabled: catalog.filter(skill => !skill.enabled).length,
             pathless: catalog.filter(skill => !skill.path).length,
@@ -152,6 +153,7 @@ try {
         if (!boundary) throw new Error("synthetic exclusive boundary missing");
         const prefix = page.events.slice(0, page.events.findIndex(event => event.id === boundary));
         const prefixIds = prefix.map(event => event.id);
+        const frozenIds = page.events.map(event => event.id);
         report.native.frozenTextEvents = prefixIds.length;
         const prompt = SENTINELS.brief + "\nReturn synthetic guidance only.\nFrozen native catalog:\n" + JSON.stringify(catalog);
         for (const full of [true, false]) await attempt(full ? "fullFork" : "boundaryFork", async () => {
@@ -166,7 +168,8 @@ try {
                 agentScope: "primary", includeEphemeral: false,
             }));
             return { ...await turn(child, prompt), inheritedTextEvents: inherited.events.length,
-                exclusivePrefixIdsMatch: !full ? JSON.stringify(inherited.events.map(event => event.id)) === JSON.stringify(prefixIds) : null };
+                inheritedPrefixIdsMatch: historyMatches(inherited, full ? frozenIds : prefixIds),
+                exclusivePrefixIdsMatch: !full ? historyMatches(inherited, prefixIds) : null };
         });
         await attempt("boundedHistory", async () => {
             const history = await deadline(collectHistory(parent.rpc.eventLog, { boundary }));
@@ -195,6 +198,7 @@ try {
         } else await attempt("cancellation", async () => {
             const observation = observeOwnTask(parent);
             try {
+                const start = requests.length;
                 const { agentId: id } = await parent.rpc.tasks.startAgent({
                     agentType: "synthetic-selector", prompt: SENTINELS.cancel, name: "synthetic-cancel-task",
                     ...(profile.model ? { model: profile.model } : {}),
@@ -203,15 +207,16 @@ try {
                 await deadline(heldRequest, 8000);
                 const ack = await parent.rpc.tasks.cancel({ id });
                 const settlement = await observation.settled(id);
-                return { acknowledgement: ack, ...settlement };
+                return { acknowledgement: ack, ...settlement,
+                    requests: requests.slice(start).filter(item => item.agentId === id).map(item => item.summary) };
             } finally { observation.unsubscribe(); }
         });
         report.native.parentConfigurationUnchanged = JSON.stringify(before)
             === JSON.stringify(await deadline(parent.rpc.model.getCurrent()));
-        report.native.parentTextPrefixUnchanged = JSON.stringify(prefixIds) === JSON.stringify(
-            (await deadline(parent.rpc.eventLog.read({ direction: "backward", max: 32,
-                types: ["user.message", "assistant.message"], agentScope: "primary", includeEphemeral: false })))
-                .events.slice(0, prefixIds.length).map(event => event.id));
+        report.native.parentTextPrefixUnchanged = historyMatches(
+            await deadline(parent.rpc.eventLog.read({ direction: "backward", max: 32,
+                types: ["user.message", "assistant.message"], agentScope: "primary", includeEphemeral: false })),
+            frozenIds, true);
     }
 } catch (error) {
     report.error = safeError(error);
