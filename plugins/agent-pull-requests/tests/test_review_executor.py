@@ -15,7 +15,7 @@ from agent_pull_requests.watch_replay_store import ReplayStore
 
 
 @pytest.fixture
-def environment(tmp_path, monkeypatch):
+def environment(tmp_path, monkeypatch, request):
     root = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(root / "plugins" / "agent-worktrees" / "src"))
     from agent_worktrees.providers.azure_owned_review import AdoReviewContext, NativeReviewResponse, ReviewContextUnavailable
@@ -41,7 +41,12 @@ def environment(tmp_path, monkeypatch):
         "actions": [{"id": "finding", "kind": "comment", "body": "Synthetic selected finding"},
                     {"id": "verdict", "kind": "verdict", "verdict": "APPROVED"}],
     }
-    store = ReplayStore(tmp_path.resolve(), "existing-owner")
+    from agent_pull_requests.watch_replay_store import ReplayServiceIdentity
+    store = ReplayStore(
+        tmp_path.resolve(), "existing-owner",
+        service_identity=ReplayServiceIdentity("fleet-a", "gateway-a", "service-a")
+        if getattr(request, "param", None) else None,
+    )
     store.provision()
     store.adopt_review_operations(lifecycle_checkpoint=lambda: None, expires_at=int(time.time()) + 600)
 

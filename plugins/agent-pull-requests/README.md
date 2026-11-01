@@ -116,6 +116,11 @@ genesis. The separate guidance hook is unchanged.
 
 ## Verbs
 
+Source embeddings additionally expose the finite
+[workspace service/client API](docs/workspace-integration.md) through the
+existing PR owner. These library interfaces do not install a writer, acquire
+credentials or imply that a running service has adopted the protocol.
+
 ```text
 agent-pull-requests status --repo <owner/repo> --number <n> [--json]
 agent-pull-requests create --repo <owner/repo> --head <branch> [--base <branch>] --title <t> [--body <b>] [--draft] [--json]
