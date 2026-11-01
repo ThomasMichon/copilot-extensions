@@ -81,6 +81,10 @@ Extensions API is not yet fully replaceable.
 
 Provides:
 
+- An opt-in [model-free SDK context spike](docs/skill-selection-spike.md) using
+  synthetic fixtures in an owned isolated runtime, with native descriptor/model
+  preflight, request-size comparisons and lifecycle evidence. It does not
+  register a selector, qualify a model or change main-agent preferences.
 - An opt-in [raw client-request capture](skills/capturing-client-requests/references/usage.md)
   script and offline interpreter for debugging a selected harness with a
   temporary local fake provider. Current model settings and a 300-second
