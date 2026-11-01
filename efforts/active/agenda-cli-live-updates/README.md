@@ -163,6 +163,24 @@ proposal is claimed available merely because its intended name is described.
 
 ## Journal
 
+### 2026-11-01 - Relay rejection and new-head first publication
+
+- Further current-head review found two provider defects. The relay now validates
+  a frame's type before membership tests, so arrays/objects produce a structured
+  invalid-response error rather than an unhashable-type traceback.
+- A correctly selected current head whose cache still belongs to its predecessor
+  now receives not-published and retains its held subscription. Head-changed is
+  reserved for a genuinely stale or unavailable selection; predecessor
+  observations are never exposed as the new head's data.
+- The focused provider/CLI packet passed 85 cases, including real malformed-frame
+  sockets and a held new-head snapshot/heartbeat/first-publication update. The
+  actual core-to-Textual witness now also reopens on the new canonical head and
+  verifies its first committed publication reaches the same live view without
+  Refresh; the six-case connected packet passed with cleanup verified.
+- The four earlier source-verified review conversations were resolved as
+  addressed, not as approvals. A fresh verdict remains required for these
+  additional corrections before normal merge.
+
 ### 2026-11-01 - Review corrections across real boundaries
 
 - Current-head review identified four additional path, platform-timeout,

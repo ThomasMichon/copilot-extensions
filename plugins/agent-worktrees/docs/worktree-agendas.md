@@ -78,6 +78,11 @@ nonnegative, bounded, generation-local monotonically advancing cursor.
 `availability` is `observed`, `not-published`, or `head-changed`. Only `observed`
 contains an observation; the other states carry null. Failure replies contain
 `ok:false`, `contract_version:1`, and `error:{code,message}`.
+`head-changed` is reserved for an absent canonical head or a request that does
+not select it. When the request selects the current head but the cache contains
+only another head's observation, availability is `not-published`: the old body
+stays private and the held feed remains eligible for the current head's first
+publication.
 
 Feed frames are complete, atomic JSON lines of at most 35 KiB. The first frame
 is `type:"snapshot"` plus the reply. Changed selections produce
@@ -89,6 +94,8 @@ refresh every tracking record. Admission closure emits
 `{type:"going-away",generation,sequence,reason}`. Errors are
 `{type:"error",ok:false,contract_version:1,error:{code,message}}`.
 The CLI validates identity, generation, cursor and frame size before stdout.
+Non-text frame types are rejected with a structured `invalid-response` error,
+not a traceback or an empty successful relay.
 There are at most 32 held agenda subscriptions, accounted in the existing
 monitor drain and retirement path; no additional listener or daemon is created.
 

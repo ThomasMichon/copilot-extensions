@@ -89,6 +89,8 @@ class Receiver:
         if not isinstance(frame, dict) or self.closed:
             raise contract.AgendaError("invalid or post-terminal agenda frame", "invalid-response")
         kind = frame.get("type")
+        if not isinstance(kind, str):
+            raise contract.AgendaError("agenda frame type must be text", "invalid-response")
         body = {key: value for key, value in frame.items() if key != "type"}
         if kind == "error":
             if not _error(body):

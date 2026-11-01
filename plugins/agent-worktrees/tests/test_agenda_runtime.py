@@ -300,7 +300,7 @@ def test_cache_fault_does_not_break_roster(owned):
 
 
 @contextmanager
-def socket_feed(owner):
+def socket_feed(owner, payload=None):
     server = control.ControlServer(
         lambda action, payload: (
             owner.health() if action == "health" else owner.agenda_handle(action, payload)
@@ -318,7 +318,7 @@ def socket_feed(owner):
                     "version": 1,
                     "token": server.token,
                     "action": "agenda-feed",
-                    "payload": request(),
+                    "payload": request() if payload is None else payload,
                 }
             ).encode()
             + b"\n"
@@ -330,6 +330,42 @@ def socket_feed(owner):
             reader.close()
             owner.close_admission()
     server.close()
+
+
+def test_current_new_head_waits_on_held_socket_for_its_first_publication(owned, monkeypatch):
+    owner, head, *_rest = owned
+    previous = observation()
+    assert owner.agendas.publish(publication(owner, previous))["ok"] is True
+    head[0] = "head-b"
+    owner.publish("project", [{"id": "full-worktree-id"}], observed_at=2)
+    selected = request(session_id="head-b")
+    waiting = owner.agendas.read(selected)
+    assert waiting["availability"] == "not-published" and waiting["observation"] is None
+    assert owner.agendas.read(request())["availability"] == "head-changed"
+    assert owner.agendas._rows[("project", "full-worktree-id")]["body"] == previous
+    monkeypatch.setattr(agenda_feed, "HEARTBEAT_SECONDS", 0.01)
+    with socket_feed(owner, selected) as (client, reader):
+        snapshot = contract.decode(reader.readline(contract.FRAME_BYTES + 1))
+        assert snapshot == {"type": "snapshot", **waiting}
+        heartbeat = contract.decode(reader.readline(contract.FRAME_BYTES + 1))
+        assert heartbeat == {
+            "type": "heartbeat",
+            "generation": snapshot["generation"],
+            "sequence": snapshot["sequence"],
+        }
+        assert owner.agendas.feed.active_count() == 1
+        current = observation(1, "head-b", "b" * 32)
+        accepted = client._request("agenda-publish", publication(owner, current))
+        assert accepted["ok"] is True
+        while True:
+            update = contract.decode(reader.readline(contract.FRAME_BYTES + 1))
+            if update["type"] != "heartbeat":
+                break
+        assert update == {"type": "update", **accepted}
+        assert update["sequence"] > snapshot["sequence"]
+        assert update["availability"] == "observed"
+        assert update["observation"] == current
+    assert owner.agendas.feed.wait_closed(1)
 
 
 def test_actual_held_control_socket_commit_update_heartbeat_and_drain(owned, monkeypatch):

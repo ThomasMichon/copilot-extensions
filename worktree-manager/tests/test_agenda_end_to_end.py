@@ -347,10 +347,43 @@ def test_actual_commits_publish_to_resident_and_textual_without_replay(chain):
                 pilot, lambda: owner.agendas.feed.active_count() == 0 and chain["settled"](),
                 detail="head invalidation retained an owned feed/process",
             )
+
+        # A fresh, correctly selected head must keep its subscription while
+        # the durable cache still contains its predecessor's observation.
+        app = mux_companion.MuxCompanionApp(cwd=str(chain["workdir"]))
+        async with app.run_test() as pilot:
+            await eventually(
+                pilot, lambda: app._data.agenda is not None,
+                detail=f"new-head snapshot did not reach Textual: {widget(app)}",
+            )
+            data, worker = app._data, app._agenda_worker
+            assert data.agenda["session_id"] == "head-b"
+            assert data.agenda["availability"] == "not-published"
+            assert data.agenda["observation"] is None
+            assert owner.agendas.feed.active_count() == 1
+            changed = request(
+                {"operation": "park", "ref": "new-head-follow-up", "reason": "nonblocking"},
+                3, "head-b-park",
+            )
+            accepted, fresh = store.mutate(
+                home, changed, session="head-b", actor="synthetic-test",
+                publisher_configured=True,
+            )
+            assert fresh and accepted["revision"] == 4
+            assert (await publish())["state"] == "delivered"
+            await receive(pilot, app, 4)
+            assert data.agenda["observation"]["source"]["session"] == "head-b"
+            assert "Parked: 2" in widget(app)
+            assert app._data is data and app._agenda_worker is worker
+            await pilot.press("escape")
+            await eventually(
+                pilot, lambda: owner.agendas.feed.active_count() == 0 and chain["settled"](),
+                detail="new-head first publication retained a reader or child after quit",
+            )
         assert store.mutate(home, initial, **identity) == (original, False)
-        assert len(store.history(home)) == 3
+        assert len(store.history(home)) == 4
         assert sum(action == "health" for action, _ in chain["actions"]) >= 7
-        assert sum(action == "agenda-publish" for action, _ in chain["actions"]) == 3
+        assert sum(action == "agenda-publish" for action, _ in chain["actions"]) == 4
 
     asyncio.run(check())
 

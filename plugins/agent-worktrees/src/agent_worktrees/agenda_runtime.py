@@ -249,7 +249,7 @@ class AgendaRuntime:
         if session is None or value["head"] is None or session != value["head"]:
             availability = "head-changed"
         elif body is not None:
-            availability = "observed" if body["source"]["session"] == session else "head-changed"
+            availability = "observed" if body["source"]["session"] == session else "not-published"
         return {
             "ok": True,
             "contract_version": 1,

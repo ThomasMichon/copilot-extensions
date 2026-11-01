@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 import io
 import json
+import socketserver
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +14,7 @@ import pytest
 from agent_worktrees import __main__ as main
 from agent_worktrees import agenda_cli as cli
 from agent_worktrees import agenda_contract as contract
+from agent_worktrees.status_monitor_cutover import ControlClient
 
 
 def request():
@@ -172,6 +175,79 @@ def test_receiver_requires_snapshot_and_structured_errors():
         receiver.receive({"type": "update", **reply(1)})
     receiver.receive({"type": "error", **contract.failure("unavailable", "Synthetic fault")})
     assert receiver.closed
+
+
+@pytest.mark.parametrize("kind", [[], {}, None, False, 17])
+def test_receiver_rejects_non_text_type_before_membership(kind):
+    receiver = cli.Receiver(request(), "a" * 32)
+    with pytest.raises(contract.AgendaError) as error:
+        receiver.receive({"type": kind})
+    assert error.value.code == "invalid-response"
+    assert receiver.previous is None
+
+
+@pytest.mark.parametrize("field", ["availability", "generation", "sequence", "session_id"])
+@pytest.mark.parametrize("value", [[], {}])
+def test_receiver_malformed_fields_raise_domain_errors_not_type_errors(field, value):
+    receiver = cli.Receiver(request(), "a" * 32)
+    with pytest.raises(contract.AgendaError):
+        receiver.receive({"type": "snapshot", **reply(), field: value})
+    assert receiver.previous is None
+
+
+@pytest.mark.parametrize("kind", [[], {}])
+def test_actual_relay_non_text_type_returns_structured_error_without_traceback(
+    monkeypatch,
+    capsys,
+    kind,
+):
+    class Handler(socketserver.StreamRequestHandler):
+        def handle(self):
+            incoming = json.loads(self.rfile.readline(contract.FRAME_BYTES))
+            if incoming["action"] == "health":
+                result = {
+                    "version": 1,
+                    "result": {
+                        "capabilities": [contract.CAPABILITY],
+                        "worktrees": {"status": "ready", "generation": "a" * 32},
+                    },
+                }
+            else:
+                assert incoming["action"] == "agenda-feed"
+                result = {"type": kind}
+            self.wfile.write(json.dumps(result).encode() + b"\n")
+            self.wfile.flush()
+
+    with socketserver.TCPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        client = ControlClient(
+            f"http://127.0.0.1:{server.server_address[1]}",
+            token="synthetic-token",
+        )
+        monkeypatch.setattr(cli, "_control_client", lambda: client)
+        monkeypatch.setattr(cli.cfg, "project_name", lambda: "project")
+        try:
+            assert (
+                cli.cmd_agenda(
+                    SimpleNamespace(
+                        command="agenda-feed",
+                        worktree="full-id",
+                        session="head",
+                        json=True,
+                    )
+                )
+                == 1
+            )
+            output = capsys.readouterr()
+            frame = json.loads(output.out)
+            assert frame["type"] == "error" and frame["ok"] is False
+            assert frame["error"]["code"] == "invalid-response"
+            assert output.err and "Traceback" not in output.err
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+        assert not thread.is_alive()
 
 
 @pytest.mark.parametrize("fault", [False, True])
