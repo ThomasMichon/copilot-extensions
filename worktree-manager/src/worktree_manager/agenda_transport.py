@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 from queue import Empty, Full, Queue
+import select
 import signal
 import subprocess
 import sys
@@ -20,11 +21,12 @@ from . import engine_client as ec
 from .companion_client import cancellable_read_runner
 from .agenda_contract import bounded_json
 from .engine_environment import _engine_environment
-from .engine_posix_process import _OWNER
+from .engine_posix_process import _OWNER, read_completion_receipt
 from .agenda_contract import AgendaUnavailable, MAX_FRAME_BYTES, _TRANSIENT_ERRORS
 
 STARTUP_TIMEOUT = 5.0
 IDLE_TIMEOUT = 5.0
+EXIT_GRACE_SECONDS = 1.0
 _HEALTH_PROBE = """
 import errno,json,sys
 try:
@@ -186,7 +188,9 @@ def _owned_process(argv: list[str], cwd: str):
         finally:
             os.close(write_fd)
         try:
-            yield output, owner.stderr
+            yield output, owner.stderr, lambda stopped: read_completion_receipt(
+                owner.stdout, argv=argv, timeout=None, cancelled=stopped,
+            )
         finally:
             try:
                 os.killpg(owner.pid, signal.SIGKILL)
@@ -206,7 +210,15 @@ def _owned_process(argv: list[str], cwd: str):
                else detached_kwargs()),
         )
         try:
-            yield process.stdout, process.stderr
+            def completion(stopped):
+                while not stopped.is_set():
+                    try:
+                        return {"returncode": process.wait(timeout=0.1)}
+                    except subprocess.TimeoutExpired:
+                        continue
+                raise InterruptedError("owned agenda completion read cancelled")
+
+            yield process.stdout, process.stderr, completion
         finally:
             if job is not None:
                 job.close()
@@ -232,6 +244,9 @@ def frames(
     queue: Queue = Queue(maxsize=2)
     stopped = Event()
     errors = bytearray()
+    completed, stderr_drained = Event(), Event()
+    receipt, receipt_error = [], []
+    stderr_error = []
 
     def deliver(value):
         while not stopped.is_set():
@@ -248,36 +263,110 @@ def frames(
                 deliver(line)
                 if not line or len(line) > MAX_FRAME_BYTES or not line.endswith(b"\n"):
                     return
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             if not stopped.is_set():
-                deliver(exc)
+                deliver(OSError(str(exc)))
 
     def read_errors(output):
         try:
-            while True:
-                chunk = output.read(4096)
+            while not stopped.is_set():
+                if os.name != "nt":
+                    ready, _, _ = select.select([output], [], [], 0.1)
+                    if not ready:
+                        if completed.is_set():
+                            stderr_drained.set()
+                            return
+                        continue
+                chunk = os.read(output.fileno(), 4096)
                 if not chunk:
+                    stderr_drained.set()
                     return
                 errors.extend(chunk)
                 del errors[:-8192]
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             if not stopped.is_set():
-                deliver(exc)
+                stderr_error.append(OSError(str(exc)))
+                stderr_drained.set()
+                deliver(stderr_error[0])
+
+    def read_completion(read):
+        try:
+            receipt.append(read(stopped))
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            if not stopped.is_set():
+                receipt_error.append(exc)
+        finally:
+            completed.set()
+
+    def ended():
+        deadline = time.monotonic() + EXIT_GRACE_SECONDS
+        while not completed.is_set():
+            if cancelled.is_set():
+                return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return AgendaUnavailable(
+                    "agenda group owner completion receipt is missing or truncated",
+                    code="invalid-receipt",
+                )
+            completed.wait(min(remaining, 0.05))
+        if cancelled.is_set():
+            return None
+        if receipt_error:
+            return receipt_error[0]
+        if not receipt:
+            return AgendaUnavailable("agenda group owner omitted its completion receipt", code="invalid-receipt")
+        value = receipt[0]
+        if "error" in value:
+            return AgendaUnavailable(f"could not start the owned agenda command: {value['error']}", code="spawn-failed")
+        while not stderr_drained.is_set():
+            if cancelled.is_set():
+                return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return AgendaUnavailable("agenda stderr did not settle after child completion", code="read-failed")
+            stderr_drained.wait(min(remaining, 0.05))
+        detail = bytes(errors).decode("utf-8", errors="replace").strip()
+        if stderr_error:
+            return stderr_error[0]
+        if value["returncode"] != 0:
+            return AgendaUnavailable(
+                f"agenda command exited {value['returncode']}: {detail or 'no diagnostic'}",
+                code="exit-failed",
+            )
+        return AgendaUnavailable(
+            "agenda feed disconnected without a going-away notice" + (f": {detail}" if detail else ""),
+            retry=True, code="disconnected",
+        )
 
     readers = []
     try:
-        with _owned_process(argv, cwd) as (stdout, stderr):
+        with _owned_process(argv, cwd) as (stdout, stderr, completion):
             readers = [
                 Thread(target=read_lines, args=(stdout,), name="agenda-feed-stdout", daemon=True),
                 Thread(target=read_errors, args=(stderr,), name="agenda-feed-stderr", daemon=True),
+                Thread(target=read_completion, args=(completion,), name="agenda-feed-completion", daemon=True),
             ]
             for reader in readers:
                 reader.start()
             deadline = time.monotonic() + STARTUP_TIMEOUT
+            exit_deadline = None
             try:
                 while not cancelled.is_set():
+                    if completed.is_set() and exit_deadline is None:
+                        exit_deadline = time.monotonic() + EXIT_GRACE_SECONDS
+                    if exit_deadline is not None and time.monotonic() >= exit_deadline:
+                        failure = ended()
+                        if failure is None:
+                            return
+                        raise failure
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
+                        if completed.is_set():
+                            failure = ended()
+                            if failure is None:
+                                return
+                            raise failure
                         raise AgendaUnavailable("agenda feed missed its frame deadline", retry=True)
                     try:
                         line = queue.get(timeout=min(remaining, 0.1))
@@ -288,12 +377,10 @@ def frames(
                     if isinstance(line, OSError):
                         raise line
                     if not line:
-                        readers[1].join(timeout=0.1)
-                        detail = bytes(errors).decode("utf-8", errors="replace").strip()
-                        raise AgendaUnavailable(
-                            detail or "agenda feed disconnected without a going-away notice",
-                            retry=not detail,
-                        )
+                        failure = ended()
+                        if failure is None:
+                            return
+                        raise failure
                     if len(line) > MAX_FRAME_BYTES or not line.endswith(b"\n"):
                         raise ValueError("agenda feed exceeded its atomic frame bound")
                     if time.monotonic() >= deadline:
@@ -306,6 +393,8 @@ def frames(
             finally:
                 stopped.set()
     except OSError as exc:
+        if cancelled.is_set():
+            return
         raise AgendaUnavailable(f"could not read the owned agenda command: {exc}") from exc
     finally:
         stopped.set()

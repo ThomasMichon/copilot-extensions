@@ -163,6 +163,26 @@ proposal is claimed available merely because its intended name is described.
 
 ## Journal
 
+### 2026-11-01 - Normal POSIX completion and diagnostic delivery
+
+- Review found a normal, noncontained POSIX path absent from the earlier
+  contained-process branch controls: the shared group owner retained its
+  feed-writer copy after child exit. The owner now closes that copy immediately
+  after the spawn attempt, while keeping its PID reserved until group cleanup.
+- The held transport consumes a bounded completion receipt without polling or
+  reaping the owner early and drains stderr incrementally. Fatal child/spawn
+  diagnostics remain terminal; successful EOF without a terminal feed notice
+  remains a classified disconnect. Explicit feed errors retain their own policy.
+- Actual production-branch controls run inside the unchanged outer
+  Docker/supervisor boundary and verify EOF before owner release, prompt
+  small-stderr diagnostics, receipt faults, cancellation and group/reader
+  settlement. Existing synchronous engine reads retain output, error and timeout
+  behavior through the same shared receipt reader.
+- The final process-owner/synchronous-engine/connected packet passed 42 cases,
+  with one Windows-only case skipped and cleanup verified. Source AST, lint,
+  module and whitespace checks passed. This fixes the additional review finding,
+  not a runtime deployment or permission to skip the next current-head verdict.
+
 ### 2026-11-01 - Project isolation and bounded recovery
 
 - Review identified four further recovery gaps. Resident-wide activation/schema

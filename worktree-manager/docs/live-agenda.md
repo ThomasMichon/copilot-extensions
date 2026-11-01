@@ -95,6 +95,15 @@ the old read, and waits for its worker before admitting a replacement.
 Unmount cancels the owned subscription. Pipes are drained under the existing
 Manager POSIX group-owner / Windows kill-on-close Job primitives, preserving
 contained-test behavior. Late callbacks cannot replace a newer selection.
+The POSIX helper closes its feed-writer copy immediately after the spawn attempt,
+then retains its unreaped group identity until caller-owned cleanup. A separate,
+bounded 4 KiB JSON completion receipt supplies the actual child exit/spawn result;
+reading that receipt never polls or reaps the reserved owner. Stderr drains
+incrementally, without waiting for the owner's pipe EOF. EOF/completion settlement
+has a bounded one-second grace per phase: missing, truncated or malformed receipts fail explicitly,
+nonzero exits preserve their diagnostic as terminal failures, and exit-zero EOF
+without a protocol terminal notice remains a classified disconnect. A complete
+structured feed error is delivered before fallback exit-status judgment.
 `head-changed` clears the observation and ends the subscription with Refresh
 required; previous agenda data is never treated as active. No Agenda control
 executes, accepts, approves or changes planning state.
@@ -149,6 +158,15 @@ Its explicit source closure adds the provider source, core scripts and
 `libs/repository-policy/src` to the prepared Manager interpreter. No installed
 provider, package-install workaround or production endpoint supplies a missing
 test dependency.
+
+`tests/test_agenda_posix_process.py` selects the actual noncontained POSIX branch
+locally inside the existing contained supervisor/disconnected Docker runner.
+It verifies writer EOF while the owner is still reserved, incremental stderr,
+prompt fatal-exit diagnostics, successful EOF semantics, spawn/receipt faults,
+cancellation, and synchronous engine output/error/timeout compatibility.
+Poll/wait/communicate guards require owned group cleanup before reaping; reader
+and owner settlement is checked. This does not disable global containment or
+qualify an installed runtime or another native platform.
 
 Expand the owning provider before enabling independently deployed consumers.
 An older provider remains an explicit optional-feature failure; Manager is
