@@ -1594,6 +1594,13 @@ and fail-fast disabled. Python and `UV_PYTHON` are 3.11,
 matching the supported first-adopter floor. No host-state opt-in, live
 installation or service deployment is used.
 
+Namespaced installation management requires Bash 4.4+. The macOS namespaced
+cell selects the runner's existing Homebrew Bash and records its actual version;
+it does not weaken the guard or skip the case. Legacy macOS keeps stock Bash.
+The Worktrees installer carries its already-selected Bash into context queries,
+staged children and helper publication instead of rediscovering a different
+`bash` after a PATH change. Missing supported native tooling fails qualification.
+
 ```bash
 gh workflow run installation-context-acceptance.yml --ref <published-workflow-branch> \
   -f immutable_runtime=true -f immutable_runtime_ref=<full-40-hex-candidate-commit>

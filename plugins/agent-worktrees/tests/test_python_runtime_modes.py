@@ -553,6 +553,9 @@ def test_dev_candidate_uses_immutable_content_and_retains_it(modes, tmp_path, mo
     monkeypatch.setattr(
         lifecycle.engine, "_retained_inputs", lambda inputs, *_args, **_kwargs: nullcontext(inputs),
     )
+    monkeypatch.setattr(
+        lifecycle.engine, "retained_source_wheels", lambda inputs, *_args, **_kwargs: nullcontext(inputs),
+    )
     monkeypatch.setattr(lifecycle.engine, "_prepare_installed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(lifecycle.engine, "_verify_installed", lambda *_args, **_kwargs: None)
     arguments = dict(

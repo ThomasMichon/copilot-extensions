@@ -968,12 +968,7 @@ def fingerprint_source(
             if on_file is not None:
                 on_file(f, data)
         digest.update(_frame(_label(f).encode("utf-8")))
-        # The entry's kind is framed as ITS OWN length-prefixed record,
-        # never concatenated into `data` as a string prefix: a regular
-        # file whose raw bytes happen to equal some symlink's encoded
-        # "target text" must never hash identically to that symlink (or
-        # vice versa) just because the two kind tags were distinguished
-        # only by unframed leading bytes.
+        # Frame kind separately so identical file bytes and link text cannot collide.
         digest.update(_frame(entries[f].encode("utf-8")))
         digest.update(_frame(data))
         if on_progress is not None:

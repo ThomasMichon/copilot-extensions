@@ -1528,20 +1528,7 @@ ADMIT_HEALTH_REPAIR_REQUIRED = "health-repair-required"
 
 
 def _normalize_windows_extended_path(target: str) -> str:
-    """Strip Windows' extended-length path prefix from a raw symlink
-    target string, so later ``isabs()``/``resolve()`` comparisons see an
-    ordinary absolute path exactly like every other path in this module.
-
-    ``os.readlink()`` on Windows can return the extended-length form
-    (``\\\\?\\C:\\...``) for a target that is otherwise an ordinary
-    absolute path -- strip it. The UNC variant
-    (``\\\\?\\UNC\\server\\share\\...``) needs its OWN conversion back to
-    an ordinary UNC path (``\\\\server\\share\\...``): naively stripping
-    just the generic ``\\\\?\\`` prefix would leave
-    ``UNC\\server\\share\\...``, which Windows path handling treats as a
-    RELATIVE path, silently breaking ``isabs()``/``resolve()`` instead of
-    recognizing the server/share location.
-    """
+    """Normalize extended drive and UNC prefixes, preserving ordinary target names."""
     if target.startswith("\\\\?\\UNC\\"):
         return "\\\\" + target[len("\\\\?\\UNC\\"):]
     if target.startswith("\\\\?\\"):

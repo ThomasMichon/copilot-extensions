@@ -18,6 +18,7 @@ import tempfile
 import time
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from types import ModuleType
 
@@ -35,6 +36,7 @@ from installer_wheel_inputs import _check_deadline
 from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs
 from installer_source_build import (
     SourceWheelInputs, _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
+    revalidate_input_content, check_dev_owner,
 )
 
 _GENERATED_DIRECTORIES = {
@@ -781,24 +783,8 @@ def dev_candidate(root: Path, *, owner: str, **kwargs):
     return _candidate(root, runtime.DEV_VERSION, dev_owner=owner, **kwargs)
 
 
-def _check_dev_owner(root: Path, owner: str) -> None:
-    with runtime._publication_lease(root):
-        claim = runtime.read_dev_claim(root, strict=True)
-        if claim is None or claim["owner"] != owner:
-            raise RuntimeError("Development construction requires this owner's explicit dev claim")
-
-
-def _revalidate_input_content(inputs: FrozenInputs) -> None:
-    if (
-        _package_roots(inputs.plugin) != inputs.packages
-        or _wheel_construction_hash(
-            _construction_hash(
-                _source_files(inputs.packages), inputs.extras, inputs.local_packages,
-            ),
-            inputs.wheel_inputs,
-        ) != inputs.payload_hash
-    ):
-        raise RuntimeError("Runtime inputs changed from expected frozen content")
+_check_dev_owner = partial(check_dev_owner, runtime)
+_revalidate_input_content = partial(revalidate_input_content, sys.modules[__name__])
 
 
 def _lease_timeout(inputs: FrozenInputs, timeout: float) -> float:

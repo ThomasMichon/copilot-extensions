@@ -26,7 +26,7 @@ REPO = Path(__file__).resolve().parent.parent
 CANONICAL_DIR = REPO / "libs" / "installer-engine"
 FILES = ("installer-engine.ps1", "installer-engine.sh")
 SUPPORT_FILES = (
-    "installer_dependency_policy.py", "installer_dependency_config.py",
+    "installer_dependency_policy.py", "installer_dependency_config.py", "installer_dependency_arguments.py",
     "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
     "installer_engine_uninstall_windows.py",
     "installer_engine_footprint.py",

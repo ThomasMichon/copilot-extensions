@@ -40,6 +40,26 @@ if TYPE_CHECKING:
     from installer_engine import FrozenInputs
 
 
+def revalidate_input_content(engine: ModuleType, inputs: FrozenInputs) -> None:
+    if (
+        engine._package_roots(inputs.plugin) != inputs.packages
+        or engine._wheel_construction_hash(
+            engine._construction_hash(
+                engine._source_files(inputs.packages), inputs.extras, inputs.local_packages,
+            ),
+            inputs.wheel_inputs,
+        ) != inputs.payload_hash
+    ):
+        raise RuntimeError("Runtime inputs changed from expected frozen content")
+
+
+def check_dev_owner(runtime: ModuleType, root: Path, owner: str) -> None:
+    with runtime._publication_lease(root):
+        claim = runtime.read_dev_claim(root, strict=True)
+        if claim is None or claim["owner"] != owner:
+            raise RuntimeError("Development construction requires this owner's explicit dev claim")
+
+
 @contextmanager
 def retained_input_graph(
     inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool,

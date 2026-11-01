@@ -338,7 +338,8 @@ def test_freeze_buffers_complete_baseline_without_reopening_copy_sources(
         return read_bytes(path)
 
     def write_snapshot(path, data):
-        if path.is_relative_to(destination):
+        ordinary = Path(engine.runtime._normalize_windows_extended_path(str(path)))
+        if ordinary.is_relative_to(destination):
             assert set(reads.values()) == {1}, "copy preceded completion of the baseline"
             if fault == "write-failure":
                 raise PermissionError("snapshot write refused")
