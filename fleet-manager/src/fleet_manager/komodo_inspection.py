@@ -12,8 +12,9 @@ from .komodo_native import KomodoNative
 from .komodo_network import retained_network, verify_network
 from .komodo_owner import native_running, verify_candidate
 from .komodo_state import KomodoState
+from .komodo_repair_evidence import read_outcome
 from .node_journal import NodeJournal
-from .operations import OperationIntent
+from .operations import OperationIntent, TargetReceipt
 from .planning import PlanError
 from .private_state import validate_private_file
 from .runtime_admission import Permit
@@ -59,6 +60,21 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
             accepted = receipt.to_dict()["status"] if receipt is not None else None
             retained = record["failed"] or record["good"]
             blockers = []
+            try:
+                references = {
+                    proof.to_dict()["result_ref"] for proof in (receipt, original_receipt, resource_receipt)
+                    if proof is not None and proof.to_dict()["status"] in ("succeeded", "failed")
+                }
+                if attempt is not None:
+                    for key in ("failure_outcome", "success_outcome"):
+                        if key in attempt:
+                            outcome = TargetReceipt.from_dict(attempt[key])
+                            outcome.check_intent(OperationIntent.from_dict(attempt["request"]))
+                            references.add(outcome.to_dict()["result_ref"])
+                for reference in references:
+                    read_outcome(state.root, reference)
+            except PlanError:
+                blockers.append("retained-terminal-outcome-unavailable")
             installed, healthy = None, None
             observed = None
             observed_declaration = None
@@ -124,6 +140,8 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
                     raise
                 blockers.append("native-network-custody-changed-or-unproved")
                 drift_error = str(error)
+                observed_declaration = None
+            if "retained-terminal-outcome-unavailable" in blockers:
                 observed_declaration = None
             detail = None
             absent = selected.declaration.to_dict().get("desired_state", "present") == "absent"

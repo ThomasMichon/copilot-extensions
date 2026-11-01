@@ -665,6 +665,9 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                         assert original_receipt.to_dict()["status"] == (
                             "failed" if "terminal-outcome" in scenario else "unknown")
                         with damaged_outcome(path, missing="missing" in scenario):
+                            status = await invoke(request, status=True)
+                            assert "retained-terminal-outcome-unavailable" in status["blockers"]
+                            assert not status["converged"] and state_record[0] == before
                             with pytest.raises(PlanError, match="immutable|outcome"):
                                 await invoke(request)
                             assert state_record[0] == before
@@ -809,6 +812,9 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                     assert original_receipt.to_dict()["status"] == (
                         "succeeded" if "committed" in scenario else "unknown")
                     with damaged_outcome(path, missing="missing" in scenario):
+                        status = await invoke(request, status=True)
+                        assert "retained-terminal-outcome-unavailable" in status["blockers"]
+                        assert not status["converged"] and state_record[0] == before
                         with pytest.raises(PlanError, match="immutable|outcome"):
                             await invoke(request)
                         assert state_record[0] == before and journal.inspect(request) == original_receipt

@@ -618,6 +618,9 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                             "failed" if "terminal-outcome-evidence" in scenario else "unknown")
                         outcome_path = state.root / "receipts" / (digest(retained_failure) + ".json")
                     with damaged_outcome(outcome_path):
+                        status = await invoke(owner(), original, status=True)
+                        assert "retained-terminal-outcome-unavailable" in status["blockers"]
+                        assert not status["converged"]
                         with pytest.raises(PlanError, match="immutable|outcome"):
                             await invoke(owner(), original)
                         assert journal.inspect(original) == original_receipt
@@ -689,6 +692,9 @@ def test_composed_owner_preserves_original_operation_and_real_native_custody(
                             "succeeded" if "terminal-outcome-evidence" in scenario else "unknown")
                         outcome_path = state.root / "receipts" / (digest(state.read()["good"]) + ".json")
                     with damaged_outcome(outcome_path):
+                        status = await invoke(owner(), original, status=True)
+                        assert "retained-terminal-outcome-unavailable" in status["blockers"]
+                        assert not status["converged"]
                         with pytest.raises(PlanError, match="immutable|outcome"):
                             await invoke(owner(), original)
                         assert journal.inspect(original) == original_receipt

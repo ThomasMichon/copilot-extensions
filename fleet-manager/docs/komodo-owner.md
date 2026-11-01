@@ -254,6 +254,8 @@ terminal replay and attempt cleanup also require the referenced evidence.
 Missing or corrupted evidence refuses without rewriting a receipt or
 reconstructing the missing outcome. Restoring the exact retained evidence
 allows the original request to finish; success still requires current readiness.
+Status reports unavailable terminal evidence as a blocker rather than claiming
+convergence, without clearing metadata or changing the original receipt.
 
 **Contract support:** this optional profile expands the source SDK's strict
 version-1 declaration reader; older readers reject the unknown `profile`
