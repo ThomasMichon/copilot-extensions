@@ -849,9 +849,14 @@ open_regular_file_once() {
             trap 'trap - USR1; return 97' USR1
             shell_pid_into open_parent_pid
             (
-                sleep 2
+                open_timer=""
+                trap 'if [[ -n "$open_timer" ]]; then kill "$open_timer" 2>/dev/null || true; wait "$open_timer" 2>/dev/null || true; fi' EXIT
+                trap 'exit 0' TERM INT
+                sleep 2 &
+                open_timer=$!
+                wait "$open_timer" || exit
                 kill -USR1 "$open_parent_pid" 2>/dev/null || true
-            ) &
+            ) </dev/null >/dev/null 2>&1 &
             open_watchdog=$!
         fi
         open_input_fd "$path" && open_status=0 || open_status=$?

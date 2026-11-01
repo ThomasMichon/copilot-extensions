@@ -6139,6 +6139,10 @@ CAS-negative controls prepare completed versions through the reference CLI
 and exercise both actual native cutovers; native completion/cutover sequences
 remain covered by rollback and interoperability controls. The slots diagnostic
 also exercises the actual PowerShell cell-lock watchdog on POSIX.
+Regular-file capture controls retain the two-second blocking-open watchdog,
+settle its timer on cancellation and close inherited capture channels. Repeated
+native captures preserve trailing bytes without paying every watchdog deadline;
+the separate FIFO control still requires a bounded refusal.
 Bootstrap drift fixtures explicitly model the publication decision as well as
 context selection, including a denied-publication control. No-write PowerShell
 hook checks use the bounded initialized host and retain every fixture file in

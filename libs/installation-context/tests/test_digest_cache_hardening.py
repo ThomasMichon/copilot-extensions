@@ -858,6 +858,38 @@ capture_regular_file "$1" "Probe file" "$2" true true
     assert "without blocking" in result.stderr.lower()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX file descriptors")
+def test_posix_regular_captures_settle_watchdogs_without_waiting_for_deadlines(
+    tmp_path: Path,
+) -> None:
+    prefix, marker, _ = _posix_source().partition('\nACTION="${1:-}"')
+    assert marker
+    probe = tmp_path / "capture-probe.sh"
+    probe.write_text(
+        prefix
+        + r'''
+shift
+for ((index = 0; index < 6; index++)); do
+    captured="$(capture_regular_file "$1" "Probe file" "$2" true true; cat "$2"; printf x)"
+    printf '%s' "${captured%x}"
+done
+''',
+        encoding="utf-8",
+    )
+    target = tmp_path / "receipt"
+    target.write_bytes(b"receipt\n\n")
+    result = subprocess.run(
+        (shutil.which("bash"), str(probe), "status", str(target), str(tmp_path / "capture")),
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == target.read_bytes() * 6
+    assert result.stderr == b""
+
+
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
 def test_powershell_cache_hit_hashes_same_size_same_second_rewrite(
     tmp_path: Path,
