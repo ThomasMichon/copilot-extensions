@@ -7,9 +7,9 @@ and #9807. Project policy lives in `tools/typecheck-projects.json`.
 The local checker foundation qualifies its own code/tests and the source of
 Remote Login Shell, Session Liveness Probe and Worktree Identity. Their remaining
 tests/helpers and the other projects are explicitly pending. This foundation
-does **not** establish required PR or release enforcement; those are separate
-reviewed implementation slices. A passing admitted cohort is not repository-wide
-type safety.
+is enforced by source CI for executable-impact changes. Candidate-release
+qualification remains a separate slice. A passing admitted cohort is not
+repository-wide type safety.
 
 ## Local commands
 
@@ -18,6 +18,7 @@ From the source repository root, with Python and UV available:
 ```text
 python tools/typecheck.py --prepare
 python tools/typecheck.py --enforced
+python tools/typecheck.py --changed --base origin/dev
 python tools/typecheck.py lib-worktree-identity
 python tools/typecheck.py --inventory
 python tools/typecheck.py --inventory --json
@@ -40,6 +41,14 @@ install subprocess has a five-minute bound. Cache-path validation stays independ
 validates the complete physical-Python inventory, then checks admitted projects
 at their declared levels and interpreter/platform targets. The summary keeps
 pending/basic/strict project counts visible.
+
+`--changed` verifies its comparison base (default `origin/dev`) and compares
+staged/unstaged files, or a pinned `--head` when supplied. It always validates
+the full physical inventory, including non-ignored untracked Python. Until the
+dependency/source-view graph is qualified, it deliberately rechecks **every
+admitted project**, even when the diff is empty or documentation-only. This
+conservative fallback includes affected consumers without claiming precise
+dependency selection. An invalid comparison fails visibly.
 
 Use `--inventory --json` for the per-file ownership ledger. Its
 `inventory-only` result describes policy ownership, **not** a fresh type-check
@@ -68,9 +77,20 @@ python tools/typecheck.py --enforced --require-complete
   physical-Python portfolio. Complete generated/composed source and live CI
   qualification remain additional campaign gates.
 
-The changed-scope/dependent-consumer command, required PR/candidate-release
-checks and additional project dependency contexts are subsequent slices. Do
-not infer they exist from this initial front door.
+## Required source CI
+
+The existing `checks` job explicitly runs `--prepare`, then `--enforced`, for
+changes requiring executable checks. Both steps have six-minute bounds, cannot
+ignore failures and feed the existing required PR aggregate. The trusted-CI
+contract guard rejects missing, reordered or weakened steps. Existing unit
+selection/reuse and release-controller admission are unchanged.
+
+CI checks every admitted project, not only changed Python files. Checker,
+manifest, dependency or workflow changes therefore cannot quietly skip an
+activated consumer. Local `--enforced` uses the same pinned checker and target
+policy; `--changed` is an intentionally conservative local parity command.
+Additional project dependency contexts and exact-candidate release checking
+remain subsequent slices.
 
 ## Implementation checks
 

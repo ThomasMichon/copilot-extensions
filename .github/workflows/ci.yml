@@ -87,6 +87,14 @@ jobs:
       if: steps.dependency-age.outputs.run == 'true'
       timeout-minutes: 5
       run: python tools/check-dependency-age.py
+    - name: Prepare pinned MyPy environment
+      if: steps.code-impact.outputs.run == 'true'
+      timeout-minutes: 6
+      run: python tools/typecheck.py --prepare
+    - name: Admitted Python type contracts
+      if: steps.code-impact.outputs.run == 'true'
+      timeout-minutes: 6
+      run: python tools/typecheck.py --enforced
     - name: Version consistency
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-version-consistency.py

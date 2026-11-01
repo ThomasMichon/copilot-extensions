@@ -60,6 +60,8 @@ CODE_IMPACT_ENV = {
     "HEAD": "${{ github.event.pull_request.head.sha || github.sha }}",
 }
 CODE_GUARD_COMMANDS = (
+    "python tools/typecheck.py --prepare",
+    "python tools/typecheck.py --enforced",
     "python tools/check-version-consistency.py",
     "python tools/check-no-agent-machines-packages.py",
     "python tools/check-install-contract.py",
@@ -495,6 +497,29 @@ def _validate_ci(path: Path) -> list[str]:
                 or any(key in code_impact[0] for key in ("if", "continue-on-error"))
             ):
                 errors.append("code guards require conservative pinned-input coverage admission")
+            typecheck_steps = [
+                [
+                    step for step in check_steps if isinstance(step, dict)
+                    and str(step.get("run", "")).strip() == command
+                ]
+                for command in (
+                    "python tools/typecheck.py --prepare",
+                    "python tools/typecheck.py --enforced",
+                )
+            ]
+            if any(len(steps) != 1 for steps in typecheck_steps) or (
+                all(len(steps) == 1 for steps in typecheck_steps)
+                and (
+                    check_steps.index(typecheck_steps[0][0]) >= check_steps.index(typecheck_steps[1][0])
+                    or any(
+                        step.get("timeout-minutes") != "6"
+                        or step.get("if") != CODE_CONDITION
+                        or "continue-on-error" in step
+                        for steps in typecheck_steps for step in steps
+                    )
+                )
+            ):
+                errors.append("MyPy must prepare then enforce the admitted portfolio with bounded required steps")
             changefile_steps = [
                 step for step in check_steps if isinstance(step, dict)
                 and str(step.get("run", "")).startswith("python tools/check-changefile-presence.py")
