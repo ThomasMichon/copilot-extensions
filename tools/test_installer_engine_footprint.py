@@ -345,13 +345,22 @@ def test_oversized_manifest_is_refused_before_decode(tmp_path: Path) -> None:
         subject._manifest_text(path)
 
 
-def test_source_manifest_history_does_not_inherit_the_installed_marker_budget(tmp_path: Path) -> None:
-    record = _record()
+@pytest.mark.parametrize("document", ["legacy", "current"])
+def test_source_manifest_does_not_inherit_the_installed_marker_budget(
+    tmp_path: Path, document: str,
+) -> None:
+    record = _legacy_record() if document == "legacy" else _record()
     path = tmp_path / "uninstall-profile.json"
     text = json.dumps(record, indent=2) + "\n" * 65537
     path.write_text(text, encoding="utf-8")
     manifest = subject.load_manifest(path, "agent-mcp")
-    assert manifest.history == tuple(entry["snapshot"] for entry in record["history"])
+    snapshot = record["history"][-1]["snapshot"] if document == "legacy" else record["contract"]
+    assert manifest.profile == snapshot["profile"]
+    assert manifest.effects == snapshot["effects"]
+    assert manifest.recognizers == snapshot["recognizers"]
+    assert manifest.producers == (
+        snapshot["producers"] if document == "legacy" else record["producers"]
+    )
     assert path.read_text(encoding="utf-8") == text
     with pytest.raises(subject.FootprintError, match="read budget"):
         subject._marker_text(path)
