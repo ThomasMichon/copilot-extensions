@@ -4,7 +4,7 @@
   for multi-session, multi-wave work.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-31
+- **Last revised:** 2026-11-01
 - **Reality docs:** [`efforts/README.md`](../../../efforts/README.md) ·
   [`docs/harness-runbook.md`](../../../docs/harness-runbook.md) ·
   [`plugins/efforts/README.md`](../../../plugins/efforts/README.md) ·
@@ -50,17 +50,23 @@ activity when needed.
   hand-typed label that a busy session can forget to advance as work moves
   forward. An explicitly adopted agenda may identify a different execution
   position without replacing checklist-authoritative completion.
-- **Optional agenda companion** gives an effort a coarse graph of work
-  packages, exit criteria and permitted transitions. The efforts plugin owns
-  this process aide and any optional local helpers; ordinary planning does
-  not depend on adopting it.
+- **Optional agenda companion** organizes assigned work into an ordered queue,
+  with explicit exits and a stack of saved continuations for nested planning.
+  Retained parent links give the resulting history its branch structure. The
+  efforts plugin owns this process aide and its optional helpers; ordinary
+  planning does not depend on adopting it.
 - **Worktree-specific agenda** belongs to the continuing agent, alongside its
   worktree journal. It draws from assigned efforts, tasks and asides and retains
   execution position and work stack across sessions; canonical source contracts
   stay with their existing owners.
-- **Nested continuation** preserves the parent objective and return position
-  while an agent follows a child effort, then refreshes the parent's agenda
-  when the child's own completion gate is met.
+- **Nested continuation** preserves the parent objective, remaining queue and
+  return position while an agent works through a subordinate queue, work item
+  or child effort. Returning carries newly learned context into the parent
+  rather than restarting its original attempt.
+- **Context-qualified revisit** distinguishes a productive return with new
+  relevant knowledge or a materially different approach from repetition under
+  unchanged conditions. Visit history is evidence, not an automatic demand for
+  operator intervention.
 
 ## Features
 
@@ -125,11 +131,28 @@ coordinates changes in the target.
 
 ### optional-effort-agenda
 
-An agent may voluntarily structure an effort into broad work packages with
-explicit exits, branches and bounded loops. The companion references the effort
-contract rather than copying its plan or maintaining another completion ledger.
-Optional efforts-owned helpers may scaffold the companion and identify or
-maintain its cursor, while manual use and unstructured efforts remain viable.
+An agent may voluntarily organize work into ordered packages with explicit exits
+and preserved continuations. The companion references canonical source contracts
+rather than copying their completion state. Optional efforts-owned helpers may
+scaffold the companion and maintain its execution position, while manual use and
+unstructured efforts remain viable.
+
+### queue-and-stacked-continuations
+
+Ordinary planning can append assigned work to the queue without interrupting the
+current item. When an item needs further planning or a prerequisite, the agent
+can decompose it into a subordinate queue and work that queue ahead of its saved
+continuation. Remaining siblings retain their order; unwinding restores the
+original parent links, objective and next action. Small subplans need not become
+separate formal efforts merely to participate in this process.
+
+### context-qualified-agenda-revisits
+
+Returning to the same item is legitimate when new relevant evidence, a resolved
+constraint, a rejected hypothesis or a materially revised plan enables a
+different attempt. The agent can explain what changed since the preceding
+attempt and how that change informs its next approach. Productive revisits do
+not automatically exhaust a raw visit counter or require operator steering.
 
 ### nested-effort-continuations
 
@@ -203,6 +226,31 @@ unsupported or stale cursor changes. This is a cooperative process aide, not a
 guarantee that an agent cannot act outside it. A cursor, child result, or terminal
 graph node never independently proves that the effort is complete.
 
+### autonomous-no-progress-recovery
+
+Repeated attempts under materially unchanged conditions should trigger bounded
+investigation, plan refinement or reconsideration by the agent, not a reflexive
+operator question. If no productive action is available, preserve the blocked
+continuation and wait for a real dependency or advance other already-authorized
+queued work. Operator input is reserved for a genuine decision, missing authority
+or a safety boundary the agent cannot resolve within its mandate.
+
+### meaningful-context-before-retry
+
+A revisit retains its preceding attempt and the new context that justifies its
+changed approach. The same failed action with a new timestamp, session,
+identifier, definition revision or cosmetic wording is not new context. Evidence
+of a changed situation and attributed agent judgment remain distinguishable;
+structural acceptance must not masquerade as semantic proof of progress.
+
+### continuity-and-resource-limits
+
+Expansion, return, refinement and deferred restoration preserve original roots,
+links, accepted work and attempt history. Renaming or recreating an item does not
+erase its prior attempts or bypass a lack-of-progress constraint. Independent
+scope, depth, storage, resource and explicit operator limits remain binding;
+productive reasoning does not grant new authority or automatically enlarge them.
+
 ### journal-is-ground-truth
 
 The effort's journal and phase/checklist status are the **authoritative**
@@ -261,6 +309,9 @@ gate and effort-discovery rule.
 - Agenda reset changes execution position; it does not authorize resetting a
   repository, restarting processes, repeating uncertain external effects or
   discarding unresolved obligations.
+- A revisit count is not, by itself, a requirement to ask the operator. The
+  agenda does not turn autonomous planning into a sequence of approval requests,
+  nor does a claim of new context authorize an uncertain external effect.
 - This vision does not prescribe a configuration filename, schema, command
   grammar, worktree record shape, or hook implementation.
 
