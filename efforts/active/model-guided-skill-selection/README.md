@@ -444,3 +444,17 @@ owned-session alternative or name the SDK dependency before adopting it.
 - The same bounded packet passed thirty-nine Node controls on Windows with
   verified process cleanup. Native integration and independent comparison are
   still separate; no production selection or rollout is claimed.
+
+### 2026-11-01 - Acquisition is bound before source bytes leave the reader
+
+- The latest review found escaped closing backticks and an admission-to-open
+  rebinding gap. Code-span matching now treats closing backticks literally
+  inside spans while preserving escaped opening semantics.
+- Acquisition binds the admitted regular file's identity to the opened handle
+  and rechecks its canonical target before reading bytes. Unix adds nonblocking,
+  no-follow flags; missing identity/protection fails explicitly. Deterministic
+  body/guide controls rebind files and ancestors and require zero outside reads.
+- Forty Node controls passed in the existing bounded Windows packet with
+  verified cleanup. Windows file-rebinding fixtures use unprivileged hard links;
+  Unix uses symlinks and its separate FIFO branch. No elevation or shared
+  configuration change is required.

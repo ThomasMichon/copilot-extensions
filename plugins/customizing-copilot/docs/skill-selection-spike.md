@@ -166,7 +166,11 @@ and titles are consumed as one declaration. Bracket matching is linear; a finite
 work budget also bounds malformed destination parsing. Ambiguous or unsupported
 Markdown forms are not guessed. Source acquisition
 rejects non-regular files before opening, uses nonblocking opens on Unix and
-retains a descriptor-level file check. The opt-in packet includes a bounded
+retains a descriptor-level file check. Acquisition compares the admitted target's
+file identity with the opened handle and rechecks its canonical path before
+reading bytes; Unix also refuses final-component symlink following. Missing
+file identity or protected-open capability is unavailable, not a permissive
+fallback. The opt-in packet includes a bounded
 FIFO control executed on Unix, not claimed as a Windows-native witness.
 
 Successful source reads retain catalog-bound body/guide digests.

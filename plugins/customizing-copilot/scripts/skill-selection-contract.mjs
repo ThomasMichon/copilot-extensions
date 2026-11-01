@@ -112,15 +112,17 @@ function declaredReferences(body) {
 function excludeCodeSpans(source) {
     const runs = [];
     for (let index = 0; index < source.length; index++) {
-        if (source[index] === "\\") { index++; continue; }
         if (source[index] !== "`") continue;
         const start = index;
+        let backslashes = 0;
+        for (let before = start - 1; before >= 0 && source[before] === "\\"; before--) backslashes++;
         while (source[index + 1] === "`") index++;
-        runs.push({ start, end: index + 1, length: index + 1 - start });
+        runs.push({ start, end: index + 1, length: index + 1 - start, escapedOpening: backslashes % 2 });
     }
     const next = new Map(), matching = new Map();
     for (let index = runs.length - 1; index >= 0; index--) {
-        if (next.has(runs[index].length)) matching.set(index, next.get(runs[index].length));
+        const openingLength = runs[index].length - runs[index].escapedOpening;
+        if (openingLength && next.has(openingLength)) matching.set(index, next.get(openingLength));
         next.set(runs[index].length, index);
     }
     const parts = [];
@@ -128,8 +130,9 @@ function excludeCodeSpans(source) {
     for (let index = 0; index < runs.length; index++) {
         if (runs[index].start < cursor || !matching.has(index)) continue;
         const end = runs[matching.get(index)].end;
-        parts.push(source.slice(cursor, runs[index].start),
-            source.slice(runs[index].start, end).replace(/[^\r\n]/g, " "));
+        const start = runs[index].start + runs[index].escapedOpening;
+        parts.push(source.slice(cursor, start),
+            source.slice(start, end).replace(/[^\r\n]/g, " "));
         cursor = end;
     }
     return parts.join("") + source.slice(cursor);
@@ -177,13 +180,21 @@ function markdownDestination(source, start, inline, spend) {
 }
 
 async function readBounded(path, limit) {
-    if (!(await stat(path)).isFile()) throw new Error("selection source is not a regular file");
-    if (process.platform !== "win32" && !Number.isInteger(constants.O_NONBLOCK)) {
-        throw new Error("nonblocking source acquisition unavailable");
+    const expected = await stat(path, { bigint: true });
+    if (!expected.isFile()) throw new Error("selection source is not a regular file");
+    if (!expected.ino) throw new Error("selection source file identity unavailable");
+    if (await realpath(path) !== path) throw new Error("selection source target changed before acquisition");
+    if (process.platform !== "win32" && (!Number.isInteger(constants.O_NONBLOCK) || !Number.isInteger(constants.O_NOFOLLOW))) {
+        throw new Error("protected source acquisition unavailable");
     }
-    const handle = await open(path, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NONBLOCK));
+    const handle = await open(path, constants.O_RDONLY | (process.platform === "win32" ? 0
+        : constants.O_NONBLOCK | constants.O_NOFOLLOW));
     try {
-        if (!(await handle.stat()).isFile()) throw new Error("selection source is not a regular file");
+        const acquired = await handle.stat({ bigint: true });
+        if (!acquired.isFile()) throw new Error("selection source is not a regular file");
+        if (acquired.ino !== expected.ino || acquired.dev !== expected.dev || await realpath(path) !== path) {
+            throw new Error("selection source target changed during acquisition");
+        }
         const buffer = Buffer.alloc(limit + 1);
         let length = 0;
         while (length < buffer.length) {

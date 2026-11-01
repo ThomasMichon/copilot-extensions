@@ -117,6 +117,7 @@ test("Markdown declarations exclude examples and preserve balanced and escaped d
         const path = join(root, "SKILL.md");
         await fs.writeFile(path, [
             "`[Example](wrong.md)`", "\\[Escaped](wrong.md)", "```md", "[Fence](wrong.md)", "````",
+            "`[Escaped close](wrong.md)\\`", "\\``[Escaped first tick](wrong.md)`",
             "    [Indented code](wrong.md)", "<!-- [Comment](wrong.md) -->",
             "> ```", "> [Quoted code](wrong.md)", "> ```",
             "- ```md", "  [List code](wrong.md)", "  ```", "[After list](after.md)",
@@ -139,6 +140,50 @@ test("Markdown declarations exclude examples and preserve balanced and escaped d
         }
         await assert.rejects(reader.read({ skill: "fixture", reference: "wrong.md" }), /not declared/);
         await assert.rejects(reader.read({ skill: "fixture", reference: "api(v1" }), /not declared/);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+test("body and guide admission-to-open rebinding is rejected before outside bytes are read", async t => {
+    const root = await fs.mkdtemp(join(tmpdir(), "skill-selection-acquisition-"));
+    try {
+        for (const part of ["body", "guide"]) for (const mode of ["file", "ancestor"]) {
+            const base = join(root, `${part}-${mode}`), admitted = join(base, "admitted"), outside = join(base, "outside");
+            await fs.mkdir(admitted, { recursive: true }); await fs.mkdir(outside);
+            for (const directory of [admitted, outside]) {
+                await fs.writeFile(join(directory, "SKILL.md"), "[Guide](guide.md)");
+                await fs.writeFile(join(directory, "guide.md"), directory === outside ? "Outside bytes" : "Inside bytes");
+            }
+            const victim = join(admitted, part === "body" ? "SKILL.md" : "guide.md");
+            const reader = await selectionReader(selectionSnapshot([
+                { name: "fixture", description: "Fixture", source: "project", enabled: true, path: join(admitted, "SKILL.md") },
+            ]), [admitted]);
+            const actual = fs.open;
+            let rebound = false, outsideReads = 0;
+            t.mock.method(fs, "open", async (...args) => {
+                if (args[0] !== victim || rebound) return actual(...args);
+                rebound = true;
+                if (mode === "file") {
+                    await fs.unlink(victim);
+                    const target = join(outside, part === "body" ? "SKILL.md" : "guide.md");
+                    if (process.platform === "win32") await fs.link(target, victim);
+                    else await fs.symlink(target, victim);
+                } else {
+                    await fs.rename(admitted, join(base, "previous"));
+                    await fs.symlink(outside, admitted, "junction");
+                }
+                const handle = await actual(...args);
+                const read = handle.read.bind(handle);
+                t.mock.method(handle, "read", (...readArgs) => { outsideReads++; return read(...readArgs); });
+                return handle;
+            });
+            syncBuiltinESMExports();
+            try {
+                await assert.rejects(reader.read({ skill: "fixture", ...(part === "guide" ? { reference: "guide.md" } : {}) }),
+                    /target changed|ELOOP/);
+                assert(rebound);
+                assert.equal(outsideReads, 0);
+                assert.deepEqual(reader.receipts(), []);
+            } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+        }
     } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 test("bracket-heavy malformed Markdown retains valid later declarations with bounded parsing work", async () => {
