@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import copy
 import inspect
+from collections import OrderedDict
+import hashlib
 
 from .source_attachment import attach_source
-from .workspace_operations import PROTOCOL
-from .review_workspace import _generation, _scope
+from .workspace_operations import PROTOCOL, encoded
+from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope
 
 TOOL_PROTOCOL = "agent-pull-requests.workspace-tools/v1"
 COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-read", "submit", "inspect")
@@ -54,6 +56,8 @@ class WorkspaceTools:
         if client is not None and not all(callable(getattr(client, name, None)) for name in ("exchange", "materialize")):
             raise ValueError("existing workspace client required")
         self.client, self.source_owner = client, source_owner
+        self._generations = OrderedDict()
+        self._native_execution = client is not None and not inspect.iscoroutinefunction(client.exchange)
 
     async def capabilities(self):
         operations = ["capabilities"]
@@ -69,7 +73,10 @@ class WorkspaceTools:
                 operations.append("materialize")
                 source_contract = getattr(self.source_owner, "contract", None)
                 declared = source_contract() if callable(source_contract) else None
-                if isinstance(declared, dict) and type(declared.get("version")) is int and declared == SOURCE_CONTRACT:
+                if (
+                    self._native_execution and isinstance(declared, dict)
+                    and type(declared.get("version")) is int and declared == SOURCE_CONTRACT
+                ):
                     operations.append("source")
                     reader = getattr(self.source_owner, "read_contract", None)
                     read = reader() if callable(reader) else None
@@ -83,6 +90,7 @@ class WorkspaceTools:
             "owner_binding": "supplied" if self.client is not None else "unavailable",
             "backend_contract": backend, "installed_tool_adoption": False,
             "source_acquisition": False, "source_preparation": "existing_owner_not_adopted",
+            "source_execution": "native_synchronous" if self._native_execution else "async_owner_unavailable",
         }
 
     async def definitions(self):
@@ -132,7 +140,7 @@ class WorkspaceTools:
             required.update(("source_attachment", "path", "side"))
         if set(request) != required:
             raise ValueError("invalid workspace tool request fields")
-        generation = await _call(self.client.materialize, request["number"], request["generation_id"])
+        generation = await self._materialize(request["number"], request["generation_id"])
         _generation(generation, _scope(generation.get("scope")))
         if command == "materialize":
             return generation
@@ -153,6 +161,30 @@ class WorkspaceTools:
         return self.source_owner.read_retained(
             attachment["source"], request["path"], request["side"], budget=request["budget_seconds"],
         )
+
+    async def _materialize(self, number, identity):
+        cached = self._generations.get(identity)
+        if cached is not None:
+            observed = await _call(self.client.exchange, "lookup", {"number": number, "generation_id": identity})
+            if (
+                observed.get("scope") != cached[0]["scope"]
+                or observed.get("result", {}).get("descriptor") != cached[1]
+            ):
+                self._generations.pop(identity, None)
+                raise WorkspaceToolUnavailable("immutable_generation_changed")
+            self._generations.move_to_end(identity)
+            return copy.deepcopy(cached[0])
+        generation = await _call(self.client.materialize, number, identity)
+        scope = _scope(generation.get("scope"))
+        _generation(generation, scope)
+        if scope["number"] != number or generation["id"] != identity:
+            raise ValueError("materialized selection differs")
+        data = encoded(generation)
+        descriptor = {"id": identity, "scope": scope, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        while self._generations and sum(item[1]["bytes"] for item in self._generations.values()) + len(data) > MAX_GENERATION_BYTES:
+            self._generations.popitem(last=False)
+        self._generations[identity] = (copy.deepcopy(generation), descriptor)
+        return generation
 
 
 async def dispatch_tool(host, name, arguments):

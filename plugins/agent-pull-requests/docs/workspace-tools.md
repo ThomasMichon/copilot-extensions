@@ -13,6 +13,10 @@ adoption. `await dispatch_tool(host, name, {"request": payload})` invokes the sa
 source façade. Native operations remain synchronous under their existing caller
 lifetime; service operations use their existing async client and handler/drain.
 The façade creates no thread, process, watcher, ledger or transport.
+Synchronous LocalReviewSource operations are available only through a native
+synchronous client. An async service host without an existing owned source
+execution/drain adapter reports source/source-read unsupported instead of blocking
+its event loop or launching untracked work. This slice does not invent that owner.
 
 The public contract is `agent-pull-requests.workspace-tools/v1`. Discovery reports
 the actual supplied client's supported operations and source-read descriptor.
@@ -21,6 +25,10 @@ All original CLI/watch interfaces and defaults remain unchanged.
 Overlapping service tool calls share negotiation through the existing client's
 `ensure_capabilities()`; explicit rediscovery remains separate and can withdraw
 cached support. This orders metadata, not caller authority or effect admission.
+The existing host lifetime retains a bounded 16 MiB total verified-generation
+read cache. Repeated source reads recheck the scoped descriptor through the
+current client/owner, without transferring all chunks again. Changed/missing
+descriptors refuse; cached bytes never substitute for current authority.
 
 ## Existing CLI frontdoor
 

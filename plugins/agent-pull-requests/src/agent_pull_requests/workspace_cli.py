@@ -48,7 +48,7 @@ def run(args, host=None):
     except WorkspaceToolUnavailable:
         print(json.dumps({"error": "workspace_owner_or_operation_unavailable", "effect_completion": "not_inferred"}))
         return 3
-    except (OSError, ValueError, RuntimeError):
+    except (OSError, ValueError, RuntimeError, OverflowError):
         print(json.dumps({"error": "workspace_input_or_result_unavailable", "effect_completion": "not_inferred"}))
         return 1
 

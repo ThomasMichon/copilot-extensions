@@ -26,8 +26,11 @@ def tools(environment, integration, tmp_path):
     root.mkdir()
 
     def git(*args):
+        from agent_worktrees.git_repository_environment import _NO_HOOKS_PATH, repository_identity_env
         return run_caller_owned(
-            ["git", "-c", "core.fsmonitor=false", *args], cwd=root,
+            ["git", "-c", "core.fsmonitor=false", "-c", f"core.hooksPath={_NO_HOOKS_PATH}",
+             "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", *args],
+            cwd=root, env=repository_identity_env(),
             timeout=20, max_stdout_bytes=65536, max_stderr_bytes=8192,
         ).stdout.strip()
 
@@ -330,3 +333,70 @@ def test_read_budget_failure_is_json_not_a_private_git_traceback(environment, to
     }, monkeypatch, capsys)
     assert code == 1 and value["effect_completion"] == "not_inferred"
     assert "private-root" not in json.dumps(value)
+
+
+def test_verified_generation_reuse_rechecks_owner_without_retransferring_chunks(environment, integration):
+    from agent_pull_requests.workspace_client import WorkspaceClientError
+    _, _, generation, _, backend, _ = environment
+    gateway, client, _, _, caller, _ = integration
+    host = WorkspaceTools(client)
+
+    async def scenario():
+        request = {"number": 42, "generation_id": generation["id"]}
+        assert await host.invoke("materialize", request) == generation
+        chunks = sum(path.endswith("/chunk") for path in caller.calls)
+        assert await host.invoke("materialize", request) == generation
+        assert sum(path.endswith("/chunk") for path in caller.calls) == chunks
+        gateway.workspaces = {}
+        with pytest.raises(WorkspaceClientError, match="unsupported"):
+            await host.invoke("materialize", request)
+        assert backend.threads == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("command", ["source", "source-read"])
+def test_async_source_is_unavailable_without_owned_execution_path(environment, integration, command):
+    import threading
+    from agent_pull_requests.workspace_tools import SOURCE_CONTRACT, READ_CONTRACT, WorkspaceToolUnavailable
+    _, _, generation, _, _, _ = environment
+    _, client, _, _, _, _ = integration
+    entered = threading.Event()
+
+    class DelayedSource:
+        def contract(self):
+            return SOURCE_CONTRACT
+
+        def read_contract(self):
+            return READ_CONTRACT
+
+        def inspect_and_retain(self, *args, **kwargs):
+            entered.set()
+            raise AssertionError("unowned blocking execution")
+
+        read_retained = inspect_and_retain
+
+    host = WorkspaceTools(client, source_owner=DelayedSource())
+
+    async def scenario():
+        capabilities = await host.capabilities()
+        assert command not in capabilities["operations"]
+        request = {"number": 42, "generation_id": generation["id"], "budget_seconds": 60}
+        if command == "source-read":
+            request.update(source_attachment={}, path="/note.txt", side="after")
+        with pytest.raises(WorkspaceToolUnavailable):
+            await asyncio.wait_for(host.invoke(command, request), timeout=2)
+        assert not entered.is_set()
+
+    asyncio.run(scenario())
+
+
+def test_oversized_source_budget_is_a_json_refusal(environment, tools, monkeypatch, capsys):
+    _, _, initial, _, _, _ = environment
+    host, _, _ = tools
+    _, loaded = invoke_cli(host, "load", {"number": 42, "expected_current": initial["id"], "budget_seconds": 60}, monkeypatch, capsys)
+    code, value = invoke_cli(host, "source", {
+        "number": 42, "generation_id": loaded["result"]["descriptor"]["id"],
+        "budget_seconds": 10**400,
+    }, monkeypatch, capsys)
+    assert code == 1 and value["effect_completion"] == "not_inferred"
