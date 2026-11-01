@@ -55,6 +55,9 @@ profiles and `--list-models`. It creates one owned session with explicit
 discovery-only roots, configuration/file-hook discovery disabled, no configured
 MCP servers, no custom agents and no tools. It never sends a prompt or starts a
 task, and retains the zero-forwarding interceptor as a guard. The output contains
+HTTP/WebSocket attempt counts recorded before ownership, parsing or transport
+refusals; even a caught refusal invalidates discovery-only behavior. Capture
+counts remain separate from attempt counts. It also contains
 counts, native source categories and a full-descriptor digest, not skill text
 or paths. Empty catalogs remain incomplete. Explicit roots need not preserve
 the foreground's plugin qualification, precedence or managed disables:

@@ -10,6 +10,7 @@ let sdkDirectory, root, runtimePath, modelsOnly = false, catalogOnly = false;
 let skillDirectories = [], profile = {}, home, workspace;
 let sdk, client, config;
 const requests = [], sessions = [], taskOwners = [], owned = new Set();
+const requestAttempts = { http: 0, webSocket: 0 };
 let heldRequestResolve;
 const heldRequest = new Promise(resolve => { heldRequestResolve = resolve; });
 const report = {
@@ -105,7 +106,8 @@ try {
             args: ["--no-auto-update", "--no-remote"],
         }),
         ...(!modelsOnly ? {
-            requestHandler: syntheticHandler(sdk.CopilotRequestHandler, owned, requests, heldRequestResolve),
+            requestHandler: syntheticHandler(sdk.CopilotRequestHandler, owned, requests, heldRequestResolve,
+                5000, kind => { requestAttempts[kind]++; }),
         } : {}),
         useLoggedInUser: true, logLevel: "none",
     });
@@ -265,6 +267,7 @@ finally {
     }
     catch (error) { report.cleanup.runtimeStopErrors.push(safeError(error)); }
     report.native.interceptedRequests = requests.length;
+    if (!modelsOnly) report.native.requestAttempts = { ...requestAttempts };
     if (!modelsOnly) report.native.catalog.providerCalls = { ...providerCalls };
     report.status = spikeStatus(report);
     console.log(JSON.stringify(report, null, 2));

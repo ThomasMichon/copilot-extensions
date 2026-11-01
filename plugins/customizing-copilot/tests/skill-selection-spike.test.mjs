@@ -160,10 +160,14 @@ test("aggregate status cannot conceal failed, unfinished or unsettled arms and c
     report.cleanup.abortErrors.push("synthetic abort failure");
     assert.equal(spikeStatus(report), "failed");
     const discovery = { mode: "catalog-discovery", status: "catalog-only",
-        native: { interceptedRequests: 0 }, forwardedModelRequests: 0, cleanup: { runtimeStopped: true } };
+        native: { interceptedRequests: 0, requestAttempts: { http: 0, webSocket: 0 } },
+        forwardedModelRequests: 0, cleanup: { runtimeStopped: true } };
     assert.equal(spikeStatus(discovery), "catalog-only");
     assert.equal(spikeStatus({ ...discovery, native: { interceptedRequests: 1 } }), "failed");
     assert.equal(spikeStatus({ ...discovery, forwardedModelRequests: undefined }), "failed");
+    for (const requestAttempts of [{ http: 1, webSocket: 0 }, { http: 0, webSocket: 1 }, undefined]) {
+        assert.equal(spikeStatus({ ...discovery, native: { ...discovery.native, requestAttempts } }), "failed");
+    }
 });
 test("expired or unobserved frozen boundary is unavailable, not a brief fallback", async () => {
     await assert.rejects(collectHistory({ read: async () => ({ cursorStatus: "expired" }) }), /expired/);
@@ -302,12 +306,18 @@ test("Responses input and buffered/SSE output stay synthetic without a chat fall
 });
 test("unowned/unsupported/budget-exhausted requests cannot forward or capture", async () => {
     const captures = [];
-    const handler = syntheticHandler(NeverForward, new Set(["own"]), captures);
+    const attempts = { http: 0, webSocket: 0 };
+    const handler = syntheticHandler(NeverForward, new Set(["own"]), captures, undefined, undefined,
+        kind => { attempts[kind]++; });
     await assert.rejects(handler.sendRequest(request("foreign"), { sessionId: "foreign" }), /unowned/);
     await assert.rejects(handler.openWebSocket(), /does not forward/);
     captures.length = 16;
     await assert.rejects(handler.sendRequest(request("own"), { sessionId: "own" }), /allowance/);
     assert.equal(captures.length, 16);
+    captures.length = 0;
+    await assert.rejects(handler.sendRequest({ json: async () => { throw new Error("parse failure"); } },
+        { sessionId: "own" }), /parse failure/);
+    assert.deepEqual(attempts, { http: 3, webSocket: 1 });
 });
 test("capture allowance reserves concurrent body reads and releases failed parsing", async () => {
     const captures = Array.from({ length: 15 }, () => ({}));
@@ -453,6 +463,14 @@ const fakeSdk = `
             return response.json();
         }
         async createSession(config) {
+            if (this.scenario === "catalog-http" || this.scenario === "catalog-websocket") {
+                try {
+                    if (this.scenario === "catalog-http") {
+                        await this.options.requestHandler.sendRequest(
+                            new Request("https://synthetic.invalid/model"), { sessionId: "unowned" });
+                    } else await this.options.requestHandler.openWebSocket();
+                } catch { this.trace.refusalCaught = true; }
+            }
             const id = "session-" + ++this.sequence;
             this.trace.created.push(id);
             return this.makeSession(id, config);
@@ -542,17 +560,23 @@ test("catalog-only orchestration cannot dispatch, load other discovery or omit o
     await writeFile(join(sdk, "package.json"), '{"type":"module"}');
     await writeFile(join(sdk, "index.js"), fakeSdk);
     const runner = fileURLToPath(new URL("../scripts/run-skill-selection-spike.mjs", import.meta.url));
-    for (const scenario of ["catalog", "catalog-empty"]) {
+    for (const scenario of ["catalog", "catalog-empty", "catalog-http", "catalog-websocket"]) {
         const fixture = join(root, scenario);
         const { stdout } = await promisify(execFile)(process.execPath,
             [runner, sdk, fixture, "--catalog-only", "--skill-directory", sdk],
             { windowsHide: true, timeout: 3000 });
         const report = JSON.parse(stdout);
         const trace = JSON.parse(await readFile(join(fixture, "owned-home", "fake-witness.json"), "utf8"));
-        assert.equal(report.status, scenario === "catalog" ? "catalog-only" : "incomplete");
+        assert.equal(report.status, scenario === "catalog" ? "catalog-only"
+            : scenario === "catalog-empty" ? "incomplete" : "failed");
         assert.equal(report.native.catalog.foregroundScopeEquivalent, null);
         assert.equal(report.native.interceptedRequests, 0);
         assert.equal(report.forwardedModelRequests, 0);
+        assert.deepEqual(report.native.requestAttempts, {
+            http: scenario === "catalog-http" ? 1 : 0,
+            webSocket: scenario === "catalog-websocket" ? 1 : 0,
+        });
+        if (scenario.startsWith("catalog-") && scenario !== "catalog-empty") assert(trace.refusalCaught);
         assert.deepEqual(report.native.catalog.providerCalls, { list: 0, read: 0 });
         assert(!stdout.includes("private"));
         assert.equal(trace.created.length, 1);

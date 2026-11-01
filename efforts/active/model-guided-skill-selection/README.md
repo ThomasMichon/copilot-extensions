@@ -362,3 +362,14 @@ owned-session alternative or name the SDK dependency before adopting it.
 - Foreground-catalog equivalence, real matched quality/cost comparison and the
   exposed selector remain open. Do not reconstruct plugin identities to make
   this discovery witness appear equivalent.
+
+### 2026-11-01 - Request attempts distinguished from successful captures
+
+- The current review found that caught HTTP ownership/parsing refusals and
+  refused WebSocket attempts could leave the successful-capture count at zero.
+  Count every interceptor invocation before validation and retain that count
+  separately from parsed, attributed captures.
+- Discovery-only status requires known zero HTTP and WebSocket attempts.
+  Focused fake-runtime controls deliberately catch refusals and continue
+  catalog discovery; the observation must fail rather than report no traffic.
+  The bounded helper packet passes with the corrected guard.

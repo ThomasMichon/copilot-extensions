@@ -48,6 +48,7 @@ export function spikeStatus(report) {
     if (cleanup?.runtimeStopped === false) return "incomplete";
     if (report.mode === "catalog-discovery") {
         return report.native.interceptedRequests === 0 && report.forwardedModelRequests === 0
+            && report.native.requestAttempts?.http === 0 && report.native.requestAttempts?.webSocket === 0
             ? report.status : "failed";
     }
     if (report.mode === "model-enumeration") return report.status;
@@ -268,10 +269,11 @@ export async function deadline(promise, ms = 15000) {
 }
 
 /** Build a synthetic-only public request interceptor; no inherited forwarding path is called. */
-export function syntheticHandler(Base, owned, requests, onHeld = () => {}, holdMs = 5000) {
+export function syntheticHandler(Base, owned, requests, onHeld = () => {}, holdMs = 5000, onAttempt = () => {}) {
     let pendingBodies = 0;
     return new class extends Base {
         async sendRequest(request, context) {
+            onAttempt("http");
             if (!owned.has(context.sessionId)) throw new Error("unowned model request refused");
             if (requests.length + pendingBodies >= 16) throw new Error("synthetic request allowance exhausted");
             pendingBodies++;
@@ -333,6 +335,9 @@ export function syntheticHandler(Base, owned, requests, onHeld = () => {}, holdM
             return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(end)}\n\ndata: [DONE]\n\n`,
                 { headers: { "Content-Type": "text/event-stream" } });
         }
-        async openWebSocket() { throw new Error("synthetic-only witness does not forward WebSocket requests"); }
+        async openWebSocket() {
+            onAttempt("webSocket");
+            throw new Error("synthetic-only witness does not forward WebSocket requests");
+        }
     }();
 }
