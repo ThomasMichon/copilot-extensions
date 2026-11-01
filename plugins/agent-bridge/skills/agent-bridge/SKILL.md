@@ -127,9 +127,9 @@ names for your environment.
   A dispatched worker may be embodied through agent-bridge, but the queue owns
   the task and agent-bridge owns only the live conversation transport.
 
-For generic task decomposition and the decision to delegate at all, use
-**`delegation-guidance:delegating-work`**. For dedup-safe open-ended task
-selection, use **`agent-dispatch:pick-and-claim`**.
+These are transport and durable-state distinctions, not a policy on whether
+arbitrary work should be delegated. For explicitly requested dedup-safe
+open-ended task selection, use **`agent-dispatch:pick-and-claim`**.
 
 ### Relay Chain Pattern
 

@@ -26,6 +26,13 @@ After retiring its writers, a POSIX caller may use `finish(stop_at_idle=True)`
 to drain available bytes without waiting for EOF from an escaped daemon that
 retained an otherwise idle pipe. This never authorizes killing that daemon.
 
+Importing the synchronous package and portable daemon registry does not load
+`ctypes` or a native library. Platform operations load their native bindings
+when needed; the Windows Job accounting layout is initialized once on native
+attribute access. Source-only bundles must retain `_windows_job_types.py`
+alongside the package, including when they load verified resource bytes into a
+private package namespace.
+
 `agent_procutil.process_retirement.PinnedProcess` is a finite external-process
 primitive for application-owned incumbent retirement on Windows and Linux.
 It validates the original birth against a retained process handle/pidfd,
@@ -69,8 +76,9 @@ arbitrary third-party output.
 ### Compiler-free migration boundary
 
 `daemon_instances.ps1` uses the shared standard-library Python owner. The
-compiled `native_daemon.ps1` and `native_owned.ps1` process launchers below
-remain separate migration boundaries.
+compiled `native_daemon.ps1` launcher below remains a separate migration
+boundary. `native_owned.ps1` delegates finite process execution to the same
+original-shell-owned Python transport.
 Python is an existing harness prerequisite owned by machine provisioning;
 a cold plugin runtime does not authorize another Python download or a
 helper-owned interpreter installation.
@@ -174,12 +182,12 @@ or completion was published, and the same exact handle balance is restored;
 it does not infer abort custody from a nonzero process exit. See Windows'
 [last-Job-handle termination contract](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects#managing-job-objects).
 
-### Existing compiled entrypoints
+### Daemon and finite-process entrypoints
 
-The packaged `native_daemon.ps1` and `native_owned.ps1` retain compiled process
-creation/control while their compiler-free replacements remain open. Their
-instance binding now requires setup-provided Python even before a plugin
-runtime exists. These are internal
+The packaged `native_daemon.ps1` retains compiled process creation/control
+while its compiler-free replacement remains open. `native_owned.ps1` uses the
+existing shared Python atomic Job owner. Both require setup-provided Python
+even before a plugin runtime exists. These are internal
 process primitives, not an installer, a request queue, an arbitrary-command
 installation CLI or a new lifecycle owner. A bootstrap must first validate
 its fixed source/recipe, acquire the canonical operation lock, and journal
@@ -231,14 +239,35 @@ windowless child and deliberately retains the caller's Job.
 stderr directly into the append-only log. It atomically assigns the suspended
 child to a strict kill-on-close Job using `PROC_THREAD_ATTRIBUTE_JOB_LIST`,
 inherits only its two declared stdio handles, and never permits breakaway.
+The startup thread handle must close successfully before spawn returns.
+A close failure retires the owned target and retains the original native
+objects as explicit uncertainty, without automatically retrying that handle.
 Return preserves the root's exit status only after every Job writer exits;
 root exit alone is not completion. Timeout and failure terminate and observe
-the same tree. `NativeOwnedProcessException.CleanupConfirmed` distinguishes
-attested settlement from an unresolved cleanup failure. A consumer must keep
+the same tree. The original shell's complete environment and argument array
+cross its authenticated private pipe; only that shell's Job scope metadata is
+extended, never the helper's private scopes. The helper is private to the
+original shell, not an independently installed daemon or another inventory.
+
+The compiler-free adapter preserves signed 32-bit native exit status. Failure
+uses the standard exception's `Data['CleanupConfirmed']` Boolean instead of
+emitting the former `NativeOwnedProcessException` interop type. True requires
+actual target-Job retirement; missing or non-Boolean evidence is unconfirmed.
+The helper retains exact process/Job objects on uncertain cleanup and fences
+later requests. Runspace cancellation retires unfinished request custody in
+`finally`, even when the shell bypasses `catch`. A consumer must keep
 an interrupted fence on uncertainty or owner death, not infer settlement from
 the operation lock becoming free.
+An append-log close failure cannot overwrite the original native outcome or
+upgrade unconfirmed retirement. Both errors remain explicit and the exact
+native references survive. A failed log object is retained and fences later
+requests even when target retirement itself was confirmed.
+Import is inert and refuses an already-loaded compiled owned-process adapter
+before replacing its function. Upgrade or rollback uses a fresh PowerShell
+process with a coherent source archive, not live guard migration. Python is
+selected normally from PATH without attestation or acquisition.
 
-The native fixtures exercise actual stock Windows PowerShell, canonical
+The native fixtures exercise actual Windows PowerShell and Core, canonical
 Python/native lock contention, caller-Job closure, contained controls,
 descendant settlement and owner death. The explicit
 `PROCUTIL_NATIVE_DAEMON_LIFETIME=1` lane runs two production and two contained
@@ -249,6 +278,11 @@ The cleanup controls also force a verified pre-acknowledgement refusal,
 an untrusted PID frame, and a still-live launcher: only an authenticated,
 successfully handle-pinned worker may be terminated, and both worker and
 launcher exit must be observed before cleanup is confirmed.
+`PROCUTIL_NATIVE_OWNED_LIFETIME=1` separately selects the finite runner's
+two-cycle caller-loss, helper-loss and runspace-cancellation matrix through
+normal and test-venv PATH Python. These compiler-free source changes still
+require fresh source-bound native and desktop qualification; older compiled
+runner or source-archive results are not their acceptance.
 
 ```python
 import subprocess

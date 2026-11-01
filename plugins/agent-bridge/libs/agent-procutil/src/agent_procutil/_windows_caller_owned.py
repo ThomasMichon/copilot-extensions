@@ -255,6 +255,7 @@ class _Process:
         self.args = argv
         self.pid = info.dwProcessId
         self._handle = info.hProcess
+        self._thread_handle = info.hThread
         self.stdin, self.stdout, self.stderr = streams
         self.returncode = None
 
@@ -285,7 +286,14 @@ class _Process:
         if self.poll() is None and not _api().TerminateProcess(self._handle, 1):
             raise ctypes.WinError(ctypes.get_last_error())
 
+    def close_thread(self) -> None:
+        if self._thread_handle:
+            if not _api().CloseHandle(self._thread_handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+            self._thread_handle = None
+
     def close(self):
+        self.close_thread()
         if self._handle:
             if not _api().CloseHandle(self._handle):
                 raise ctypes.WinError(ctypes.get_last_error())
@@ -320,7 +328,10 @@ def spawn(argv: list[str], **kwargs):
         raise ValueError("allow_breakaway must be a boolean")
     job_name = _job_scopes.new_name()
     environment = _environment_block(
-        _job_scopes.child_environment(kwargs.get("env"), append=job_name),
+        _job_scopes.child_environment(
+            kwargs.get("env"), append=job_name,
+            inherit_current=kwargs.get("inherit_job_scopes", True),
+        ),
     )
     cwd = os.fspath(kwargs["cwd"]) if kwargs.get("cwd") is not None else None
     if cwd is not None and (not isinstance(cwd, str) or "\0" in cwd):
@@ -358,6 +369,13 @@ def spawn(argv: list[str], **kwargs):
                         os.close(parent)
                         raise
                     parent_streams.callback(stream.close)
+                elif name == "stderr" and kwargs[name] == subprocess.STDOUT:
+                    child = child_fds[1]
+                    stream = None
+                elif kwargs[name] not in (subprocess.DEVNULL, None):
+                    child = os.dup(kwargs[name].fileno())
+                    resources.callback(os.close, child)
+                    stream = None
                 else:
                     child = os.open(
                         os.devnull, (os.O_RDONLY if index == 0 else os.O_WRONLY) | os.O_BINARY,
@@ -366,7 +384,9 @@ def spawn(argv: list[str], **kwargs):
                     stream = None
                 child_fds.append(child)
                 streams.append(stream)
-            handles = (wintypes.HANDLE * 3)(*(msvcrt.get_osfhandle(fd) for fd in child_fds))
+            stdio = [msvcrt.get_osfhandle(fd) for fd in child_fds]
+            inherited = list(dict.fromkeys(stdio))
+            handles = (wintypes.HANDLE * len(inherited))(*inherited)
             jobs = (wintypes.HANDLE * 1)(handle)
             size = ctypes.c_size_t()
             kernel.InitializeProcThreadAttributeList(None, 2, 0, ctypes.byref(size))
@@ -387,7 +407,7 @@ def spawn(argv: list[str], **kwargs):
             startup.StartupInfo.cb = ctypes.sizeof(startup)
             startup.StartupInfo.dwFlags = 0x100 | 1
             startup.StartupInfo.hStdInput, startup.StartupInfo.hStdOutput, \
-                startup.StartupInfo.hStdError = handles
+                startup.StartupInfo.hStdError = stdio
             startup.lpAttributeList = ctypes.cast(attributes, wintypes.LPVOID)
             command = ctypes.create_unicode_buffer(subprocess.list2cmdline(argv))
             try:
@@ -403,24 +423,37 @@ def spawn(argv: list[str], **kwargs):
                 if kernel.ResumeThread(info.hThread) == 0xFFFFFFFF:
                     raise ctypes.WinError(ctypes.get_last_error())
             finally:
-                if info.hThread:
-                    kernel.CloseHandle(info.hThread)
+                if process is not None:
+                    process.close_thread()
+                elif info.hThread:
+                    if not kernel.CloseHandle(info.hThread):
+                        raise ctypes.WinError(ctypes.get_last_error())
+                    info.hThread = None
             # Transfer only parent streams and native custody, never inheritable child handles.
             parent_streams.pop_all()
             return process, job
-    except BaseException:
+    except BaseException as error:
         if process is None and info.hProcess:
             process = _Process(argv, info, streams)
         if process is not None:
             try:
                 job.terminate_and_wait(2.0)
                 process.wait(2.0)
-            except BaseException as error:
+            except BaseException as cleanup:
+                raise OwnedCleanupError(process, job) from cleanup
+            try:
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
+            except BaseException as cleanup:
+                raise OwnedCleanupError(process, job) from cleanup
+            if process._thread_handle:
+                # Keep the failed native handle, rather than retrying an uncertain close.
                 raise OwnedCleanupError(process, job) from error
-            for stream in (process.stdin, process.stdout, process.stderr):
-                if stream is not None:
-                    stream.close()
-            process.close()
+            try:
+                process.close()
+            except BaseException as cleanup:
+                raise OwnedCleanupError(process, job) from cleanup
         else:
             job.close()
         raise

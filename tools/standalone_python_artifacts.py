@@ -87,8 +87,20 @@ def injected_resources(component: str, root: Path) -> dict[str, Path]:
         result.update({
             package + "_runtime_launcher.py": root / "libs" / "installer-engine" / "runtime_launcher.py",
             package + "_installer_process.py": root / "libs" / "installer-engine" / "installer_engine_process.py",
-            package + "_construction_procutil.py": (
+            package + "_construction_procutil/__init__.py": (
                 root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py"
+            ),
+            package + "_construction_procutil/_job_scopes.py": (
+                root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "_job_scopes.py"
+            ),
+            package + "_construction_procutil/_windows_job_types.py": (
+                root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "_windows_job_types.py"
+            ),
+            package + "_construction_procutil/streaming.py": (
+                root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "streaming.py"
+            ),
+            package + "_construction_procutil/_output_relay.py": (
+                root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "_output_relay.py"
             ),
         })
     else:

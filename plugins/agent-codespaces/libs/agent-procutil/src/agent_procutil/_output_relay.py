@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import os
 import queue
 import subprocess
@@ -32,8 +33,23 @@ class ByteRelay:
         self.last_progress = 0.0
         self._ending = False
         self._closed = False
+        retained = globals().get("_retained_source_bytes")
+        if retained is None:
+            command = [sys.executable, "-I", "-B", str(Path(__file__).resolve())]
+        else:
+            if type(retained) is not bytes or not 0 < len(retained) <= 1024 * 1024:
+                raise ValueError("retained output relay source is invalid")
+            encoded = base64.b64encode(retained).decode("ascii")
+            bootstrap = (
+                "import base64\n"
+                "__file__='_output_relay.py'\n"
+                "exec(compile(base64.b64decode(" + repr(encoded) + ",validate=True),__file__,'exec'))"
+            )
+            if len(bootstrap.encode("utf-16-le")) // 2 > 30000:
+                raise ValueError("retained output relay exceeds its command budget")
+            command = [sys.executable, "-I", "-B", "-c", bootstrap]
         self.process, self.job = spawn_sync_in_kill_on_close_job(
-            [sys.executable, "-I", "-B", str(Path(__file__).resolve()), "--copy", str(os.getpid())],
+            [*command, "--copy", str(os.getpid())],
             require_job=os.name == "nt", allow_breakaway=False,
             stdin=subprocess.PIPE, stdout=descriptor, stderr=subprocess.PIPE,
             close_fds=True, **no_window_kwargs(),

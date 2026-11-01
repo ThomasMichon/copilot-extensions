@@ -180,6 +180,26 @@ def test_lifecycle_source_archive_is_deterministic_and_contains_only_python():
         assert archive.read("agent_procutil/_daemon_instance_linux.py") == (
             SCRIPT.parents[1] / "libs/agent-procutil/src/agent_procutil/_daemon_instance_linux.py"
         ).read_bytes()
+        assert archive.read("agent_procutil/_windows_job_types.py") == (
+            SCRIPT.parents[1] / "libs/agent-procutil/src/agent_procutil/_windows_job_types.py"
+        ).read_bytes()
+
+
+def test_lifecycle_source_archive_requires_native_accounting_dependency(tmp_path):
+    from daemon_lifecycle_assets import lifecycle_archive
+
+    package = tmp_path / "libs/agent-procutil/src/agent_procutil"
+    package.mkdir(parents=True)
+    for name in (
+        "__init__.py", "daemon_instances.py", "_daemon_instance_cli.py",
+        "_daemon_instance_linux.py", "_daemon_instance_clock.py",
+        "_daemon_instance_store.py", "_linux_pidfd.py",
+    ):
+        (package / name).write_bytes(b"# source-only closure fixture\n")
+    with pytest.raises(ValueError, match="package is incomplete"):
+        lifecycle_archive(tmp_path)
+    (package / "_windows_job_types.py").write_bytes(b"# retained native accounting source\n")
+    assert lifecycle_archive(tmp_path)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX source archive custody")

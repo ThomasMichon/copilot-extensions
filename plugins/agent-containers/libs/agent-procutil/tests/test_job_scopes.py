@@ -1,6 +1,7 @@
 """Native ownership identities, scoped admission and settled refusal controls."""
 
 from contextlib import contextmanager
+import ctypes
 import os
 import subprocess
 from unittest.mock import Mock
@@ -75,7 +76,8 @@ def test_unavailable_scope_closes_already_pinned_scopes(monkeypatch):
     kernel = Mock()
     kernel.OpenJobObjectW.side_effect = [10, 0]
     monkeypatch.setattr(scopes, "_api", lambda: kernel)
-    monkeypatch.setattr(scopes.ctypes, "WinError", lambda code: OSError("scope unavailable"), raising=False)
+    monkeypatch.setattr(ctypes, "WinError", lambda code: OSError("scope unavailable"), raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
     environment = {scopes.ENVIRONMENT_KEY: ";".join((scopes.new_name(), scopes.new_name()))}
     with pytest.raises(OSError, match="unavailable"):
         with scopes.query_scopes(environment):

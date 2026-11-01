@@ -59,6 +59,7 @@ def _source(root, component):
             (ROOT / standalone.COMPONENTS[component] / "setup.py").read_bytes()
         )
         for path in standalone.injected_resources(component, root).values():
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"# controlled canonical runtime resource\n")
     return source
 

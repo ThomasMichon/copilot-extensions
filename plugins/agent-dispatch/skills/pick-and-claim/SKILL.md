@@ -1,22 +1,15 @@
 ---
 name: pick-and-claim
 description: >
-  Dedup-safe self-dispatch for open-ended "pick something and work on it"
-  prompts. Before starting freely-chosen work, atomically claim your pick on the
-  dispatch queue with a subject dedup_key, so two concurrent open-ended
-  agents don't land the same item. Use this whenever you (or several parallel
-  sessions) are told to choose your own work.
+  Dedup-safe self-dispatch through an explicitly adopted agent-dispatch queue.
+  Atomically claim a freely chosen subject so concurrent queue workers do not
+  land the same item. Use when explicitly requesting queue self-dispatch or
+  continuing that adopted workflow, not for arbitrary work selection, research,
+  a named task, ordinary delegation, or deciding whether to use agents.
   Trigger phrases include:
-  - 'pick something interesting'
-  - 'work on something'
-  - 'find something to do'
-  - 'grab something to work on'
-  - 'self-dispatch'
-  - 'claim something to work on'
-  - 'pick an issue and fix it'
-  - 'choose your own work'
-  - 'avoid duplicate work'
-  - 'pick up an effort and drive it'
+  - 'self-dispatch through agent-dispatch'
+  - 'pick and claim a queue task'
+  - 'resume queue self-dispatch'
 ---
 
 # Pick-and-Claim — dedup-safe open-ended self-dispatch
@@ -28,10 +21,9 @@ invoke it as `& "<agent-dispatch catalog argv[0]>" <args>`. If the catalog is
 missing, follow the single-installed-payload fallback in the `agent-dispatch`
 skill and fail on ambiguity.
 
-When you are told to **pick your own work** ("pick something interesting and work
-on it", "grab an issue", "pick up an effort and drive it") — especially when
-**several sessions run the same open-ended prompt at once** — you must avoid two
-agents landing the **same** subject. The queue's atomic claim is how.
+Within an explicitly adopted **queue self-dispatch** workflow, avoid two
+workers landing the **same** subject through the queue's atomic claim.
+This procedure does not require a queue for unrelated work selection.
 
 **The one rule: land your selection on an atomic claim keyed by the subject.**
 A sweep of what others are doing only helps you *pick better*; the **claim** is
@@ -159,8 +151,7 @@ such as `issue:owner/repo#42:reopen:<event-id>`.
 - The **`agent-dispatch`** skill — the full CLI, the nine-state lifecycle, worker
   identity, capability/affinity routing, and selector (`--require`/`--exclude`)
   matching. Its responsibility boundary distinguishes durable task-loop state
-  from live agent-bridge conversation. For generic task decomposition and the
-  decision to delegate at all, use
-  **`delegation-guidance:delegating-work`**.
+  from live agent-bridge conversation; it does not decide whether arbitrary work
+  should be delegated.
 - `<agent-dispatch catalog argv[0]> create --help` — the `--claim`, `--dedup-key`, `--require`, and
   `--exclude` flags.

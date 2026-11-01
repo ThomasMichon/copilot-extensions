@@ -30,6 +30,7 @@ def lifecycle_archive(repo: Path) -> bytes:
         "__init__.py", "daemon_instances.py", "_daemon_instance_cli.py",
         "_daemon_instance_linux.py", "_daemon_instance_clock.py",
         "_daemon_instance_store.py", "_linux_pidfd.py",
+        "_windows_job_types.py",
     )):
         raise ValueError("lifecycle source package is incomplete")
     output = io.BytesIO()

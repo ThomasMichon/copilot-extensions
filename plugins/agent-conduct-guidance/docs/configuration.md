@@ -1,7 +1,8 @@
 # Conduct configuration
 
 Conduct is payload guidance, not a new service/runtime. Model routing is
-optional, inert input to delegated-work selection. Its complete canonical
+an optional, explicitly invoked inert model lookup, not a delegation strategy.
+Its complete canonical
 schema is [`model-routing.schema.json`](../schemas/model-routing.schema.json),
 with a [portable example](../examples/model-routing.json) and the native
 [`resolve-model-routing.py`](../scripts/resolve-model-routing.py) reader.
@@ -86,10 +87,12 @@ hold, arms a candidate trial, satisfies a missing constraint or demonstrates
 a model. Invalid operator configuration suppresses lower repository choices;
 repository+machine preferences do not bypass that fail-closed boundary.
 
-Optional `--budget-posture` and `--budget-at` use the
-[budget advice reader](../scripts/budget_routing.py). Posture is owner-issued
-read-data, never model qualification, permission or automatic worker scaling.
-Advice may refine an already eligible choice; freshness/error boundaries remain.
+The former `--budget-posture`, `--budget-at`, and `decision.budgetAdvice`
+integration is retired; these flags are rejected rather than silently ignored.
+Use budget-guidance's independent
+[monthly economy information](../../budget-guidance/docs/configuration.md#optional-monthly-economy-advice)
+instead. No budget lookup is required before honoring a request, and that
+information does not select models or delegation strategies.
 
 ## Other files, reload and exclusions
 

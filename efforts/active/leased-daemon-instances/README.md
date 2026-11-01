@@ -7,7 +7,8 @@
 - **Status:** Active
 - **Original scope completed:** 2026-10-25
 - **Source:** #8720 (original implementation merged); compiler-free amendment
-  reviewed in #9120; Linux replacement merged in #9129, Windows replacement open
+  reviewed in #9120; Linux replacement merged in #9129, PowerShell instance
+  adapter merged in #9628; remaining Windows launchers open
 - **Vision:** `visions/plugin-services/README.md` - `attributed-daemon-instances`
 - **Umbrella issue:** #8403
 
@@ -169,8 +170,8 @@ their existing owners and guarantees.
   remains a separate implementation and qualification boundary.
 - [x] Qualify the compiler-free PowerShell instance adapter and its changed
   source archive: 60 native instance, three installer and 44 SDK cases pass
-  with exact source, desktop and retirement reconciliation. Current-head
-  review/CI/merge remain separate gates; see the linked implementation journal.
+  with exact source, desktop and retirement reconciliation. Merged in #9628
+  after current-head approval and required CI; see the implementation journal.
 - [ ] Migrate the remaining thin shell and PowerShell daemon/owned-process
   entrypoints through
   setup-provided PATH Python without interpreter attestation; preserve Windows
@@ -221,12 +222,16 @@ runtime rollout was authorized or performed.
 The compiler-free SDK custody prerequisite subsequently merged in #9354.
 Its native packet does not replace the retained compiled PowerShell
 daemon-instance entrypoint or qualify its admission, expiry and reconciliation.
+The subsequent instance-adapter migration and its fresh 107-case qualification
+merged in #9628. The retained daemon/owned-process launchers and complete
+compiler-free construction/lifecycle qualification remain open.
 
 ## Journal
 
 All original entries and qualification details are retained in dated sidecars,
 newest first:
 
+- [2026-10-30 - compiler-free finite process custody](../lean-runtime-dependencies/journal/2026/10.30%20finite-owned-process.md)
 - [2026-10-30 - compiler-free PowerShell instance custody](../lean-runtime-dependencies/journal/2026/10.30%20powershell-instance-custody.md)
 - [2026-10-28 - SDK caller bounds and native qualification](../lean-runtime-dependencies/journal/2026/10.28%20sdk-caller-qualification.md)
 - [2026-10-26 - compiler-free amendment](journal/2026/10.26%20compiler-free-amendment.md)

@@ -125,6 +125,24 @@ def test_missing_config_is_explicitly_unavailable(tmp_path, capsys):
     assert posture["availability"] == "unavailable"
     assert posture["calculated"] is None
     assert "consumption" in posture["missing_fields"]
+    assert posture["economy_advice"]["suggestions"] == []
+
+
+def test_overspent_status_suggests_optional_economy_without_refusing_the_read(tmp_path, capsys):
+    config = tmp_path / "config.json"
+    _write_config(config)
+    value = json.loads(config.read_text(encoding="utf-8"))
+    value["adapters"][0]["reading"]["consumption"] = 125
+    config.write_text(json.dumps(value), encoding="utf-8")
+    args = ["status", "--config", str(config), "--at", "2026-09-05T19:00:00Z"]
+    assert main([*args, "--json"]) == 0
+    posture = json.loads(capsys.readouterr().out)
+    assert posture["calculated"]["warning_band"] == "overspent"
+    assert "routing_advice" not in posture
+    assert main(args) == 0
+    human = capsys.readouterr().out
+    for suggestion in posture["economy_advice"]["suggestions"]:
+        assert suggestion in human
 
 
 def test_invalid_config_is_a_machine_readable_error(tmp_path, capsys):

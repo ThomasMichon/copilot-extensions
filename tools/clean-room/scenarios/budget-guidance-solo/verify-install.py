@@ -95,6 +95,6 @@ with tempfile.TemporaryDirectory(prefix="budget-static-") as temporary:
     # Posture v1 deliberately serializes calculated Decimal values as strings.
     assert posture["calculated"]["remaining"] == "680"
     assert posture["fields"]["allowance"]["selected"]["source"] == "manual-example"
-    assert posture["routing_advice"]["availability"] == "available"
+    assert posture["economy_advice"]["availability"] == "available"
 
 print("installed source/version identity and offline posture verified")
