@@ -150,8 +150,7 @@ def test_changed_cohort_fences_original_writes_but_recovers_accepted_results(q):
         _publish(q, published)
     with pytest.raises(TaskError, match="not in"):
         _publish(q, published, cohort=2)
-    with pytest.raises(TaskError, match="revision changed"):
-        _observe(q, initial)
+    assert _observe(q, initial) == observation
     assert observation.revision == 1
     assert q.pool_catalog_snapshot() == before
     assert q.pool_catalog_snapshot(now=140.0).scopes[0].valid_until == 130.0
