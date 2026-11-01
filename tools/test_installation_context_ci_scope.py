@@ -292,6 +292,9 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
         },
         "agent-machines": {"tests/test_fleet_update.py", "tests/test_self_update.py"},
         "update-driver": {"tests/test_core.py", "tests/test_legacy_record_readback.py"},
+        "agent-vault": {
+            "tests/test_service_launch.py", "tests/test_install_service_failures.py",
+        },
         "runtime-source": {
             "tests/test_runtime_source_native.py", "tests/test_source_snapshot_publication.py",
         },

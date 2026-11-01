@@ -583,13 +583,24 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py payload-invocation --allow-explicit-tiers
           --test-file tests/test_generate.py
-          -k generated_shim_external_cache_cold_and_warm
+          -k "generated_shim_external_cache_cold_and_warm or
+          posix_shim_preserves_args_exit_and_project_cwd or
+          multi_command_shim_dispatches_its_own_module"
       - name: Qualify global Worktrees frontdoor cache isolation
         if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-
           python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
           --test-file tests/test_global_binstub_publication.py
           -k global_frontdoor_keeps_import_cache
+      - name: Qualify Vault service launcher cache isolation
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-vault --allow-explicit-tiers
+          --test-file tests/test_service_launch.py
+          --test-file tests/test_install_service_failures.py
+          -k "vendored_service_imports_its_own_package or
+          generated_task_launcher_routes_late_imports or
+          conditional_service_publication_preserves_documented_best_effort"
       - name: Qualify progress-renewed updater inactivity and tree settlement
         if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-

@@ -25,6 +25,11 @@ idempotent without mistaking another build's healthy ping for currentness.
 Replacement compares immutable build identities, not numerical version order.
 The installer's separate explicit-downgrade policy is unchanged.
 
+CLI service launches, the Windows task launcher and the existing POSIX service
+unit keep enabled Python bytecode in the owning home's `cache/python`, outside
+immutable slots. Late private-handoff imports follow that same policy; Python
+bytecode is separate from credential caches and does not change auth expiry.
+
 The newcomer binds a fresh endpoint beside a live predecessor and atomically
 publishes it through the existing native-transport rendezvous. TCP can use an
 ephemeral port while the predecessor owns the legacy port. After acquiring work

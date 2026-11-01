@@ -5029,7 +5029,10 @@ def test_spawn_detached_uses_console_python_windowless_daemon(monkeypatch):
     expected_python, expected_env = direct_monitor_python(m.sys.executable)
     assert seen["argv"][0] == expected_python
     assert all(seen["env"][key] == value for key, value in expected_env.items())
-    assert seen["argv"][1:] == ["-m", "agent_worktrees", "status-monitor"]
+    assert seen["argv"][1:] == [
+        *agent_procutil.python_cache_args(m.cfg.install_dir()),
+        "-m", "agent_worktrees", "status-monitor",
+    ]
     # Windows: periodic console children inherit one hidden console tree.
     assert seen["kwargs"]["console_children"] is True
     assert seen["env"]["SAFE_VALUE"] == "kept"

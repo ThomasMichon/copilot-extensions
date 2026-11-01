@@ -815,7 +815,7 @@ _install_service() {
             AGENT_VAULT_RUN_DIR="$RUN_DIR" \
             AGENT_VAULT_SOCKET="$SOCKET_PATH" \
             AGENT_VAULT_INSTALLATION_ID="$INSTALLATION_ID" \
-            "$LINK_PYTHON" -m agent_vault.service --export-handoff 2>/dev/null
+            "$LINK_PYTHON" -X "pycache_prefix=$INSTALL_DIR/cache/python" -m agent_vault.service --export-handoff 2>/dev/null
         )" || handoff_json=""
     fi
 
@@ -839,7 +839,7 @@ Environment=AGENT_VAULT_SYSTEMD_UNIT=$SYSTEMD_UNIT
 Environment=AGENT_VAULT_TASK_NAME=AgentVault${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}
 Environment=AGENT_VAULT_INSTALLATION_ID=$INSTALLATION_ID
 $PORT_ENV_LINE
-ExecStart=$LINK_PYTHON -m agent_vault.service --foreground --persistent --handoff-stdin
+ExecStart=$LINK_PYTHON -X "pycache_prefix=$INSTALL_DIR/cache/python" -m agent_vault.service --foreground --persistent --handoff-stdin
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR

@@ -17,7 +17,8 @@ Generated shims:
 - resolve the runtime only through the payload's canonical runtime resolver;
 - preserve caller arguments and child exit status;
 - send enabled Python bytecode caches to the resolved legacy state root's
-  `cache/python`, outside version slots (extended paths on Windows);
+  `cache/python`, outside version slots (extended paths for native Windows
+  interpreters, including Windows Git Bash);
 - self-provision only through the same payload's installer/snapshot;
 - never scan installed marketplaces or resolve a sibling command through
   `PATH`.

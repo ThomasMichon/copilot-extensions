@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from agent_procutil import no_window_kwargs
+from agent_procutil import no_window_kwargs, python_cache_args
 
 from agent_worktrees import project_command_templates
 
@@ -218,6 +218,7 @@ def test_selected_update_operation_refuses_implicit_posix_bootstrap(
     assert result.returncode == (19 if ready else 127), result.stderr.decode()
     if ready:
         assert _arguments(tmp / "python.args") == [
+            *python_cache_args(home / ".agent-worktrees"),
             "-m", "agent_worktrees", "--project", "sample", "update", *flags,
         ]
     else:

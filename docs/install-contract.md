@@ -2548,6 +2548,9 @@ redirect custody through selective native deletion. Its `--check` performs
 structural admission only; deletion repeats ownership, inventory, guards and
 current-user process attribution under custody. A matching deploy manifest is
 removed last and retained as retry proof on cleanup failure.
+An existing manifest is retained byte-for-byte. A stamped-only installation
+records untyped product retry evidence, never synthesizes command-publication
+ownership from its teardown admission.
 An explicit `--check --check-consumers` additionally acquires that removal
 custody and checks consumers before a non-daemon caller's first mutation;
 ordinary daemon adapters retain their owned service-STOP ordering. Finite

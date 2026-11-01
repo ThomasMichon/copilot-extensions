@@ -62,7 +62,7 @@ def _manifest(tmp_path: Path) -> Path:
     return path
 
 
-@pytest.mark.parametrize("kind", ["ps1", "cmd", "dispatcher"] if os.name == "nt"
+@pytest.mark.parametrize("kind", ["sh", "ps1", "cmd", "dispatcher"] if os.name == "nt"
                          else ["sh", "ps1", "dispatcher"])
 def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
     manifest = _manifest(tmp_path)
@@ -92,7 +92,7 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
         "$AgentRtPy = '" + str(python).replace("'", "''") + "'\n", encoding="utf-8",
     )
     (scripts / "resolve-runtime.sh").write_text(
-        "AGENT_RT_PY=" + shlex.quote(str(python)) + "\n", encoding="utf-8",
+        "AGENT_RT_PY=" + shlex.quote(str(python).replace("\\", "/")) + "\n", encoding="utf-8",
     )
     assert generator.process_manifest(manifest, check=False) == []
     shim = manifest.parent / "bin" / ("agent-example" + ("" if kind == "sh" else "." + kind))
@@ -120,7 +120,13 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
             )
         argv = [host, "-NoProfile", "-NonInteractive", "-File", str(shim)]
     else:
-        argv = ["sh", str(shim)]
+        if os.name == "nt":
+            git = shutil.which("git")
+            host = Path(git).parent.parent / "bin/bash.exe" if git else None
+            assert host and host.is_file(), "native Git Bash is required"
+            argv = [str(host), str(shim)]
+        else:
+            argv = ["sh", str(shim)]
     environment = dict(os.environ)
     child_env = {**environment, "USERPROFILE": str(profile), "HOME": str(profile)}
     child_env.pop("PYTHONDONTWRITEBYTECODE", None)
@@ -724,14 +730,12 @@ def _agent_machines_import_sources(payload: Path) -> list[str]:
         for name in ("plugin-resolve", "agent-procutil", "machine-transport", "remote-login-shell")
     ]
 def _dependency_materializer() -> ModuleType:
-    helper = (
-        REPO / "worktree-manager" / "src" / "worktree_manager"
-        / "_trusted_pointer_materializer.py"
-    )
+    helper = REPO / "tools" / "materialize_main.py"
     spec = importlib.util.spec_from_file_location("payload_dependency_materializer", helper)
     assert spec and spec.loader
     materializer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(materializer)
+    materializer.find_uv_editable_refs = materializer.uer.find_uv_editable_refs
     return materializer
 
 
@@ -761,7 +765,7 @@ def _stage_payload_dependencies(payload: Path, *, source_consumer: Path) -> None
         canonical_root=REPO,
         dest_root=payload,
     )
-    assert not any(line.startswith("SKIP ") for line in result), result
+    assert not any(line.startswith("SKIP ") for line in result), "\n".join(result)
     assert (payload / "libs" / "machine-transport" / "src" / "machine_transport").is_dir()
     assert (payload / "libs" / "remote-login-shell" / "src" / "remote_login_shell").is_dir()
 
@@ -2647,9 +2651,9 @@ def test_skill_catalog_references_name_payload_adopters() -> None:
             )
             composes_catalog = any(
                 (plugin_root / "scripts" / writer_name).is_file()
-                and "emit-command-catalog"
-                in (plugin_root / "scripts" / writer_name).read_text(
-                    encoding="utf-8"
+                and any(
+                    emitter in (plugin_root / "scripts" / writer_name).read_text(encoding="utf-8")
+                    for emitter in ("emit-command-catalog", "emit_command_catalog.py")
                 )
                 for writer_name in (
                     "write_session_guidance.py",
@@ -2728,7 +2732,10 @@ def test_posix_shim_preserves_args_exit_and_project_cwd(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 23
-    assert result.stdout.strip() == f"{project}|-m agent_example search two words"
+    assert result.stdout.strip() == (
+        f"{project}|-X pycache_prefix={home / '.agent-example/cache/python'} "
+        "-m agent_example search two words"
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
@@ -2982,7 +2989,10 @@ def test_multi_command_shim_dispatches_its_own_module(tmp_path: Path) -> None:
         text=True,
         check=True,
     )
-    assert result.stdout.strip() == "-m agent_example.helper two words"
+    assert result.stdout.strip() == (
+        f"-X pycache_prefix={home / '.agent-example/cache/python'} "
+        "-m agent_example.helper two words"
+    )
 
 
 def test_multi_command_traces_use_manifest_plugin_identity(tmp_path: Path) -> None:
