@@ -1033,14 +1033,14 @@ def test_trusted_pointer_read_failure_retains_last_known_set(monkeypatch, tmp_pa
     )
     first = sources.refresh(emit_warnings=False)
     pointer_file = pointer_base / "pointers.json"
-    original_read_text = Path.read_text
+    original_read_bytes = Path.read_bytes
 
     def deny_pointer(path, *args, **kwargs):
         if path == pointer_file:
             raise PermissionError("temporarily denied")
-        return original_read_text(path, *args, **kwargs)
+        return original_read_bytes(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", deny_pointer)
+    monkeypatch.setattr(Path, "read_bytes", deny_pointer)
     second = sources.refresh(emit_warnings=False)
 
     assert first.trusted_authority is ScanAuthority.COMPLETE
@@ -1282,14 +1282,14 @@ def test_human_doctor_reports_trusted_retention_possibility(
         REGISTRAR_DROPINS_DIR_ENV,
         str(tmp_path / "registrar.d"),
     )
-    original_read_text = Path.read_text
+    original_read_bytes = Path.read_bytes
 
     def deny_pointer(path, *args, **kwargs):
         if path == pointer_file:
             raise PermissionError("temporarily denied")
-        return original_read_text(path, *args, **kwargs)
+        return original_read_bytes(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", deny_pointer)
+    monkeypatch.setattr(Path, "read_bytes", deny_pointer)
     rc = main(["registrar", "doctor"])
     human = capsys.readouterr().out
 
