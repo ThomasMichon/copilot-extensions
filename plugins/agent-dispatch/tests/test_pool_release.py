@@ -438,3 +438,46 @@ def test_successor_wake_accounts_its_native_without_recounting_retired_predecess
         # not proof that historical effects have gone away.
         conn.execute(f"UPDATE {outbox} SET owner_session_id=NULL WHERE task_id=?", (t.id,))
         assert reservation_transport_accountable(conn, predecessor)
+
+
+@pytest.mark.parametrize("state", ["pending", "unknown"])
+@pytest.mark.parametrize("outbox", ["wake_outbox", "run_waiter_wakes"])
+@pytest.mark.parametrize("execution_machine", ["HOST-A", " host-a "])
+def test_mixed_case_wake_host_retains_retired_native_capacity(
+    q: TaskQueue, state: str, outbox: str, execution_machine: str,
+) -> None:
+    publish(q, pool())
+    t = task(q)
+    r, _ = place(q, t)
+    q.record_spawn_worktree(
+        r.key, "worktree", ownership="created", creating_host="host-a",
+        execution_machine=execution_machine, driver="cli",
+    )
+    q.record_spawn(r.key, session_handle="native", startup_complete=True, startup_revision=1)
+    q.start(t.id, "host-a/worktree", owner_session_id="native",
+            expected_generation=q.get(t.id).generation)
+    q.suspend(t.id, "host-a/worktree", reason="external wait")
+    if outbox == "wake_outbox":
+        q.resume(t.id, "host-a/worktree", wake_requested=True, wake_message="continue")
+    else:
+        waiter = q.register_run_waiter(
+            t.id, pid=123, host="host-a", start_token="synthetic-waiter",
+            resume_worktree="host-a/worktree", command=["synthetic-wait"],
+        )
+        q.recover_dead_run_waiter(
+            t.id, generation=waiter["generation"], reason="external",
+            message="continue", sender="recovery",
+        )
+    q.request_spawn_release(r.key)
+    q.retire_spawn(r.key, exact_absence=True)
+    with q._connect() as conn:
+        conn.execute(f"UPDATE {outbox} SET execution_send_state=? WHERE task_id=?", (state, t.id))
+        row = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (r.key,)).fetchone()
+        assert is_native_retired(row)
+        assert reservation_transport_accountable(conn, row)
+        assert reservation_accountable(conn, row)
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    with q._connect() as conn:
+        conn.execute(f"UPDATE {outbox} SET execution_send_state='not_sent' WHERE task_id=?", (t.id,))
+    assert place(q, task(q))[1]

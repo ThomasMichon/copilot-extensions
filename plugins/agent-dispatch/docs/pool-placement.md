@@ -46,7 +46,8 @@ retain older attempts even when the task's current assignment advances.
 Unresolved launch/resume/delivery sends consume the slot of their recorded
 reservation, not every predecessor in the same lineage. Wake sends retain
 capacity for their actual native/workspace target; missing native identity
-keeps matching workspace custody ambiguous. Admission still reconciles the
+keeps matching workspace custody ambiguous. Wake host matching uses the same
+strip/lower normalization as workspace validation. Admission still reconciles the
 entire task/exclusive lineage before any fresh execution.
 A terminal pool attempt enters the existing release/retirement path with
 `native_release_pending`, retaining its historical state rather than becoming

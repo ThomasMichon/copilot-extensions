@@ -1809,3 +1809,16 @@ changed Python lint, installation and documentation contracts pass. Broader
 legacy mixin typing is not claimed as qualified. Current-head review, actual
 merge, caller/startup-policy integration and every canonical parent/native
 gate remain open.
+
+### 2026-11-01 - Wake host normalization correction prepared
+
+Wake capacity ownership uses the same host normalization as pool workspace
+validation, so a matching pending/unknown native send remains accountable when
+the recorded execution host differs only in casing or surrounding whitespace.
+Eight owner/waiter controls record that host through the actual preparation
+boundary, reach affirmative start, retain transport capacity after native
+retirement and release it only after transport settlement.
+Final contained validation passed **1396 controls**, with one existing skip,
+across the same twenty-one selectors. The correction is source-only; current
+review/merge, caller integration and all canonical parent/native gates remain
+open.

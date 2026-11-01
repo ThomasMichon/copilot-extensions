@@ -131,6 +131,7 @@ def unresolved_wake_send(
 
 def reservation_wake_accountable(conn: sqlite3.Connection, reservation: sqlite3.Row) -> bool:
     """A wake targets a native/workspace, independently of reservation lineage."""
+    from .bridge_remote import normalize_host
     from .ordinary_native_bindings import reservation_native_identity
 
     native = reservation_native_identity(conn, reservation)
@@ -154,7 +155,7 @@ def reservation_wake_accountable(conn: sqlite3.Connection, reservation: sqlite3.
                     continue
             host = reservation["execution_machine"]
             wake_host = wake["owner"].partition("/")[0]
-            if host and wake_host and host != wake_host:
+            if host and wake_host and normalize_host(host) != normalize_host(wake_host):
                 continue
             return True
     return False
