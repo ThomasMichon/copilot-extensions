@@ -207,6 +207,79 @@ def test_construction_owner_call_keeps_pair_available_and_preserves_failure_cust
     assert not any(key == observed[0] or key.startswith(observed[0] + ".") for key in sys.modules)
 
 
+@pytest.mark.parametrize("stage", ["diagnostics", "owner", "procutil", "runtime"])
+@pytest.mark.parametrize("elapsed", [44, 45])
+def test_client_resource_preparation_consumes_shared_startup_deadline(
+    installed, monkeypatch, tmp_path, stage, elapsed,
+):
+    import os
+    import sys
+
+    construction, package, _evidence = installed_procutil(installed, monkeypatch)
+    process = Path(__file__).resolve().parents[2] / "libs/installer-engine/installer_engine_process.py"
+    content = process.read_bytes()
+    (package / "_installer_process.py").write_bytes(content)
+    distribution = installed[0]
+    distribution.files = [
+        entry for entry in distribution.files if str(entry) != "fleet_manager/_installer_process.py"
+    ] + [Entry("fleet_manager/_installer_process.py", content)]
+    evidence = construction.artifact_staging.diagnose_client()
+    clock = {"now": 0}
+    observed = []
+    original_read = construction.artifact_staging._bytes
+    original_diagnose = construction.artifact_staging.diagnose_client
+    original_owner = construction._process_resource
+    delayed_member = {
+        "owner": "_installer_process.py",
+        "procutil": "_job_scopes.py",
+        "runtime": "_versioned_runtime.py",
+    }.get(stage)
+
+    def read(path, limit):
+        data = original_read(path, limit)
+        if path.name == delayed_member:
+            clock["now"] = elapsed
+        return data
+
+    def diagnose():
+        result = original_diagnose()
+        if stage == "diagnostics":
+            clock["now"] = elapsed
+        return result
+
+    def retained(argv, **options):
+        observed.append(options)
+        assert options["deadline"] == 45
+        assert options["timeout"] == 45 - elapsed
+        return SimpleNamespace(stdout="complete", stderr="")
+
+    def owner(name, *, evidence):
+        module = original_owner(name, evidence=evidence)
+        monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+        monkeypatch.setattr(module, "os", SimpleNamespace(name="nt"))
+        monkeypatch.setattr(module, "_retained_windows", retained)
+        return module
+
+    monkeypatch.setattr(construction, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+    monkeypatch.setattr(construction, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+    monkeypatch.setattr(construction.artifact_staging, "_bytes", read)
+    monkeypatch.setattr(construction.artifact_staging, "diagnose_client", diagnose)
+    monkeypatch.setattr(construction, "_process_resource", owner)
+    slot = tmp_path / "runtime/versions/fixture"
+    slot.mkdir(parents=True)
+    prefix = "fleet_manager._retained_construction_procutil_"
+    before = {name for name in sys.modules if name.startswith(prefix)}
+    options = {"descriptor": 1, "resource_evidence": None if stage == "diagnostics" else evidence}
+    if elapsed == 45:
+        with pytest.raises(PlanError, match="client fixture timed out"):
+            construction._run(["fixture"], slot, "fixture", **options)
+        assert not observed
+    else:
+        assert construction._run(["fixture"], slot, "fixture", **options) == b"complete"
+        assert len(observed) == 1
+    assert {name for name in sys.modules if name.startswith(prefix)} == before
+
+
 def installed_runtime(installed, monkeypatch):
     from fleet_manager import artifact_staging
 

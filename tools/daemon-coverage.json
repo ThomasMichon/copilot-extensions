@@ -420,6 +420,7 @@
       "wm:production_picker/picker_tui/data_ssh.py::LiveLoader._spawn_stream::Popen": 1,
       "r:plugins/agent-worktrees/scripts/hook_client.py::_fallback_legacy_session_start::Popen": 1,
       "t:plugin_test_containment.py::_posix_worker::Popen": 1,
+      "t:plugin_test_containment.py::_worker_main::Popen": 1,
       "t:plugin_test_containment.py::_run_contained_process::Popen": 1,
       "t:native_qualification_receiver.py::receive::Popen": 1,
       "r:plugins/agent-index/scripts/cell-runtime.py::_spawn_windows_owned_process::Popen": 1,

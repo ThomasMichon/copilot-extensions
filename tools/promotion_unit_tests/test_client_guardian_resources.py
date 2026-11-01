@@ -35,6 +35,9 @@ _diagnostics = _load_source(
 installed = _diagnostics.installed
 installed_procutil = _diagnostics.installed_procutil
 installed_runtime = _diagnostics.installed_runtime
+test_client_resource_preparation_consumes_shared_startup_deadline = (
+    _diagnostics.test_client_resource_preparation_consumes_shared_startup_deadline
+)
 
 
 class _ValueStructure:

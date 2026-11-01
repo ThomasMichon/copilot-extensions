@@ -231,6 +231,7 @@ def _procutil_resource(evidence):
 
 
 def _run(argv, slot, phase, *, descriptor, resource_evidence=None):
+    deadline = time.monotonic() + 45
     evidence = (artifact_staging.diagnose_client()
                 if resource_evidence is None else resource_evidence)
     owner = _process_resource("_installer_process.py", evidence=evidence)
@@ -247,7 +248,7 @@ def _run(argv, slot, phase, *, descriptor, resource_evidence=None):
             } if os.name == "nt" else None
             result = owner.run_owned(
                 [str(value) for value in argv], cwd=slot, env=_environment(slot),
-                timeout=45, procutil=procutil, construction_fd=descriptor,
+                timeout=45, deadline=deadline, procutil=procutil, construction_fd=descriptor,
                 runtime_root=slot.parent.parent, runtime_version=slot.name,
                 runtime_path=Path(__file__).absolute().with_name("_versioned_runtime.py"),
                 guardian_sources=sources,

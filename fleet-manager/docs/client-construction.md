@@ -124,7 +124,9 @@ finite launch path rather than reopening the resource file. The guardian packet
 writer and output readers must all settle before capture completes.
 Ordinary source-install callers snapshot the same bounded closure before
 launching; this is not installed-wheel RECORD authentication.
-One monotonic execution deadline covers guardian source preparation, startup
+The client caller establishes its absolute deadline before RECORD/resource
+admission and forwards it unchanged to the finite owner. One monotonic execution
+deadline covers guardian source preparation, startup
 and target creation; neither process starts with a fresh timeout budget.
 Admission rechecks that deadline immediately before guardian launch and after
 confirmed settlement, so late completion cannot report success. The existing
