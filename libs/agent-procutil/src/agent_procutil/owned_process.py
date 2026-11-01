@@ -146,7 +146,10 @@ def _communicate_unreaped(
             return _remaining(deadline, argv, timeout)
         except subprocess.TimeoutExpired as error:
             if capture_limits is not None and capture_timeout:
-                error.output, error.stderr = (bytes(value) for value in output)
+                error.output, error.stderr = (
+                    bytes(value) if stream is not None else None
+                    for value, stream in zip(output, streams)
+                )
             raise
 
     with selectors.DefaultSelector() as selector:
@@ -464,21 +467,25 @@ def _run_owned(
     if bounded_windows:
         from agent_procutil._windows_caller_owned import spawn
 
-    process, job = spawn(
-        argv, require_job=True, allow_breakaway=allow_daemon_breakaway,
-        stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-        stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-        stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
-        **({"text": False, "bufsize": 0} if bounded_windows else {
-            "text": True, "encoding": "utf-8", "errors": "strict",
-        }),
-        **no_window_kwargs(),
-        **({"start_new_session": True} if not windows and not inherit_process_group else {}),
-        **({"pass_fds": pass_fds} if pass_fds else {}),
-        **({"cwd": cwd} if cwd is not None else {}),
-        **({"env": env} if env is not None else {}),
-        **({"budget": budget} if bounded_windows and budget is not None else {}),
-    )
+    try:
+        process, job = spawn(
+            argv, require_job=True, allow_breakaway=allow_daemon_breakaway,
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+            stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
+            **({"text": False, "bufsize": 0} if bounded_windows else {
+                "text": True, "encoding": "utf-8", "errors": "strict",
+            }),
+            **no_window_kwargs(),
+            **({"start_new_session": True} if not windows and not inherit_process_group else {}),
+            **({"pass_fds": pass_fds} if pass_fds else {}),
+            **({"cwd": cwd} if cwd is not None else {}),
+            **({"env": env} if env is not None else {}),
+            **({"budget": budget, "command_deadline": deadline, "on_settled": on_settled}
+               if bounded_windows and budget is not None else {}),
+        )
+    except subprocess.TimeoutExpired as error:
+        raise subprocess.TimeoutExpired(argv, timeout) from error
     retained = False
     try:
         if bounded_windows:

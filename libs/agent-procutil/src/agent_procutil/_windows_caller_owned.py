@@ -316,13 +316,22 @@ def _environment_block(environment):
     return ctypes.create_unicode_buffer("\0".join(entries) + "\0\0")
 
 
-def spawn(argv: list[str], *, budget=None, **kwargs):
+def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=None, **kwargs):
     """Create the target in its caller-owned Job atomically, before it can run."""
     import msvcrt
     from agent_procutil.owned_process import OwnedCleanupError
 
     from . import _job_scopes
 
+    if command_deadline is not None and (
+        type(command_deadline) not in (int, float) or not math.isfinite(command_deadline)
+    ):
+        raise ValueError("native execution deadline must be finite")
+    if budget is not None:
+        command_deadline = (
+            budget.execution_deadline if command_deadline is None
+            else min(command_deadline, budget.execution_deadline)
+        )
     allow_breakaway = kwargs.get("allow_breakaway", False)
     if type(allow_breakaway) is not bool:
         raise ValueError("allow_breakaway must be a boolean")
@@ -345,6 +354,7 @@ def spawn(argv: list[str], *, budget=None, **kwargs):
         raise OSError("owned Job identity already exists")
     job = JobHandle(handle, name=job_name)
     process = None
+    creation_attempted = False
     info = _ProcessInfo()
     streams = []
     try:
@@ -413,6 +423,9 @@ def spawn(argv: list[str], *, budget=None, **kwargs):
             try:
                 for fd in child_fds:
                     os.set_handle_inheritable(msvcrt.get_osfhandle(fd), True)
+                if command_deadline is not None and time.monotonic() >= command_deadline:
+                    raise subprocess.TimeoutExpired(argv, 0)
+                creation_attempted = True
                 if not kernel.CreateProcessW(
                     None, command, None, None, True,
                     0x80000 | 0x8000000 | 4 | (0x400 if environment is not None else 0),
@@ -420,6 +433,8 @@ def spawn(argv: list[str], *, budget=None, **kwargs):
                 ):
                     raise ctypes.WinError(ctypes.get_last_error())
                 process = _Process(argv, info, streams)
+                if command_deadline is not None and time.monotonic() >= command_deadline:
+                    raise subprocess.TimeoutExpired(argv, 0)
                 if kernel.ResumeThread(info.hThread) == 0xFFFFFFFF:
                     raise ctypes.WinError(ctypes.get_last_error())
             finally:
@@ -459,4 +474,6 @@ def spawn(argv: list[str], *, budget=None, **kwargs):
                 raise OwnedCleanupError(process, job) from cleanup
         else:
             job.close()
+        if on_settled is not None and (process is not None or not creation_attempted):
+            on_settled()
         raise

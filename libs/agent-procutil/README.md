@@ -416,6 +416,12 @@ unchanged. Omitting `budget` preserves every existing default.
 
 Windows retirement, retirement-lock acquisition, pipe-worker completion/join
 and process-exit waits consume the same remaining deadline. POSIX passes that
+Native startup checks the earlier individual/aggregate execution cutoff
+immediately before target creation and before resuming the suspended target.
+Slow setup cannot admit execution into the reserve. Known no-target refusal or
+confirmed failed-startup retirement may notify settlement; ambiguous creation
+and unconfirmed cleanup cannot. Timeout exceptions retain the original command
+and individual timeout. POSIX passes that
 same clock through its finite guardian and retains unreaped group custody
 through native group confirmation and reaping. `OwnedCleanupError` still retains
 the exact process/Job when settlement cannot be confirmed; deadline expiry is
