@@ -551,3 +551,35 @@ def test_name_allowlist_order_and_no_independent_runtime_imports():
     assert not any(name in sys.modules for name in (
         "agent_bridge", "agent_dispatch", "agent_vault", "agent_ssh",
     ))
+
+
+
+@pytest.mark.parametrize("variant", ["exact", "edited-main", "edited-aux", "foreign-root", "missing-peer"])
+def test_exact_historical_global_logger_commands(tmp_path, variant):
+    home = tmp_path / "home"
+    root = home / ".agent-logger"
+    payload = REPO / "plugins" / "agent-logger"
+    fixture_root = REPO / "tools" / "fixtures" / "logger-pre-queue"
+    main = (fixture_root / "agent-logger.ps1").read_text(encoding="utf-8").rstrip("\n")
+    auxiliary = (fixture_root / "logger-auxiliary.ps1").read_text(encoding="utf-8").rstrip("\n")
+    current = dict(fixtures("agent-logger", root))
+    contents = {name: text for name, text in current.items() if name.endswith((".ps1", ".cmd"))}
+    contents["agent-logger.ps1"] = main
+    for name in AUXILIARY:
+        contents[name + ".ps1"] = auxiliary.replace("__COMMAND__", name)
+    expected = set(contents)
+    if variant == "edited-main":
+        contents["agent-logger.ps1"] += "\nWrite-Output 'edited'"
+        expected -= {"agent-logger.ps1", "agent-logger.cmd"}
+    elif variant == "edited-aux":
+        contents["session-sync.ps1"] += "\nWrite-Output 'edited'"
+        expected -= {"session-sync.ps1", "session-sync.cmd"}
+    elif variant == "foreign-root":
+        root = home / ".foreign-logger"
+        expected.clear()
+    elif variant == "missing-peer":
+        del contents["session-sync.ps1"]
+        expected -= {"session-sync.ps1", "session-sync.cmd"}
+    assert set(MODULE.owned_local_names(
+        payload, root, "agent_logger", contents, home=home,
+    )) == expected
