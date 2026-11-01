@@ -431,6 +431,7 @@ def spawn(argv: list[str], *, budget=None, command_deadline=None, on_settled=Non
                     0x80000 | 0x8000000 | 4 | (0x400 if environment is not None else 0),
                     environment, cwd, ctypes.byref(startup), ctypes.byref(info),
                 ):
+                    creation_attempted = False
                     raise ctypes.WinError(ctypes.get_last_error())
                 process = _Process(argv, info, streams)
                 if command_deadline is not None and time.monotonic() >= command_deadline:

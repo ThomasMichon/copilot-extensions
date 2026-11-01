@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import select
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -310,9 +309,12 @@ raise AssertionError('unconfirmed cleanup must not return a decision')
         assert not (tmp_path / "settled").exists()
     finally:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.communicate(timeout=5)
-        for pin in pins:
-            pin.close()
+            from agent_procutil.owned_process import _retire_posix_group
+
+            _retire_posix_group(process)
+        finally:
+            try:
+                process.communicate(timeout=5)
+            finally:
+                for pin in pins:
+                    pin.close()

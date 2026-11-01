@@ -251,3 +251,53 @@ def test_precreation_failed_job_close_retains_custody_without_notifying(monkeypa
     finally:
         assert original_close(job.handle)
         job._handle = None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows CreateProcessW refusal")
+def test_failed_native_creation_notifies_after_closing_all_preparation(tmp_path, monkeypatch):
+    descriptors = []
+    original_pipe = os.pipe
+
+    def pipe():
+        values = original_pipe()
+        descriptors.extend(values)
+        return values
+
+    monkeypatch.setattr(os, "pipe", pipe)
+    settled = []
+
+    def observe():
+        assert len(descriptors) == 6
+        for descriptor in descriptors:
+            with pytest.raises(OSError):
+                os.fstat(descriptor)
+        settled.append(True)
+
+    with pytest.raises(OSError) as caught:
+        run_caller_owned(
+            [str(tmp_path / "missing-native-fixture.exe")],
+            timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+            input_text="{}",
+            budget=OwnedExecutionBudget.from_timeout(5, cleanup_reserve=1),
+            on_settled=observe,
+        )
+    assert caught.value.winerror == 2
+    assert settled == [True]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows interrupted creation")
+def test_interrupted_creation_cannot_claim_known_no_target(monkeypatch):
+    from agent_procutil import _windows_caller_owned as windows
+
+    def interrupt(*args):
+        raise OSError("fixture creation interrupted without native result")
+
+    monkeypatch.setattr(windows._api(), "CreateProcessW", interrupt)
+    settled = []
+    with pytest.raises(OSError, match="creation interrupted"):
+        run_caller_owned(
+            ["fixture"], timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+            budget=OwnedExecutionBudget.from_timeout(5, cleanup_reserve=1),
+            on_settled=lambda: settled.append(True),
+        )
+    assert settled == []
