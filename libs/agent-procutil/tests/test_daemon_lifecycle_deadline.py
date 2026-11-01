@@ -70,6 +70,12 @@ def test_cleanup_overrun_retains_the_record_and_reports_held(tmp_path: Path, mon
 
 
 def test_lifecycle_exposes_held_cleanup_without_retrying_it(tmp_path: Path, monkeypatch) -> None:
+    def fixture_owner(path: Path) -> None:
+        assert path.is_relative_to(tmp_path)
+
+    from agent_procutil import _daemon_instance_owner as owner
+
+    monkeypatch.setattr(owner, "assert_path_owner", fixture_owner)
     monkeypatch.setattr(store, "_monotonic_clock", lambda: 20)
     monkeypatch.setattr(store, "birth_identity", lambda _pid: "fixture")
     monkeypatch.setattr(store, "_ensure_monitor", lambda: None)
