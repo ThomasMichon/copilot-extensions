@@ -30,6 +30,7 @@ def retire_monitor(
     attempt(close_admission)
     attempt(repositories_runtime.shutdown)
     attempt(lambda: worktrees_runtime.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S))
+    attempt(lambda: worktrees_runtime.agendas.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S))
     attempt(close_request_surfaces)
     attempt(control_server.close)
     attempt(receipts.wait_idle)

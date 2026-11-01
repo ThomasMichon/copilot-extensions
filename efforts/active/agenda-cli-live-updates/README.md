@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Retained managed source worktree; reviewed PRs to `dev`
 - **Created:** 2026-11-01
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/efforts` and `visions/mux-companion`
 - **Umbrella issue:** [#9855](https://github.com/ThomasMichon/copilot-extensions/issues/9855)
 - **Related:** existing Mux Companion continuation #8811
@@ -87,45 +87,45 @@ They are not public source identifiers or permission to mutate the active agent.
 
 ### Phase 1 - Reviewed command, durability and delivery contract
 
-- [ ] Review and merge this implementation plan before code execution.
-- [ ] Resolve the actual standalone command/store and Manager/resident
+- [x] Review and merge this implementation plan before code execution.
+- [x] Resolve the actual standalone command/store and Manager/resident
   notification/subscription boundaries, including meaningful consumer behavior.
-- [ ] Record read-only evaluation findings without importing private identifiers
+- [x] Record read-only evaluation findings without importing private identifiers
   or another agent's operational authority into public source.
 
 ### Phase 2 - CLI-owned agenda mutations
 
-- [ ] Refactor/reuse the existing strict board/chain/budget validator; preserve
+- [x] Refactor/reuse the existing strict board/chain/budget validator; preserve
   existing read-only calls and version-1/2 input compatibility.
-- [ ] Supply current assignment reads and compact semantic updates for
+- [x] Supply current assignment reads and compact semantic updates for
   initialization/import, plan refinement, selection, outcomes, execution links,
   blocking/deferred rechecks and deliberate returns.
-- [ ] Require expected revisions and stable operation identities; generate
+- [x] Require expected revisions and stable operation identities; generate
   schema/version, actor/source qualification and actual timestamp metadata.
-- [ ] Implement serialized durable state/history publication with a single
+- [x] Implement serialized durable state/history publication with a single
   commit barrier, explicit failure/crash behavior and idempotent retry results.
-- [ ] Preserve original roots, evidence, visits, stricter limits and pending
+- [x] Preserve original roots, evidence, visits, stricter limits and pending
   decisions. Imported legacy entry times remain unknown rather than invented.
 
 ### Phase 3 - Immediate optional live projection
 
-- [ ] Extend the actual owning Manager/resident contract with bounded,
+- [x] Extend the actual owning Manager/resident contract with bounded,
   revision/source-qualified agenda observations and a supported held consumer.
-- [ ] Publish only committed state; retain current generation/head/selection
+- [x] Publish only committed state; retain current generation/head/selection
   fences and reject stale or wrong-source updates.
-- [ ] Distinguish persisted operation success from live-delivery pending,
+- [x] Distinguish persisted operation success from live-delivery pending,
   unsupported/offline/not-configured state. Never replay the mutation merely
   because notification failed.
-- [ ] Reconnect/restart through current snapshots and bounded delivery recovery,
+- [x] Reconnect/restart through current snapshots and bounded delivery recovery,
   without making the Manager a rival agenda store or polling every file.
-- [ ] Wire a real synthetic Manager/Textual consumer so a committed update
+- [x] Wire a real synthetic Manager/Textual consumer so a committed update
   reaches its view without a periodic agenda-file read.
 
 ### Phase 4 - Catalog, guidance and completion
 
-- [ ] Publish attributable owned CLI invocation/catalog and compact ambient
+- [x] Publish attributable owned CLI invocation/catalog and compact ambient
   transition guidance plus the existing on-demand skill/reference.
-- [ ] Prefer CLI submission over manual edits; make legacy/manual recovery and
+- [x] Prefer CLI submission over manual edits; make legacy/manual recovery and
   actual App/CLI/ACP command availability explicit rather than assumed.
 - [ ] Run bounded targeted tests and independent critique, add required
   changefiles, and drive all implementation PRs through actual merge.
@@ -134,21 +134,21 @@ They are not public source identifiers or permission to mutate the active agent.
 
 ## Validation Plan
 
-- [ ] Existing valid manual/read-only usage remains compatible; unsupported
+- [x] Existing valid manual/read-only usage remains compatible; unsupported
   required new state fails rather than looking complete or silently stale.
-- [ ] Malformed/oversized/duplicate/nonfinite data, unsafe paths and invalid
+- [x] Malformed/oversized/duplicate/nonfinite data, unsafe paths and invalid
   references/revisions fail visibly with no partial accepted mutation.
-- [ ] Concurrent/stale writes, interrupted publication and duplicate operations
+- [x] Concurrent/stale writes, interrupted publication and duplicate operations
   preserve one consistent state/history and the original accepted result.
-- [ ] Every supported branch operation preserves roots, returns, evidence and
+- [x] Every supported branch operation preserves roots, returns, evidence and
   finite visit/depth/detour/deferred budgets, including no-progress cycles.
-- [ ] Generated metadata is truthful; missing native identity and legacy entry
+- [x] Generated metadata is truthful; missing native identity and legacy entry
   times remain qualified unknowns, not authenticated labels or fake durations.
-- [ ] Real synthetic push/held-subscription/consumer tests demonstrate visibility
+- [x] Real synthetic push/held-subscription/consumer tests demonstrate visibility
   only after commit, without repeated agenda-file polling.
-- [ ] Offline/unsupported delivery, stale/head/generation changes, late results,
+- [x] Offline/unsupported delivery, stale/head/generation changes, late results,
   reconnect and daemon retirement retain explicit source/delivery semantics.
-- [ ] Standalone/no-Manager paths, process-boundary owned invocation and
+- [x] Standalone/no-Manager paths, process-boundary owned invocation and
   supported host/tool surfaces are tested; no deployment claim from source tests.
 - [ ] Public artifacts remain generic, required review/CI pass, and source,
   release, installation and actual active-agent migration are distinguished.
@@ -162,6 +162,293 @@ owners. Expansion precedes independently deployed callers. No API in this
 proposal is claimed available merely because its intended name is described.
 
 ## Journal
+
+### 2026-11-01 - Executable module admission review
+
+- Re-review found an admitted module form that has no executable agenda
+  entry point: a successful provider health probe was followed by an empty
+  successful process exit, misclassified as a retrying disconnect.
+- Module admission now rejects the non-executable helper before probe/feed
+  execution and admits only the actual package and `__main__` module forms.
+  Original roster operations and the shipped console callable remain unchanged;
+  opaque scripts are not guessed or rewritten into agenda entry points.
+- The full contract/normal-POSIX/connected packet passed 110 cases independently
+  with cleanup verified. Actual processes demonstrate the helper's empty
+  successful exit, explicit terminal refusal despite healthy resident support,
+  supported module/console dispatch and unchanged roster dispatch. A fresh
+  current-head review remains required.
+
+### 2026-11-01 - Consumer reconnect fence reconciliation
+
+- The next review listed no open findings and accepted initialization closure,
+  but its reconnect warning matched two concrete consumer defects on inspection.
+  A not-published snapshot could erase the preceding observed store revision;
+  an equal-sequence reconnect could accept changed publication content.
+- Receive and reconnect now share one bounded publication fence, retaining
+  copied store-revision/body evidence independently from display availability.
+  Equal-sequence same-generation snapshots require semantic equality, ignoring
+  only snapshot/update envelope type. Same-head store replacement refuses,
+  matching the existing provider's unregistered-store refusal.
+- The full contract/held-consumer/connected packet passed 133 cases independently
+  with cleanup verified. Actual subprocess/Textual regressions reject rollback
+  through a null snapshot and changed equal-sequence publications without bad
+  paint, while preserving unchanged reconnects, later sequences, new generations,
+  temporary recovery, cancellation and the finite retry budget. A fresh review
+  follows these confirmed fixes; no extra approval shape is being invented.
+
+### 2026-11-01 - Agenda initialization failure review
+
+- Fresh review accepted shared-root history preservation and the resident
+  activation-error/replacement closure. It then identified a separate failure
+  inside agenda initialization: recorded SQLite/schema errors could still
+  activate the agenda feed, leaving an already-held subscriber on stale data.
+- Feed activation now follows successful cache initialization, observer
+  registration and a fresh owner fence. Unsuccessful initialization closes held
+  streams even when an unexpected defect propagates; expected agenda faults
+  remain explicit without disabling the ordinary roster service.
+- The provider/current-runtime packet passed 112 cases independently, with
+  cleanup verified. Real held-schema-fault/repair, storage and observer-failure
+  controls retain same-generation recovery, sequence/revision fences and
+  permanent retirement. Fresh source review remains open.
+
+### 2026-11-01 - Restoration preserves consumed shared-root history
+
+- The exact shipped deferred sequence reproduced declining visit counts on
+  restore. Stable frame correlation, retained imported visit origins and unique
+  managed entry logs now reconcile the entire continuing chain, including
+  ancestors, against deferred, restored and completed history.
+- Distinct managed fork occurrences are counted once each rather than reduced
+  to the largest counter. Continuing evidence, execution links and holds remain
+  available; original saved positions, returns, pending decisions and tighter
+  limits are preserved. Ambiguous legacy histories, conflicting occurrences,
+  missing history and exhausted budgets refuse before transaction acceptance.
+- The standalone store/fault/restoration packet passed 122 cases. The initial
+  worker container snapshot failed before testing; its bounded source-runner
+  result was independently verified through the full isolated container using
+  the coordinator's per-invocation temporary directory. The actual connected
+  Manager/held-consumer/contract packet passed 117 cases with cleanup verified.
+  Idempotent results and the single SQLite commit barrier remain unchanged.
+  Fresh current-head review and normal source merge remain required.
+
+### 2026-11-01 - Activation failure closes held agenda streams
+
+- Activation-error and writer-replacement paths now use the owning
+  `close_admission` seam to close agenda streams alongside the roster feed.
+  Later temporary failures cannot downgrade an already-permanent subscriber
+  retirement reason.
+- Seven real private-socket regressions failed before the correction. They now
+  verify terminal going-away followed by EOF, successful/failed writer
+  replacement, same-generation recovery, new-generation requalification and
+  permanent shutdown refusal.
+- The provider/current-runtime packet passed 108 cases both for the scoped
+  worker and independent coordinator, with cleanup verified. The coordinator's
+  first attempt exhausted the host temporary filesystem before tests began;
+  the unchanged isolated runner succeeded using a private per-invocation
+  temporary directory on another filesystem, without deletion or global changes.
+  Shared-root restoration and fresh review remain blocking.
+
+### 2026-11-01 - Shared-root restoration and resident closure review
+
+- Fresh review accepted the Unicode and buffered-frame corrections, then found
+  that restoring a deferred shared-root chain can reduce previously consumed
+  visits and omit intervening evidence. The standalone owner is reproducing the
+  shipped version-2 sequence and must reconcile that history or visibly refuse
+  an ambiguous restoration before accepting it.
+- The resident owner is correcting activation-error and writer-replacement
+  paths that close the roster feed but leave an already-held agenda feed alive.
+  Regression coverage must prove closure and preserve legitimate temporary
+  same-generation recovery, project isolation and source/sequence fences.
+- Concurrent contribution-base edits caused an additive test-documentation
+  conflict. Both independent integration-portfolio descriptions were retained;
+  source history was rebased without discarding either owner's content.
+  These new findings remain blocking pending fixes, validation and fresh review.
+
+### 2026-11-01 - Buffered protocol frames before exit fallback
+
+- A paused consumer could previously let the child-exit grace expire before
+  receiving its already-buffered structured error. Complete queued frames and
+  the stdout reader's one bounded pending line now precede exit-status fallback.
+  Only remaining reader settlement consumes the bounded completion grace.
+- Actual normal POSIX controls preserve a transient error after snapshot/update,
+  child exit and a consumer pause longer than the grace. A 64-frame backlog and
+  delayed reader retain ordering, bounded capacity and cancellation settlement.
+- The focused worker packet passed 30 cases. Independent coordinator verification
+  of the full process-owner, synchronous-engine and connected Manager packet
+  passed 45 cases with one Windows-only skip and cleanup verified. Existing
+  fatal diagnostics, EOF classification, receipt faults and owner reservation
+  remain covered. A fresh passing review and implementation merge remain open.
+
+### 2026-11-01 - Bounded Unicode control publication
+
+- Review found that legacy ASCII-escaped control serialization expanded a valid
+  near-limit Unicode agenda beyond the control frame budget. Agenda read/publish
+  requests now use the existing compact UTF-8 contract encoder; unrelated control
+  requests retain their original encoding and behavior.
+- The actual CLI/client/server/runtime regression publishes a near-32-KiB
+  CJK/non-BMP observation whose escaped envelope exceeds 35 KiB, verifies exact
+  transmitted bytes and held-update content, and retains strict text, collection,
+  nesting, nonfinite, body and frame limits.
+- The provider/control packet passed 136 cases. Independent coordinator
+  verification of the resident packet passed 73 cases with cleanup verified.
+  Publication and a fresh passing current-head review remain required.
+
+### 2026-11-01 - Normal POSIX completion and diagnostic delivery
+
+- Review found a normal, noncontained POSIX path absent from the earlier
+  contained-process branch controls: the shared group owner retained its
+  feed-writer copy after child exit. The owner now closes that copy immediately
+  after the spawn attempt, while keeping its PID reserved until group cleanup.
+- The held transport consumes a bounded completion receipt without polling or
+  reaping the owner early and drains stderr incrementally. Fatal child/spawn
+  diagnostics remain terminal; successful EOF without a terminal feed notice
+  remains a classified disconnect. Explicit feed errors retain their own policy.
+- Actual production-branch controls run inside the unchanged outer
+  Docker/supervisor boundary and verify EOF before owner release, prompt
+  small-stderr diagnostics, receipt faults, cancellation and group/reader
+  settlement. Existing synchronous engine reads retain output, error and timeout
+  behavior through the same shared receipt reader.
+- The final process-owner/synchronous-engine/connected packet passed 42 cases,
+  with one Windows-only case skipped and cleanup verified. Source AST, lint,
+  module and whitespace checks passed. This fixes the additional review finding,
+  not a runtime deployment or permission to skip the next current-head verdict.
+
+### 2026-11-01 - Project isolation and bounded recovery
+
+- Review identified four further recovery gaps. Resident-wide activation/schema
+  faults are now separate from project reconciliation failures; another project's
+  success cannot clear a failed project's latch or expose its old cached body.
+  Only successful reconciliation of that project clears the fault, including
+  across same-generation reactivation.
+- Agenda requests retain the existing owner's bounded project demand and coalesced
+  producer wake. An unpublished project returns unready rather than not-found;
+  failed initial subscriptions leave bounded demand for the existing producer.
+  A completed roster that genuinely lacks the worktree still returns not-found.
+- The Manager preserves typed health-probe connection/timeout and transient
+  authority errors, while unsupported, malformed, permission and authentication
+  failures remain terminal. Authenticated capability proof precedes first-snapshot
+  recovery without an extra probe per attempt or any resident autostart.
+- Known temporary closure states do not retire the generation. Real drain,
+  unready and unavailable reactivation tests preserve resident sequence/store
+  fences while accepting a fresh same-generation snapshot; actual supersession
+  and shutdown remain retirement boundaries.
+- The provider packet passed 115 cases with two real project records,
+  corruption/repair, generation qualification and demand controls. The final
+  Manager contract/connected/held-consumer packet passed 117 cases with cleanup
+  verified, including actual offline reprobe recovery, same-generation updates,
+  initial producer demand and prior cancellation/retirement behavior. Source
+  AST, lint, module and whitespace checks passed. Fresh review and merge remain
+  required; the source effort is still Active.
+
+### 2026-11-01 - Relay rejection and new-head first publication
+
+- Further current-head review found two provider defects. The relay now validates
+  a frame's type before membership tests, so arrays/objects produce a structured
+  invalid-response error rather than an unhashable-type traceback.
+- A correctly selected current head whose cache still belongs to its predecessor
+  now receives not-published and retains its held subscription. Head-changed is
+  reserved for a genuinely stale or unavailable selection; predecessor
+  observations are never exposed as the new head's data.
+- The focused provider/CLI packet passed 85 cases, including real malformed-frame
+  sockets and a held new-head snapshot/heartbeat/first-publication update. The
+  actual core-to-Textual witness now also reopens on the new canonical head and
+  verifies its first committed publication reaches the same live view without
+  Refresh; the six-case connected packet passed with cleanup verified.
+- The four earlier source-verified review conversations were resolved as
+  addressed, not as approvals. A fresh verdict remains required for these
+  additional corrections before normal merge.
+
+### 2026-11-01 - Review corrections across real boundaries
+
+- Current-head review identified four additional path, platform-timeout,
+  reconnect and cancellation defects. Relative homes are now normalized through
+  the existing absolute-path safety checks at every managed store/publisher
+  entry, without resolving away linked components or relaxing traversal checks.
+- The standalone publisher catches `asyncio.TimeoutError` explicitly, including
+  Python 3.10 where it differs from the built-in exception. Focused tests and an
+  actual read-only, disconnected Python 3.10 container retained accepted state,
+  history and original retry results while recording pending timeout delivery.
+- Known structured transient errors from the actual resident relay participate
+  in the existing bounded reconnect policy; unsupported/malformed failures remain
+  terminal. Real socket closure and CLI relay controls verify fresh-snapshot
+  recovery and exactly three retry opportunities, not just synthetic pipe EOF.
+- Health-completion cancellation now returns normally; unexpected interruption
+  remains visible. Real-child barriers verify Refresh joins the old worker, quit
+  settles it, and a canceled generation cannot invoke a feed or paint late data.
+- Targeted standalone and Manager packets passed with verified cleanup. The
+  corrected source still requires a fresh current-head review and merge; earlier
+  passing checks or an older verdict do not authorize completion.
+
+### 2026-11-01 - Source implementation and connected validation
+
+- The standalone command now owns validated state, semantic movements, generated
+  metadata, immutable accepted-operation history and independent delivery status.
+  Revision/idempotence, finite budgets, source evidence and pending branches are
+  preserved. Managed signed-63-bit revision exhaustion refuses before acceptance
+  or legacy fencing; the manual inspector's existing behavior remains unchanged.
+- Explicit, quiescent POSIX same-home adoption durably preserves original cursor
+  bytes and recovery input before installing a version-3 old-reader refusal
+  marker, then commits SQLite state/history. Filesystem fencing and database
+  acceptance cannot share one atomic commit: interruption may leave an unavailable
+  fenced lane, recovered only with the same saved initialization request. Other
+  platforms refuse legacy adoption explicitly; fresh standalone stores do not
+  require that migration. No active lane was migrated.
+- The existing resident serves a separate generation/head/source-qualified agenda
+  cache and held feed. The Manager checks actual provider capability before new
+  syntax, retains owned process/selection custody and updates its Agenda view
+  without reading agenda files. Legacy revisit offsets remain unchanged; generated
+  commit times remain UTC. Scalar parked counts are not collection-size limits.
+- Scoped standalone, provider and consumer packets passed, including actual old
+  reader refusal, interruption recovery, stale/concurrent writes, limits,
+  unsupported delivery, retirement and reconnect controls. A real connected
+  transaction/publisher/parser/authenticated socket/record lock/held relay/Textual
+  witness proves commit-before-delivery, exact observation equality, pushed changes,
+  offline pending delivery without replay and canonical-head invalidation.
+- Final connected/consumer-contract packet passed 44 cases with verified cleanup.
+  Source AST, runtime/headless, module, release-intent, guidance/reference and
+  documentation checks passed after classifying the two new caller-contained
+  launch sites in the existing lifecycle census. Independent critique found one
+  late-exposure ordering issue: fresh owner validation now precedes live
+  row/sequence/notification changes, with staged head refreshes and retained
+  rejected invalidations. Deterministic owner-loss controls, the 69-case
+  provider/CLI packet and the actual connected witness passed; the reviewer
+  confirmed the finding closed. Normal source publication remains the next gate;
+  this effort is still Active.
+
+### 2026-11-01 - Command and publication boundary
+
+- Keep efforts payload-only: a Python-standard-library command owns an explicit
+  lane's transactional state and operation history. SQLite supplies one commit
+  barrier and serialized expected-revision writes; legacy manual files remain
+  inputs, not independently updated replicas. Managed reads must not silently
+  fall back to those files after adoption.
+- The mux coalescing server's subscription is a client-retention count, not a
+  change stream. Extend the existing agency resident's authenticated control
+  plane with a separately negotiated `worktree-agendas-v1` cached projection
+  and held feed. Do not alter the existing roster's strict row contract.
+- The optional adapter accepts committed, source-qualified agenda observations.
+  Agency owns current worktree/head identity and runtime-generation fencing;
+  Manager consumes complete bounded frames and updates its existing Companion
+  through a cancellation-owned process boundary, without reading agenda files.
+- Standalone mutation success and optional delivery status remain separate.
+  Notification retry publishes the latest committed snapshot, never repeats
+  the agenda mutation. Source tests use synthetic lanes and resident instances;
+  installing or migrating active agents remains excluded.
+
+### 2026-11-01 - Reviewed implementation admission
+
+- Plan #9858 received current-head Copilot approval with no open findings,
+  passed required CI and merged to `dev`. The same retained source workspace
+  synced onto the provider-confirmed merge before code execution.
+- The supplied manual agenda already used coarse assignments, explicit exits/
+  transitions, finite budgets, review evidence and parked nonblocking work.
+  The gap is the shipped interface: no mutation CLI or live agenda contract.
+- Legacy input lacks writer-generated occurrence/entry metadata and can carry
+  composite source-reference text. Import must preserve that evidence, qualify
+  missing identity/timing and avoid interpreting text as a single authoritative
+  source or inventing an earlier entry time.
+- Continue with the actual command/store and Manager notification/consumer
+  boundary, then cohesive implementation. No supplied active state or installed
+  runtime was changed.
 
 ### 2026-11-01 - Source intake
 

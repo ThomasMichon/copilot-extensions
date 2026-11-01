@@ -17,10 +17,13 @@ _OWNER = """
 import json,os,signal,subprocess,sys
 try:
     try:
-        child = subprocess.Popen(
-            json.loads(sys.argv[1]), stdin=subprocess.DEVNULL,
-            stdout=int(sys.argv[2]), stderr=sys.stderr,
-        )
+        try:
+            child = subprocess.Popen(
+                json.loads(sys.argv[1]), stdin=subprocess.DEVNULL,
+                stdout=int(sys.argv[2]), stderr=sys.stderr,
+            )
+        finally:
+            os.close(int(sys.argv[2]))
     except OSError as exc:
         print(json.dumps({"error": str(exc)}), flush=True)
     else:
@@ -29,6 +32,63 @@ try:
 finally:
     os.killpg(os.getpgrp(), signal.SIGKILL)
 """
+
+MAX_RECEIPT_BYTES = 4096
+
+
+def parse_completion_receipt(raw: bytes) -> dict:
+    if len(raw) > MAX_RECEIPT_BYTES or not raw.endswith(b"\n"):
+        raise OSError("launch group owner returned an oversized or truncated completion receipt")
+
+    def fields(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate completion receipt field")
+            value[key] = item
+        return value
+
+    try:
+        receipt = json.loads(raw, object_pairs_hook=fields)
+    except (ValueError, UnicodeError, RecursionError) as exc:
+        raise OSError("launch group owner returned no valid completion receipt") from exc
+    if isinstance(receipt, dict) and set(receipt) == {"error"}:
+        if isinstance(receipt["error"], str) and receipt["error"]:
+            return receipt
+    if isinstance(receipt, dict) and set(receipt) == {"returncode"}:
+        if type(receipt["returncode"]) is int:
+            return receipt
+    raise OSError("launch group owner returned an invalid completion receipt")
+
+
+def read_completion_receipt(output, *, argv, timeout, cancelled=None) -> dict:
+    """Read bounded partial receipt bytes without waiting/reaping the group owner."""
+    deadline = None if timeout is None else time.monotonic() + timeout
+    stream = getattr(output, "buffer", output)
+    read = getattr(stream, "read1", stream.read)
+    pending = bytearray()
+    while True:
+        if cancelled is not None and cancelled.is_set():
+            raise InterruptedError("owned engine read cancelled")
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        wait = 0.1 if remaining is None else min(remaining, 0.1)
+        ready, _, _ = select.select([stream], [], [], wait)
+        if not ready:
+            if cancelled is None and deadline is not None and time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            continue
+        chunk = read(MAX_RECEIPT_BYTES + 1 - len(pending))
+        if isinstance(chunk, str):
+            chunk = chunk.encode("utf-8")
+        if not chunk:
+            raise OSError("launch group owner returned a missing or truncated completion receipt")
+        pending.extend(chunk)
+        if len(pending) > MAX_RECEIPT_BYTES:
+            raise OSError("launch group owner returned an oversized completion receipt")
+        if b"\n" in pending:
+            return parse_completion_receipt(bytes(pending))
 
 
 def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -49,29 +109,11 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
             start_new_session=True, pass_fds=(output.fileno(),), **kwargs,
         )
         try:
-            deadline = None if timeout is None else time.monotonic() + timeout
-            while True:
-                if cancelled is not None and cancelled.is_set():
-                    raise InterruptedError("owned engine read cancelled")
-                remaining = None if deadline is None else deadline - time.monotonic()
-                if remaining is not None and remaining <= 0:
-                    raise subprocess.TimeoutExpired(argv, timeout)
-                wait = remaining if cancelled is None else (
-                    0.1 if remaining is None else min(remaining, 0.1)
-                )
-                ready, _, _ = select.select([owner.stdout], [], [], wait)
-                if ready:
-                    break
-                if cancelled is None:
-                    raise subprocess.TimeoutExpired(argv, timeout)
-            try:
-                receipt = json.loads(owner.stdout.readline())
-            except ValueError as exc:
-                raise OSError("launch group owner returned no valid completion receipt") from exc
-            if isinstance(receipt, dict) and isinstance(receipt.get("error"), str):
+            receipt = read_completion_receipt(
+                owner.stdout, argv=argv, timeout=timeout, cancelled=cancelled,
+            )
+            if "error" in receipt:
                 raise OSError(receipt["error"])
-            if not isinstance(receipt, dict) or type(receipt.get("returncode")) is not int:
-                raise OSError("launch group owner returned an invalid completion receipt")
             output.seek(0)
             stdout = output.read()
             stderr = None

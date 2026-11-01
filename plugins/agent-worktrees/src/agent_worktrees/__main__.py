@@ -5133,8 +5133,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     from . import pr_cli, resolve_cli, session_binding_cli, session_inspection_cli, session_tracking_cli
     from . import handoff_successor_repair_cli
-    from . import record_cli
+    from . import agenda_cli, record_cli
 
+    agenda_cli.add_parsers(sub)
     resolve_cli.add_parsers(sub)
     from . import launch_attempt_inspection
     launch_attempt_inspection.add_parsers(sub)
@@ -5336,6 +5337,9 @@ def _current_session_ids() -> set[str]:
 # fleet, reconcile, delegates, hook -- each of those is fixed to do its own
 # lazy `from . import <module>` at its own call site instead).
 _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
+    'agenda-publish': ('agenda_cli', 'cmd_agenda'),
+    'agenda-read': ('agenda_cli', 'cmd_agenda'),
+    'agenda-feed': ('agenda_cli', 'cmd_agenda'),
     'launch-attempts': ('launch_attempt_inspection', 'cmd_launch_attempts'),
     'dev-status': ('installation_cli', 'cmd_dev_status'),
     'dev-release': ('installation_cli', 'cmd_dev_release'),
@@ -6383,14 +6387,7 @@ def main(argv: list[str] | None = None) -> int:
             _is_no_project_invocation,
         )
     except (OSError, ValueError, RuntimeError) as exc:
-        if not args_list or args_list[0] != "record":
-            raise
-        cfg.set_active_project(None)
-        output._json_output({
-            "ok": False, "worktree": None,
-            "error": {"code": "project-unavailable", "message": str(exc)},
-        })
-        return 1
+        return front_door_cli.project_resolution_failure(args_list, exc)
 
     # No args → the binstub seam (Phase 6 / DQ7 / DQ8). A bare, no-args
     # invocation is the human-facing path. The Manager now owns the transplanted
@@ -6409,6 +6406,8 @@ def main(argv: list[str] | None = None) -> int:
     # A project-requiring subcommand without any project context → balk
     # helpfully instead of raising a bare RuntimeError deep in load_config.
     if not has_project and not _is_no_project_invocation(args_list):
+        if args_list[0] in {"agenda-read", "agenda-publish", "agenda-feed"}:
+            return front_door_cli.agenda_project_unavailable(args_list, "no registered invocation project")
         if args_list[0] == "record":
             return _dispatch_lazy("record", args_list)
         return cmd_help_unrouted(requested=args_list[0])

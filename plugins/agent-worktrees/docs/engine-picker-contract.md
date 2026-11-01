@@ -7,6 +7,10 @@ contract below, never `import agent_worktrees`. That boundary keeps the coupling
 one-way and dependency-free (the Picker owns no worktree logic or state), and
 keeps the TUI framework (Textual) entirely out of the plugin engine.
 
+The independent optional [current-head agenda contract](worktree-agendas.md)
+uses the same resident owner and process boundary, not fields added to roster
+rows or a dependency on a planning runtime.
+
 ## Optional resident Picker bootstrap
 
 The elected monitor advertises `picker-bootstrap-v1` on its existing control

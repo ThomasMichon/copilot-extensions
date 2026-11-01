@@ -15,6 +15,21 @@ lease, sandbox and whole-process cleanup.
 This is opt-in source qualification, not a required unit-CI expansion, actual
 Docker/official-image startup, installed-service adoption or rollout proof.
 
+The optional agenda integration packet connects the actual efforts transaction,
+postcommit publisher, authenticated agency resident and held CLI relay to a real
+Manager/Textual widget. Run
+`test-supervisor -- python tools/run_tests_in_devcontainer.py worktree-manager --test-file tests/test_agenda_end_to_end.py`
+after staging the source/test closure. The test uses a disposable canonical
+tracking record and redirects only fixture project/endpoint discovery; it does
+not normalize observations or replace the movement validator. It covers
+commit-before-delivery, pushed updates without reload, offline pending delivery,
+unchanged idempotent history, current-head invalidation and owned-reader cleanup.
+The owning standalone/provider/consumer packets remain separately selectable in
+their plugin and Manager docs. These synthetic process/socket tests do not enter
+required unit-only CI or qualify native Windows, installed rollout or migration
+of an active agent. Same-home legacy adoption additionally requires quiescence
+and the efforts-owned POSIX recovery/fencing checks.
+
 The optional `uv_deployment_compatibility` native-acceptance selector runs the
 focused retained-dependency policy, Codespaces cold/warm installation,
 MCP/Dispatch caller compatibility and full coupled Logger batch/binstub packets
