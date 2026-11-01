@@ -263,6 +263,12 @@ per-unit source progress is retained. A real-child regression verifies progress
 above the former 64 KiB bound and confirms excessive output still fails; the
 standalone publication-helper bound and production inactivity renewal stay
 unchanged.
+The conditional failure/healthy-selection integration case uses a 60-second
+item guard: measured healthy installation plus rejected installation/rollback
+can consume the default 30 seconds before its final installed `--version`
+probe. All rollback and final-health assertions, the 90-second child bound and
+other item guards remain unchanged. Parent command durations are reported even
+when capture is interrupted.
 
 Fleet-manager's `test_komodo_*` packet exercises strict declaration/current
 grant checks, real caller-owned synthetic Docker protocol processes, physical

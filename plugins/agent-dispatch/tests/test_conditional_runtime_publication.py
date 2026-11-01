@@ -366,6 +366,7 @@ fi
             assert "runtime-gate.sh" in (bin_dir / "agent-dispatch").read_text(encoding="utf-8")
 
 
+@pytest.mark.timeout(60)
 @pytest.mark.parametrize(("failure", "action"), [
     ("mkdir", "install"), ("copy", "install"), ("cat", "install"),
     ("chmod", "install"), ("machine", "install"), ("manifest", "install"),

@@ -25,7 +25,7 @@ def lifecycle_archive(repo: Path) -> bytes:
             continue
         if source.is_symlink() or not source.is_file():
             raise ValueError("lifecycle source is not an ordinary Python file")
-        members["agent_procutil/" + source.name] = source.read_bytes()
+        members["agent_procutil/" + source.name] = source.read_bytes().replace(b"\r\n", b"\n")
     if not all("agent_procutil/" + name in members for name in (
         "__init__.py", "daemon_instances.py", "_daemon_instance_cli.py",
         "_daemon_instance_linux.py", "_daemon_instance_clock.py",
