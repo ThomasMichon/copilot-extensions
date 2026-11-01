@@ -3511,6 +3511,7 @@
         "libs/agent-procutil/src/agent_procutil/diagnostics.py": "c5e3c4e15f1e853c4da3a2916514dbc50b743272b54223780fae6262bd3dc113",
         "libs/agent-procutil/src/agent_procutil/owned_process.py": "f44494ec1714f06968eb6c4ba9b4710bbd12124e1e2341125ad04797a3c9763b",
         "libs/agent-procutil/src/agent_procutil/startup.py": "986b9973485ea50e00c52e8292316bd811062e59b652f514d9829d4a8d66bee0",
+        "libs/agent-procutil/src/agent_procutil/streaming.py": "61151b0aba9e207a7e4f804c50d34a6afde573010ea2a68663eca419d3743d4f",
         "libs/agent-procutil/src/agent_procutil/windows_broker_cell.py": "eaecb72de5977740e505cd63fcd8641578a3410331859d6933e0d8fe8ef31f72",
         "libs/agent-procutil/src/agent_procutil/windows_broker_installation.py": "633bd532bf44365fc4540cdfc632e9f93c039f1662fb824f1c674b4299665abd",
         "libs/agent-procutil/src/agent_procutil/windows_broker_native.py": "faab2bf9c801ecc2fcc2d3e05551608a64c38c92909f5b87c98cf1be1006a7e8",
@@ -4160,7 +4161,8 @@
         "tools/plugin_test_containment.py",
         "tools/plugin_test_containment_observation.py",
         "libs/agent-procutil/src/agent_procutil/_windows_job_types.py",
-        "libs/agent-procutil/src/agent_procutil/_output_relay.py"
+        "libs/agent-procutil/src/agent_procutil/_output_relay.py",
+        "libs/agent-procutil/src/agent_procutil/streaming.py"
     ],
     "max_seconds": 300
 }
