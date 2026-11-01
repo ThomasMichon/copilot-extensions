@@ -3894,7 +3894,7 @@
         "tools/promotion_unit_tests/test_control_transition.py": "c84dc26b1113638c6dcce05b8df7894aced38c2e321a45f425ca7fcf25aab6cc",
         "tools/promotion_unit_tests/test_creation_diagnostics.py": "d4061059850bb6d429ac7f2e221a0ea8d6715f030c5e97221d193f6463f7df27",
         "tools/promotion_unit_tests/test_daemon_fixture_publication.py": "74eb81efecaffa08f0b26adfbf2825c61ab1a39ceb64653b78a22154ee0e1846",
-        "tools/promotion_unit_tests/test_daemon_lifecycle_deadline.py": "cb2f20f4fdd6d37d8df6806f2ff25a216b1dcb7ef18c6c4fe0e7a341579a454a",
+        "tools/promotion_unit_tests/test_daemon_lifecycle_deadline.py": "1e9e4acfe4e5dc39842b77df4bf7c3f374bfcb00820fa6a29ece8772fe29f32f",
         "tools/promotion_unit_tests/test_development_map.py": "990f33f1fb3220f573c1c5b2210851bfd03609c7802a22f1cfd58b4057d716bd",
         "tools/promotion_unit_tests/test_dispatch.py": "ea6025b25daa8810be340a0f7ad53f453ad5c3667e0a8b245607b7d890dba7ff",
         "tools/promotion_unit_tests/test_dispatch_spawn_diagnostics.py": "a584c930abfbef1768225c1fc40f6471721d111bb99e133a91789a2c8f855962",
