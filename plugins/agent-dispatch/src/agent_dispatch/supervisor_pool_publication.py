@@ -16,12 +16,13 @@ from .pool_publication_custody import (
 )
 from .pool_source_snapshot import DeclarationRead, local_input_revision
 from .single_instance import SingleInstance, SingletonAdmissionError, lock_path_for
+from .supervisor_pool_sender import SupervisorPoolSender
 
 log = logging.getLogger("agent-dispatch.supervisor-daemon")
 
 
-class SupervisorPoolPublication:
-    """No serve-loop caller, publisher enrollment or metadata write transport."""
+class SupervisorPoolPublication(SupervisorPoolSender):
+    """Explicit preparation/sending, never called by the serve loop."""
 
     if TYPE_CHECKING:
         machine: str | None
@@ -44,6 +45,7 @@ class SupervisorPoolPublication:
 
     def _init_pool_publication(self) -> None:
         self._pool_publisher_custody: PoolPublisherCustody | None = None
+        self._init_pool_sender()
 
     def _build_lock(self) -> SingleInstance:
         from .config import run_dir
@@ -119,6 +121,7 @@ class SupervisorPoolPublication:
         with self._pool_preparation_boundary() as (lock, acquisition):
             reasons = []
             catalog = None
+            local_recheck_revision = None
             try:
                 self._prune_probe_inflight()
                 before = self._bounded_read("pool-catalog-before", self.client.pool_catalog_metadata)
@@ -129,9 +132,11 @@ class SupervisorPoolPublication:
                     self._effective_registrations()
                     snapshot = self._pool_source_snapshot
                     revision, complete = self._bounded_read("pool-local-recheck", self._read_pool_local_inputs)
+                    if self._source_observations["pool-local-recheck"].state == "fresh":
+                        local_recheck_revision = revision
                     if self._source_observations["pool-local-recheck"].state != "fresh" or not complete:
                         reasons.append("local-input-recheck-not-fresh")
-                    if revision != snapshot.input_revision:
+                    if revision != snapshot.observation_revision:
                         reasons.append("local-inputs-changed")
                 except Exception as exc:
                     log.warning("pool local input capture unavailable: error_type=%s", type(exc).__name__)
@@ -153,7 +158,7 @@ class SupervisorPoolPublication:
                 raise SingletonAdmissionError("pool source capture changed the singleton scope")
             return PoolPublicationInputs(
                 self.machine or "", self.env, acquisition, self._pool_source_snapshot,
-                catalog, tuple(sorted(set(reasons))),
+                catalog, tuple(sorted(set(reasons))), local_recheck_revision,
             )
 
     def prepare_pool_metadata_request(self) -> PoolMetadataRequest:

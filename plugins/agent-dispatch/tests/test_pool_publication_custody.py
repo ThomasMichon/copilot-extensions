@@ -438,7 +438,10 @@ def test_catalog_auth_refusal_remains_explicit_without_legacy_fallback(status: i
 
 def test_catalog_observation_refuses_duplicate_or_invalid_scope_without_subset() -> None:
     value = {"protocol": "pool_catalog_transport/v1", "version": 1, "registration_revision": 0, "scopes": [
-        {"machine": "host-a", "env": "default", "publisher_id": "one", "generation": 1, "revision": 0},
+        {"machine": "host-a", "env": "default", "publisher_id": "one", "generation": 1,
+         "revision": 0, "state": "pending", "input_revision": None,
+         "registration_revision": None, "valid_until": None, "definitions": [],
+         "definitions_generation": None, "definitions_revision": None, "reason": None},
     ]}
     assert len(PoolCatalogRead.from_dict(value).positions) == 1
     duplicate = copy.deepcopy(value)

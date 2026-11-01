@@ -7,8 +7,17 @@ pure mechanical extraction with no behavior change. Mixed into
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import httpx
+
 from .client_errors import DispatchUpgradeRequired
-from .pool_publication_custody import PoolCatalogRead
+from .pool_publication_custody import PoolCatalogRead, PoolMetadataRequest
+from .pool_publication_response import read_pool_metadata_result
+from .queue_pool_catalog import PoolPublicationScope
 
 
 class RegistrationClientMixin:
@@ -16,6 +25,12 @@ class RegistrationClientMixin:
 
     Relies on ``self._unwrap`` and ``self._http`` from the composing class.
     """
+
+    if TYPE_CHECKING:
+        _http: httpx.Client
+        _unwrap: Callable[[httpx.Response], Any]
+        _control_headers: Callable[[], dict[str, str]]
+        health: Callable[[], dict]
 
     def register_registration(
         self,
@@ -44,7 +59,7 @@ class RegistrationClientMixin:
         env: str | None = None,
         include_paused: bool = True,
     ) -> list[dict]:
-        params: dict[str, object] = {"include_paused": include_paused}
+        params: dict[str, str | bool] = {"include_paused": include_paused}
         if kind is not None:
             params["kind"] = kind
         if machine is not None:
@@ -53,8 +68,7 @@ class RegistrationClientMixin:
             params["env"] = env
         return self._unwrap(self._http.get("/registrations", params=params))
 
-    def pool_catalog_metadata(self) -> dict:
-        """Explicit preparation read; ordinary reconciliation never calls it."""
+    def _require_pool_metadata_transport(self) -> None:
         health = self.health()
         contract = health.get("pool_catalog_transport") if isinstance(health, dict) else None
         if not isinstance(contract, dict) or (
@@ -66,9 +80,27 @@ class RegistrationClientMixin:
             or contract.get("control_authority_configured") is not True
         ):
             raise DispatchUpgradeRequired("running coordinator lacks control-authorized pool catalog metadata")
+
+    def pool_catalog_metadata(self) -> dict:
+        """Explicit preparation read; ordinary reconciliation never calls it."""
+        self._require_pool_metadata_transport()
         result = self._unwrap(self._http.get("/pool-catalog", headers=self._control_headers()))
         PoolCatalogRead.from_dict(result)
         return result
+
+    def send_pool_metadata(
+        self, request: PoolMetadataRequest, *,
+        boundary: Callable[[], AbstractContextManager[None]],
+    ) -> PoolPublicationScope:
+        """Send the retained body only after running-peer and local admission."""
+        self._require_pool_metadata_transport()
+        body = request.to_dict()
+        headers = self._control_headers()
+        with boundary():
+            result = self._unwrap(self._http.post(
+                f"/pool-catalog/scopes/{request.operation}", json=body, headers=headers,
+            ))
+        return read_pool_metadata_result(result)
 
     def get_registration(self, rid: str) -> dict:
         return self._unwrap(self._http.get(f"/registrations/{rid}"))
