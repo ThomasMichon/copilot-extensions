@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import shutil
 import subprocess
 import sys
 import os
 import tempfile
+import venv
 
 import pytest
 
@@ -16,6 +19,57 @@ from test_source_python_publication import (
 CRITICAL = "agent-worktrees.cmd"
 NAMES = ("agent-worktrees", "agent-worktrees.cmd", "agent-worktrees.ps1")
 publication_case = shared_publication_case
+
+
+@pytest.mark.parametrize(("shell", "executable"), native_hosts())
+def test_global_frontdoor_keeps_import_cache_outside_the_selected_slot(
+    tmp_path: Path, shell: str, executable: str,
+) -> None:
+    from agent_procutil import no_window_kwargs, python_cache_args
+    from test_source_install_transactions import _ps, _sh
+
+    plugin = Path(__file__).resolve().parents[1]
+    home = tmp_path / "home with spaces"
+    root = home / ".agent-worktrees"
+    slot = root / "versions" / "1.0.0"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    library = slot / ("Lib/site-packages" if os.name == "nt" else
+                      f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
+    package = library / "agent_worktrees"
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import json,sys\nprint(json.dumps({'args':sys.argv[1:],"
+        "'cache':sys.pycache_prefix,'prefix':sys.prefix}))\n", encoding="utf-8",
+    )
+    local_bin = home / ".local" / "bin"
+    shutil.copytree(plugin / "bin", local_bin)
+    resolver = root / "bin"
+    resolver.mkdir()
+    (resolver / "resolve-runtime.ps1").write_text(f"$AwPy = {_ps(python)}\n", encoding="utf-8")
+    (resolver / "resolve-runtime.sh").write_text(f"AW_PY={_sh(python)}\n", encoding="utf-8")
+    before = {path.relative_to(slot): path.read_bytes() for path in slot.rglob("*") if path.is_file()}
+    env = {key: value for key, value in os.environ.items() if key.upper() not in {
+        "PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "PYTHONPATH", "PYTHONHOME",
+    }}
+    env.update(HOME=str(home), USERPROFILE=str(home))
+    entry = local_bin / ("agent-worktrees.ps1" if shell == "ps1" else "agent-worktrees")
+    command = (
+        [executable, "-NoProfile", "-File", str(entry)]
+        if shell == "ps1" else [executable, str(entry)]
+    )
+    result = subprocess.run(
+        [*command, "cache-probe", "argument with spaces"], env=env, cwd=home,
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["args"] == ["cache-probe", "argument with spaces"]
+    assert Path(observed["prefix"]).resolve() == slot.resolve()
+    assert observed["cache"] == python_cache_args(root)[1].split("=", 1)[1]
+    assert {path.relative_to(slot): path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
+    assert list((root / "cache" / "python").rglob("__main__*.pyc"))
 
 
 @pytest.fixture
@@ -67,6 +121,20 @@ def test_actual_callback_global_file_publication(
     publication_case, shell, executable, fault, monkeypatch,
 ):
     driver, root, slot, owner, content, _identity = publication_case
+    installed = root.parent / ".copilot/installed-plugins/example/agent-worktrees"
+    shutil.copytree(owner, installed)
+    (root.parent / ".copilot/settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+        },
+    }), encoding="utf-8")
+    owner = installed
+    with admitted(driver, root, owner, content, monkeypatch) as (governance, _lease):
+        with governance.manifest_publication(
+            b'{"schema_version":3,"service":"agent-worktrees"}',
+        ) as bound:
+            (root / "deploy-manifest.json").write_bytes(bound)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
     local_bin = root.parent / ".local" / "bin"
     local_bin.mkdir(parents=True)
     for name in NAMES:

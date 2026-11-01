@@ -312,7 +312,8 @@ def test_manifest_recovery_admits_only_exact_existing_global_commands(
     fixture["arguments"].update(payload_root=payload, legacy_root=runtime, plugin_id=plugin)
     scripts = payload / "scripts"
     scripts.mkdir()
-    for name in ("installer_engine_uninstall.py", "installer_engine_commands.py"):
+    for name in ("installer_engine_uninstall.py", "installer_engine_commands.py",
+                 "installer_engine_footprint.py"):
         shutil.copyfile(ROOT / "libs/installer-engine" / name, scripts / name)
     _write(payload / "plugin.json", {"name": plugin})
     directory = home / ".local/bin"
@@ -383,7 +384,8 @@ def test_manifest_recovery_retains_relocated_publisher_as_template_data(
     fixture.update(payload=payload, legacy=runtime)
     fixture["arguments"].update(payload_root=payload, legacy_root=runtime, plugin_id=plugin)
     _write(payload / "plugin.json", {"name": plugin})
-    for name in ("installer_engine_uninstall.py", "installer_engine_commands.py"):
+    for name in ("installer_engine_uninstall.py", "installer_engine_commands.py",
+                 "installer_engine_footprint.py"):
         shutil.copyfile(ROOT / "libs/installer-engine" / name, scripts / name)
     profile = ROOT / "plugins" / plugin / "scripts/uninstall-profile.json"
     if profile.is_file():
@@ -507,7 +509,8 @@ def test_teardown_preserves_foreign_commands_without_publication(
     _write(fixture["payload"] / "plugin.json", {"name": PLUGIN_ID})
     scripts = fixture["payload"] / "scripts"
     scripts.mkdir()
-    for name in ("installer_engine_uninstall.py", "installer_engine_commands.py"):
+    for name in ("installer_engine_uninstall.py", "installer_engine_commands.py",
+                 "installer_engine_footprint.py"):
         shutil.copyfile(ROOT / "libs/installer-engine" / name, scripts / name)
     shutil.copyfile(ROOT / "plugins" / PLUGIN_ID / "scripts/uninstall-profile.json",
                     scripts / "uninstall-profile.json")
