@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation); create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -77,10 +77,10 @@ rewrite.
 
 ### Phase 1 - Checker foundation and first admission
 
-- [ ] Deliver the typed local front door, reproducible checker preparation, project manifest and complete tracked-Python coverage ledger.
-- [ ] Activate the already-clean small libraries in strict mode and the checker infrastructure's own code/tests; verify actual negative MyPy controls.
+- [x] Deliver the typed local front door, reproducible checker preparation, project manifest and complete tracked-Python coverage ledger.
+- [x] Activate the already-clean small libraries in strict mode and the checker infrastructure's own code/tests; verify actual negative MyPy controls.
 - [ ] Add required PR and candidate-release static checks using the same front door and project policies; preserve existing unit selection and Main control.
-- [ ] Document and validate local `--prepare`, per-project, `--enforced`, `--changed`, `--all` and inventory commands. Default checking never implicitly installs tooling.
+- [x] Document and validate local `--prepare`, per-project, `--enforced`, `--changed`, `--all` and inventory commands. Default checking never implicitly installs tooling.
 
 ### Phase 2 - Source and platform qualification
 
@@ -117,12 +117,12 @@ rewrite.
 ## Validation Plan
 
 - [ ] Unit controls cover manifest validity, complete file classification, additions/renames, safe selection, monotonic activation and dependency impact.
-- [ ] Actual MyPy subprocess controls prove an incompatible argument/return fails basic mode and missing annotations/bare generics fail strict mode.
+- [x] Actual MyPy subprocess controls prove an incompatible argument/return fails basic mode and missing annotations/bare generics fail strict mode.
 - [ ] Local and CI use identical pinned checker, dependencies, project config and interpreter/platform targets; unknown source/setup errors fail visibly.
-- [ ] Changed-scope checks include working-tree edits and affected activated consumers; changes to checker/config/workflows cannot skip enforcement.
+- [x] Changed-scope checks include working-tree edits and affected activated consumers; changes to checker/config/workflows cannot skip enforcement.
 - [ ] Composition and generated-copy controls reject omitted/reordered/changed fragments or stale source correspondence; no empty result can certify coverage.
 - [ ] Each typing change preserves behavior through the smallest existing focused tests plus directly relevant integration/native checks. Skips are explicitly justified in that PR.
-- [ ] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
+- [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
 - [ ] Required source and release gates actually reject a type regression on activated code; final strict gate rejects a newly unclassified Python file.
 - [ ] Final full inventory, all strict projects/targets, documented boundary exceptions and live PR/release qualification are green together.
 
@@ -153,3 +153,43 @@ composition prerequisites, and review/validation rules.
 - #9829 merged after a current-head Copilot approval with no findings and green required CI. The source worktree was pulled forward onto the reviewed plan.
 - The reviewed decomposition and baseline were linked on #9807; #9831 owns P1's local checker, full inventory and initial strict source qualification.
 - The active slice transitions from `Phase 0 - Reviewed campaign` to `Phase 1 - Checker foundation and first admission`. P2/P3 retain actual PR/release enforcement; no implemented or live gate is claimed by plan completion.
+
+### 2026-11-01 - Checker foundation merged; source enforcement selected
+
+- #9838 merged into `dev` after exact-head Copilot approval, resolved findings
+  and green required CI. P1's local checker, complete physical inventory and
+  four strict projects are delivered; 63 projects remain pending.
+- The checker and cache-helper controls pass 51 tests. Actual MyPy negative
+  controls include basic/strict regressions and a non-ASCII Windows target.
+  Strict checking passes all admitted projects on Linux and Win32 analysis
+  targets. Fresh hash-locked preparation and the real local subprocess path
+  were exercised without importing product code or collecting its tests.
+- Review fixes preserve Python 3.10 bootstrap, immutable requirements,
+  finite installation, selector-independent inventory, safe response files,
+  repair-marker invalidation and readiness under the environment lease.
+- P2 is the next active slice: required source-PR checking through the existing
+  aggregate, local changed-scope parity and conservative consumer rechecking.
+  P3 retains candidate-release qualification. Neither CI enforcement nor full
+  type safety is claimed by this foundation merge; no installed rollout occurred.
+
+### 2026-11-01 - Required source gate qualified on the draft shipping PR
+
+- #9854's clean hosted candidate passed all source checks, the unchanged unit
+  packet and the required aggregate in
+  [run 41284762059](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41284762059).
+  Fresh pinned checker preparation and every admitted platform target ran.
+- A temporary, unconsumed module in an admitted source directory supplied an
+  incompatible assignment. MyPy rejected precisely that assignment, units
+  passed and the required aggregate failed in
+  [run 41285005852](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41285005852).
+  The probe is removed before shipping readiness; this is negative validation,
+  not a retained exception or failing source.
+- The changed-scope command conservatively checks every admitted consumer.
+  Real Git controls cover staged/unstaged edits, additions/deletions, pinned
+  comparison and invalid references. Source-hash admission was refreshed only
+  for the changed CI guard and its existing packet fixture: node selection,
+  production coverage targets and budgets are unchanged.
+- Local validation passed 53 checker/cache controls, 236 CI/packet-fixture
+  controls, strict admitted checks and the full 3,184-node unit packet with
+  coverage. The source-CI PR still requires a clean final head, review and
+  merge; candidate-release qualification and the full campaign remain open.
