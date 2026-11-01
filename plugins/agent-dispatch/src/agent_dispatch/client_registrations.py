@@ -7,6 +7,9 @@ pure mechanical extraction with no behavior change. Mixed into
 
 from __future__ import annotations
 
+from .client_errors import DispatchUpgradeRequired
+from .pool_publication_custody import PoolCatalogRead
+
 
 class RegistrationClientMixin:
     """Supervisor-registration HTTP calls, mixed into ``DispatchClient``.
@@ -49,6 +52,23 @@ class RegistrationClientMixin:
         if env is not None:
             params["env"] = env
         return self._unwrap(self._http.get("/registrations", params=params))
+
+    def pool_catalog_metadata(self) -> dict:
+        """Explicit preparation read; ordinary reconciliation never calls it."""
+        health = self.health()
+        contract = health.get("pool_catalog_transport") if isinstance(health, dict) else None
+        if not isinstance(contract, dict) or (
+            contract.get("protocol") != "pool_catalog_transport/v1"
+            or not isinstance(contract.get("supported_versions"), list)
+            or not any(type(version) is int and version == 1 for version in contract["supported_versions"])
+            or not isinstance(contract.get("definition_versions"), list)
+            or not any(type(version) is int and version == 1 for version in contract["definition_versions"])
+            or contract.get("control_authority_configured") is not True
+        ):
+            raise DispatchUpgradeRequired("running coordinator lacks control-authorized pool catalog metadata")
+        result = self._unwrap(self._http.get("/pool-catalog", headers=self._control_headers()))
+        PoolCatalogRead.from_dict(result)
+        return result
 
     def get_registration(self, rid: str) -> dict:
         return self._unwrap(self._http.get(f"/registrations/{rid}"))

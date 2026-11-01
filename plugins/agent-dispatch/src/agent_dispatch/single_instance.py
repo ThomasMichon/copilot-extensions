@@ -18,8 +18,16 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from uuid import uuid4
+
+
+class SingletonAdmissionError(RuntimeError):
+    """The original process acquisition is no longer held."""
 
 
 def lock_path_for(run_dir: Path, scope: str) -> Path:
@@ -34,13 +42,31 @@ class SingleInstance:
     def __init__(self, lock_path: str | Path):
         self.lock_path = Path(lock_path)
         self._fd: int | None = None
+        self._holder_pid: int | None = None
+        self._acquisition: str | None = None
         # Guards release() itself (not acquire()): a holder may legitimately
         # be released from two threads racing the same handoff (e.g. serve()'s
         # readiness poller vs. its own bounded-join fallback) -- without this,
         # both could observe the same fd and the second os.close() could close
         # a descriptor already reused elsewhere (review follow-up on
         # ThomasMichon/copilot-extensions#3066).
-        self._release_lock = threading.Lock()
+        self._release_lock = threading.RLock()
+
+    @property
+    def acquisition(self) -> str | None:
+        """An opaque incarnation of this process's actual lock acquisition."""
+        with self._release_lock:
+            return self._acquisition if self._fd is not None and self._holder_pid == os.getpid() else None
+
+    @contextmanager
+    def guard_acquisition(self, acquisition: str) -> Iterator[None]:
+        """Keep release serialized with a bounded, locally admitted operation."""
+        with self._release_lock:
+            if not acquisition or self.acquisition != acquisition:
+                raise SingletonAdmissionError("supervisor singleton acquisition is not current")
+            yield
+            if self.acquisition != acquisition:
+                raise SingletonAdmissionError("supervisor singleton acquisition changed during operation")
 
     @property
     def _owner_path(self) -> Path:
@@ -57,8 +83,18 @@ class SingleInstance:
     def acquire(self) -> bool:
         """Try to take the lock. Returns ``True`` if acquired, ``False`` if another
         live process already holds it. Idempotent for the holding instance."""
-        if self._fd is not None:
+        with self._release_lock:
+            return self._acquire()
+
+    def _acquire(self) -> bool:
+        if self._fd is not None and self._holder_pid == os.getpid():
             return True
+        if self._fd is not None:
+            # A fork inherits the descriptor, not its parent's admission.
+            os.close(self._fd)
+            self._fd = None
+            self._acquisition = None
+            self._holder_pid = None
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(str(self.lock_path), os.O_CREAT | os.O_RDWR, 0o644)
         try:
@@ -67,6 +103,8 @@ class SingleInstance:
             os.close(fd)
             return False
         self._fd = fd
+        self._holder_pid = os.getpid()
+        self._acquisition = uuid4().hex
         try:
             os.ftruncate(fd, 0)
             os.write(fd, str(os.getpid()).encode("ascii"))
@@ -88,6 +126,12 @@ class SingleInstance:
             if fd is None:
                 return
             self._fd = None
+            holder_pid = self._holder_pid
+            self._holder_pid = None
+            self._acquisition = None
+            if holder_pid != os.getpid():
+                os.close(fd)
+                return
             # Remove the side-car *before* unlocking: unlocking is the moment
             # another process can acquire and write its own pid into it, so
             # removing it after would delete that new holder's record instead
@@ -157,7 +201,7 @@ def read_holder_pid(lock_path: str | Path) -> int | None:
         return None
 
 
-if os.name == "nt":  # pragma: no cover -- exercised on Windows only
+if sys.platform == "win32":  # pragma: no cover -- exercised on Windows only
     import msvcrt
 
     def _lock(fd: int) -> None:

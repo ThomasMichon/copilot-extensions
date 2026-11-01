@@ -5,14 +5,18 @@ from __future__ import annotations
 import copy
 import logging
 import time
+import threading
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import CancelledError, Executor, Future, TimeoutError
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from .companion import CompanionIndeterminate
 from .pool_source_snapshot import (
     DeclarationRead, PoolSourceSnapshot, SourceObservation, SourceState, collect_pool_sources,
+    local_input_revision,
 )
+from .supervisor_pool_publication import SupervisorPoolPublication
 from .supervisor_registration import merge_registration_sources, registration_override_ids
 
 if TYPE_CHECKING:
@@ -21,7 +25,7 @@ if TYPE_CHECKING:
 log = logging.getLogger("agent-dispatch.supervisor-daemon")
 
 
-class SupervisorSources:
+class SupervisorSources(SupervisorPoolPublication):
     """Internal mixin; snapshots add no publisher, allocator or execution owner."""
 
     if TYPE_CHECKING:
@@ -42,6 +46,10 @@ class SupervisorSources:
         _publish_declarations: Callable[[list[dict]], set[str]]
 
     def _init_source_collection(self) -> None:
+        self._source_collection_lock = threading.RLock()
+        self._local_source_inputs: dict[str, object] = {}
+        self._last_override_veto: set[str] | None = None
+        self._init_pool_publication()
         self._last_store_registrations: list[dict] | None = None
         self._source_attempt = 0
         self._source_observations: dict[str, SourceObservation] = {}
@@ -125,6 +133,7 @@ class SupervisorSources:
         declared_source = self.declared_source
         if declared_source is None:
             self._observe_source("declarations", "fresh")
+            self._local_source_inputs["declarations"] = []
             return []
         from .registrar_reconcile import declared_registrations
 
@@ -159,6 +168,7 @@ class SupervisorSources:
             return self._last_declared
         if not complete:
             self._observe_source("declarations", "unconfirmed", reason)
+        self._local_source_inputs["declarations"] = copy.deepcopy(registrations)
         self._last_declared = registrations
         self._published_declared_ids = self._publish_declarations(registrations)
         return registrations
@@ -167,7 +177,7 @@ class SupervisorSources:
         """Read the same veto once; preserve legacy behavior on failed reads."""
         from . import overrides as ov
 
-        try:
+        def read() -> Mapping[str, dict]:
             if self.overrides_source is not None:
                 data = self.overrides_source()
                 ov.validate_overrides(data)
@@ -175,19 +185,38 @@ class SupervisorSources:
                 from .config import overrides_path
 
                 data = ov.load_overrides(overrides_path(), strict=True)
+            return copy.deepcopy(data)
+
+        try:
+            data = self._bounded_read("overrides", read)
+        except (CancelledError, TimeoutError) as exc:
+            self._observe_source("overrides", "cached" if self._last_override_veto is not None else "pending")
+            if self._last_override_veto is None:
+                raise CompanionIndeterminate(
+                    "override discovery pending; no confirmed veto snapshot"
+                ) from exc
+            log.warning("override discovery pending; retaining confirmed vetoes")
+            return set(self._last_override_veto)
         except ov.OverrideObservationError as exc:
             self._observe_source("overrides", "unavailable")
             log.warning("operator override observation malformed; retaining valid legacy vetoes")
-            return ov.overridden_off_ids(exc.overrides)
+            self._last_override_veto = ov.overridden_off_ids(exc.overrides)
+            return set(self._last_override_veto)
         except Exception as exc:
             self._observe_source("overrides", "unavailable")
             log.warning("failed to read operator overrides; treating as none: error_type=%s", type(exc).__name__)
             return set()
-        self._observe_source("overrides", "fresh")
-        return ov.overridden_off_ids(data)
+        self._local_source_inputs["overrides"] = copy.deepcopy(data)
+        self._last_override_veto = ov.overridden_off_ids(data)
+        return set(self._last_override_veto)
 
     def _effective_registrations(self) -> dict[str, dict]:
+        with self._source_collection_lock:
+            return self._collect_effective_registrations()
+
+    def _collect_effective_registrations(self) -> dict[str, dict]:
         self._source_attempt += 1
+        self._local_source_inputs = {}
         observed_at = self.clock()
         self._source_observations = {
             key: SourceObservation(key, "pending")
@@ -234,6 +263,17 @@ class SupervisorSources:
                 desired, machine=self.machine, env=self.env, attempt=self._source_attempt,
                 observed_at=observed_at, observations=self._source_observations.values(), reasons=reasons,
             )
+            if self._pool_source_snapshot.complete:
+                try:
+                    revision = local_input_revision(
+                        self._local_source_inputs["declarations"], self._local_source_inputs["overrides"],
+                    )
+                except (KeyError, TypeError, ValueError):
+                    self._pool_source_snapshot = replace(
+                        self._pool_source_snapshot, definitions=(), reasons=("local-input-revision-unavailable",),
+                    )
+                else:
+                    self._pool_source_snapshot = replace(self._pool_source_snapshot, input_revision=revision)
             if (not self._pool_source_snapshot.complete
                     and self._pool_source_snapshot.reasons != self._last_pool_source_reasons):
                 log.warning("effective pool collection unavailable: reasons=%s", self._pool_source_snapshot.reasons)

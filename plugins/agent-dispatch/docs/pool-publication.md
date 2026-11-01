@@ -107,6 +107,55 @@ still needs the lock-holder generation, coordinator input revision and local
 source rechecks below. Collection alone does not establish the complete configured
 scope membership or executing-runtime support.
 
+## Implemented bounded preparation and request custody
+
+`SingleInstance.acquisition` identifies one actual local OS-lock acquisition,
+not a pid sidecar, schedule lease or bearer credential. Repeated acquire by the
+holder preserves it; release/reacquire creates a new incarnation. A forked child
+cannot inherit its parent's admission or unlock the parent's lock when releasing
+its inherited descriptor. The acquisition guard serializes bounded local
+preparation with release. `SupervisorPoolPublication` accepts only the daemon's
+actual lock for its configured machine/environment scope, not an injected
+boolean-only lock or a live lock for a different scope.
+
+The explicit `capture_pool_publication_inputs()` seam brackets the existing
+effective-set collection and a fresh declaration/override recheck with two
+control-authorized coordinator catalog observations. It requires equal
+coordinator registration revisions and publisher positions, exact local-input
+digests and fresh reads from this attempt. Declaration publication or any other
+registration mutation during collection makes that attempt unavailable.
+Delayed futures, read failures, incomplete sources and changed local inputs do
+not authorize a complete request. Override reads share the owner's bounded
+discovery pool and remain in its existing future/shutdown accounting.
+The new timeout path retains confirmed vetoes; without a first confirmed veto
+snapshot it is indeterminate, not permission to start units against an unknown
+override. Completed older reads remain unqualified until a fresh attempt.
+
+This is **optimistic observed coherence**, not an atomic filesystem transaction
+or a remote attestation. The digest includes the entire observed declaration
+and override inputs, not just surviving workers; it is a correlation value and
+does not renew freshness. External file writers, the final effect-boundary local
+recheck and the complete configured cohort remain integration gates.
+
+`prepare_pool_metadata_request()` captures through that owner rather than
+accepting a caller-supplied completeness certificate. It retains exactly one
+immutable original begin or whole-scope publication request. Unresolved results
+block another request before discovery; replay materialization preserves the
+original generation, publication/input revisions and definitions. A successor's
+position never rebases that request. An unavailable publication has an empty
+definition array and an explicitly unavailable attempt correlation; its result
+must retain the previous definitions' original generation/revision. Matching
+late results can settle the old custody after release, but never restore its
+admission. The unresolved and last-settled request/response remain inspectable
+with bounded local memory; durable publication history stays provider-owned.
+
+The client read negotiates the running peer's version-1 metadata/definition
+support and configured control authority before accessing the unfiltered catalog.
+Missing, old or unsupported support refuses the new operation without trying a
+legacy write. **No serve-loop caller, enrollment/publication RPC sender or pool
+activation is wired.** These source prerequisites leave the provider's
+metadata-only/false admission and placement advertisements unchanged.
+
 ## Implemented storage boundary
 
 Each enrolled machine/environment scope has a monotonically increasing
@@ -156,10 +205,11 @@ equivalent-source deduplication, pauses and overrides. This storage API does not
 prove that collection is complete. Its opaque `input_revision` is a correlation
 provided by that owner, not an arbitrary allocator's completeness certificate.
 No ordinary allocator may publish a preferred subset or available-slot count.
-The local collector refuses failed/cached/uncertain observations, but transport
-must carry its unavailable result rather than reuse an older complete tuple.
-Pending local inputs and withdrawals still need the owner's own revision
-fencing and rechecks before a source snapshot can be published.
+The local collector and bounded preparation refuse failed/cached/uncertain
+observations. A future sender must carry the retained unavailable request rather
+than reuse an older complete tuple, recheck the original local acquisition at
+the write boundary and reconcile unknown outcomes before changing requests.
+External source mutations and final write-boundary rechecks remain unqualified.
 
 The controlling registration owner must also establish the complete expected
 scope membership. These primitives retain every scope it enrolls; an empty

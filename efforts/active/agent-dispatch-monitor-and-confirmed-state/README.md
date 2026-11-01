@@ -1388,3 +1388,38 @@ distinguishes inherited API `401` string-detail failures from the structured
 catalog `403`/`503` failures, including the configuration refusal reached only
 after valid ordinary authentication. This preserves the existing app-wide
 authentication boundary rather than overriding it for the new routes.
+
+The metadata transport source actually merged in
+[#9797](https://github.com/ThomasMichon/copilot-extensions/pull/9797) as
+`455d67f5ecbdcbf6517285c8a01e6931d77cd83c` after a current-head clean
+Copilot comment verdict with no Medium/High findings and successful required
+checks. The documented daemon-impact assessment preserves the existing
+activation/drain owner and transactional unknown-write recovery; it does not
+claim a new graceful or live-publication guarantee. Managed `pr-complete`
+retained the pre-completion backup and reached the exact squash merge cleanly.
+The next source boundary is the existing admitted singleton's coherent
+input/revision and publication custody, not a live enrollment or placement trial.
+
+### 2026-10-31 - Singleton-bound pool input and request preparation
+
+The existing singleton now supplies a process-bound acquisition incarnation and
+bounded release guard, rather than using a pid sidecar or schedule identity.
+The reconciliation owner captures exact whole-local-input digests and explicitly
+rechecks declarations/overrides between coordinator registration-revision and
+publisher-position observations. Older futures and changed/unavailable inputs
+cannot authorize a complete request. The new bounded override timeout preserves
+confirmed vetoes and refuses a first unknown observation.
+
+One immutable unresolved begin/publication request retains its original fences
+and full definition custody; late matching results account for that request
+without restoring an expired acquisition. Unavailable publication is not a
+partial set or a renewed old complete snapshot. Local memory retains only the
+unresolved and last-settled request; durable history stays provider-owned.
+
+This is source-only optimistic observed coherence, not an atomic filesystem
+transaction, remote lock-holder verification or complete configured membership.
+No ordinary reconciliation caller, publication sender, activation or placement
+was enabled. The [publication reference](../../../plugins/agent-dispatch/docs/pool-publication.md)
+records the boundary. Final effect-boundary source fencing, expected membership,
+mixed-version qualification and atomic placement remain open under #9709 and
+the original amendment matrix.

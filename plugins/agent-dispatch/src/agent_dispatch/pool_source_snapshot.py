@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
+import hashlib
+import json
 from typing import TYPE_CHECKING, Literal
 
 from dropin_registry import ScanAuthority
@@ -69,10 +71,19 @@ class PoolSourceSnapshot:
     definitions: tuple[PoolInstanceDefinition, ...]
     observations: tuple[SourceObservation, ...]
     reasons: tuple[str, ...]
+    input_revision: str | None = None
 
     @property
     def complete(self) -> bool:
         return not self.reasons
+
+
+def local_input_revision(declarations: object, overrides: object) -> str:
+    """Correlate exact observed local inputs; a digest alone proves no freshness."""
+    encoded = json.dumps(
+        [declarations, overrides], sort_keys=True, separators=(",", ":"), allow_nan=False,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def collect_pool_sources(
