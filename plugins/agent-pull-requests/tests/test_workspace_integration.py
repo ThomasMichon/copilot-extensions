@@ -71,6 +71,7 @@ def integration(environment):
 
     class Caller:
         corrupt = None
+        after_chunk = None
         calls = []
 
         async def request(self, method, target, *, request_headers, body, response_limit):
@@ -79,6 +80,9 @@ def integration(environment):
                 CallerContext("fleet-a", "gateway-a", "service-a", "caller-a", int(time.time()) + 600),
                 method, target, tuple((k.lower(), v) for k, v in request_headers), body,
             ))
+            if self.after_chunk is not None and target.endswith("/chunk"):
+                callback, self.after_chunk = self.after_chunk, None
+                callback()
             if self.corrupt == "missing_descriptor" and target.endswith("/lookup"):
                 from dataclasses import replace
                 value = json.loads(response.body)
@@ -305,6 +309,39 @@ def test_missing_lookup_descriptor_is_a_structured_client_refusal(environment, i
         with pytest.raises(WorkspaceClientError, match="invalid_workspace_descriptor"):
             await client.materialize(42, generation["id"])
         assert backend.threads == []
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("replacement", ["identical", "corrupt"])
+def test_pinned_chunks_revalidate_republication_but_reject_changed_content(environment, integration, replacement):
+    _, _, initial, _, backend, _ = environment
+    gateway, client, native, _, caller, _ = integration
+    backend.pr["description"] = "Synthetic long description " * 3000
+
+    async def scenario():
+        await client.capabilities()
+        descriptor = (await client.exchange("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 120,
+        }))["result"]["descriptor"]
+        generation = native.operations.cache.lookup(initial["scope"], generation_id=descriptor["id"])["generation"]
+
+        def replace_content():
+            if replacement == "identical":
+                assert native.operations.cache.publish(generation, expected_current=generation["id"])["status"] == "published"
+            else:
+                path = native.operations.cache.generations / (generation["id"] + ".json")
+                corrupted = copy.deepcopy(generation)
+                corrupted["sections"]["pull_request"]["data"]["description"] = "Changed without a matching content ID"
+                path.write_text(json.dumps(corrupted), encoding="utf-8")
+
+        caller.after_chunk = replace_content
+        if replacement == "identical":
+            assert await client.materialize(42, descriptor["id"]) == generation
+        else:
+            with pytest.raises(WorkspaceClientError):
+                await client.materialize(42, descriptor["id"])
         await gateway.drain(timeout=2)
 
     asyncio.run(scenario())

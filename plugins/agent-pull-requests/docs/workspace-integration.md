@@ -59,7 +59,8 @@ Fleet's existing 32 KiB physical frame is unchanged.
 The executing owner memoizes validated immutable bytes within one bounded
 16 MiB total read buffer. Each chunk rechecks the existing cache descriptor,
 plain file identity and caller/owner lifetime, not the whole generation.
-Changed/evicted files refuse rather than borrowing another scope or current ID.
+Changed content/evicted files refuse rather than borrowing another scope or current
+ID; identical republication revalidates once and refreshes only the file stamp.
 The buffer has no durable file, effect receipt or new lifecycle; final assembly
 still verifies the complete hash/schema. This avoids quadratic disk/JSON work.
 

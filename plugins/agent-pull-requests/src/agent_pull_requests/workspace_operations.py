@@ -177,7 +177,7 @@ class WorkspaceOperations:
                 descriptor, data, stamp = retained
                 # Small descriptor/file-identity checks retain the existing owner
                 # boundary without reparsing/reserializing the full object N times.
-                with cache._transaction():
+                with cache._transaction() as lock:
                     path = cache.generations / (generation_id + ".json")
                     try:
                         _plain(path)
@@ -186,8 +186,13 @@ class WorkspaceOperations:
                         del self._materializations[key]
                         raise WorkspaceUnavailable("selected immutable generation unavailable") from None
                     if (current.st_ino, current.st_size, current.st_mtime_ns) != stamp:
-                        del self._materializations[key]
-                        raise WorkspaceUnavailable("immutable generation changed")
+                        refreshed = cache._load_generation(generation_id, scope)
+                        if encoded(refreshed) != data:
+                            del self._materializations[key]
+                            raise WorkspaceUnavailable("immutable generation changed")
+                        stamp = (current.st_ino, current.st_size, current.st_mtime_ns)
+                        self._materializations[key] = (descriptor, data, stamp)
+                    cache._check(lock)
                 self._materializations.move_to_end(key)
                 return copy.deepcopy(descriptor), data
             with cache._transaction() as lock:
