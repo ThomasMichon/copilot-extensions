@@ -1,0 +1,73 @@
+{
+  "comment": "Correct installation-scoped Python caches, productive guardian deadlines, and native replacement qualification",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "dev"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "dev"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    },
+    {
+      "plugin": "wsl-setup",
+      "type": "dev"
+    }
+  ]
+}

@@ -10,6 +10,8 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from pathlib import Path
@@ -677,6 +679,7 @@ class _PowerShellHost:
     """Initialize only the real host before measuring unchanged product scripts."""
 
     def __init__(self, home: Path, environment: dict[str, str]) -> None:
+        self._response_prefix = f"__fixture_response_{uuid.uuid4().hex}__"
         script = home / "initialized-host.ps1"
         script.write_text(
             "$ErrorActionPreference='Stop'\n"
@@ -687,7 +690,7 @@ class _PowerShellHost:
             "$null='{\"path\":\"fixture\",\"arguments\":[]}'|ConvertFrom-Json\n"
             # Stopping recording can itself write; it belongs before READY/baseline.
             "[System.Runtime.ProfileOptimization]::StartProfile($null)\n"
-            "[Console]::WriteLine('{\"ready\":true}')\n"
+            f"[Console]::WriteLine('{self._response_prefix}{{\"ready\":true}}')\n"
             "while ($null -ne ($line=[Console]::ReadLine())) {\n"
             "    $request=$line|ConvertFrom-Json\n"
             "    $arguments=@($request.arguments)\n"
@@ -714,7 +717,7 @@ class _PowerShellHost:
             "    $nativeErr=[IO.StreamWriter]::new([Console]::OpenStandardError(),"
             "[Text.UTF8Encoding]::new($false),1024,$true)\n"
             "    $nativeErr.WriteLine('__fixture_stderr_complete__'); $nativeErr.Dispose()\n"
-            "    [Console]::WriteLine($response)\n"
+            f"    [Console]::WriteLine('{self._response_prefix}'+$response)\n"
             "}\n",
             encoding="utf-8",
         )
@@ -758,12 +761,26 @@ class _PowerShellHost:
             raise
 
     def _response(self) -> dict:
-        try:
-            line = self.lines.get(timeout=30)
-        except queue.Empty:
-            raise AssertionError("PowerShell fixture host timed out") from None
-        assert line is not None, "PowerShell fixture host exited: " + "".join(self.errors)
-        return json.loads(line)
+        deadline = time.monotonic() + 30
+        native_output = []
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise AssertionError("PowerShell fixture host timed out")
+            try:
+                line = self.lines.get(timeout=remaining)
+            except queue.Empty:
+                raise AssertionError("PowerShell fixture host timed out") from None
+            assert line is not None, "PowerShell fixture host exited: " + "".join(self.errors)
+            prefix, separator, body = line.partition(self._response_prefix)
+            if separator:
+                response = json.loads(body)
+                if prefix:
+                    native_output.append(prefix)
+                if native_output:
+                    response["stdout"] = "".join(native_output) + response.get("stdout", "")
+                return response
+            native_output.append(line)
 
     def run(self, argv: list[str]) -> subprocess.CompletedProcess:
         index = argv.index("-File")
@@ -822,7 +839,9 @@ def powershell_host():
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")
-@pytest.mark.parametrize("result", ["ignored-native-failure", "exit", "throw", "native-stderr"])
+@pytest.mark.parametrize("result", [
+    "ignored-native-failure", "exit", "throw", "native-stderr", "native-stdout",
+])
 def test_command_binding_initialized_host_preserves_script_outcome(
     binding_fixture: dict, result: str, powershell_host,
 ) -> None:
@@ -838,17 +857,27 @@ def test_command_binding_initialized_host_preserves_script_outcome(
         "native-stderr": (
             "& $env:TEST_PYTHON -c 'import sys;sys.stderr.write(\"native-error\")'\n"
         ),
+        "native-stdout": (
+            "$writer=[IO.StreamWriter]::new([Console]::OpenStandardOutput(),"
+            "[Text.UTF8Encoding]::new($false),1024,$true)\n"
+            "$writer.Write(\"raw-native`n{`\"ready`\":false}`n\");$writer.Dispose()\n"
+            "Write-Output 'complete'\n"
+        ),
     }[result], encoding="utf-8")
     host = powershell_host(binding_fixture, environment)
     completed = host.run([POWERSHELL, "-File", str(script)])
     assert completed.returncode == {
         "ignored-native-failure": 0, "exit": 7, "throw": 1, "native-stderr": 0,
+        "native-stdout": 0,
     }[result]
     if result == "throw":
         assert "fixture-script-error" in completed.stderr
     elif result == "native-stderr":
         assert "native-error" in completed.stderr
         assert host.run([POWERSHELL, "-File", str(script)]).stderr == completed.stderr
+    elif result == "native-stdout":
+        assert completed.stdout == 'raw-native\n{"ready":false}\ncomplete'
+        assert host.run([POWERSHELL, "-File", str(script)]).stdout == completed.stdout
     else:
         assert completed.stdout == "complete"
 

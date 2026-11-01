@@ -14,6 +14,64 @@ from worktree_manager import runtime_source_config as config
 from worktree_manager import self_install, source_config, update_driver_cli, update_events, update_orchestration
 
 
+@pytest.mark.parametrize("retained", [False, True])
+def test_main_manager_acquisition_checks_out_only_its_payload_and_libraries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, retained: bool,
+) -> None:
+    root, repo = tmp_path / "m", tmp_path / "upstream"
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    files = {
+        "worktree-manager/pyproject.toml": "[project]\nversion='1.0'\n",
+        "libs/example/pyproject.toml": "[project]\nname='example'\n",
+        ".gitattributes": "* text=auto\n",
+        "plugins/unrelated/fixture.txt": "not a Manager dependency\n",
+    }
+    for relative, body in files.items():
+        path = repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "-c", "user.name=Example", "-c", "user.email=example@example.invalid",
+        "commit", "-qm", "initial payload", "--no-verify")
+    staging = root / self_install.STAGING_DIR
+    if retained:
+        root.mkdir()
+        git(root, "clone", "-q", str(repo), str(staging))
+        assert (staging / "plugins/unrelated/fixture.txt").is_file()
+        git(staging, "config", "core.sparseCheckoutCone", "true")
+    files["worktree-manager/pyproject.toml"] = "[project]\nversion='2.0'\n"
+    (repo / "worktree-manager/pyproject.toml").write_text(
+        files["worktree-manager/pyproject.toml"], encoding="utf-8",
+    )
+    git(repo, "add", ".")
+    git(repo, "-c", "user.name=Example", "-c", "user.email=example@example.invalid",
+        "commit", "-qm", "current payload", "--no-verify")
+    source_config.set_source(repo=str(repo), ref="main", root=root)
+    monkeypatch.setattr("worktree_manager.update_auth.environment", lambda *a, **kw: None)
+    acquired = []
+
+    def install(**kwargs: object) -> self_install.SelfInstallResult:
+        acquired.append(kwargs["payload_dir"])
+        for relative, body in files.items():
+            path = staging / relative
+            if relative.startswith("plugins/"):
+                assert not path.exists()
+            else:
+                assert path.read_text(encoding="utf-8") == body
+        assert not (staging / "plugins").exists()
+        assert git(staging, "rev-parse", "HEAD") == git(repo, "rev-parse", "main")
+        return self_install.SelfInstallResult(action="planned", version="2.0", root=str(root))
+
+    monkeypatch.setattr(self_install, "self_install", install)
+    result = self_install.self_update(root=root, dry_run=True)
+    assert result.action == "updated", result.reason
+    assert acquired == [staging / "worktree-manager"]
+
+
 @pytest.mark.parametrize("support", ["legacy", "inventory-only", "prepared"])
 def test_real_source_suite_preparation_and_provider_skew(
     tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, support: str,

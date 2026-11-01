@@ -147,10 +147,9 @@ class Registration:
         root = Path(self.root).resolve()
         for path in (Path(self.pythonw), Path(self.entrypoint), root):
             if path.resolve() != path.absolute() or any(
-                parent.is_symlink() or (parent / ".git").exists()
-                for parent in (path, *path.parents)
+                parent.is_symlink() for parent in (path, *path.parents)
             ):
-                raise _refuse("transient installation refused")
+                raise _refuse("linked installation refused")
         if (
             not Path(self.pythonw).is_file() or not Path(self.entrypoint).is_file()
             or not Path(self.entrypoint).is_relative_to(root)

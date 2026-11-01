@@ -1712,11 +1712,14 @@ still install noneditable wheel content rather than references to those source
 directories. The canonical installer dependency CLI
 refuses explicit editable operands, including requirements-file entries, and
 non-copy link modes. It freezes editable source mappings in private retained
-metadata and supplies `--link-mode copy` to UV; `uv pip install` does not accept
+metadata and supplies `--link-mode copy` to UV only when the caller has not
+already supplied it; `uv pip install` does not accept
 the global `--no-editable` option. The Python constructor uses the same
 non-editable retention mode, verifies installed origins and permits ordinary
 immutable wheel-cache hardlinks as described in the source-wheel cache contract
 below.
+Static admission recognizes the standard UV, setuptools and pywin32 bootstrap
+import hooks with their required slot-local modules, without executing them.
 Completion rejects symlink/reparse redirection, editable origins and escaping
 path hooks, not an ordinary file merely having another hardlink. Cache content
 is never modified in place; cache retirement unlinks its own names without
@@ -2545,6 +2548,9 @@ redirect custody through selective native deletion. Its `--check` performs
 structural admission only; deletion repeats ownership, inventory, guards and
 current-user process attribution under custody. A matching deploy manifest is
 removed last and retained as retry proof on cleanup failure.
+An existing manifest is retained byte-for-byte. A stamped-only installation
+records untyped product retry evidence, never synthesizes command-publication
+ownership from its teardown admission.
 An explicit `--check --check-consumers` additionally acquires that removal
 custody and checks consumers before a non-daemon caller's first mutation;
 ordinary daemon adapters retain their owned service-STOP ordering. Finite
@@ -2626,6 +2632,11 @@ a health result. No new installed receipt is required.
 
 MCP's native installers now pass that maintained footprint into the existing
 attached construction session under the same installer lock/execution owner.
+The shared source-manifest loader keeps maintained history separate from the
+small installed-marker read budget, including construction, process retirement
+and control reset.
+PowerShell preserves an exited construction owner's captured stderr and exit
+code when its input pipe has already closed.
 A compatible layout can reuse an admitted candidate, including the selected
 same-input replacement generation. Otherwise construction is fresh: an occupied
 target receives a distinct `repair.<id>` generation, without rewriting the
@@ -4794,6 +4805,14 @@ The caller owns the named role, distinct immutable slot, role-specific health
 and ordinary publication/removal lifecycle; this construction seam does not
 make an installer, service supervisor or selected command catalog by itself.
 
+Numbered content conflicts raise the typed `ContentRepairRequired` signal,
+which remains a `RuntimeError` for existing callers. The Manager adapter handles
+it inside candidate construction by selecting a distinct repair generation,
+just as for a settled installed-health repair; it never rewrites the published
+slot or leaks this recoverable admission outcome out of borrowed execution
+custody. Exact wheel-receipt reuse still cannot construct another generation.
+Other callers retain their existing handling of content conflicts.
+
 Reused installed-health failures request distinct-generation repair when the
 probe exits unsuccessfully, cannot create its child, or reaches its deadline
 after every owned writer has settled. Process creation is distinguished by
@@ -4962,6 +4981,11 @@ The parent allows the guardian's existing startup grace only until its first
 output. Subsequent progress renews the configured child inactivity window,
 not the startup-plus-teardown allowance; a blocked output pipe cannot postpone
 hang detection by repeatedly borrowing that grace.
+When incremental output is requested, `timeout` bounds inactivity, not total
+productive execution. An explicitly supplied monotonic `deadline` remains an
+absolute cap through launch and settlement; without incremental output the
+finite execution timeout still applies. Preparation and native launch retain
+their finite startup checks in either mode.
 If the parent's quiet window expires first, it closes its liveness pipe and
 continues draining the guardian's settled completion before propagating the
 timeout, preserving the child's original stdout and stderr channels.

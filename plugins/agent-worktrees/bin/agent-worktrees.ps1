@@ -44,6 +44,13 @@ foreach ($_pyEnvVar in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONEXECUTABLE', 'VIRTUA
 # from the snapshot the stamp recorded, then dispatch. Opt out with
 # AGENT_WORKTREES_NO_SELFPROVISION=1 (then falls through to a PATH python).
 $_root = Join-Path $env:USERPROFILE '.agent-worktrees'
+$_awCacheId = [Guid]::NewGuid().ToString('N')
+$_awPythonCache = [IO.Path]::GetFullPath((Join-Path $_root "cache\python\unsealed-$_awCacheId"))
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not $_awPythonCache.StartsWith('\\?\')) {
+    $_awPythonCache = if ($_awPythonCache.StartsWith('\\')) {
+        '\\?\UNC\' + $_awPythonCache.Substring(2)
+    } else { '\\?\' + $_awPythonCache }
+}
 function _resolve_aw_py {
     $resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
     if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) { return $null }
@@ -51,7 +58,7 @@ function _resolve_aw_py {
     return $AwPy
 }
 $_py = _resolve_aw_py
-if ($_py) { & $_py -m agent_worktrees @args; exit $LASTEXITCODE }
+if ($_py) { & $_py -X "pycache_prefix=$_awPythonCache" -m agent_worktrees @args; exit $LASTEXITCODE }
 if ($_awUpdateDiagnostic) {
     [Console]::Error.WriteLine('[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.')
     exit 127
@@ -97,6 +104,6 @@ try {
     $mutex.Dispose()
 }
 $_py = _resolve_aw_py
-if ($_py) { & $_py -m agent_worktrees @args; exit $LASTEXITCODE }
+if ($_py) { & $_py -X "pycache_prefix=$_awPythonCache" -m agent_worktrees @args; exit $LASTEXITCODE }
 [Console]::Error.WriteLine('[agent-worktrees] provisioning did not yield a runtime. See the log above; retry, or run the installer manually.')
 exit 1

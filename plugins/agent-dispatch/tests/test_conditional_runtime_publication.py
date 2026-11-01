@@ -3,14 +3,39 @@ from __future__ import annotations
 
 import os
 import json
+import importlib.util
 import shutil
+import shlex
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from . import source_publication_fixture as fixture
+
+
+def test_fixture_reports_duration_when_parent_interrupts_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_dispatch import procutil
+
+    class Interrupted(BaseException):
+        pass
+
+    def interrupt(*args: object, **kwargs: object) -> None:
+        assert kwargs["timeout"] == 90
+        raise Interrupted
+
+    monkeypatch.setattr(fixture.shutil, "which", lambda *args, **kwargs: "fixture-shell")
+    monkeypatch.setattr(procutil, "run_background_capture", interrupt)
+    with pytest.raises(Interrupted):
+        fixture.run("sh", tmp_path / "entry", ["--version"], {})
+    diagnostics = capsys.readouterr().err
+    assert "publication fixture: begin sh" in diagnostics
+    assert "publication fixture: end code=unavailable, elapsed=" in diagnostics
+
 
 INJECTION = r'''
 if [[ -n "${FIXTURE_PEER_PYTHON:-}" ]]; then
@@ -91,6 +116,258 @@ def snapshot(paths: list[Path]) -> dict[Path, tuple[bytes, int] | None]:
     }
 
 
+@pytest.mark.parametrize("home", ["fixture", "relative", "missing"])
+def test_fixture_posix_home_binding_preserves_canonical_input_guards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: str,
+) -> None:
+    scripts = tmp_path / "scripts"
+    copied = scripts / "installation-context"
+    shutil.copytree(fixture.SCRIPTS / "installation-context", copied)
+    adapter = (copied / "installation-context.ps1").read_bytes()
+    canonical = (fixture.SCRIPTS / "installation-context" / "_installation_context_resolution.py").read_bytes()
+    fixture.bind_posix_account_home(scripts)
+    assert (copied / "installation-context.ps1").read_bytes() == adapter
+    assert (fixture.SCRIPTS / "installation-context" / "_installation_context_resolution.py").read_bytes() == canonical
+    spec = importlib.util.spec_from_file_location(
+        "_dispatch_fixture_posix_home_sdk", copied / "installation_context.py",
+    )
+    assert spec and spec.loader
+    sdk = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, sdk)
+    spec.loader.exec_module(sdk)
+    env = fixture.environment(tmp_path)
+    expected = Path(env["HOME"]).resolve()
+    if home != "fixture":
+        env["HOME"] = "relative-home" if home == "relative" else str(tmp_path / "missing-home")
+        message = "must be absolute" if home == "relative" else "Cannot resolve path|Path does not exist"
+        with pytest.raises(sdk.InstallationContextError, match=message):
+            sdk._current_environment(environment=env, os_profile=None, platform="posix", wsl_distro=None)
+    else:
+        record, profile = sdk._current_environment(
+            environment=env, os_profile=None, platform="posix", wsl_distro=None,
+        )
+        assert profile == expected
+        assert record == {"platform": "posix", "homeRealPath": str(expected), "wslDistro": None}
+
+
+def test_fixture_posix_home_binding_rejects_modified_canonical_input(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    copied = scripts / "installation-context"
+    shutil.copytree(fixture.SCRIPTS / "installation-context", copied)
+    helper = copied / "_installation_context_resolution.py"
+    foreign = helper.read_bytes() + b"\n# foreign fixture modification\n"
+    helper.write_bytes(foreign)
+    with pytest.raises(AssertionError, match="unchanged canonical SDK fragment"):
+        fixture.bind_posix_account_home(scripts)
+    assert helper.read_bytes() == foreign
+
+
+@pytest.mark.parametrize("units", (70000, 600000))
+def test_fixture_captures_genuine_source_progress_and_still_bounds_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, units: int,
+) -> None:
+    from agent_dispatch import procutil
+
+    captured = procutil.run_background_capture
+    program = (
+        "import sys\nsys.path.insert(0,sys.argv[1])\n"
+        "import installer_source_build as builds\n"
+        "with builds._source_phase('source-selection',180,{}) as progress:\n"
+        f"    for _ in range({units}):\n        progress.renew()\n"
+        "print('settled')\n"
+    )
+
+    def execute(_argv, **options):
+        return captured(
+            [sys.executable, "-I", "-B", "-c", program, str(fixture.SCRIPTS)], **options,
+        )
+
+    monkeypatch.setattr(procutil, "run_background_capture", execute)
+    if units == 600000:
+        with pytest.raises(procutil.OutputLimitExceeded):
+            fixture.run("ps1", tmp_path / "controlled.ps1", [], fixture.environment(tmp_path))
+    else:
+        result = fixture.run("ps1", tmp_path / "controlled.ps1", [], fixture.environment(tmp_path))
+        assert result.returncode == 0 and result.stdout == "settled\n"
+        assert len(result.stderr) > 65536
+        assert 0 < result.stderr.count("Source wheel progress:") < units
+        assert "state=completed" in result.stderr
+        assert f"completed-units={units}\n" in result.stderr
+
+
+def _admission_source(tmp_path: Path, missing: str | None = None) -> Path:
+    scripts = tmp_path / "payload" / "scripts"
+    scripts.mkdir(parents=True)
+    if missing != "directory":
+        bundle = scripts / "installation-context"
+        bundle.mkdir()
+        for name in fixture.mandatory_admission_files():
+            if name != missing:
+                (bundle / name).write_text(f"new:{name}\n", encoding="utf-8")
+        (bundle / "optional-extra.txt").write_text("optional\n", encoding="utf-8")
+    for name in (
+        "resolve-runtime.sh", "resolve-runtime.ps1", "runtime-gate.sh", "runtime-gate.ps1",
+        "delegated-waiter-callback.sh", "delegated-waiter-callback.ps1",
+    ):
+        (scripts / name).write_text(f"new:{name}\n", encoding="utf-8")
+    return scripts
+
+
+def _admission_bash(tmp_path: Path, body: str) -> subprocess.CompletedProcess[str]:
+    from .test_install_sh_activation_guard import _resolve_bash
+
+    bash = _resolve_bash()
+    if not bash:
+        pytest.skip("native Bash unavailable")
+    definitions = "\n".join(fixture.function("sh", name) for name in (
+        "_runtime_admission_preflight", "deploy_binstub", "do_stamp", "do_install",
+        "do_update", "_ensure_runtime",
+    ))
+    harness = tmp_path / "admission-bundle.sh"
+    harness.write_bytes(("set -euo pipefail\n"
+                        '_fail() { printf "%s\\n" "$*" >&2; }\n'
+                        '_ok() { :; }; _warn() { printf "%s\\n" "$*" >&2; }\n'
+                        + definitions + "\n" + body).encode("utf-8"))
+    return subprocess.run(
+        [bash, str(harness)],
+        cwd=tmp_path, env=fixture.environment(tmp_path), capture_output=True,
+        text=True, timeout=90 if os.name == "nt" else 20, creationflags=fixture.HEADLESS,
+    )
+
+
+@pytest.mark.parametrize("missing", ["directory", *fixture.mandatory_admission_files()])
+def test_admission_bundle_missing_input_has_no_publication_effects(tmp_path: Path, missing: str) -> None:
+    scripts = _admission_source(tmp_path, missing)
+    root = tmp_path / "runtime"
+    root.mkdir()
+    for name in ("current-version", "payload-dir", "stamped-version", "machine"):
+        (root / name).write_text(f"healthy:{name}", encoding="utf-8")
+    before = snapshot(list(root.iterdir()))
+    result = _admission_bash(tmp_path, f"""
+SCRIPT_DIR={shlex.quote(scripts.as_posix())}
+INSTALL_DIR={shlex.quote(root.as_posix())}
+LOCAL_BIN={shlex.quote((tmp_path / "localbin").as_posix())}
+VERSIONED_RUNTIME=1
+for action in do_stamp do_install do_update _ensure_runtime deploy_binstub; do
+    if "$action"; then exit 91; else [[ "$?" == 1 ]] || exit 92; fi
+done
+INSTALL_DIR={shlex.quote((tmp_path / "fresh-runtime").as_posix())}
+for action in do_stamp do_install do_update _ensure_runtime deploy_binstub; do
+    if "$action"; then exit 93; else [[ "$?" == 1 ]] || exit 94; fi
+done
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stderr.count("Required runtime admission") == 10
+    assert ("installation-context" if missing == "directory" else missing) in result.stderr
+    assert snapshot(list(root.iterdir())) == before
+    assert not (tmp_path / "fresh-runtime").exists()
+    assert not (tmp_path / "localbin").exists()
+
+
+def test_admission_bundle_preflight_precedes_lifecycle_effects() -> None:
+    text = (fixture.SCRIPTS / "install.sh").read_text(encoding="utf-8")
+    dispatch = text[text.index('_LIFECYCLE_ACTION=""'):]
+    assert dispatch.index("_runtime_admission_preflight") < dispatch.index("_lifecycle_emit begin")
+    assert dispatch.index("_runtime_admission_preflight") < dispatch.index("reconcile_installer_instances")
+
+
+@pytest.mark.parametrize("case", ["complete", "scoped", "copy-failure", "copy-failure-peer"])
+@pytest.mark.timeout(120 if os.name == "nt" else 30)
+def test_admission_bundle_complete_copy_and_owned_recovery(tmp_path: Path, case: str) -> None:
+    scripts = _admission_source(tmp_path)
+    root = tmp_path / "runtime"
+    bin_dir = tmp_path / "localbin"
+    support = root / "bin" / "installation-context"
+    support.mkdir(parents=True)
+    bin_dir.mkdir()
+    paths = [root / name for name in (
+        "machine", "payload-dir", "stamped-version", "current-version", "last-known-good",
+    )] + [bin_dir / "agent-dispatch", bin_dir / "agent-dispatch-board"]
+    paths.extend(support / name for name in fixture.mandatory_admission_files())
+    paths.append(support / "optional-extra.txt")
+    paths.extend(root / "bin" / name for name in (
+        "resolve-runtime.sh", "resolve-runtime.ps1", "runtime-gate.sh", "runtime-gate.ps1",
+    ))
+    for path in paths:
+        path.write_text(f"healthy:{path.name}\n", encoding="utf-8")
+    before = snapshot(paths)
+    legacy = tmp_path / "legacy" if case == "scoped" else root
+    legacy.mkdir(exist_ok=True)
+    body = f"""
+SCRIPT_DIR={shlex.quote(scripts.as_posix())}
+INSTALL_DIR={shlex.quote(root.as_posix())}
+LEGACY_INSTALL_DIR={shlex.quote(legacy.as_posix())}
+LOCAL_BIN={shlex.quote(bin_dir.as_posix())}
+STUB="$LOCAL_BIN/agent-dispatch"; BOARD_STUB="$LOCAL_BIN/agent-dispatch-board"
+PLUGIN_DIR=""; SOURCE_RUNTIME_IDENTITY=""
+AGENT_DISPATCH_SUPERVISE_MACHINE=fixture
+. {shlex.quote((fixture.REPO / "libs" / "installer-engine" / "installer-engine.sh").as_posix())}
+. {shlex.quote((fixture.SCRIPTS / "source-runtime.sh").as_posix())}
+# Full-set journaling is covered by the contained installer cases below.
+# Keep this portable copy/refusal test bounded to its actual failure target.
+_runtime_publication_begin "$INSTALL_DIR/machine" \
+    "$INSTALL_DIR/bin/installation-context/json-query.awk" "$STUB" "$BOARD_STUB"
+if [[ '{case}' == copy-failure* ]]; then
+    real_copy="$(declare -f _runtime_publication_copy)"
+    eval "${{real_copy/_runtime_publication_copy/_admission_real_copy}}"
+    _runtime_publication_copy() {{
+        [[ "$1" == "$SCRIPT_DIR/installation-context/json-query.awk" ]] || return 0
+        _admission_real_copy "$@" || return 1
+    }}
+fi
+copy_failed=0
+cp() {{
+    if [[ "$copy_failed" == 0 && '{case}' == copy-failure* &&
+          "${{@: -1}}" == "$INSTALL_DIR/bin/installation-context/.json-query.awk.publication-stage."*/json-query.awk ]]; then
+        copy_failed=1
+        command head -c 4 "${{@: -2:1}}" > "${{@: -1}}" || return 1
+        if [[ '{case}' == copy-failure-peer ]]; then
+            printf peer-machine > "$INSTALL_DIR/peer-machine"
+            command mv "$INSTALL_DIR/peer-machine" "$INSTALL_DIR/machine" || return 1
+        fi
+        return 73
+    fi
+    command cp "$@"
+}}
+if deploy_binstub; then
+    [[ '{case}' == complete || '{case}' == scoped ]] || exit 91
+    _runtime_publication_discard || exit 92
+else
+    [[ '{case}' == copy-failure* ]] || exit 93
+    if [[ '{case}' == copy-failure-peer ]]; then
+        peer_before="$(_runtime_publication_state "$INSTALL_DIR/machine")"
+        if _runtime_publication_restore; then exit 94; fi
+        [[ "$(_runtime_publication_state "$INSTALL_DIR/machine")" == "$peer_before" ]] || exit 95
+    else
+        _runtime_publication_restore || exit 96
+    fi
+fi
+"""
+    result = _admission_bash(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    if case == "copy-failure-peer":
+        assert (root / "machine").read_bytes() == b"peer-machine"
+        assert list(root.glob(".publication.????????/journal"))
+        assert "Unowned publication state" in result.stderr
+    elif case == "copy-failure":
+        assert snapshot(paths) == before
+        assert not list(root.rglob("*.publication.*"))
+        assert not list(bin_dir.glob("*.publication.*"))
+    else:
+        for path in support.iterdir():
+            assert path.read_bytes() == (scripts / "installation-context" / path.name).read_bytes()
+        assert {path.name for path in support.iterdir()} == {
+            *fixture.mandatory_admission_files(), "optional-extra.txt",
+        }
+        if case == "scoped":
+            assert snapshot([bin_dir / "agent-dispatch", bin_dir / "agent-dispatch-board"]) == {
+                path: value for path, value in before.items() if path.parent == bin_dir
+            }
+        else:
+            assert "runtime-gate.sh" in (bin_dir / "agent-dispatch").read_text(encoding="utf-8")
+
+
+@pytest.mark.timeout(60)
 @pytest.mark.parametrize(("failure", "action"), [
     ("mkdir", "install"), ("copy", "install"), ("cat", "install"),
     ("chmod", "install"), ("machine", "install"), ("manifest", "install"),
@@ -130,6 +407,11 @@ def test_conditional_publication_failure_keeps_healthy_selection(tmp_path, monke
         "current-version", "last-known-good", "deploy-manifest.json", "payload-dir",
         "stamped-version", "machine", "bin/resolve-runtime.sh", "bin/resolve-runtime.ps1",
     )] + [bin_dir / "agent-dispatch", bin_dir / "agent-dispatch-board"]
+    paths.extend(
+        root / "bin/installation-context" / support.name
+        for support in (fixture.SCRIPTS / "installation-context").iterdir()
+        if support.is_file()
+    )
     before = snapshot(paths)
     completions = {
         identity.runtime_version: (root / "versions" / identity.runtime_version / ".install-complete.json").read_bytes()
@@ -469,4 +751,7 @@ exit 77
     assert (root / "stamped-version").read_text() == fixture.PACKAGE
     assert (root / "bin/runtime-gate.sh").is_file()
     assert (root / "bin/installation-context/installation-context.sh").is_file()
+    for support in (fixture.SCRIPTS / "installation-context").iterdir():
+        if support.is_file():
+            assert (root / "bin/installation-context" / support.name).read_bytes() == support.read_bytes()
     assert not list(root.rglob("*.publication.*"))

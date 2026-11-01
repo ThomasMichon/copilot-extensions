@@ -1,45 +1,20 @@
-"""Drain-safe cutover: hand off the unlocked master secret between generations.
+"""Minimal in-memory auth state, with versioned expiration-preserving adoption.
 
-A routine vault version bump replaces the running daemon. Today that hard-restart
-drops the in-memory unlocked master password(s) and the warm credential cache,
-forcing the operator to re-unlock. The drain-safe cutover (#743) instead stands up
-the new generation, has it **inherit the unlocked state from the outgoing one**,
-flips the routing record, and drains the old daemon -- so a version bump costs no
-re-unlock.
+The negotiated functions use the private native channels in service_handoff:
+only compatible, unexpired master passwords cross generations, never a file,
+log, command-line argument or environment carrier. Credential-value caches
+re-warm lazily.
 
-This module is the *mechanism*: it builds and applies the minimal handoff payload.
-The payload carries the unlocked master password(s) in plaintext, so it is
-**security-critical** and bound by the invariants in ``docs/architecture.md``.
-The handoff crosses TWO distinct legs, each gated differently:
-
-1. **Outgoing daemon -> installer** (`request_handoff_from_running_daemon` /
-   the `handoff-export` daemon action): ONLY over a transport we can prove is
-   access-gated to the owner -- today the vault's AF_UNIX control socket
-   (``0o600``) -- and **never** plain loopback TCP or the network. The
-   Windows named pipe is excluded until it carries a hardened owner-only ACL,
-   and a host without a qualifying transport (Windows today, or a TCP-only
-   WSL layout) safely degrades to the existing re-unlock path.
-2. **Installer -> not-yet-running new generation** (`--handoff-stdin`, in
-   `service.main`): this is not an inter-daemon crossing (nothing is
-   listening yet) -- it is how a parent process hands data to the child it is
-   about to launch, so it uses whichever same-user, non-persistent OS carrier
-   the launch mechanism supports: stdin for a direct invocation, or the
-   ``AGENT_VAULT_HANDOFF_JSON`` env var for a systemd-managed restart
-   (`systemctl --user set-environment` immediately before, unset immediately
-   after -- never written to the unit file, never persisted past that one
-   restart). Neither carrier is a file and neither crosses the network.
-
-In both legs the secret is transferred, applied, and dropped -- this module
-never persists it and never logs its value.
-
-Only what is needed to avoid a re-unlock is carried: the unlocked master
-password(s) + their TTL bookkeeping. The credential-*value* cache is intentionally
-left to re-warm lazily on the new generation, keeping the secret surface minimal.
+The older build/apply/export/stdin helpers remain for the legacy POSIX restart
+path and explicit compatibility callers. They are not the negotiated protocol
+or evidence of incoming-first replacement. In particular, ordinary named pipes
+and TCP remain excluded from their unversioned secret-export action.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import time
 from typing import TYPE_CHECKING
 
@@ -58,6 +33,76 @@ if TYPE_CHECKING:  # avoid a runtime import cycle with service.py
 # re-unlock (invariant #3). Plain loopback TCP is never gated and is always
 # refused.
 OWNER_GATED_TRANSPORTS = frozenset({"unix"})
+AUTH_STATE_CONTRACT = "agent-vault.auth-state"
+AUTH_STATE_VERSIONS = (1,)
+
+
+def negotiate_auth_state(versions: object) -> int | None:
+    if not isinstance(versions, (list, tuple)):
+        return None
+    overlap = set(AUTH_STATE_VERSIONS) & {
+        value for value in versions if type(value) is int
+    }
+    return max(overlap) if overlap else None
+
+
+def _finite_time(value: object) -> bool:
+    try:
+        return type(value) in (int, float) and math.isfinite(value) and value >= 0
+    except OverflowError:
+        return False
+
+
+def build_auth_state(service: VaultService) -> dict:
+    """Capture only unexpired unlocked masters, without resetting their clocks."""
+    passwords = {}
+    with service._credential_lock:
+        now = time.time()
+        for kpdb in service.cli.unlocked_vaults():
+            password = service.cli.get_password(kpdb)
+            stamp = service._password_set_at.get(kpdb)
+            if not isinstance(password, str) or not _finite_time(stamp) or stamp > now:
+                continue
+            deadline = service._password_expiration(kpdb, stamp)
+            if deadline is not None and deadline <= now:
+                continue
+            passwords[kpdb] = {"password": password, "set_at": stamp, "expires_at": deadline}
+    return {"contract": AUTH_STATE_CONTRACT, "version": 1, "passwords": passwords}
+
+
+def apply_auth_state(service: VaultService, payload: object) -> int:
+    """Adopt a negotiated state in memory, retaining the original expiration."""
+    if (
+        not isinstance(payload, dict) or payload.get("contract") != AUTH_STATE_CONTRACT
+        or type(payload.get("version")) is not int
+        or payload["version"] not in AUTH_STATE_VERSIONS
+        or not isinstance(payload.get("passwords"), dict)
+    ):
+        return 0
+    warmed = 0
+    with service._credential_lock:
+        now = time.time()
+        for kpdb, entry in payload["passwords"].items():
+            if not isinstance(kpdb, str) or not kpdb or not isinstance(entry, dict):
+                continue
+            password, stamp, deadline = (
+                entry.get("password"), entry.get("set_at"), entry.get("expires_at"),
+            )
+            if (
+                not isinstance(password, str) or not _finite_time(stamp) or stamp > now
+                or "expires_at" not in entry
+                or (deadline is not None and (
+                    not _finite_time(deadline) or deadline <= now or deadline < stamp
+                ))
+            ):
+                continue
+            service.cli.set_password(kpdb, password)
+            service._password_set_at[kpdb] = stamp
+            service._password_handoff_deadlines.pop(kpdb, None)
+            if deadline is not None:
+                service._password_handoff_deadlines[kpdb] = deadline
+            warmed += 1
+    return warmed
 
 
 def build_handoff_payload(service: VaultService) -> dict:

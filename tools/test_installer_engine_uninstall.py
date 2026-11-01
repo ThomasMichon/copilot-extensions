@@ -604,6 +604,8 @@ def test_missing_cim_image_requires_matching_native_birth(installation, monkeypa
     image = str(root / "versions" / "1.0.0" / "python.exe").replace("'", "''")
     prelude = f"""
 function Get-CimInstance {{
+    param($ClassName, $Filter)
+    $rows = @(
     [pscustomobject]@{{ProcessId={os.getpid()};ParentProcessId=0;Name='python.exe';
         ExecutablePath='{str(sys.executable).replace("'", "''")}';CommandLine='fixture inspector';
         CreationDate=[datetime]'2026-01-01T00:00:00'}}
@@ -612,19 +614,26 @@ function Get-CimInstance {{
     [pscustomobject]@{{ProcessId=$PID;ParentProcessId={os.getpid()};Name='pwsh.exe';
         ExecutablePath='{str(HOST).replace("'", "''")}';CommandLine="fixture $module inspection";
         CreationDate=[datetime]'2026-01-01T00:00:00'}}
+    )
+    if ($Filter -eq 'ProcessId=64123') {{ return $rows | Where-Object ProcessId -eq 64123 }}
+    return $rows
 }}
 function Invoke-CimMethod {{
     [pscustomobject]@{{ReturnValue=0;Sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value}}
 }}
 function Get-Process {{
-    $result=[pscustomobject]@{{StartTime=[datetime]'{native_birth}';Path='{image}'}}
+    $result=[pscustomobject]@{{StartTime=[datetime]'{native_birth}';Path='{image}';HasExited=$false}}
     $result | Add-Member -MemberType ScriptMethod -Name Dispose -Value {{ }}
     return $result
 }}
 """
-    monkeypatch.setattr(MODULE, "_run", lambda owner, argv: run(
-        owner, [*argv[:-1], prelude + argv[-1]],
-    ))
+    def inspect(owner, argv):
+        native = "[Diagnostics.Process]::GetProcessById($processId)"
+        assert argv[-1].count(native) == 1
+        program = argv[-1].replace(native, "(Get-Process -Id $processId)")
+        return run(owner, [*argv[:-1], prelude + program])
+
+    monkeypatch.setattr(MODULE, "_run", inspect)
     with pytest.raises(RuntimeError, match="Cannot inspect a current-user candidate process"):
         MODULE.refuse_consumers(
             payload, "agent-bridge", root, HOST, MODULE.profile_for(payload, "agent-bridge"),
@@ -874,6 +883,63 @@ def test_partial_failure_retains_exact_retry_proof(
     assert (root / "deploy-manifest.json").read_bytes() == before
     assert (root / "tasks.db").read_bytes() == b"database"
     assert _cleanup(payload, root, remove_runtime=True, remover=_remove)["status"] == "removed"
+
+
+def test_failed_stamped_teardown_never_grants_foreign_command_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
+    payload = home / ".copilot/installed-plugins/example/agent-bridge"
+    shutil.copytree(
+        REPO / "plugins/agent-bridge", payload,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    (home / ".copilot/settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+        },
+    }), encoding="utf-8")
+    root = home / ".agent-bridge"
+    _seed(root, "agent-bridge")
+    manifest = root / "deploy-manifest.json"
+    manifest.unlink()
+    snapshot = root / "snapshots/1.0.0"
+    (snapshot / "pyproject.toml").write_text(
+        '[project]\nname="agent-bridge"\nversion="1.0.0"\n', encoding="utf-8",
+    )
+    (root / "payload-dir").write_text(str(snapshot), encoding="utf-8")
+    command = home / ".local/bin/agent-bridge"
+    command.parent.mkdir(parents=True)
+    command.write_bytes(b"foreign operator command\n")
+    binding = MODULE._load(payload / "scripts/command_binding.py")
+    primitive = binding._load_primitive(payload)
+    lifecycle = binding._load_lifecycle()
+    arguments = dict(payload_root=payload, plugin_id="agent-bridge", legacy_root=root)
+
+    def refuse_publication():
+        with pytest.raises(binding.CommandOwnershipConflict, match="global commands"):
+            with lifecycle.legacy_lifecycle(binding._rules(), primitive, **arguments):
+                pytest.fail("Teardown retry proof admitted foreign command publication")
+
+    refuse_publication()
+    monkeypatch.setattr(MODULE, "refuse_consumers", lambda *_: None)
+
+    def fail_after_manifest_unlink(payload, shell, directory, names):
+        _remove(payload, shell, directory, names)
+        if "deploy-manifest.json" in names:
+            raise OSError("fixture failure after manifest unlink")
+
+    with pytest.raises(OSError, match="after manifest unlink"):
+        _cleanup(payload, root, remove_runtime=True, remover=fail_after_manifest_unlink)
+    refuse_publication()
+    assert "commandBinding" not in json.loads(manifest.read_text(encoding="utf-8"))
+    assert command.read_bytes() == b"foreign operator command\n"
+    assert (root / "tasks.db").read_bytes() == b"database"
+    assert _cleanup(payload, root, remove_runtime=True, remover=_remove)["status"] == "removed"
+    assert command.read_bytes() == b"foreign operator command\n"
 
 
 def test_profile_guard_runs_inside_custody_before_deletion(

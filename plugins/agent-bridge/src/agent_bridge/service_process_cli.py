@@ -361,13 +361,17 @@ def _win_task_exists() -> bool:
 
 def _daemon_launch_argv() -> list[str]:
     """Argv that starts the foreground daemon without the Windows ``.cmd`` shim."""
+    from agent_procutil import python_cache_args
     from .execution_identity import source_repository
 
     core = _core()
     source = source_repository(Path.cwd())
     source_args = ["--source-worktree", str(source)] if source is not None else []
     if sys.executable:
-        return [sys.executable, "-m", "agent_bridge", "start", *source_args]
+        return [
+            sys.executable, *python_cache_args(os.path.abspath(core._INSTALL_DIR)),
+            "-m", "agent_bridge", "start", *source_args,
+        ]
     venv = os.path.join(core._INSTALL_DIR, "venv")
     py = (
         os.path.join(venv, "Scripts", "python.exe")
@@ -375,7 +379,10 @@ def _daemon_launch_argv() -> list[str]:
         else os.path.join(venv, "bin", "python")
     )
     if os.path.isfile(py):
-        return [py, "-m", "agent_bridge", "start", *source_args]
+        return [
+            py, *python_cache_args(os.path.abspath(core._INSTALL_DIR), runtime=py),
+            "-m", "agent_bridge", "start", *source_args,
+        ]
     exe = shutil.which("agent-bridge")  # marketplace-isolation: allow legacy-compatibility
     if exe:
         return [exe, "start"]
@@ -485,21 +492,14 @@ def _spawn_watchdog_replacement(
 
 def _watchdog_dead(reason: str, *, active_port: int | None = None) -> None:
     """Restart the Windows frontend promptly, then hard-exit the wedged one."""
-    from .watchdog import _force_exit
+    from .watchdog import _force_exit, _record_event
 
+    _record_event("replacement-requested", reason)
     try:
         _core()._spawn_watchdog_replacement(active_port=active_port)
-        import logging
-
-        logging.getLogger("agent-bridge").error(
-            "Self-watchdog: scheduled a detached Windows replacement before exit"
-        )
+        _record_event("replacement-scheduled", reason)
     except Exception as exc:
-        import logging
-
-        logging.getLogger("agent-bridge").error(
-            "Self-watchdog: could not schedule Windows replacement: %s", exc
-        )
+        _record_event("replacement-failed", type(exc).__name__)
     _force_exit(reason)
 
 

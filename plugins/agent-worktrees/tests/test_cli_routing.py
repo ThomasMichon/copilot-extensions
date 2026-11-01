@@ -1522,9 +1522,20 @@ def test_manager_handoff_binds_exact_engine_runtime(monkeypatch):
     assert seen["argv"] == [
         r"C:\manager\worktree-manager.cmd", "--project", "demo"
     ]
-    assert json.loads(
-        seen["env"][m._WORKTREE_MANAGER_ENGINE_ARGV_ENV]
-    ) == [r"C:\runtime\python.exe", "-m", "agent_worktrees"]
+    from agent_worktrees import manager_launch_cli
+
+    engine = json.loads(seen["env"][m._WORKTREE_MANAGER_ENGINE_ARGV_ENV])
+    fresh = manager_launch_cli._agent_worktrees_launch_command(None)
+    assert engine[:2] == fresh[:2] == [m.sys.executable, "-X"]
+    assert engine[3:] == fresh[3:] == ["-m", "agent_worktrees"]
+    prefixes = [
+        Path(command[2].removeprefix("pycache_prefix=").removeprefix("\\\\?\\"))
+        for command in (engine, fresh)
+    ]
+    assert all(prefix.parent == Path(m.cfg.install_dir()).absolute() / "cache" / "python"
+               for prefix in prefixes)
+    assert all(prefix.name.startswith("unsealed-") for prefix in prefixes)
+    assert prefixes[0] != prefixes[1]
 
 
 def test_exec_worktree_manager_closes_job_on_windows_clean_exit(monkeypatch):

@@ -61,7 +61,8 @@ def _payload(slot, version="1.2.3"):
     (pkg / "__main__.py").write_text(
         "import json, sys, worktree_manager\n"
         "print(json.dumps(dict(version=worktree_manager.__version__, "
-        "file=worktree_manager.__file__, args=sys.argv[1:])))\n"
+        "file=worktree_manager.__file__, cached=worktree_manager.__cached__, "
+        "isolated=sys.flags.isolated, no_bytecode=sys.dont_write_bytecode, args=sys.argv[1:])))\n"
         "raise SystemExit(7 if '--fail' in sys.argv else 0)\n",
         encoding="utf-8",
     )
@@ -103,15 +104,55 @@ def test_constructed_slot_runs_installed_package_without_resolution(launcher, tm
     _payload(tmp_path)
     env["PYTHONPATH"] = str(tmp_path / "src")
     env["UV_PROJECT_ENVIRONMENT"] = str(tmp_path / "foreign-env")
+    before = {
+        str(path.relative_to(slot)): (
+            path.read_bytes() if path.is_file() else None,
+            path.stat().st_mtime_ns, path.stat().st_ctime_ns, path.stat().st_ino,
+        )
+        for path in (slot, *slot.rglob("*"))
+    }
     result = _run(argv + ["argument with spaces", "\u2713"], env=env, cwd=tmp_path)
     assert result.returncode == 0, result.stderr
     output = json.loads(result.stdout)
     assert output["version"] == "1.2.3"
     assert Path(output["file"]).is_relative_to(runtime)
     assert output["args"] == ["argument with spaces", "\u2713"]
+    assert output["isolated"] == 1 and output["no_bytecode"] is False
+    cache = Path(output["cached"])
+    assert cache.is_relative_to(Path(env["WORKTREE_MANAGER_ROOT"]) / "cache" / "python") or (
+        os.name == "nt" and cache.is_relative_to(
+            Path("\\\\?\\" + env["WORKTREE_MANAGER_ROOT"]) / "cache" / "python"
+        )
+    )
+    assert cache.is_file()
+    cached_before = (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino)
     assert not Path(env["UV_PROJECT_ENVIRONMENT"]).exists()
     failed = _run(argv + ["--fail"], env=env, cwd=tmp_path)
     assert failed.returncode == 7, failed.stderr
+    assert (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino) == cached_before
+    assert {
+        str(path.relative_to(slot)): (
+            path.read_bytes() if path.is_file() else None,
+            path.stat().st_mtime_ns, path.stat().st_ctime_ns, path.stat().st_ino,
+        )
+        for path in (slot, *slot.rglob("*"))
+    } == before
+    installed_module = Path(output["file"])
+    module_stat = installed_module.stat()
+    installed_module.write_bytes(
+        installed_module.read_bytes().replace(b'"1.2.3"', b'"1.2.4"')
+    )
+    os.utime(installed_module, ns=(module_stat.st_atime_ns, module_stat.st_mtime_ns))
+    (slot / "src" / "worktree_manager" / "__init__.py").write_text(
+        '__version__ = "1.2.4"\n', encoding="utf-8",
+    )
+    replaced = _run(argv, env=env, cwd=tmp_path)
+    assert replaced.returncode == 0, replaced.stderr
+    replacement = json.loads(replaced.stdout)
+    assert replacement["version"] == "1.2.4"
+    assert replacement["file"] == output["file"]
+    assert Path(replacement["cached"]) != cache
+    assert (cache.read_bytes(), cache.stat().st_mtime_ns, cache.stat().st_ino) == cached_before
 
 
 def test_selected_payload_only_slot_is_not_an_installed_runtime(launcher, tmp_path, monkeypatch):

@@ -4,13 +4,24 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import venv
+import re
 from pathlib import Path
 
 import agent_procutil
 import pytest
 
 from agent_vault import cli, config, launch, service
+
+
+def _cache_args(argv, root):
+    assert argv[0] == "-X" and len(argv) == 2
+    cache = Path(argv[1].removeprefix("pycache_prefix="))
+    assert cache.parent == Path(agent_procutil.python_cache_args(root)[1].partition("=")[2]).parent
+    assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
+    return str(cache)
 
 
 @pytest.fixture
@@ -29,6 +40,37 @@ def test_start_service_launches_through_spawn_service(monkeypatch, recorded_spaw
     # Always in the foreground: spawn_daemon already detached it, and POSIX's
     # self-daemonize would move it to HOME with its output on /dev/null.
     assert recorded_spawns == [["--tcp-port", "4242", "--foreground"]]
+
+
+def test_start_service_waits_for_credential_work_admission(monkeypatch, recorded_spawns):
+    replies = iter(({"ok": True, "accepting_work": False}, {"ok": True, "accepting_work": True}))
+    seen = []
+
+    def ping(*args, **kwargs):
+        response = next(replies)
+        seen.append(response)
+        return response
+
+    monkeypatch.setattr(cli, "send_command", ping)
+    assert cli.start_service(4242)
+    assert len(seen) == 2
+    assert recorded_spawns == [["--tcp-port", "4242", "--foreground"]]
+
+
+@pytest.mark.parametrize("eventually_ready", (True, False))
+def test_ensure_waits_for_transition_without_spawning_a_duplicate(
+    monkeypatch, recorded_spawns, eventually_ready,
+):
+    calls = []
+
+    def ping(*args, **kwargs):
+        calls.append(True)
+        return {"ok": True, "accepting_work": eventually_ready and len(calls) >= 3}
+
+    monkeypatch.setattr(cli, "send_command", ping)
+    assert cli.ensure_service(4242) is eventually_ready
+    assert len(calls) == (3 if eventually_ready else 21)
+    assert recorded_spawns == []
 
 
 def test_windows_self_daemonize_launches_through_spawn_service(monkeypatch):
@@ -51,8 +93,9 @@ def test_spawn_service_runs_from_the_runtime_root_with_a_log(monkeypatch, tmp_pa
     assert launch.spawn_service(["--foreground"]) == "proc"
     root = home.resolve()
     assert root.is_dir()
-    assert seen["argv"][1] == "-c"
-    assert seen["argv"][3:] == [
+    _cache_args(seen["argv"][1:3], root)
+    assert seen["argv"][3] == "-c"
+    assert seen["argv"][5:] == [
         str(Path(launch.__file__).resolve().parent.parent), "--foreground",
     ]
     assert seen["cwd"] == root
@@ -103,7 +146,7 @@ def test_vendored_service_imports_its_own_package_from_runtime_cwd(
     (package / "service.py").write_text(
         "import json, os, sys\n"
         "print(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd(), "
-        "'module': __file__}))\n",
+        "'module': __file__, 'cached': __cached__, 'cache': sys.pycache_prefix}))\n",
         encoding="utf-8",
     )
     home = tmp_path / "runtime home"
@@ -132,11 +175,14 @@ def test_vendored_service_imports_its_own_package_from_runtime_cwd(
     monkeypatch.setattr(launch, "spawn_daemon", capture)
     args = ["--foreground", "--probe-value", "value with spaces"]
     launch.spawn_service(args)
+    prefix = _cache_args(command[1:3], home)
     env = {
         key: value for key, value in os.environ.items()
         if not key.upper().startswith("PYTHON")
     }
     env.update(overrides)
+    before = {path: path.read_bytes() for path in package.rglob("*") if path.is_file()}
+    cached_before = None
     for _ in range(2):
         result = subprocess.run(
             [command[0], "-S", *command[1:]], cwd=home, env=env,
@@ -148,6 +194,93 @@ def test_vendored_service_imports_its_own_package_from_runtime_cwd(
         assert observed["argv"] == args
         assert Path(observed["cwd"]) == home.resolve()
         assert Path(observed["module"]).resolve() == (package / "service.py").resolve()
+        assert {path: path.read_bytes() for path in package.rglob("*") if path.is_file()} == before
+        assert observed["cache"] == prefix
+        cached = Path(observed["cached"])
+        current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
+        if cached_before is not None:
+            assert current == cached_before
+        cached_before = current
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Actual Windows service launcher template")
+def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path):
+    root = tmp_path / "vault home"
+    slot = root / "versions/1.0.0"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    site = slot / "Lib/site-packages"
+    for name in ("agent_vault", "zdd"):
+        package = site / name
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+    (site / "zdd/private_peer.py").write_text("VALUE = 42\n", encoding="utf-8")
+    (site / "agent_vault/service.py").write_text(
+        "import json,sys\nfrom zdd import private_peer\n"
+        "print(json.dumps({'args':sys.argv[1:],'cache':sys.pycache_prefix,"
+        "'cached':private_peer.__cached__,'value':private_peer.VALUE}))\n",
+        encoding="utf-8",
+    )
+    source = (Path(__file__).resolve().parents[1] / "scripts/install.ps1").read_text(encoding="utf-8")
+    start = source.index(
+        '[System.IO.File]::WriteAllText($TaskLauncher, @"',
+        source.index("function Register-AgentVaultTask"),
+    )
+    ending = '"@, $utf8NoBom)'
+    emission = source[start:source.index(ending, start) + len(ending)]
+    values = {
+        "InstallDir": root, "RunDir": root / "run", "SocketPath": root / "run/socket",
+        "PipePath": "fixture-pipe", "PidFile": root / "run/pid", "LogFile": root / "logs/service.log",
+        "TaskName": "FixtureVault", "installationId": "", "portDirective": "",
+        "TaskLauncher": root / "service.ps1", "LinkPython": slot / "Scripts/python.exe",
+    }
+    harness = tmp_path / "publish-service.ps1"
+    harness.write_text(
+        "$ErrorActionPreference='Stop'\n$utf8NoBom=[Text.UTF8Encoding]::new($false)\n"
+        + "\n".join(
+            "$" + name + "='" + str(value).replace("'", "''") + "'"
+            for name, value in values.items()
+        )
+        + "\n" + emission + "\n& $TaskLauncher --cache-probe\nexit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    host = shutil.which("pwsh")
+    assert host, "native PowerShell is required"
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")}
+    before = {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
+    cached_before = None
+    previous_cache = None
+    for _ in range(2):
+        result = subprocess.run(
+            [host, "-NoProfile", "-File", str(harness)], env=env,
+            capture_output=True, text=True, timeout=15, **agent_procutil.no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        observed = json.loads(result.stdout)
+        assert observed["args"] == ["--foreground", "--persistent", "--cache-probe"]
+        assert observed["value"] == 42
+        assert {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
+        _cache_args(["-X", "pycache_prefix=" + observed["cache"]], root)
+        cached = Path(observed["cached"])
+        current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
+        if cached_before is not None:
+            assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
+                    previous_cache.stat().st_ino) == cached_before
+            assert cached != previous_cache
+        cached_before = current
+        previous_cache = cached
+    module = site / "zdd/private_peer.py"
+    module_stat = module.stat()
+    module.write_text("VALUE = 84\n", encoding="utf-8")
+    os.utime(module, ns=(module_stat.st_atime_ns, module_stat.st_mtime_ns))
+    result = subprocess.run(
+        [host, "-NoProfile", "-File", str(harness)], env=env,
+        capture_output=True, text=True, timeout=15, **agent_procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["value"] == 84 and Path(observed["cached"]) != previous_cache
+    assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
+            previous_cache.stat().st_ino) == cached_before
 
 
 def test_relative_home_override_is_passed_resolved(monkeypatch, tmp_path):

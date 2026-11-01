@@ -34,7 +34,21 @@ _aw_exec_resolved() {
   AW_PY=""
   [ -f "$_awroot/bin/resolve-runtime.sh" ] || return 1
   . "$_awroot/bin/resolve-runtime.sh"
-  [ -n "$AW_PY" ] && exec "$AW_PY" -m agent_worktrees "$@"
+  [ -n "$AW_PY" ] || return 1
+  _aw_cache_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+  [ "${#_aw_cache_id}" -eq 32 ] || exit 1
+  case "$_aw_cache_id" in *[!0-9a-f]*) exit 1 ;; esac
+  _aw_python_cache="$_awroot/cache/python/unsealed-$_aw_cache_id"
+  case "$AW_PY" in
+    *.exe)
+      _aw_python_cache="$(cygpath -aw "$_aw_python_cache")" || return
+      case "$_aw_python_cache" in
+        '\\?\'*) ;;
+        '\\'*) _aw_python_cache='\\?\UNC\'"${_aw_python_cache#'\\'}" ;;
+        *) _aw_python_cache='\\?\'"$_aw_python_cache" ;;
+      esac ;;
+  esac
+  exec "$AW_PY" -X "pycache_prefix=$_aw_python_cache" -m agent_worktrees "$@"
 }
 _aw_exec_resolved "$@"
 if [ "${_aw_update_diagnostic:-0}" = 1 ]; then

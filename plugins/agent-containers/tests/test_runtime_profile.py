@@ -92,20 +92,22 @@ def _install_command(commands):
     )
 
 
-@pytest.fixture
-def repository_policy(payload: Path) -> Path:
-    library = payload / "libs" / "repository-policy"
+@pytest.fixture(params=["repository-policy", "configuration-layers"])
+def repository_policy(payload: Path, request) -> Path:
+    name = request.param
+    module_name = name.replace("-", "_")
+    library = payload / "libs" / name
     library.mkdir(parents=True, exist_ok=True)
     (library / "pyproject.toml").write_text(
-        '[project]\nname="agent-repository-policy"\nversion="0.1.0"\n', encoding="utf-8",
+        f'[project]\nname="agent-{name}"\nversion="0.1.0"\n', encoding="utf-8",
     )
-    module = library / "src" / "repository_policy"
+    module = library / "src" / module_name
     module.mkdir(parents=True)
     (module / "__init__.py").write_text('POLICY = "first"\n', encoding="utf-8")
     (payload / "pyproject.toml").write_text(
         '[project]\nname="agent-containers"\nversion="1.0.0"\n'
-        'dependencies=["agent-repository-policy"]\n'
-        '[tool.uv.sources]\nagent-repository-policy={path="libs/repository-policy"}\n',
+        f'dependencies=["agent-{name}"]\n'
+        f'[tool.uv.sources]\nagent-{name}={{path="libs/{name}"}}\n',
         encoding="utf-8",
     )
     return library
@@ -121,7 +123,7 @@ def test_declared_repository_policy_is_an_explicit_local_install_and_health_inpu
     assert "--no-sources" in install
     assert str(repository_policy) in install
     health = next(call for call in commands if "-c" in call)
-    assert "repository_policy" in health[health.index("-c") + 1]
+    assert repository_policy.name.replace("-", "_") in health[health.index("-c") + 1]
     assert result["profile"] == profile
 
 
@@ -137,11 +139,11 @@ def test_repository_policy_content_participates_in_each_profile_input_layout(
         shutil.copyfile(original / "pyproject.toml", payload / "pyproject.toml")
         shutil.copytree(original / "src", payload / "src")
         shutil.copytree(original / "libs", checkout / "libs")
-        repository_policy = checkout / "libs" / "repository-policy"
+        repository_policy = checkout / "libs" / repository_policy.name
     roots = profiles._library_roots(payload, prepared=layout == "prepared")
     assert repository_policy in roots
     before = profiles._fingerprint(payload, roots)
-    module = repository_policy / "src" / "repository_policy" / "__init__.py"
+    module = repository_policy / "src" / repository_policy.name.replace("-", "_") / "__init__.py"
     info = module.stat()
     module.write_text('POLICY = "other"\n', encoding="utf-8")
     os.utime(module, ns=(info.st_atime_ns, info.st_mtime_ns))
@@ -854,7 +856,7 @@ def test_docker_preflight_preserves_native_diagnostics_and_outcome(
     for name in ("installer-human-output.ps1", "versioned_runtime_native.ps1"):
         shutil.copyfile(SCRIPTS / name, tmp_path / name)
     setup_start = source.index("Set-StrictMode -Version 2.0")
-    setup_end = source.index("\nif ($InstallDir) {", setup_start)
+    setup_end = source.index("\n. (Join-Path $PSScriptRoot 'legacy-transaction.ps1')", setup_start)
     harness = tmp_path / "docker-preflight.ps1"
     harness.write_text(
         "[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(1252)\n"
@@ -982,9 +984,8 @@ def test_marketplace_self_stage_preserves_caller_relative_root_and_profile(tmp_p
     prefix = source[:source.index(marker) + len(marker)]
     receipt = tmp_path / "staged-arguments.txt"
     if extension == "ps1":
-        shutil.copy2(
-            SCRIPTS / "versioned_runtime_native.ps1", scripts / "versioned_runtime_native.ps1",
-        )
+        for name in ("versioned_runtime_native.ps1", "legacy-transaction.ps1"):
+            shutil.copy2(SCRIPTS / name, scripts / name)
         body = (
             '[System.IO.File]::WriteAllLines($env:PROFILE_STAGE_RECEIPT, '
             '[string[]]@($InstallDir, $Profile, $Action, [string]$Force.IsPresent, '

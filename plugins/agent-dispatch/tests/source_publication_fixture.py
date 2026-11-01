@@ -1,6 +1,7 @@
 """Contained source publication using the actual installer runtime functions."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import json
@@ -19,6 +20,29 @@ REPO = PLUGIN.parents[1]
 SCRIPTS = PLUGIN / "scripts"
 PACKAGE = "1.2.3-dev4"
 HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
+def mandatory_admission_files() -> tuple[str, ...]:
+    """Read the canonical bundle declaration without executing tooling."""
+    archive_tree = ast.parse((REPO / "tools" / "daemon_lifecycle_assets.py").read_text(encoding="utf-8"))
+    archive = next(
+        ast.literal_eval(node.value)
+        for node in archive_tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "ARCHIVE_NAME" for target in node.targets)
+    )
+    tree = ast.parse((REPO / "tools" / "sync-installation-context.py").read_text(encoding="utf-8"))
+    declaration = next(
+        node.value for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "FILES" for target in node.targets)
+    )
+    assert isinstance(declaration, ast.Tuple)
+    return tuple(
+        archive if isinstance(member, ast.Name) and member.id == "ARCHIVE_NAME"
+        else ast.literal_eval(member)
+        for member in declaration.elts
+    )
 
 
 def run_publication_bash(argv: list[str], tmp_path: Path) -> subprocess.CompletedProcess:
@@ -127,6 +151,7 @@ try {
 """
     else:
         names = (
+            "_runtime_admission_preflight",
             "_ensure_runtime", "_payload_hash", "_versioned_slot_clean", "_versioned_mark_complete",
             "_versioned_activate", "_versioned_current", "_activation_superseded_now",
             "_version_lt", "_write_manifest", "deploy_binstub", "do_stamp",
@@ -278,6 +303,23 @@ def environment(tmp_path: Path) -> dict[str, str]:
     return env
 
 
+def bind_posix_account_home(scripts: Path) -> None:
+    """Bind only the copied SDK's POSIX account-home lookup before freezing."""
+    relative = Path("installation-context") / "_installation_context_resolution.py"
+    helper = scripts / relative
+    text = helper.read_text(encoding="utf-8")
+    canonical = (SCRIPTS / relative).read_text(encoding="utf-8")
+    assert text == canonical, "fixture home binding requires the unchanged canonical SDK fragment"
+    original = (
+        "            import pwd\n\n"
+        "            profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)"
+    )
+    assert canonical.count(original) == 1, "canonical POSIX account-home lookup changed"
+    helper.write_bytes(text.replace(
+        original, '            profile_value = Path(environment["HOME"])',
+    ).encode("utf-8"))
+
+
 def stage(tmp_path: Path, *, broken_b: bool = False):
     started = time.monotonic()
     print("publication fixture: staging begin", file=sys.stderr, flush=True)
@@ -311,11 +353,7 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
             shutil.copy2(SCRIPTS / relative, scripts / relative)
         shutil.copytree(SCRIPTS / "installation-context", scripts / "installation-context")
         if os.name != "nt":
-            helper = scripts / "installation-context/installation-context.ps1"
-            text = helper.read_text(encoding="utf-8")
-            original = "$passwdHome = [CePosixAccount]::Home()"
-            assert text.count(original) == 1
-            helper.write_text(text.replace(original, "$passwdHome = $env:HOME"), encoding="utf-8")
+            bind_posix_account_home(scripts)
         for ext in ("sh", "ps1"):
             (scripts / f"install.{ext}").write_bytes(script(ext).encode("utf-8"))
         package = payload / "src" / "agent_dispatch"
@@ -409,14 +447,18 @@ def run(
         f"py={shutil.which('py', path=env.get('PATH'))}",
         file=sys.stderr, flush=True,
     )
-    result = run_background_capture(
-        [executable, *prefix, str(entry), *args], env=env, cwd=cwd, timeout=90,
-        max_output=65536,
-    )
+    result = None
+    try:
+        result = run_background_capture(
+            [executable, *prefix, str(entry), *args], env=env, cwd=cwd, timeout=90,
+            max_output=512 * 1024,
+        )
+    finally:
+        print(
+            f"publication fixture: end code={result.returncode if result is not None else 'unavailable'}, "
+            f"elapsed={time.monotonic() - started:.3f}s\n"
+            + (result.stderr if result is not None else ""),
+            file=sys.stderr, flush=True,
+        )
     assert result is not None, "publication fixture exceeded 90s or could not start"
-    print(
-        f"publication fixture: end code={result.returncode}, elapsed={time.monotonic() - started:.3f}s\n"
-        + result.stderr,
-        file=sys.stderr, flush=True,
-    )
     return result

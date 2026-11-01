@@ -1891,6 +1891,7 @@ function Register-ScheduledTask_ {
     # Create launcher script
     $launcherPath = Join-Path $InstallDir 'start-agent-bridge.ps1'
     $launcherBody = @"
+param([switch]`$ResolveOnly)
 # Start agent-bridge service -- called by scheduled task at logon.
 # Launch via the venv's signed python (-m), never the unsigned console-script
 # trampoline .exe -- Smart App Control blocks unsigned, zero-reputation exes.
@@ -1912,6 +1913,7 @@ if (-not (`$launchPy -and (Test-Path -LiteralPath `$launchPy))) {
     if (-not (`$launchPy -and (Test-Path -LiteralPath `$launchPy))) { `$launchPy = '' }
 }
 if (-not (`$launchPy -and (Test-Path -LiteralPath `$launchPy))) { `$launchPy = Get-ChildItem (Join-Path `$root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1 }
+if (`$ResolveOnly) { Write-Output `$launchPy; exit 0 }
 `$pidFile = '$($PidFile -replace "'", "''")'
 `$logFile = Join-Path (Split-Path `$pidFile) 'agent-bridge.log'
 `$errFile = Join-Path (Split-Path `$pidFile) 'agent-bridge-err.log'
@@ -1938,7 +1940,13 @@ if (Test-Path `$pidFile) {
     }
 }
 
-`$proc = Start-Process -FilePath `$launchPy -ArgumentList '-m','agent_bridge','start' ``
+`$cacheId = [Guid]::NewGuid().ToString('N')
+`$cache = [IO.Path]::GetFullPath((Join-Path `$runtimeHome "cache\python\unsealed-`$cacheId"))
+if (-not `$cache.StartsWith('\\?\')) {
+    `$cache = if (`$cache.StartsWith('\\')) { '\\?\UNC\' + `$cache.Substring(2) } else { '\\?\' + `$cache }
+}
+`$cacheOption = '"pycache_prefix=' + `$cache + '"'
+`$proc = Start-Process -FilePath `$launchPy -ArgumentList '-X',`$cacheOption,'-m','agent_bridge','start' ``
     -WorkingDirectory `$runtimeHome ``
     -NoNewWindow -PassThru ``
     -RedirectStandardOutput `$logFile ``

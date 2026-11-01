@@ -2034,15 +2034,14 @@ switch ($Action) {
             if ($LASTEXITCODE -ne 0) { throw $guardError }
         }
         if ($publishGlobalBinstubs) {
-            $anyStub = $false
-            foreach ($name in $BinstubNames) {
-                foreach ($ext in 'ps1', 'cmd') {
-                    $f = Join-Path $LocalBin "$name.$ext"
-                    if (Test-Path $f) {
-                        $anyStub = $true
-                        if ($DryRun) { Write-Host "[dry-run] would remove binstub: $f" }
-                        else { Remove-Item $f -Force -ErrorAction Stop }
-                    }
+            $guardError = ''
+            $commandAction = if ($DryRun) { '--command-names' } else { '--remove-commands' }
+            $ownedCommandOutput = Invoke-Hidden -FilePath $uninstallPython -ArgList ($uninstallGuardArgs + @($commandAction)) -ErrorOutput ([ref]$guardError)
+            if ($LASTEXITCODE -ne 0) { throw $guardError }
+            $ownedCommands = @($ownedCommandOutput -split '\r?\n' | Where-Object { $_ -match '\.(ps1|cmd)$' })
+            if ($DryRun) {
+                foreach ($name in $ownedCommands) {
+                    Write-Host "[dry-run] would remove binstub: $(Join-Path $LocalBin $name)"
                 }
             }
             if (-not $DryRun) { Write-Changed "binstubs removed from $LocalBin" }

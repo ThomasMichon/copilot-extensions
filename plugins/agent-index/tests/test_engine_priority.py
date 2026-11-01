@@ -21,6 +21,9 @@ platforms share a once-per-process-lifetime guard so a later
 from __future__ import annotations
 
 import importlib.util
+import importlib.metadata
+import asyncio
+import os
 import sys
 import types
 from pathlib import Path
@@ -44,6 +47,48 @@ def _load_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_health_freezes_the_running_engine_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    package_distribution = importlib.metadata.distribution
+    installed = types.SimpleNamespace(
+        version="1.2.3", files=["agent_index_engine/app.py"],
+        locate_file=lambda member: APP_PATH,
+    )
+    monkeypatch.setattr(
+        importlib.metadata, "distribution",
+        lambda name: installed if name == "agent-index-engine" else package_distribution(name),
+    )
+    module = _load_module()
+    installed.version = "9.9.9"
+    monkeypatch.setattr(module, "_check_gpu_deps", lambda: False)
+    health = asyncio.run(module.health())
+    assert health.pid == os.getpid()
+    assert health.version == "1.2.3"
+    assert health.model_loaded is False
+
+
+@pytest.mark.parametrize("attribution", ["foreign", "unrecorded", "missing"])
+def test_health_leaves_unattributed_engine_version_unknown(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, attribution: str,
+) -> None:
+    package_distribution = importlib.metadata.distribution
+
+    def selected_distribution(name):
+        if name != "agent-index-engine":
+            return package_distribution(name)
+        if attribution == "missing":
+            raise importlib.metadata.PackageNotFoundError(name)
+        return types.SimpleNamespace(
+            version="1.2.3",
+            files=[] if attribution == "unrecorded" else ["agent_index_engine/app.py"],
+            locate_file=lambda member: tmp_path / member if attribution == "foreign" else APP_PATH,
+        )
+
+    monkeypatch.setattr(importlib.metadata, "distribution", selected_distribution)
+    module = _load_module()
+    monkeypatch.setattr(module, "_check_gpu_deps", lambda: False)
+    assert asyncio.run(module.health()).version == ""
 
 
 class _FakePipeline:
@@ -379,4 +424,3 @@ def test_lower_own_priority_is_best_effort(monkeypatch) -> None:
     monkeypatch.setattr(priority_module, "lower_current_process_priority", boom)
 
     module._lower_own_priority()  # must not raise
-

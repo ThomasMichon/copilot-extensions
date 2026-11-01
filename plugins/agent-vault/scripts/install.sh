@@ -804,6 +804,11 @@ _install_service() {
     # written to a file.
     local handoff_json=""
     if systemctl --user is-active "$SYSTEMD_UNIT" >/dev/null 2>&1; then
+        local cache_id
+        cache_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+        [[ "$cache_id" =~ ^[0-9a-f]{32}$ ]] || {
+            _fail "Vault handoff cache namespace could not be selected"; return 1;
+        }
         # config.SOCKET_PATH/run_dir() etc. resolve from these env vars at
         # import time, so they must be set for THIS invocation explicitly --
         # unlike the systemd-managed daemon (which gets them from the unit's
@@ -815,7 +820,7 @@ _install_service() {
             AGENT_VAULT_RUN_DIR="$RUN_DIR" \
             AGENT_VAULT_SOCKET="$SOCKET_PATH" \
             AGENT_VAULT_INSTALLATION_ID="$INSTALLATION_ID" \
-            "$LINK_PYTHON" -m agent_vault.service --export-handoff 2>/dev/null
+            "$LINK_PYTHON" -X "pycache_prefix=$INSTALL_DIR/cache/python/unsealed-$cache_id" -m agent_vault.service --export-handoff 2>/dev/null
         )" || handoff_json=""
     fi
 
@@ -839,7 +844,7 @@ Environment=AGENT_VAULT_SYSTEMD_UNIT=$SYSTEMD_UNIT
 Environment=AGENT_VAULT_TASK_NAME=AgentVault${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}
 Environment=AGENT_VAULT_INSTALLATION_ID=$INSTALLATION_ID
 $PORT_ENV_LINE
-ExecStart=$LINK_PYTHON -m agent_vault.service --foreground --persistent --handoff-stdin
+ExecStart=$LINK_PYTHON -X "pycache_prefix=$INSTALL_DIR/cache/python/unsealed-\${INVOCATION_ID}" -m agent_vault.service --foreground --persistent --handoff-stdin
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR

@@ -1699,9 +1699,12 @@ case "${ACTION}" in
         fi
       done <<< "$uninstall_units"
       if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
-        for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
+        owned_commands="$("$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" \
+            --root "$INSTALL_DIR" --command-names)" || exit 1
+        while IFS= read -r name; do
+          [[ -n "$name" && "$name" != *.ps1 && "$name" != *.cmd ]] || continue
           [[ -e "${LOCAL_BIN}/${name}" ]] && echo "[dry-run] would remove binstub: ${LOCAL_BIN}/${name}"
-        done
+        done <<< "$owned_commands"
       fi
       echo "[dry-run] would remove runtime generations, snapshots, generated dispatchers and runtime selectors"
       echo "[dry-run] config/session-state at ${INSTALL_DIR} would be kept (agent-logger uninstall never removes it)"
@@ -1730,9 +1733,8 @@ case "${ACTION}" in
       systemctl --user daemon-reload || true
       chg "timer removed (config at ${INSTALL_DIR} kept)"
       if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
-        for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
-          rm -f "${LOCAL_BIN}/${name}" || exit 1
-        done
+        "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" \
+            --root "$INSTALL_DIR" --remove-commands >/dev/null || exit 1
         chg "binstubs removed from ${LOCAL_BIN}"
       else
         chg "scoped install left legacy global binstubs unchanged"

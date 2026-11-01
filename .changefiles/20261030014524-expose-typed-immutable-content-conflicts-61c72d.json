@@ -1,0 +1,33 @@
+{
+  "comment": "Expose typed immutable content conflicts for Manager distinct-generation repair",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

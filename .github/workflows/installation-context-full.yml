@@ -32,17 +32,41 @@ on:
           - bridge-contracts
           - bridge-binding
           - dispatch-binding
+          - dispatch-publication
           - dispatch-maintenance
           - promotion-controls
           - pane-argv
           - manager-uninstall
           - komodo-recovery
+          - manager-suite
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  dispatch-publication-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-publication'
+    name: Dispatch admission publication (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact qualification source
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Qualify required admission files and owned publication rollback
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_conditional_runtime_publication.py
+          --test-file tests/test_install_sh_activation_guard.py
   exhaustive-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'context-windows'
     name: exhaustive adapters (Windows)
@@ -500,6 +524,62 @@ jobs:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
       UV_PYTHON: "3.12"
     steps: *bridge-bootstrap-steps
+  manager-suite-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-suite'
+    name: Manager whole-suite replacement (Windows, ${{ matrix.mode }})
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [normal, repair]
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact native source
+        shell: pwsh
+        env:
+          EXPECTED_SOURCE: ${{ github.sha }}
+        run: |
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_SOURCE) {
+            throw 'Suite replacement source does not match the dispatch SHA'
+          }
+      - name: Qualify installed V1 to V2 through the real Manager
+        shell: pwsh
+        run: >-
+          python tools\run-manager-suite-acceptance.py
+          --root .v --mode ${{ matrix.mode }}
+      - name: Retain synthetic qualification diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manager-suite-${{ matrix.mode }}
+          path: |
+            .v/*-runner.json
+            .v/*-process-trace.json
+            .v/*/result.json
+            .v/*/preparation-error.json
+            .v/*/settlement.json
+            .v/*/commands.jsonl
+            .v/*/task-inventory.json
+            .v/*/driver-diagnostics.json
+            .v/*/driver-logs/*.log
+            .v/*/resident-logs/agent-bridge/*.log
+            .v/*/resident-logs/agent-codespaces/logs/*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+
   manager-uninstall-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-uninstall'
     name: Manager installed uninstall (Windows)

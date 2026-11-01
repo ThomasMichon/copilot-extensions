@@ -971,12 +971,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     arguments = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
     try:
-        pairs = list(_argument_pairs(arguments))
-        if any(option in ("-e", "--editable") for option, _ in pairs):
-            raise DependencyPolicyError("deployed runtimes require non-editable immutable versioned slots")
-        if any(option == "--link-mode" and value != "copy" for option, value in pairs):
-            raise DependencyPolicyError("deployed runtimes require copied installation artifacts")
-        arguments = [*arguments, "--link-mode", "copy"]
+        arguments = _configuration.immutable_install_arguments(
+            arguments, list(_argument_pairs(arguments)), error_type=DependencyPolicyError,
+        )
         roots = () if args.registry_only else (tuple(args.trusted_source_root) or _anchor_roots())
         return run_uv_install(
             args.uv, arguments, trusted_source_roots=roots, non_editable=True,

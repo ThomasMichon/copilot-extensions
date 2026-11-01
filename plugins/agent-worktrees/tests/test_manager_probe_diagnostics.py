@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -16,6 +17,53 @@ from agent_worktrees import manager_launch_cli as launch
 from agent_worktrees.control_plane_providers import _ControlPlaneProviderManifest
 
 Provider = Callable[[str], _ControlPlaneProviderManifest]
+
+
+def test_engine_callback_preserves_source_and_reuses_external_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil import no_window_kwargs
+
+    root = tmp_path / "runtime"
+    slot = root / "versions" / "original"
+    package = slot / "agent_worktrees"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "payload.py").write_text("value = 7\n", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import json,sys\nfrom .payload import value\n"
+        "print(json.dumps({'args':sys.argv[1:],'value':value,'prefix':sys.pycache_prefix}))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launch.cfg, "install_dir", lambda: root)
+    previous_environment = os.environ.get("PYTHONPYCACHEPREFIX")
+    previous_prefix = sys.pycache_prefix
+
+    def snapshot(directory: Path) -> dict[str, tuple[bytes, int, int]]:
+        return {
+            str(path.relative_to(directory)): (path.read_bytes(), path.stat().st_mtime_ns, path.stat().st_ino)
+            for path in directory.rglob("*") if path.is_file()
+        }
+
+    before = snapshot(slot)
+    for attempt in range(2):
+        result = subprocess.run(
+            launch._agent_worktrees_launch_command("example"),
+            cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(slot)},
+            capture_output=True, text=True, timeout=10, check=True, **no_window_kwargs(),
+        )
+        value = json.loads(result.stdout)
+        assert value["args"] == ["--project", "example"] and value["value"] == 7
+        assert snapshot(slot) == before
+        assert Path(value["prefix"]).samefile(root / "cache" / "python")
+        cache = snapshot(root / "cache" / "python")
+        assert any("payload." in name and name.endswith(".pyc") for name in cache)
+        if attempt == 0:
+            cold = cache
+        else:
+            assert cache == cold
+    assert os.environ.get("PYTHONPYCACHEPREFIX") == previous_environment
+    assert sys.pycache_prefix == previous_prefix
 
 
 @pytest.fixture
@@ -95,7 +143,9 @@ def test_probe_diagnostic_is_redacted_before_bounding(
     assert "fixture-query-secret" not in captured.err
     assert "exclude-newer rejected the dependency" in captured.err
     assert len(captured.err) < 2600
-    assert ("truncated" in captured.err) is bool(padding)
+    assert " stderr: " in captured.err
+    diagnostic = captured.err.rsplit(" stderr: ", 1)[1]
+    assert ("truncated" in diagnostic) is bool(padding)
 
 
 @pytest.mark.parametrize("stderr", ["", " \n\t", "\x1b[0m"])
