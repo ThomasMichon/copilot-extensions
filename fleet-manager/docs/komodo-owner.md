@@ -205,6 +205,17 @@ all other inspection fields are compared exactly through read-only
 native checkpoint. Native mount comparison retains every field and
 multiplicity, ignoring only mount-array order. Device/inode identities of
 mount sources and retained file identities/content bind the selected operation.
+An optional code-registered `docker_socket_source` retains one exact native
+Periphery bind source at `/var/run/docker.sock`, separately from the ordinary
+physical `docker_socket` used by the selected Docker client. This bounded
+exception permits an explicit native directory alias such as `/var/run`;
+it never discovers an alias, rewrites native mount records or relaxes other
+owner paths. The native source must resolve exactly to the supplied physical
+socket and match its current socket type, device and inode before and after
+each material observation. Missing, retargeted, ambiguous or noncanonical
+sources refuse. Both spellings and physical identity enter selection evidence;
+native mount comparison continues to bind every original field. Omission
+preserves the original strict-path behavior and evidence format.
 Selection evidence also normalizes mount-array and volume-record ordering,
 so a freshly resolved identical materialization retains its original deployment
 digest. Every record field and native mount remains bound; duplicates refuse.

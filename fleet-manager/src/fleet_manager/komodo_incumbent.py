@@ -126,6 +126,7 @@ class KomodoIncumbentMaterialization:
     retained_files: tuple[Path, ...]
     encoded: bytes
     topology: bytes | None = None
+    docker_socket_source: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.encoded) is not bytes or type(self.retained_files) is not tuple:
@@ -142,6 +143,22 @@ class KomodoIncumbentMaterialization:
         ordinary_path(self.docker_socket)
         if not stat.S_ISSOCK(self.docker_socket.stat().st_mode):
             raise PlanError("Komodo incumbent requires its existing native Docker socket")
+        if self.docker_socket_source is not None:
+            for mounts in value["mounts"].values():
+                mount_evidence(mounts)
+            self.socket_evidence()
+            socket_mounts = [
+                (service, mount) for service, mounts in value["mounts"].items()
+                for mount in mounts
+                if isinstance(mount, dict) and (
+                    mount.get("Source") == self.docker_socket_source
+                    or mount.get("Destination") == "/var/run/docker.sock")
+            ]
+            if (len(socket_mounts) != 1 or socket_mounts[0][0] != "periphery"
+                    or socket_mounts[0][1].get("Type") != "bind"
+                    or socket_mounts[0][1].get("Source") != self.docker_socket_source
+                    or socket_mounts[0][1].get("Destination") != "/var/run/docker.sock"):
+                raise PlanError("Komodo incumbent socket binding requires one exact native Periphery mount")
         volumes = {}
         for volume in value["volumes"]:
             if (not isinstance(volume, dict) or volume.get("Driver") != "local"
@@ -165,7 +182,8 @@ class KomodoIncumbentMaterialization:
             mounts = value["mounts"][service]
             mount_evidence(mounts)
             for mount in mounts:
-                source = Path(mount["Source"])
+                source = (self.docker_socket if mount["Source"] == self.docker_socket_source
+                          else Path(mount["Source"]))
                 ordinary_path(source)
                 if not source.exists():
                     raise PlanError("Komodo incumbent mount source is unavailable")
@@ -208,6 +226,36 @@ class KomodoIncumbentMaterialization:
             raise PlanError("Komodo incumbent retained identity is unavailable")
         self.evidence()
 
+    def socket_evidence(self) -> dict | None:
+        if self.docker_socket_source is None:
+            return None
+        native = self.docker_socket_source
+        if (type(native) is not str or not 1 <= len(native) <= 4096
+                or any(ord(char) < 32 or char == "$" for char in native)):
+            raise PlanError("Komodo incumbent native socket source is invalid")
+        source = Path(native)
+        if not source.is_absolute() or ".." in source.parts or str(source) != native:
+            raise PlanError("Komodo incumbent native socket source is not canonical")
+        try:
+            ordinary_path(self.docker_socket)
+            if (source.resolve(strict=True) != self.docker_socket
+                    or any((component / ".git").exists() for component in (source, *source.parents))):
+                raise PlanError("Komodo incumbent native socket source differs from its physical socket")
+            before = source.stat()
+            physical = self.docker_socket.stat()
+            ordinary_path(self.docker_socket)
+            if source.resolve(strict=True) != self.docker_socket:
+                raise PlanError("Komodo incumbent native socket source changed during observation")
+            after = source.stat()
+            if (any(not stat.S_ISSOCK(info.st_mode) for info in (before, physical, after))
+                    or (before.st_dev, before.st_ino) != (physical.st_dev, physical.st_ino)
+                    or (after.st_dev, after.st_ino) != (physical.st_dev, physical.st_ino)):
+                raise PlanError("Komodo incumbent native socket identity changed during observation")
+        except OSError:
+            raise PlanError("Komodo incumbent native socket source is unavailable") from None
+        return {"source": native, "path": str(self.docker_socket),
+                "device": physical.st_dev, "inode": physical.st_ino}
+
     def credential_bytes(self) -> dict[str, bytes]:
         values = {}
         for name in ("admin_username", "admin_password"):
@@ -228,15 +276,18 @@ class KomodoIncumbentMaterialization:
         return values
 
     def evidence(self) -> dict:
+        socket = self.socket_evidence()
         credentials = self.credential_bytes()
         selected = decode(self.encoded)
         paths = {}
         for mounts in selected["mounts"].values():
             for mount in mounts:
-                path = Path(mount["Source"])
+                path = (self.docker_socket if mount["Source"] == self.docker_socket_source
+                        else Path(mount["Source"]))
                 ordinary_path(path)
                 info = path.stat()
-                paths[str(path)] = {"device": info.st_dev, "inode": info.st_ino}
+                name = mount["Source"] if mount["Source"] == self.docker_socket_source else str(path)
+                paths[name] = {"device": info.st_dev, "inode": info.st_ino}
         files = {}
         username_path = (self.admin_username.config if type(self.admin_username) is KomodoConfigUsername
                          else self.admin_username)
@@ -284,6 +335,10 @@ class KomodoIncumbentMaterialization:
             result["topology"] = digest(incumbent_topology(self.topology))
         if type(self.admin_username) is KomodoConfigUsername:
             result["username_source"] = {"config": str(username_path), "field": "init_admin_username"}
+        if socket is not None:
+            if self.socket_evidence() != socket:
+                raise PlanError("Komodo incumbent native socket changed during observation")
+            result["docker_socket"] = socket
         return result
 
     def network_mode(self, service: str, project: str) -> str:
