@@ -63,6 +63,13 @@ Changed content/evicted files refuse rather than borrowing another scope or curr
 ID; identical republication revalidates once and refreshes only the file stamp.
 The buffer has no durable file, effect receipt or new lifecycle; final assembly
 still verifies the complete hash/schema. This avoids quadratic disk/JSON work.
+The client paces finite chunk requests at half the existing SDK challenge refill
+rate by default, without another poller or retry loop. An existing transport owner
+may supply async `read_admission` to share its actual IO pacing across consumers.
+Each request still obtains its own normal challenge/token; none is cached or
+reused. Inline pacing is cancellation-aware transport flow control, not a
+delegation permission/read-count ceiling. Shared saturation still reports the
+actual 429/unavailable outcome; it does not trigger automatic replay.
 
 Client `attach_source(generation, source_owner, **limits)` uses the merged local
 attachment API in the reviewer venue. Its actual selected source owner verifies

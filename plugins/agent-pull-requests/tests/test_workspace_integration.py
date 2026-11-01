@@ -72,9 +72,12 @@ def integration(environment):
     class Caller:
         corrupt = None
         after_chunk = None
+        before_request = None
         calls = []
 
         async def request(self, method, target, *, request_headers, body, response_limit):
+            if self.before_request is not None:
+                self.before_request()
             self.calls.append(target)
             response = await gateway.handle(ServiceRequest(
                 CallerContext("fleet-a", "gateway-a", "service-a", "caller-a", int(time.time()) + 600),
@@ -119,6 +122,49 @@ def test_native_and_wire_materialize_same_generation_and_strict_watch_remains_co
             "expected_current": generation["id"], "budget_seconds": 120,
         })
         assert result["result"]["comparison"]["changed_sections"] == []
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("paced", [True, False])
+def test_large_materialization_respects_actual_gateway_challenge_budget(environment, integration, monkeypatch, paced):
+    from types import SimpleNamespace
+    from fleet_manager import gateway_service_server
+    from agent_pull_requests import workspace_client
+    _, _, initial, _, backend, _ = environment
+    gateway, client, _, _, caller, _ = integration
+    backend.pr["description"] = "Synthetic transport payload " * 15000
+    clock = [0.0]
+    monkeypatch.setattr(gateway_service_server, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    runtime = gateway_service_server.ServiceRuntime(
+        None, SimpleNamespace(external_origin="", origin="https://gateway.example.test"), 5,
+    )
+    caller.before_request = runtime.control_budget
+
+    async def sleep(seconds):
+        clock[0] += seconds
+
+    async def unpaced():
+        pass
+
+    monkeypatch.setattr(workspace_client, "asyncio", SimpleNamespace(sleep=sleep))
+    if not paced:
+        client._read_admission = unpaced
+
+    async def scenario():
+        await client.capabilities()
+        descriptor = (await client.exchange("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 120,
+        }))["result"]["descriptor"]
+        assert descriptor["bytes"] > 32 * 8192
+        if paced:
+            generation = await client.materialize(42, descriptor["id"])
+            assert generation["sections"]["pull_request"]["data"]["description"] == backend.pr["description"]
+        else:
+            with pytest.raises(WorkspaceClientError) as error:
+                await client.materialize(42, descriptor["id"])
+            assert error.value.http_status == 429 and not error.value.outcome_unknown
         await gateway.drain(timeout=2)
 
     asyncio.run(scenario())

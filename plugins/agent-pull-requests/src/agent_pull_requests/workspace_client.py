@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import base64
 import copy
+import asyncio
 
-from fleet_manager.gateway_service_channel import BODY_BYTES, TransportError
+from fleet_manager.gateway_service_channel import BODY_BYTES, CONTROL_RATE, TransportError
 
 from .watch_replay_binding import ReplayBinding
 from .watch_replay_client import ReplayClient, ReplayClientError
@@ -22,7 +23,7 @@ class WorkspaceClientError(ReplayClientError):
 class WorkspaceClient:
     """No retry/fallback, local journal, credential source or service activation."""
 
-    def __init__(self, caller, *, route_prefix, binding: ReplayBinding, scope):
+    def __init__(self, caller, *, route_prefix, binding: ReplayBinding, scope, read_admission=None):
         # Reuse the existing path/binding validator; do not duplicate auth.
         ReplayClient(
             caller, route_prefix=route_prefix, target=binding.target,
@@ -34,6 +35,9 @@ class WorkspaceClient:
         self._scope.pop("number")
         self._path = route_prefix + "/v2/review/" + binding.target
         self._capabilities = None
+        if read_admission is not None and not callable(read_admission):
+            raise ValueError("invalid existing transport read-admission callback")
+        self._read_admission = read_admission
 
     async def _exchange(self, operation, payload):
         data = encoded({"binding": self._binding.document(), "request": payload})
@@ -109,6 +113,12 @@ class WorkspaceClient:
             raise WorkspaceClientError("invalid_workspace_descriptor") from None
         chunks = {}
         for offset in range(0, descriptor["bytes"], CHUNK_BYTES):
+            if self._read_admission is None:
+                # Each SDK request takes a fresh shared Gateway challenge. Do not
+                # spend its burst on one large immutable read; leave headroom.
+                await asyncio.sleep(2 / CONTROL_RATE)
+            else:
+                await self._read_admission()
             value = await self.exchange("chunk", {
                 "number": number, "generation_id": generation_id, "offset": offset,
             })
