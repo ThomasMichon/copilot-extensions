@@ -26,8 +26,9 @@ def launch(monkeypatch):
     class Job:
         closed = False
 
-        def __init__(self, handle):
+        def __init__(self, handle, *, name=None):
             self.handle = handle
+            self.name = name
             jobs.append(self)
 
         def terminate_and_wait(self, timeout):
@@ -142,12 +143,16 @@ def test_expired_observation_deadline_starts_nothing(launch):
 
 @pytest.mark.parametrize("environment", [{}, {"Z": "é", "A": "值"}])
 def test_atomic_attributes_keep_storage_and_exact_environment_cwd(launch, environment):
+    from agent_procutil import _job_scopes
+
     process, job = native.spawn(
         ["git", "status"], cleanup_deadline=110, cwd="C:\\fixture\\café",
         env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     created = next(event for event in launch.calls if isinstance(event, tuple) and event[0] == "create")
-    assert created[1] == native._environment_block(environment)[:]
+    assert created[1] == native._environment_block(
+        _job_scopes.child_environment(environment, append=job.name),
+    )[:]
     assert created[2] == "C:\\fixture\\café"
     assert launch.calls.index("job") < launch.calls.index(created) < launch.calls.index("resume")
     assert launch.calls.index("delete-attributes") > launch.calls.index("resume")

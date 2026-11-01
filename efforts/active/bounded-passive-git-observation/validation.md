@@ -523,3 +523,11 @@ The canonical SDK cap, standalone library/current-base qualification, final
 promotion packet, source review and required CI remain gates. The existing
 #9578 owner exclusively holds the coupled SDK correction; no SDK rewrite,
 runtime rollout or source merge is inferred from this local consumer pass.
+
+The PR-added canonical launch fixture now accepts named Jobs and compares the
+exact environment after the actual inherited-custody augmentation. Its
+standalone `agent-procutil --test-file tests\test_windows_observation_spawn.py`
+selection passes 13 cases, zero skipped, in 0.17 seconds (16.95 with managed
+preparation/cleanup). Worktrees again loads the canonical fixture directly.
+Receipt: `.venv-tools/r1a-canonical-fixture-20261031.log`. No shared SDK
+implementation was edited for this fixture correction.

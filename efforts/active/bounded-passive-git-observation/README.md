@@ -502,3 +502,13 @@ review-gated platform slice, not disabling ordinary POSIX classification.
   and any directly required SDK cap extraction. Wait for its admitted source
   merge before the final source-base/SDK requalification; do not create another
   SDK implementation or PR. #8458 remains unpublished and this effort Active.
+- The PR-added canonical launch fixture subsequently adopted the named-Job
+  constructor and exact inherited custody metadata. Its standalone 13-case file
+  passes; worktrees again uses that fixture directly instead of a compatibility
+  wrapper. SDK implementation ownership remains with #9578.
+- Integrated only the inspected documentation changes from
+  `6c9f35e5b6af40c88a048aa7dd37d97b7044a8e2`,
+  `fc80ca7d89cb966392e8cd6f53841ea7992ef06b` and
+  `c9f72e6704d20c741fa85eff2176d3bf64757e18`. Their source-only acceptance
+  journals preserve broader production, platform and rollout gates. No sibling
+  code or checkout was changed and no additional PR was opened.

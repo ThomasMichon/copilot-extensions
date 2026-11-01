@@ -3,7 +3,6 @@
 import io
 import runpy
 import subprocess
-from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,26 +10,10 @@ import pytest
 
 from agent_worktrees import push_timeout as pt
 
-_shared_launch = runpy.run_path(str(
+launch = runpy.run_path(str(
     Path(__file__).resolve().parents[3] / "libs" / "agent-procutil" / "tests"
     / "test_windows_observation_spawn.py"
 ))["launch"]
-
-
-@pytest.fixture
-def launch(monkeypatch):
-    from agent_procutil import _windows_caller_owned as native
-
-    with contextmanager(_shared_launch.__wrapped__)(monkeypatch) as fixture:
-        original_job = native.JobHandle
-
-        class NamedJob(original_job):
-            def __init__(self, handle, *, name=None):
-                super().__init__(handle)
-                self.name = name
-
-        monkeypatch.setattr(native, "JobHandle", NamedJob)
-        yield fixture
 
 
 class Root:
