@@ -2,6 +2,9 @@ name: Owned budget native acceptance
 
 on:
   workflow_dispatch:
+  push:
+    branches: ["pr/**"]
+    paths: [".github/workflows/owned-budget-native-acceptance.yml"]
 
 permissions:
   contents: read
