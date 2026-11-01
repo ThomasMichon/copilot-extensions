@@ -3493,7 +3493,19 @@
         "tools/promotion_unit_tests/test_sdk_process_safety.py::test_process_cli_dispatch_is_explicit_and_refuses_visible_permission[True-process-safety]",
         "tools/promotion_unit_tests/test_sdk_process_safety.py::test_process_cli_dispatch_is_explicit_and_refuses_visible_permission[True-process-safety-worker]",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_running_runner_and_loaded_helpers_cannot_qualify_another_sdk[sdk_native_win32.py-probe]",
-        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_running_runner_and_loaded_helpers_cannot_qualify_another_sdk[sdk_native_win32.py-worker]"
+        "tools/promotion_unit_tests/test_sdk_desktop_observer.py::test_running_runner_and_loaded_helpers_cannot_qualify_another_sdk[sdk_native_win32.py-worker]",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py::test_real_process_command_retains_pipe_framing_correlation_and_deadlines[immediate]",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py::test_real_process_command_retains_pipe_framing_correlation_and_deadlines[split]",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py::test_real_process_command_retains_pipe_framing_correlation_and_deadlines[empty]",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py::test_real_process_command_retains_pipe_framing_correlation_and_deadlines[generation-wait]",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py::test_real_process_command_retains_pipe_framing_correlation_and_deadlines[wrong-nonce]",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py::test_real_process_command_retains_pipe_framing_correlation_and_deadlines[stale]",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py::test_real_process_command_retains_pipe_framing_correlation_and_deadlines[closed]",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py::test_real_process_command_retains_pipe_framing_correlation_and_deadlines[pipelined]",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py::test_real_process_command_retains_pipe_framing_correlation_and_deadlines[oversized]",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py::test_real_process_command_retains_pipe_framing_correlation_and_deadlines[expired]",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py::test_real_process_worker_handshake_reaches_pytest_and_closes_parent_without_gui",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py::test_desktop_subclass_retains_actual_message_dispatch_instead_of_process_noop"
     ],
     "sources": {
         "libs/configuration-layers/src/configuration_layers/__init__.py": "e522797fe6207e3648705759db4234936df60bcf255b36deb23f8d400b52a890",
@@ -3579,7 +3591,7 @@
         "libs/agent-procutil/src/agent_procutil/windows_task_broker.py": "c970124239e6b01824179e47698dadd24d1367dca50f2ea9ac6ce0f5429f5e95",
         "libs/agent-procutil/tests/sdk_desktop_observer.py": "94611376383991ec78de7a1d29eb4256c592a4aa9be0bcf98b7df6f6e415e022",
         "libs/agent-procutil/tests/sdk_desktop_win32.py": "76dfb69362d03495feff56aff4476383c63b5a1a4e343d00b52912f166fe32fa",
-        "libs/agent-procutil/tests/sdk_visibility.py": "fb7c6b49883a39de84a1bc0b359e20abcb460afeea5384daa2c9f0b1f842b0a2",
+        "libs/agent-procutil/tests/sdk_visibility.py": "d232b547051b0968ab9f32efb572dc12d1af8cba7dd7a9f4f1b5a4cfba34b944",
         "libs/agent-procutil/tests/sdk_visibility_cases.py": "6cf438b387e7123eca6baeec1fed5d14e4297a1c336f029de4ec66dc99ad2972",
         "libs/agent-procutil/tests/sdk_visibility_sources.py": "b8c1f93b63b7f1efaaf66adc5ad305f8df15d378f0f7bddde64fb6e21e3bae85",
         "libs/agent-procutil/tests/test_daemon_lifecycle_deadline.py": "93f856ec9217f2bae8032ba22e57b58ddb2a05d707650c54cf8556175907d69d",
@@ -3931,7 +3943,8 @@
         "libs/agent-procutil/src/agent_procutil/python_cache.py": "37e93017af90235d2ce668a98b97a65be18a39ae7ef2435b35d9a778d56c4df2",
         "tools/promotion_unit_tests/test_python_cache.py": "14faf58f606d0826c79fc63c90775eb20be9f469541d3d1bfed845a53c80154a",
         "tools/promotion_unit_tests/test_sdk_process_safety.py": "c0c99998235107f11813e2d32ccce73f1faaa8aef7aad881c1e6aa4c9daa6870",
-        "libs/agent-procutil/tests/sdk_native_win32.py": "85d099b5152f395a84c2f20b195c7d7a039c5e7bdd015e8e6add75a3c7c67ac1"
+        "libs/agent-procutil/tests/sdk_native_win32.py": "38f0102bec252be6e60975cb316d94b1b5c87ec5021d4f774fcfa525a0228c73",
+        "tools/promotion_unit_tests/test_sdk_process_commands.py": "037de71dce65b2dfa5bbe012b65492b8478f1084e43f0a505187d6c609d94c1a"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_engine_footprint.py",

@@ -322,7 +322,7 @@ class Child:
             raise ObservationBlocked("owned fixture cleanup: " + "; ".join(failures))
 
 
-def command(api: WinAPI, nonce: str, deadline: float) -> str:
+def command(api: NativeProcessAPI, nonce: str, deadline: float) -> str:
     pending = bytearray()
     while True:
         require_time(deadline, "private command")
@@ -348,7 +348,7 @@ def command(api: WinAPI, nonce: str, deadline: float) -> str:
         time.sleep(0.01)
 
 
-def wait_generation_boundary(api: WinAPI, tick: int, deadline: float) -> None:
+def wait_generation_boundary(api: NativeProcessAPI, tick: int, deadline: float) -> None:
     while True:
         require_time(deadline, "private command generation boundary")
         delta = (int(api.kernel.GetTickCount64()) - tick) & 0xFFFFFFFF
@@ -515,7 +515,7 @@ def restore_incomplete_control(api: WinAPI, original: dict, pin, report: dict) -
 
 
 def run_workers(
-    request: dict, root: Path, api: WinAPI, deadline: float, start: float,
+    request: dict, root: Path, api: NativeProcessAPI, deadline: float, start: float,
     report: dict, observer: DesktopObserver | None = None,
     *, functional_only: bool = False,
     process_only: bool = False,

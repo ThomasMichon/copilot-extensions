@@ -124,6 +124,10 @@ class NativeProcessAPI:
             raise ObservationBlocked(f"private command pipe: WinError {error}")
         return int(available.value)
 
+    def pump(self) -> None:
+        """Process-only polling has no desktop event queue to dispatch."""
+        return None
+
     def elevated(self) -> bool:
         token, elevation, size = wt.HANDLE(), wt.DWORD(), wt.DWORD()
         self.check(self.advapi.OpenProcessToken(
