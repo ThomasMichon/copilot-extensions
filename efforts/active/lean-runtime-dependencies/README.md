@@ -230,6 +230,14 @@ owns the revised implementation and validation boundary.
   Python without interpreter attestation, and remove the superseded signature,
   registry and physical-path gates rather than introduce another acquisition
   or admission path.
+- [x] Land the compiler-free finite owned-process helper, retained lazy
+  accounting, complete construction-resource closure and original client
+  startup deadline through #9687. This is source closure only; current native
+  Job/handle, helper-loss, runspace, lifetime and construction acceptance remain
+  open in the [continuation journal](journal/2026/11.01%20non-ui-process-safety.md).
+- [ ] Prepare and qualify a separate no-desktop-observation process-safety
+  stage, preserving existing console/desktop admission and the still-unverified
+  actual no-window/no-focus gate.
 - [ ] Remove first-party native sources, generated copies, custom compiled
   artifacts, compiler build hooks and release construction/verification
   compilation; retain normal integrity and source admission.
@@ -371,6 +379,8 @@ from #6767: no rejected routing broker or shared mutable venv, and no claimed
 transfer without acceptance by a named tracked objective.
 
 ## Journal
+
+- [2026-11-01 - merged finite source and non-UI safety preparation](journal/2026/11.01%20non-ui-process-safety.md)
 
 - [2026-10-30 - compiler-free finite process custody](journal/2026/10.30%20finite-owned-process.md)
 

@@ -537,6 +537,32 @@ the shared child rechecks its unchanged request deadline after publishing the
 request and immediately before native process creation. Slow hashing, parent
 queries, earlier packets or request-file writes cannot launch a late worker.
 
+The explicit `process-safety` and `process-safety-worker` modes go further:
+they do not load `user32`, query a window station or input desktop, inspect
+foreground/windows, activate controls, or synthesize input. Their shared
+`sdk_native_win32.py` binding retains native birth-pinned process handles,
+original-parent pipe authentication and owned-only retirement. Both the
+coordinator and worker require an existing outer Job and an unelevated token;
+the outside owner still proves that Job's identity, resource limits and final
+settlement. An arbitrary Job-membership result is not that proof. No console
+or desktop admission is borrowed, and no fallback selects another mode.
+The same exact source-bound SDK, offer and startup packets, stream bounds,
+worker deadline, cleanup and JUnit checks remain in force.
+
+Process safety accepts no `visible_controls` or original-window fields and
+rejects `--allow-visible-control-once`. Its separate
+`process-safety-result.json` has `kind: sdk-process-safety`,
+`desktop_observed: false`, `desktop_qualified: false` and
+`visible_controls_attempted: 0`. A successful process packet does not prove
+zero popups/focus changes, cold construction, the separate finite-writer
+helper-loss/runspace matrix, or installed runtime behavior. Those acceptance
+rows remain distinct. Source preparation does not authorize native execution,
+and the older console-admitted functional fixture is not a no-desktop fixture.
+`tools/promotion_unit_tests/test_sdk_process_safety.py` exercises the actual
+process factory and binding bodies with native actors substituted at their
+boundaries. Targeted unit invocations use the canonical packet's explicit
+repository root and importlib import mode, preserving one helper/error identity.
+
 `tools/native_qualification_receiver.py` supplies an explicitly selected,
 source-managed result receiver when the command transport cannot witness final
 native exit and post-capture timing. It adds one process inside the existing
