@@ -1,4 +1,4 @@
-"""Fresh registrar projection preparation; no sender, activation or attestation."""
+"""Fresh registrar projection custody; no automatic publisher or activation."""
 
 from __future__ import annotations
 
@@ -13,8 +13,9 @@ from .pool_publication_custody import PoolPublicationError
 from .queue import TaskQueue
 from .queue_pool_cohort import PoolConfiguredCohort, _encode_observation
 from .queue_records import TaskError
+from .registrar import RegistrarError
 from .registrar_configuration import ConfiguredSupervisorCohort
-from .registrar_discovery import RegistrarSources, pointers_file
+from .registrar_discovery import RegistrarSources, _pointer_transaction, pointers_file
 
 
 @dataclass(frozen=True)
@@ -182,6 +183,61 @@ class PoolCohortPreparation:
         """Account for an original result even after the source or cohort changes."""
         with self._state():
             self._acknowledge(request, result)
+
+    def _require_original_source(self, request: PoolCohortProjectionRequest) -> None:
+        if (
+            pointers_file(self._sources.base).absolute() != request.source_path
+            or Path(self._queue.db_path).absolute() != request.coordinator_path
+        ):
+            raise PoolPublicationError(
+                "configured cohort projection lost an original owner target"
+            )
+        observation = self._sources.configured_supervisor_cohort()
+        _comparable_observation(observation)
+        if (
+            pointers_file(self._sources.base).absolute() != request.source_path
+            or Path(self._queue.db_path).absolute() != request.coordinator_path
+        ):
+            raise PoolPublicationError(
+                "configured cohort projection lost an original owner target"
+            )
+        if observation != request.observation:
+            raise PoolPublicationError(
+                "configured owner source changed before projection settlement"
+            )
+
+    def project(self, request: PoolCohortProjectionRequest) -> PoolConfiguredCohort:
+        """Explicit optimistic projection; managed writers share the registrar lock."""
+        with self._state():
+            if self._pending is not request:
+                raise PoolPublicationError(
+                    "cohort projection requires the original pending request"
+                )
+            if Path(self._queue.db_path).absolute() != request.coordinator_path:
+                raise PoolPublicationError(
+                    "cohort projection lost the original coordinator target"
+                )
+            retained = self._queue.recover_pool_configured_cohort(
+                request.observation,
+                expected_revision=request.expected_revision,
+            )
+            if retained is not None:
+                self._acknowledge(request, retained)
+                return retained
+            try:
+                with _pointer_transaction(request.source_path.parent):
+                    self._require_original_source(request)
+                    result = self._queue.observe_pool_configured_cohort(
+                        request.observation,
+                        expected_revision=request.expected_revision,
+                    )
+                    self._require_original_source(request)
+                    self._acknowledge(request, result)
+                    return result
+            except RegistrarError as exc:
+                raise PoolPublicationError(
+                    "configured cohort projection source lock failed"
+                ) from exc
 
     def recover(self) -> PoolConfiguredCohort | None:
         """Inspect original provider history only; never re-read a source or write."""

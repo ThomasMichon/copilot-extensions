@@ -246,6 +246,23 @@ renews freshness or erases retained publication/startup history.
 `observe_pool_configured_cohort()` likewise recovers an exact historical
 original result before applying current-state admission to a fresh write.
 
+`PoolCohortPreparation.project()` is an **explicit local projection operation**,
+not an automatic publisher. It recovers an already-accepted original result
+before reading current sources or attempting another write. A fresh attempt
+uses the existing registrar pointer-writer lock and rechecks the original whole
+source observation and both owner targets before and after the coordinator CAS.
+A changed source, changed target, stale CAS, lock failure or interrupted write
+leaves the original request pending. A later history-only recovery can account
+for an accepted write even when the post-write source recheck refused settlement.
+It does not relabel that accepted historical result as current-source attestation.
+
+The pointer lock serializes only cooperating registrar writers. An unmanaged
+writer can still race a source read or replace the file; no transaction spans
+the external file and coordinator database. A post-write refusal preserves
+custody, not a rollback of a committed projection. Unmanaged-writer exclusion,
+current-file atomicity and executing-runtime qualification remain separate
+prerequisites before admission. No caller is wired to this operation.
+
 This is **source-only optimistic preparation and result accounting**. No
 projection sender, live HTTP configuration publisher, ordinary caller,
 configuration setter, membership activation or placement is wired. The local

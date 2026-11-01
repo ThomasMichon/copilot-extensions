@@ -207,6 +207,8 @@ live claim token. No new blanket ACK or executor appointment is created.
       idle-worker, pool-capacity and submission owners.
       Configured-source and coordinator metadata-fence prerequisites merged in
       #9826 and #9834; cohort-aware original request custody merged in #9837.
+      Fresh configured-owner preparation and original projection-result accounting
+      merged in #9840.
       Fresh owner publication, external atomicity, mixed writers and placement remain separate
       acceptance gates.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
@@ -1576,3 +1578,37 @@ registrar/coordinator owners. No automatic publisher, configuration migration,
 ordinary caller, runtime enrollment or placement is enabled. External atomicity,
 old-writer exclusion, supported executable rollback, installed/runtime proof and
 every original Plan/Validation item remain open. The parent stays **Active**.
+
+### 2026-10-31 - Fresh configured-owner projection preparation
+
+[#9840](https://github.com/ThomasMichon/copilot-extensions/pull/9840) actually
+merged as `ea76c2d013cf79b4ec9343b7277b06f26b0c2fbb` after current-head
+Copilot approval and all three required checks passed. The complete approval
+reports no active findings; both prior inline findings are resolved.
+Managed source reconciliation retained the pre-completion backup and reached
+the actual squash merge. The preceding #9837 journal was delivered in this batch.
+
+`PoolCohortPreparation` brackets fresh whole registrar observations with
+coordinator reads and retains one immutable original observation, source and
+coordinator targets, and CAS. Confirmed absence, legacy bytes, explicit empty
+membership and digest-bearing unavailable cohort metadata remain distinct.
+Uncomparable source failures refuse preparation. Unknown outcomes prevent
+replacement or request rebase; exact original history recovery permits
+accounting after newer projections or queue reopen without writes or renewal.
+
+Three substantive review corrections require the original coordinator target,
+verify its actual accepted history before clearing custody, and validate the
+result observation's canonical shape before Python equality. Lookalike results
+from another database and boolean/float configured revisions retain the original
+pending request and prior settled result. Final focused coverage passed 39 cases;
+the preceding coupled packet passed 450 cases across ten files. Changed lint,
+two-module mypy and the install-contract gate passed.
+
+This is partial source-only acceptance, not fresh source publication or
+configured runtime membership. The next bounded source stretch adds an explicit
+original-request projection boundary under the existing registrar/coordinator
+owners, preserving external-file coherence and unknown-result custody.
+No automatic publisher, live configuration setter, ordinary caller, enrollment,
+activation, rollout, placement, old-writer adoption or protected reconciliation
+is enabled. External atomicity, mixed-writer exclusion, executable rollback and
+all original Plan/Validation gates remain open. The parent remains **Active**.
