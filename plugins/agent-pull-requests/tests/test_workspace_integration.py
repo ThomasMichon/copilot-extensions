@@ -253,6 +253,25 @@ def test_corrupt_owner_state_is_not_invalid_caller_input(environment, integratio
     asyncio.run(scenario())
 
 
+def test_owner_response_capacity_does_not_turn_valid_load_into_bad_input(environment, integration):
+    _, _, initial, _, backend, _ = environment
+    gateway, client, native, _, _, _ = integration
+
+    async def scenario():
+        await client.capabilities()
+        native.operations.read_owner.max_payload_bytes = 1
+        with pytest.raises(WorkspaceClientError) as error:
+            await client.exchange("load", {
+                "number": 42, "expected_current": initial["id"], "budget_seconds": 120,
+            })
+        assert error.value.http_status == 503
+        assert native.operations.cache.lookup(initial["scope"])["current_id"] == initial["id"]
+        assert backend.threads == []
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
 def test_older_overlapping_discovery_cannot_restore_support_after_newer_failure(environment, integration):
     gateway, client, _, _, caller, _ = integration
 

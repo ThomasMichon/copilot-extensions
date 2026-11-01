@@ -245,6 +245,7 @@ class WatchGateway:
 
     async def _execute_workspace(self, workspace, operation, payload, request, target, expected):
         from .generation_cache import CacheInvalid
+        from .owner_read import OwnerReadResponseTooLarge
         from .workspace_operations import WorkspaceUnavailable
 
         def checkpoint():
@@ -268,6 +269,8 @@ class WatchGateway:
             return _response(409, {"error": "workspace_binding_mismatch"})
         except PermissionError:
             return _response(403, {"error": "workspace_owner_refused"})
+        except OwnerReadResponseTooLarge:
+            return _response(503, {"error": "workspace_response_limit"})
         except (CacheInvalid, ReplayStoreInvalid, OperationOwnershipError):
             return _response(503, {"error": "workspace_state_unavailable"})
         except (WorkspaceUnavailable, OSError, RuntimeError):

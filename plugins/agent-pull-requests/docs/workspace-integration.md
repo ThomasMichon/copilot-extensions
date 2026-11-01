@@ -113,7 +113,10 @@ unavailable. Actual protected-owner permission denial returns 403/access-refused
 not a temporary 503 outage; a denial after an admitted effect still preserves
 unknown receipts and is never rollback. Existing watch clients keep their exact strict capability shape.
 Corrupt cache/replay state reports owner-state unavailability rather than invalid
-caller input; no repair is inferred. Overlapping capability discovery uses a
+caller input; no repair is inferred.
+Valid loads exceeding the current read owner's response capacity report response
+unavailability without publishing a cache generation or blaming caller syntax.
+Overlapping capability discovery uses a
 local request revision so an older response cannot restore support after a newer
 discovery failed. This revision is metadata ordering, not authority or custody.
 Neither package equality nor a new source library upgrades a running service.
