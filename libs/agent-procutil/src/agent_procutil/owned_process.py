@@ -135,11 +135,20 @@ def _communicate_unreaped(
     process: subprocess.Popen, *, input_text: str | None, deadline: float,
     argv: list[str], timeout: float, capture_limits: tuple[int, int] | None = None,
     binary: bool = False,
+    capture_timeout: bool = False,
 ) -> tuple[str | None, str | None]:
     streams = (process.stdout, process.stderr)
     output = (bytearray(), bytearray())
     data = memoryview(input_text.encode("utf-8")) if input_text is not None else None
     offset = 0
+    def remaining():
+        try:
+            return _remaining(deadline, argv, timeout)
+        except subprocess.TimeoutExpired as error:
+            if capture_limits is not None and capture_timeout:
+                error.output, error.stderr = (bytes(value) for value in output)
+            raise
+
     with selectors.DefaultSelector() as selector:
         for index, stream in enumerate(streams):
             if stream is not None:
@@ -152,7 +161,7 @@ def _communicate_unreaped(
             else:
                 process.stdin.close()
         while selector.get_map():
-            for key, _mask in selector.select(_remaining(deadline, argv, timeout)):
+            for key, _mask in selector.select(remaining()):
                 if key.data == -1:
                     try:
                         offset += os.write(key.fd, data[offset:offset + 65536])
@@ -180,7 +189,7 @@ def _communicate_unreaped(
                     else:
                         selector.unregister(key.fileobj)
     while _observe_unreaped(process) is None:
-        time.sleep(min(.01, _remaining(deadline, argv, timeout)))
+        time.sleep(min(.01, remaining()))
     return tuple(
         (bytes(data) if binary else data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"))
         if stream is not None else None
@@ -422,6 +431,7 @@ def _run_owned(
     allow_daemon_breakaway: bool = False,
     binary: bool = False,
     budget: OwnedExecutionBudget | None = None,
+    borrow_parent_scope: bool = False,
 ) -> subprocess.CompletedProcess:
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("native child timeout must be finite and positive")
@@ -433,7 +443,12 @@ def _run_owned(
     if type(allow_daemon_breakaway) is not bool:
         raise ValueError("allow_daemon_breakaway must be a boolean")
     if inherit_process_group:
-        require_contained_worker()
+        if borrow_parent_scope:
+            parent = os.getppid()
+            if os.name == "nt" or os.getpgrp() != parent or os.getsid(0) != parent:
+                raise RuntimeError("borrowed caller requires its enclosing parent's native group")
+        else:
+            require_contained_worker()
     if not windows:
         _require_posix_execution_support()
     deadline = time.monotonic() + timeout
@@ -482,6 +497,7 @@ def _run_owned(
                 process, input_text=input_text, deadline=deadline, argv=argv, timeout=timeout,
                 capture_limits=capture_limits,
                 binary=binary,
+                **({"capture_timeout": True} if budget is not None else {}),
             )
     except OwnedCleanupError:
         retained = True
@@ -571,6 +587,7 @@ def run_caller_owned(
     env: dict[str, str] | None = None,
     binary: bool = False,
     budget: OwnedExecutionBudget | None = None,
+    borrow_parent_scope: bool = False,
 ) -> subprocess.CompletedProcess:
     """Execute with caller lifetime/stream budgets; binary capture preserves exact bytes."""
     from agent_procutil._caller_owned import run
@@ -583,6 +600,7 @@ def run_caller_owned(
         **({"env": env} if env is not None else {}),
         **({"binary": binary} if binary is not False else {}),
         **({"budget": budget} if budget is not None else {}),
+        **({"borrow_parent_scope": borrow_parent_scope} if borrow_parent_scope is not False else {}),
     )
 
 

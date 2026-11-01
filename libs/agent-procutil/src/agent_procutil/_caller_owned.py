@@ -190,7 +190,8 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
     fields = {
         "completed": {"returncode", "stdout", "stderr"},
         "output-limit": {"stream", "limit"},
-        "timeout": set(), "decode": set(), "execution": set(), "os-error": {"errno"},
+        "timeout": ({"output", "stderr"} if "output" in reply else set()),
+        "decode": set(), "execution": set(), "os-error": {"errno"},
     }
     if not isinstance(kind, str) or kind not in fields or set(reply) != {
         "version", "kind", *fields[kind],
@@ -219,7 +220,15 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
             raise RuntimeError("caller-owned stream limit is invalid")
         raise OutputLimitExceeded(stream, limit)
     if kind == "timeout":
-        raise subprocess.TimeoutExpired(request["argv"], request["timeout"])
+        partial = [None, None]
+        if "output" in reply:
+            try:
+                partial = [base64.b64decode(reply[name], validate=True) for name in ("output", "stderr")]
+                if any(len(value) > limit for value, limit in zip(partial, request["limits"])):
+                    raise ValueError("timeout evidence exceeds its byte budget")
+            except (TypeError, ValueError):
+                raise RuntimeError("caller-owned timeout evidence is invalid") from None
+        raise subprocess.TimeoutExpired(request["argv"], request["timeout"], *partial)
     if kind == "os-error":
         errno = reply.get("errno")
         if type(errno) is not int:
@@ -239,10 +248,17 @@ def run(
     allow_daemon_breakaway: bool = False,
     binary: bool = False,
     budget: OwnedExecutionBudget | None = None,
+    borrow_parent_scope: bool = False,
 ) -> subprocess.CompletedProcess:
     if on_settled is not None and not callable(on_settled):
         raise TypeError("settlement notification must be callable")
     try:
+        if type(borrow_parent_scope) is not bool:
+            raise TypeError("borrow_parent_scope must be a boolean")
+        if borrow_parent_scope and budget is None:
+            raise ValueError("borrowing an enclosing group requires an aggregate budget")
+        if borrow_parent_scope and os.name != "nt" and on_settled is not None:
+            raise ValueError("borrowed group settlement belongs to its enclosing owner")
         if budget is not None and not isinstance(budget, OwnedExecutionBudget):
             raise TypeError("budget must be an OwnedExecutionBudget")
         if budget is not None and time.monotonic() >= budget.execution_deadline:
@@ -274,6 +290,13 @@ def run(
             **({"budget": budget} if budget is not None else {}),
             **({"cwd": cwd} if cwd is not None else {}),
             **({"env": env} if env is not None else {}),
+        )
+    if borrow_parent_scope:
+        return _run_owned(
+            argv, timeout=timeout, input_text=input_text, capture=capture,
+            capture_limits=(max_stdout_bytes, max_stderr_bytes),
+            inherit_process_group=True, borrow_parent_scope=True, budget=budget,
+            binary=binary, cwd=cwd, env=env,
         )
     reader = writer = None
     launch_attempted = False
@@ -372,13 +395,16 @@ def _main() -> None:
         if len(frame) > _MAX_REQUEST or not frame.endswith(b"\n"):
             raise ValueError("caller-owned request frame is invalid")
         request = _validate(json.loads(frame))
+        budget = OwnedExecutionBudget(**request["budget"]) if "budget" in request else None
+        if budget is not None:
+            budget = OwnedExecutionBudget(budget.deadline, budget.cleanup_reserve + .5)
         try:
             result = _run_owned(
                 request["argv"], timeout=request["timeout"],
                 input_text=request["input_text"], capture=request["capture"],
                 inherit_process_group=True, capture_limits=tuple(request["limits"]),
                 binary=request.get("binary", False),
-                **({"budget": OwnedExecutionBudget(**request["budget"])} if "budget" in request else {}),
+                **({"budget": budget} if budget is not None else {}),
             )
             if request.get("binary", False) and request["capture"]:
                 result.stdout, result.stderr = (
@@ -390,8 +416,13 @@ def _main() -> None:
             )
         except OutputLimitExceeded as error:
             response.update(kind="output-limit", stream=error.stream, limit=error.limit)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as error:
             response["kind"] = "timeout"
+            if error.output is not None or error.stderr is not None:
+                response.update(
+                    output=base64.b64encode(error.output or b"").decode("ascii"),
+                    stderr=base64.b64encode(error.stderr or b"").decode("ascii"),
+                )
         except UnicodeError:
             response["kind"] = "decode"
         except OSError as error:

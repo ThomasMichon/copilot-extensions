@@ -150,6 +150,15 @@ def _find_close_attempts(cmd: str) -> list[dict]:
     return attempts
 
 
+def owned_cleanup_failure(error) -> bool:
+    """Recognize the canonical error without acquiring the SDK for cheap guards."""
+    try:
+        from agent_procutil.owned_process import OwnedCleanupError
+    except ImportError:
+        return False
+    return isinstance(error, OwnedCleanupError)
+
+
 def _run_gh(args: list[str], cwd: str, deadline: float | None, *, budget=None) -> str | None:
     timeout = _GH_TIMEOUT_S
     if deadline is not None:
@@ -164,6 +173,7 @@ def _run_gh(args: list[str], cwd: str, deadline: float | None, *, budget=None) -
                 ["gh", *args], cwd=cwd or None, env=dict(os.environ),
                 timeout=timeout, max_stdout_bytes=65536, max_stderr_bytes=4096,
                 budget=budget,
+                borrow_parent_scope=bool(os.environ.get("AGENT_WORKTREES_PRE_SETTLEMENT_DEADLINE")),
             )
         else:
             proc = subprocess.run(
@@ -172,11 +182,8 @@ def _run_gh(args: list[str], cwd: str, deadline: float | None, *, budget=None) -
                 creationflags=(0x08000000 if _IS_WIN else 0),
             )
     except (OSError, subprocess.SubprocessError) as error:
-        if budget is not None:
-            from agent_procutil.owned_process import OwnedCleanupError
-
-            if isinstance(error, OwnedCleanupError):
-                raise
+        if budget is not None and owned_cleanup_failure(error):
+            raise
         return None
     if proc.returncode != 0:
         return None

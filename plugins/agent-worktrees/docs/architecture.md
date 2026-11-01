@@ -3114,6 +3114,15 @@ but cannot renew the aggregate clock. Confirmed deny takes precedence, and a
 settled late observation timeout preserves an accumulated ask. The native/SDK
 28-second adapter and 30-second host limits are unchanged.
 
+SDK acquisition is lazy for supersede observations: an absent SDK cannot
+suppress an intact cheap guard's denial. SDK-capable legacy PR observations use
+the same enclosing worker owner while preserving silent empty legacy outcomes.
+POSIX observations explicitly borrow their enclosing guardian's native group;
+Windows retains strict nested Jobs. A cleanup failure keeps the accumulated
+decision with its retained custody and emits only a bounded internal pending
+envelope. The adapter forwards that decision only after the enclosing SDK's
+positive native settlement callback; unknown enclosing cleanup stays pending.
+
 Explicit installation cells are validated through the existing native
 installation-context helper before the read-only runtime resolver selects the
 owning slot. A missing/invalid cell or unavailable owning interpreter produces

@@ -34,6 +34,22 @@ def unavailable(boundary: str) -> dict:
     )}
 
 
+def execute_owned_observations(payload, raw, load_sibling):
+    """Give legacy PR observations the same enclosing settlement owner."""
+    arguments = payload.get("toolArgs")
+    command = str(arguments.get("command", "")) if isinstance(arguments, dict) else ""
+    if "gh" not in command.lower() or "close" not in command.lower():
+        return None
+    try:
+        __import__("agent_procutil.owned_budget", fromlist=["OwnedExecutionBudget"])
+    except ImportError:
+        return None
+    worker = load_sibling("hook_policy_process.py")
+    if callable(getattr(worker, "execute", None)):
+        return worker.execute(raw.encode("utf-8"), legacy=True)
+    return None
+
+
 def decide(
     payload: dict,
     *,
@@ -54,9 +70,6 @@ def decide(
             )
         except Exception:
             return unavailable("installation-context validation failed")
-    from agent_procutil.owned_budget import OwnedExecutionBudget
-    from agent_procutil.owned_process import OwnedCleanupError
-
     deadline = time.monotonic() + budget_seconds - 2.0
     inherited = os.environ.get("AGENT_WORKTREES_PRE_SETTLEMENT_DEADLINE")
     if inherited:
@@ -68,7 +81,7 @@ def decide(
                 deadline = min(deadline, value)
         except ValueError:
             pass
-    budget = OwnedExecutionBudget(deadline, cleanup_reserve=3.0)
+    execution_deadline = deadline - 3.0
     combined: dict = {}
     for name in (
         "statelessness_guard.py", "cross_repo_guard.py",
@@ -79,13 +92,23 @@ def decide(
             combined = merge_decisions(combined, unavailable(f"{name} unavailable"))
             continue
         try:
-            kwargs = {"deadline": budget.execution_deadline} if name == "cross_repo_guard.py" else {}
+            kwargs = {"deadline": execution_deadline} if name == "cross_repo_guard.py" else {}
             if name == "pr_supersede_guard.py":
-                kwargs = {"deadline": budget.execution_deadline, "budget": budget}
+                try:
+                    from agent_procutil.owned_budget import OwnedExecutionBudget
+                except ImportError:
+                    combined = merge_decisions(combined, unavailable("supersede SDK unavailable"))
+                    continue
+                kwargs = {"deadline": execution_deadline, "budget": OwnedExecutionBudget(deadline, 3.0)}
             decision = module.decide(payload, home=home, **kwargs)
-        except OwnedCleanupError:
-            raise
-        except Exception:
+        except BaseException as error:
+            if getattr(module, "owned_cleanup_failure", lambda value: False)(error):
+                error.pretool_decision = merge_decisions(
+                    combined, unavailable("PR observation cleanup requires enclosing settlement"),
+                )
+                raise
+            if not isinstance(error, Exception):
+                raise
             combined = merge_decisions(combined, unavailable(f"{name} evaluation failed"))
             continue
         if not valid_decision(decision):

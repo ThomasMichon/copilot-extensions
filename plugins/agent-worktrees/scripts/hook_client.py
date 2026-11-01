@@ -951,6 +951,12 @@ def main(argv: list[str] | None = None) -> int:
         elif strict_policy:
             result = decide(kind, payload, require_policy=True)
         else:
+            if kind == "preToolUse":
+                helper = _load_sibling("hook_pre_policy.py")
+                execute = getattr(helper, "execute_owned_observations", None)
+                handled = execute(payload, raw, _load_sibling) if callable(execute) else None
+                if handled is not None:
+                    return handled
             result = decide(kind, payload)
         diagnostic = result.pop("_stderr", None)
         if diagnostic:
@@ -968,8 +974,17 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif kind != "sessionEnd" and (result or strict_policy):
             sys.stdout.write(json.dumps(result, separators=(",", ":")))
-    except Exception:
+    except Exception as error:
         if kind == "preToolUse":
+            pending = getattr(error, "pretool_decision", None)
+            if strict_policy and isinstance(pending, dict):
+                from threading import Event
+
+                sys.stdout.write(json.dumps({"_ownedCleanupPending": pending}, separators=(",", ":")))
+                sys.stdout.flush()
+                # The enclosing SDK retires this worker and its borrowed descendants
+                # before admitting its pending decision to the command/SDK adapter.
+                Event().wait()
             sys.stdout.write(json.dumps(_pre_unavailable("policy client evaluation failed")))
     # sessionStart always emits exactly one JSON object -- write it here,
     # outside the try block, so an exception anywhere above still leaves

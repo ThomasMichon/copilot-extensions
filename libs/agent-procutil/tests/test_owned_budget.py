@@ -80,3 +80,22 @@ def test_windows_cleanup_waits_use_one_remaining_deadline_and_retain_custody(mon
         )
     assert waits == [1.0]
     assert caught.value.process is process and caught.value.job is job
+
+
+def test_borrowed_scope_refuses_unrelated_parent_before_creation(monkeypatch):
+    from agent_procutil import _caller_owned
+
+    monkeypatch.setattr(_caller_owned, "_require_posix_support", lambda: None)
+    monkeypatch.setattr(owned_process, "_require_posix_execution_support", lambda: None)
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "getppid", lambda: 41)
+    monkeypatch.setattr(os, "getpgrp", lambda: 42, raising=False)
+    monkeypatch.setattr(os, "getsid", lambda pid: 41, raising=False)
+    monkeypatch.setattr(owned_process, "spawn_sync_in_kill_on_close_job",
+                        lambda *a, **k: pytest.fail("foreign scope must refuse before launch"))
+    with pytest.raises(RuntimeError, match="enclosing parent's native group"):
+        run_caller_owned(
+            ["fixture"], timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+            budget=OwnedExecutionBudget.from_timeout(3, cleanup_reserve=1),
+            borrow_parent_scope=True,
+        )

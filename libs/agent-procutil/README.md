@@ -424,6 +424,19 @@ blocking kernel calls or caller-supplied callbacks. Settlement callbacks remain
 synchronous bounded bookkeeping, never permission or execution-success proof.
 Consumers must reserve response/serialization time outside this budget.
 
+For an explicitly enclosing finite POSIX owner, opt-in
+`borrow_parent_scope=True` keeps observations in that owner's native group
+instead of creating a separate guardian. Admission requires the caller's actual
+parent to be its current session/group leader and a supplied aggregate budget.
+The child remains exclusively unreaped until individual retirement; only the
+enclosing owner confirms the whole group. Borrowed calls therefore cannot claim
+whole-group `on_settled` callbacks. This is an explicit lifetime delegation,
+not application authority or a general ambient-containment fallback. Windows
+retains its strict owned Job. Ordinary callers keep the existing guardian.
+The guardian reserves an additional half-second inside the same deadline for
+its bounded completion frame. Confirmed-cleanup timeouts retain bounded raw
+partial streams; no partial result is treated as successful execution.
+
 Windowless launch guidance lives here rather than in the package initializer:
 `no_window_kwargs` selects captured headless children; `detached_kwargs` and
 `windowless_daemon_kwargs` serve explicitly owned durable lifetimes.

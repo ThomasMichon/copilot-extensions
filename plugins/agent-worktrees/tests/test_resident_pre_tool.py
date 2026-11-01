@@ -365,7 +365,7 @@ console.log(JSON.stringify(result));
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows caller-owned native/SDK deadline consumers")
 @pytest.mark.parametrize("consumer", ["resident", "powershell.exe"])
-@pytest.mark.parametrize("late_result", ["timeout", "deny"])
+@pytest.mark.parametrize("late_result", ["timeout", "deny", "cleanup-error"])
 def test_pretool_preserves_accumulated_ask_across_later_lookup(tmp_path, consumer, late_result):
     import time
     import uuid
@@ -401,7 +401,8 @@ if args[:2] == ['pr', 'view']:
     prepared = marker.with_suffix('.prepared')
     prepared.write_text(json.dumps({'pid': os.getpid(), 'birth': birth, 'nonce': os.environ['PRETOOL_TEST_NONCE']}), encoding='utf-8')
     prepared.replace(marker)
-    if os.environ['PRETOOL_TEST_LATE_RESULT'] == 'timeout':
+    marker.with_suffix('.published').write_text(os.environ['PRETOOL_TEST_NONCE'], encoding='utf-8')
+    if os.environ['PRETOOL_TEST_LATE_RESULT'] != 'deny':
         threading.Event().wait(11 if number == '41' else 60)
         state = 'CLOSED'
     else:
@@ -420,6 +421,7 @@ import json, os, subprocess, sys, time
 from pathlib import Path
 from agent_procutil import owned_process
 _real_run = owned_process.run_caller_owned
+_retained = []
 _root = Path(os.environ['PRETOOL_TEST_OBSERVATIONS'])
 def emit(value):
     with (_root / 'events.jsonl').open('a', encoding='utf-8') as stream:
@@ -430,6 +432,16 @@ def local_gh(args, *positional, **kwargs):
         emit({'event': 'gh-call', 'args': list(args[1:]), 'timeout': kwargs.get('timeout'),
               'deadline': budget.deadline, 'cleanup_reserve': budget.cleanup_reserve,
               'time': time.monotonic()})
+        if os.environ['PRETOOL_TEST_LATE_RESULT'] == 'cleanup-error' and args[1:3] == ['pr', 'view'] and args[3] == '42':
+            from agent_procutil import spawn_sync_in_kill_on_close_job
+            process, job = spawn_sync_in_kill_on_close_job(
+                [sys.executable, os.environ['PRETOOL_TEST_GH_CHILD'], *args[1:]],
+                require_job=True, allow_breakaway=False, env=kwargs['env'], cwd=kwargs['cwd'],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            _retained.append((process, job))
+            raise owned_process.OwnedCleanupError(process, job)
         return _real_run([sys.executable, os.environ['PRETOOL_TEST_GH_CHILD'], *args[1:]], *positional, **kwargs)
     return _real_run(args, *positional, **kwargs)
 owned_process.run_caller_owned = local_gh
@@ -489,10 +501,10 @@ sys.setprofile(observe)
             process.stdin.write(json.dumps(event).encode("utf-8"))
             process.stdin.close()
             process.stdin = None
-        if late_result == "timeout":
+        if late_result != "deny":
             marker = observations / "gh-42.json"
             deadline = time.monotonic() + 15
-            while not marker.is_file():
+            while not marker.with_suffix(".published").is_file():
                 assert process.poll() is None, process.communicate(timeout=5)
                 assert time.monotonic() < deadline, "second local lookup never started"
                 time.sleep(0.02)
@@ -502,7 +514,7 @@ sys.setprofile(observe)
         stdout, stderr = process.communicate(timeout=40)
         assert process.returncode == 0, (stdout, stderr)
         assert time.monotonic() - started < 30, "consumer exceeded the original hook deadline"
-        if late_result == "timeout":
+        if late_result != "deny":
             assert retired(), "local lookup child survived its owned policy scope"
         observed = [json.loads(line) for line in (observations / "events.jsonl").read_text().splitlines()]
         decisions = [row["decision"] for row in observed if row["event"] == "accumulated-decision"]
@@ -511,12 +523,12 @@ sys.setprofile(observe)
         assert len(calls) == 2, calls
         assert calls[0]["deadline"] == calls[1]["deadline"]
         assert all(row["cleanup_reserve"] == 3.0 for row in calls)
-        if late_result == "timeout":
+        if late_result != "deny":
             assert calls[1]["timeout"] < calls[0]["timeout"]
         reply = json.loads(stdout)
         print(json.dumps({"consumer": consumer, "late_result": late_result, "observed": observed, "reply": reply}))
         assert not target.exists()
-        assert reply.get("permissionDecision") == ("ask" if late_result == "timeout" else "deny"), reply
+        assert reply.get("permissionDecision") == ("deny" if late_result == "deny" else "ask"), reply
         if late_result == "deny":
             assert decisions[-1] == "deny"
             assert "contributor" in reply.get("permissionDecisionReason", "")
@@ -525,3 +537,30 @@ sys.setprofile(observe)
             close_observer()
         job.terminate_and_wait(5)
         process.wait(timeout=5)
+
+
+def test_missing_sdk_does_not_suppress_intact_stateless_guard(monkeypatch, tmp_path):
+    import builtins
+    import importlib.util
+    from types import SimpleNamespace
+
+    spec = importlib.util.spec_from_file_location("fixture_pre_policy", PLUGIN / "scripts" / "hook_pre_policy.py")
+    policy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(policy)
+    original = builtins.__import__
+
+    def missing_sdk(name, *args, **kwargs):
+        if name.startswith("agent_procutil"):
+            raise ModuleNotFoundError("fixture missing SDK")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", missing_sdk)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    result = policy.decide(
+        {}, home=tmp_path, budget_seconds=25,
+        load_sibling=lambda name: SimpleNamespace(decide=lambda *a, **k: {
+            "permissionDecision": "deny", "permissionDecisionReason": "intact stateless guard",
+        }),
+        merge_decisions=lambda left, right: {**left, **right},
+    )
+    assert result["permissionDecision"] == "deny"
