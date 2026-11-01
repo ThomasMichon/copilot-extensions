@@ -6132,6 +6132,10 @@ through the real PowerShell adapter, rather than resurrecting retired C# types.
 They retain the 259/260/280-unit file/publication and 247/248/260/280-unit
 directory boundaries, destination identity/content checks and long snapshot
 parity.
+Windows path comparisons separately cover ordinary and extended DOS/UNC
+representations returned during concurrent directory creation. Canonical I/O
+paths retain their extended spelling, while different roots stay distinct and
+device-prefix spellings are not rewritten.
 Concurrent slot controls retain the five-second lock-admission bound: a
 confirmed busy reply is checked explicitly and retried once after the competing
 publisher finishes, rather than assuming every contender must wait indefinitely.

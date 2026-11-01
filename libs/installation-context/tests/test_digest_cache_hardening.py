@@ -141,6 +141,28 @@ def test_python_completion_publication_never_replaces_existing_identity(
     assert list(tmp_path.iterdir()) == [target]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows path comparison")
+@pytest.mark.parametrize(("left", "right", "equivalent"), (
+    (r"C:\example\receipt", r"\\?\C:\example\receipt", True),
+    (r"\\example.invalid\share\receipt", r"\\?\UNC\example.invalid\share\receipt", True),
+    (r"C:\example\receipt", r"\\?\C:\other\receipt", False),
+    (r"C:\example\receipt", r"\\?\GLOBALROOT\Device\C:\example\receipt", False),
+))
+def test_windows_path_comparison_retains_extended_io_paths(
+    left: str, right: str, equivalent: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_python_module()
+    resolved = []
+
+    def physical_path(path):
+        resolved.append(path)
+        return path
+
+    monkeypatch.setattr(module, "canonical_path", physical_path)
+    assert module.paths_equal(left, right) is equivalent
+    assert resolved == [Path(left), Path(right)]
+
+
 @pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
 @pytest.mark.parametrize("path_units", (259, 260, 280))
 def test_powershell_safe_open_preserves_extended_length_file_reads(

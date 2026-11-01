@@ -76,6 +76,9 @@ its whole working set rolled back.
   A required missing path retains the PowerShell `Path does not exist`
   diagnostic. Ordinary Python, optional-path and permission/other resolution
   diagnostics remain unchanged.
+  Windows physical-path comparisons equate ordinary and extended DOS/UNC
+  spellings without removing extended prefixes from I/O paths. Different
+  roots remain distinct; device-prefix spellings are not rewritten.
   Receipt identity, fully-qualified path admission, locking, atomic publication
   and cleanup remain owned by the shared Python implementation.
   Only `resolve`, `validate` and the four mode actions may select an ambient
