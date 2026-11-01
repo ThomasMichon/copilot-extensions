@@ -1623,7 +1623,7 @@ jobs:
     if: ${{ inputs.source_cache }}
     name: Source wheel cache and hardlinks (Windows)
     runs-on: windows-latest
-    timeout-minutes: 6
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:

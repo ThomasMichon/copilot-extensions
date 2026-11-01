@@ -335,6 +335,23 @@ def test_offline_uv_provides_private_interpreter_layout(tmp_path: Path, foundati
         assert Path(json.loads(result.stdout)) == managed
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Native Linux interpreter custody")
+def test_install_fixture_preserves_daemon_interpreter_custody(tmp_path, monkeypatch):
+    unsafe = tmp_path / "writable-python"
+    shutil.copyfile(sys._base_executable, unsafe)
+    unsafe.chmod(0o777)
+    monkeypatch.setattr(sys, "_base_executable", str(unsafe))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_DAEMON_PYTHON", str(unsafe))
+    env = _isolated_install_env(tmp_path / "home")
+    assert Path(env["COPILOT_EXTENSIONS_DAEMON_PYTHON"]).resolve() != unsafe.resolve()
+    result = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-c", '. "$1"; _di_lifecycle check',
+         "custody-proof", str(_PLUGIN_ROOT / "scripts" / "daemon_instances.sh")],
+        env=env, capture_output=True, text=True, check=False, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def _assert_complete_runtime(home: Path) -> None:
     root = home / ".agent-logger"
     version = (root / "current-version").read_text(encoding="utf-8").strip()
@@ -375,6 +392,27 @@ def _isolated_install_env(home: Path) -> dict[str, str]:
     env["COPILOT_PLUGIN_INSTALL_STAGED"] = "1"
     for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
         env.pop(name, None)
+    if sys.platform == "linux":
+        candidates = (
+            env.get("COPILOT_EXTENSIONS_DAEMON_PYTHON"),
+            sys._base_executable,
+            shutil.which("python3", path=os.defpath),
+        )
+        diagnostics = []
+        for candidate in dict.fromkeys(filter(None, candidates)):
+            probe = subprocess.run(
+                ["bash", "--noprofile", "--norc", "-c",
+                 '. "$1"; _di_lifecycle check >/dev/null && _di_python',
+                 "fixture-interpreter", str(_PLUGIN_ROOT / "scripts" / "daemon_instances.sh")],
+                env={**env, "COPILOT_EXTENSIONS_DAEMON_PYTHON": candidate},
+                capture_output=True, text=True, check=False, timeout=20,
+            )
+            if probe.returncode == 0:
+                env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = probe.stdout.strip()
+                break
+            diagnostics.append(probe.stderr.strip())
+        else:
+            raise RuntimeError("No custody-qualified daemon test interpreter: " + "; ".join(diagnostics))
     return env
 
 
