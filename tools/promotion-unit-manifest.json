@@ -3500,6 +3500,7 @@
         "libs/agent-procutil/src/agent_procutil/_job_scopes.py": "c6a4509be12413ae0e24145486f1813917ab51a81b32db1bf778cb51f4326bc1",
         "libs/agent-procutil/src/agent_procutil/_linux_pidfd.py": "cfb80912e44db7f98efe911ad57dd38f0fa5eb5a28e4e7b91da8206431871560",
         "libs/agent-procutil/src/agent_procutil/_native_owned.py": "908a6021d730ff6c15da3ff3619e098a48ea1936c578c3d745c40d7e8e3460a4",
+        "libs/agent-procutil/src/agent_procutil/_output_relay.py": "45a60124e4a87996a24b6796738c6a334bfc9312819fe2130f56ec4dddcbb989",
         "libs/agent-procutil/src/agent_procutil/_shell_caller_owned.py": "ac7a083c4bcfd41fc9c657c367b4717837ae5fecdd57bff1dd215ce4253873b1",
         "libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py": "686c69b11c3b0601cc381292dc56b217391dae35634db8e3de18e0a27e375a57",
         "libs/agent-procutil/src/agent_procutil/_windows_job_types.py": "31f666695db93312d65bb6fe6009371c7f640a39107cc36024fd05c766c15a43",
@@ -4158,7 +4159,8 @@
         "tools/native_qualification_contract.py",
         "tools/plugin_test_containment.py",
         "tools/plugin_test_containment_observation.py",
-        "libs/agent-procutil/src/agent_procutil/_windows_job_types.py"
+        "libs/agent-procutil/src/agent_procutil/_windows_job_types.py",
+        "libs/agent-procutil/src/agent_procutil/_output_relay.py"
     ],
     "max_seconds": 300
 }
