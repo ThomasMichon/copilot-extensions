@@ -74,6 +74,8 @@ def environment(tmp_path, monkeypatch, request):
         malformed_author_reply = False
         singleton_continuation = None
         response_ids = None
+        read_late = False
+        empty_read = False
 
         def __init__(self):
             self.pr = copy.deepcopy(evidence["sections"]["pull_request"]["data"])
@@ -120,8 +122,9 @@ def environment(tmp_path, monkeypatch, request):
                 if "/statuses?" in url or "/policy/evaluations?" in url:
                     values = [{"id": "synthetic-evaluation", "status": "failed"}] if self.policy_failed else []
                     return NativeReviewResponse(200, {"value": values})
-                return NativeReviewResponse(200, copy.deepcopy(self.pr),
-                                            "unexpected" if self.singleton_continuation == "pr" else "")
+                return NativeReviewResponse(200, {} if self.empty_read else copy.deepcopy(self.pr),
+                                            "unexpected" if self.singleton_continuation == "pr" else "",
+                                            late=self.read_late)
             retained = store.inspect_review(selected["operation_id"], scope, expires_at=int(time.time()) + 600)
             action = next(row for row in retained["actions"] if row["state"] == "unknown")
             assert action["attempt_id"], "backend entered before durable in-flight persistence"
@@ -229,6 +232,28 @@ def test_singleton_continuation_retains_structured_action_state(environment, end
     assert result["actions"][0]["state"] == ("confirmed" if after_effect else "unattempted")
     assert len(writes(backend)) == int(after_effect)
     assert backend.vote is None
+
+
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize("after_effect", [False, True])
+def test_late_native_read_buffer_is_not_readiness_or_effect_confirmation(environment, empty, after_effect):
+    _, _, _, _, backend, _ = environment
+    backend.pr["status"] = "completed"
+
+    def lose_read_completion(value):
+        value.read_late = True
+        value.empty_read = empty
+
+    if after_effect:
+        backend.after_write = lose_read_completion
+    else:
+        lose_read_completion(backend)
+    result = run(environment)
+    assert result["status"] == "unknown"
+    assert result["actions"][0]["state"] == ("confirmed" if after_effect else "unattempted")
+    assert result["actions"][1]["state"] == "unattempted"
+    assert result["entered_writes"] == int(after_effect)
+    assert len(writes(backend)) == int(after_effect) and backend.vote is None
 
 
 @pytest.mark.parametrize("ids,retained", [

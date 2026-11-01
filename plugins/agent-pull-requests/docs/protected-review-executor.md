@@ -112,6 +112,13 @@ If a bounded native write reply arrives after the work deadline while the owner
 still permits settlement, its known IDs are persisted unconfirmed; no success
 or subsequent write is permitted. Malformed response authors likewise fail
 verification without discarding otherwise known native IDs.
+Native response bytes and caller transport/cleanup completion are different
+evidence. An owner-declared late read is unavailable even if it contains complete
+JSON and the operation budget remains positive; an empty late buffer is no success
+either. The owner must not map timed-out buffered stdout to a completed response.
+Preflight read failure leaves actions unattempted; a later read failure retains
+earlier confirmed effects without confirming remaining actions. A selected
+`Closed` status or terminal PR observation is not an executed action receipt.
 Each returned native ID is validated independently, retaining usable partial IDs
 without confirming an incomplete response. Unexpected singleton-read continuations
 produce an unavailable structured outcome; malformed or missing readback IDs cannot
