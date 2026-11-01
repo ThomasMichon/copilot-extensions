@@ -1081,7 +1081,9 @@ class SupervisorDaemon(BoundedReconciliation):
         return handled
 
     def _prune_probe_inflight(self) -> None:
-        self._probe_inflight = {f for f in self._probe_inflight if not f.done()}
+        for future in tuple(self._probe_inflight):
+            if future.done():
+                self._probe_inflight.discard(future)
 
     def _poll_managed_health(
         self, rid: str, snapshot: ManagedLaunchSnapshot, deadline: float
@@ -1746,36 +1748,6 @@ class SupervisorDaemon(BoundedReconciliation):
         return summary
 
     # -- serve loop ----------------------------------------------------------
-
-    def _build_lock(self) -> Any:
-        from .config import run_dir
-        from .single_instance import SingleInstance, lock_path_for
-
-        scope = supervisor_lease_scope(self.machine, self.env)
-        return SingleInstance(lock_path_for(run_dir(), scope))
-
-    def acquire_singleton(self) -> bool:
-        """Win the single-instance election for this (machine, env), or stand down.
-
-        Uses a crash-safe **OS lock file** over a ``supervisor:<machine>:<env>``
-        scope: the kernel releases the lock automatically if the daemon dies, so a
-        restart reacquires cleanly, while a *live* second daemon is refused
-        (returns ``False``) and must NOT run -- the *one supervisor per
-        machine-and-environment* guarantee, without a crash leaving a permanent
-        lock.
-        """
-        if self._lock is None:
-            self._lock = self._build_lock()
-        return bool(self._lock.acquire())
-
-    def release_singleton(self) -> None:
-        """Release this daemon's single-instance lock (best-effort)."""
-        if self._lock is None:
-            return
-        try:
-            self._lock.release()
-        except Exception:  # pragma: no cover -- best-effort
-            log.exception("error releasing supervisor lock")
 
     def _await_runtime_pool_idle(self, timeout: float) -> bool:
         """Wait up to ``timeout`` seconds for in-flight managed runtime work.
