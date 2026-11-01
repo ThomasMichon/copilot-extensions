@@ -1942,7 +1942,8 @@ def test_exemplar_producer_evidence_is_accepted_without_activation_mutation(
     nested.mkdir()
     (nested / "snapshot-provenance.json").write_bytes(b"nested payload\n")
     (nested / "\u00e9.txt").write_bytes(b"unicode path\n")
-    (nested / "line\nbreak.txt").write_bytes(b"newline path\n")
+    payload_name = "space name.txt" if os.name == "nt" else "line\nbreak.txt"
+    (nested / payload_name).write_bytes(b"platform filename\n")
     (nested / "empty").mkdir()
     snapshot_root = Path(layout["snapshot_root"])
     (snapshot_root / "payload-content.txt").unlink()
@@ -4013,7 +4014,8 @@ def test_snapshot_content_digest_is_exact_and_cross_runner_deterministic(
     nested = snapshot_root / "nested"
     nested.mkdir()
     (nested / "snapshot-provenance.json").write_bytes(b"nested sidecar name\n")
-    (nested / "line\nbreak.txt").write_bytes(b"newline path\n")
+    payload_name = "space name.txt" if os.name == "nt" else "line\nbreak.txt"
+    (nested / payload_name).write_bytes(b"platform filename\n")
     (nested / "z.txt").write_bytes(b"last\n")
     (snapshot_root / "\u03a9.txt").write_bytes(b"unicode path\n")
     (snapshot_root / "empty").mkdir()
@@ -4091,6 +4093,7 @@ def test_snapshot_content_hashing_rejects_links_and_non_regular_entries(
     ).exists()
 
 
+@pytest.mark.skipif(BASH is None, reason="supported POSIX Bash required")
 def test_posix_snapshot_hashing_fails_closed_on_partial_find_output(
     tmp_path: Path,
 ) -> None:
@@ -4118,7 +4121,7 @@ def test_posix_snapshot_hashing_fails_closed_on_partial_find_output(
     fake_find.chmod(0o755)
 
     result = _run_completion(
-        ALL_RUNNERS[1],
+        next(runner for runner in ALL_RUNNERS if runner[0] == "posix"),
         "slot-complete",
         layout,
         environment_overrides={
@@ -4328,6 +4331,7 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
         environment={},
     )
     marker = Path(published["completion"])
+    original_bytes = marker.read_bytes()
     replacement = marker.with_name(".replacement-completion.json")
     replacement_bytes = b'{"replaced":true}\n'
     replacement.write_bytes(replacement_bytes)
@@ -4335,6 +4339,7 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
     original_read = module.os.read
     marker_descriptor: int | None = None
     replaced = False
+    replacement_error: PermissionError | None = None
 
     def racing_open(
         path: str | os.PathLike[str],
@@ -4353,19 +4358,21 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
         return descriptor
 
     def racing_read(descriptor: int, length: int) -> bytes:
-        nonlocal replaced
+        nonlocal replaced, replacement_error
         if descriptor == marker_descriptor and not replaced:
             replaced = True
-            os.replace(replacement, marker)
+            try:
+                os.replace(replacement, marker)
+            except PermissionError as error:
+                if os.name != "nt" or error.winerror not in (5, 32):
+                    raise
+                replacement_error = error
         return original_read(descriptor, length)
 
     monkeypatch.setattr(module.os, "open", racing_open)
     monkeypatch.setattr(module.os, "read", racing_read)
-    with pytest.raises(
-        module.InstallationContextError,
-        match="changed while it was being read",
-    ):
-        module.validate_runtime_slot_completion(
+    def validate() -> dict[str, Any]:
+        return module.validate_runtime_slot_completion(
             context=layout["install"],
             expected_marketplace_id=layout["marketplace_id"],
             expected_plugin_id=layout["plugin_id"],
@@ -4377,6 +4384,19 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
             environment={},
         )
 
+    if os.name == "nt":
+        assert validate()["receipt"] == published["receipt"]
+        assert replacement_error is not None
+        assert marker.read_bytes() == original_bytes
+        assert replacement.read_bytes() == replacement_bytes
+        os.replace(replacement, marker)
+    else:
+        with pytest.raises(
+            module.InstallationContextError,
+            match="changed while it was being read",
+        ):
+            validate()
+        assert replacement_error is None
     assert replaced
     assert marker.read_bytes() == replacement_bytes
 
@@ -5114,25 +5134,47 @@ def test_runtime_slot_completion_captures_one_concurrently_replaced_build_receip
     )
     build_path.write_bytes(candidate_bytes[0])
     stop = Event()
+    first_replacement = Event()
+    replacements = 0
 
     def rewrite() -> None:
+        nonlocal replacements
         index = 1
         staging = build_path.with_name(".install-complete.next")
         while not stop.is_set():
             staging.write_bytes(candidate_bytes[index])
-            os.replace(staging, build_path)
+            try:
+                os.replace(staging, build_path)
+            except PermissionError as error:
+                if os.name != "nt" or error.winerror not in (5, 32):
+                    raise
+                stop.wait(0.001)
+                continue
+            replacements += 1
+            first_replacement.set()
             index = 1 - index
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(rewrite)
         try:
-            published = json.loads(
-                _run_completion(runner, "slot-complete", layout).stdout
-            )
+            assert first_replacement.wait(timeout=5)
+            result = _run_completion(runner, "slot-complete", layout, check=False)
         finally:
             stop.set()
             future.result(timeout=10)
 
+    assert replacements > 0
+    if os.name == "nt" and result.returncode != 0:
+        assert result.returncode == 1
+        assert "Cannot read build completion evidence" in result.stderr
+        assert any(
+            code in result.stderr
+            for code in ("[Errno 13]", "[WinError 5]", "[WinError 32]")
+        )
+        assert not (build_path.parent / ".runtime-slot-completion.json").exists()
+        result = _run_completion(runner, "slot-complete", layout)
+    assert result.returncode == 0, result.stdout + result.stderr
+    published = json.loads(result.stdout)
     recorded = published["receipt"]["build"]
     matched = [
         candidate
