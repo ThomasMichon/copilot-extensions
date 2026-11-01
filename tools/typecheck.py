@@ -253,6 +253,8 @@ def check_project(
         raise TypecheckError(f"{project.name}: run python tools/typecheck.py {project.name} --prepare")
     lease = acquire_environment(0, path)
     try:
+        if not python.is_file() or not marker.is_file() or marker.read_text(encoding="utf-8").strip() != digest:
+            raise TypecheckError(f"{project.name}: run python tools/typecheck.py {project.name} --prepare")
         imports = {str(root), str(root / "libs" / "installer-engine")}
         imports.update(
             str(root.joinpath(*file.split("/")[:file.split("/").index("src") + 1]))

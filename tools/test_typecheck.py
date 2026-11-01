@@ -315,6 +315,41 @@ def test_preparation_refuses_replaced_leased_directory(
     assert not (environment / ".typecheck-prepared").exists()
 
 
+def test_readiness_is_revalidated_under_the_checker_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repair between preflight and acquisition cannot launch an unprepared checker."""
+    marker = tmp_path / ".typecheck-prepared"
+    marker.write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return tmp_path, "test-context"
+
+    def environment_python(_path: Path) -> Path:
+        return Path(sys.executable)
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        marker.unlink()
+        return lease
+
+    def run(
+        argv: list[str], _root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        pytest.fail("MyPy must not start after admission was invalidated")
+
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", environment_python)
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    monkeypatch.setattr(typecheck, "_run", run)
+    with pytest.raises(typecheck.TypecheckError, match="--prepare"):
+        typecheck.check_project(tmp_path, project(), ("sample.py",), all_paths=("sample.py",))
+    assert lease.released
+    assert not (tmp_path / "typecheck-targets.txt").exists()
+
+
 def test_checker_timeout_settles_targets_and_environment_lease(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
