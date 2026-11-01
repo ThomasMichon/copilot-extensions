@@ -44,7 +44,6 @@ callers that patch subprocess creation.
 
 from __future__ import annotations
 
-import ctypes
 import logging
 import math
 import os
@@ -58,8 +57,10 @@ from typing import TYPE_CHECKING, Any, BinaryIO
 
 if TYPE_CHECKING:
     import asyncio as asyncio
+    import ctypes as ctypes
 
     from ._async import spawn_in_kill_on_close_job
+    from ._windows_job_types import _JobBasicAccountingInformation as _JobBasicAccountingInformation
     from .daemon_broker import WindowsDaemonProcess
 
 # Win32 process-creation flags. Read from ``subprocess`` when present (Windows)
@@ -137,19 +138,12 @@ def _job_scope_names(environment) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _job_child_environment(environment=None, *, append: str | None = None) -> dict[str, str]:
-    child = dict(os.environ if environment is None else environment)
-    names = list(_job_scope_names(os.environ))
-    for key in tuple(child):
-        if key.upper() == _JOB_SCOPES_ENV:
-            names.extend(_job_scope_names({_JOB_SCOPES_ENV: child.pop(key)}))
-    names = list(dict.fromkeys(names))
-    if append is not None:
-        names.append(append)
-    if names:
-        child[_JOB_SCOPES_ENV] = ";".join(names)
-        _job_scope_names(child)
-    return child
+def _job_child_environment(
+    environment=None, *, append: str | None = None, inherit_current: bool = True,
+) -> dict[str, str]:
+    from ._job_scopes import child_environment
+
+    return child_environment(environment, append=append, inherit_current=inherit_current)
 
 
 def _publish_job_scope(name: str) -> None:
@@ -195,6 +189,9 @@ class JobHandle:
         handle = self._handle
         if not handle:
             raise RuntimeError("Job handle is closed; cannot confirm empty Job")
+        import ctypes
+        from ._windows_job_types import _JobBasicAccountingInformation
+
         kernel32 = _kernel32()
         _configure_job_teardown_api(kernel32)
         deadline = time.monotonic() + timeout_seconds
@@ -231,23 +228,13 @@ class JobHandle:
 
 
 def _kernel32() -> Any:
+    import ctypes
+
     return ctypes.WinDLL("kernel32", use_last_error=True)
 
 
-class _JobBasicAccountingInformation(ctypes.Structure):
-    _fields_ = [
-        ("TotalUserTime", ctypes.c_int64),
-        ("TotalKernelTime", ctypes.c_int64),
-        ("ThisPeriodTotalUserTime", ctypes.c_int64),
-        ("ThisPeriodTotalKernelTime", ctypes.c_int64),
-        ("TotalPageFaultCount", ctypes.c_uint32),
-        ("TotalProcesses", ctypes.c_uint32),
-        ("ActiveProcesses", ctypes.c_uint32),
-        ("TotalTerminatedProcesses", ctypes.c_uint32),
-    ]
-
-
 def _configure_job_teardown_api(kernel32: Any) -> None:
+    import ctypes
     from ctypes import wintypes
 
     kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
@@ -262,10 +249,13 @@ def _configure_job_teardown_api(kernel32: Any) -> None:
 
 
 def _ntdll() -> Any:
+    import ctypes
+
     return ctypes.WinDLL("ntdll", use_last_error=True)
 
 
 def _build_job_extended_limit_info() -> type[ctypes.Structure]:
+    import ctypes
     from ctypes import wintypes
 
     ulong_ptr = ctypes.c_size_t
@@ -307,6 +297,7 @@ def _build_job_extended_limit_info() -> type[ctypes.Structure]:
 
 
 def _configure_job_api(kernel32: Any) -> None:
+    import ctypes
     from ctypes import wintypes
 
     kernel32.CreateJobObjectW.restype = wintypes.HANDLE
@@ -324,6 +315,7 @@ def _configure_job_api(kernel32: Any) -> None:
 
 
 def _configure_resume_api(kernel32: Any, ntdll: Any) -> None:
+    import ctypes
     from ctypes import wintypes
 
     kernel32.OpenProcess.restype = wintypes.HANDLE
@@ -334,6 +326,8 @@ def _configure_resume_api(kernel32: Any, ntdll: Any) -> None:
 
 
 def _log_job_failure(operation: str) -> None:
+    import ctypes
+
     error = ctypes.get_last_error()
     if error == _ERROR_ACCESS_DENIED:
         log.debug("%s failed with access denied; child job binding skipped", operation)
@@ -357,6 +351,7 @@ def _assign_suspended_to_kill_on_close_job(
     if pid <= 0:
         log.debug("invalid pid %r; child job binding skipped", pid)
         return None
+    import ctypes
 
     job = None
     process = None
@@ -448,6 +443,16 @@ def _resume_suspended_process(pid: int) -> bool:
 
 
 def __getattr__(name: str) -> Any:
+    if name == "ctypes":
+        import ctypes
+
+        globals()[name] = ctypes
+        return ctypes
+    if name == "_JobBasicAccountingInformation":
+        from ._windows_job_types import _JobBasicAccountingInformation
+
+        globals()[name] = _JobBasicAccountingInformation
+        return _JobBasicAccountingInformation
     if name == "spawn_in_kill_on_close_job":
         from ._async import asyncio, spawn_in_kill_on_close_job
 
@@ -463,7 +468,7 @@ def __getattr__(name: str) -> Any:
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__) | {"asyncio"})
+    return sorted(set(globals()) | set(__all__) | {"asyncio", "ctypes", "_JobBasicAccountingInformation"})
 
 
 class SyncProcessLaunchError(OSError):

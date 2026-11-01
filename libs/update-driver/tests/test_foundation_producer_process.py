@@ -163,7 +163,9 @@ def test_native_submit_facade_preserves_contained_caller_job_suppression(produce
     shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
     fixture = Path(__file__).with_name("fixture_foundation_submit.ps1")
     env = dict(
-        os.environ, PATH=str(Path(os.environ["SystemRoot"]) / "System32"),
+        os.environ, PATH=os.pathsep.join((
+            str(Path(sys.executable).parent), str(Path(os.environ["SystemRoot"]) / "System32"),
+        )),
         COPILOT_EXTENSIONS_TEST_CONTAINED="1", FOUNDATION_FIXTURE_PYTHON=sys.executable,
         FOUNDATION_FIXTURE_HOLD="1",
     )

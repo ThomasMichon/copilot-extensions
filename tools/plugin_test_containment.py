@@ -8,7 +8,6 @@ launch state; intentional interactive child launches are not rewritten.
 
 from __future__ import annotations
 
-import ctypes
 import os
 import shutil as shutil  # Retain the shared adapter seam for existing callers.
 import signal
@@ -21,11 +20,13 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence, TypeVar
 
 if __package__:
+    from .native_qualification_contract import WORK_SECONDS, Boundary, Qualification, QualificationError
     from .native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
     from .plugin_test_containment_posix import (
         GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
     )
 else:
+    from native_qualification_contract import WORK_SECONDS, Boundary, Qualification, QualificationError
     from native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
     from plugin_test_containment_posix import (
         GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
@@ -489,6 +490,12 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
         raise UnreapedProcessError("POSIX process group remains live after SIGKILL")
 
 
+def _windows_last_error() -> int:
+    import ctypes
+
+    return ctypes.get_last_error()
+
+
 class _WindowsJob:
     """A kill-on-close Job Object for a signalled worker process."""
 
@@ -500,6 +507,7 @@ class _WindowsJob:
     _PROCESS_TERMINATE = 0x0001
 
     def __init__(self, limits: Limits) -> None:
+        import ctypes
         from ctypes import wintypes
 
         class _BasicLimit(ctypes.Structure):
@@ -605,6 +613,8 @@ class _WindowsJob:
         self._ExtendedLimit = _ExtendedLimit
 
     def assign(self, pid: int) -> None:
+        import ctypes
+
         process = self._kernel32.OpenProcess(
             self._PROCESS_SET_QUOTA | self._PROCESS_TERMINATE, False, pid
         )
@@ -621,22 +631,30 @@ class _WindowsJob:
         finally:
             self._kernel32.CloseHandle(process)
 
-    def close(self) -> None:
+    def close(self, *, qualification: Qualification | None = None) -> None:
         if self._handle:
             try:
                 if self.active_processes():
+                    if qualification is not None:
+                        qualification.forced_termination = True
                     if not self._kernel32.TerminateJobObject(self._handle, 124):
                         raise UnreapedProcessError(
                             "TerminateJobObject failed with error "
-                            f"{ctypes.get_last_error()}"
+                            f"{_windows_last_error()}"
                         )
-                    deadline = time.monotonic() + 5.0
+                    deadline = (
+                        min(time.monotonic() + 5.0, qualification.boundary.whole_deadline)
+                        if qualification is not None else time.monotonic() + 5.0
+                    )
                     while self.active_processes():
                         if time.monotonic() >= deadline:
                             raise UnreapedProcessError(
                                 "Windows Job Object still has active processes after termination"
                             )
                         time.sleep(0.01)
+                if qualification is not None:
+                    qualification.boundary.require(time.monotonic)
+                    qualification.job_zero_observed = True
             except (ContainmentError, KeyboardInterrupt, OSError) as exc:
                 if isinstance(exc, UnreapedProcessError):
                     raise
@@ -644,10 +662,16 @@ class _WindowsJob:
                     f"Windows Job Object termination could not be verified: {exc}"
                 ) from exc
             finally:
-                self._kernel32.CloseHandle(self._handle)
+                closed = self._kernel32.CloseHandle(self._handle)
                 self._handle = None
+                if qualification is not None:
+                    qualification.job_handle_closed = bool(closed)
+                    if not closed:
+                        raise UnreapedProcessError("Original Windows Job handle could not be closed")
 
     def active_processes(self) -> int:
+        import ctypes
+
         accounting = self._BasicAccounting()
         if not self._kernel32.QueryInformationJobObject(
             self._handle,
@@ -663,6 +687,8 @@ class _WindowsJob:
         return int(accounting.ActiveProcesses)
 
     def usage(self) -> tuple[int, int]:
+        import ctypes
+
         active = self.active_processes()
         extended = self._ExtendedLimit()
         if not self._kernel32.QueryInformationJobObject(
@@ -681,7 +707,14 @@ class _WindowsJob:
         )
 
 
-def _worker_command(command: Sequence[str], ready: Path) -> list[str]:
+def _worker_command(
+    command: Sequence[str], ready: Path, *, boundary: Boundary | None = None,
+) -> list[str]:
+    if boundary is not None:
+        return [
+            sys.executable, str(Path(__file__).resolve()), "_worker-qualification",
+            repr(boundary.start), boundary.utc, str(ready), *command,
+        ]
     return [sys.executable, str(Path(__file__).resolve()), "_worker", str(ready), *command]
 
 
@@ -695,7 +728,7 @@ def _windows_stdio_kwargs() -> dict[str, Any]:
     return {}
 
 
-def _worker_main(argv: Sequence[str]) -> int:
+def _worker_main(argv: Sequence[str], *, boundary: Boundary | None = None) -> int:
     if len(argv) < 2:
         raise SystemExit("worker requires a ready path and command")
     ready = Path(argv[0])
@@ -707,11 +740,20 @@ def _worker_main(argv: Sequence[str]) -> int:
             raise ContainmentError("POSIX controller status pipe is missing")
         return _posix_worker(command, ready, int(result_fd), int(owner_fd))
     deadline = time.monotonic() + 30.0
+    if boundary is not None:
+        boundary.require(time.monotonic, work=True)
+        deadline = min(deadline, boundary.start + WORK_SECONDS)
     while not ready.exists():
         if time.monotonic() >= deadline:
             print("containment worker was not assigned before launch", file=sys.stderr)
             return 126
-        time.sleep(0.01)
+        time.sleep(max(0, min(0.01, deadline - time.monotonic())))
+    if boundary is not None:
+        boundary.require(time.monotonic, work=True)
+        process = subprocess.Popen(
+            command, **no_window_kwargs(), **_windows_stdio_kwargs(),
+        )
+        return process.wait(timeout=boundary.remaining(clock=time.monotonic))
     return subprocess.run(
         command, check=False, **no_window_kwargs(), **_windows_stdio_kwargs(),
     ).returncode
@@ -768,17 +810,35 @@ def _posix_worker(command: list[str], ready: Path, result_fd: int, owner_fd: int
         time.sleep(0.05)
 
 
-def _reap_controller(proc: subprocess.Popen) -> None:
+def _reap_controller(proc: subprocess.Popen, *, qualification: Qualification | None = None) -> None:
+    def remaining() -> float:
+        return (
+            max(0, min(5, qualification.boundary.whole_deadline - time.monotonic()))
+            if qualification is not None else 5
+        )
+
     try:
-        proc.wait(timeout=5)
+        proc.wait(timeout=remaining())
     except subprocess.TimeoutExpired:
+        if qualification is not None:
+            qualification.forced_termination = True
         try:
             proc.kill()
-            proc.wait(timeout=5)
+            proc.wait(timeout=remaining())
         except (OSError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
             raise UnreapedProcessError("Controller process could not be reaped") from exc
     except (OSError, KeyboardInterrupt) as exc:
         raise UnreapedProcessError("Controller process could not be reaped") from exc
+    if qualification is not None:
+        qualification.worker_reaped = True
+        handle = getattr(proc, "_handle", None)
+        if handle is not None and not qualification.worker_handle_closed:
+            try:
+                handle.Close()
+                qualification.worker_handle_closed = True
+            except OSError as exc:
+                raise UnreapedProcessError("Original controller handle could not be closed") from exc
+        qualification.boundary.require(time.monotonic)
 
 
 def _run_contained_process(
@@ -788,9 +848,14 @@ def _run_contained_process(
     env: Mapping[str, str],
     sandbox: Path,
     limits: Limits,
+    qualification: Qualification | None = None,
 ) -> int:
     """Run ``command`` in an owned process tree and return its exit code."""
     limits.validate()
+    if qualification is not None:
+        if os.name != "nt":
+            raise QualificationError("Absolute native qualification requires the original Windows Job owner.")
+        qualification.boundary.require(time.monotonic, work=True)
     sandbox.mkdir(parents=True, exist_ok=True)
     ready = sandbox / ".containment-ready"
     ready.unlink(missing_ok=True)
@@ -808,13 +873,23 @@ def _run_contained_process(
             worker_env["COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD"] = str(result_write)
             worker_env["COPILOT_EXTENSIONS_CONTAINMENT_OWNER_FD"] = str(owner_read)
             kwargs["pass_fds"] = (result_write, owner_read)
+        worker_command = (
+            _worker_command(command, ready, boundary=qualification.boundary)
+            if qualification is not None else _worker_command(command, ready)
+        )
+        if qualification is not None:
+            qualification.boundary.require(time.monotonic, work=True)
         proc = subprocess.Popen(
-            _worker_command(command, ready),
+            worker_command,
             cwd=str(cwd),
             env=worker_env,
             start_new_session=os.name != "nt",
             **no_window_kwargs(),
-            **_windows_stdio_kwargs(),
+            **(
+                {"stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE,
+                 "stderr": subprocess.PIPE, "bufsize": 0}
+                if qualification is not None else _windows_stdio_kwargs()
+            ),
             **kwargs,
         )
     except BaseException:
@@ -831,6 +906,10 @@ def _run_contained_process(
     job = None
     posix_identity = None
     try:
+        if qualification is not None:
+            qualification.boundary.require(time.monotonic, work=True)
+            assert proc.stdout is not None and proc.stderr is not None
+            qualification.capture.start((proc.stdout, proc.stderr))
         if os.name == "nt":
             try:
                 job = _WindowsJob(limits)
@@ -842,12 +921,19 @@ def _run_contained_process(
                     raise UnreapedProcessError(
                         "Unassigned controller could not be terminated"
                     ) from exc
-                _reap_controller(proc)
+                if qualification is not None:
+                    _reap_controller(proc, qualification=qualification)
+                else:
+                    _reap_controller(proc)
                 raise
         else:
             posix_identity = _posix_group_identity(proc.pid)
+        if qualification is not None:
+            qualification.boundary.require(time.monotonic, work=True)
         ready.write_text("assigned\n", encoding="ascii")
-        started = time.monotonic()
+        started = qualification.boundary.start if qualification is not None else time.monotonic()
+        if qualification is not None:
+            qualification.boundary.require(time.monotonic, work=True)
         next_temp_check = started
         next_usage_check = started
         while True:
@@ -857,14 +943,22 @@ def _run_contained_process(
                 assert result_read is not None
                 returncode = _posix_exit_code(result_read)
             now = time.monotonic()
-            cycle_deadline = min(now + limits.poll_seconds, started + limits.wall_seconds)
-            if now - started > limits.wall_seconds:
+            remaining = (
+                qualification.phase_remaining(time.monotonic) if qualification is not None
+                else started + limits.wall_seconds - now
+            )
+            cycle_deadline = min(now + limits.poll_seconds, now + remaining)
+            if qualification is None and now - started > limits.wall_seconds:
                 print(
                     f"[LIMIT] wall-clock limit exceeded ({limits.wall_seconds:g}s)",
                     file=sys.stderr,
                 )
                 return 124
             if returncode is not None:
+                if qualification is not None:
+                    qualification.native_exit = returncode
+                    if returncode == 0 and not qualification.work_completed:
+                        raise QualificationError("Native receiver exited without qualified work-completion evidence.")
                 return returncode
             violation = None
             if sys.platform != "darwin" and now >= next_temp_check:
@@ -898,7 +992,7 @@ def _run_contained_process(
             if violation is not None:
                 print(f"[LIMIT] {violation}", file=sys.stderr)
                 return 124
-            if sys.platform == "darwin":
+            if qualification is not None or sys.platform == "darwin":
                 time.sleep(max(0.0, cycle_deadline - time.monotonic()))
             else:
                 time.sleep(limits.poll_seconds)
@@ -909,7 +1003,10 @@ def _run_contained_process(
         try:
             if os.name == "nt":
                 if job is not None:
-                    job.close()
+                    if qualification is not None:
+                        job.close(qualification=qualification)
+                    else:
+                        job.close()
             else:
                 if posix_identity is None:
                     raise UnreapedProcessError("POSIX ownership identity was not captured")
@@ -925,8 +1022,17 @@ def _run_contained_process(
             except OSError as exc:
                 raise UnreapedProcessError("Controller pipes could not be released") from exc
             finally:
-                _reap_controller(proc)
+                if qualification is not None:
+                    _reap_controller(proc, qualification=qualification)
+                else:
+                    _reap_controller(proc)
         ready.unlink(missing_ok=True)
+        if qualification is not None:
+            assert proc.stdout is not None and proc.stderr is not None
+            qualification.capture.finish(
+                (proc.stdout, proc.stderr), qualification.boundary, time.monotonic,
+            )
+            qualification.observe_receiver(time.monotonic)
 
 
 def run_contained(
@@ -938,9 +1044,19 @@ def run_contained(
     limits: Limits,
     daemon_purpose: str = "unattended-test",
     daemon_lease: DaemonLeasePolicy | None = None,
+    qualification: Qualification | None = None,
 ) -> int:
     """Run an owned test tree; interactive tests require an explicit lease policy."""
+    lifecycle_results: list[Any] = []
+    if qualification is not None:
+        if os.name != "nt":
+            raise QualificationError("Absolute native qualification requires the original Windows Job owner.")
+        if limits != Limits(wall_seconds=WORK_SECONDS):
+            raise QualificationError("Native qualification must preserve the original process, memory and poll limits.")
+        qualification.validate(sandbox, time.monotonic)
     environment_snapshot = _read_registry_environment()
+    if qualification is not None:
+        qualification.boundary.require(time.monotonic, work=True)
     unreaped = None
     try:
         with daemon_test_lifecycle(
@@ -948,6 +1064,10 @@ def run_contained(
             registry_root=sandbox.resolve() / "daemon-instances",
             purpose=daemon_purpose,
             lease=daemon_lease,
+            **(
+                {"deadline": qualification.boundary.whole_deadline, "cleanup_results": lifecycle_results}
+                if qualification is not None else {}
+            ),
         ) as daemon_environment:
             result = _run_contained_process(
                 command,
@@ -955,12 +1075,20 @@ def run_contained(
                 env={**env, **daemon_environment},
                 sandbox=sandbox,
                 limits=limits,
+                **({"qualification": qualification} if qualification is not None else {}),
+            )
+        if qualification is not None:
+            qualification.boundary.require(time.monotonic)
+            qualification.lifecycle_settled = all(
+                outcome.status in ("settled", "missing") for outcome in lifecycle_results
             )
     except UnreapedProcessError as exc:
         unreaped = exc
         raise
     finally:
         try:
+            if qualification is not None:
+                qualification.boundary.require(time.monotonic)
             changed = _registry_environment_drift(environment_snapshot)
             if changed:
                 print(
@@ -977,6 +1105,9 @@ def run_contained(
             ) from unreaped
     if changed:
         return 125
+    if qualification is not None:
+        qualification.registry_unchanged = True
+        qualification.require_settled(time.monotonic)
     return result
 
 
@@ -984,6 +1115,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "_worker":
         return _worker_main(args[1:])
+    if args and args[0] == "_worker-qualification":
+        if len(args) < 5:
+            raise SystemExit("qualification worker requires the original origin, ready path and command")
+        boundary = Boundary.supplied(float(args[1]), args[2])
+        return _worker_main(args[3:], boundary=boundary)
     raise SystemExit("plugin_test_containment is an internal runner module")
 
 

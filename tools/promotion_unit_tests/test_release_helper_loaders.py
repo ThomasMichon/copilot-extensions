@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from promotion_unit_contract import UnitEvidenceError
-from release_helper_loaders import dynamic_loads
+from release_helper_loaders import _dump_ast, dynamic_loads
 
 _IMPORTS = "import importlib.util\nfrom pathlib import Path\n"
 _CHAIN = (
@@ -230,6 +230,85 @@ def test_existing_loader_files_enroll_exact_paths_without_importing_them(relativ
     root = Path(__file__).resolve().parents[2]
     tree = ast.parse((root / relative).read_bytes(), filename=relative)
     assert dynamic_loads(tree, relative) == expected
+
+
+@pytest.mark.parametrize("type_parameters", ["absent", "empty"])
+def test_retained_guardian_accepts_supported_empty_type_parameter_schemas(type_parameters):
+    root = Path(__file__).resolve().parents[2]
+    tree = ast.parse((root / _ACTOR_SOURCE).read_bytes(), filename=_ACTOR_SOURCE)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            node._fields = tuple(field for field in node._fields if field != "type_params")
+            if type_parameters == "empty":
+                node._fields += ("type_params",)
+                node.type_params = []
+            elif hasattr(node, "type_params"):
+                del node.type_params
+    before = ast.dump(tree)
+    assert dynamic_loads(tree, _ACTOR_SOURCE) == set()
+    assert ast.dump(tree) == before
+
+
+@pytest.mark.parametrize("source", [
+    "def declared(): pass", "async def declared(): pass", "class Declared: pass",
+], ids=["function", "async-function", "class"])
+def test_fingerprint_normalizes_only_empty_definition_type_parameters(source):
+    tree = ast.parse(source)
+    node = tree.body[0]
+    node._fields = tuple(field for field in node._fields if field != "type_params")
+    absent = _dump_ast(tree)
+    node._fields += ("type_params",)
+    node.type_params = []
+    before = ast.dump(tree)
+    assert _dump_ast(tree) == absent
+    assert ast.dump(tree) == before
+    node.type_params = [ast.Name(id="T", ctx=ast.Load())]
+    assert _dump_ast(tree) != absent
+
+
+@pytest.mark.parametrize("definition", ["function", "class"])
+def test_retained_guardian_nonempty_type_parameters_remain_pinned(definition):
+    root = Path(__file__).resolve().parents[2]
+    tree = ast.parse((root / _ACTOR_SOURCE).read_bytes(), filename=_ACTOR_SOURCE)
+    kind = ast.FunctionDef if definition == "function" else ast.ClassDef
+    node = next(node for node in ast.walk(tree) if isinstance(node, kind))
+    node._fields = tuple(field for field in node._fields if field != "type_params") + ("type_params",)
+    node.type_params = [ast.Name(id="T", ctx=ast.Load())]
+    with pytest.raises(UnitEvidenceError, match="retained runtime actor source shape changed"):
+        dynamic_loads(tree, _ACTOR_SOURCE)
+
+
+def test_fingerprint_preserves_type_parameter_like_string_constants():
+    literal = ast.parse("sentinel = ', type_params=[]'").body[0].value
+    assert _dump_ast(literal) == ast.dump(literal)
+
+
+@pytest.mark.parametrize("fault", ["bundle", "accounting-bundle", "bootstrap", "supervisor", "main"])
+def test_retained_guardian_actor_changes_require_fresh_source_qualification(fault):
+    root = Path(__file__).resolve().parents[2]
+    source = (root / _ACTOR_SOURCE).read_text()
+    before, after = {
+        "bundle": ('"_construction_procutil/_job_scopes.py"', '"foreign.py"'),
+        "accounting-bundle": ('"_construction_procutil/_windows_job_types.py"', '"foreign.py"'),
+        "bootstrap": ("base64.b64decode(v,validate=True)", "base64.b64decode(v)"),
+        "supervisor": ("allow_breakaway=False", "allow_breakaway=True"),
+        "main": ("_supervise_windows(args, args.command[1:])", "_supervise_windows(other, args.command[1:])"),
+    }[fault]
+    assert before in source
+    with pytest.raises(UnitEvidenceError, match="retained runtime actor source shape changed"):
+        dynamic_loads(ast.parse(source.replace(before, after)), _ACTOR_SOURCE)
+
+
+@pytest.mark.parametrize("source", [
+    "from installer_engine_process import _guardian_packet",
+    "from installer_engine_process import _load_guardian_resources as load",
+    "from installer_engine_process import _run_guardian_child",
+    "import installer_engine_process as process\nprocess._load_guardian_resources(sources)",
+    "import installer_engine_process as process\nloader = process._guardian_packet",
+])
+def test_retained_guardian_private_seams_cannot_become_release_helper_edges(source):
+    with pytest.raises(UnitEvidenceError):
+        _discover(source)
 
 
 def test_inert_source_is_not_executed_by_discovery():

@@ -16,7 +16,9 @@ import threading
 import time
 import uuid
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Protocol
 
 from . import _daemon_instance_clock as lease_clock
 from ._daemon_instance_identity import (
@@ -172,24 +174,63 @@ def _receipt(receipt: DaemonInstanceReceipt) -> Path:
 @contextlib.contextmanager
 def _locked(
     receipt: DaemonInstanceReceipt, *, wait_seconds: float = 0, nonblocking: bool = False,
+    deadline: float | None = None,
 ):
     record = _receipt(receipt)
     with _file_lock(
         record.with_suffix(".lock"), wait_seconds=wait_seconds, nonblocking=nonblocking,
+        **({"deadline": deadline} if deadline is not None else {}),
     ):
         yield record
 
 
+def _remaining(deadline: float | None) -> float | None:
+    if deadline is None:
+        return None
+    if type(deadline) not in (int, float) or not math.isfinite(deadline):
+        raise ValueError("daemon lifecycle deadline must be finite")
+    remaining = deadline - _monotonic_clock()
+    if remaining <= 0:
+        raise TimeoutError("original daemon lifecycle deadline exhausted; no further cleanup admitted")
+    return remaining
+
+
+class _CustodyLock(Protocol):
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool: ...
+
+    def release(self) -> None: ...
+
+
 @contextlib.contextmanager
-def _file_lock(path, *, wait_seconds=0, guard=None, nonblocking=False):
-    guard = _local_lock if guard is None else guard
-    if not guard.acquire(blocking=not nonblocking):
+def _local_custody(
+    guard: _CustodyLock, *, deadline: float | None = None, nonblocking: bool = False,
+) -> Iterator[None]:
+    remaining = _remaining(deadline)
+    acquired = (
+        guard.acquire(blocking=False) if nonblocking
+        else guard.acquire(timeout=remaining) if remaining is not None
+        else guard.acquire()
+    )
+    if not acquired:
+        if remaining is not None and not nonblocking:
+            raise TimeoutError("original daemon lifecycle lock deadline exhausted")
         raise BlockingIOError(errno.EAGAIN, "inventory collection already owned")
     try:
+        _remaining(deadline)
+        yield
+    finally:
+        guard.release()
+
+
+@contextlib.contextmanager
+def _file_lock(path, *, wait_seconds=0, guard=None, nonblocking=False, deadline=None):
+    guard = _local_lock if guard is None else guard
+    with _local_custody(guard, deadline=deadline, nonblocking=nonblocking):
         try:
             _plain(path)
         except FileNotFoundError:
             pass
+        _remaining(deadline)
         descriptor = os.open(
             path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600,
         )
@@ -198,9 +239,12 @@ def _file_lock(path, *, wait_seconds=0, guard=None, nonblocking=False):
                 before = os.fstat(stream.fileno())
                 if not os.path.samestat(before, _plain(path)):
                     raise OSError("daemon instance lock replaced")
-                deadline = _monotonic_clock() + wait_seconds
+                lock_deadline = _monotonic_clock() + wait_seconds
+                if deadline is not None:
+                    lock_deadline = min(lock_deadline, deadline)
                 while True:
                     try:
+                        _remaining(deadline)
                         if os.name == "nt":
                             import msvcrt
                             stream.seek(1 << 30)
@@ -210,16 +254,15 @@ def _file_lock(path, *, wait_seconds=0, guard=None, nonblocking=False):
                             fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                         break
                     except OSError as error:
-                        if error.errno not in (errno.EACCES, errno.EAGAIN) or _monotonic_clock() >= deadline:
+                        if error.errno not in (errno.EACCES, errno.EAGAIN) or _monotonic_clock() >= lock_deadline:
                             raise
-                        _pause.wait(.005)
+                        _pause.wait(max(0, min(.005, lock_deadline - _monotonic_clock())))
                 if not os.path.samestat(before, _plain(path)):
                     raise OSError("daemon instance lock replaced")
+                _remaining(deadline)
                 yield
         except BaseException:
             raise
-    finally:
-        guard.release()
 
 
 def _read(path: Path) -> dict[str, str]:
@@ -479,7 +522,11 @@ def _ensure_monitor():
 
 
 @contextlib.contextmanager
-def test_lifecycle(owner, root, purpose, policy):
+def test_lifecycle(
+    owner: str, root: Path, purpose: str, policy: DaemonLeasePolicy | None,
+    *, deadline: float | None = None, cleanup_results: list[InstanceCleanupResult] | None = None,
+) -> Iterator[dict[str, str]]:
+    _remaining(deadline)
     if not owner or len(owner) > 200 or any(ord(char) < 32 for char in owner):
         raise ValueError("test lifecycle owner must be explicit and printable")
     if purpose == "production":
@@ -496,32 +543,50 @@ def test_lifecycle(owner, root, purpose, policy):
         "max_lifetime": policy.max_lifetime_seconds,
         "next_renew": 0,
     }
-    with _local_lock:
+    if deadline is not None:
+        context["qualification_deadline"] = deadline
+    with _local_custody(_local_lock, deadline=deadline):
         _owners[context["run_id"]] = context
         _ensure_monitor()
     try:
         declaration = b"".join(
             key.encode("ascii") + b"\t" + base64.b64encode(str(value).encode()) + b"\n"
-            for key, value in sorted(context.items()) if key != "next_renew"
+            for key, value in sorted(context.items())
+            if key not in ("next_renew", "qualification_deadline")
         )
+        _remaining(deadline)
         yield {TEST_CONTEXT_ENV: base64.b64encode(declaration).decode("ascii")}
     finally:
-        with _local_lock:
+        with _local_custody(_local_lock, deadline=deadline):
             _owners.pop(context["run_id"], None)
+        if deadline is not None:
+            _settle_lifecycle_monitor(deadline)
         # Explicit test teardown is primary; expiry and installer GC are backstops.
         for record in inspect(root):
             if record.get("run_id") != context["run_id"]:
+                if cleanup_results is not None and record.get("state") == "held":
+                    cleanup_results.append(InstanceCleanupResult(
+                        record["instance_id"], "held", record.get("reason", "invalid-record"),
+                    ))
                 continue
             receipt = DaemonInstanceReceipt(record["instance_id"], root)
             try:
-                with _locked(receipt, wait_seconds=1) as path:
+                _remaining(deadline)
+                with _locked(
+                    receipt, wait_seconds=1,
+                    **({"deadline": deadline} if deadline is not None else {}),
+                ) as path:
                     current = _read(path)
                     if sys.platform.startswith("linux") or current.get("schema") == "2":
-                        deadline, _ = lease_clock.bounds(current)
-                        current["deadline_mono"] = str(min(_monotonic_clock(), deadline))
+                        lease_deadline, _ = lease_clock.bounds(current)
+                        current["deadline_mono"] = str(min(_monotonic_clock(), lease_deadline))
                     current["deadline"] = str(min(_wall_clock(), float(current["deadline"])))
                     _write(path, current)
-                outcome = cleanup(receipt)
+                outcome = cleanup(
+                    receipt, **({"deadline": deadline} if deadline is not None else {}),
+                )
+                if cleanup_results is not None:
+                    cleanup_results.append(outcome)
                 if outcome.status == "held":
                     _log.warning("daemon instance cleanup held: %s %s", receipt.instance_id, outcome.reason)
             except (OSError, ValueError, KeyError) as error:
@@ -529,7 +594,24 @@ def test_lifecycle(owner, root, purpose, policy):
                 _log.warning(
                     "daemon instance cleanup held: %s %s", receipt.instance_id, type(error).__name__,
                 )
+                if cleanup_results is not None:
+                    cleanup_results.append(InstanceCleanupResult(
+                        receipt.instance_id, "held", type(error).__name__,
+                    ))
                 continue
+        _remaining(deadline)
+
+
+def _settle_lifecycle_monitor(deadline: float) -> None:
+    with _local_custody(_local_lock, deadline=deadline):
+        if _owners or _guards:
+            raise RuntimeError("qualification lifecycle has other live custody; monitor settlement unconfirmed")
+        monitor = _monitor
+    if monitor is not None:
+        monitor.join(timeout=_remaining(deadline))
+        if monitor.is_alive():
+            raise TimeoutError("original lifecycle monitor did not settle within its deadline")
+    _remaining(deadline)
 
 
 def _observe_expiry():
@@ -541,6 +623,9 @@ def _observe_expiry():
         if not entries and not owners:
             return
         for context in owners:
+            qualification_deadline = context.get("qualification_deadline")
+            if qualification_deadline is not None and _monotonic_clock() >= qualification_deadline:
+                continue
             if _monotonic_clock() < context["next_renew"]:
                 continue
             context["next_renew"] = _monotonic_clock() + min(30, float(context["ttl"]) / 3)
@@ -685,14 +770,19 @@ def inspect(root=None):
     return results
 
 
-def cleanup(receipt, *, terminate=True, stop_timeout=5, _caller_pid=None):
+def cleanup(receipt, *, terminate=True, stop_timeout=5, _caller_pid=None, deadline=None):
     removed = []
 
     def result(status, reason):
         return InstanceCleanupResult(receipt.instance_id, status, reason, tuple(removed))
 
+    def stop_budget() -> float:
+        remaining = _remaining(deadline)
+        return min(stop_timeout, remaining) if remaining is not None else stop_timeout
+
     try:
-        with _locked(receipt) as path:
+        _remaining(deadline)
+        with _locked(receipt, **({"deadline": deadline} if deadline is not None else {})) as path:
             try:
                 record = _read(path)
             except FileNotFoundError:
@@ -711,7 +801,9 @@ def cleanup(receipt, *, terminate=True, stop_timeout=5, _caller_pid=None):
                     return result("live", "finite-worker-running")
                 if observed != "dead":
                     return result("held", "process-" + observed)
+                _remaining(deadline)
                 path.unlink()
+                _remaining(deadline)
                 return result("settled", "finite-worker-exit-observed")
             root = Path(record["runtime_root"])
             _plain(root, directory=True, owned=False)
@@ -724,6 +816,7 @@ def cleanup(receipt, *, terminate=True, stop_timeout=5, _caller_pid=None):
                 return result("held", "invalid-artifact-count")
             artifacts = []
             for index in range(count):
+                _remaining(deadline)
                 artifact = Path(record[f"artifact_{index}_path"])
                 artifact.relative_to(root)
                 if artifact.is_relative_to(receipt.registry_root):
@@ -755,9 +848,10 @@ def cleanup(receipt, *, terminate=True, stop_timeout=5, _caller_pid=None):
                         return result("held", "self-cleanup-refused")
                     if not terminate or not stop_identity(
                         int(supervisor_pid), record["supervisor_birth"],
-                        timeout=stop_timeout, graceful=True,
+                        timeout=stop_budget(), graceful=True,
                     ):
                         return result("held", "descendant-settlement-unconfirmed")
+                    _remaining(deadline)
                 if record.get("tree_settled") != "1":
                     try:
                         proof = _read(witness)
@@ -781,11 +875,14 @@ def cleanup(receipt, *, terminate=True, stop_timeout=5, _caller_pid=None):
                     return result("held", "stop-required")
                 if int(record["pid"]) in (os.getpid(), _caller_pid):
                     return result("held", "self-cleanup-refused")
-                if not stop_identity(int(record["pid"]), record["birth"], timeout=stop_timeout):
+                if not stop_identity(int(record["pid"]), record["birth"], timeout=stop_budget()):
                     return result("held", "stop-unconfirmed")
+                _remaining(deadline)
+            _remaining(deadline)
             record["state"] = "cleaning"
             _write(path, record)
             for artifact in artifacts:
+                _remaining(deadline)
                 _plain(artifact)
                 index = next(i for i in range(count) if record[f"artifact_{i}_path"] == str(artifact))
                 if path_identity(artifact) != (
@@ -797,10 +894,13 @@ def cleanup(receipt, *, terminate=True, stop_timeout=5, _caller_pid=None):
                 ))
                 removed.append(str(artifact))
             if supervisor_pid and witness.exists():
+                _remaining(deadline)
                 _plain(witness)
                 witness.unlink()
                 removed.append(str(witness))
+            _remaining(deadline)
             path.unlink()
+            _remaining(deadline)
             # The canonical lock entry stays: unlinking a lock permits split custody.
             return result("settled", "process-exit-observed")
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
