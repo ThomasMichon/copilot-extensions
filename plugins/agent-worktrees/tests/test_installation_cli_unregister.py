@@ -22,6 +22,7 @@ import pytest
 from agent_worktrees import installation_cli as installation_cli_mod
 from agent_worktrees import launch_wrapper_assets as lwa
 from agent_worktrees import repos as repos_mod
+from agent_worktrees import tracking
 from agent_worktrees import unregister_cli as unregister_cli_mod
 
 
@@ -178,7 +179,7 @@ def test_unregister_keep_repo_entry_downgrades_instead_of_removing(fake_runtime,
 
 @pytest.mark.parametrize("keep_repo_entry", [False, "unchanged"])
 def test_unregister_refuses_with_live_worktrees_unless_forced(
-    fake_runtime, monkeypatch, keep_repo_entry,
+    fake_runtime, monkeypatch, keep_repo_entry, capsys,
 ):
     monkeypatch.setattr(
         unregister_cli_mod, "_unregister_blockers", lambda project: ["1 live worktree(s)"]
@@ -190,6 +191,11 @@ def test_unregister_refuses_with_live_worktrees_unless_forced(
     )
     assert rc == 1
     assert "demoproj" in fake_runtime["registry"]["projects"]  # untouched
+    bounced = capsys.readouterr().out
+    assert "claims bounce" in bounced
+    assert "--project demoproj finalize <worktree-id>" in bounced
+    assert "Do not automatically add --force" in bounced
+    assert "or pass --force" not in bounced
 
     monkeypatch.setattr(repos_mod, "find_repo", lambda name: None)
     rc2 = installation_cli_mod.cmd_unregister(
@@ -197,6 +203,46 @@ def test_unregister_refuses_with_live_worktrees_unless_forced(
     )
     assert rc2 == 0
     assert "demoproj" not in fake_runtime["registry"]["projects"]
+    assert "does not settle the outstanding work" in capsys.readouterr().out
+
+
+def test_unregister_bounce_identifies_local_work_and_preserves_claims(
+    fake_runtime, monkeypatch, capsys,
+):
+    ledger = fake_runtime["tmp_path"] / "worktrees"
+    ledger.mkdir()
+    record = tracking.create_new_record(
+        "owner-worktree", "worktree/owner", str(ledger),
+        "demoproj", "test-node", "linux", ledger,
+    )
+    record.resources = [
+        tracking.ResourceClaim(kind="container", ref="unfinished-container"),
+        tracking.ResourceClaim(kind="container", ref="safe-container", state="at-rest"),
+    ]
+    record.prs = [tracking.PRRecord(state="open", number=42)]
+    tracking.save_record(record)
+    before = record.yaml_path.read_bytes()
+    monkeypatch.setattr(
+        unregister_cli_mod.cfg, "tracking_dir", lambda project=None: ledger,
+    )
+    monkeypatch.setattr(
+        unregister_cli_mod.inst, "remove_project_binstub",
+        lambda *a: pytest.fail("blocked unregister removed its binstub"),
+    )
+    monkeypatch.setattr(
+        repos_mod, "remove_repo",
+        lambda *a: pytest.fail("blocked unregister removed its repository"),
+    )
+
+    assert installation_cli_mod.cmd_unregister(_unregister_args()) == 1
+
+    out = capsys.readouterr().out
+    assert "--project demoproj claims owner-worktree" in out
+    assert "1 open PR(s)" in out
+    assert "unsettled container: unfinished-container" in out
+    assert "safe-container" not in out
+    assert record.yaml_path.read_bytes() == before
+    assert "demoproj" in fake_runtime["registry"]["projects"]
 
 
 @pytest.mark.parametrize("mode,expected_class,expected_agent", [
