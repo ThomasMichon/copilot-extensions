@@ -498,3 +498,28 @@ the existing owner's scoped decision for the procutil size/fixture seam before
 continuing. No publication, fresh accepted review, required green CI, merge,
 release, installed proof or broader-effort completion is claimed. The retained
 source and canonical effort remain open and resumable.
+
+### 2026-10-31 owned repairs and unchanged native-control rerun
+
+The same complete 15-file packet now passes **746 tests, zero failed/skipped**,
+232.08 seconds pytest and 268.56 including managed preparation/cleanup.
+Receipt: `.venv-tools/r1a-owned-currentbase-20261031.log`.
+The preceding three-file pairing/custody/native packet passed 66 cases;
+the actual cold-hook stamp separately passed one case with 158 deselected.
+
+The ten fixture mismatches were repaired only in worktrees tests: current
+named-Job construction, `observe_records`, and the health module's bound runtime
+generation. Actual native observation controls and the real first-install hook
+were rerun unchanged with an existing supported Python selected on the child
+PATH. All six native observation controls pass without extending any native
+wait or production deadline. The complete rerun preserves the original causal
+failure receipt rather than labeling it a successful skip or weakening its
+assertions.
+
+Existing live classification and retirement helpers now carry the duplicate
+map and drain diagnostic/busy predicates. Both worktrees module-size guards
+pass without raising a baseline; focused Ruff F/E9 and whitespace also pass.
+The canonical SDK cap, standalone library/current-base qualification, final
+promotion packet, source review and required CI remain gates. The existing
+#9578 owner exclusively holds the coupled SDK correction; no SDK rewrite,
+runtime rollout or source merge is inferred from this local consumer pass.

@@ -850,13 +850,8 @@ def _classify_daemon_compute(kind: str, payload: dict, *, cleanup_owner=None) ->
     session_ctx = sessions.scan_sessions_fast(records)
     config = cfg.load_config(path=cfg.project_dir(project) / "config.yaml", project=project)
     repo = config.default_repo
-    active_paths = _build_active_paths(records, session_ctx)
     def observe():
-        return {
-            rec.worktree_id: _classify_one_record(
-                rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx,
-            ) for rec in records
-        }
+        return _classify_records_live(records, session_ctx, repo=repo)
     from . import push_timeout
     try:
         state_map = (

@@ -431,7 +431,7 @@ def test_served_snapshot_and_warm_roster_share_one_carrier(owner, monkeypatch, h
         rendered.append(path)
         return "WIP B"
 
-    def gather(runtime, project):
+    def gather(runtime, project, *, observe_records=None):
         assert inside[0] and project == "B"
         published.append(project)
         return 1
@@ -614,6 +614,7 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
     )
     if recovery_directory is not None:
         monkeypatch.setattr("agent_worktrees.runtime_identity.PROCESS_GENERATION", "fixture-runtime")
+        monkeypatch.setattr("agent_worktrees.status_monitor_health.PROCESS_GENERATION", "fixture-runtime")
         monkeypatch.setattr(status_monitor_cutover, "routing_dir", lambda: recovery_directory)
     monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.setattr(single_instance_lease, "SingleInstance", Lease)

@@ -477,3 +477,28 @@ review-gated platform slice, not disabling ordinary POSIX classification.
 - #8458 was not pushed or merged. Keep this effort Active, the existing PR and
   preserved source history under ownership, and R1b/R2/POSIX/installed/broader
   acceptance open. No runtime, live service or other checkout was changed.
+
+### 2026-10-31 - Owned compatibility fixes qualified; SDK dependency retained
+
+- The paired worktrees fixture now accepts the current named-Job constructor
+  while retaining the canonical injected launch implementation and cleanup.
+  Warm-roster doubles accept `observe_records`; guarded health patches the
+  actual health module's bound generation. These repair six atomic pairings,
+  three roster cases and the guarded dispatch case without suppressing their
+  original assertions or changing SDK source.
+- All six actual native observation cases then passed with unchanged 15/5-second
+  production bounds and unchanged fixture waits. The real cold-hook stamp also
+  passed after selecting an existing supported Python on the child PATH. No
+  timing relaxation, test skip, provisioned host or runtime change was used.
+- Reused the existing live-classification helper instead of its duplicate map,
+  and moved drain counts/busy predicates to the existing retirement module.
+  Both owned worktrees size guards now pass; the SDK cap remains independently
+  gated. Focused Ruff and whitespace pass.
+- The complete same 15-file affected/native selection now passes **746 cases,
+  zero failed/skipped**, 232.08 seconds pytest and 268.56 including containment
+  preparation/cleanup. This supersedes the failed candidate's consumer receipt,
+  not final-current-base required-unit/review/CI qualification.
+- The existing #9578 owner holds the additive aggregate budget SDK correction
+  and any directly required SDK cap extraction. Wait for its admitted source
+  merge before the final source-base/SDK requalification; do not create another
+  SDK implementation or PR. #8458 remains unpublished and this effort Active.

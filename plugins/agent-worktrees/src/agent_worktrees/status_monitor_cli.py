@@ -9,6 +9,7 @@ import os
 import sys
 
 from . import config as cfg
+from .status_monitor_retirement import surface_busy
 from .sessions_pane_args import sweep_registered_mux_pane_args as sweep_mux_pane_args
 
 _DEFAULT_SWEEP_INTERVAL_S = 30
@@ -607,23 +608,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         return extra
 
     def _hook_busy() -> bool:
-        return any(
-            server.active_handler_count() > 0
-            for server in ([hook_server] if hook_server is not None else []) + retired_hook_servers
-        )
+        return surface_busy(hook_server, retired_hook_servers)
 
     def _classify_busy() -> bool:
-        return any(
-            server.active_handler_count() > 0
-            for server in ([classify_server] if classify_server is not None else [])
-            + retired_classify_servers
-        )
+        return surface_busy(classify_server, retired_classify_servers)
 
     def _tracking_write_busy() -> bool:
-        return any(
-            server.active_handler_count() > 0
-            for server in ([tracking_write_server] if tracking_write_server is not None else [])
-            + retired_tracking_write_servers
+        return surface_busy(
+            tracking_write_server, retired_tracking_write_servers,
         ) or tracking_write.has_inflight_write()
 
     def _cleanup_retired_request_surfaces() -> None:
@@ -662,28 +654,18 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         return reasons
 
     def _drain_observations() -> dict[str, int]:
-        result = {
-            "sweep": int(sweep_active),
-            "hook": sum(server.active_handler_count() for server in
-                        ([hook_server] if hook_server is not None else []) + retired_hook_servers),
-            "classify": sum(server.active_handler_count() for server in
-                            ([classify_server] if classify_server is not None else [])
-                            + retired_classify_servers),
-            "tracking-write": sum(server.active_handler_count() for server in
-                                  ([tracking_write_server] if tracking_write_server is not None else [])
-                                  + retired_tracking_write_servers),
-            "tracking-write-compute": int(tracking_write.has_inflight_write()),
-            "allocation-link": allocation_linker.active_count(),
-            "worktrees-feed": worktrees_runtime.feed.active_count(),
-            **worktrees_runtime.agenda_counts(control_server),
-            "worktrees-read": control_server.current_read_count(),
-            "repos-map-read": control_server.current_read_count(repository_map.READ_ACTION),
-            "repos-map-producer": int(repositories_runtime.health()["repositories"]["refreshing"]),
-            "prompt-receipt": receipts.active_count(),
-            "lifecycle": lifecycle_count,
-        }
-        result.update(segment_cache.custody_observations(worktree_status_runtime))
-        return result
+        from .status_monitor_retirement import drain_observations
+
+        return drain_observations(
+            sweep_active=sweep_active,
+            hooks=([hook_server] if hook_server is not None else []) + retired_hook_servers,
+            classifiers=([classify_server] if classify_server is not None else []) + retired_classify_servers,
+            writers=([tracking_write_server] if tracking_write_server is not None else []) + retired_tracking_write_servers,
+            tracking_write=tracking_write, allocation_linker=allocation_linker,
+            worktrees_runtime=worktrees_runtime, control_server=control_server,
+            repositories_runtime=repositories_runtime, receipts=receipts, lifecycle_count=lifecycle_count,
+            segment_cache=segment_cache, worktree_status_runtime=worktree_status_runtime,
+        )
 
     control_server = status_monitor_cutover.ControlServer(
         lambda action, payload: _handle_control(action, payload),
