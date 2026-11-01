@@ -322,11 +322,6 @@ class KomodoOwner:
                 images = self.native.prerequisites(selected.declaration, selected.material, deadline=deadline)
                 containers = self.native.inspect(selected.declaration, selected.material, deadline=deadline)
                 record = self._baseline(state, selected, containers)
-                if selected.declaration.preserving:
-                    verify_native(containers, selected, images, selected.profile(), owned=False)
-                    if (record["failed"] is not None or record["good"] is not None
-                            and record["good"]["deployment"] != content):
-                        raise PlanError("Komodo preserving profile cannot apply or recreate native resources")
                 pending = bool(record["failed"] is not None
                                and "partial_public_keys" in record["failed"])
                 network = self.native.network(selected.declaration, selected.material, deadline=deadline)
@@ -341,6 +336,11 @@ class KomodoOwner:
                 permit = self.admission.revalidate(permit, request)
                 prior = journal.inspect(request)
                 if prior is None or prior.to_dict()["status"] == "accepted":
+                    if selected.declaration.preserving:
+                        verify_native(containers, selected, images, selected.profile(), owned=False)
+                        if (record["failed"] is not None or record["good"] is not None
+                                and record["good"]["deployment"] != content):
+                            raise PlanError("Komodo preserving profile cannot apply or recreate native resources")
                     self._preserved(record, selected, containers)
                     verify_network(network, selected, containers,
                                    retained_network(record, selected), pending=pending)

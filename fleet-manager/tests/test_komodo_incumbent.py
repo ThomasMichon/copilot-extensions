@@ -150,6 +150,18 @@ def test_mount_comparison_retains_all_fields_and_ignores_only_order(incumbent):
         incumbent.material.check_mounts("core", changed)
 
 
+def test_refreshed_materialization_preserves_selection_evidence_across_observation_order(incumbent):
+    material = incumbent.material
+    observed = decode(material.encoded)
+    for mounts in observed["mounts"].values():
+        mounts.reverse()
+    observed["volumes"].reverse()
+    refreshed = replace(material, encoded=canonical(observed))
+    assert refreshed.encoded != material.encoded
+    assert refreshed.evidence() == material.evidence()
+    assert refreshed.profile() == material.profile()
+
+
 @pytest.mark.parametrize("changed", [False, True])
 def test_global_key_reference_requires_exact_original_named_volume_mount(incumbent, changed):
     mounts = deepcopy(incumbent.mounts["core"])
@@ -235,6 +247,8 @@ def test_native_apply_refuses_incumbent_even_with_a_fixed_declaration(incumbent)
     "adopt-repeat-status", "update", "stopped", "mount-drift", "credential-drift",
     "native-drift", "missing", "missing-adoption", "private-key-drift", "lost-terminal", "global-trust",
     "expired-during-selection",
+    "refreshed-order", "failed-repeat-running", "failed-repeat-stopped",
+    "failed-lost-terminal", "failed-pending-terminal", "failed-native-drift",
 ])
 def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
     incumbent, keys, monkeypatch, scenario,
@@ -306,7 +320,7 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                 return web.json_response({"data": {"jwt": token}})
             assert request.headers.get("authorization") == token
             return web.json_response({
-                "/read/GetVersion": {"version": "2.0.0"},
+                "/read/GetVersion": {"version": "9.0.0" if scenario.startswith("failed-") else "2.0.0"},
                 "/read/GetServer": {
                     "id": "original-server", "name": "example-host",
                     "config": {"enabled": True, "address": (
@@ -391,16 +405,52 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
             owner.native = native
             revision = 0
 
-            async def invoke(request, status=False):
+            async def invoke(request, status=False, failed=False):
                 nonlocal revision
                 revision += 1
                 harness.current = policy(revision=revision, enrollments=(actor(operations=(
                     OperationGrant("manager.converge", "host-a", 1, request.request_digest),
                 )),))
                 permit = harness.admit(request)
-                return await asyncio.to_thread(owner.inspect if status else owner.converge, request, permit)
+                operation = owner.inspect if status else owner.settle_failed if failed else owner.converge
+                return await asyncio.to_thread(operation, request, permit)
 
             request = intent(deployment=selection.deployment_digest)
+            if scenario.startswith("failed-"):
+                with pytest.raises(PlanError, match="Core version"):
+                    await invoke(request)
+                assert state_record[0]["attempt"]["native_settled"] is True
+                if scenario != "failed-repeat-running":
+                    containers["core"]["State"].update(Status="exited", Running=False, Pid=0)
+                reconcile = NodeJournal.reconcile
+                settled = []
+                if scenario in ("failed-lost-terminal", "failed-pending-terminal"):
+                    def lost_failure(journal, original, outcome):
+                        if scenario == "failed-lost-terminal":
+                            settled.append(reconcile(journal, original, outcome))
+                        raise PlanError("fixture-lost-failure-receipt")
+
+                    monkeypatch.setattr(NodeJournal, "reconcile", lost_failure)
+                    with pytest.raises(PlanError, match="fixture-lost-failure"):
+                        await invoke(request, failed=True)
+                    assert state_record[0]["failed"] is not None
+                    monkeypatch.setattr(NodeJournal, "reconcile", reconcile)
+                if not settled:
+                    settled.append(await invoke(request, failed=True))
+                original_failed = deepcopy(state_record[0]["failed"])
+                if scenario == "failed-native-drift":
+                    containers["core"]["Config"]["Env"].append("UNSELECTED_SETTING=changed")
+                    with pytest.raises(PlanError, match="replaced or changed"):
+                        await invoke(request)
+                else:
+                    receipt = await invoke(request)
+                    assert receipt == settled[0] and receipt.to_dict()["status"] == "failed"
+                    assert await invoke(request) == receipt
+                    result = await invoke(request, status=True)
+                    assert result["accepted"] == "failed" and result["converged"] is False
+                    assert result["native_mutations_performed"] is False
+                assert state_record[0]["failed"] == original_failed and native_calls == []
+                return
             if scenario == "expired-during-selection":
                 now = [harness.clock()]
                 owner.clock = lambda: now[0]
@@ -430,7 +480,14 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
             receipt = await invoke(request)
             assert receipt.to_dict()["status"] == "succeeded"
             original = deepcopy(state_record[0])
-            if scenario in ("adopt-repeat-status", "lost-terminal", "global-trust"):
+            if scenario == "refreshed-order":
+                observed = decode(material.encoded)
+                for mounts in observed["mounts"].values():
+                    mounts.reverse()
+                observed["volumes"].reverse()
+                current[0] = replace(selection, material=replace(material, encoded=canonical(observed)))
+                assert current[0].deployment_digest == selection.deployment_digest
+            if scenario in ("adopt-repeat-status", "lost-terminal", "global-trust", "refreshed-order"):
                 assert await invoke(request) == receipt
                 result = await invoke(request, status=True)
                 assert result["converged"] and result["currently_healthy"]

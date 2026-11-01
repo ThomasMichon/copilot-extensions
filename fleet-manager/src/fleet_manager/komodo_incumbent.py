@@ -134,8 +134,9 @@ class KomodoIncumbentMaterialization:
 
     def evidence(self) -> dict:
         credentials = self.credential_bytes()
+        selected = decode(self.encoded)
         paths = {}
-        for mounts in decode(self.encoded)["mounts"].values():
+        for mounts in selected["mounts"].values():
             for mount in mounts:
                 path = Path(mount["Source"])
                 ordinary_path(path)
@@ -153,7 +154,12 @@ class KomodoIncumbentMaterialization:
             }
         info = self.keys.stat()
         return {
-            "incumbent": hashlib.sha256(self.encoded).hexdigest(), "paths": paths, "files": files,
+            "incumbent": digest({
+                "schema": selected["schema"], "version": selected["version"],
+                "mounts": {name: mount_evidence(mounts) for name, mounts in selected["mounts"].items()},
+                "volumes": {volume["Name"]: volume for volume in selected["volumes"]},
+            }),
+            "paths": paths, "files": files,
             "keys": {"path": str(self.keys), "device": info.st_dev, "inode": info.st_ino},
             "credentials": digest({
                 name: hashlib.sha256(raw).hexdigest() for name, raw in credentials.items()

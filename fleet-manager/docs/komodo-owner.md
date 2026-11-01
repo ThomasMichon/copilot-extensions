@@ -194,6 +194,9 @@ all other inspection fields are compared exactly through read-only
 native checkpoint. Native mount comparison retains every field and
 multiplicity, ignoring only mount-array order. Device/inode identities of
 mount sources and retained file identities/content bind the selected operation.
+Selection evidence also normalizes mount-array and volume-record ordering,
+so a freshly resolved identical materialization retains its original deployment
+digest. Every record field and native mount remains bound; duplicates refuse.
 Both Core and Periphery must use the same original `/config/keys` mount.
 Volume mountpoints are read locations, never replacements for native volume mounts.
 An existing Core global `file:/config/keys/periphery.pub` reference may resolve
@@ -212,6 +215,13 @@ cannot become a repair/update by adding a data-compatibility assertion.
 Explicit absence likewise refuses. This first incumbent-only contract does
 not provide managed update, removal, onboarding-key issuance, legacy-journal
 conversion, a concrete credential provider or live adoption qualification.
+New-attempt refusals are applied only after consulting the original journal
+status. Replaying an already settled FAILED operation returns that original
+failure even for stopped retained containers, without claiming current
+readiness or performing native apply. Exact retained native/material/network
+proofs still apply. A lost failure response after terminal publication replays
+that outcome; a failure publication still UNKNOWN retains the explicit
+`settle_failed` decision and original attempt rather than becoming a new apply.
 
 **Contract support:** this optional profile expands the source SDK's strict
 version-1 declaration reader; older readers reject the unknown `profile`
