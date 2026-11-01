@@ -335,6 +335,7 @@ def test_native_apply_refuses_incumbent_even_with_a_fixed_declaration(incumbent)
     "failed-recovered-foreign-request", "failed-recovered-changed-evidence",
     "failed-unstarted-converge", "failed-unstarted-settle",
     "failed-unstarted-foreign-network",
+    "failed-unstarted-keys-converge", "failed-unstarted-keys-settle",
 ])
 def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
     incumbent, keys, monkeypatch, scenario,
@@ -446,8 +447,9 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                         with os.fdopen(descriptor, "wb") as stream:
                             stream.write((name + "-fixed-fixture-material").encode())
                 fixed_material = KomodoMaterialization(material.docker_socket, **paths)
-                for name in ("core", "periphery"):
-                    (material.keys / (name + ".pub")).unlink()
+                if "-keys-" not in scenario:
+                    for name in ("core", "periphery"):
+                        (material.keys / (name + ".pub")).unlink()
             project = desired["project"] + "_default"
             containers = {}
             images = {}
@@ -577,6 +579,7 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                     "failed-recovered-foreign-request", "failed-recovered-changed-evidence",
                     "failed-unstarted-converge", "failed-unstarted-settle",
                     "failed-unstarted-foreign-network",
+                    "failed-unstarted-keys-converge", "failed-unstarted-keys-settle",
                 ):
                     def lost_failure(journal, original, outcome):
                         if scenario == "failed-lost-terminal":
@@ -599,11 +602,16 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                         assert state_record[0]["failed"] == original_failed
                         assert native_calls == ["apply"] and not requests
                         return
-                    receipt = await invoke(request, failed=scenario == "failed-unstarted-settle")
+                    receipt = await invoke(request, failed=scenario.endswith("-settle"))
                     assert receipt.to_dict()["status"] == "failed"
                     assert state_record[0]["attempt"] is None
                     assert state_record[0]["failed"] == original_failed
                     assert await invoke(request) == receipt
+                    status = await invoke(request, status=True)
+                    assert status["accepted"] == "failed" and not status["converged"]
+                    assert "native-network-custody-changed-or-unproved" not in status["blockers"]
+                    if "-keys-" in scenario:
+                        assert status["blockers"] == ["owned-core-not-running"]
                     assert native_calls == ["apply"] and not requests
                     return
                 if scenario.startswith("failed-recovered-"):

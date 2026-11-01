@@ -365,7 +365,8 @@ class KomodoOwner:
                 if status in ("succeeded", "failed"):
                     self._preserved(record, selected, containers)
                     expected_network = verify_network(
-                        network, selected, containers, retained_network(record, selected), pending=pending)
+                        network, selected, containers, retained_network(record, selected),
+                        pending=pending or status == "failed")
                     if status == "succeeded":
                         verify_native(containers, selected, images, profile,
                                       owned=record["good"]["fixed_profile"])

@@ -118,7 +118,7 @@ def inspect_owner(owner: KomodoOwner, request: OperationIntent, permit: Permit) 
                     selected, containers,
                     attempt["network_before"] if candidate else retained_network(record, selected),
                     created=bool(candidate and attempt["fixed_profile"]),
-                    pending=bool(retained is not None and "partial_public_keys" in retained))
+                    pending=record["failed"] is not None)
             except PlanError as error:
                 if owner.native.native_failure is not None:
                     raise
