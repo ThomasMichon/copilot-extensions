@@ -37,6 +37,7 @@ placement is an explicit requirement; no option is a mandatory core dependency.
 | Runner loadout participant | Vision-first #7192 template, placement and declaration-to-managed-owner flow; existing release/lifecycle/authentication owners retained | Existing #7192 coordination and separate managed upstream worktree |
 | Trusted base-image participant | Bounded #8352 image recipe, contract, docs and tests; no controller or credential ownership | Separate managed upstream worktree; campaign owner integrates |
 | Diagnostic logging contributor | Bounded #8377 shared Bridge/Dispatch application logging, discovery and retention source; no installer/native capture or deployment ownership | Managed source worktree `spinning-sprocket` |
+| Telemetry attribution planner | Bounded #8377 public intent and source-backed attribution proposal; no implementation, collector or deployment ownership | Managed source worktree `gleaming-gasket` |
 | Adopter | Capacity, inventory, trust and live activation approval | Provider-specific downstream flow |
 
 ## Coordination
@@ -312,6 +313,11 @@ mutation follows from this amendment.
   behavior and concrete API proposals cleared review in #9176 and #9183;
   existing-owner integration settlement remains before service/peer wiring.
   Ordinary disposable-test expiry and production lifetime remain unchanged.
+- [ ] Review and realize the [keyed attribution continuation](telemetry-attribution.md)
+  through the [existing logging sub-plan](logging-conventions.md), preserving
+  internal diagnostics, truthful subject identities and user-held-key self-lookup.
+  Plan publication precedes separately admitted implementation; shared deployment
+  remains blocked on the complete ingestion/query identity-separation review.
 
 ### Mission amendment - Setup, refresh and first useful services
 
@@ -779,6 +785,12 @@ See the [source qualification and remaining release/adopter gates](komodo-substr
   policy rather than manually tuning or recreating the pool. No live pool,
   capacity, routing, credential or deployment state changed. Durable adoption,
   its temporary-protection discharge and all broader parent gates remain open.
+- 2026-10-25 UTC — The coordinator accepted the
+  [keyed attribution proposal's](telemetry-attribution.md) API/configuration
+  family for later implementation. This is design acceptance only: reviewed
+  source publication, driver-owned intent publication and a separate execution
+  ACK still precede code. #8377, installer #8370, formatter #6812 and all
+  deployment/privacy acceptance remain open with their existing owners.
 - #8535 merged the published-source preparation and review SDK as
   `b1cd2b1a1712dd4f6b4ac815e050b10fcfd990b1` after exact-head Copilot approval,
   complete resolved-thread review and actual required-source checks. Acquisition
