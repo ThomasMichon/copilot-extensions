@@ -284,6 +284,8 @@ def run_owned(
     """
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("installer child timeout must be finite and positive")
+    if type(allow_breakaway) is not bool:
+        raise ValueError("installer child breakaway policy must be a boolean")
     if os.name == "nt" and procutil is None:
         raise ValueError("Windows installer children require native process utilities")
     if (on_output is not None or output_fds) and procutil is None:
@@ -295,8 +297,6 @@ def run_owned(
         if remaining <= 0:
             raise ChildTimeoutExpired(argv, 0, output="", stderr="")
         timeout = min(timeout, remaining)
-    if type(allow_breakaway) is not bool:
-        raise ValueError("installer child breakaway policy must be a boolean")
     if retention_scope is not None and (
         os.name != "nt" or runtime_root is None or runtime_version is None or runtime_path is None
     ):
