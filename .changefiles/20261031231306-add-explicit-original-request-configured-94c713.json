@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit original-request configured-cohort projection with registrar-writer locking and history-first custody recovery.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
