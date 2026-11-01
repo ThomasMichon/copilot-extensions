@@ -51,6 +51,7 @@ from . import companion_observations as co
 from . import companion_attention as ca
 from .companion_topology import topology_view
 from . import handoff_client as hc
+from .companion_agenda import agenda_text, subscribe
 
 #: Blocker code (from the closure descriptor's ``blockers`` list) -> a short,
 #: plain-language reason. Mirrors the vocabulary in
@@ -119,6 +120,8 @@ class _CompanionData:
     observation_error: str | None = "not-loaded"
     attention: dict | None = None
     attention_error: str | None = "not-loaded"
+    agenda: dict | None = None
+    agenda_error: str | None = "not-loaded"
 
 
 def _load_current_worktree(cwd: str | None = None, *, runner=None) -> _CompanionData:
@@ -354,7 +357,7 @@ class MuxCompanionApp(App):
         padding: 0;
     }
 
-    #summary, #topology {
+    #summary, #topology, #agenda {
         height: auto;
         padding: 1 2;
     }
@@ -412,6 +415,9 @@ class MuxCompanionApp(App):
         self._attention_cancel = Event()
         self._attention_busy = False
         self._attention_next = 0.0
+        self._agenda_cancel = Event()
+        self._agenda_worker = None
+        self._agenda_generation = 0
         self._observer_pane = os.environ.get("TMUX_PANE")
         self._action_message: Text | None = None
 
@@ -426,6 +432,9 @@ class MuxCompanionApp(App):
             with TabPane("Claims", id="claims-tab"):
                 yield Static(id="claims-evidence")
                 yield DataTable(id="claims")
+            with TabPane("Agenda", id="agenda-tab"):
+                with VerticalScroll():
+                    yield Static(agenda_text(None, "loading"), id="agenda")
             with TabPane("Graph", id="topology-tab"):
                 with VerticalScroll():
                     yield Static(id="topology")
@@ -468,18 +477,39 @@ class MuxCompanionApp(App):
                 session_incarnation=incarnation,
             )
             if alive is False:
-                self.exit()
+                self.action_quit()
         finally:
             self._checking_cli = False
 
     def on_unmount(self) -> None:
+        self._cancel_owned_reads()
+
+    def action_quit(self) -> None:
+        self._cancel_owned_reads()
+        self.exit()
+
+    def _cancel_owned_reads(self) -> None:
         self._read_cancel.set()
         self._navigation_cancel.set()
         self._observation_cancel.set()
         self._attention_cancel.set()
+        self._agenda_cancel.set()
+        self._agenda_generation += 1
+        self._data.agenda = None
+        self._data.agenda_error = "subscription closed"
 
     @work(exclusive=True)
     async def _reload(self) -> None:
+        self._read_cancel.set()
+        self._agenda_cancel.set()
+        self._agenda_generation += 1
+        generation = self._agenda_generation
+        self._data.agenda = None
+        self._data.agenda_error = "loading; previous selection invalidated"
+        self._update_agenda()
+        if self._agenda_worker is not None:
+            await self._agenda_worker.wait()
+            self._agenda_worker = None
         self._observation_cancel.set()
         self._attention_cancel.set()
         self._attention_busy = False
@@ -493,7 +523,7 @@ class MuxCompanionApp(App):
         cancelled = Event()
         self._read_cancel = cancelled
         try:
-            self._data = await asyncio.to_thread(
+            data = await asyncio.to_thread(
                 _load_current_worktree, self._cwd,
                 runner=cc.cancellable_read_runner(
                     cancelled, cwd=self._cwd or os.getcwd(),
@@ -501,12 +531,70 @@ class MuxCompanionApp(App):
             )
         finally:
             cancelled.set()
+        if generation != self._agenda_generation:
+            return
+        self._data = data
         self._loading = False
         self._refresh_view(reload=False)
         self.query_one("#refresh-btn", Button).disabled = False
         self._poll_attention(force=True)
+        self._start_agenda()
         if self.query_one("#views", TabbedContent).active == "topology-tab":
             self._load_observations()
+
+    def _start_agenda(self) -> None:
+        data = self._data
+        heads = [
+            row.get("id") for row in data.sessions
+            if row.get("is_head") is True and isinstance(row.get("id"), str) and row["id"]
+        ]
+        worktree = data.worktree.get("id")
+        project = data.worktree.get("repo")
+        if not isinstance(project, str) or not project:
+            observer_project, observer_worktree, _ = self._observer_identity
+            project = observer_project if observer_worktree == worktree else None
+        if (
+            data.error or data.sessions_error or len(heads) != 1
+            or not isinstance(worktree, str) or not worktree
+            or not isinstance(project, str) or not project
+        ):
+            data.agenda_error = "selected project/worktree or exactly one head is unavailable"
+            self._update_agenda()
+            return
+        cancelled = Event()
+        self._agenda_cancel = cancelled
+        data.agenda_error = "awaiting provider snapshot (worktree-agendas-v1)"
+        self._update_agenda()
+        self._agenda_worker = self._subscribe_agenda(
+            data, self._agenda_generation, cancelled, project, worktree, heads[0],
+        )
+
+    def _update_agenda(self) -> None:
+        self.query_one("#agenda", Static).update(agenda_text(
+            self._data.agenda, self._data.agenda_error,
+        ))
+
+    def _receive_agenda(self, data, generation, cancelled, frame, error) -> None:
+        if (
+            cancelled.is_set() or self._data is not data
+            or generation != self._agenda_generation
+        ):
+            return
+        data.agenda, data.agenda_error = frame, error
+        self._update_agenda()
+
+    @work(thread=True, group="agenda-subscription")
+    def _subscribe_agenda(
+        self, data: _CompanionData, generation: int, cancelled: Event,
+        project: str, worktree: str, session: str,
+    ) -> None:
+        subscribe(
+            project, worktree, session, cancelled=cancelled,
+            cwd=self._cwd or os.getcwd(),
+            publish=lambda frame, error: self.call_from_thread(
+                self._receive_agenda, data, generation, cancelled, frame, error,
+            ),
+        )
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         if event.pane.id == "topology-tab" and not self._loading:
@@ -745,7 +833,7 @@ class MuxCompanionApp(App):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "exit-btn":
-            self.exit()
+            self.action_quit()
         elif event.button.id == "refresh-btn":
             self.action_refresh()
         elif event.button.id == "cutover-btn":

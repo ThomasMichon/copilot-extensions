@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Retained managed source worktree; reviewed PRs to `dev`
 - **Created:** 2026-11-01
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/efforts` and `visions/mux-companion`
 - **Umbrella issue:** [#9855](https://github.com/ThomasMichon/copilot-extensions/issues/9855)
 - **Related:** existing Mux Companion continuation #8811
@@ -87,45 +87,45 @@ They are not public source identifiers or permission to mutate the active agent.
 
 ### Phase 1 - Reviewed command, durability and delivery contract
 
-- [ ] Review and merge this implementation plan before code execution.
-- [ ] Resolve the actual standalone command/store and Manager/resident
+- [x] Review and merge this implementation plan before code execution.
+- [x] Resolve the actual standalone command/store and Manager/resident
   notification/subscription boundaries, including meaningful consumer behavior.
-- [ ] Record read-only evaluation findings without importing private identifiers
+- [x] Record read-only evaluation findings without importing private identifiers
   or another agent's operational authority into public source.
 
 ### Phase 2 - CLI-owned agenda mutations
 
-- [ ] Refactor/reuse the existing strict board/chain/budget validator; preserve
+- [x] Refactor/reuse the existing strict board/chain/budget validator; preserve
   existing read-only calls and version-1/2 input compatibility.
-- [ ] Supply current assignment reads and compact semantic updates for
+- [x] Supply current assignment reads and compact semantic updates for
   initialization/import, plan refinement, selection, outcomes, execution links,
   blocking/deferred rechecks and deliberate returns.
-- [ ] Require expected revisions and stable operation identities; generate
+- [x] Require expected revisions and stable operation identities; generate
   schema/version, actor/source qualification and actual timestamp metadata.
-- [ ] Implement serialized durable state/history publication with a single
+- [x] Implement serialized durable state/history publication with a single
   commit barrier, explicit failure/crash behavior and idempotent retry results.
-- [ ] Preserve original roots, evidence, visits, stricter limits and pending
+- [x] Preserve original roots, evidence, visits, stricter limits and pending
   decisions. Imported legacy entry times remain unknown rather than invented.
 
 ### Phase 3 - Immediate optional live projection
 
-- [ ] Extend the actual owning Manager/resident contract with bounded,
+- [x] Extend the actual owning Manager/resident contract with bounded,
   revision/source-qualified agenda observations and a supported held consumer.
-- [ ] Publish only committed state; retain current generation/head/selection
+- [x] Publish only committed state; retain current generation/head/selection
   fences and reject stale or wrong-source updates.
-- [ ] Distinguish persisted operation success from live-delivery pending,
+- [x] Distinguish persisted operation success from live-delivery pending,
   unsupported/offline/not-configured state. Never replay the mutation merely
   because notification failed.
-- [ ] Reconnect/restart through current snapshots and bounded delivery recovery,
+- [x] Reconnect/restart through current snapshots and bounded delivery recovery,
   without making the Manager a rival agenda store or polling every file.
-- [ ] Wire a real synthetic Manager/Textual consumer so a committed update
+- [x] Wire a real synthetic Manager/Textual consumer so a committed update
   reaches its view without a periodic agenda-file read.
 
 ### Phase 4 - Catalog, guidance and completion
 
-- [ ] Publish attributable owned CLI invocation/catalog and compact ambient
+- [x] Publish attributable owned CLI invocation/catalog and compact ambient
   transition guidance plus the existing on-demand skill/reference.
-- [ ] Prefer CLI submission over manual edits; make legacy/manual recovery and
+- [x] Prefer CLI submission over manual edits; make legacy/manual recovery and
   actual App/CLI/ACP command availability explicit rather than assumed.
 - [ ] Run bounded targeted tests and independent critique, add required
   changefiles, and drive all implementation PRs through actual merge.
@@ -134,21 +134,21 @@ They are not public source identifiers or permission to mutate the active agent.
 
 ## Validation Plan
 
-- [ ] Existing valid manual/read-only usage remains compatible; unsupported
+- [x] Existing valid manual/read-only usage remains compatible; unsupported
   required new state fails rather than looking complete or silently stale.
-- [ ] Malformed/oversized/duplicate/nonfinite data, unsafe paths and invalid
+- [x] Malformed/oversized/duplicate/nonfinite data, unsafe paths and invalid
   references/revisions fail visibly with no partial accepted mutation.
-- [ ] Concurrent/stale writes, interrupted publication and duplicate operations
+- [x] Concurrent/stale writes, interrupted publication and duplicate operations
   preserve one consistent state/history and the original accepted result.
-- [ ] Every supported branch operation preserves roots, returns, evidence and
+- [x] Every supported branch operation preserves roots, returns, evidence and
   finite visit/depth/detour/deferred budgets, including no-progress cycles.
-- [ ] Generated metadata is truthful; missing native identity and legacy entry
+- [x] Generated metadata is truthful; missing native identity and legacy entry
   times remain qualified unknowns, not authenticated labels or fake durations.
-- [ ] Real synthetic push/held-subscription/consumer tests demonstrate visibility
+- [x] Real synthetic push/held-subscription/consumer tests demonstrate visibility
   only after commit, without repeated agenda-file polling.
-- [ ] Offline/unsupported delivery, stale/head/generation changes, late results,
+- [x] Offline/unsupported delivery, stale/head/generation changes, late results,
   reconnect and daemon retirement retain explicit source/delivery semantics.
-- [ ] Standalone/no-Manager paths, process-boundary owned invocation and
+- [x] Standalone/no-Manager paths, process-boundary owned invocation and
   supported host/tool surfaces are tested; no deployment claim from source tests.
 - [ ] Public artifacts remain generic, required review/CI pass, and source,
   release, installation and actual active-agent migration are distinguished.
@@ -162,6 +162,78 @@ owners. Expansion precedes independently deployed callers. No API in this
 proposal is claimed available merely because its intended name is described.
 
 ## Journal
+
+### 2026-11-01 - Source implementation and connected validation
+
+- The standalone command now owns validated state, semantic movements, generated
+  metadata, immutable accepted-operation history and independent delivery status.
+  Revision/idempotence, finite budgets, source evidence and pending branches are
+  preserved. Managed signed-63-bit revision exhaustion refuses before acceptance
+  or legacy fencing; the manual inspector's existing behavior remains unchanged.
+- Explicit, quiescent POSIX same-home adoption durably preserves original cursor
+  bytes and recovery input before installing a version-3 old-reader refusal
+  marker, then commits SQLite state/history. Filesystem fencing and database
+  acceptance cannot share one atomic commit: interruption may leave an unavailable
+  fenced lane, recovered only with the same saved initialization request. Other
+  platforms refuse legacy adoption explicitly; fresh standalone stores do not
+  require that migration. No active lane was migrated.
+- The existing resident serves a separate generation/head/source-qualified agenda
+  cache and held feed. The Manager checks actual provider capability before new
+  syntax, retains owned process/selection custody and updates its Agenda view
+  without reading agenda files. Legacy revisit offsets remain unchanged; generated
+  commit times remain UTC. Scalar parked counts are not collection-size limits.
+- Scoped standalone, provider and consumer packets passed, including actual old
+  reader refusal, interruption recovery, stale/concurrent writes, limits,
+  unsupported delivery, retirement and reconnect controls. A real connected
+  transaction/publisher/parser/authenticated socket/record lock/held relay/Textual
+  witness proves commit-before-delivery, exact observation equality, pushed changes,
+  offline pending delivery without replay and canonical-head invalidation.
+- Final connected/consumer-contract packet passed 44 cases with verified cleanup.
+  Source AST, runtime/headless, module, release-intent, guidance/reference and
+  documentation checks passed after classifying the two new caller-contained
+  launch sites in the existing lifecycle census. Independent critique found one
+  late-exposure ordering issue: fresh owner validation now precedes live
+  row/sequence/notification changes, with staged head refreshes and retained
+  rejected invalidations. Deterministic owner-loss controls, the 69-case
+  provider/CLI packet and the actual connected witness passed; the reviewer
+  confirmed the finding closed. Normal source publication remains the next gate;
+  this effort is still Active.
+
+### 2026-11-01 - Command and publication boundary
+
+- Keep efforts payload-only: a Python-standard-library command owns an explicit
+  lane's transactional state and operation history. SQLite supplies one commit
+  barrier and serialized expected-revision writes; legacy manual files remain
+  inputs, not independently updated replicas. Managed reads must not silently
+  fall back to those files after adoption.
+- The mux coalescing server's subscription is a client-retention count, not a
+  change stream. Extend the existing agency resident's authenticated control
+  plane with a separately negotiated `worktree-agendas-v1` cached projection
+  and held feed. Do not alter the existing roster's strict row contract.
+- The optional adapter accepts committed, source-qualified agenda observations.
+  Agency owns current worktree/head identity and runtime-generation fencing;
+  Manager consumes complete bounded frames and updates its existing Companion
+  through a cancellation-owned process boundary, without reading agenda files.
+- Standalone mutation success and optional delivery status remain separate.
+  Notification retry publishes the latest committed snapshot, never repeats
+  the agenda mutation. Source tests use synthetic lanes and resident instances;
+  installing or migrating active agents remains excluded.
+
+### 2026-11-01 - Reviewed implementation admission
+
+- Plan #9858 received current-head Copilot approval with no open findings,
+  passed required CI and merged to `dev`. The same retained source workspace
+  synced onto the provider-confirmed merge before code execution.
+- The supplied manual agenda already used coarse assignments, explicit exits/
+  transitions, finite budgets, review evidence and parked nonblocking work.
+  The gap is the shipped interface: no mutation CLI or live agenda contract.
+- Legacy input lacks writer-generated occurrence/entry metadata and can carry
+  composite source-reference text. Import must preserve that evidence, qualify
+  missing identity/timing and avoid interpreting text as a single authoritative
+  source or inventing an earlier entry time.
+- Continue with the actual command/store and Manager notification/consumer
+  boundary, then cohesive implementation. No supplied active state or installed
+  runtime was changed.
 
 ### 2026-11-01 - Source intake
 

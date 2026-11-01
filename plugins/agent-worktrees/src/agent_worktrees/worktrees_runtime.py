@@ -109,6 +109,9 @@ class WorktreesRuntime:
         self._now = now
         self._elected = elected
         self.feed = WorktreesFeed(self)
+        from .agenda_runtime import AgendaRuntime
+
+        self.agendas = AgendaRuntime(self)
 
     def activate(self) -> None:
         with self._activation_lock:
@@ -151,6 +154,7 @@ class WorktreesRuntime:
                 self._error = None
                 self._unready_demand.clear()
             self.feed.activate()
+            self.agendas.activate()
             if self._wake is not None:
                 self._wake.set()
 
@@ -159,6 +163,7 @@ class WorktreesRuntime:
             self._admitting = False
             self._reason = reason
         self.feed.close(reason)
+        self.agendas.close(reason)
 
     def health(self) -> dict:
         from .worktrees_feed import FEED_CAPABILITY
@@ -167,6 +172,7 @@ class WorktreesRuntime:
             return {
                 "capabilities": [
                     CAPABILITY, FEED_CAPABILITY, observations.CAPABILITY, "picker-bootstrap-v1",
+                    "worktree-agendas-v1",
                 ],
                 "worktrees": {
                     "contract_version": CONTRACT_VERSION,
@@ -175,6 +181,24 @@ class WorktreesRuntime:
                     "error": self._error,
                 },
             }
+
+    def agenda_handle(self, action: str, payload: dict) -> dict:
+        return self.agendas.publish(payload) if action == "agenda-publish" else self.agendas.read(payload)
+
+    def stream(self, action, payload, disconnected):
+        if action == "agenda-feed":
+            return self.agendas.stream(payload, disconnected)
+        return self.feed.stream(payload, disconnected)
+
+    def agenda_counts(self, server) -> dict:
+        return {
+            "agenda-feed": self.agendas.feed.active_count(),
+            "agenda-read": server.current_read_count("agenda-read"),
+            "agenda-publish": server.current_read_count("agenda-publish"),
+        }
+
+    def agenda_busy(self, server) -> list[str]:
+        return [key for key, value in self.agenda_counts(server).items() if value]
 
     def picker_bootstrap(self, payload: dict) -> dict:
         from . import picker_bootstrap_runtime
@@ -255,7 +279,7 @@ class WorktreesRuntime:
             self._demand = {p: at for p, at in self._demand.items() if at >= cutoff}
             self._unready_demand.intersection_update(self._demand)
             projects = set(self._demand)
-        return projects | self.feed.projects()
+        return projects | self.feed.projects() | self.agendas.feed.projects()
 
     def publish(self, project: str, rows, *, observed_at: float) -> None:
         with self._activation_lock:
@@ -264,6 +288,7 @@ class WorktreesRuntime:
                     raise ProjectionUnavailable("current-roster publisher is not admitted")
             try:
                 self.store.publish(project, rows, observed_at=observed_at)
+                self.agendas.roster_changed(project)
             except ProjectionUnavailable as exc:
                 if self.store.superseded:
                     self.close_admission("superseded")

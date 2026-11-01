@@ -36,6 +36,27 @@ resource references, states and notes. Each observation retains its own
 confirmation marker and timestamp; unavailable data is not an empty ledger.
 Reads and Refresh run off the UI loop. `r` refreshes and Escape closes.
 
+Agenda is an optional, display-only tab subscribed through the selected engine's
+`agenda-feed` CLI (`worktree-agendas-v1`). It starts only after the current
+worktree, project and exactly one head session are resolved. Complete pushed
+frames update the widget without agenda-file reads or an agenda polling timer.
+Refresh invalidates and retires the prior subscription before replacing it;
+head changes clear the displayed agenda and require Refresh. Unsupported,
+unpublished, unavailable and malformed data remain explicit, never an empty
+successful agenda. After a supported connection fails, at most three reconnects
+use bounded backoff and each requires a new atomic snapshot. Publication is
+not acceptance, execution permission or an action.
+
+The provider must expand first: this consumer does not install, provision or
+start a resident to obtain agenda support. Before sending any new agenda verb,
+an owned process calls the existing `worktrees_client.read_health()` in the
+resolved provider interpreter, without entering its legacy main/launch dispatcher.
+Missing capability/readiness or an unadmitted wrapper shape refuses the feed.
+Independently updating Manager against
+an older engine leaves Agenda unavailable without disabling other tabs.
+See [`docs/live-agenda.md`](docs/live-agenda.md) for ownership, wire admission,
+test commands and the separate provider-integration/rollout gates.
+
 Graph shows bounded recorded disposition history and directed resource
 references, with reported subagents kept distinct from resource ownership.
 Opening Graph reads the selected head session's optional, versioned
