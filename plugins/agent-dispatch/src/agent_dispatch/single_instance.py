@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from _thread import RLock
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -68,12 +69,38 @@ class SingleInstance:
             return self._acquisition if self._fd is not None and self._holder_pid == os.getpid() else None
 
     @contextmanager
-    def guard_acquisition(self, acquisition: str) -> Iterator[None]:
+    def _guard_mutex(self, deadline: float | None) -> Iterator[None]:
+        mutex = self._process_mutex()
+        acquired = mutex.acquire() if deadline is None else mutex.acquire(
+            timeout=max(0.0, deadline - time.monotonic()),
+        )
+        if not acquired:
+            raise SingletonAdmissionError("supervisor singleton acquisition mutex deadline exhausted")
+        try:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise SingletonAdmissionError("supervisor singleton acquisition deadline exhausted")
+            yield
+        finally:
+            mutex.release()
+
+    @contextmanager
+    def guard_acquisition(self, acquisition: str, *, deadline: float | None = None) -> Iterator[None]:
         """Keep release serialized with a bounded, locally admitted operation."""
-        with self._process_mutex():
+        with self._guard_mutex(deadline):
             if not acquisition or self.acquisition != acquisition:
                 raise SingletonAdmissionError("supervisor singleton acquisition is not current")
             yield
+            if self.acquisition != acquisition:
+                raise SingletonAdmissionError("supervisor singleton acquisition changed during operation")
+
+    @contextmanager
+    def guard_current_acquisition(self, *, deadline: float) -> Iterator[str]:
+        """Obtain the actual incarnation only after a deadline-bound mutex wait."""
+        with self._guard_mutex(deadline):
+            acquisition = self.acquisition
+            if acquisition is None:
+                raise SingletonAdmissionError("supervisor singleton acquisition is not current")
+            yield acquisition
             if self.acquisition != acquisition:
                 raise SingletonAdmissionError("supervisor singleton acquisition changed during operation")
 

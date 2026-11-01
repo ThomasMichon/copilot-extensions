@@ -134,6 +134,9 @@ snapshot it is indeterminate, not permission to start units against an unknown
 override. Completed older reads remain unqualified until a fresh attempt.
 Capture owns a context-local deadline shared by its reads and declaration
 publication; concurrent tick setup/cleanup cannot overwrite that budget.
+That deadline starts before admission. Both the acquisition-mutex and source
+collection-lock waits consume it; request preparation preserves the same
+deadline through nested capture rather than granting a fresh budget.
 Completed discovery results are pruned at both capture boundaries through the
 existing future owner, preserving every still-pending operation.
 Valid outer override mappings are normalized without dropping vetoes.

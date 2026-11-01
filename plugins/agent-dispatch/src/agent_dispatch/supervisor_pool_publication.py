@@ -5,7 +5,8 @@ from __future__ import annotations
 import copy
 import logging
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
@@ -64,15 +65,36 @@ class SupervisorPoolPublication:
         except Exception:  # pragma: no cover -- best-effort
             log.exception("error releasing supervisor lock")
 
-    def _pool_acquisition(self) -> tuple[SingleInstance, str]:
+    def _pool_lock(self) -> SingleInstance:
         lock = self._lock
         if (
             not isinstance(lock, SingleInstance)
             or lock.lock_path != self._build_lock().lock_path
-            or not (acquisition := lock.acquisition)
         ):
             raise SingletonAdmissionError("pool metadata requires this scope's actual singleton acquisition")
-        return lock, acquisition
+        return lock
+
+    @contextmanager
+    def _pool_preparation_boundary(self) -> Iterator[tuple[SingleInstance, str]]:
+        deadline = self._pool_capture_deadline.get()
+        token = None
+        if deadline is None:
+            deadline = time.monotonic() + self._reconcile_call_budget
+            token = self._pool_capture_deadline.set(deadline)
+        try:
+            lock = self._pool_lock()
+            with lock.guard_current_acquisition(deadline=deadline) as acquisition:
+                if not self._source_collection_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+                    raise PoolPublicationError("pool source collection lock deadline exhausted")
+                try:
+                    if time.monotonic() >= deadline:
+                        raise PoolPublicationError("pool preparation deadline exhausted")
+                    yield lock, acquisition
+                finally:
+                    self._source_collection_lock.release()
+        finally:
+            if token is not None:
+                self._pool_capture_deadline.reset(token)
 
     def _read_pool_local_inputs(self) -> tuple[str, bool]:
         from . import overrides as ov
@@ -99,9 +121,7 @@ class SupervisorPoolPublication:
         External file writers and configured-cohort admission still need their
         own integration before any production caller can use these inputs.
         """
-        lock, acquisition = self._pool_acquisition()
-        with lock.guard_acquisition(acquisition), self._source_collection_lock:
-            capture_token = self._pool_capture_deadline.set(time.monotonic() + self._reconcile_call_budget)
+        with self._pool_preparation_boundary() as (lock, acquisition):
             reasons = []
             catalog = None
             try:
@@ -133,9 +153,8 @@ class SupervisorPoolPublication:
                 log.warning("pool publication input capture unavailable: error_type=%s", type(exc).__name__)
                 reasons.append("coordinator-input-capture-unavailable")
             finally:
-                self._pool_capture_deadline.reset(capture_token)
                 self._prune_probe_inflight()
-            if self._pool_acquisition() != (lock, acquisition):
+            if self._pool_lock() is not lock:
                 raise SingletonAdmissionError("pool source capture changed the singleton scope")
             return PoolPublicationInputs(
                 self.machine or "", self.env, acquisition, self._pool_source_snapshot,
@@ -144,8 +163,7 @@ class SupervisorPoolPublication:
 
     def prepare_pool_metadata_request(self) -> PoolMetadataRequest:
         """Capture and retain one original request without issuing a write RPC."""
-        lock, acquisition = self._pool_acquisition()
-        with lock.guard_acquisition(acquisition), self._source_collection_lock:
+        with self._pool_preparation_boundary() as (_lock, acquisition):
             if self._pool_publisher_custody is None:
                 self._pool_publisher_custody = PoolPublisherCustody(acquisition)
             custody = self._pool_publisher_custody

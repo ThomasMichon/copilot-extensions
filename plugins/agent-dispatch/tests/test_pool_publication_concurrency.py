@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import signal
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Event
 from typing import Any
@@ -11,6 +12,8 @@ from typing import Any
 import pytest
 
 from agent_dispatch.single_instance import SingleInstance
+from agent_dispatch.single_instance import SingletonAdmissionError
+from agent_dispatch.pool_publication_custody import PoolPublicationError
 from tests.test_pool_publication_custody import owner as owner
 
 
@@ -135,3 +138,65 @@ def test_standalone_captures_prune_completed_results_without_losing_pending_work
         pending.set_result(None)
     daemon.capture_pool_publication_inputs()
     assert daemon._probe_inflight == set()
+
+
+@pytest.mark.parametrize("operation", ["capture_pool_publication_inputs", "prepare_pool_metadata_request"])
+@pytest.mark.parametrize("locked", ["singleton", "sources"])
+def test_admission_lock_waits_share_the_preparation_deadline(
+    owner: Any, operation: str, locked: str,
+) -> None:
+    daemon, _queue, calls = owner
+    daemon._reconcile_call_budget = 0.05
+    acquisition = daemon._lock.acquisition
+    entered = Event()
+    leave = Event()
+
+    def hold() -> None:
+        guard = daemon._lock.guard_acquisition(acquisition) if locked == "singleton" else daemon._source_collection_lock
+        with guard:
+            entered.set()
+            assert leave.wait(2)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        holding = executor.submit(hold)
+        assert entered.wait(1)
+        started = time.monotonic()
+        try:
+            with pytest.raises((SingletonAdmissionError, PoolPublicationError), match="deadline exhausted"):
+                getattr(daemon, operation)()
+            assert time.monotonic() - started < 0.5
+            assert daemon._pool_capture_deadline.get() is None
+            assert calls == []
+            assert daemon._pool_publisher_custody is None
+            if locked == "sources":
+                executor.submit(daemon.release_singleton).result(timeout=0.5)
+                assert daemon._lock.acquisition is None
+        finally:
+            leave.set()
+            holding.result(timeout=1)
+
+
+def test_request_preparation_does_not_restart_the_nested_capture_budget(
+    owner: Any, monkeypatch: Any,
+) -> None:
+    daemon, _queue, _calls = owner
+    capture = daemon.capture_pool_publication_inputs
+    bounded_read = daemon._bounded_read
+    outer = []
+    reads = []
+
+    def nested_capture() -> Any:
+        outer.append(daemon._pool_capture_deadline.get())
+        return capture()
+
+    def read(key: str, callback: Any) -> Any:
+        reads.append(daemon._pool_capture_deadline.get())
+        return bounded_read(key, callback)
+
+    monkeypatch.setattr(daemon, "capture_pool_publication_inputs", nested_capture)
+    monkeypatch.setattr(daemon, "_bounded_read", read)
+    request = daemon.prepare_pool_metadata_request()
+    assert request.operation == "begin"
+    assert len(outer) == 1 and outer[0] is not None
+    assert reads and all(deadline == outer[0] for deadline in reads)
+    assert daemon._pool_capture_deadline.get() is None
