@@ -121,21 +121,27 @@ actual compatible-reader transition/drain, never an HTTP request or startup fix.
 
 ## Source acceptance
 
-- [ ] Actual cache/store/native-client and same-handler synthetic wire consumers
+- [x] Actual cache/store/native-client and same-handler synthetic wire consumers
   prove initial load, unchanged sync, discussion reply/edit/deletion, head/target
   movement and partial evidence without changing observation clocks.
-- [ ] Immutable chunk materialization rejects truncation, wrong ID/scope/hash,
+- [x] Immutable chunk materialization rejects truncation, wrong ID/scope/hash,
   unsupported peers and disconnect; concurrent CAS cannot publish half-current
   data or replace the generation selected by an in-flight reader.
-- [ ] Existing watch behavior remains intact with absent and present optional
+- [x] Existing watch behavior remains intact with absent and present optional
   workspace support, including an actual unchanged strict `ReplayClient`
   capability exchange against the expanded handler; drain owns admitted source work.
-- [ ] Actual merged protected executor/store prove bounded explicit submit,
+- [x] Actual merged protected executor/store prove bounded explicit submit,
   durable pre-send fencing, partial/unknown receipt retention and no blind replay.
-- [ ] Oversized submit refuses locally; missing current read/write owners are
+- [x] Oversized submit refuses locally; missing current read/write owners are
   explicit unavailable states, not fabricated callbacks or credentials.
-- [ ] Focused contained tests, source lint/install/changefile gates and actual
+- [x] Focused contained tests, source lint/install/changefile gates and actual
   current-head review/required CI/managed merge pass.
+
+#9795 realizes these bounded source items. The follow-through additionally
+validates direct adversarial wire scope, generation identity, content hash and
+truncation through actual handlers/clients and the existing cache. The final
+source packet passes 170 cases; the unchanged complete service packet passes 45.
+Broader operational acceptance below is unchanged and is not inferred from tests.
 
 No live backend effects, source acquisition, installation, serving activation or
 rollout are authorized by this source slice. Real owner factory/property support,
