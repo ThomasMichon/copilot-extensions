@@ -6126,6 +6126,12 @@ and 90-minute bound. No test selector or failure limit shrinks those collections
 Installed exemplar fixtures use the release materializer for canonical
 dependencies; completion controls hold real construction ownership and inject
 failure only at the actual marker writer, with a positive downstream control.
+Windows long-path controls exercise the shared Python owner's stable file
+reads, exclusive directory creation and no-replacement completion publication
+through the real PowerShell adapter, rather than resurrecting retired C# types.
+They retain the 259/260/280-unit file/publication and 247/248/260/280-unit
+directory boundaries, destination identity/content checks and long snapshot
+parity.
 Bootstrap drift fixtures explicitly model the publication decision as well as
 context selection, including a denied-publication control. No-write PowerShell
 hook checks use the bounded initialized host and retain every fixture file in

@@ -157,28 +157,11 @@ def test_powershell_safe_open_preserves_extended_length_file_reads(
     target = directory / filename
     target.write_text("native long-path contents\n", encoding="utf-8")
     assert prefix_units(target) == path_units
-    source, marker, _ = _powershell_source().partition("\ntry {\n    Assert-ExactChoice")
-    assert marker
-    probe = tmp_path / "long-open.ps1"
-    probe.write_text(
-        source + """
-$opened = [CeSafeFile]::Open($env:CE_LONG_OPEN_TEST_PATH)
-try {
-    $reader = [IO.StreamReader]::new($opened.Stream, [Text.Encoding]::UTF8, $true, 1024, $true)
-    try { [Console]::Write($reader.ReadToEnd()) } finally { $reader.Dispose() }
-} finally { $opened.Dispose() }
-""",
-        encoding="utf-8-sig",
-    )
-    result = subprocess.run(
-        (str(POWERSHELL), "-NoProfile", "-File", str(probe), "probe"),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env={**os.environ, "CE_LONG_OPEN_TEST_PATH": str(target)},
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        timeout=30,
-        check=False,
+    result = _run_owner_probe(
+        tmp_path / "long-open-probe",
+        f"contents, identity = _read_regular_file(Path({str(target)!r}), "
+        "label='Long-path contents', require_stable_identity=True)\n"
+        "sys.stdout.buffer.write(contents)",
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == "native long-path contents\n"
@@ -196,31 +179,33 @@ def test_powershell_atomic_directory_preserves_extended_length_paths(
     parent.mkdir(parents=True)
     target = parent / ("d" * (path_units - prefix_units(parent) - 1))
     assert prefix_units(target) == path_units
-    source, marker, _ = _powershell_source().partition("\ntry {\n    Assert-ExactChoice")
-    assert marker
-    probe = tmp_path / "atomic-directory.ps1"
-    probe.write_text(
-        source + """
-$path = $env:CE_ATOMIC_TEST_PATH
-if ([CeAtomicDirectory]::CreateWindows($path) -ne 1) { throw 'Directory not created' }
-if ([CeAtomicDirectory]::CreateWindows($path) -ne 0) { throw 'Directory replaced' }
-""",
-        encoding="utf-8-sig",
-    )
-    result = subprocess.run(
-        (str(POWERSHELL), "-NoProfile", "-File", str(probe), "probe"),
-        capture_output=True, text=True, encoding="utf-8",
-        env={**os.environ, "CE_ATOMIC_TEST_PATH": str(target)},
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        timeout=30, check=False,
+    result = _run_owner_probe(
+        tmp_path / "atomic-directory-probe",
+        f"path = Path({str(target)!r})\n"
+        "lock = _DirectoryLock(path, kind='installation', marketplace_id='example')\n"
+        "lock._create(time.monotonic() + 5)\n"
+        "try:\n"
+        "    assert path.is_dir()\n"
+        "    identity = _stat_identity(path.stat())\n"
+        "    before = lock.owner_path.read_bytes()\n"
+        "    try:\n"
+        "        lock._create(time.monotonic() + 5)\n"
+        "    except FileExistsError:\n"
+        "        pass\n"
+        "    else:\n"
+        "        raise AssertionError('Directory replaced')\n"
+        "    assert _stat_identity(path.stat()) == identity\n"
+        "    assert lock.owner_path.read_bytes() == before\n"
+        "finally:\n"
+        "    lock.release()",
     )
     assert result.returncode == 0, result.stderr
-    assert target.is_dir()
+    assert not target.exists()
 
 
 @pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")
 @pytest.mark.parametrize("path_units", (259, 260, 280))
-def test_powershell_atomic_move_preserves_long_paths_without_replacement(
+def test_powershell_atomic_publication_preserves_long_paths_without_replacement(
     tmp_path: Path, path_units: int,
 ) -> None:
     parent = tmp_path / "atomic-move"
@@ -233,33 +218,22 @@ def test_powershell_atomic_move_preserves_long_paths_without_replacement(
     destination = parent / ("d" * filename_units)
     original.write_bytes(b"original completion\n")
     assert prefix_units(original) == prefix_units(destination) == path_units
-    source, marker, _ = _powershell_source().partition("\ntry {\n    Assert-ExactChoice")
-    assert marker
-    probe = tmp_path / "atomic-move.ps1"
-    probe.write_text(
-        source + """
-$source = $env:CE_ATOMIC_TEST_SOURCE
-$destination = $env:CE_ATOMIC_TEST_DESTINATION
-if ([CeAtomicDirectory]::MoveWindows($source, $destination) -ne 1) { throw 'File not moved' }
-[IO.File]::WriteAllText($source, 'must not replace')
-if ([CeAtomicDirectory]::MoveWindows($source, $destination) -ne 0) { throw 'File replaced' }
-""",
-        encoding="utf-8-sig",
-    )
-    result = subprocess.run(
-        (str(POWERSHELL), "-NoProfile", "-File", str(probe), "probe"),
-        capture_output=True, text=True, encoding="utf-8",
-        env={
-            **os.environ,
-            "CE_ATOMIC_TEST_SOURCE": str(original),
-            "CE_ATOMIC_TEST_DESTINATION": str(destination),
-        },
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        timeout=30, check=False,
+    result = _run_owner_probe(
+        tmp_path / "atomic-publication-probe",
+        f"source = Path({str(original)!r})\n"
+        f"destination = Path({str(destination)!r})\n"
+        "assert _publish_json_no_replace(destination, "
+        "{'contents': source.read_text(encoding='utf-8')}, locks=())\n"
+        "identity = _stat_identity(destination.stat())\n"
+        "before = destination.read_bytes()\n"
+        "source.write_bytes(b'must not replace')\n"
+        "assert not _publish_json_no_replace(destination, {'replaced': True}, locks=())\n"
+        "assert _stat_identity(destination.stat()) == identity\n"
+        "assert destination.read_bytes() == before",
     )
     assert result.returncode == 0, result.stderr
     assert original.read_bytes() == b"must not replace"
-    assert destination.read_bytes() == b"original completion\n"
+    assert _load_python_module().read_json(destination) == {"contents": "original completion\n"}
 
 
 @pytest.mark.skipif(os.name != "nt" or POWERSHELL is None, reason="native Windows PowerShell")

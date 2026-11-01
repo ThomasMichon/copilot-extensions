@@ -291,12 +291,12 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
         },
         "agent-machines": {"tests/test_fleet_update.py", "tests/test_self_update.py"},
         "update-driver": {"tests/test_core.py", "tests/test_legacy_record_readback.py"},
-        "agent-mcp": {"tests/test_source_install_transactions.py"},
-        "agent-procutil": {"tests/test_retirement_custody.py"},
-        "payload-invocation": {"tests/test_command_lifecycle.py"},
         "runtime-source": {
             "tests/test_runtime_source_native.py", "tests/test_source_snapshot_publication.py",
         },
+        "agent-mcp": {"tests/test_source_install_transactions.py"},
+        "agent-procutil": {"tests/test_retirement_custody.py"},
+        "payload-invocation": {"tests/test_command_lifecycle.py"},
     }
     selected = {target: set() for target in required}
     for step in families:

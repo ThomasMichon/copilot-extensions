@@ -873,6 +873,15 @@ def _run_exemplar_slot_action(
     )
 
 
+def _release_materializer() -> Any:
+    source = LIB.parents[1] / "tools" / "materialize_main.py"
+    spec = importlib.util.spec_from_file_location("snapshot_fixture_materializer", source)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _installed_exemplar(
     exemplar: tuple[str, tuple[str, ...], str],
     tmp_path: Path,
@@ -900,13 +909,21 @@ def _installed_exemplar(
                 "dist",
             ),
         )
-    if source_plugin.name == "agent-index":
-        engine = installed_plugin.parents[1] / "libs" / "installer-engine"
-        if not engine.exists():
-            shutil.copytree(
-                LIB.parents[1] / "libs" / "installer-engine", engine,
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-            )
+        materializer = _release_materializer()
+        entries = materializer.materialize_file_pointers(
+            installed_plugin, canonical_root=LIB.parents[1],
+        )
+        for operation in (
+            materializer.materialize_uv_editable_ref_into,
+            materializer.materialize_installer_engine_ref_into,
+            materializer.materialize_launch_wrapper_assets_into,
+        ):
+            entries.extend(operation(
+                source_consumer_dir=source_plugin,
+                dest_consumer_dir=installed_plugin,
+                canonical_root=LIB.parents[1],
+            ))
+        assert not any(entry.startswith("SKIP ") for entry in entries), entries
     installed_script = installed_plugin / source_script.relative_to(source_plugin)
     return (*prefix[:-1], str(installed_script)), installed_plugin, home
 
@@ -1461,6 +1478,23 @@ def test_agent_machines_snapshot_publication_preserves_unowned_final_state(
     ).exists()
 
 
+def _reserve_exemplar_completion_slot(
+    installed_plugin: Path,
+    layout: dict[str, Path | str],
+    version: str,
+) -> None:
+    snapshot_root = Path(layout["snapshot_root"])
+    (snapshot_root / "payload-content.txt").unlink()
+    shutil.copytree(installed_plugin, snapshot_root, dirs_exist_ok=True)
+    _stamp_with_python(layout, snapshot_id=version)
+    provisioned = _run(
+        ALL_RUNNERS[0], "slot-provision", layout,
+        snapshot_id=version, runtime_version=version,
+        expected_payload_root=installed_plugin, expected_payload_version=version,
+    )
+    assert provisioned.returncode == 0, provisioned.stderr
+
+
 def _activation_tail_source(script: Path, plugin_id: str, style: str) -> str:
     """Keep the real completion guard before the fixture's activation witness."""
     source = script.read_text(encoding="utf-8")
@@ -1502,6 +1536,17 @@ def _run_exemplar_mark_complete(
             "    raise OSError('injected completion writer failure')\n"
         )
         helper.write_text(source.replace(marker, hook + marker, 1), encoding="utf-8")
+    helpers = subprocess.check_output(
+        [
+            sys.executable, "-I", "-B", str(producer / "versioned_runtime.py"),
+            "--root", str(layout["plugin_root"]), "construction-shell",
+            "--shell", "ps1" if style == "powershell" else "sh",
+        ],
+        text=True,
+        encoding="utf-8",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        timeout=20,
+    )
     source_script = installed_plugin / "scripts" / (
         ("init.ps1" if style == "powershell" else "init.sh")
         if installed_plugin.name == "agent-machines"
@@ -1541,6 +1586,7 @@ def _run_exemplar_mark_complete(
                     ". (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')",
                     _source_runtime_functions(source_script, style),
                     "Initialize-SourceRuntime",
+                    helpers,
                     _function_source(
                         source_script,
                         "function Get-PayloadHash(",
@@ -1621,6 +1667,7 @@ def _run_exemplar_mark_complete(
                     "_bootstrap_python() { printf '%s\\n' \"$PYTHON\"; }",
                     _source_runtime_functions(source_script, style),
                     "_initialize_source_runtime",
+                    helpers,
                     _function_source(
                         source_script,
                         "_payload_hash() {",
@@ -1668,6 +1715,7 @@ def _run_exemplar_mark_complete(
         encoding="utf-8",
         env=environment,
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
@@ -1776,8 +1824,10 @@ def _payload_file_bytes(root: Path) -> dict[str, bytes]:
     EXEMPLAR_INSTALLERS,
     ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
 )
-def test_exemplar_marker_writer_failure_prevents_activation_tail(
+@pytest.mark.parametrize("fail_mark_complete", (False, True))
+def test_exemplar_completion_writer_gates_activation_tail(
     exemplar: tuple[str, tuple[str, ...], str],
+    fail_mark_complete: bool,
     tmp_path: Path,
 ) -> None:
     plugin_id, prefix, _ = exemplar
@@ -1796,7 +1846,7 @@ def test_exemplar_marker_writer_failure_prevents_activation_tail(
         payload_root=installed_plugin,
     )
     slot = Path(layout["plugin_root"]) / "versions" / version
-    slot.mkdir(parents=True)
+    _reserve_exemplar_completion_slot(installed_plugin, layout, version)
     activation_sentinel = tmp_path / "activation-reached"
     failure_witness = tmp_path / "completion-write-attempted"
 
@@ -1806,14 +1856,19 @@ def test_exemplar_marker_writer_failure_prevents_activation_tail(
         layout,
         tmp_path,
         runtime_version=version,
-        marker_failure_witness=failure_witness,
+        marker_failure_witness=failure_witness if fail_mark_complete else None,
         activation_sentinel=activation_sentinel,
     )
 
-    assert result.returncode != 0
-    assert failure_witness.read_text(encoding="utf-8") == "attempted", result.stderr
-    assert not activation_sentinel.exists()
-    assert not (slot / ".install-complete.json").exists()
+    if fail_mark_complete:
+        assert result.returncode != 0
+        assert failure_witness.read_text(encoding="utf-8") == "attempted", result.stderr
+        assert not activation_sentinel.exists()
+        assert not (slot / ".install-complete.json").exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert activation_sentinel.read_text(encoding="utf-8") == "activated"
+        assert (slot / ".install-complete.json").is_file()
     assert not (Path(layout["plugin_root"]) / "current-version").exists()
     assert not (Path(layout["plugin_root"]) / "last-known-good").exists()
     assert not (Path(layout["plugin_root"]) / "installation-activation.json").exists()
@@ -2409,9 +2464,11 @@ def test_powershell_exemplar_wide_payload_rejects_small_limit(
     "action",
     ("slot-provision", "slot-validate", "slot-complete", "slot-completion-validate"),
 )
-def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
+@pytest.mark.parametrize("prestaged", (False, True))
+def test_exemplar_slot_actions_release_installed_payload_cwd_without_legacy_staging(
     exemplar: tuple[str, tuple[str, ...], str],
     action: str,
+    prestaged: bool,
     tmp_path: Path,
 ) -> None:
     _, _, style = exemplar
@@ -2452,7 +2509,7 @@ def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
         action,
         layout,
         tmp_path,
-        environment_overrides={"COPILOT_PLUGIN_INSTALL_STAGED": "1"},
+        environment_overrides={"COPILOT_PLUGIN_INSTALL_STAGED": "1"} if prestaged else {},
     )
 
     assert result.returncode == 0, result.stderr
@@ -2462,6 +2519,7 @@ def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
         assert Path(cwd["process"]) == home
     else:
         assert Path(cwd["cwd"]) == home
+    assert not (home / ".agent-machines").exists()
 
 
 @pytest.mark.parametrize(
