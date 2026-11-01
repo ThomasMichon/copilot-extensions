@@ -1414,7 +1414,7 @@ function Install-Package {
     }
     # Local first-party code still resolves its external and build dependencies
     # through the configured, seasoned index, in one retained transaction.
-    $installArgs = @('--python', $VenvPython, '--no-editable')
+    $installArgs = @('--python', $VenvPython)
     foreach ($lib in @(
         @{
             Name = 'config-migrate'

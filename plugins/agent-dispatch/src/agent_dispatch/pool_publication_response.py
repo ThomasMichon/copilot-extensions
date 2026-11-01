@@ -83,11 +83,18 @@ def read_pool_scope(value: object) -> PoolPublicationScope:
         raise PoolPublicationError("pool metadata response has foreign definitions")
     if definitions and generation is None:
         raise PoolPublicationError("pool metadata response has unattributed definitions")
+    cohort_revisions = []
+    for key in ("enrollment_cohort_revision", "definitions_cohort_revision"):
+        revision = value.get(key)
+        if revision is not None and (type(revision) is not int or revision < 1):
+            raise PoolPublicationError("pool metadata response has invalid configured cohort attribution")
+        cohort_revisions.append(revision)
     return PoolPublicationScope(
         value["machine"], value["env"], value["publisher_id"], value["generation"],
         value["revision"], value["state"], value["input_revision"],
         value["registration_revision"], valid_until, definitions,
         value["definitions_generation"], value["definitions_revision"], value["reason"],
+        *cohort_revisions,
     )
 
 

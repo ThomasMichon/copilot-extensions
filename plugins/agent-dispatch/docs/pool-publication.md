@@ -12,6 +12,8 @@ scope membership or atomic-placement support.
 The running coordinator's existing `/health` response adds
 `pool_catalog_transport`, with protocol `pool_catalog_transport/v1`, supported
 metadata/definition versions and whether control authority is configured.
+The additive `configured_cohort_fencing_versions: [1]` advertises parsing and
+storage fences only, not an active configuration publisher or runtime admission.
 The descriptor explicitly advertises metadata-only support and no lock-holder
 verification, configured-scope completeness or atomic placement. Read this
 running-peer declaration rather than inferring support from a package version
@@ -45,6 +47,11 @@ tolerates additive fields without dropping required permit/reject semantics.
 The write envelope rejects unknown fields and coerced revisions, including
 booleans. There is no caller clock, TTL, preferred subset, winner, slot count
 or completeness flag. Scoped/partial GET requests are refused.
+Both bodies also accept optional integer `expected_cohort_revision`. Absence
+preserves legacy metadata writes only while no configured observation has been
+projected. After projection, fresh writes require its current coordinator
+revision and a complete observation containing that actual execution scope.
+An unfenced legacy writer receives `409` before mutation, not guessed coverage.
 
 Malformed request bodies yield `422`; invalid normalized definitions yield
 `400`; stale generation/revision/input fences or incompatible scope publication
@@ -347,10 +354,54 @@ the envelope, so no existing configuration is migrated or rewritten into it
 automatically. All configuration writers and running readers must be qualified
 before an authorized adoption; provider rollback must remain fenced rather than
 silently stripping membership metadata. No CLI setter, serve/tick caller,
-coordinator membership publication, enrollment, scope withdrawal or placement
+runtime configuration publication, enrollment, scope withdrawal or placement
 is enabled. The health descriptor still advertises
 `configured_scope_membership: false`. Configured intent is not evidence that
 the named runtime exists, holds its singleton or supports atomic placement.
+
+### Coordinator projection and metadata fences
+
+`observe_pool_configured_cohort()` is an explicit source-only seam on the
+existing catalog owner. It accepts the registrar's whole immutable observation,
+not a pool list, preferred subset or caller completeness flag. The existing
+catalog singleton retains it with a separate monotonic coordinator cohort
+revision; its history is append-only. The source's configured revision and
+exact-byte digest remain separate. Equal fresh observations and original
+immediate retries do not advance the clock. Changed membership requires a
+new configured revision; a pointer-only byte change can retain that configured
+revision but advances the coordinator fence. Regression or revision reuse for
+changed members refuses even after an unavailable observation.
+
+The same SQLite write transaction checks cohort revision and actual
+`execution_machine`/`env` membership before fresh publisher enrollment or
+publication. Logical `machine` is retained, never substituted for that scope.
+Unavailable and unconfirmed observations block new writes without deleting
+scopes, definitions or history. Missing configured scopes, retained unconfigured
+scopes, stale cohort attribution, pending, unavailable or expired publications
+block the global catalog. Membership removal does not silently withdraw a scope.
+Accepted original begin/publication retries remain recoverable after membership
+changes without another write or freshness renewal. An unavailable publication
+preserves the prior definitions' cohort attribution.
+
+Unfiltered GET adds `configured_cohort`, `configured_metadata_ready` and each
+scope's enrollment/definition cohort revisions. Explicit complete empty intent
+can have confirmed configured coverage; the legacy `metadata_ready` still
+requires at least one scope. A missing projection preserves the legacy enrolled
+metadata contract but never claims configured completeness. Additive response
+readers preserve the optional attribution and reject malformed revisions.
+The existing unfenced request-custody owner cannot acknowledge a response as
+though its original request carried a cohort fence.
+
+No HTTP configuration-publisher route or ordinary consumer is wired. This
+projection is retained metadata, not proof that an external file is still
+unchanged, that all configured writers enforce the fence, or that the named
+process holds its singleton. External atomicity, runtime publisher integration,
+old-writer exclusion and supported rollback remain prerequisites to adoption;
+the runtime membership/lock-holder/placement advertisements stay false.
+In particular, older positional catalog-clock initialization cannot reopen the
+expanded clock schema. The source upgrade preserves legacy rows without
+backfilling membership; it does not qualify an older executable against that
+schema or authorize a live database migration.
 
 ### Runtime and placement qualification
 
@@ -374,8 +425,9 @@ original acquisition at the write boundary and recovers unknown outcomes before
 changing requests. External source atomicity and installed publisher activation
 remain unqualified.
 
-The controlling registration owner must still fence and publish the configured
-cohort observation through the coordinator's admission owner. These primitives
+The controlling registration owner must still integrate fresh configured-source
+publication through the coordinator's admission owner. The source projection
+and fences above do not install that caller. These primitives
 retain every scope it enrolls; an empty store does not prove there are no
 configured pools. Scope withdrawal and
 mixed-cohort/rollback policy remain separate reviewed integration work; there

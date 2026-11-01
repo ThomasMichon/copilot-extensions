@@ -1,5 +1,31 @@
 # Testing copilot-extensions
 
+The optional `uv_deployment_compatibility` native-acceptance selector runs the
+focused retained-dependency policy, Codespaces cold/warm installation,
+MCP/Dispatch caller compatibility and full coupled Logger batch/binstub packets
+on Linux and Windows at the exact dispatch
+SHA. It covers canonical editable mappings frozen only for deployment, original
+manifest preservation, explicit editable refusal and unchanged developer APIs.
+Codespaces and the native Logger batch controls execute actual UV; Logger's
+offline first-use package-effects/backend fixture remains synthetic.
+MCP/Dispatch controls retain source-closure, reinstall, extras, cutoff, retry
+and exact-exit checks through their fixture UV capture.
+The thirty-minute jobs and twenty-minute Logger packet allowance include existing
+preparation and cleanup costs, not a production installer deadline or speed
+claim. Pair this selector with `source_cache=true` for the ordinary constructor's
+hash-pinned real-backend controls. Neither selector qualifies installed-host
+rollout or expands required unit-only CI.
+The Windows source-cache job has a ten-minute outer guard: its completed
+64-pass packet and action cleanup reached the previous six-minute limit on a
+native runner. Constructor/item deadlines and the Linux job are unchanged.
+The Logger Linux fixture explicitly qualifies its daemon-supervision interpreter
+through the shipped custody checks, rather than weakening those checks when a
+hosted toolcache interpreter is writable.
+The source-phase regression advances20,000 controlled completed-unit notifications
+beyond the quiet allowance, retaining a flushed byte and deadline renewal for
+each unit while detailed diagnostics coalesce below64 KiB. Terminal counts,
+unchanged stdout and subsequent silent expiry are checked independently.
+
 The optional `update_diagnostics` lane runs the native installer inactivity
 packet separately from the focused constructor packet on Linux and Windows.
 Real children emit stdout/stderr without newlines beyond their quiet window;

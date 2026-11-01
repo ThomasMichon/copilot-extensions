@@ -548,7 +548,7 @@ _install_package_into() {
     local sources=("$SSH_MGR_DIR" "$CRED_RELAY_DIR" "$CFG_MIGRATE_DIR"
         "$ZDD_DIR" "$VENUE_COPILOT_DIR" "$SESSION_LIVENESS_PROBE_DIR"
         "$SINGLE_INSTANCE_LEASE_DIR" "$REMOTE_LOGIN_SHELL_DIR" "$UPDATE_DRIVER_DIR" "$PLUGIN_DIR")
-    local i output install_args=(--python "$py" --no-editable)
+    local i output install_args=(--python "$py")
     for i in "${!packages[@]}"; do
         install_args+=(--reinstall-package "${packages[$i]}" "${sources[$i]}")
     done

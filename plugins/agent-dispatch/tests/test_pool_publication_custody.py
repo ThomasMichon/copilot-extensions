@@ -64,6 +64,29 @@ def _settle(daemon: Any, queue: TaskQueue) -> Any:
     return request, result
 
 
+@pytest.mark.parametrize("operation,field", [
+    ("begin", "enrollment_cohort_revision"),
+    ("begin", "definitions_cohort_revision"),
+    ("publish", "enrollment_cohort_revision"),
+    ("publish", "definitions_cohort_revision"),
+])
+def test_unfenced_original_request_cannot_acknowledge_fabricated_cohort_attribution(
+    owner: Any, operation: str, field: str,
+) -> None:
+    daemon, queue, _calls = owner
+    if operation == "publish":
+        _settle(daemon, queue)
+    request = daemon.prepare_pool_metadata_request()
+    result = _apply(queue, request)
+    before = queue.pool_catalog_snapshot()
+    with pytest.raises(PoolPublicationError):
+        daemon._pool_publisher_custody.acknowledge(request, replace(result, **{field: 1}))
+    assert daemon._pool_publisher_custody.pending is request
+    assert queue.pool_catalog_snapshot() == before
+    daemon._pool_publisher_custody.acknowledge(request, result)
+    assert daemon._pool_publisher_custody.pending is None
+
+
 def test_acquisition_token_is_actual_idempotent_and_new_after_release(tmp_path: Any) -> None:
     lock = SingleInstance(tmp_path / "singleton.lock")
     assert lock.acquisition is None

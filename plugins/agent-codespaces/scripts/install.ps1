@@ -798,7 +798,7 @@ function Install-PackageInto {
         'agent-update-driver' = $UpdateDriverDir
         'agent-codespaces' = $PluginDir
     }
-    $installArguments = @('--python', $Python, '--no-editable')
+    $installArguments = @('--python', $Python)
     foreach ($entry in $sources.GetEnumerator()) {
         $installArguments += @('--reinstall-package', $entry.Key, $entry.Value)
     }
