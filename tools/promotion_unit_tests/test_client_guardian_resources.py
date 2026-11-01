@@ -40,6 +40,17 @@ test_client_resource_preparation_consumes_shared_startup_deadline = (
 )
 
 
+@pytest.fixture(autouse=True)
+def fixture_artifact_reader(tmp_path, monkeypatch):
+    from fleet_manager import artifacts
+
+    def open_fixture(path):
+        assert Path(path).resolve().is_relative_to(tmp_path.resolve())
+        return os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+
+    monkeypatch.setattr(artifacts, "_open_artifact", open_fixture)
+
+
 class _ValueStructure:
     pass
 
