@@ -5,7 +5,10 @@ runs one bounded Linux job at the exact dispatch SHA. It exercises the existing
 native subprocess protocol fixture, real physical-owner locks, immutable
 state/profile/outcome files and SQLite publication across lost failure
 publication, recovered health, pending attachments and native/repair
-entry-point switches. Compose 2/5 protocol cases retain their original native
+entry-point switches. Missing or corrupted immutable outcomes refuse both
+UNKNOWN and already-published terminal recovery without clearing the original
+attempt; restoring exact evidence permits the original receipt to finish.
+Compose 2/5 protocol cases retain their original native
 process custody and verify no replayed apply. The job fails rather than crediting
 skipped or empty test selection, and uses the standalone runner's environment
 lease, sandbox and whole-process cleanup.

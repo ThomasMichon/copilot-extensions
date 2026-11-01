@@ -247,6 +247,13 @@ it. Native-owner reconciliation refuses a pending repair-owned outcome, and
 repair-owner reconciliation refuses a pending native-owned failure. Neither
 path converts the other's evidence or changes its decision; the original
 owner can finish its exact receipt under fresh authorization and custody.
+Successful decisions likewise retain their exact receipt on the original
+attempt before journal publication. Recovery rechecks immutable outcome bytes
+inside terminal journal reconciliation and again before clearing the attempt;
+terminal replay and attempt cleanup also require the referenced evidence.
+Missing or corrupted evidence refuses without rewriting a receipt or
+reconstructing the missing outcome. Restoring the exact retained evidence
+allows the original request to finish; success still requires current readiness.
 
 **Contract support:** this optional profile expands the source SDK's strict
 version-1 declaration reader; older readers reject the unknown `profile`

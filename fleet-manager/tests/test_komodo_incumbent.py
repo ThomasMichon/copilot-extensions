@@ -29,7 +29,7 @@ from fleet_manager.komodo_profile import DATA_NAMES, SECRET_NAMES, KomodoMateria
 from fleet_manager.komodo_selection import KomodoSelection
 from fleet_manager.komodo_state import KomodoState
 from fleet_manager.node_journal import NodeJournal
-from fleet_manager.planning import PlanError, canonical, decode
+from fleet_manager.planning import PlanError, canonical, decode, digest
 from fleet_manager.private_state import create_private_file, private_directory
 from fleet_manager.runtime_admission import OperationGrant
 from komodo_public_fixtures import PUBLIC_DER, PUBLIC_PEM
@@ -339,6 +339,10 @@ def test_native_apply_refuses_incumbent_even_with_a_fixed_declaration(incumbent)
     "failed-unstarted-foreign-network",
     "failed-unstarted-keys-converge", "failed-unstarted-keys-settle",
     "failed-unstarted-keys-native-to-repair", "failed-unstarted-keys-repair-to-native",
+    "failed-unstarted-keys-missing-outcome", "failed-unstarted-keys-corrupt-outcome",
+    "failed-unstarted-keys-missing-terminal-outcome", "failed-unstarted-keys-corrupt-terminal-outcome",
+    "lost-terminal-missing-outcome", "lost-terminal-corrupt-outcome",
+    "lost-terminal-committed-missing-outcome", "lost-terminal-committed-corrupt-outcome",
 ])
 def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
     incumbent, keys, monkeypatch, scenario,
@@ -374,9 +378,24 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
     state_record = [None]
 
     @contextmanager
-    def opened(host_runtime, *, daemon, project, existing_only=False):
-        from fleet_manager.planning import digest
+    def damaged_outcome(path, *, missing):
+        original = path.read_bytes()
+        if missing:
+            path.unlink()
+        else:
+            path.write_bytes(b"{}")
+        try:
+            yield
+        finally:
+            if not path.exists():
+                descriptor = create_private_file(path)
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(original)
+            else:
+                path.write_bytes(original)
 
+    @contextmanager
+    def opened(host_runtime, *, daemon, project, existing_only=False):
         root = host_runtime / digest({"daemon": daemon, "project": project})
         private_directory(root)
 
@@ -392,7 +411,8 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                 descriptor = create_private_file(path)
                 with os.fdopen(descriptor, "wb") as stream:
                     stream.write(raw)
-            assert path.read_bytes() == raw
+            if path.read_bytes() != raw:
+                raise PlanError("Komodo retained immutable profile changed")
             return path
 
         def retain(value):
@@ -405,7 +425,8 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                 descriptor = create_private_file(path)
                 with os.fdopen(descriptor, "wb") as stream:
                     stream.write(raw)
-            assert path.read_bytes() == raw
+            if path.read_bytes() != raw:
+                raise PlanError("Komodo retained immutable outcome changed")
             return reference
 
         yield SimpleNamespace(
@@ -612,9 +633,12 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                     "failed-unstarted-foreign-network",
                     "failed-unstarted-keys-converge", "failed-unstarted-keys-settle",
                     "failed-unstarted-keys-native-to-repair", "failed-unstarted-keys-repair-to-native",
+                    "failed-unstarted-keys-missing-outcome", "failed-unstarted-keys-corrupt-outcome",
+                    "failed-unstarted-keys-missing-terminal-outcome",
+                    "failed-unstarted-keys-corrupt-terminal-outcome",
                 ):
                     def lost_failure(journal, original, outcome, **options):
-                        if scenario == "failed-lost-terminal":
+                        if scenario == "failed-lost-terminal" or "terminal-outcome" in scenario:
                             settled.append(reconcile(journal, original, outcome, **options))
                         raise PlanError("fixture-lost-failure-receipt")
 
@@ -631,6 +655,26 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                     monkeypatch.setattr(NodeJournal, "reconcile", reconcile)
                 if unstarted:
                     original_failed = deepcopy(state_record[0]["failed"])
+                    if scenario.endswith("-outcome"):
+                        before = deepcopy(state_record[0])
+                        path = runtime / selection.resource / "receipts" / (digest(original_failed) + ".json")
+                        journal = NodeJournal(
+                            runtime / selection.resource / "node.sqlite",
+                            authority="gateway-a", installation="install-a", target="host-a")
+                        original_receipt = journal.inspect(request)
+                        assert original_receipt.to_dict()["status"] == (
+                            "failed" if "terminal-outcome" in scenario else "unknown")
+                        with damaged_outcome(path, missing="missing" in scenario):
+                            with pytest.raises(PlanError, match="immutable|outcome"):
+                                await invoke(request)
+                            assert state_record[0] == before
+                            assert journal.inspect(request) == original_receipt
+                        receipt = await invoke(request)
+                        assert receipt.to_dict()["status"] == "failed"
+                        assert state_record[0]["attempt"] is None
+                        assert state_record[0]["failed"] == original_failed
+                        assert native_calls == ["apply"] and not requests
+                        return
                     if scenario.endswith(("native-to-repair", "repair-to-native")):
                         before = deepcopy(state_record[0])
                         for name, item in containers.items():
@@ -661,8 +705,6 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                         else:
                             receipt = await invoke(request)
                         assert receipt.to_dict()["status"] == "failed"
-                        from fleet_manager.planning import digest
-
                         assert receipt.to_dict()["result_ref"] == digest(original_failed)
                         assert state_record[0]["failed"] == original_failed
                         assert state_record[0]["attempt"] is None
@@ -690,8 +732,6 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                     assert native_calls == ["apply"] and not requests
                     return
                 if scenario.startswith("failed-recovered-"):
-                    from fleet_manager.planning import digest
-
                     original_failed = deepcopy(state_record[0]["failed"])
                     recovered = True
                     containers["core"]["State"].update(Status="running", Running=True, Pid=1)
@@ -746,10 +786,12 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                     owner._selected(request)
                 assert state_record[0] is None and native_calls == [] and requests == []
                 return
-            if scenario == "lost-terminal":
+            if scenario.startswith("lost-terminal"):
                 reconcile = NodeJournal.reconcile
 
                 def lost_reply(*arguments, **options):
+                    if "committed" in scenario:
+                        reconcile(*arguments, **options)
                     raise PlanError("fixture-lost-terminal-receipt")
 
                 monkeypatch.setattr(NodeJournal, "reconcile", lost_reply)
@@ -757,6 +799,24 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                     await invoke(request)
                 assert state_record[0]["attempt"]["native_settled"] is True
                 monkeypatch.setattr(NodeJournal, "reconcile", reconcile)
+                if scenario.endswith("-outcome"):
+                    before = deepcopy(state_record[0])
+                    path = runtime / selection.resource / "receipts" / (digest(before["good"]) + ".json")
+                    journal = NodeJournal(
+                        runtime / selection.resource / "node.sqlite",
+                        authority="gateway-a", installation="install-a", target="host-a")
+                    original_receipt = journal.inspect(request)
+                    assert original_receipt.to_dict()["status"] == (
+                        "succeeded" if "committed" in scenario else "unknown")
+                    with damaged_outcome(path, missing="missing" in scenario):
+                        with pytest.raises(PlanError, match="immutable|outcome"):
+                            await invoke(request)
+                        assert state_record[0] == before and journal.inspect(request) == original_receipt
+                    receipt = await invoke(request)
+                    assert receipt.to_dict()["status"] == "succeeded"
+                    assert state_record[0]["attempt"] is None
+                    assert state_record[0]["good"] == before["good"] and native_calls == []
+                    return
             receipt = await invoke(request)
             assert receipt.to_dict()["status"] == "succeeded"
             original = deepcopy(state_record[0])
@@ -799,8 +859,6 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
                 with pytest.raises(PlanError):
                     await invoke(retry)
                 assert state_record[0] == original
-                from fleet_manager.planning import digest
-
                 journal = NodeJournal(
                     runtime / digest({"daemon": tooling.daemon_id, "project": desired["project"]})
                     / "node.sqlite", authority="gateway-a", installation="install-a", target="host-a",

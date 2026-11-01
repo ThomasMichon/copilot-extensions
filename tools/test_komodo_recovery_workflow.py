@@ -71,7 +71,7 @@ def test_actual_workflow_body_preserves_exit_cleanup_and_native_execution_credit
         assert options["sandbox"] == sandbox and options["limits"].wall_seconds == 900
         assert options["env"] == {"isolated": str(sandbox)}
         selector = command[command.index("-k") + 1]
-        for name in ("failed-retained-health", "lost-failure-publication",
+        for name in ("failed-retained-health", "lost-failure-publication", "lost-terminal-receipt",
                      "native-failure-to-repair", "repair-failure-to-native", "physical_state"):
             assert name in selector
         if mode == "unreaped":

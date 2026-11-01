@@ -201,7 +201,7 @@ jobs:
               report = sandbox / "results.xml"
               tests = root / "fleet-manager/tests"
               selection = (
-                  "failed-retained-health or lost-failure-publication or adoption-incumbent or "
+                  "failed-retained-health or lost-failure-publication or lost-terminal-receipt or adoption-incumbent or "
                   "native-failure-to-repair or repair-failure-to-native or physical_state or "
                   "state_retains_failed or original_pending_prefix"
               )

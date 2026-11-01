@@ -347,12 +347,15 @@ class _Attempt:
         return value
 
     def pending_outcome(self, *, failed: bool | None = None) -> dict[str, Any] | None:
-        if "failure_outcome" in self.original:
-            outcome = TargetReceipt.from_dict(self.original["failure_outcome"])
+        if "failure_outcome" in self.original or "success_outcome" in self.original:
+            failed_native = "failure_outcome" in self.original
+            outcome = TargetReceipt.from_dict(
+                self.original["failure_outcome" if failed_native else "success_outcome"])
             outcome.check_intent(self.request)
-            if (outcome.to_dict()["status"] != "failed" or self.record["failed"] is None
-                    or outcome.to_dict()["result_ref"] != digest(self.record["failed"])):
-                raise PlanError("Komodo retained failure decision lacks original evidence")
+            status, key = ("failed", "failed") if failed_native else ("succeeded", "good")
+            if (outcome.to_dict()["status"] != status or self.record[key] is None
+                    or outcome.to_dict()["result_ref"] != digest(self.record[key])):
+                raise PlanError("Komodo retained terminal decision lacks original evidence")
             raise PlanError("Komodo retained terminal decision requires original native-owner reconciliation")
         pending = [name for name in ("good", "failed")
                    if type(self.record[name]) is dict and self.record[name].get(
