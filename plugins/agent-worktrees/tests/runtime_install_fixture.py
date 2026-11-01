@@ -43,17 +43,9 @@ def isolate_account_profile(
         ), encoding="utf-8")
     shell_context = plugin / "scripts" / "installation-context" / "installation-context.sh"
     source = shell_context.read_text(encoding="utf-8")
-    lookup = 'CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"'
+    lookup = 'canonical_path_into CURRENT_PROFILE_HOME "$home_path" true || return'
     assert source.count(lookup) == 1
     shell_context.write_text(source.replace(
         lookup,
-        f'CURRENT_PROFILE_HOME="$(canonical_path {shlex.quote(str(home))} true)"',
-    ), encoding="utf-8")
-    powershell_context = plugin / "scripts" / "installation-context" / "installation-context.ps1"
-    source = powershell_context.read_text(encoding="utf-8")
-    lookup = "$passwdHome = [CePosixAccount]::Home()"
-    assert source.count(lookup) == 1
-    quoted_home = "'" + str(home).replace("'", "''") + "'"
-    powershell_context.write_text(source.replace(
-        lookup, "$passwdHome = " + quoted_home,
+        f'canonical_path_into CURRENT_PROFILE_HOME {shlex.quote(str(home))} true || return',
     ), encoding="utf-8")
