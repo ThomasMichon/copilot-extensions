@@ -1306,6 +1306,21 @@ work. The project's own per-project state directory (`~/.<project>`) is left
 in place; remove it by hand, or with `uninstall --project <name>
 --remove-config --yes`, once it's no longer needed.
 
+A normal refusal is a **claims bounce**, not an instruction to add `--force`.
+It names active worktree records and their locally recorded unsettled resources,
+then directs the agent to inspect `--project <project> claims <worktree-id>`
+with the same selected executable. Help the rightful owners finish the work,
+merge PRs through their required review flow, settle resource obligations,
+and use normal `finalize` before retrying unregister. Keep the unregister
+request open until closure; do not automatically abandon work or kill sessions.
+The explicit `--force` path still bypasses this local gate, but its warning
+makes clear that removing registration does not settle the outstanding work.
+
+These diagnostics reuse the existing local active-record census; they do not
+perform a live process/remote-provider scan or auto-finalize anything. No new
+CLI arguments, JSON protocol, checkout-overlay cleanup or installed-host
+rollout is introduced by the diagnostic change.
+
 To remove only full project adoption while retaining a related repository's
 editing class, agent preference and repository metadata, use:
 

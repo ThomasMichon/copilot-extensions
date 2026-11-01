@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from agent_procutil import no_window_kwargs
-from agent_worktrees import config as cfg, installer, project_state, related, repos
+from agent_worktrees import config as cfg, installer, project_state, related, repos, tracking
 from test_control_plane_binding_integration import _checkout, _run
 from test_registry_paths import _payload, _select, _stamp
 
@@ -69,6 +69,35 @@ def test_unadopt_preserves_related_repository_and_real_worktree_creation(
     foreign_command.write_text("this PATH command must never be invoked\n", encoding="utf-8")
     monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ["PATH"])
     command = [str(native_command), "--project", "sample"]
+    ledger = state / "worktrees"
+    ledger.mkdir()
+    record = tracking.create_new_record(
+        "pending-worktree", "worktree/pending", str(tmp_path / "pending"),
+        "sample", "test-node", "linux", ledger,
+    )
+    record.resources = [
+        tracking.ResourceClaim(kind="container", ref="unfinished-container"),
+    ]
+    tracking.save_record(record)
+    before = {
+        path: path.read_bytes()
+        for path in (native / "projects.yaml", native / "repos.yaml", record.yaml_path)
+    }
+    refused = subprocess.run(
+        [*command, "unregister", "--keep-repo-entry", "unchanged"],
+        cwd=checkout, capture_output=True, text=True, timeout=25,
+        **no_window_kwargs(),
+    )
+    assert refused.returncode == 1, refused.stderr or refused.stdout
+    assert "claims bounce" in refused.stdout
+    assert "--project sample claims pending-worktree" in refused.stdout
+    assert "unsettled container: unfinished-container" in refused.stdout
+    assert all(path.read_bytes() == contents for path, contents in before.items())
+    assert foreign.read_bytes() == launcher_before
+
+    record.status = "completed"
+    record.resources[0].state = "released"
+    tracking.save_record(record)
     _run([*command, "unregister", "--keep-repo-entry", "unchanged"], checkout)
 
     assert asdict(repos.read_registry().repos["sample"]) == retained
