@@ -164,7 +164,7 @@ def owned_cleanup_failure(error) -> bool:
     """Recognize the canonical error without acquiring the SDK for cheap guards."""
     try:
         from agent_procutil.owned_process import OwnedCleanupError
-    except ImportError:
+    except Exception:
         return False
     return isinstance(error, OwnedCleanupError)
 

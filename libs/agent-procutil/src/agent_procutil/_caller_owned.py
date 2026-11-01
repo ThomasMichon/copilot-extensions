@@ -273,12 +273,10 @@ def run(
                if budget is not None else {}),
         })
         if budget is not None and os.name != "nt" and not borrow_parent_scope:
-            read_deadline = min(
-                time.monotonic() + timeout + budget.cleanup_reserve + .25,
-                budget.execution_deadline,
-            )
-            execution_budget = OwnedExecutionBudget(read_deadline + budget.cleanup_reserve, budget.cleanup_reserve)
-            enclosed = execution_budget.enclosed_budget()
+            target_deadline = min(time.monotonic() + timeout, budget.execution_deadline)
+            capped = OwnedExecutionBudget(target_deadline + budget.cleanup_reserve, budget.cleanup_reserve)
+            enclosed = capped.enclosed_budget()
+            execution_budget = OwnedExecutionBudget(capped.deadline, capped.cleanup_reserve / 2)
             request["budget"] = {"deadline": enclosed.deadline, "cleanup_reserve": enclosed.cleanup_reserve}
         frame = json.dumps(request, ensure_ascii=True, allow_nan=False) + "\n"
         if len(frame) > _MAX_REQUEST:
@@ -329,7 +327,7 @@ def run(
                     str(Path(__file__).resolve().parents[1]), str(reader),
                     *([str(os.getpid())] if sys.platform == "darwin" else []),
                 ],
-                timeout=timeout + (budget.cleanup_reserve + .25 if budget else 0),
+                timeout=timeout + (budget.cleanup_reserve / 2 if budget else 0),
                 input_text=frame, capture=True, pass_fds=(reader,),
                 capture_limits=(6 * (max_stdout_bytes + max_stderr_bytes) + 4096, 65536),
                 confirm_posix_group=True,

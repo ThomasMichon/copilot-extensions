@@ -44,4 +44,6 @@ class OwnedExecutionBudget:
 
     def enclosed_budget(self):
         """Settle and publish a nested owner before this owner's read cutoff."""
-        return OwnedExecutionBudget(self.execution_deadline - .25, self.cleanup_reserve)
+        publication = min(.25, self.cleanup_reserve / 4)
+        reserve = self.cleanup_reserve / 2 - publication
+        return OwnedExecutionBudget(self.execution_deadline + reserve, reserve)

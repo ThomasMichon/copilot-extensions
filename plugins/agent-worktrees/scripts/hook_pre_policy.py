@@ -69,7 +69,7 @@ def execute_owned_observations(payload, raw, load_sibling, merge_decisions):
         return 0
     try:
         __import__("agent_procutil.owned_budget", fromlist=["OwnedExecutionBudget"])
-    except ImportError:
+    except Exception:
         import sys
 
         sys.stdout.write(json.dumps(merge_decisions(initial, unavailable("supersede SDK unavailable"))))
@@ -139,7 +139,7 @@ def decide(
             if name == "pr_supersede_guard.py":
                 try:
                     from agent_procutil.owned_budget import OwnedExecutionBudget
-                except ImportError:
+                except Exception:
                     combined = merge_decisions(combined, unavailable("supersede SDK unavailable"))
                     continue
                 kwargs = {"deadline": execution_deadline, "budget": OwnedExecutionBudget(deadline, 3.0)}

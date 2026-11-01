@@ -42,6 +42,17 @@ def test_observation_owner_uses_guard_tool_and_argument_aliases():
     })
 
 
+def test_cleanup_classifier_does_not_mask_ordinary_sdk_initialization_failure(monkeypatch):
+    import builtins
+    original = builtins.__import__
+    def fail_initialization(name, *args, **kwargs):
+        if name == "agent_procutil.owned_process":
+            raise RuntimeError("fixture unavailable SDK initialization")
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", fail_initialization)
+    assert not guard.owned_cleanup_failure(ValueError("original failure"))
+
+
 # --- core denial ---------------------------------------------------------
 
 def test_close_other_authors_open_pr_denies():

@@ -579,7 +579,8 @@ def test_legacy_aliased_json_keeps_ask_after_cleanup_error(tmp_path):
 
 
 @pytest.mark.parametrize("permission", ["deny", "ask"])
-def test_legacy_main_keeps_cheap_guard_when_sdk_native_admission_unavailable(monkeypatch, tmp_path, capsys, permission):
+@pytest.mark.parametrize("admission", ["native", "initialization"])
+def test_legacy_main_keeps_cheap_guard_when_sdk_native_admission_unavailable(monkeypatch, tmp_path, capsys, permission, admission):
     import importlib.util
     import io
     from types import SimpleNamespace
@@ -605,6 +606,14 @@ def test_legacy_main_keeps_cheap_guard_when_sdk_native_admission_unavailable(mon
     def unavailable():
         raise RuntimeError("fixture unavailable native observation")
     monkeypatch.setattr(owned_process, "require_caller_owned_support", unavailable)
+    if admission == "initialization":
+        import builtins
+        original = builtins.__import__
+        def fail_initialization(name, *args, **kwargs):
+            if name == "agent_procutil.owned_budget":
+                raise RuntimeError("fixture ordinary SDK initialization failure")
+            return original(name, *args, **kwargs)
+        monkeypatch.setattr(builtins, "__import__", fail_initialization)
     monkeypatch.delenv("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({

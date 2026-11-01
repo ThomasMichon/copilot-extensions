@@ -442,6 +442,9 @@ retains its strict owned Job. Ordinary callers keep the existing guardian.
 `budget.enclosed_budget()` places a nested owner's settlement deadline before
 the enclosing read cutoff, reserving a quarter-second for its bounded completion
 frame and retaining cleanup time inside that earlier bound. POSIX callers pass
+The single cleanup reserve is divided between nested and enclosing settlement,
+with publication charged to the nested share; it is not subtracted twice from
+the target's execution allowance. Publication scales down for smaller reserves. POSIX callers pass
 that nested budget to the guardian, also capped by the individual call timeout.
 The target keeps its individual execution allowance; guardian read time adds
 only cleanup/publication allowance within the aggregate deadline. A short

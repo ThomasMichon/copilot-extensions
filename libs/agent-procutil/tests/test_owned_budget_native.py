@@ -163,7 +163,7 @@ def test_slow_guardian_settlement_publishes_pending_output_before_parent_cutoff(
         "exec('original=p._run_owned\\ndef slow(*a,**k):\\n"
         " try:return original(*a,**k)\\n finally:time.sleep(.75)\\np._run_owned=slow');"
         "p._main()")
-    budget = OwnedExecutionBudget.from_timeout(4, cleanup_reserve=1)
+    budget = OwnedExecutionBudget.from_timeout(4, cleanup_reserve=2)
     settled = []
     with pytest.raises(subprocess.TimeoutExpired) as caught:
         run_caller_owned(
@@ -186,6 +186,21 @@ def test_short_individual_timeout_does_not_subtract_aggregate_cleanup_allowance(
     result = run_caller_owned(
         [sys.executable, "-I", "-c", "print('executed')"],
         timeout=1, max_stdout_bytes=4096, max_stderr_bytes=4096, budget=budget,
+    )
+    assert result.stdout.strip() == "executed"
+    assert time.monotonic() < budget.deadline
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="native POSIX guardian")
+def test_short_aggregate_budget_does_not_charge_the_cleanup_reserve_twice():
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_procutil.owned_process import run_caller_owned
+
+    budget = OwnedExecutionBudget.from_timeout(3, cleanup_reserve=2)
+    result = run_caller_owned(
+        [sys.executable, "-I", "-c", "print('executed')"],
+        timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096, budget=budget,
     )
     assert result.stdout.strip() == "executed"
     assert time.monotonic() < budget.deadline
