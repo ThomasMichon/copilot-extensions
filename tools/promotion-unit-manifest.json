@@ -3894,7 +3894,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/launch_progress.py": "b44ba6207d319af74ecbf40a0324ad0126a7415573b15b564b107002f16431c8",
         "libs/installer-engine/installer_engine_footprint.py": "d21294107d14486a23778e075497fec0fa145aff0631680fd9ace6ad7033455d",
         "libs/agent-procutil/src/agent_procutil/python_cache.py": "37e93017af90235d2ce668a98b97a65be18a39ae7ef2435b35d9a778d56c4df2",
-        "tools/promotion_unit_tests/test_python_cache.py": "e5bec0deafd88bc03b35bbd096ed20f320a4dc6539cc7ba5fed656e906685159"
+        "tools/promotion_unit_tests/test_python_cache.py": "14faf58f606d0826c79fc63c90775eb20be9f469541d3d1bfed845a53c80154a"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_engine_footprint.py",

@@ -79,11 +79,7 @@ def test_unrecorded_completion_uses_fresh_external_namespace(cache, tmp_path, ev
 
 @pytest.mark.parametrize("registered", [False, True])
 def test_minimal_loader_keeps_cache_and_cleanup_metadata_without_resident_modules(tmp_path, monkeypatch, registered):
-    package = tmp_path / "minimal"
-    package.mkdir()
-    source = package / "__init__.py"
-    source.write_bytes(SOURCE.with_name("__init__.py").read_bytes())
-    (package / "python_cache.py").write_bytes(SOURCE.read_bytes())
+    source = SOURCE.with_name("__init__.py")
     spec = importlib.util.spec_from_file_location("unit_minimal_procutil", source)
     module = importlib.util.module_from_spec(spec)
     if registered:
