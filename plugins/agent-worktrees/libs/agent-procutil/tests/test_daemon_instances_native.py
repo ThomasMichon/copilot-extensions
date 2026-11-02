@@ -1,11 +1,15 @@
 """Contained real-process qualification; never use an escaped host daemon."""
 
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from functools import lru_cache
 import os
 import json
 import re
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -20,6 +24,89 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1",
     reason="requires the canonical process-tree containment owner",
 )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows security descriptor creation")
+def test_created_private_inventory_entries_use_token_user_owner(tmp_path: Path) -> None:
+    from agent_procutil import _daemon_instance_owner as owner
+    from agent_procutil import _daemon_instance_store as store
+
+    user = owner._current_sids(os.getpid())[0]
+    root = store._root(tmp_path / "private" / "inventory", create=True)
+    identity = "a" * 32
+    record = root / (identity + ".instance")
+    lock = record.with_suffix(".lock")
+    with store._file_lock(lock):
+        store._write(record, {"schema": "1", "instance_id": identity})
+    store._write_cursor(root, identity)
+    for path in (root.parent, root, lock, record, root / ".reconcile.cursor"):
+        user_owned = owner._path_owner_sid(path) == user
+        assert user_owned, "new private inventory entries must have the token user as owner"
+    assert store._read(record)["instance_id"] == identity
+    assert store._read_cursor(root) == identity
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows CRT descriptor handoff")
+def test_created_private_file_preserves_binary_bytes_and_noninheritance(tmp_path: Path) -> None:
+    from agent_procutil import _daemon_instance_owner as owner
+
+    path = tmp_path / "private.bin"
+    data = b"\0\r\n\xff\nraw\rbytes"
+    descriptor = owner.open_private(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+    try:
+        assert not os.get_inheritable(descriptor)
+        assert os.write(descriptor, data) == len(data)
+    finally:
+        os.close(descriptor)
+    assert path.read_bytes() == data
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows concurrent security descriptor creation")
+@pytest.mark.parametrize("kind", ["directory", "file"])
+def test_private_creation_survives_concurrent_cold_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    from agent_procutil import _daemon_instance_owner as owner
+
+    user = owner._current_sids(os.getpid())[0]
+    factory = owner._attributes_type.__wrapped__
+    attributes = owner._creation_attributes
+    cold_misses, creation = threading.Barrier(2), threading.Barrier(2)
+    layouts = []
+
+    @lru_cache(maxsize=1)
+    def cold_layout():
+        layout = factory()
+        layouts.append(layout)
+        cold_misses.wait(timeout=5)
+        return layout
+
+    @contextmanager
+    def interleaved_attributes(*, directory):
+        creation.wait(timeout=5)
+        with attributes(directory=directory) as value:
+            yield value
+
+    monkeypatch.setattr(owner, "_attributes_type", cold_layout)
+    monkeypatch.setattr(owner, "_creation_attributes", interleaved_attributes)
+
+    def create(index):
+        path = tmp_path / f"private-{index}"
+        if kind == "directory":
+            owner.mkdir_private(path)
+            assert path.is_dir()
+        else:
+            descriptor = owner.open_private(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            try:
+                assert not os.get_inheritable(descriptor)
+            finally:
+                os.close(descriptor)
+            assert path.is_file()
+        assert owner._path_owner_sid(path) == user
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        list(workers.map(create, (0, 1)))
+    assert len(layouts) == 2 and layouts[0] is not layouts[1]
 
 
 def test_production_source_ready_and_nonexpiry(tmp_path):
