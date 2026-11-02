@@ -2,44 +2,51 @@
 
 from __future__ import annotations
 
+import socket
 import threading
 import time
+from collections.abc import Callable
+from typing import Any, NoReturn, cast
 
 import pytest
 
 from work_coalescing_singleton.server import _CLOSE_SERVE_WAIT_S, CoalescingServer, Unavailable
 
 
-def _make_server(**kwargs) -> CoalescingServer:
-    kwargs.setdefault("linger_seconds", 0.15)
-    kwargs.setdefault("subscriber_ttl", 0.2)
-    kwargs.setdefault("reap_interval", 0.05)
-    return CoalescingServer(lambda kind, payload: {"kind": kind, **payload}, **kwargs)
+def _make_server(
+    *, linger_seconds: float = 0.15, subscriber_ttl: float = 0.2,
+    reap_interval: float = 0.05, on_idle: Callable[[], None] | None = None,
+) -> CoalescingServer:
+    return CoalescingServer(
+        lambda kind, payload: {"kind": kind, **payload},
+        linger_seconds=linger_seconds, subscriber_ttl=subscriber_ttl,
+        reap_interval=reap_interval, on_idle=on_idle,
+    )
 
 
-def test_identical_key_coalesces_into_one_execution():
+def test_identical_key_coalesces_into_one_execution() -> None:
     calls = []
     gate = threading.Event()
 
-    def compute(kind, payload):
+    def compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         calls.append(payload["n"])
         gate.wait(timeout=2)
         return {"echo": payload["n"]}
 
     server = CoalescingServer(compute, linger_seconds=0.1)
     try:
-        results = {}
+        results: dict[str, dict[str, Any]] = {}
 
-        def owner():
+        def owner() -> None:
             results["owner"] = server.handle_request("k", "same-key", {"n": 1}, time.time() + 5)
 
         t = threading.Thread(target=owner)
         t.start()
         time.sleep(0.1)  # let the owner grab the in-flight slot before the joiner arrives
 
-        joiner_result = None
+        joiner_result: dict[str, Any] | None = None
 
-        def joiner():
+        def joiner() -> None:
             nonlocal joiner_result
             joiner_result = server.handle_request("k", "same-key", {"n": 2}, time.time() + 5)
 
@@ -57,10 +64,10 @@ def test_identical_key_coalesces_into_one_execution():
         server.close()
 
 
-def test_distinct_keys_never_coalesced():
+def test_distinct_keys_never_coalesced() -> None:
     calls = []
 
-    def compute(kind, payload):
+    def compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         calls.append(payload["n"])
         return {"n": payload["n"]}
 
@@ -75,18 +82,18 @@ def test_distinct_keys_never_coalesced():
         server.close()
 
 
-def test_expired_deadline_raises_unavailable_without_blocking_owner():
+def test_expired_deadline_raises_unavailable_without_blocking_owner() -> None:
     gate = threading.Event()
 
-    def compute(kind, payload):
+    def compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         gate.wait(timeout=2)
         return {"ok": True}
 
     server = CoalescingServer(compute, linger_seconds=0.1)
     try:
-        owner_result = {}
+        owner_result: dict[str, dict[str, Any]] = {}
 
-        def owner():
+        def owner() -> None:
             owner_result["r"] = server.handle_request("k", "slow", {}, time.time() + 5)
 
         t = threading.Thread(target=owner)
@@ -103,7 +110,7 @@ def test_expired_deadline_raises_unavailable_without_blocking_owner():
         server.close()
 
 
-def test_owner_own_deadline_is_enforced_after_compute_completes():
+def test_owner_own_deadline_is_enforced_after_compute_completes() -> None:
     """Copilot review finding: the owner path never checked its own
     ``deadline`` after ``_compute`` finished, so a slow computation could
     run past the caller's request budget and still return a (late) result
@@ -113,16 +120,16 @@ def test_owner_own_deadline_is_enforced_after_compute_completes():
     call raises ``Unavailable``."""
     release = threading.Event()
 
-    def compute(kind, payload):
+    def compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         release.wait(timeout=5)
         return {"ok": True}
 
     server = CoalescingServer(compute, linger_seconds=0.1)
     try:
-        owner_result: dict = {}
-        owner_error: dict = {}
+        owner_result: dict[str, dict[str, Any]] = {}
+        owner_error: dict[str, bool] = {}
 
-        def owner():
+        def owner() -> None:
             try:
                 owner_result["r"] = server.handle_request("k", "slow", {}, time.time() + 0.1)
             except Unavailable:
@@ -132,7 +139,7 @@ def test_owner_own_deadline_is_enforced_after_compute_completes():
         t.start()
         time.sleep(0.05)  # let the owner register as the in-flight owner first
 
-        def releaser():
+        def releaser() -> None:
             # Fires well after the owner's own 0.1s deadline has elapsed,
             # but well before the joiner's 5s one -- proving the owner sees
             # Unavailable while the joiner still gets the real result.
@@ -151,10 +158,10 @@ def test_owner_own_deadline_is_enforced_after_compute_completes():
         server.close()
 
 
-def test_compute_error_is_raised_to_every_joiner():
+def test_compute_error_is_raised_to_every_joiner() -> None:
     gate = threading.Event()
 
-    def compute(kind, payload):
+    def compute(kind: str, payload: dict[str, Any]) -> NoReturn:
         gate.wait(timeout=2)
         raise RuntimeError("boom")
 
@@ -162,7 +169,7 @@ def test_compute_error_is_raised_to_every_joiner():
     try:
         owner_exc = {}
 
-        def owner():
+        def owner() -> None:
             try:
                 server.handle_request("k", "err", {}, time.time() + 5)
             except RuntimeError as exc:
@@ -174,7 +181,7 @@ def test_compute_error_is_raised_to_every_joiner():
 
         joiner_exc = {}
 
-        def joiner():
+        def joiner() -> None:
             try:
                 server.handle_request("k", "err", {}, time.time() + 5)
             except RuntimeError as exc:
@@ -193,7 +200,7 @@ def test_compute_error_is_raised_to_every_joiner():
         server.close()
 
 
-def test_close_admission_rejects_new_requests_with_reason_but_keeps_socket_usable():
+def test_close_admission_rejects_new_requests_with_reason_but_keeps_socket_usable() -> None:
     """``close_admission`` is the single-shot-caller admission-discipline
     contract: a new (never-before-admitted) request must be rejected with
     the structured ``reason`` immediately, without affecting an execution
@@ -205,15 +212,15 @@ def test_close_admission_rejects_new_requests_with_reason_but_keeps_socket_usabl
     """
     gate = threading.Event()
 
-    def compute(kind, payload):
+    def compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         gate.wait(timeout=2)
         return {"ok": True}
 
     server = CoalescingServer(compute, linger_seconds=0.1)
     try:
-        owner_result = {}
+        owner_result: dict[str, dict[str, Any]] = {}
 
-        def owner():
+        def owner() -> None:
             owner_result["r"] = server.handle_request("k", "in-flight", {}, time.time() + 5)
 
         t = threading.Thread(target=owner)
@@ -235,7 +242,7 @@ def test_close_admission_rejects_new_requests_with_reason_but_keeps_socket_usabl
         server.close()
 
 
-def test_open_admission_reverses_close_admission_on_a_still_live_server():
+def test_open_admission_reverses_close_admission_on_a_still_live_server() -> None:
     server = _make_server()
     try:
         server.close_admission("superseded")
@@ -249,7 +256,7 @@ def test_open_admission_reverses_close_admission_on_a_still_live_server():
         server.close()
 
 
-def test_refcount_linger_fires_only_after_last_release():
+def test_refcount_linger_fires_only_after_last_release() -> None:
     idle = threading.Event()
     server = _make_server(on_idle=idle.set)
     try:
@@ -265,7 +272,7 @@ def test_refcount_linger_fires_only_after_last_release():
         server.close()
 
 
-def test_new_subscribe_cancels_pending_linger():
+def test_new_subscribe_cancels_pending_linger() -> None:
     idle = threading.Event()
     server = _make_server(on_idle=idle.set, linger_seconds=0.2)
     try:
@@ -279,7 +286,7 @@ def test_new_subscribe_cancels_pending_linger():
         server.close()
 
 
-def test_active_handler_count_starts_at_zero():
+def test_active_handler_count_starts_at_zero() -> None:
     server = _make_server()
     try:
         assert server.active_handler_count() == 0
@@ -287,7 +294,9 @@ def test_active_handler_count_starts_at_zero():
         server.close()
 
 
-def test_active_handler_count_is_decremented_when_request_delegation_fails(monkeypatch):
+def test_active_handler_count_is_decremented_when_request_delegation_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """copilot-extensions#3798 round-4 review finding: `ThreadingMixIn.
     process_request` only creates and starts the handler thread -- if THAT
     itself raises (e.g. `Thread.start()` failing under OS thread
@@ -299,19 +308,21 @@ def test_active_handler_count_is_decremented_when_request_delegation_fails(monke
 
     server = _make_server()
     try:
-        def _raise(self, request, client_address):
+        def _raise(
+            self: socketserver.ThreadingMixIn, request: object, client_address: tuple[str, int],
+        ) -> NoReturn:
             raise RuntimeError("simulated thread-creation failure")
 
         monkeypatch.setattr(socketserver.ThreadingMixIn, "process_request", _raise)
         assert server.active_handler_count() == 0
         with pytest.raises(RuntimeError):
-            server._server.process_request(object(), ("127.0.0.1", 0))
+            server._server.process_request(cast(socket.socket, object()), ("127.0.0.1", 0))
         assert server.active_handler_count() == 0
     finally:
         server.close()
 
 
-def test_liveness_reap_drops_stale_subscriber_and_goes_idle():
+def test_liveness_reap_drops_stale_subscriber_and_goes_idle() -> None:
     idle = threading.Event()
     server = _make_server(on_idle=idle.set, subscriber_ttl=0.1, reap_interval=0.05)
     server.start()  # the reap loop only runs once started
@@ -325,7 +336,7 @@ def test_liveness_reap_drops_stale_subscriber_and_goes_idle():
         server.close()
 
 
-def test_touch_keeps_a_fire_and_forget_caller_alive():
+def test_touch_keeps_a_fire_and_forget_caller_alive() -> None:
     idle = threading.Event()
     server = _make_server(on_idle=idle.set, subscriber_ttl=0.3, reap_interval=0.05)
     server.start()  # the reap loop only runs once started
@@ -339,7 +350,9 @@ def test_touch_keeps_a_fire_and_forget_caller_alive():
         server.close()
 
 
-def test_close_after_a_failed_serve_thread_launch_never_blocks():
+def test_close_after_a_failed_serve_thread_launch_never_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Copilot review finding: the previous single ``_started`` flag was
     set to ``True`` *before* ``self._serve_thread.start()`` ran, so a
     ``.start()`` failure (e.g. OS thread-creation exhaustion) left
@@ -351,17 +364,17 @@ def test_close_after_a_failed_serve_thread_launch_never_blocks():
     server = _make_server()
     real_start = threading.Thread.start
 
-    def _boom(self):
+    def _boom(self: threading.Thread) -> None:
         if self.name == "work-coalescing-singleton":
             raise RuntimeError("simulated thread-creation failure")
         return real_start(self)
 
-    threading.Thread.start = _boom
+    monkeypatch.setattr(threading.Thread, "start", _boom)
     try:
         with pytest.raises(RuntimeError):
             server.start()
     finally:
-        threading.Thread.start = real_start
+        monkeypatch.setattr(threading.Thread, "start", real_start)
     assert server._serve_started is False
     assert server._reap_started is False
     # The regression itself: this must return promptly, never hang.
@@ -371,7 +384,9 @@ def test_close_after_a_failed_serve_thread_launch_never_blocks():
     assert not close_thread.is_alive(), "close() hung waiting on a never-started server"
 
 
-def test_close_after_serve_thread_dies_before_confirming_running_never_blocks():
+def test_close_after_serve_thread_dies_before_confirming_running_never_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Copilot review finding: the sibling test above only exercises
     ``Thread.start()`` itself raising, which leaves ``_serve_started``
     ``False`` -- ``close()`` then short-circuits the ``_serve_started and
@@ -385,7 +400,7 @@ def test_close_after_serve_thread_dies_before_confirming_running_never_blocks():
     never hang waiting on a loop that will never confirm running."""
     server = _make_server()
 
-    def _dies_immediately(poll_interval):
+    def _dies_immediately(poll_interval: float) -> NoReturn:
         raise RuntimeError("simulated early serve_forever failure")
 
     # `self._serve_thread` was constructed in `__init__` with
@@ -393,7 +408,7 @@ def test_close_after_serve_thread_dies_before_confirming_running_never_blocks():
     # `server._server.serve_forever` afterwards would not affect that
     # already-captured target, so the substitute must replace the thread's
     # own `_target` instead for the injected failure to actually run.
-    server._serve_thread._target = _dies_immediately
+    monkeypatch.setattr(server._serve_thread, "_target", _dies_immediately)
     server.start()
     assert server._serve_started is True
     assert server._reap_started is True
@@ -407,7 +422,9 @@ def test_close_after_serve_thread_dies_before_confirming_running_never_blocks():
     assert elapsed < _CLOSE_SERVE_WAIT_S + 2, "close() should not wait meaningfully longer than its own bound"
 
 
-def test_close_never_calls_shutdown_on_a_thread_that_died_after_confirming_running():
+def test_close_never_calls_shutdown_on_a_thread_that_died_after_confirming_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Copilot review finding: ``_serve_running`` is a one-way readiness
     event -- once ``service_actions()`` sets it, it stays set even if the
     serve thread has since died on its own. If ``close()`` trusted that
@@ -417,14 +434,18 @@ def test_close_never_calls_shutdown_on_a_thread_that_died_after_confirming_runni
     server = _make_server()
     shutdown_calls: list[None] = []
     real_shutdown = server._server.shutdown
-    server._server.shutdown = lambda: shutdown_calls.append(None) or real_shutdown()
+    def shutdown() -> None:
+        shutdown_calls.append(None)
+        real_shutdown()
 
-    def _confirms_running_then_dies(poll_interval):
+    monkeypatch.setattr(server._server, "shutdown", shutdown)
+
+    def _confirms_running_then_dies(poll_interval: float) -> None:
         server._serve_running.set()
 
     # See the sibling test above for why the thread's own `_target` (not
     # `server._server.serve_forever`) must be replaced.
-    server._serve_thread._target = _confirms_running_then_dies
+    monkeypatch.setattr(server._serve_thread, "_target", _confirms_running_then_dies)
     server.start()
     assert server._serve_started is True
     server._serve_thread.join(timeout=2)
@@ -437,7 +458,9 @@ def test_close_never_calls_shutdown_on_a_thread_that_died_after_confirming_runni
     assert shutdown_calls == [], "close() must not call shutdown() against an already-dead serve loop"
 
 
-def test_close_after_a_failed_reap_thread_launch_still_stops_the_serve_loop():
+def test_close_after_a_failed_reap_thread_launch_still_stops_the_serve_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The other half of the same finding: if the serve thread starts fine
     but the *reap* thread's own launch fails, close() must still properly
     shut down and join the serve loop that IS actually running (not treat
@@ -446,17 +469,17 @@ def test_close_after_a_failed_reap_thread_launch_still_stops_the_serve_loop():
     server = _make_server()
     real_start = threading.Thread.start
 
-    def _boom(self):
+    def _boom(self: threading.Thread) -> None:
         if self.name == "work-coalescing-singleton-reaper":
             raise RuntimeError("simulated thread-creation failure")
         return real_start(self)
 
-    threading.Thread.start = _boom
+    monkeypatch.setattr(threading.Thread, "start", _boom)
     try:
         with pytest.raises(RuntimeError):
             server.start()
     finally:
-        threading.Thread.start = real_start
+        monkeypatch.setattr(threading.Thread, "start", real_start)
     assert server._serve_started is True
     assert server._reap_started is False
     close_thread = threading.Thread(target=server.close)
@@ -466,7 +489,9 @@ def test_close_after_a_failed_reap_thread_launch_still_stops_the_serve_loop():
     assert not server._serve_thread.is_alive()  # actually shut down, not leaked
 
 
-def test_start_itself_closes_a_partially_started_server_before_reraising():
+def test_start_itself_closes_a_partially_started_server_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Copilot review finding: if the reap thread's launch fails after the
     serve thread already started, the server would otherwise be left
     accepting connections with no owner -- several existing consumers (e.g.
@@ -479,17 +504,17 @@ def test_start_itself_closes_a_partially_started_server_before_reraising():
     server = _make_server()
     real_start = threading.Thread.start
 
-    def _boom(self):
+    def _boom(self: threading.Thread) -> None:
         if self.name == "work-coalescing-singleton-reaper":
             raise RuntimeError("simulated thread-creation failure")
         return real_start(self)
 
-    threading.Thread.start = _boom
+    monkeypatch.setattr(threading.Thread, "start", _boom)
     try:
         with pytest.raises(RuntimeError):
             server.start()
     finally:
-        threading.Thread.start = real_start
+        monkeypatch.setattr(threading.Thread, "start", real_start)
 
     # No explicit close() call here at all -- start() must have already
     # torn everything down on its own.
@@ -497,7 +522,9 @@ def test_start_itself_closes_a_partially_started_server_before_reraising():
     assert not server._serve_thread.is_alive()
 
 
-def test_close_racing_start_between_thread_launch_and_flag_assignment_is_serialized():
+def test_close_racing_start_between_thread_launch_and_flag_assignment_is_serialized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Copilot review finding: ``close()`` could previously run entirely
     between ``self._serve_thread.start()`` succeeding and the following
     ``self._serve_started = True`` -- observing ``_serve_started`` still
@@ -512,7 +539,7 @@ def test_close_racing_start_between_thread_launch_and_flag_assignment_is_seriali
     entered_gap = threading.Event()
     release_gap = threading.Event()
 
-    def _gated_start(self):
+    def _gated_start(self: threading.Thread) -> None:
         result = real_start(self)
         if self.name == "work-coalescing-singleton":
             # Simulate close() racing exactly in the gap between the serve
@@ -522,7 +549,7 @@ def test_close_racing_start_between_thread_launch_and_flag_assignment_is_seriali
             release_gap.wait(timeout=5)
         return result
 
-    threading.Thread.start = _gated_start
+    monkeypatch.setattr(threading.Thread, "start", _gated_start)
     try:
         start_thread = threading.Thread(target=server.start)
         start_thread.start()
@@ -553,14 +580,16 @@ def test_close_racing_start_between_thread_launch_and_flag_assignment_is_seriali
         assert not server._serve_thread.is_alive()
         assert not server._reap_thread.is_alive()
     finally:
-        threading.Thread.start = real_start
+        monkeypatch.setattr(threading.Thread, "start", real_start)
         release_gap.set()
 
 
 @pytest.mark.filterwarnings(
     "ignore::pytest.PytestUnhandledThreadExceptionWarning"
 )
-def test_close_does_not_call_shutdown_before_serve_forever_is_confirmed_running(monkeypatch):
+def test_close_does_not_call_shutdown_before_serve_forever_is_confirmed_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Copilot review finding: ``Thread.start()`` returning successfully
     only proves the OS thread object was created, not that
     ``serve_forever()`` has actually begun executing yet -- and even once
@@ -590,7 +619,7 @@ def test_close_does_not_call_shutdown_before_serve_forever_is_confirmed_running(
     gate = threading.Event()
     real_service_actions = server._server.service_actions
 
-    def _delayed_service_actions():
+    def _delayed_service_actions() -> None:
         gate.wait(timeout=5)  # simulates a real scheduling delay
         if server._closed:
             return
@@ -617,7 +646,7 @@ def test_close_does_not_call_shutdown_before_serve_forever_is_confirmed_running(
         server._serve_thread.join(timeout=1)
 
 
-def test_close_shuts_down_promptly_once_serve_forever_is_confirmed_running():
+def test_close_shuts_down_promptly_once_serve_forever_is_confirmed_running() -> None:
     """The other side of the same guard: once ``_serve_running`` IS set (a
     real ``start()``), ``close()`` must still promptly call ``shutdown()``
     and actually stop the loop -- the bounded wait must never itself

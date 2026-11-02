@@ -1,0 +1,21 @@
+{
+  "comment": "Admit all canonical Work Coalescing Singleton source and tests to strict MyPy without changing wire or lifecycle behavior.",
+  "changes": [
+    {
+      "plugin": "work-coalescing-singleton",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
