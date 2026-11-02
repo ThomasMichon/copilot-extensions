@@ -19,7 +19,7 @@ from agent_worktrees.control_plane_providers import _ControlPlaneProviderManifes
 Provider = Callable[[str], _ControlPlaneProviderManifest]
 
 
-def test_engine_callback_preserves_source_and_reuses_external_cache(
+def test_engine_callback_preserves_source_with_fresh_unsealed_external_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent_procutil import no_window_kwargs
@@ -55,13 +55,17 @@ def test_engine_callback_preserves_source_and_reuses_external_cache(
         value = json.loads(result.stdout)
         assert value["args"] == ["--project", "example"] and value["value"] == 7
         assert snapshot(slot) == before
-        assert Path(value["prefix"]).samefile(root / "cache" / "python")
+        prefix = Path(value["prefix"])
+        assert prefix.parent.samefile(root / "cache" / "python")
+        assert prefix.name.startswith("unsealed-")
         cache = snapshot(root / "cache" / "python")
         assert any("payload." in name and name.endswith(".pyc") for name in cache)
         if attempt == 0:
             cold = cache
+            cold_prefix = prefix
         else:
-            assert cache == cold
+            assert prefix != cold_prefix
+            assert all(cache[name] == entry for name, entry in cold.items())
     assert os.environ.get("PYTHONPYCACHEPREFIX") == previous_environment
     assert sys.pycache_prefix == previous_prefix
 

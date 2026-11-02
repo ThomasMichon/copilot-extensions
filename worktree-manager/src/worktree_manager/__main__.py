@@ -14,7 +14,11 @@ Everything here is **programmatic and non-agentic**: no AI agent is in the loop.
 
 from __future__ import annotations
 
+from . import terminal_launch as _terminal_launch
+
 if __name__ == "__main__":
+    if _terminal_launch.answer_query():
+        raise SystemExit(0)
     import sys as _entry_sys
 
     if _entry_sys.argv[1:2] == ["--resident-picker"]:
@@ -1340,7 +1344,7 @@ def _execute_launch(req) -> int:
     if getattr(req, "machine", None) is None and plan.action == "exec":
         if script is not None:
             if (
-                _is_windows() and os.environ.get("CE_TERMINAL_LAUNCH")
+                _is_windows() and _terminal_launch.available()
                 and not new_window and not getattr(req, "no_mux", False)
                 and os.environ.get("WORKTREE_NO_MUX") != "1"
             ):
@@ -1541,6 +1545,8 @@ def main(argv: list[str] | None = None) -> int:
               f"{inherited_warning}", file=sys.stderr)
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("--version", "-V"):
+        if _terminal_launch.answer_query(args):
+            return 0
         print(f"worktree-manager {__version__}")
         return 0
     if args and args[0] in ("--help", "-h"):

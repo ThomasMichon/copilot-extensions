@@ -1,0 +1,93 @@
+"""Selected-runtime capability responses, without session or daemon effects."""
+
+import json
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+from agent_worktrees import terminal_launch
+from agent_procutil import owned_process
+
+
+@pytest.mark.parametrize("response", ["current", "legacy", "malformed", "foreign", "failed"])
+def test_foreground_channel_only_reaches_a_supported_selected_receiver(monkeypatch, response, tmp_path):
+    monkeypatch.setattr(terminal_launch, "_channel", "foreground-request")
+    monkeypatch.setattr(terminal_launch, "os", SimpleNamespace(name="nt"))
+    command = ["selected-manager", "fixed-prefix"]
+    pinned = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "worktree_manager"]
+    root = str(tmp_path / "selected-root")
+    environment = {"PATH": "unchanged", "CE_TERMINAL_LAUNCH": "stale-request"}
+    outputs = {
+        "current": json.dumps({
+            "package": "worktree_manager", "capability": terminal_launch.CAPABILITY,
+            "runtime": {"command": pinned, "root": root},
+        }),
+        "legacy": "worktree-manager 0.1.0-dev21\n",
+        "malformed": "{",
+        "foreign": json.dumps({"package": "other", "capability": terminal_launch.CAPABILITY}),
+        "failed": "",
+    }
+
+    def query(argv, **options):
+        assert argv == [*command, "--version"]
+        assert "CE_TERMINAL_LAUNCH" not in options["env"]
+        assert options["env"]["UV_NO_SYNC"] == "1"
+        assert options["timeout"] == 10
+        assert options["max_stdout_bytes"] == options["max_stderr_bytes"] == 4096
+        return SimpleNamespace(returncode=int(response == "failed"), stderr="", stdout=outputs[response])
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", query)
+    if response in {"current", "legacy"}:
+        selected, result = terminal_launch.select_receiver(command, environment)
+        assert selected == (pinned if response == "current" else command)
+        assert result.get("CE_TERMINAL_LAUNCH") == (
+            "foreground-request" if response == "current" else None
+        )
+        assert result["PATH"] == "unchanged"
+        assert environment["CE_TERMINAL_LAUNCH"] == "stale-request"
+        assert result.get("WORKTREE_MANAGER_ROOT") == (root if response == "current" else None)
+    else:
+        with pytest.raises(RuntimeError):
+            terminal_launch.select_receiver(command, environment)
+
+
+def test_no_foreground_offer_does_not_probe_or_reuse_an_inherited_channel(monkeypatch):
+    monkeypatch.setattr(terminal_launch, "_channel", None)
+    monkeypatch.setattr(
+        owned_process, "run_caller_owned",
+        lambda *args, **kwargs: pytest.fail("non-foreground query"),
+    )
+    assert terminal_launch.select_receiver(["selected"], {"CE_TERMINAL_LAUNCH": "stale"}) == (["selected"], {})
+
+
+@pytest.mark.parametrize("damage", ["no-binding", "shell", "extra-argument", "missing-python", "retired-slot", "root"])
+def test_unavailable_or_unbound_runtime_cannot_receive_an_offer(monkeypatch, tmp_path, damage):
+    monkeypatch.setattr(terminal_launch, "_channel", "foreground-request")
+    monkeypatch.setattr(terminal_launch, "os", SimpleNamespace(name="nt"))
+    command = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "worktree_manager"]
+    response = {
+        "package": "worktree_manager", "capability": terminal_launch.CAPABILITY,
+        "runtime": {"command": command, "root": None},
+    }
+    if damage == "no-binding":
+        response.pop("runtime")
+    elif damage == "shell":
+        command[-2:] = ["-c", "launch()"]
+    elif damage == "extra-argument":
+        command.append("--project")
+    elif damage == "missing-python":
+        command[0] = str(tmp_path / "removed-python")
+    elif damage == "retired-slot":
+        bootstrap = tmp_path / "versions" / "retired" / ".runtime-bootstrap" / "runtime_launcher.py"
+        bootstrap.parent.mkdir(parents=True)
+        bootstrap.write_text("", encoding="utf-8")
+        command[5:5] = ["-S", str(bootstrap)]
+    else:
+        response["runtime"]["root"] = "relative-root"
+    monkeypatch.setattr(
+        owned_process, "run_caller_owned",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stderr="", stdout=json.dumps(response)),
+    )
+    with pytest.raises(RuntimeError):
+        terminal_launch.select_receiver(["changing-selector"], {})

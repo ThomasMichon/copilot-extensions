@@ -264,8 +264,6 @@ class Console:
 
 
 def _fixture(root, layer, mode):
-    from worktree_manager import engine_client, terminal_launch
-
     if layer == "outer":
         repository = Path(__file__).resolve().parents[3]
         sys.path[:0] = [
@@ -273,6 +271,9 @@ def _fixture(root, layer, mode):
             *(str(path) for path in (repository / "libs").glob("*/src")),
         ]
         from agent_worktrees import manager_launch_cli
+        from agent_worktrees import terminal_launch as aw_terminal_launch
+
+        assert aw_terminal_launch.available()
 
         # Only engine discovery is synthetic; the forwarding and Job owner run.
         manager_launch_cli._agent_worktrees_launch_command = lambda _: [
@@ -283,10 +284,19 @@ def _fixture(root, layer, mode):
             shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(root / "nested.ps1"),
         ], None)
         raise AssertionError("Windows forwarding unexpectedly returned")
+    from worktree_manager import engine_client, terminal_launch
+
+    if os.environ.get("CE_TERMINAL_LAUNCH"):
+        raise AssertionError("Manager did not capture its foreground channel")
+    if mode == "legacy":
+        (root / "legacy.json").write_text(json.dumps({
+            "channel": terminal_launch.available(), "inherited": os.environ.get("CE_TERMINAL_LAUNCH"),
+        }), encoding="utf-8")
+        return 0
     outer_record = root / "outer.json"
     outer = json.loads(outer_record.read_text(encoding="utf-8"))["pid"] if outer_record.exists() else 0
     (root / "prepared.json").write_text(json.dumps({
-        "pid": os.getpid(), "outer": outer, "request": os.environ["CE_TERMINAL_LAUNCH"],
+        "pid": os.getpid(), "outer": outer, "request": terminal_launch._channel,
     }), encoding="utf-8")
     deadline = time.monotonic() + 20
     while not (root / "release").exists():
@@ -298,7 +308,7 @@ def _fixture(root, layer, mode):
     if mode == "failed":
         return 7
     if mode == "malformed":
-        request = Path(os.environ["CE_TERMINAL_LAUNCH"])
+        request = Path(terminal_launch._channel)
         (request.parent / "result.json").write_text("{}", encoding="utf-8")
         return 0
     engine_client.engine_base_command = lambda: ["fixture-engine", "literal engine"]
@@ -318,4 +328,9 @@ def _fixture(root, layer, mode):
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["query"]:
+        from worktree_manager import terminal_launch
+
+        assert terminal_launch.answer_query(["--version"])
+        raise SystemExit(0)
     raise SystemExit(_fixture(Path(sys.argv[1]), sys.argv[2], sys.argv[3]))

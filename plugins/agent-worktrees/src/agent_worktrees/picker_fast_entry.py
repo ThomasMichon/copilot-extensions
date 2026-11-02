@@ -96,7 +96,9 @@ def dispatch(argv: list[str]) -> int | None:
     environment["PYTHONUTF8"] = "1"
     environment.pop("PYTHONHOME", None)
     environment.pop("UV_INTERNAL__PYTHONHOME", None)
-    if result.get("manager_session"):
+    from .terminal_launch import available
+
+    if result.get("manager_session") and not available():
         from .picker_session_entry import open_session
 
         code = open_session(result, engine_command, environment)
@@ -104,7 +106,10 @@ def dispatch(argv: list[str]) -> int | None:
             return code
     from agent_procutil import spawn_sync_in_kill_on_close_job
 
-    command = [*result["manager_command"], "--project", argv[1]]
+    from .terminal_launch import select_receiver
+
+    selected, environment = select_receiver(result["manager_command"], environment)
+    command = [*selected, "--project", argv[1]]
     try:
         if os.name != "nt":
             os.execvpe(command[0], command, environment)

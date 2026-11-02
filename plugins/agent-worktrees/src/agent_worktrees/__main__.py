@@ -48,7 +48,11 @@ The ``agent-worktrees`` prefix is stripped for SSH compatibility
 
 from __future__ import annotations
 
+from . import terminal_launch as _terminal_launch
+
 if __name__ == "__main__":
+    if _terminal_launch.answer_query():
+        raise SystemExit(0)
     from .current_roster_entry import run_module_if_selected
     run_module_if_selected()
     import sys as _entry_sys

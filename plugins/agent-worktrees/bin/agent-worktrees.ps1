@@ -45,7 +45,7 @@ foreach ($_pyEnvVar in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONEXECUTABLE', 'VIRTUA
 # AGENT_WORKTREES_NO_SELFPROVISION=1 (then falls through to a PATH python).
 $_root = Join-Path $env:USERPROFILE '.agent-worktrees'
 function Invoke-AwTerminalPython {
-    param([string]$Python, [string[]]$PythonArguments)
+    param([string]$Python, [string[]]$PythonArguments, [string[]]$QueryArguments)
     $payload = $_awPayloadRoot
     if (-not (Test-Path -LiteralPath (Join-Path $payload 'plugin.json') -PathType Leaf)) {
         $pointer = Join-Path $_root 'payload-dir'
@@ -58,7 +58,8 @@ function Invoke-AwTerminalPython {
     $hostScript = Join-Path $payload 'bin\terminal-launch.ps1'
     if (Test-Path -LiteralPath $hostScript -PathType Leaf) {
         . $hostScript
-        Invoke-WorktreeTerminalLaunch -Executable $Python -Arguments $PythonArguments
+        Invoke-WorktreeTerminalLaunch -Executable $Python -Arguments $PythonArguments `
+            -QueryArguments $QueryArguments -Package agent_worktrees
     } else {
         & $Python @PythonArguments
     }
@@ -77,12 +78,12 @@ function _resolve_aw_py {
     return $AwPy
 }
 $_py = _resolve_aw_py
-if ($_py) { Invoke-AwTerminalPython $_py (@('-X', "pycache_prefix=$_awPythonCache", '-m', 'agent_worktrees') + $args); exit $LASTEXITCODE }
+if ($_py) { Invoke-AwTerminalPython $_py (@('-X', "pycache_prefix=$_awPythonCache", '-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
 if ($_awUpdateDiagnostic) {
     [Console]::Error.WriteLine('[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.')
     exit 127
 }
-if ($env:AGENT_WORKTREES_NO_SELFPROVISION) { Invoke-AwTerminalPython 'python' (@('-m', 'agent_worktrees') + $args); exit $LASTEXITCODE }
+if ($env:AGENT_WORKTREES_NO_SELFPROVISION) { Invoke-AwTerminalPython 'python' (@('-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
 $_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
@@ -123,6 +124,6 @@ try {
     $mutex.Dispose()
 }
 $_py = _resolve_aw_py
-if ($_py) { Invoke-AwTerminalPython $_py (@('-X', "pycache_prefix=$_awPythonCache", '-m', 'agent_worktrees') + $args); exit $LASTEXITCODE }
+if ($_py) { Invoke-AwTerminalPython $_py (@('-X', "pycache_prefix=$_awPythonCache", '-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
 [Console]::Error.WriteLine('[agent-worktrees] provisioning did not yield a runtime. See the log above; retry, or run the installer manually.')
 exit 1

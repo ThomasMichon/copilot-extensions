@@ -9,10 +9,33 @@ import sys
 from pathlib import Path
 
 ENVIRONMENT = "CE_TERMINAL_LAUNCH"
+CAPABILITY = "ce-terminal-launch-v1"
+_channel = os.environ.pop(ENVIRONMENT, None)
+
+
+def available() -> bool:
+    return bool(_channel)
+
+
+def answer_query(arguments: list[str] | None = None) -> bool:
+    if (sys.argv[1:] if arguments is None else arguments) != ["--version"]:
+        return False
+    if os.environ.pop("CE_TERMINAL_CAPABILITY_QUERY", "") != "1":
+        return False
+    from .warm_picker_contract import runtime_command
+
+    print(json.dumps({
+        "package": "worktree_manager", "capability": CAPABILITY,
+        "runtime": {
+            "command": runtime_command("worktree_manager"),
+            "root": os.environ.get("WORKTREE_MANAGER_ROOT"),
+        },
+    }))
+    return True
 
 
 def prepare(script: Path, arguments: list[str], attempt_id: str | None) -> bool:
-    raw = os.environ.get(ENVIRONMENT)
+    raw = _channel
     if not raw:
         return False
     request = Path(raw)

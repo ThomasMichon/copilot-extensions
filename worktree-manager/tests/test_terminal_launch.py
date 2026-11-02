@@ -20,7 +20,8 @@ def channel(tmp_path, monkeypatch):
     script = tmp_path / "launch session \u65e5.ps1"
     script.write_text("exit 0\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("CE_TERMINAL_LAUNCH", str(request))
+    monkeypatch.setattr(terminal_launch, "_channel", str(request))
+    monkeypatch.delenv("CE_TERMINAL_LAUNCH", raising=False)
     monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
     monkeypatch.delenv("WORKTREE_NO_MUX", raising=False)
     monkeypatch.setattr(engine_client, "engine_base_command", lambda: ["fixture-engine"])
@@ -81,10 +82,10 @@ def test_invalid_request_never_publishes_or_observes(channel, monkeypatch, damag
     request = channel.request
     identity = channel.identity.copy()
     if damage == "relative":
-        monkeypatch.setenv("CE_TERMINAL_LAUNCH", request.name)
+        monkeypatch.setattr(terminal_launch, "_channel", request.name)
     elif damage == "wrong-name":
         request = request.rename(request.with_name("other.json"))
-        monkeypatch.setenv("CE_TERMINAL_LAUNCH", str(request))
+        monkeypatch.setattr(terminal_launch, "_channel", str(request))
     elif damage == "directory":
         request.unlink()
         request.mkdir()
@@ -151,7 +152,7 @@ def test_relocated_launch_prepares_instead_of_spawning_or_waiting(
 
     monkeypatch.setattr(relocated_launch.subprocess, "Popen", popen)
     if not offered:
-        monkeypatch.delenv("CE_TERMINAL_LAUNCH")
+        monkeypatch.setattr(terminal_launch, "_channel", None)
     request = SimpleNamespace(
         project="project with spaces", mode="resume", worktree_id="wt-a",
         attempt_id=None, no_mux=False, new_window=False,
@@ -183,7 +184,7 @@ def test_relocated_launch_prepares_instead_of_spawning_or_waiting(
 def test_without_host_channel_prepare_keeps_legacy_path_without_touching_files(
     channel, monkeypatch,
 ):
-    monkeypatch.delenv("CE_TERMINAL_LAUNCH")
+    monkeypatch.setattr(terminal_launch, "_channel", None)
     assert terminal_launch.prepare(Path("does-not-exist.ps1"), [], None) is False
     assert not channel.result.exists()
     assert channel.events == []

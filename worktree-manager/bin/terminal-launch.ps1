@@ -1,15 +1,121 @@
+function Get-WorktreeTerminalCapability {
+    param([string]$Executable, [string[]]$QueryArguments, [string]$Package)
+    if (-not $QueryArguments.Count -or $Package -notin @('agent_worktrees', 'worktree_manager')) {
+        throw 'Selected runtime terminal query is unavailable.'
+    }
+    $helper = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\scripts\daemon_instances.ps1'))
+    if (-not [IO.File]::Exists($helper)) { throw 'Native terminal query owner is unavailable.' }
+    . $helper
+    $environment = @{}
+    foreach ($entry in [Environment]::GetEnvironmentVariables().GetEnumerator()) {
+        if ([string]$entry.Key -ine 'CE_TERMINAL_LAUNCH') {
+            $environment[[string]$entry.Key] = [string]$entry.Value
+        }
+    }
+    $environment['CE_TERMINAL_CAPABILITY_QUERY'] = '1'
+    $environment['UV_NO_SYNC'] = '1'
+    $environment['UV_OFFLINE'] = '1'
+    $environment['WORKTREE_NO_UPDATE'] = '1'
+    $environment['AGENT_WORKTREES_NO_SELFPROVISION'] = '1'
+    $application = @(Get-Command $Executable -CommandType Application -ErrorAction Stop)[0].Path
+    $result = Invoke-DaemonInstanceRequest -Transient @{command='run-query'; parameters=@{
+        executable=$application; arguments=@($QueryArguments)
+        cwd=[IO.Directory]::GetCurrentDirectory(); environment=$environment
+        timeout_ms=10000; limit=4096
+    }}
+    if ($result.returncode -ne 0 -or $result.stderr) {
+        throw 'Selected runtime terminal capability query failed; no launch was admitted.'
+    }
+    $text = $result.stdout.Trim()
+    $legacy = if ($Package -ceq 'worktree_manager') {
+        '\Aworktree-manager [0-9]+\.[0-9]+\.[0-9]+(?:-dev[0-9]+)?\z'
+    } else {
+        '\Aagent-worktrees [0-9?]+\.[0-9?]+\.[0-9?]+(?:-dev[0-9]+)?  ' +
+        'commit (?:[0-9a-f]{1,10}|unknown)  branch [^\r\n]+  built [^\r\n]+' +
+        '(?:\r?\ndeployed [^\r\n]+)?\z'
+    }
+    if ($text -cmatch $legacy) { return $false }
+    $response = $text | ConvertFrom-Json -ErrorAction Stop
+    $propertyCount = if ($Package -ceq 'worktree_manager') { 3 } else { 2 }
+    if ($response.package -cne $Package -or $response.capability -cne 'ce-terminal-launch-v1' -or
+        @($response.PSObject.Properties).Count -ne $propertyCount) {
+        throw 'Selected runtime returned an invalid terminal capability.'
+    }
+    if ($Package -ceq 'worktree_manager') {
+        $binding = $response.runtime
+        $command = $binding.command
+        if ($null -eq $binding -or @($binding.PSObject.Properties).Count -ne 2 -or
+            @($binding.PSObject.Properties.Name | Where-Object { $_ -cnotin @('command', 'root') }).Count -or
+            $command -isnot [array] -or $command.Count -notin @(7, 9) -or
+            @($command | Where-Object { $_ -isnot [string] -or -not $_ -or $_.Contains([char]0) }).Count -or
+            -not [IO.Path]::IsPathRooted($command[0]) -or -not [IO.File]::Exists($command[0]) -or
+            ($command[1..4] -join ',') -cne '-I,-B,-X,utf8' -or
+            ($command[-2..-1] -join ',') -cne '-m,worktree_manager' -or
+            ($null -ne $binding.root -and
+                ($binding.root -isnot [string] -or $binding.root.Contains([char]0) -or
+                    -not [IO.Path]::IsPathRooted($binding.root)))) {
+            throw 'Selected runtime returned an invalid runtime binding.'
+        }
+        if ($command.Count -eq 9) {
+            $bootstrap = $command[6]
+            $directory = [IO.Path]::GetDirectoryName($bootstrap)
+            $slot = [IO.Path]::GetDirectoryName($directory)
+            if ($command[5] -cne '-S' -or -not [IO.Path]::IsPathRooted($bootstrap) -or
+                -not [IO.File]::Exists($bootstrap) -or
+                [IO.Path]::GetFileName($bootstrap) -cne 'runtime_launcher.py' -or
+                [IO.Path]::GetFileName($directory) -cne '.runtime-bootstrap' -or
+                [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($slot)) -cne 'versions' -or
+                -not [IO.File]::Exists((Join-Path $slot '.install-complete.json'))) {
+                throw 'Selected runtime is no longer available.'
+            }
+        }
+    }
+    return $true
+}
+
 function Invoke-WorktreeTerminalLaunch {
     param(
         [Parameter(Mandatory)][string]$Executable,
-        [Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Arguments
+        [Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Arguments,
+        [string[]]$QueryArguments = @(),
+        [string]$Package = ''
     )
 
     # Native failures remain exit results, matching the previous child shell.
     $PSNativeCommandUseErrorActionPreference = $false
 
-    # Nested dispatchers share the outer terminal's one-shot return channel.
-    if ($env:CE_TERMINAL_LAUNCH -or [Console]::IsInputRedirected) {
+    $inherited = $env:CE_TERMINAL_LAUNCH
+    Remove-Item Env:CE_TERMINAL_LAUNCH -ErrorAction SilentlyContinue
+    if ([Console]::IsInputRedirected -and -not $inherited) {
         & $Executable @Arguments
+        return
+    }
+    try {
+        if ($inherited) {
+            $item = Get-Item -LiteralPath $inherited -ErrorAction Stop
+            if (-not [IO.Path]::IsPathRooted($inherited) -or $item.Name -cne 'request.json' -or
+                $item.PSIsContainer -or $item.Length -gt 4096 -or
+                ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw 'Invalid inherited terminal launch request.'
+            }
+            $identity = [IO.File]::ReadAllText($inherited) | ConvertFrom-Json
+            if (($identity.version -isnot [int] -and $identity.version -isnot [long]) -or
+                $identity.version -cne 1 -or $identity.nonce -isnot [string] -or
+                $identity.nonce -cnotmatch '\A[0-9a-f]{32}\z' -or
+                ($identity.host_pid -isnot [int] -and $identity.host_pid -isnot [long]) -or
+                $identity.host_pid -le 0) { throw 'Invalid inherited terminal launch identity.' }
+        }
+        $supported = Get-WorktreeTerminalCapability $Executable $QueryArguments $Package
+        if ($inherited -or -not $supported) {
+            try {
+                if ($supported) { $env:CE_TERMINAL_LAUNCH = $inherited }
+                & $Executable @Arguments
+            } finally { Remove-Item Env:CE_TERMINAL_LAUNCH -ErrorAction SilentlyContinue }
+            return
+        }
+    } catch {
+        [Console]::Error.WriteLine("Terminal query admission failed: $($_.Exception.Message)")
+        $global:LASTEXITCODE = 1
         return
     }
 

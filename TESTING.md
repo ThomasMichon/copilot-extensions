@@ -29,6 +29,21 @@ qualification, not a full engine/Copilot launch, installed rollout, live-session
 migration or shared Manager-daemon inventory. The packet does not enter required
 unit-only CI.
 
+The same packet now checks actual selected-runtime capability responses,
+explicit legacy execution without an offer, malformed/unavailable queries,
+stale inherited offers and current Worktrees forwarding to a legacy Manager.
+Native queries use the existing finite owner, never the selected target's
+possibly older process utility. The separate
+`agent-procutil --test-file tests/test_native_owned.py --allow-explicit-tiers -k transient_native_query`
+packet pins real query targets across success, output overflow and deadline
+expiry on PowerShell 5.1 and 7. Its transient helper leaves the original
+shell's global instance guard untouched.
+Cold/warm terminal-query measurements report real elapsed time and birth-pinned
+observed process names; the external sampler is an honest lower bound, not an
+exhaustive count of short-lived interpreter trampolines. Query helpers and
+targets are transient, and attachment still requires zero persistent Python
+forwarders. These are source-boundary controls, not installed rollout proof.
+
 The manual `Installation context full` workflow's `komodo-recovery` portfolio
 runs one bounded Linux job at the exact dispatch SHA. It exercises the existing
 native subprocess protocol fixture, real physical-owner locks, immutable

@@ -490,7 +490,7 @@ else:
             . $terminalHost
             Invoke-WorktreeTerminalLaunch -Executable $Python -Arguments (
                 @('-X', "pycache_prefix=$selectedCache", '-m', 'agent_worktrees') + $forwardArgs
-            )
+            ) -QueryArguments @('-I', '-B', '-m', 'agent_worktrees', '--version') -Package agent_worktrees
         } else {
             & $Python -X "pycache_prefix=$selectedCache" -m agent_worktrees @forwardArgs
         }

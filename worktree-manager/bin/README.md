@@ -11,13 +11,35 @@ of the `worktree-manager-control-plane` effort.
   (mux session creation/attach, profile selection, seed injection, handoff
   cutover argv), then call `agent-worktrees post-exit` for finalization.
 - `terminal-launch.ps1` - the foreground Windows shell's finite Picker handoff.
-  At an interactive native entry it offers a version-1 `CE_TERMINAL_LAUNCH`
+  At an interactive native entry it first queries the actual selected execution
+  runtime using its fixed, effect-free `--version` route, never appending a
+  negotiation flag after operator arguments. Under the private query environment,
+  a current runtime returns an explicit package/capability response; a supported
+  legacy version response retains execution without a channel. Native finite
+  capture bounds each stream to 4096 bytes and the target to ten seconds,
+  confirms descendant retirement, and closes its transient transport helper
+  before admission. Missing, malformed or failed queries cannot admit a launch
+  or silently install, retry or replay it. The query does add transient Python
+  startup work; it is not a zero-discovery path.
+  After positive support it offers a version-1 `CE_TERMINAL_LAUNCH`
   return channel before invoking Python. A capable Manager returns its prepared
   local mux launch, then exits. Only after preparation has returned and its
   Python-owned Jobs have closed does the outer shell consume the one-shot result
   and invoke `launch-session.ps1` in its own PowerShell process. Nested entry
   points share that outer channel rather than attaching inside another Python
-  waiter. The existing launcher retains attach-return, detach/exit and terminal
+  waiter, but independently selected receivers also query their actual runtime
+  before receiving it. Worktrees additionally probes its selected Manager through
+  the existing read-only version route before forwarding. The response includes
+  that executing Manager's isolated module command and scoped state root.
+  Worktrees launches this pinned command, not the resolving front door a second
+  time: advancing the current-version selector cannot redirect the offer to an
+  older receiver. A numbered runtime reacquires its existing slot-local retention
+  lease before site imports; removal during the query/execution gap fails the
+  launch rather than selecting another slot or replaying it.
+  Each current Python
+  front door captures and removes the offer before any resident, worker or pane
+  child can inherit it. An active malformed/expired offer is an admission error,
+  not permission for another session. The existing launcher retains attach-return, detach/exit and terminal
   cleanup duties; neither forwarding interpreter is a session-lifetime host.
   The consumed result and request directory are removed before attachment;
   literal argv arrays are splatted without shell evaluation or flattening.
@@ -38,9 +60,9 @@ of the `worktree-manager-control-plane` effort.
   exit results inside the helper, rather than inheriting a caller's
   native-error-as-exception preference; that caller preference is unchanged
   when the helper returns.
-  The response itself negotiates version 1 against the outer shell's request;
+  The prepared response correlates version 1 against the outer shell's request;
   no new command-line option is sent to an older runtime. A missing helper,
-  older Manager that returns no prepared result, redirected stdin, explicit
+  explicitly unsupported Manager, redirected stdin without an active offer, explicit
   Python invocation, no-mux and remote paths retain their existing behavior
   and cannot be credited with removing both forwarding roles. New-window launch
   remains separately owned. POSIX keeps native process replacement.

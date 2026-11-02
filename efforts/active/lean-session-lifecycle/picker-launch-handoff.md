@@ -3,7 +3,7 @@
 - **Parent:** [Lean Session Lifecycle](README.md), Phase 3
 - **Tracking:** #5579; no duplicate implementation owner or umbrella issue
 - **Created:** 2026-11-01
-- **Status:** Active; query-admission amendment reviewed, implementation pending
+- **Status:** Active; query admission implemented and source-qualified, publication pending
 - **Vision:** `visions/plugin-services/README.md` - transient callbacks and
   removal of session-scaled wait-only forwarding processes
 
@@ -144,7 +144,7 @@ reviewed admission revision is implemented and qualified.
 
 ### Slice 2 - Remove the two Python forwarding roles
 
-- [ ] Implement selected-runtime support discovery and foreground-only channel
+- [x] Implement selected-runtime support discovery and foreground-only channel
   propagation, preserving unsupported-peer legacy behavior.
 - [x] Implement the shell-owned preparation-to-attachment handoff for ordinary
   local Windows creation and resume, including existing-session joins.
@@ -166,13 +166,13 @@ reviewed admission revision is implemented and qualified.
 
 ## Validation Plan
 
-- [ ] Actual selected-runtime support, not latest-payload metadata, gates the
+- [x] Actual selected-runtime support, not latest-payload metadata, gates the
   channel. Both mixed-version directions preserve legacy operation without
   leaking a request into later sessions.
-- [ ] Queries are effect-free for current/legacy peers, bounded and owned;
+- [x] Queries are effect-free for current/legacy peers, bounded and owned;
   missing/malformed/unavailable results, timeout and failed cleanup cannot
   admit handoff or silently trigger installation, retry or a second session.
-- [ ] No channel reaches resident or pane children. Repeated/concurrent later
+- [x] No channel reaches resident or pane children. Repeated/concurrent later
   launches cannot reuse an expired offer after foreground completion.
 - [ ] Cold/warm capability-query measurements classify every transient process
   and retain the zero persistent-forwarder requirement after attachment.
@@ -359,3 +359,39 @@ reviewed admission revision is implemented and qualified.
   implementation slice.
 - The implementation remains drafted. This completes the admission-plan review
   gate, not capability implementation, source qualification, release or rollout.
+
+### 2026-11-02 - Selected-runtime admission qualified
+
+- The shell queries the selected native runtime through an early, effect-free
+  `--version` branch before offering the foreground channel. The existing
+  finite process owner limits each stream to 4096 bytes and target execution
+  to ten seconds, settles its child tree and closes the private transient
+  transport before returning. No new daemon, installer, network bootstrap,
+  Task or UAC path is introduced.
+- Worktrees queries its independently selected Manager before forwarding.
+  Manager returns its isolated module command and scoped state root;
+  Worktrees executes that pinned command rather than resolving the front door
+  again. A native test advances the selector to a legacy receiver immediately
+  after the query and still reaches the queried runtime. Removing completion
+  after selection instead fails at the existing slot-local retention bootstrap
+  before receiver execution, with no fallback or second session.
+- Current/legacy, both mixed-version directions, malformed/nonzero/stale
+  responses, repeated offers and both Worktrees front doors pass the isolated
+  native controls. The 23-case native packet includes the selector race and
+  query/execution lease gap; the 233-case Worktrees packet covers admission,
+  ordinary routing, resident bootstrap and provider-session entry. Earlier
+  owned-output, overflow and timeout controls pass under PowerShell 5 and 7.
+  These packets overlap; their counts are not additive coverage.
+- The final direct query sample measured 1384.30 ms cold and 777.30 ms warm.
+  Birth-pinned polling observed three Python processes and two console hosts
+  per query, all retired before admission. These are lower bounds: short-lived
+  trampolines may fall between samples. Exhaustive transient attribution
+  remains open; the supported attachment still retains zero Python processes
+  in either forwarding role. This is not a zero-discovery claim.
+- Fresh synthetic numbered runtimes and native terminal boundaries exercise
+  the source contract without touching installed runtimes. A full real-engine
+  Copilot launch, installed singleton inventory and replacement survival are
+  not exercised here: authorized installed proof remains with parent Phase 4 /
+  #5579, and the existing #8669 owner keeps its copied-shell/lifecycle scope.
+  Source review, required CI, promotion and installed rollout remain distinct.
+  No runtime was deployed, live session changed or deployment hold lifted.
