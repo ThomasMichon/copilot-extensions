@@ -17,6 +17,44 @@ machine scope. Browsing and refreshing are read-only and run off the UI thread:
 they do not install prerequisites, start services/workers, request credentials
 or enroll automatic maintenance.
 
+### Automatic update controls
+
+The same workspace has two independently confirmed local controls:
+
+| Row | Existing policy and scope |
+|-----|---------------------------|
+| **Automatic software updates** | The shared default-installation bootstrap KillSwitch. Allowing updates clears its named central/legacy switch files through the canonical controller; an explicit state-file override remains isolated. The confirmation shows affected paths. This control is not applicable to an independent installation cell. |
+| **Launch-time maintenance** | Manager's existing `[maintenance] automatic` boolean, default `true`. This also permits automatic housekeeping, repair and monitor startup, so it remains separate from the software-update switch. Changes preserve unrelated TOML and refuse stale views. |
+
+```toml
+[maintenance]
+automatic = false
+```
+
+Enabled means permission from that control, not a running worker. Details show
+effective automatic-update admission and independent blockers. Allowing one
+control never clears the other, starts an update, enrolls recurring maintenance
+or stops work already admitted. Missing/unreadable/invalid controller state is
+visible; an invalid legacy switch retains its documented fail-open reader
+semantics rather than being presented as a reliable pause.
+
+Automatic software updates after Manager startup and before worktree
+creation/resume use the canonical `<repo> update --auto` path. Normal launches
+submit without blocking first paint; explicit blocking mode waits on the same
+owner. `--no-update` and non-update reconciliation retain their separate
+meaning. There is no competing stage/apply installer.
+
+Plain user or agent `<repo> update` calls, including explicit component updates,
+do not consult these automation vetoes and need no force flag. They retain
+normal installation/re-entrancy, source, privilege and interruption checks.
+The execution owner re-reads applicable automatic policy before a pending
+automatic request starts: a veto retains a durable exit-3 result with no product
+runner, not a successful skip. Queued work is not replayed merely by enabling
+the setting. See the [execution contract](../../libs/update-driver/README.md#automatic-update-killswitch-and-explicitmanual-admission)
+for worker/version-skew and installation-scope behavior.
+
+### Maintained components and explicit updates
+
 The table distinguishes delivered **Payload**, **Selected runtime**, **Observed
 running**, enablement and durable update activity. A deployment marker is not
 running-service proof. Manager's running version describes the querying process,

@@ -8,6 +8,10 @@ be a shared runtime import. To keep one source of truth, the canonical copy
 lives at ``libs/bootstrap-killswitch/`` and this script vendors it,
 **byte-identically**, into every adopting plugin's ``scripts/`` dir.
 
+The standalone Manager also ships the unchanged controller pair for its
+explicit Configuration actions; that does not add a bootstrap hook or another
+policy store.
+
 Opt-in criterion (mirrors ``sync-versioned-runtime.py``'s resolver fan-out):
 a plugin adopts by already carrying a ``scripts/bootstrap-check.sh`` (its
 sessionStart hook). The guard is vendored alongside it so that hook's own
@@ -120,6 +124,12 @@ def main(argv: list[str] | None = None) -> int:
         for plugin in plugins
         for name in GUARD_NAMES
     ]
+    manager = (REPO / "worktree-manager/pyproject.toml").is_file()
+    if manager:
+        pairs.extend(
+            (canonical_bytes[name], REPO / "worktree-manager/scripts" / name)
+            for name in GUARD_NAMES
+        )
 
     pretool = CANONICAL_DIR / "pretool_killswitch.py"
     if not pretool.is_file():
@@ -147,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
             dest.chmod(dest.stat().st_mode | 0o111)
         written.append(rel)
 
-    scope = f"{len(plugins)} plugins"
+    scope = f"{len(plugins)} plugins" + (" and standalone Manager" if manager else "")
     call_site_gaps = _call_site_gaps(plugins)
     for entry, marker in (
         ("plugins/agent-worktrees/scripts/hook_client.py", "switch.is_active()"),

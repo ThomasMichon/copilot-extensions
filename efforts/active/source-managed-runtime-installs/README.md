@@ -547,12 +547,12 @@ matrix; no schedule or cadence is enabled by this plan.
 The [bounded control refinement](automatic-update-control.md) extends the
 existing maintenance and installation workspace owners, not another updater.
 
-- [ ] Review the automatic-control intent and validation plan before implementation.
-- [ ] Expose the applicable existing automatic-update control and independent
+- [x] Review the automatic-control intent and validation plan before implementation (#10056).
+- [x] Implement the applicable existing automatic-update control and independent
   maintenance veto in Configuration / Installation & Updates with truthful
   scope, persistence, errors and an actionable ON/OFF interaction.
-- [ ] Route automatic software updates after Manager startup and before
-  worktree creation/resume through canonical `<repo> update --auto`, preserving
+- [x] Implement canonical automatic software-update routing after Manager startup and before
+  worktree creation/resume through `<repo> update --auto`, preserving
   origin through queued execution and retaining the existing single executor.
 - [ ] Prove that disabling automatic updates blocks only automatic requests;
   explicit user/agent and selected-component updates retain their ordinary
@@ -560,6 +560,11 @@ existing maintenance and installation workspace owners, not another updater.
 - [ ] Qualify UI cancellation/persistence, queued policy changes, both launcher
   adapters and supported mixed-version behavior; update owner docs and land
   the bounded source through normal review and required CI.
+
+Local source qualification and its explicit platform/publication limits are
+recorded in the [control refinement](automatic-update-control.md#implementation-and-qualification).
+The implementation rows above do not credit native rollout or the parent
+maintenance/adoption gate.
 
 ### Phase 4b - Durable installation execution driver
 The [execution-driver slice](execution-driver.md), tracked by #7758, separates

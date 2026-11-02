@@ -3185,6 +3185,24 @@ and PR-deadline owners are substituted. Their existing closed source/import
 cohort and production coverage targets are positively admitted; no Git, child,
 workspace mutation, tool staging or native launch is represented by these units.
 Those effectful counterparts remain in the bounded Worktrees development packet.
+
+The ten units in `tools/promotion_unit_tests/test_automatic_update_policy.py`
+exercise the actual shared automatic-policy function bodies without importing
+the native execution owner. Their source AST, strict automatic/manual identity,
+queued-policy predicate, optional legacy parser dispatch, independent-cell scope
+and actual read-only Manager controls are source-bound in the same packet.
+The early bootstrap control binds its explicit addressed root rather than an
+ambient default and preserves the mandatory veto with an older policy reader.
+Controller discovery is inert in these units; no worker, shell, installer or
+desktop actor starts. The separate Manager
+`test_installation_maintenance_control.py`,
+`test_installation_automatic_updates.py` and production Configuration tests
+exercise real TOML persistence, canonical switch-controller effects, payload
+delivery, confirmation/cancellation and refresh in private fixtures. The existing
+`test_launch_update_requests.py` matrix executes each available native shell
+against a synthetic engine, retaining `--auto`, strict unsupported-flag refusal,
+single submission and separate no-update behavior. Platform skips are not native
+qualification, and the consoleless desktop observer remains a separate opt-in.
 The retained lifecycle deadline and guardian-pair units substitute their native
 Windows path-owner/file-open boundaries, retaining actual cleanup/deadline and
 byte-reader logic. Native ownership and file-sharing custody are not unit evidence.

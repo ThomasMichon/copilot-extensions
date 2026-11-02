@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import codecs
 import json
+import importlib
 import math
 import os
 import re
@@ -174,11 +175,38 @@ def _spec_document(spec: RequestSpec) -> dict:
     return document
 
 
-def _automatic_update_inhibited(spec: RequestSpec) -> bool:
+def automatic_update_refusal(spec: RequestSpec) -> str | None:
+    """Read applicable automation vetoes; explicit updates never consult them."""
     # Older Manager/engine update requests retained flags without the verb.
     update = spec.argv[:1] == ("update",) or spec.backend in {"manager", "engine"}
-    if not update or "--auto" not in spec.argv or dict(spec.context).get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
-        return False
+    if not update or "--auto" not in spec.argv:
+        return None
+    context = dict(spec.context)
+    cell = bool(context.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
+    manager_root = context.get("WORKTREE_MANAGER_ROOT")
+    if not cell or manager_root or spec.backend == "manager":
+        path = (Path(manager_root).expanduser() if manager_root else Path.home() / ".worktree-manager") / "config.toml"
+        try:
+            content = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            content = None
+        except (OSError, UnicodeError) as error:
+            return f"Manager automatic-maintenance policy unavailable: {error}; nothing ran"
+        if content is not None:
+            try:
+                parser = importlib.import_module("tomllib" if sys.version_info >= (3, 11) else "tomli")
+                policy = parser.loads(content).get("maintenance", {})
+                if (
+                    not isinstance(policy, dict) or policy.keys() - {"automatic"}
+                    or type(policy.get("automatic", True)) is not bool
+                ):
+                    raise ValueError("maintenance.automatic must be a boolean")
+                if not policy.get("automatic", True):
+                    return "Manager maintenance.automatic is false; automatic update not run"
+            except (ModuleNotFoundError, ValueError) as error:
+                return f"Manager automatic-maintenance policy invalid or unsupported: {error}; nothing ran"
+    if cell:
+        return None
     override = spec.killswitch_path
     try:
         base = Path.home() / ".copilot-extensions"
@@ -188,11 +216,11 @@ def _automatic_update_inhibited(spec: RequestSpec) -> bool:
         with path.open("rb") as stream:
             data = stream.read(65537)
     except FileNotFoundError:
-        return False
+        return None
     except OSError as error:
         print(f"[bootstrap-killswitch] unreadable state; automatic update allowed: "
               f"{type(error).__name__}", file=sys.stderr)
-        return False
+        return None
     try:
         if len(data) > 65536:
             raise ValueError("state exceeds size limit")
@@ -201,8 +229,12 @@ def _automatic_update_inhibited(spec: RequestSpec) -> bool:
             raise ValueError("state requires a boolean active field")
     except (UnicodeError, ValueError):
         print("[bootstrap-killswitch] invalid state; automatic update allowed", file=sys.stderr)
-        return False
-    return state["active"]
+        return None
+    return "automatic-update KillSwitch active; nothing ran" if state["active"] else None
+
+
+def _automatic_update_inhibited(spec: RequestSpec) -> bool:
+    return automatic_update_refusal(spec) is not None
 
 
 def _runner(runner: TrustedRunner) -> TrustedRunner:
@@ -791,8 +823,8 @@ def drain(
                     db.commit()
                     return 0
                 request = _request(row, root)
-                if _automatic_update_inhibited(request.spec):
-                    reason = "automatic-update KillSwitch active; nothing ran"
+                reason = automatic_update_refusal(request.spec)
+                if reason is not None:
                     db.execute(
                         """UPDATE requests SET state='completed',exit_code=3,error=?,
                         finished_at=? WHERE id=?""",

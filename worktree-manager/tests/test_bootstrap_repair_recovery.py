@@ -264,6 +264,6 @@ def test_native_bootstrap_preserves_hold_path_before_staging(tmp_path, monkeypat
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     adapter = self_install._runtime_installer()
     assert adapter._automatic_bootstrap_inhibited(SimpleNamespace(
-        payload=INSTALLER.parents[1], command=["update", "--auto"],
+        payload=INSTALLER.parents[1], root=root, command=["update", "--auto"],
     ))
     assert json.loads(hold.read_text()) == {"active": True}

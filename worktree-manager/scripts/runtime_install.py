@@ -463,20 +463,39 @@ def _bootstrap_hold_path() -> str:
     return os.path.abspath(os.path.expanduser(override)) if override else ""
 
 
-def _automatic_bootstrap_inhibited(args) -> bool:
+def _automatic_bootstrap_refusal(args) -> str | None:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if command[:1] != ["update"]:
-        return False
+        return None
     from worktree_manager.update_driver_cli import parse_options, request_context
 
     options, _forwarded = parse_options(command[1:])
     if not options.auto:
-        return False
+        return None
     driver = _execution_driver(args.payload)
-    return driver._automatic_update_inhibited(driver.RequestSpec(
-        "manager-bootstrap", ("update", "--auto"), context=tuple(request_context().items()),
+    request = driver.RequestSpec(
+        "manager-bootstrap", ("update", "--auto"),
+        context=tuple({**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}.items()),
         killswitch_path=_bootstrap_hold_path(),
-    ))
+    )
+    reader = getattr(driver, "automatic_update_refusal", None)
+    if callable(reader):
+        return reader(request)
+    from worktree_manager.manager_config import ManagerConfigError, load_config
+
+    try:
+        if not load_config(args.root).maintenance.automatic:
+            return "Manager maintenance.automatic is false; automatic update not run"
+    except ManagerConfigError as error:
+        return f"Manager automatic-maintenance policy unavailable: {error}; nothing ran"
+    return (
+        "automatic-update KillSwitch active; nothing ran"
+        if driver._automatic_update_inhibited(request) else None
+    )
+
+
+def _automatic_bootstrap_inhibited(args) -> bool:
+    return _automatic_bootstrap_refusal(args) is not None
 
 
 def _foreground_install(args, driver) -> Path | int:
@@ -844,8 +863,9 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as error:
             print(f"Runtime source: {error}", file=sys.stderr)
             return 1
-    if _automatic_bootstrap_inhibited(args):
-        print("automatic-update KillSwitch active; nothing ran", file=sys.stderr)
+    refusal = _automatic_bootstrap_refusal(args)
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
         return 3
     if os.name == "nt":
         driver = _execution_driver(args.payload)

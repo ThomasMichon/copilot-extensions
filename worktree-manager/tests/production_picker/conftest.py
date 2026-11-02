@@ -162,7 +162,12 @@ def _isolate_agent_worktrees_home(tmp_path_factory):
     # network one). Redirect it alongside the fake home so every test is
     # fully sandboxed from this machine's actual installed state.
     os.environ["WORKTREE_MANAGER_ROOT"] = str(fake_home / ".worktree-manager")
-    pathlib.Path.home = classmethod(lambda cls: fake_home)
+    home_key = "USERPROFILE" if os.name == "nt" else "HOME"
+    home_type = type(fake_home)
+    # Explicit fixture profiles must agree with their real subprocesses.
+    pathlib.Path.home = classmethod(
+        lambda cls: home_type(os.environ.get(home_key) or str(fake_home)),
+    )
     try:
         yield fake_home
     finally:

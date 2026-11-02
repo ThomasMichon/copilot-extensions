@@ -157,6 +157,9 @@ def request_context() -> dict[str, str]:
         accepted = inherited_engine_command()
         if accepted is not None:
             context[ENGINE_ARGV_ENV] = json.dumps(accepted)
+    from .source_config import default_root
+
+    context["WORKTREE_MANAGER_ROOT"] = str(default_root().resolve())
     return context
 
 
@@ -327,10 +330,11 @@ def cmd_update_request(rest: list[str]) -> int:
                 for name in ("detach", "wait", "supervised_debug", "json")
                 if getattr(options, name)
             ]
-            return engine_client.run_engine_passthrough(
-                project, ["update", "--no-manager", *arguments, *observer],
-                **({"headless": True} if options.detach else {}),
-            )
+            with _request_environment(request_context()):
+                return engine_client.run_engine_passthrough(
+                    project, ["update", "--no-manager", *arguments, *observer],
+                    **({"headless": True} if options.detach else {}),
+                )
         project, _args = extract_project(forwarded)
         context = request_context()
         _update_context_directory(context)

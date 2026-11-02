@@ -47,6 +47,52 @@ def test_readonly_absent(area):
     assert not root.exists()
 
 
+def test_manager_policy_rechecks_queued_auto_without_blocking_manual(area):
+    manager = area / "manager"
+    manager.mkdir()
+    path = manager / "config.toml"
+    path.write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    context = (("WORKTREE_MANAGER_ROOT", str(manager)),)
+    automatic = sample(area, argv=("update", "--auto"), context=context)
+    manual = sample(area, argv=("update",), context=context)
+    path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    observed = []
+    assert drain(root=area / "state", executor=lambda tx: observed.append(tx.request.id) or 0) == 0
+    assert observed == [manual.id]
+    refused = status(automatic.id, root=area / "state")
+    assert refused.exit_code == 3 and refused.started_at is None
+    assert "maintenance.automatic is false" in refused.error
+    assert status(manual.id, root=area / "state").exit_code == 0
+
+
+@pytest.mark.parametrize("content", ["[", "[maintenance]\nautomatic = 'false'\n"])
+def test_invalid_manager_policy_blocks_only_explicitly_automatic_work(area, content):
+    from update_driver.core import automatic_update_refusal
+
+    manager = area / "manager"
+    manager.mkdir()
+    (manager / "config.toml").write_text(content, encoding="utf-8")
+    context = (("WORKTREE_MANAGER_ROOT", str(manager)),)
+    assert automatic_update_refusal(RequestSpec("engine", ("--auto",), context=context))
+    assert automatic_update_refusal(RequestSpec("engine", (), context=context)) is None
+
+
+def test_manager_policy_preserves_unrelated_cell_scope(area, monkeypatch):
+    from pathlib import Path
+    from update_driver.core import automatic_update_refusal
+
+    monkeypatch.setattr(Path, "home", lambda: area)
+    manager = area / ".worktree-manager"
+    manager.mkdir()
+    (manager / "config.toml").write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    cell = (("COPILOT_EXTENSIONS_CONTEXT", "separate-cell"),)
+    assert automatic_update_refusal(RequestSpec("engine", ("--auto",), context=cell)) is None
+    addressed = (*cell, ("WORKTREE_MANAGER_ROOT", str(manager)))
+    assert "maintenance.automatic is false" in automatic_update_refusal(
+        RequestSpec("engine", ("--auto",), context=addressed),
+    )
+
+
 def test_killswitch_retires_pending_normal_work_but_executes_repair(area, monkeypatch, capsys):
     root = area / "state"
     switch = area / "killswitch.json"

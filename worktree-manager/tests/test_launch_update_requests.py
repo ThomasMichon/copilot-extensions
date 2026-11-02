@@ -100,10 +100,10 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
         "args=sys.argv[1:]\n"
         f"if {mode!r}!='no-project':\n"
         " assert args[:2]==['--project','fixture-project']; args=args[2:]\n"
-        "assert args[:2] in [['launch-update','automatic'],['launch-update','bootstrap'],['launch-update','staged'],['launch-update','reconcile']]\n"
+        "assert args[:1]==['update'] or args[:2]==['launch-update','automatic']\n"
         "assert '--auto' in args\n"
         f"if {mode!r}=='old-engine':\n"
-        " print('unrecognized command: launch-update',file=sys.stderr); sys.exit(2)\n"
+        " print('unrecognized arguments: --auto',file=sys.stderr); sys.exit(2)\n"
         "print('native-progress',file=sys.stderr,flush=True)\n"
         f"if {mode!r}=='worker-refused':\n"
         " print(json.dumps(dict(ok=False,reason='update-driver',message='worker launch failed: DaemonSpawnError'))); sys.exit(1)\n"
@@ -211,24 +211,18 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
         assert "Automatic maintenance not admitted" in report
         assert ("disabled" if mode == "maintenance-off" else "blocked") in report
         return
-    if mode == "wait":
-        assert observed[0] == ["launch-update", "bootstrap", "--auto", "--defer-worktrees"]
-        expected_stage = ["launch-update", "staged", "--auto", "--status", str(stage)]
-        assert observed[-1] == expected_stage
-        assert ["launch-update", "reconcile", "--auto"] in observed
-        assert len(observed) == 3
+    if mode == "no-update":
+        expected = ["launch-update", "automatic", "--auto", "--no-update", "--with-reconcile", "--detach"]
     else:
-        expected = ["launch-update", "automatic", "--auto", "--detach"]
-        if mode == "no-update":
-            expected += ["--no-update"]
-        if mode != "no-reconcile":
-            expected += ["--with-reconcile"]
-        assert observed == [expected]
+        expected = ["update", "--auto", "--wait" if mode == "wait" else "--detach"]
+        if mode == "no-reconcile":
+            expected += ["--skip-modules"]
+    assert observed == [expected]
     report = log.read_text(encoding="utf-8-sig")
     if mode == "old-engine":
-        assert "unrecognized command: launch-update" in report
+        assert "unrecognized arguments: --auto" in report
         assert "failed (exit 2)" in report
-        assert all(call[0] == "launch-update" for call in observed)
+        assert all(call[0] == "update" for call in observed)
     elif mode == "worker-refused":
         assert "worker launch failed: DaemonSpawnError" in report
         assert "failed (exit 1)" in report

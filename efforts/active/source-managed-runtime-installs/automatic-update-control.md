@@ -17,12 +17,12 @@ existing Manager workspace. Preserve explicit automatic origin through the
 canonical updater and its durable execution. Automation policy is not a veto
 on manual updates and does not require the user to force a normal update.
 
-## Current source and scope
+## Baseline and scope
 
 The existing OFF toast comes from the Picker's post-binding
 `maintenance.automatic` check. That Manager-local veto also suppresses
 automatic housekeeping and monitor/repair activity; it is not just an update
-flag. The Installation & Updates workspace currently offers component details
+flag. The Installation & Updates workspace offered component details
 and explicit updates but no control for that veto.
 
 The default installation also has the existing shared bootstrap KillSwitch,
@@ -43,22 +43,22 @@ setup and release owners retain their unrelated work.
 
 ## Plan
 
-- [ ] Review and merge this bounded intent before code changes.
-- [ ] Extend the existing Installation & Updates interaction so the operator
+- [x] Review and merge this bounded intent before code changes (#10056).
+- [x] Extend the existing Installation & Updates interaction so the operator
   can inspect and change supported local automatic-update controls, with
   effective ON/OFF state, target scope and any independent blocker visible.
-- [ ] Reuse existing policy persistence and admission rather than a shadow
+- [x] Reuse existing policy persistence and admission rather than a shadow
   switch. Preserve the general Manager audit veto and default-installation
   KillSwitch semantics, defaults and cell isolation.
-- [ ] Route actual automatic software updates through `<repo> update --auto`
+- [x] Route actual automatic software updates through `<repo> update --auto`
   using the existing Manager/project adapter and durable execution owner.
   Keep the automatic marker through forwarding, detachment and execution.
-- [ ] Re-read applicable policy at automatic effect admission, including work
+- [x] Re-read applicable policy at automatic effect admission, including work
   queued before a disable; do not terminate an already admitted update.
-- [ ] Preserve direct CLI, agent and selected-component update semantics
+- [x] Preserve direct CLI, agent and selected-component update semantics
   without adding `--auto`, requiring force, bypassing single-writer custody
   or letting the automation setting block their normal path.
-- [ ] Make ordinary disabled state actionable in Configuration rather than a
+- [x] Make ordinary disabled state actionable in Configuration rather than a
   dead-end toast; preserve visible configuration and execution errors.
 - [ ] Add focused tests and owner documentation, publish the source with
   required changefiles, and drive independent review/CI through merge.
@@ -87,3 +87,33 @@ different effectful CLI form.
 Use temporary test-owned configuration and synthetic update effects.
 No live setting change, background enrollment, desktop/window observation,
 service operation or rollout is authorized by this source refinement.
+
+## Implementation and qualification
+
+The source implements two independently confirmed existing controls: the
+default-installation bootstrap KillSwitch and Manager's broader launch-time
+maintenance veto. The first invokes the unchanged canonical shell/PowerShell
+controllers shipped in Manager's own payload; it has no Machines runtime
+dependency or shadow state. Independent cells cannot edit that global hold.
+The second edits only the existing TOML preference with stale-view checks and
+preserved unrelated values/comments. Neither action starts an update or worker.
+
+Automatic software updates use the existing project/Manager `update --auto`
+seam and one durable execution owner, with optional detached or blocking
+observation. Explicit updates retain their original admission, engine-target
+identity and re-entrancy behavior. Actual queued automatic requests re-read
+applicable policy before becoming running and keep a non-success receipt
+when inhibited; active work is not retrospectively terminated.
+
+Local qualification includes real private-fixture controller changes and
+payload copies, production virtual Configuration confirmation/cancellation and
+refresh, queue/manual/scope controls, and the available Bash argument matrix.
+Initial source qualification passed the 3,674-case actor-free packet with 465 bound sources, 214
+production coverage targets, coverage once and no observed effects inside its
+unchanged 300-second budget. The additional early-bootstrap addressed-root
+regression is included in the final current-source packet rather than credited
+to that earlier result. All 21 currently admitted strict typing projects
+pass Linux and Windows static views; pending projects are not thereby admitted.
+Actual Windows shell execution, independent implementation review/required CI
+and normal source merge remain explicit publication gates. No local result
+qualifies desktop behavior, an installed update or the complete parent effort.

@@ -88,6 +88,13 @@ reconcile mid-diagnosis just as easily as never having the switch at all, with
 no way for the operator to know it happened. `status` always shows who set
 it, when, and why, so a forgotten switch is discoverable rather than silent.
 
+Manager's [Installation & Updates controls](../../worktree-manager/docs/configuration.md#automatic-update-controls)
+also expose this same default-installation switch. Its payload carries the
+unchanged canonical controller pair through `sync-bootstrap-killswitch.py`;
+the UI does not require the Machines runtime or create another state file.
+Manager's broader launch-time maintenance veto remains a separate control,
+and an independent namespaced cell cannot edit this default-installation hold.
+
 ## Known limitations
 
 - **Does not stop an already-in-flight reconcile.** The switch only ever

@@ -48,7 +48,10 @@ def inventory(tmp_path, monkeypatch):
 
 def test_complete_inventory_separates_known_payload_runtime_and_running(inventory):
     rows = {row["id"]: row for row in ui.inventory()["entries"]}
-    assert set(rows) == {"worktree-manager", "guide", "absent"}
+    assert set(rows) == {
+        "worktree-manager", "guide", "absent", "manager-automatic-maintenance",
+        "default-automatic-updates",
+    }
     assert rows["worktree-manager"]["selected"] == "1"
     assert "daemon unknown" in rows["worktree-manager"]["running"]
     assert rows["guide"]["payload"] == "2"
@@ -79,7 +82,11 @@ def test_malformed_owner_keeps_manager_and_unknown_components_inspectable(invent
 def test_history_failure_is_unknown_not_idle_or_success(inventory, monkeypatch):
     monkeypatch.setattr(ui, "_operations", lambda **kwargs: (_ for _ in ()).throw(ValueError("unreadable journal")))
     rows = ui.inventory()["entries"]
-    assert all(row["activity"] == "unknown" for row in rows)
+    assert all(
+        row["activity"] == "unknown" for row in rows
+        if row["id"] not in {"manager-automatic-maintenance", "default-automatic-updates"}
+    )
+    assert next(row for row in rows if row.get("maintenance_control"))["activity"] == "allowed"
     assert "unreadable journal" in rows[0]["card"]["body"]
 
 
@@ -263,11 +270,11 @@ def test_engine_history_is_attributed_only_to_selected_execution_source(inventor
     monkeypatch.setattr(ui.engine_client, "run_json", lambda *a, **k: {
         "contract": 1, "execution_source": "/selected/engine", "entries": [dict(inventory)],
     })
-    assert ui.inventory()["entries"][1]["activity"] == "running"
+    assert next(row for row in ui.inventory()["entries"] if row["id"] == "guide")["activity"] == "running"
     request.state, request.exit_code = "completed", 1
-    assert ui.inventory()["entries"][1]["activity"] == "failed"
+    assert next(row for row in ui.inventory()["entries"] if row["id"] == "guide")["activity"] == "failed"
     request.spec.source = "/other/engine"
-    assert ui.inventory()["entries"][1]["activity"] == "idle"
+    assert next(row for row in ui.inventory()["entries"] if row["id"] == "guide")["activity"] == "idle"
 
 
 def test_durable_submission_uses_existing_owner_not_an_observer_queue(inventory, monkeypatch, tmp_path, capsys):
@@ -288,9 +295,9 @@ def test_durable_submission_uses_existing_owner_not_an_observer_queue(inventory,
 
 
 def test_refreshed_inventory_uses_owner_version_not_receipt_success(inventory):
-    assert ui.inventory()["entries"][1]["payload"] == "2"
+    assert next(row for row in ui.inventory()["entries"] if row["id"] == "guide")["payload"] == "2"
     inventory["payload"] = "3"
-    assert ui.inventory()["entries"][1]["payload"] == "3"
+    assert next(row for row in ui.inventory()["entries"] if row["id"] == "guide")["payload"] == "3"
 
 
 @pytest.mark.parametrize("suite_budget", [None, "120"])
