@@ -693,8 +693,12 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
     report = None if os.environ.get("AGENT_CONTAINERS_CONFIG") else _configuration_report()
     if report is not None:
         from configuration_context import context_from_owner
+        from configuration_layers import ConfigurationError
 
-        context_from_owner(report)
+        context = context_from_owner(report)
+        if context["binding"] == "bound" and not Path(context["knowledge_root"]).is_dir():
+            # A malformed explicit binding is a refusal, never optional absence.
+            raise ConfigurationError("bound knowledge root is not a directory")
     path = _config_path() if report is None else Path(report["context"]["base_root"])
     fragments = plugin_config.discover_plugin_fragments(
         repository=(

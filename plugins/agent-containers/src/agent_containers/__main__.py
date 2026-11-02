@@ -392,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
             return dispatch_workspace_command(args)
         if args.command == "relay-profile":
             return _cmd_relay_profile()
-    except RuntimeError as e:
+    except (RuntimeError, ValueError) as e:  # ValueError: configuration refusals
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
