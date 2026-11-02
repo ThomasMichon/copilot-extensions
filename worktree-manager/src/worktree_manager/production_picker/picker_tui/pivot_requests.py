@@ -50,6 +50,7 @@ class PivotRequestsMixin:
         with self._lock:
             scopes = tuple(self._cache.keys() | self._inflight) if machine is None else (machine,)
             for scope in scopes:
+                self._refresh_pending.discard(scope)
                 self._resetting_scopes[scope] = self._resetting_scopes.get(scope, 0) + 1
             if machine is None:
                 self._gen += 1
@@ -89,8 +90,6 @@ class PivotRequestsMixin:
 
     def _stop_scope_read(self, machine, *, refetch):
         with self._lock:
-            if not refetch:
-                self._refresh_pending.discard(machine)
             if machine in self._reconnecting_scopes:
                 self._reconnecting_scopes.discard(machine)
                 self._inflight.discard(machine)

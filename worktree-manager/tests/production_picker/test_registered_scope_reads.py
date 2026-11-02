@@ -395,7 +395,7 @@ def test_invalidation_reserves_scope_before_retirement_capture(monkeypatch):
     runtime.invalidate("a")
     wait(lambda: not runtime._scope_retirements)
     assert retired == [old]
-    runtime.ensure("a")
+    wait(lambda: starts == [True])
     assert starts == [True] and runtime._pending_requests[0][0] == "a"
 
 
