@@ -116,6 +116,11 @@ class WorkerBody(BaseModel):
     owner_session_id: str | None = None
 
 
+class StartBody(WorkerBody):
+    expected_generation: int | None = Field(default=None, ge=0, strict=True)
+    expected_owner_session_id: str | None = None
+
+
 class ActivityBody(BaseModel):
     activity: str | None = None
     reservation_key: str

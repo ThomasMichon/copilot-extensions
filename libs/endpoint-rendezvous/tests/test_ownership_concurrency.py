@@ -57,12 +57,12 @@ def test_successor_publication_waits_for_owned_cleanup(
 
     successor = threading.Thread(target=publish, daemon=True)
 
-    def pause_unlink(path: Path, *args: object, **kwargs: object) -> None:
+    def pause_unlink(path: Path, missing_ok: bool = False) -> None:
         if path == endpoint:
             successor.start()
             assert started.wait(5)
             assert not finished.wait(0.2), "successor replaced the checked record before unlink"
-        unlink(path, *args, **kwargs)
+        unlink(path, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "unlink", pause_unlink)
     try:
@@ -99,7 +99,9 @@ def test_reader_allows_independent_publication_and_keeps_its_snapshot(
     if hasattr(rendezvous, "read_endpoint_strict"):
         readers.append(rendezvous.read_endpoint_strict)
     open_endpoint = rendezvous._open_endpoint
-    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    module_file = rendezvous.__file__
+    assert module_file is not None
     for reader in readers:
         runtime = tmp_path / reader.__name__
         rendezvous.write_endpoint(runtime, "tcp", "127.0.0.1:41001", pid=1001)
@@ -108,7 +110,7 @@ def test_reader_allows_independent_publication_and_keeps_its_snapshot(
         def publish_while_open(path: Path) -> Iterator[BinaryIO]:
             with open_endpoint(path) as handle:
                 result = subprocess.run(
-                    [sys.executable, "-c", WRITER, rendezvous.__file__, str(runtime)],
+                    [sys.executable, "-c", WRITER, module_file, str(runtime)],
                     input="publish\n", capture_output=True, text=True,
                     creationflags=flags, timeout=5,
                 )
@@ -201,26 +203,29 @@ def test_cleanup_serializes_with_an_independent_publisher(
     rendezvous.write_endpoint(tmp_path, "tcp", "127.0.0.1:41001", pid=1001)
     endpoint = rendezvous.endpoint_file(tmp_path)
     unlink = Path.unlink
-    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    module_file = rendezvous.__file__
+    assert module_file is not None
     with subprocess.Popen(
-        [sys.executable, "-c", WRITER, rendezvous.__file__, str(tmp_path)],
+        [sys.executable, "-c", WRITER, module_file, str(tmp_path)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         creationflags=flags,
     ) as successor:
-        assert successor.stdout is not None and successor.stdin is not None
-        assert successor.stdout.readline().strip() == "ready"
+        stdin, stdout_stream = successor.stdin, successor.stdout
+        assert stdout_stream is not None and stdin is not None
+        assert stdout_stream.readline().strip() == "ready"
 
-        def pause_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        def pause_unlink(path: Path, missing_ok: bool = False) -> None:
             if path == endpoint:
-                successor.stdin.write("publish\n")
-                successor.stdin.flush()
-                assert successor.stdout.readline().strip() == "attempting"
+                stdin.write("publish\n")
+                stdin.flush()
+                assert stdout_stream.readline().strip() == "attempting"
                 with pytest.raises(subprocess.TimeoutExpired):
                     successor.wait(timeout=0.2)
-            unlink(path, *args, **kwargs)
+            unlink(path, missing_ok=missing_ok)
 
         monkeypatch.setattr(Path, "unlink", pause_unlink)
         try:
@@ -358,10 +363,10 @@ def test_unlink_failure_is_not_reported_as_lock_contention(
     endpoint = rendezvous.endpoint_file(tmp_path)
     unlink = Path.unlink
 
-    def fail_unlink(path: Path, *args: object, **kwargs: object) -> None:
+    def fail_unlink(path: Path, missing_ok: bool = False) -> None:
         if path == endpoint:
             raise error("injected unlink failure")
-        unlink(path, *args, **kwargs)
+        unlink(path, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "unlink", fail_unlink)
     rendezvous.clear_endpoint(tmp_path, owner_pid=1001)

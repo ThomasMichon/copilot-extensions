@@ -15,6 +15,7 @@ and is not usable standalone.
 from __future__ import annotations
 
 from .queue_execution_custody import require_execution_send_reconciliation
+from .queue_pool_placement import require_pool_recovery_retirement
 from .queue_records import SpawnState, Status, TaskError
 
 
@@ -57,7 +58,7 @@ class SpawnRearmMixin:
                 or latest["conversation_retired"]
                 or latest["worktree_ownership"] not in {"created", "reused", "targeted"}
                 or latest["conclusion_state"] == "pending"
-                or any(row["state"] in SpawnState.ACTIVE for row in rows)
+                or any(row["state"] in SpawnState.ACTIVE or row["native_release_pending"] for row in rows)
             ):
                 raise TaskError("fresh acquisition reservation fence changed or remains active")
             if latest["worktree_ownership"] == "targeted" and (
@@ -83,6 +84,7 @@ class SpawnRearmMixin:
             require_execution_send_reconciliation(
                 conn, task_id, exclusive_key=task.exclusive_key,
             )
+            require_pool_recovery_retirement(conn, task)
             timestamp = self._now(None)
             conn.execute(
                 "UPDATE tasks SET generation=generation+1, updated_at=? WHERE id=?",
@@ -154,7 +156,10 @@ class SpawnRearmMixin:
                 "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt ASC",
                 (task_id,),
             ).fetchall()
-            active = [row["key"] for row in rows if row["state"] in SpawnState.ACTIVE]
+            active = [
+                row["key"] for row in rows
+                if row["state"] in SpawnState.ACTIVE or row["native_release_pending"]
+            ]
             if active:
                 conn.execute("COMMIT")
                 raise TaskError(
@@ -179,6 +184,7 @@ class SpawnRearmMixin:
             require_execution_send_reconciliation(
                 conn, task_id, exclusive_key=task.exclusive_key,
             )
+            require_pool_recovery_retirement(conn, task)
             keys: list[str] = []
             for row in failed:
                 keys.append(row["key"])
