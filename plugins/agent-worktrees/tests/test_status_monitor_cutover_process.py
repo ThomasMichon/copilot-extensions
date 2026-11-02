@@ -655,3 +655,39 @@ def test_spawn_passive_is_windowless_from_pythonw_parent(tmp_path: Path) -> None
     assert len(pids) == 2
     assert all(isinstance(pid, int) and pid > 0 for pid in pids)
     assert surfaced == focus_changes == set()
+def test_departed_installer_prepublication_reservation_has_surviving_recovery(tmp_path):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import runtime_monitor_retirements as retirements
+    from zdd import breadcrumb, routing
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    start = locks.process_start_time(os.getpid())
+    assert isinstance(start, str) and start
+    routing.publish_active(
+        root / "status-monitor-routing", bind="127.0.0.1", port=61001,
+        pid=os.getpid(), process_start_time=start,
+    )
+    script = """
+import os, sys
+from pathlib import Path
+from agent_worktrees import runtime_monitor_retirements as retirements
+from agent_worktrees.status_monitor_cutover import _acquire_cutover_lock
+root = Path(sys.argv[1])
+guard = _acquire_cutover_lock(root / "status-monitor-routing")
+retirements.reserve(root, {
+    "pid": int(sys.argv[2]), "start": sys.argv[3], "slot": None, "release_claim": None,
+})
+os._exit(29)
+"""
+    child = subprocess.run(
+        [sys.executable, "-B", "-c", script, str(root), str(os.getpid()), start],
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=30, **no_window_kwargs(),
+    )
+    assert child.returncode == 29, child.stderr
+    assert retirements._records(root)[0][1]["state"] == "prepared"
+    assert breadcrumb.read_breadcrumb(root / "status-monitor-routing") is None
+    surviving_owner = retirements.ResidentRetirements(root)
+    surviving_owner.refresh()
+    assert not surviving_owner.pending and surviving_owner.error is None
+    assert not retirements._records(root)

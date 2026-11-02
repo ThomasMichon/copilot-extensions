@@ -26,7 +26,7 @@ failed, committed result; it never disposes of a possibly admitted successor or
 rolls the route back. The resident owns supersession,
 accepted-work draining and eventual exit independently of the installer.
 `retirement_pending` reports that separation; it never certifies predecessor
-exit. This mode cannot be combined with conditional writer transfer or
+exit, including an error after irreversible publication. This mode cannot be combined with conditional writer transfer or
 pre-publication drain. Existing adopters keep their synchronous cutover
 contract unless they explicitly opt in.
 Adopters must qualify the incoming runtime's actual capability before publication

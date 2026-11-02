@@ -456,6 +456,56 @@ def pending_claim(root: Path, claim: dict) -> bool:
     )
 
 
+def cancel_abandoned_preparations(root: Path, *, runtime: ModuleType | None = None) -> None:
+    """Revoke prepublication grants only while the original route still owns custody."""
+    from single_instance_lease import AlreadyRunningError
+    from zdd import breadcrumb
+    from .status_monitor_cutover import _acquire_cutover_lock
+
+    route_root = root / "status-monitor-routing"
+    directory = root / "status-monitor-retirements"
+    if not directory.exists() or breadcrumb.breadcrumb_path(route_root).exists():
+        return
+    try:
+        guard = _acquire_cutover_lock(route_root, timeout_s=0)
+    except AlreadyRunningError:
+        return
+    try:
+        with tracking._RecordLock(directory / "inventory", require_sidecar=True):
+            if breadcrumb.breadcrumb_path(route_root).exists():
+                return
+            table = routing.read_table(route_root, strict=True)
+            routing._validate_endpoint_rows(table)
+            raw = (table.get("active") or table.get("previous")) if isinstance(table, dict) else None
+            endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+            for path, record in _records(root):
+                if record["state"] != "prepared":
+                    continue
+                exited = _exit_state(record)
+                if exited is None or (
+                    endpoint is not None
+                    and (endpoint.pid, endpoint.process_start_time) != (record["pid"], record["start"])
+                ) or (endpoint is None and exited is not True):
+                    continue
+                claim = record["release_claim"]
+                if claim is not None:
+                    helper = runtime if runtime is not None else _runtime()
+                    with helper._publication_lease(root):
+                        if (
+                            helper.current_version(root) != "dev"
+                            or helper.read_dev_claim(root, strict=True) != claim
+                        ):
+                            raise RuntimeError("Prepared monitor dev custody changed before cancellation")
+                        _write_record(path, {**record, "state": "cancelled"})
+                else:
+                    _write_record(path, {**record, "state": "cancelled"})
+                done, _needed = _cancelled_status(root, {**record, "state": "cancelled"}, runtime)
+                if done:
+                    path.unlink()
+    finally:
+        guard.release()
+
+
 def cancel_prepared_release(root: Path, claim: dict, *, guard, runtime: ModuleType) -> bool:
     """Cancel exact, proven precommit dev preparations for an authorized retry."""
     from single_instance_lease import SingleInstance
@@ -545,7 +595,9 @@ class ResidentRetirements:
 
     def refresh(self, *, cleanup: bool = True) -> None:
         try:
-            self.pending = reconcile(self.root, cleanup=cleanup)
+            if cleanup:
+                cancel_abandoned_preparations(self.root)
+            pending = reconcile(self.root, cleanup=cleanup)
         except (OSError, ValueError, RuntimeError, ImportError) as error:
             message = str(error)
             if message != self.error:
@@ -554,7 +606,9 @@ class ResidentRetirements:
                 )
             self.pending, self.error = True, message
         else:
-            self.error = None
+            if cleanup:
+                self.error = None
+            self.pending = pending or self.error is not None
 
     def health(self) -> dict:
         return {"pending": self.pending, "error": self.error}

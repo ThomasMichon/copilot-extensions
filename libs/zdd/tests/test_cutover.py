@@ -353,9 +353,92 @@ def test_self_retirement_publication_is_irreversible_before_flipped_record(
     )
     result = orch.run(health_timeout=1)
     assert result.committed and not result.ok and not result.rolled_back
+    assert result.retirement_pending and not result.retirement_confirmed
+    assert result.to_dict()["retirement_pending"] is True
     assert not handle.terminated
     assert routing.read_table(tmp_path)["active"]["pid"] == handle.pid
     assert "record failure" in result.error
+
+
+@pytest.mark.parametrize("visible", [False, True])
+def test_self_retirement_uncertain_storage_reports_only_proven_commit(
+    tmp_path, monkeypatch, native_birth, visible,
+):
+    from zdd import routing_persistence
+
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    old = routing.read_active_endpoint(tmp_path)
+    promoted = []
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={},
+        expected_old=old, refuse_old=lambda raw: None,
+        self_retirement=True, activate_successor=promoted.append,
+    )
+    write = routing_persistence.write
+
+    def uncertain(path, data):
+        if path == routing.routing_table_path(tmp_path) and (
+            data.get("active", {}).get("pid") == handle.pid
+            if visible else any(
+                entry["pid"] == handle.pid
+                for entry in data.get("publication_history", {}).get("entries", [])
+            )
+        ):
+            write(path, data)
+            raise routing_persistence.PublicationCommitUncertain("durability unconfirmed")
+        return write(path, data)
+
+    monkeypatch.setattr(routing_persistence, "write", uncertain)
+    result = orch.run(health_timeout=1)
+
+    assert result.publication_uncertain and not result.ok and not result.rolled_back
+    assert result.committed is visible
+    assert result.retirement_pending is visible
+    assert not result.retirement_confirmed and not handle.terminated and promoted == []
+    active = routing.read_table(tmp_path)["active"]
+    assert active["pid"] == (handle.pid if visible else old.pid)
+    record = breadcrumb.read_breadcrumb(tmp_path)
+    assert record["state"] == "publication-uncertain"
+    assert record["old"] == old.to_dict() and record["new_pid"] == handle.pid
+
+
+def test_expected_native_predecessor_exit_before_selection_preserves_caller_custody(
+    tmp_path, monkeypatch, native_birth,
+):
+    from zdd.cutover_lock import CutoverLock
+    import time
+
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111)
+    expected = routing.Endpoint.from_dict(routing.read_table(tmp_path)["active"])
+    witness = routing.publication_witness(tmp_path, deadline=time.monotonic() + 5)
+    before = routing.routing_table_path(tmp_path).read_bytes()
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: False)
+    monkeypatch.setattr(routing, "_pid_alive", lambda pid: False)
+    pending = {"reservation": "caller-owned"}
+    promoted = []
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={},
+        expected_old=expected, refuse_old=lambda raw: None,
+        self_retirement=True, activate_successor=promoted.append,
+    )
+
+    def spawn(port):
+        pending.pop("reservation")
+        return handle
+
+    orch.spawn_passive = spawn
+    lock = CutoverLock(tmp_path)
+    with lock:
+        result = orch.run(health_timeout=1, held_lock=lock)
+        assert lock.held
+    assert not result.ok and not result.committed and not result.retirement_pending
+    assert not result.rolled_back and not handle.terminated and promoted == []
+    assert "selected predecessor differs" in result.error
+    assert pending == {"reservation": "caller-owned"}
+    assert routing.routing_table_path(tmp_path).read_bytes() == before
+    assert routing.publication_witness(tmp_path, deadline=time.monotonic() + 5) == witness
+    assert breadcrumb.read_breadcrumb(tmp_path) is None
 
 
 def test_rollback_when_new_unhealthy(tmp_path: Path, monkeypatch):

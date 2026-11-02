@@ -384,12 +384,9 @@ class CutoverOrchestrator:
         make_client = conditional.snapshot.make_client if conditional else self.make_client
         if self._refuse_current_old(result):
             return result
-        # Dead-port watchdog: before standing up the new daemon, retire any
-        # advertised-but-dead endpoint a previously-aborted cutover may have left
-        # behind (the state that wedged the pipeline). Best-effort -- it only acts
-        # when the active endpoint has no listener *and* a dead pid, so a healthy
-        # or still-starting daemon is never disturbed. Logs its own reap.
-        if conditional is None and not self.drain_before_publish:
+        # Exact-predecessor callers own recovery; preserve their route witness
+        # even when the observed native predecessor exited before selection.
+        if conditional is None and not self.drain_before_publish and self.expected_old is None:
             try:
                 self.routing.reap_stale_active(self.config_dir, service=self.service)
             except Exception:  # noqa: BLE001 -- watchdog is best-effort, never fatal
@@ -454,11 +451,7 @@ class CutoverOrchestrator:
             result.error = "candidate port must differ from predecessor"
             result.steps.append(f"refused: {result.error}")
             return result
-        # Durable breadcrumb (#1756): written *before* the drain gate is ever
-        # touched, so if this orchestrator dies mid-cutover the aborted attempt
-        # leaves an attributable trace on disk (and recover_stale_cutover can
-        # undrain the stranded old daemon). started_at is threaded through every
-        # later update so the record keeps its original timestamp.
+        # Record custody before drain; preserve started_at across later updates.
         old_dict = (
             old.to_dict() if (conditional or self.expected_old is not None or self.self_retirement) and old is not None else
             {"bind": old.bind, "port": old.port} if old is not None else None
@@ -493,12 +486,7 @@ class CutoverOrchestrator:
             new_process_start_time = process_start_time(new_pid)
         result.steps.append(f"spawned passive pid={new_pid if new_pid is not None else '?'} "
                             f"port={new_port}")
-        # Record the passive's own pid the moment it is known -- before the
-        # health gate, flip, or drain even begin -- so a crash anywhere past
-        # this point (including one that never reaches the flip) leaves a
-        # breadcrumb naming the passive to reap if it is never promoted
-        # (#5195, reap_abandoned_passive). Threaded through every later update
-        # like started_at.
+        # Record the passive PID before health, publication or drain (#5195).
         flipped = False
         drain_started = False
 
@@ -620,6 +608,7 @@ class CutoverOrchestrator:
                         )
                 if self.self_retirement:
                     result.committed = True
+                    result.retirement_pending = old is not None and old.port != new_port
             except (refused, _UnguardedRouting, routing.RoutingLockTimeout) as exc:
                 result.error = str(exc)
                 result.steps.append(f"refused: {exc}")
@@ -699,7 +688,6 @@ class CutoverOrchestrator:
                 successor = new_for_cas
                 activate_successor = self.activate_successor
                 assert activate_successor is not None
-                result.retirement_pending = old is not None and old.port != new_port
                 write_breadcrumb(
                     state="committed", old=old_dict, new_port=new_port,
                     new_pid=new_pid, started_at=started_at,
@@ -829,6 +817,18 @@ class CutoverOrchestrator:
 
         except Exception as exc:  # noqa: BLE001 -- convert to a rollback
             if isinstance(exc, routing_persistence.PublicationCommitUncertain):
+                if self.self_retirement and not result.committed:
+                    try:
+                        active = Endpoint.from_dict(self._raw_active())
+                        result.committed = active is not None and (
+                            active.bind, active.port, active.pid, active.version, active.process_start_time,
+                        ) == (self.bind, new_port, new_pid, self.version, new_process_start_time) and (
+                            active.generation > (old.generation if old is not None else 0)
+                        )
+                    except (OSError, ValueError, RuntimeError):
+                        pass
+                if self.self_retirement and result.committed:
+                    result.retirement_pending = old is not None and old.port != new_port
                 result.publication_uncertain = True
                 result.error = "publication commit uncertain; generations retained"
                 result.serving_endpoint = None

@@ -5005,6 +5005,14 @@ retain their original recovery path. Durable confirmation preserves the
 previous route rather than republishing away the fallback. A subsequent
 installer rechecks pending witness refusal after acquiring cutover custody,
 before reserving retirement or invoking legacy recovery.
+The resident also reconciles abandoned prepublication preparation without a
+new worker: nonblocking acquisition of the same cutover guard proves no
+installer still owns that transition. Cancellation requires no witness and
+the original recorded native route, or positive predecessor exit without a
+foreign route. It revokes the nongrant, never grants dev-claim release, and
+retains live code. A different or unknown owner remains pending. Read-only
+inventory refresh cannot erase an earlier cleanup failure; only a successful
+cleanup pass clears that pending error.
 Cancellation is fsynced before cleanup and revokes the claim grant while keeping
 execution protection for any still-live code. Completed retirement is an
 idempotent commit outcome, not a missing-record loop.
@@ -5025,7 +5033,12 @@ the original claim and defers its exact-snapshot release to that resident;
 changed claims refuse cleanup, a pending dev retirement refuses a rebuild, and
 duplicate release cannot bypass the original pending claim.
 Idle retirement rechecks election, accepted work, demand and pending retirement
-inside the acquired cutover custody before closing admission. Guarded synchronous
+inside the acquired cutover custody before closing admission.
+If a just-accepted request remains after closure, the resident releases that
+idle-exit guard immediately and drains under its own latched retirement, allowing
+the next installation to proceed independently. A positively verified successor
+birth-token mismatch also releases the cold-start lease; unknown identity does not.
+Guarded synchronous
 rollback reuses its already-held routing authority for discovery renewal; this
 is a private call-chain fact, never an instruction accepted from a wire payload.
 Release also refuses other pending dev-code retirement; cancelled attempts do

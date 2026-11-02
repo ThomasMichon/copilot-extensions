@@ -900,3 +900,54 @@ def test_matching_legacy_hashed_reference_does_not_need_new_capacity(retained):
     alive.remove(101)
     assert not retirements.reconcile(root, runtime=runtime)
     assert owner not in runtime._leases.read_runtime_references(root)
+@pytest.mark.parametrize("boundary", ["original", "gone", "foreign", "witness", "busy", "unknown"])
+def test_abandoned_prepublication_intent_is_cancelled_only_under_original_custody(
+    tmp_path, monkeypatch, boundary,
+):
+    from contextlib import nullcontext
+    from single_instance_lease import SingleInstance
+    from zdd import breadcrumb, routing
+
+    root = tmp_path
+    directory = root / "status-monitor-routing"
+    predecessor = {"pid": 101, "start": "1001", "slot": None, "release_claim": None}
+    monkeypatch.setattr(retirements.locks, "process_start_time", lambda pid: "1001")
+    monkeypatch.setattr(retirements.diagnostics, "_pid_alive", lambda pid: boundary != "gone")
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: "1001")
+    if boundary != "gone":
+        routing.publish_active(
+            directory, bind="127.0.0.1", port=61001, pid=303 if boundary == "foreign" else 101,
+            process_start_time="1001",
+        )
+    if boundary == "witness":
+        breadcrumb.write_breadcrumb(directory, state="started", new_pid=202, self_retirement=True)
+    if boundary == "unknown":
+        monkeypatch.setattr(retirements.locks, "process_start_time", lambda pid: None)
+    retirements.reserve(root, predecessor)
+    original = retirements._records(root)
+    held = SingleInstance(directory, service="fixture", lock_name="cutover.lock")
+    with held if boundary == "busy" else nullcontext():
+        retirements.cancel_abandoned_preparations(root)
+    if boundary in {"original", "gone"}:
+        assert not retirements._records(root)
+    else:
+        assert retirements._records(root) == original
+    with SingleInstance(directory, service="fixture", lock_name="cutover.lock"):
+        pass
+
+
+def test_readonly_retirement_refresh_cannot_forget_failed_cleanup(tmp_path, monkeypatch):
+    inventory = retirements.ResidentRetirements(tmp_path)
+    monkeypatch.setattr(retirements, "cancel_abandoned_preparations", lambda root: None)
+
+    def fail(root, **kwargs):
+        raise RuntimeError("changed dev claim")
+
+    monkeypatch.setattr(retirements, "reconcile", fail)
+    inventory.refresh()
+    assert inventory.pending and inventory.error == "changed dev claim"
+    monkeypatch.setattr(retirements, "reconcile", lambda root, **kwargs: False)
+    inventory.refresh(cleanup=False)
+    assert inventory.pending and inventory.error == "changed dev claim"
+    inventory.refresh(cleanup=True)
+    assert not inventory.pending and inventory.error is None

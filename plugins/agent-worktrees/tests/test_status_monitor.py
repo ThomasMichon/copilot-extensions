@@ -4493,6 +4493,98 @@ def test_idle_exit_rechecks_new_conditions_after_acquiring_cutover_guard(tmp_pat
     assert state["acquired"] and state["released"]
 
 
+def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_path, monkeypatch):
+    from agent_worktrees import monitor_roots, self_retire, status_monitor_cutover as smc
+    from agent_worktrees import runtime_monitor_retirements as retirements
+    from agent_worktrees.worktrees_runtime import WorktreesRuntime
+
+    directory = tmp_path / "status-monitor-routing"
+    accepted, finish = threading.Event(), threading.Event()
+    state = {"closed": False, "waits": 0, "guard_available": False}
+    servers, clients, results = [], [], []
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
+    monkeypatch.setattr(smc, "routing_dir", lambda *a: directory)
+    monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *a, **k: False)
+    monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: True)
+    monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", lambda: None)
+    monkeypatch.setattr(m, "_monitor_sweep", lambda *a, **k: 0)
+    monkeypatch.setattr(monitor_roots, "live_picker_projects", lambda: set())
+    monkeypatch.setattr(m.list_cache, "recent_demand_projects", lambda: set())
+    monkeypatch.setattr(
+        retirements.ResidentRetirements, "refresh",
+        lambda self, **kwargs: setattr(self, "pending", False),
+    )
+    native_control = smc.ControlServer
+
+    def control(handle, **kwargs):
+        def held_read(action, payload):
+            if action == "worktrees-read":
+                accepted.set()
+                assert finish.wait(3), "accepted request never drained"
+                return {"ok": True}
+            return handle(action, payload)
+
+        server = native_control(held_read, token="idle-race-test", **kwargs)
+        servers.append(server)
+        return server
+
+    monkeypatch.setattr(smc, "ControlServer", control)
+    close_admission = WorktreesRuntime.close_admission
+
+    def close_with_late_request(runtime, reason):
+        if reason == "draining" and not state["closed"]:
+            state["closed"] = True
+            server = servers[0]
+            client = smc.ControlClient(
+                f"http://127.0.0.1:{server.port}", token=server.token, timeout=3,
+            )
+            thread = threading.Thread(
+                target=lambda: results.append(client._request("worktrees-read", {})),
+            )
+            clients.append(thread)
+            thread.start()
+            assert accepted.wait(2), "real receiver did not accept the late read"
+            assert server.current_read_count() == 1
+        return close_admission(runtime, reason)
+
+    monkeypatch.setattr(WorktreesRuntime, "close_admission", close_with_late_request)
+
+    def wait(event, interval):
+        state["waits"] += 1
+        assert state["waits"] < 12, "monitor never retired after accepted work drained"
+        if not state["closed"]:
+            time.sleep(.02)
+            return
+        assert servers[0].handle("health", {})["status"] == "draining"
+        if not finish.is_set():
+            assert servers[0].current_read_count() == 1
+            # A real second installer can take the native gate before the read ends.
+            guard = smc._acquire_cutover_lock(directory, timeout_s=0)
+            try:
+                state["guard_available"] = True
+                assert servers[0].current_read_count() == 1
+            finally:
+                guard.release()
+                finish.set()
+            clients[0].join(timeout=2)
+            assert not clients[0].is_alive()
+
+    monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", wait)
+    try:
+        assert m.cmd_status_monitor(argparse.Namespace(interval=1)) == 0
+        assert state["guard_available"]
+        assert results == [{"ok": True}]
+    finally:
+        finish.set()
+        for thread in clients:
+            thread.join(timeout=3)
+
+
 def test_status_monitor_keeps_repository_map_available_until_handoff_is_ready(tmp_path, monkeypatch):
     from agent_worktrees import self_retire, status_monitor_cutover as smc
 

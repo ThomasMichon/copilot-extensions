@@ -35,7 +35,9 @@ class MonitorHandover:
         endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
         successor_dead = (
             endpoint is not None and type(endpoint.pid) is int and endpoint.pid > 0
-            and endpoint.pid != pid and not diagnostics._pid_alive(endpoint.pid)
+            and endpoint.pid != pid and not diagnostics.lock_data_is_live({
+                "pid": endpoint.pid, "start_time": endpoint.process_start_time,
+            })
         )
         if self.retiring or successor_dead:
             lease.release()
