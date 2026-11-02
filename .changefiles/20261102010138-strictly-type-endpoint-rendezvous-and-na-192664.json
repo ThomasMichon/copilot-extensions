@@ -1,0 +1,13 @@
+{
+  "comment": "Strictly type Endpoint Rendezvous and native ownership fixtures",
+  "changes": [
+    {
+      "plugin": "libs/endpoint-rendezvous",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

@@ -113,7 +113,7 @@
         "libs/endpoint-rendezvous"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-fleet-contracts",

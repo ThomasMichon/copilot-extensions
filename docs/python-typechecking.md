@@ -5,8 +5,9 @@ The repository is migrating to strict MyPy through the
 and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
 The admitted cohort qualifies the checker code/tests, the complete Config
-Migrate and Dropin Registry source/test projects, and the source of Remote
-Login Shell, Session Liveness Probe and Worktree Identity. The latter libraries' remaining
+Migrate, Dropin Registry and Endpoint Rendezvous source/test projects, and the
+source of Remote Login Shell, Session Liveness Probe and Worktree Identity.
+The latter libraries' remaining
 tests/helpers and the other projects are explicitly pending. Source CI and the
 exact-candidate release gate enforce this cohort. A passing admitted cohort is
 not repository-wide type safety.
@@ -23,6 +24,7 @@ python tools/typecheck.py lib-worktree-identity
 python tools/typecheck.py lib-config-migrate --prepare
 python tools/typecheck.py lib-config-migrate
 python tools/typecheck.py lib-dropin-registry
+python tools/typecheck.py lib-endpoint-rendezvous
 python tools/typecheck.py --inventory
 python tools/typecheck.py --inventory --json
 ```
@@ -54,6 +56,12 @@ source/test files strictly on both declared targets. Its native FIFO test skips
 only where that operation is unavailable; the actor-free release adapter retains
 its existing synthetic FIFO refusal control. Synchronized vendored copies remain
 independently pending until copy-checking correspondence is qualified.
+
+Endpoint Rendezvous also uses the base environment for its complete five-file
+canonical source/test project, including native ownership/concurrency fixtures.
+JSON record values remain an explicit dynamic serialization boundary. This
+admission does not claim that existing malformed-record or publication-race
+tracking is resolved, nor that independent in-package variants inherit checking.
 
 `--enforced` is the default when no project name or selector is supplied. It
 validates the complete physical-Python inventory, then checks admitted projects

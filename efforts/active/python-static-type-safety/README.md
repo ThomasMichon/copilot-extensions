@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -63,6 +63,11 @@ Confirmed operator responses:
   only the read-only `source-units` job deadline from five to 20 minutes to
   accommodate setup, both six-minute MyPy steps, the unchanged 300-second
   unit packet and evidence upload.
+- `review_block=accept-bounded-merge`: for #9932 only, accept the completed
+  implementation review plus the verified one-line cohort-index correction
+  after repeated reviewer-guidance tool failures. Required CI, resolved
+  feedback and normal Maintainer/provider gates remain. This is not a
+  standing exception for subsequent PRs.
 
 ## Scope Approvals
 
@@ -105,6 +110,9 @@ rewrite.
 
 ### Phase 3 - Shared-library ratchet
 
+- [x] Strictly admit all Config Migrate source/test files with a declared YAML/stub environment (#9924).
+- [x] Strictly admit all canonical Dropin Registry source/test files; keep copies independently pending (#9930).
+- [ ] Strictly admit all canonical Endpoint Rendezvous source/test files, preserving native ownership fixtures (#9933).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -461,3 +469,34 @@ composition prerequisites, and review/validation rules.
   pointer consumers. Only two unit-source digests change; nodes, decision
   targets and packet budget are unchanged. Required hosted packet qualification
   and review remain before merging this proposed sixth strict project.
+
+### 2026-11-02 - Dropin Registry merged; Endpoint Rendezvous selected
+
+- #9932 merged as `f6a6d3bf6b8fabff5e868c985e5b3b12afc69b67`
+  with all required checks green in
+  [run 41379486808](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41379486808).
+  Its completed implementation review found only a stale cohort count; the
+  sole follow-up corrected that index line and resolved its thread.
+  Two later reviews deferred assessment because a required guidance skill
+  was unavailable. The operator explicitly accepted that reviewed implementation
+  plus the verified one-line correction for normal Maintainer completion.
+  The bounded reason is recorded on the PR; no CI gate was bypassed.
+- The source worktree is pulled forward after exact stable patch equivalence
+  proved the merged squash contains all published work. Six projects are
+  strict and 62 remain pending. #9807 and the full campaign stay open.
+- #9933 selects all five Endpoint Rendezvous source/test files. Its initial
+  Linux strict probe reported 65 errors across three files. Both declared
+  targets now pass after JSON dictionary generics, fixture annotations,
+  explicit optional-result/pipe narrowing, platform-safe native constants
+  and filesystem callbacks matching `Path.unlink`'s actual signature.
+- All 131 existing behavior/native tests pass in 9.74 seconds, including
+  four-source ownership/concurrency controls for the canonical implementation
+  and independent in-package variants. Ruff F/E9 passes. Runtime validation,
+  locking, publication and process cleanup behavior are unchanged.
+  The dynamic JSON value boundary remains explicit; existing #5903/#5904
+  tracking is not closed or superseded by this typing slice.
+- No release-unit source digest, node, decision target or budget changed:
+  this library is not part of that packet's admitted source set. Required
+  hosted typing/packet CI and normal review remain before this proposed
+  seventh strict project can merge. In-package variants retain independent
+  pending typing ownership.
