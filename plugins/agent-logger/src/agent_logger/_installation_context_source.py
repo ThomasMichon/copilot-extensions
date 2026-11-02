@@ -19,7 +19,7 @@ def _pid_is_live(pid: int) -> bool:
         process_query_limited_information = 0x1000
         wait_object_0 = 0
         wait_timeout = 258
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
         kernel32.OpenProcess.argtypes = (
             wintypes.DWORD,
             wintypes.BOOL,
@@ -36,7 +36,8 @@ def _pid_is_live(pid: int) -> bool:
             pid,
         )
         if not handle:
-            return _lock_openprocess_failure_means_live(ctypes.get_last_error())
+            last_error = cast(Callable[[], int], getattr(ctypes, "get_last_error"))
+            return _lock_openprocess_failure_means_live(last_error())
         try:
             wait_result = kernel32.WaitForSingleObject(handle, 0)
             if wait_result == wait_object_0:
