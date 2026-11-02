@@ -103,12 +103,14 @@ def test_legacy_import_refusal_preserves_the_existing_guard_exit_function():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="the adapter resolves Python only on native Windows")
-def test_store_python_alias_stub_is_refused_with_the_prerequisite_message(tmp_path):
+@pytest.mark.parametrize("stub", [True, False], ids=["store-alias-stub", "no-python"])
+def test_store_python_alias_stub_is_refused_with_the_prerequisite_message(tmp_path, stub):
     stub_dir = tmp_path / "Microsoft" / "WindowsApps"
     stub_dir.mkdir(parents=True)
-    (stub_dir / "python.exe").write_bytes(b"")
+    if stub:
+        (stub_dir / "python.exe").write_bytes(b"")
     result = _run(
-        "$ErrorActionPreference='Stop'; "
+        "$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; "
         f"$env:PATH={_literal(stub_dir)}; "
         f". {_literal(HELPER)}; "
         "try { Start-DaemonInstanceWorker @{}; throw 'expected prerequisite refusal' } "

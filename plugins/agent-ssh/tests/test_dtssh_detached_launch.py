@@ -154,6 +154,7 @@ def _python_check(tmp_path: Path, path_dirs: list[Path]) -> subprocess.Completed
     path = ";".join(str(d) for d in path_dirs) if os.name == "nt" else ":".join(str(d) for d in path_dirs)
     script = (
         "$ErrorActionPreference = 'Stop'\n"
+        "Set-StrictMode -Version Latest\n"
         f"$env:PATH = '{path}'\n"
         + _function("Assert-HostLauncherPython")
         + "\nAssert-HostLauncherPython\nWrite-Host 'python-ok'\n"
@@ -165,10 +166,12 @@ def _python_check(tmp_path: Path, path_dirs: list[Path]) -> subprocess.Completed
 
 
 @pytest.mark.skipif(os.name != "nt", reason="the Store alias stub exists only on Windows")
-def test_launch_refuses_a_store_alias_stub_with_the_python_remedy(tmp_path):
+@pytest.mark.parametrize("stub", [True, False], ids=["store-alias-stub", "no-python"])
+def test_launch_refuses_a_store_alias_stub_with_the_python_remedy(tmp_path, stub):
     stub_dir = tmp_path / "Microsoft" / "WindowsApps"
     stub_dir.mkdir(parents=True)
-    (stub_dir / "python.exe").write_bytes(b"")
+    if stub:
+        (stub_dir / "python.exe").write_bytes(b"")
     proc = _python_check(tmp_path, [stub_dir])
     assert proc.returncode != 0
     assert "needs Python 3.10+" in proc.stderr

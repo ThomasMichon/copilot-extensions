@@ -706,8 +706,8 @@ function Assert-HostLauncherPython {
     # The launcher runs a Python daemon-instance helper. Check up front so a box
     # without Python fails here with the remedy, not as a host that exits before
     # writing any log. The Microsoft Store alias stub is not an interpreter.
-    $python = @(Get-Command -Name python -All -CommandType Application -ErrorAction SilentlyContinue |
-        Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })[0]
+    $python = Get-Command -Name python -All -CommandType Application -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } | Select-Object -First 1
     if ($python) {
         & $python.Source -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
         if ($LASTEXITCODE -eq 0) { return }

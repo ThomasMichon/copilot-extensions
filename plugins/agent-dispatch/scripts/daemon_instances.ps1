@@ -85,8 +85,8 @@ function Start-DaemonInstanceWorker {
     }
     # The Microsoft Store App Execution Alias stub is not an interpreter: it only
     # prints an install hint, which would surface as an opaque helper-pipe failure.
-    $python = @(Get-Command -Name python -All -CommandType Application -ErrorAction SilentlyContinue |
-        Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })[0]
+    $python = Get-Command -Name python -All -CommandType Application -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } | Select-Object -First 1
     if (-not $python) {
         throw 'Python 3.10+ must be available as python on PATH (the Microsoft Store alias stub does not count). Run the harness Python prerequisite setup, or install the standalone prerequisite.'
     }
