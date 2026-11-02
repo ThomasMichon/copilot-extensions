@@ -350,7 +350,7 @@ def _git_invocation(
             has_repo_override = has_repo_override or lower == "--git-dir"
             if index + 1 < len(tokens):
                 value = tokens[index + 1]
-                targets[lower[2:]] = _resolve(value, git_cwd)
+                targets[lower[2:]] = value
             index += 2
             continue
         matched_target = False
@@ -359,7 +359,7 @@ def _git_invocation(
                 has_repo_override = has_repo_override or option == "--git-dir"
                 value = _unquote_shell_token(token.split("=", 1)[1])
                 if value:
-                    targets[option[2:]] = _resolve(value, git_cwd)
+                    targets[option[2:]] = value
                 matched_target = True
                 break
         if matched_target:
@@ -373,6 +373,9 @@ def _git_invocation(
             continue
         if lower.startswith("--exec-path="):
             index += 1
+            continue
+        if lower in _GIT_GLOBAL_LONG_OPTIONS_WITH_VALUE:
+            index += 2
             continue
         if any(
             lower.startswith(option + "=")
@@ -412,7 +415,7 @@ def _git_resolved_targets(
     git_cwd_overridden: bool,
     subcommand: str,
 ) -> list[tuple[str, str]]:
-    resolved = list(targets.items())
+    resolved = [(kind, _resolve(path, git_cwd)) for kind, path in targets.items()]
     if "git-dir" in targets:
         if (
             "work-tree" not in targets

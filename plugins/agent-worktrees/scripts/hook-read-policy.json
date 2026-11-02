@@ -4,7 +4,7 @@
   "guards": {
     "statelessness_guard.py": "c8a135b668c48477191b0776e4d2efc8734da4782a39a4bc6bbeeade33ae00cd",
     "cross_repo_guard.py": "dfded77cc2c3a7a07bcf135233deb61dadd61ec04f72992da838c95152a992d1",
-    "anchor_write_guard.py": "7a772ee2a0050c5104312fbf405b4c1c4d4b2109fe039089fa1b9614c084ec7e",
+    "anchor_write_guard.py": "2d89450ca067669950fb430e02e89057ed648a45daded9770ead248fcb1c05f1",
     "pr_supersede_guard.py": "405514834a48658e8006ee226d838a4305a70eff0d539ab274670c21013bf140"
   }
 }

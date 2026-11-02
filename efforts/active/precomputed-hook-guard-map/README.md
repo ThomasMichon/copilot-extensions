@@ -370,3 +370,11 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   potential-write policy, and repository-only operations do not treat an
   explicit work tree as a write destination. The map, consumer, deployment and
   relevance packet passed 214 cases with four native-capability skips.
+- Corrected two shared global-option seams: value-taking namespace/super-prefix
+  arguments are consumed before the subcommand, and relative Git/work-tree
+  paths resolve after the final `-C`, matching Git itself rather than option
+  encounter order. Guarded/unrelated controls cover both directions and both
+  Git-directory forms. A real, read-only Git invocation independently verifies
+  the final directory contract. Both guard suites and the map/deployment/
+  relevance packet passed 388 cases with six native-capability skips; only the
+  changed shared parser's existing admission hash was updated.

@@ -414,6 +414,7 @@ def test_git_message_directory_option_is_not_a_write_target(tmp_path, guarded_ta
     "-C '{target}' --literal-pathspecs",
     "-c core.quotePath=false -C '{target}'",
     "-C '{target}' -c core.quotePath=false",
+    "--namespace test -C '{target}'",
 ])
 @pytest.mark.parametrize("guarded_target", [False, True])
 @pytest.mark.parametrize("subcommand", ["rm tracked.txt", "commit -m new"])
@@ -518,6 +519,75 @@ def test_repository_only_git_operation_does_not_write_explicit_worktree(
     }, home=tmp_path, env={}, guarded_roots=[row])
 
     assert bool(result) is writes_worktree
+
+
+@pytest.mark.parametrize("guarded_target", [False, True])
+@pytest.mark.parametrize("option", ["--git-dir .git", "--git-dir=.git"])
+def test_relative_git_directory_resolves_after_final_cwd(
+    tmp_path, guarded_target, option,
+):
+    guard = _load("cross_repo_guard")
+    anchor = _repo(tmp_path / "guarded")
+    outside = _repo(tmp_path / "outside")
+    target, cwd = (anchor, outside) if guarded_target else (outside, anchor)
+    row = {
+        "name": "target", "delegate": "agent-bridge", "path": str(anchor),
+        "identity": guard._guard_map.repository_identity(anchor),
+    }
+
+    result = guard.decide({
+        "toolName": "powershell", "cwd": str(cwd),
+        "toolArgs": {"command": f"git {option} -C '{target}' commit -m new"},
+    }, home=tmp_path, env={}, guarded_roots=[row])
+
+    assert bool(result) is guarded_target
+
+
+@pytest.mark.parametrize("guarded_target", [False, True])
+def test_relative_worktree_resolves_after_final_cwd(tmp_path, guarded_target):
+    guard = _load("cross_repo_guard")
+    anchor = _repo(tmp_path / "guarded")
+    outside = _repo(tmp_path / "outside")
+    target, cwd = (anchor, outside) if guarded_target else (outside, anchor)
+    row = {
+        "name": "target", "delegate": "agent-bridge", "path": str(anchor),
+        "identity": guard._guard_map.repository_identity(anchor),
+    }
+
+    result = guard.decide({
+        "toolName": "powershell", "cwd": str(cwd),
+        "toolArgs": {"command": (
+            f"git --git-dir '{outside / '.git'}' --work-tree . -C '{target}' checkout -- tracked.txt"
+        )},
+    }, home=tmp_path, env={}, guarded_roots=[row])
+
+    assert bool(result) is guarded_target
+
+
+def test_git_native_relative_overrides_match_parser_targets(tmp_path):
+    import shutil
+
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("Git is unavailable for the native argument contract")
+    guard = _load("cross_repo_guard")
+    source = _repo(tmp_path / "source")
+    target = _repo(tmp_path / "target space")
+    result = subprocess.run(
+        [git, "--git-dir", ".git", "--work-tree", ".", "-C", str(target),
+         "rev-parse", "--absolute-git-dir", "--show-toplevel"],
+        cwd=source, capture_output=True, text=True, check=True, timeout=10,
+        env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    _command, _args, targets, _overridden = guard._git_invocation(
+        f"git --git-dir .git --work-tree . -C '{target}' rev-parse",
+        str(source), "powershell",
+    )
+
+    assert [guard._guard_map.canonical(path) for path in result.stdout.splitlines()] == [
+        guard._guard_map.canonical(path) for _kind, path in targets
+    ]
 
 
 def test_map_scope_does_not_borrow_other_installation(tmp_path):
