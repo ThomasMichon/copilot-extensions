@@ -500,3 +500,25 @@ composition prerequisites, and review/validation rules.
   hosted typing/packet CI and normal review remain before this proposed
   seventh strict project can merge. In-package variants retain independent
   pending typing ownership.
+
+### 2026-11-02 - Hosted-review instruction delivery repaired
+
+- #9940's review deferred assessment because the checked-in catch-all
+  unconditionally required a CLI-only skill/resolver workflow. The referenced
+  review documents were intact; the generated instruction body was stale
+  relative to its current owning template.
+- The operator selected repair-first, not a further review exception.
+  #9945 merged as `ff59152d405338d607a5f174b3885096cc3bf74d`,
+  closing #9944 after exact-head Copilot approval with no findings and all
+  required checks in
+  [run 41421184069](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41421184069).
+  The isolated repair worktree is finalized.
+- The scoped generator refreshed only the catch-all locator, complete reviewed
+  fallback and corresponding lock entry. The other seven lock entries are
+  unchanged. All 151 delivery controls, offline scan, actual repository
+  fallback selection without enabled-source lookup and no-op regeneration
+  pass. No review/CI gate or runtime behavior changed; no rollout was requested.
+- The typing worktree is pulled forward. Next: publish the same Endpoint
+  Rendezvous candidate on the repaired base, obtain a genuine fresh review,
+  merge only after required checks, then continue #9941's four remaining
+  leaf-library helper/test files. #9807 remains active.
