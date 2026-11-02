@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -746,3 +746,41 @@ composition prerequisites, and review/validation rules.
   clean room or installed rollout is requested. Later source/test preparations,
   signature preservation for the validation decorator, genuine whole-project
   admission and physical-copy qualification remain open.
+
+### 2026-11-02 - Native preparation merged; decorator contracts selected
+
+- #9973 merged as `de0495f9eaa1e3d1b888c5c2ea24ce543cd117d4`
+  after exact-head Copilot approval with no findings, zero open review
+  comments and all required checks in
+  [run 41439756652](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41439756652).
+  The source worktree is pulled forward. This is measured preparation, not
+  Installation Context admission; counts remain 13 strict / 55 pending.
+- #9975 selects signature preservation for `_validation_scope`. Replace its
+  parameter/return erasure with `ParamSpec` and a return type variable while
+  preserving wrapper metadata, nested cache scope, thread isolation,
+  exceptions and token restoration.
+- Retain actual-source positive/negative MyPy controls and exact callable
+  assertions for eventual whole-project enforcement. More precise signatures
+  may expose additional genuine diagnostics; do not hide them or qualify an
+  otherwise-failing pending library. Source/test debt, source-copy
+  correspondence and all later project admissions remain required.
+- The decorator now preserves its complete callable signature with `ParamSpec`
+  and a return type variable. Two real-MyPy clients import the complete
+  composed canonical implementation: valid calls pass; incorrect positional
+  types, keyword types, positional use of a keyword-only parameter and return
+  assignment all fail. This checks the client contract only, not pending
+  library admission. An exact callable assertion remains in the library tests
+  for eventual whole-project enforcement.
+- Runtime metadata, signature, result and exception-restoration controls pass
+  alongside nested-cache/thread-isolation checks. The dynamically loaded test
+  module has an explicit `ModuleType` return contract. Whole-project probes
+  still fail: Linux 219 basic / 440 strict, Win32 205 basic / 427 strict.
+  The base fragment and exact callable assertion are clean on both targets.
+  Counts remain 13 strict / 55 pending; no diagnostic is ignored or filtered
+  for qualification.
+- The existing owner synchronizes exactly 27 physical copies of the base
+  fragment. MCP's source-only producer hashes retain revision 36 and unchanged
+  semantics. Only one admitted unit-source digest changes; nodes, targets and
+  packet budget remain unchanged. No provisioning, activation or lifecycle
+  behavior changes, so fresh-box installation and external runtime rollout
+  are not applicable to this typing-only preparation.

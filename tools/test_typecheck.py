@@ -555,6 +555,64 @@ def test_actual_mypy_preserves_lazy_helper_callable_signatures(
     assert lease.released
 
 
+@pytest.mark.parametrize("invalid", [False, True])
+def test_actual_mypy_preserves_validation_scope_callable_signature(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    invalid: bool,
+) -> None:
+    """Check a client of the complete pending implementation, not library admission."""
+    root = tmp_path / "source"
+    root.mkdir()
+    view = views.installation_view(
+        typecheck.ROOT, typecheck.python_paths(typecheck.ROOT),
+        root / "installation_context.py",
+    )
+    source = (
+        "from installation_context import _validation_scope\n"
+        "@_validation_scope\n"
+        "def local(value: int, *, enabled: bool = False) -> str:\n"
+        "    return str(value)\n"
+        "valid: str = local(3, enabled=True)\n"
+    )
+    if invalid:
+        source += (
+            "local('wrong', enabled=True)\n"
+            "local(3, enabled='wrong')\n"
+            "local(3, True)\n"
+            "wrong_return: int = local(3, enabled=True)\n"
+        )
+    (root / "sample.py").write_text(source, encoding="utf-8")
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return environment, "test-context"
+
+    def environment_python(_path: Path) -> Path:
+        return Path(sys.executable)
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        return lease
+
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", environment_python)
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    paths = ("sample.py",)
+    assert typecheck.check_project(root, project(), paths, all_paths=paths) == int(invalid)
+    view.verify(typecheck.ROOT)
+    output = capsys.readouterr().out
+    if invalid:
+        assert output.count(": error:") == 4
+        assert "[arg-type]" in output and "[assignment]" in output and "[misc]" in output
+    else:
+        assert "Success: no issues found" in output
+    assert lease.released
+
+
 def fragment_source(tmp_path: Path) -> tuple[str, ...]:
     """Use the real loader with a small, deliberately interdependent namespace."""
     directory = tmp_path / "libs" / "installation-context"
