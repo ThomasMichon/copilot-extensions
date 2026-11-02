@@ -600,7 +600,7 @@ def _legacy_uninstall_fixture(tmp_path: Path, monkeypatch):
 
 def test_legacy_uninstall_guard_uses_teardown_admission(tmp_path, monkeypatch):
     payload, root, _, guard, local_bin, _ = _legacy_uninstall_fixture(tmp_path, monkeypatch)
-    foreign = local_bin / "session-sync"
+    foreign = local_bin / ("session-sync.ps1" if os.name == "nt" else "session-sync")
     foreign.write_bytes(b"foreign command\n")
     before = (root / "deploy-manifest.json").read_bytes()
     binding = guard["_load"]("_logger_test_binding", "command_binding.py")
@@ -713,8 +713,10 @@ def test_native_uninstall_removes_only_owned_commands(tmp_path, monkeypatch, nat
         elif dry_run:
             assert (local_bin / name).read_bytes() == original[name]
             assert name in result.stdout
-        else:
+        elif (native == "ps1") == (os.name == "nt"):
             assert not (local_bin / name).exists(), name
+        else:
+            assert (local_bin / name).read_bytes() == original[name]
     assert (root / "deploy-manifest.json").read_bytes() == manifest
     assert (root / "config.yaml").read_bytes() == b"preserved configuration\n"
     assert (root / "session-state" / "sentinel").read_bytes() == b"preserved session data\n"
