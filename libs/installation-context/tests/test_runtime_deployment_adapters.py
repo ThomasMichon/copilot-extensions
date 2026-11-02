@@ -4,9 +4,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
 import pytest
 
@@ -57,6 +58,10 @@ DOWNLOAD_PROFILES = {
 }
 
 
+class _TimeoutDiagnostics(Protocol):
+    __notes__: list[str]
+
+
 def _run_adapter(
     runner: str, arguments: list[str], *, trace_root: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -91,10 +96,13 @@ def _run_adapter(
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired as exc:
-        stderr = exc.stderr or b""
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode("utf-8", errors="replace")
-        exc.__notes__ = [
+        raw_stderr = exc.stderr or b""
+        stderr = (
+            raw_stderr.decode("utf-8", errors="replace")
+            if isinstance(raw_stderr, bytes) else raw_stderr
+        )
+        diagnostics = cast(_TimeoutDiagnostics, exc)
+        diagnostics.__notes__ = [
             *getattr(exc, "__notes__", []),
             f"Native policy child started at {started}; phase evidence:\n{stderr}",
         ]
@@ -110,7 +118,8 @@ def test_native_timeout_retains_phase_evidence_without_retry(monkeypatch: pytest
         ["native-reader"], 30, stderr=b"native-policy-phase=Get-Command;elapsed_ms=50\n",
     )
     monkeypatch.setattr(failure, "add_note", None, raising=False)
-    failure.__notes__ = ["existing diagnostic"]
+    diagnostics = cast(_TimeoutDiagnostics, failure)
+    diagnostics.__notes__ = ["existing diagnostic"]
 
     def timeout(command: list[str], **kwargs: Any) -> None:
         calls.append((command, kwargs))
@@ -122,9 +131,9 @@ def test_native_timeout_retains_phase_evidence_without_retry(monkeypatch: pytest
     assert captured.value is failure
     assert len(calls) == 1
     assert calls[0][1]["timeout"] == 30
-    assert "native-policy-phase=Get-Command" in "\n".join(failure.__notes__)
-    assert failure.__notes__[0] == "existing diagnostic"
-    assert "Native policy child started at " in failure.__notes__[-1]
+    assert "native-policy-phase=Get-Command" in "\n".join(diagnostics.__notes__)
+    assert diagnostics.__notes__[0] == "existing diagnostic"
+    assert "Native policy child started at " in diagnostics.__notes__[-1]
 
 
 @pytest.mark.skipif(
@@ -306,7 +315,8 @@ def test_namespaced_adapter_policy_uses_governed_actual_root(tmp_path: Path, run
 def test_inaccessible_policy_cannot_become_missing(
     tmp_path: Path, runner: str, blocked: str,
 ) -> None:
-    if os.geteuid() == 0:
+    geteuid: Callable[[], int] = getattr(os, "geteuid")
+    if geteuid() == 0:
         pytest.skip("An OS superuser can read the restricted fixture")
     module = _load_module(native_environment=True)
     layout = _cell_layout(tmp_path)

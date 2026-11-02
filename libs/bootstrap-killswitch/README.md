@@ -48,6 +48,12 @@ other plugins' hooks that fire on the exact same session starts.
   Activating the switch from one marketplace's session can therefore never
   pause an independent, unrelated cell's reconcile.
 
+Retained compatibility hooks that only emit `{}` and exit do not reconcile
+anything and need no switch call. The sync audit recognizes only the exact
+inert shell/PowerShell bodies; adding another executable command restores the
+guard-wiring requirement. Their vendored guards remain available for older
+callers and direct switch management.
+
 ## Usage
 
 Every adopting plugin vendors an identical guard that doubles as a direct

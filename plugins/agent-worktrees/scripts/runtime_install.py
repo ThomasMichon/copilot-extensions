@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import tomllib
+import uuid
 from contextlib import ExitStack, nullcontext
 from pathlib import Path
 
@@ -57,7 +58,11 @@ def helper_publication_plan(path: Path, digest: str) -> dict:
     if (Path(plan["copies"]).parent != path.parent or copies is None
             or [copies.device, copies.inode] != plan["copies_identity"]):
         raise InstallationRefused("Callback copy inventory is not its owner-created file")
-    governance = Governance(Path(plan["root"]), Path(plan["owner"]))
+    governance = Governance(
+        Path(plan["root"]), Path(plan["owner"]),
+        **({"source_descriptor": plan["governance"]["source_descriptor"]}
+           if "source_descriptor" in plan["governance"] else {}),
+    )
     if governance.signature() != plan["governance"]:
         raise InstallationRefused("Helper publication governance changed")
     if governance.context:
@@ -92,6 +97,7 @@ def helper_publication_plan(path: Path, digest: str) -> dict:
             binding._rules(), governance.helper, payload_root=Path(plan["owner"]),
             plugin_id="agent-worktrees", legacy_root=governance.root,
             project_root=governance.project_root,
+            **governance.binding_options,
         )
         if lease is None:
             raise InstallationRefused("Helper publication requires its existing borrowed lifecycle")
@@ -133,9 +139,10 @@ def _publish_helpers(
     pin = {key: source[key] for key in ("runtime_version", "runtime_source") if key in source}
     staging = governance.root / ".installer-inputs"
     staging.mkdir(parents=True, exist_ok=True)
-    temporary = tempfile.mkdtemp(dir=staging, prefix="helper-publication-")
-    with nullcontext(temporary):
-        directory = Path(temporary)
+    directory = engine._private_retained_root(
+        staging, name=f"helper-publication-{os.getpid()}-{uuid.uuid4().hex}",
+    )
+    with nullcontext(directory):
         plan_path, result_path = directory / "plan.json", directory / "result.json"
         publication = runtime._runtime_component("versioned_runtime_publication")
         copies_path = directory / "copies"
@@ -182,6 +189,11 @@ def _publish_helpers(
                     "--install-dir", str(governance.root),
                     "--runtime-publication-python", sys._base_executable,
                     "--runtime-publication-plan", str(plan_path), "--runtime-publication-digest", digest]
+        if governance.source_descriptor is not None:
+            argv.extend([
+                "-RuntimeSourceDescriptor" if frontend["shell"] == "ps1" else "--runtime-source-descriptor",
+                json.dumps(governance.source_descriptor, sort_keys=True),
+            ])
         environment = dict(os.environ)
         environment["COPILOT_PLUGIN_STAGED_FROM"] = str(governance.payload)
         environment["COPILOT_PLUGIN_INSTALL_STAGED"] = (
@@ -487,10 +499,15 @@ def install(
     expected_source_identity: dict | None = None,
     frontend: dict | None = None,
     recover_adopted_manager: bool = False,
+    wheel_inputs: engine.WheelInstallInputs | None = None,
+    repair: bool = False,
+    source_descriptor: dict | None = None,
 ) -> dict:
     if base_python.resolve(strict=True) != Path(sys.executable).resolve():
         raise InstallationRefused("The lifecycle driver must run under the selected base interpreter")
-    governance = Governance(root, payload)
+    governance = Governance(
+        root, payload, **({"source_descriptor": source_descriptor} if source_descriptor is not None else {}),
+    )
     os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"] = str(governance.payload)
     root = governance.root
     package_version = tomllib.loads(
@@ -504,6 +521,30 @@ def install(
     ):
         raise InstallationRefused("Source identity changed after frontend runtime selection")
     version = source_identity.runtime_version if source_identity is not None else package_version
+    wheel_options = {}
+    if wheel_inputs is not None:
+        if source_identity is None or not isinstance(wheel_inputs, engine.WheelInstallInputs):
+            raise InstallationRefused("Closed source wheels require an attributed retained source selection")
+        wheel_inputs.verify()
+        receipt = wheel_inputs.receipt()
+        profile = receipt["binding"]
+        if profile.get("component") != "agent-worktrees" or profile.get("release") != {
+            "identity": "source:" + source_identity.source_commit,
+            "sha256": "sha256:" + source_identity.assembly_hash,
+        } or profile.get("mode") != "source":
+            raise InstallationRefused("Closed wheel profile differs from its Worktrees source")
+        version += ".profile." + receipt["lock_id"][7:23]
+        wheel_options = {
+            "wheel_inputs": wheel_inputs,
+            "local_packages": tuple(sorted(
+                engine._package_name(package) for package in engine._package_roots(plugin)
+                if engine._package_name(package) in receipt["distributions"]
+            )),
+        }
+    if repair:
+        if wheel_inputs is None:
+            raise InstallationRefused("Direct source repair requires complete wheel inputs")
+        version += ".repair." + uuid.uuid4().hex
     provenance = _source_provenance(governance.payload, package_version, source_identity)
     print(f"Runtime {version}: admitting frozen inputs", flush=True)
     with ExitStack() as custody:
@@ -532,10 +573,19 @@ def install(
                     reuse_generations=source_identity is None,
                     expected_source_identity=runtime_source.manifest_fields(source_identity),
                     wait_timeout=wait_timeout, child_timeout=child_timeout,
+                    **wheel_options,
                 ))
         except engine.HealthRepairRequired:
             if source_identity is None:
                 raise
+            if wheel_inputs is not None:
+                return install(
+                    root, plugin, payload=payload, uv=uv, base_python=base_python,
+                    wait_timeout=wait_timeout, child_timeout=child_timeout,
+                    expected_source_identity=runtime_source.manifest_fields(source_identity),
+                    frontend=frontend, recover_adopted_manager=recover_adopted_manager,
+                    wheel_inputs=wheel_inputs, repair=True,
+                )
             import runtime_install_modes as modes
 
             return modes.run(
@@ -610,7 +660,11 @@ def settle_candidate(
     governance: Governance | None = None,
     recover_adopted_manager: bool = False,
 ) -> dict:
-    governance = governance if governance is not None else Governance(root, payload)
+    governance = governance if governance is not None else Governance(
+        root, payload,
+        **({"source_descriptor": expected_governance["source_descriptor"]}
+           if "source_descriptor" in expected_governance else {}),
+    )
     if governance.signature() != expected_governance:
         raise InstallationRefused("Installation governance changed before candidate handover")
     root = governance.root
@@ -786,13 +840,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=("ordinary", "repair", "dev", "dev-release"), default="ordinary")
     parser.add_argument("--owner", type=Path)
     parser.add_argument("--mode-owner", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--install-source", type=Path)
     arguments = parser.parse_args(argv)
     required = ("root", "plugin") if (
         arguments.inspect_helper_publication or arguments.complete_helper_publication
     ) else ("root", "plugin", "payload", "uv", "base_python", "result")
     if any(getattr(arguments, name) is None for name in required):
         parser.error("required arguments: " + ", ".join("--" + name.replace("_", "-") for name in required))
-    if arguments.inspect_helper_publication or arguments.complete_helper_publication:
+    if arguments.install_source:
+        if arguments.mode not in ("ordinary", "repair") or any((
+            arguments.mode_owner, arguments.settle_slot,
+            arguments.inspect_helper_publication, arguments.complete_helper_publication,
+        )):
+            parser.error("--install-source selects only ordinary installation or independent repair")
+        from install_source import project_inputs
+
+        with project_inputs(arguments.install_source, "agent-worktrees") as (selected, wheels):
+            if runtime_source.read_source_identity(
+                arguments.plugin, selected.identity.package_version, plugin="agent-worktrees",
+            ) != selected.identity:
+                raise InstallationRefused("Invocation payload differs from the selected installation source")
+            result = install(
+                arguments.root, selected.payload, payload=arguments.payload,
+                uv=arguments.uv, base_python=arguments.base_python,
+                wait_timeout=arguments.wait_timeout, child_timeout=arguments.child_timeout,
+                expected_source_identity=arguments.expected_source_identity,
+                frontend=arguments.frontend,
+                recover_adopted_manager=arguments.recover_adopted_manager,
+                wheel_inputs=wheels, repair=arguments.mode == "repair",
+                **({"source_descriptor": selected.source_descriptor}
+                   if getattr(selected, "source_descriptor", None) is not None else {}),
+            )
+    elif arguments.inspect_helper_publication or arguments.complete_helper_publication:
         path = arguments.inspect_helper_publication or arguments.complete_helper_publication
         plan = helper_publication_plan(path, arguments.publication_digest)
         if Path(plan["root"]).resolve() != arguments.root.resolve():

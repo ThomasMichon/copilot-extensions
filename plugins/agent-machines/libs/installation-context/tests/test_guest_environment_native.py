@@ -7,9 +7,9 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from types import ModuleType
-from typing import Any
+from typing import Protocol, TypedDict, cast
 
 import pytest
 
@@ -21,21 +21,47 @@ HOSTS = [
 ]
 
 
+class _CatalogFixture(TypedDict):
+    home: Path
+    payload: Path
+    environment: dict[str, str]
+
+
+class _PowerShellHost(Protocol):
+    errors: list[str]
+
+    def run(self, argv: list[str]) -> subprocess.CompletedProcess[str]: ...
+
+    def close(self) -> None: ...
+
+
+class _CommandBindingFixture(Protocol):
+    POWERSHELL: str | None
+    _PowerShellHost: Callable[[Path, dict[str, str]], _PowerShellHost]
+
+    def _catalog_environment(
+        self, fixture: _CatalogFixture, interpreter: str | None = None,
+    ) -> dict[str, str]: ...
+
+    def _snapshot(self, root: Path) -> dict[str, tuple[bool, int, bytes | None]]: ...
+
+
 def _initialized_host(
     executable: str, profile: Path, environment: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[ModuleType, Any, dict[str, str]]:
+) -> tuple[_CommandBindingFixture, _PowerShellHost, dict[str, str]]:
     path = LIB.parents[1] / "libs/payload-invocation/tests/test_command_binding.py"
     spec = importlib.util.spec_from_file_location("guest_native_fixture", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
-    module.POWERSHELL = executable
-    environment = module._catalog_environment({
+    fixture = cast(_CommandBindingFixture, module)
+    fixture.POWERSHELL = executable
+    environment = fixture._catalog_environment({
         "home": profile, "payload": profile, "environment": environment,
     })
-    return module, module._PowerShellHost(profile, environment), environment
+    return fixture, fixture._PowerShellHost(profile, environment), environment
 
 
 def _powershell_command(
@@ -109,7 +135,7 @@ def test_native_host_default_diagnostic_matches_python(
     try:
         reference = subprocess.run(
             commands[0], env=environment, capture_output=True, text=True,
-            encoding="utf-8", timeout=20, creationflags=subprocess.CREATE_NO_WINDOW,
+            encoding="utf-8", timeout=20, creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
         )
         result = initialized.run(commands[1])
         for response in (reference, result):

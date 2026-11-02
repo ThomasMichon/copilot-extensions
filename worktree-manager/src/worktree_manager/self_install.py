@@ -32,6 +32,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import worktree_manager
+
+from .self_install_runtime import (
+    running_payload_dir as running_payload_dir,
+    load_runtime_installer as _load_runtime_installer,
+    slot_is_complete as _runtime_slot_is_complete,
+    slot_package_version as _runtime_slot_package_version,
+    runtime_scripts as _runtime_resource_scripts,
+)
+from .self_install_payload import (
+    _clear_dir as _clear_dir,
+    _fetch_via_tarball as _payload_fetch_via_tarball,
+)
 from .source_config import default_root as default_root
 
 MARKER = "current-version"
@@ -139,29 +151,12 @@ def control_plane_providers_dir() -> Path:
     return home / ".agent-worktrees" / CONTROL_PLANE_PROVIDERS_SUBDIR
 
 
-def running_payload_dir() -> Path:
-    """The project dir of the currently-running payload (has pyproject.toml)."""
-    # .../worktree-manager/src/worktree_manager/self_install.py -> parents[2] == project.
-    package = Path(worktree_manager.__file__).resolve()
-    retained = Path(sys.prefix) / "payload"
-    if package.is_relative_to(Path(sys.prefix).resolve()) and (retained / "pyproject.toml").is_file():
-        return retained
-    return package.parents[2]
-
-
 def _runtime_installer():
-    script = running_payload_dir() / "scripts" / "runtime_install.py"
-    name = "_manager_runtime_install"
-    existing = sys.modules.get(name)
-    if existing is not None and Path(existing.__file__).resolve() == script.resolve():
-        return existing
-    spec = importlib.util.spec_from_file_location(name, script)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("Manager canonical installer adapter is unavailable")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return _load_runtime_installer(_runtime_scripts())
+
+
+def _runtime_scripts() -> Path:
+    return _runtime_resource_scripts(Path(worktree_manager.__file__).resolve().parent, running_payload_dir)
 
 
 def payload_version(payload_dir: Path | None = None) -> str | None:
@@ -201,22 +196,7 @@ def _mark_slot_complete(slot: Path) -> None:
 
 
 def _slot_is_complete(slot: Path) -> bool:
-    """Check canonical completion, interpreter and retained payload availability.
-
-    Payload assembly alone never establishes runtime readiness. Apply/reuse
-    additionally runs the canonical installed-origin and CLI health probe under
-    candidate custody; this read-only status check does not reconstruct a slot.
-    """
-    payload = slot / "payload"
-    try:
-        runtime = _runtime_installer().runtime
-        return (
-            runtime.is_complete(slot.parent.parent, slot.name)
-            and runtime.slot_python(slot.parent.parent, slot.name) is not None
-            and all((payload / rel).is_file() for rel in _SLOT_KEY_FILES)
-        )
-    except (OSError, ValueError, ImportError, RuntimeError):
-        return False
+    return _runtime_slot_is_complete(slot, _runtime_installer, _SLOT_KEY_FILES)
 
 
 def _binstub_files() -> list[str]:
@@ -230,7 +210,17 @@ def _primary_binstub_name() -> str:
 
 
 def _provider_manifest_template_path(payload_dir: Path | None = None) -> Path:
-    candidate = (payload_dir or running_payload_dir()) / "references" / "control-plane-provider.json"
+    packaged = (
+        Path(worktree_manager.__file__).resolve().parent
+        / "_runtime_assets" / "references" / "control-plane-provider.json"
+    )
+    if payload_dir is not None:
+        candidate = payload_dir / "references" / "control-plane-provider.json"
+        if candidate.is_file():
+            return candidate
+    if packaged.is_file():
+        return packaged
+    candidate = running_payload_dir() / "references" / "control-plane-provider.json"
     if candidate.is_file():
         return candidate
     return running_payload_dir() / "references" / "control-plane-provider.json"
@@ -332,12 +322,23 @@ def binstub_present() -> Path | None:
     return None
 
 
-def _expected_binstub_contents() -> dict[str, str]:
+def _expected_binstub_contents(*, application_slot: Path | None = None) -> dict[str, str]:
     """The exact binstub file contents this version would (re)deploy.
 
     Factored out of :func:`_deploy_binstubs` so :func:`_binstubs_are_stale`
     can compare against the same expectation without writing anything.
     """
+    if application_slot is not None:
+        script = application_slot / "runtime_application_binstubs.py"
+        spec = importlib.util.spec_from_file_location("_manager_application_binstubs", script)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("Manager application launchers are unavailable")
+        launchers = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(launchers)
+        return launchers.global_binstubs(
+            "worktree-manager", "WORKTREE_MANAGER_ROOT", ".worktree-manager",
+            root=application_slot.parent.parent,
+        )
     contents = {"worktree-manager": _sh_binstub()}
     if os.name == "nt":
         contents = {
@@ -348,7 +349,7 @@ def _expected_binstub_contents() -> dict[str, str]:
     return contents
 
 
-def _binstubs_are_stale() -> bool:
+def _binstubs_are_stale(*, application_slot: Path | None = None) -> bool:
     """True when a deployed binstub is missing or its content doesn't match.
 
     ``binstub_present()`` only proves *some* file with an expected name
@@ -364,7 +365,7 @@ def _binstubs_are_stale() -> bool:
     mismatch (or absence) means the binstub needs (re)deploying.
     """
     lb = local_bin()
-    for name, expected in _expected_binstub_contents().items():
+    for name, expected in _expected_binstub_contents(application_slot=application_slot).items():
         p = lb / name
         try:
             # newline="" preserves exact line endings on read (matches how
@@ -391,7 +392,7 @@ class SelfInstallStatus:
         if self.installed_version is None:
             return False
         root = Path(self.root)
-        version = payload_version(version_slot(self.installed_version, root) / "payload")
+        version = _slot_package_version(version_slot(self.installed_version, root))
         return version is not None and _core_install_satisfied(version, root)
 
 
@@ -422,10 +423,13 @@ def _core_install_satisfied(version: str, root: Path | None = None) -> bool:
     slot = _selected_runtime_slot(r)
     return (
         slot is not None
-        and payload_version(slot / "payload") == version
+        and _slot_package_version(slot) == version
         and _slot_is_complete(slot)
         and binstub_present() is not None
-        and not _binstubs_are_stale()
+        and not (
+            _binstubs_are_stale(application_slot=slot)
+            if (slot / "application.json").is_file() else _binstubs_are_stale()
+        )
     )
 
 
@@ -445,7 +449,7 @@ def _core_install_satisfied_gaps(version: str, root: Path | None = None) -> list
     cur = current_version(r)
     valid_selection = _selected_runtime_slot(r)
     selected = valid_selection or version_slot(version, r)
-    matching_payload = payload_version(selected / "payload") == version
+    matching_payload = _slot_package_version(selected) == version
     if valid_selection is None:
         gaps.append(f"current-version marker is missing, empty or invalid: {cur!r}")
     elif cur != version and not matching_payload:
@@ -459,7 +463,10 @@ def _core_install_satisfied_gaps(version: str, root: Path | None = None) -> list
     stub = binstub_present()
     if stub is None:
         gaps.append("no binstub found in ~/.local/bin")
-    elif _binstubs_are_stale():
+    elif (
+        _binstubs_are_stale(application_slot=selected)
+        if (selected / "application.json").is_file() else _binstubs_are_stale()
+    ):
         gaps.append(f"binstub {stub} content does not match this version's template")
     return gaps
 
@@ -503,15 +510,53 @@ from .runtime_launchers import _ps1_binstub as _ps1_binstub
 from .runtime_launchers import _sh_binstub as _sh_binstub
 
 
-def _deploy_binstubs() -> list[Path]:
+def _slot_package_version(slot: Path) -> str | None:
+    return _runtime_slot_package_version(slot, _runtime_installer, payload_version)
+
+
+def _deploy_binstubs(*, application_slot: Path | None = None, _published=None) -> list[Path]:
     lb = local_bin()
     lb.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    for name, body in _expected_binstub_contents().items():
+    contents = _expected_binstub_contents(application_slot=application_slot)
+    if application_slot is not None:
+        previous = _selected_runtime_slot(application_slot.parent.parent)
+        owned = _expected_binstub_contents(
+            application_slot=previous
+            if previous is not None and (previous / "application.json").is_file() else None,
+        )
+        for name, body in contents.items():
+            path = lb / name
+            if path.is_symlink() or (path.exists() and not path.is_file()):
+                raise RuntimeError(f"Foreign Manager command preserved: {path}")
+            if path.exists() and path.read_bytes() not in (
+                body.encode("utf-8"), owned.get(name, "").encode("utf-8"),
+            ):
+                raise RuntimeError(f"Foreign Manager command preserved: {path}")
+    for name, body in contents.items():
         p = lb / name
-        p.write_text(body, encoding="utf-8", newline="")
-        if os.name != "nt":
-            p.chmod(0o755)
+        if application_slot is None:
+            p.write_text(body, encoding="utf-8", newline="")
+            if os.name != "nt":
+                p.chmod(0o755)
+        else:
+            publication = _runtime_installer().runtime._runtime_component("versioned_runtime_publication")
+            temporary = p.with_name(f".{p.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+            try:
+                with temporary.open("xb") as stream:
+                    stream.write(body.encode("utf-8"))
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                if os.name != "nt":
+                    temporary.chmod(0o755)
+                created = publication.state_path(temporary)
+                _replace_with_retry(temporary, p)
+                if _published is not None:
+                    _published[p] = created
+                if publication.state_path(p) != created:
+                    raise RuntimeError(f"Manager command changed during publication: {p}")
+            finally:
+                temporary.unlink(missing_ok=True)
         written.append(p)
     return written
 
@@ -743,34 +788,83 @@ def _complete_candidate(
     was_current: bool, before_publish=None, after_activate=None,
     transactional_activation: bool = False,
 ) -> SelfInstallResult:
-    slot = ready.slot
-    version = payload_version(payload)
+    return _complete_slot(
+        ready.slot, payload, payload_version(payload), root, previous=previous,
+        was_current=was_current, reused=ready.reused, before_publish=before_publish,
+        after_activate=after_activate, transactional_activation=transactional_activation,
+    )
+
+
+def _complete_slot(
+    slot: Path, payload: Path, version: str | None, root: Path, *,
+    previous: str | None, was_current: bool, reused: bool,
+    before_publish=None, after_activate=None, transactional_activation: bool = False,
+) -> SelfInstallResult:
     stubs: list[Path] = []
+    application_slot = slot if (slot / "application.json").is_file() else None
+    baseline = {}
+    contents = {}
+    published = {}
 
     def publish_frontdoors() -> None:
         nonlocal stubs
         publication = installer.runtime._runtime_component("versioned_runtime_publication")
-        targets = [*(local_bin() / name for name in _binstub_files()),
+        targets = [*(local_bin() / name for name in (
+            _expected_binstub_contents(application_slot=application_slot)
+            if application_slot is not None else _binstub_files()
+        )),
                    _control_plane_provider_manifest_path(payload, root=root)]
         with publication.target_leases(root, targets):
             if before_publish is not None:
                 before_publish()
-            stubs = _deploy_binstubs()
-            _write_control_plane_provider_manifest(payload, root=root)
+            if application_slot is not None:
+                for path in targets:
+                    baseline[path] = publication.state_path(path)
+                    contents[path] = (
+                        publication.CopyPublication._bytes(path, baseline[path])
+                        if baseline[path] is not None else None
+                    )
+            stubs = (
+                _deploy_binstubs(application_slot=application_slot, _published=published)
+                if application_slot is not None else _deploy_binstubs()
+            )
+            provider = _write_control_plane_provider_manifest(payload, root=root)
+            if application_slot is not None:
+                published[provider] = publication.state_path(provider)
 
     installer = _runtime_installer()
     if before_publish is not None:
         before_publish()
-    installer.activate(
-        root, slot.name, expected=previous, before_publish=publish_frontdoors,
-        after_publish=(lambda: after_activate(slot))
-        if transactional_activation and after_activate is not None else None,
-    )
-    if after_activate is not None and not transactional_activation:
-        after_activate(slot)
+    try:
+        installer.activate(
+            root, slot.name, expected=previous, before_publish=publish_frontdoors,
+            after_publish=(lambda: after_activate(slot))
+            if transactional_activation and after_activate is not None else None,
+        )
+        if after_activate is not None and not transactional_activation:
+            after_activate(slot)
+    except BaseException:
+        if application_slot is not None and published:
+            publication = installer.runtime._runtime_component("versioned_runtime_publication")
+            with publication.target_leases(root, list(published)):
+                for path, created in published.items():
+                    if publication.state_path(path) != created:
+                        raise RuntimeError(f"Manager publication changed during recovery: {path}")
+                for path in published:
+                    if baseline[path] is None:
+                        path.unlink()
+                    else:
+                        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.recover")
+                        try:
+                            temporary.write_bytes(contents[path])
+                            temporary.chmod(baseline[path].mode & 0o7777)
+                            _replace_with_retry(temporary, path)
+                        finally:
+                            temporary.unlink(missing_ok=True)
+        raise
     return SelfInstallResult(
         version=version, action="already-current"
-        if was_current and ready.reused and previous == slot.name else "installed",
+        if was_current and reused and previous == slot.name else "installed",
         root=str(root), slot=str(slot), marker=slot.name,
         binstubs=tuple(str(stub) for stub in stubs),
     )
@@ -785,18 +879,33 @@ def self_install(
     _transactional_activation: bool = False, _reconcile_instances: bool = True,
     _wheel_inputs=None, _local_packages: tuple[str, ...] | None = None, _validate_candidate=None,
     _raise_candidate_errors: bool = False, _base_python: Path | None = None, _uv: Path | None = None,
+    _application: Path | None = None,
 ) -> SelfInstallResult:
     """Construct and health-gate with the canonical engine before selection."""
+    from .runtime_identity import running_application_slot
+
     r = (root or default_root()).resolve()
-    pd = payload_dir or running_payload_dir()
-    version = payload_version(pd)
+    application_slot = running_application_slot() if payload_dir is None else None
+    pd = payload_dir or application_slot or running_payload_dir()
+    version = worktree_manager.__version__ if application_slot is not None else payload_version(pd)
     if version is None:
         return SelfInstallResult(version=None, action="error", root=str(r),
                                  reason="could not read payload __version__")
-    slot = version_slot(version, r)
+    slot = application_slot or version_slot(version, r)
     try:
         installer = _runtime_installer()
+        if application_slot is not None and (
+            application_slot.parent.parent != r
+            or not Path(worktree_manager.__file__).resolve().is_relative_to(application_slot / ".venv")
+        ):
+            raise RuntimeError("Running Manager application belongs to another installation")
         if dry_run:
+            if application_slot is not None:
+                return SelfInstallResult(
+                    version=version, action="already-current"
+                    if current_version(r) == slot.name and not needs_install(version, r) else "planned",
+                    root=str(r), slot=str(slot), marker=slot.name, reason="dry-run",
+                )
             selected = _selected_runtime_slot(r)
             generation, source_matches = installer.source_install_selection(pd, version, selected)
             slot = version_slot(generation, r)
@@ -813,15 +922,44 @@ def self_install(
         ):
             from installer_instance_reconcile import reconcile_installer_instances
 
-            reconcile_installer_instances(running_payload_dir() / "scripts")
+            reconcile_installer_instances(_runtime_scripts())
         candidate_options = {key: value for key, value in (
             ("python", _base_python), ("uv", _uv), ("wheel_inputs", _wheel_inputs),
             ("local_packages", _local_packages), ("validate_candidate", _validate_candidate),
+            ("application", _application),
         ) if value is not None}
         with ExitStack() as custody:
             if os.name == "nt" and os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":
                 if custody.enter_context(installer._installation_custody()) is None:
                     raise RuntimeError("Manager construction requires live installation custody")
+            if application_slot is not None:
+                script = application_slot / "install.py"
+                spec = importlib.util.spec_from_file_location("_manager_application_install", script)
+                if spec is None or spec.loader is None:
+                    raise RuntimeError("Manager application install entry is unavailable")
+                application = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(application)
+                record = application._application(application_slot)
+                if record["name"] != "worktree-manager":
+                    raise RuntimeError("Running application is not Manager")
+                reused = installer.runtime.is_complete(r, slot.name)
+                _, unchanged = custody.enter_context(application._qualified(slot, record))
+
+                def before_publish():
+                    unchanged()
+                    if _before_publish is not None:
+                        _before_publish()
+
+                return _complete_slot(
+                    slot, slot, version, r, previous=previous,
+                    was_current=was_current, reused=reused, before_publish=before_publish,
+                    after_activate=_after_activate or (
+                        lambda selected: installer._activate_after_bootstrap_update(
+                            r, selected, start_if_missing=True,
+                        )
+                    ),
+                    transactional_activation=True,
+                )
             ready = custody.enter_context(installer.candidate(pd, r, assemble=_copy_payload, **candidate_options))
             slot = ready.slot
             return _complete_candidate(
@@ -847,95 +985,8 @@ class SelfUpdateResult:
     cutover: dict[str, object] | None = None
 
 
-def _clear_dir(d: Path) -> None:
-    """Empty a directory in place (keep the directory itself)."""
-    if not d.exists():
-        return
-    for child in d.iterdir():
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child, ignore_errors=True)
-        else:
-            try:
-                child.unlink()
-            except OSError:
-                pass
-
-
 def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
-    """Fetch + extract the worktree-manager payload from a GitHub tarball (no git).
-
-    Replaces ``staging`` contents with the extracted ``worktree-manager/`` payload
-    PLUS its sibling ``libs/`` directory, so ``staging/worktree-manager/pyproject.toml``
-    and ``staging/libs/`` both exist -- the same monorepo-shaped layout the git
-    clone produces. ``libs/`` supplies canonical content for
-    ``_materialize_payload_pointers`` to expand any vendor-pointer copy inside the
-    payload -- expansion itself uses the LOCAL, already-trusted
-    ``_trusted_pointer_materializer`` module (never the fetched ``tools/``, which
-    this function deliberately does NOT fetch: ``self_update`` supports
-    user-configured forks/canary refs, so executing anything from that untrusted
-    tree would be a real supply-chain risk -- see
-    ``_materialize_payload_pointers``'s own docstring). A tarball-only fetch that
-    skipped the ``libs/`` sibling would leave those pointers permanently
-    unresolvable in the installed slot.
-    Raises ``OSError`` on any failure so the caller can degrade to an ``error`` result.
-    """
-    import tarfile
-    import tempfile
-    import urllib.request
-
-    staging.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory() as td:
-        tdp = Path(td)
-        archive = tdp / "payload.tar.gz"
-        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 - https codeload
-            archive.write_bytes(resp.read())
-        extract = tdp / "x"
-        extract.mkdir()
-        with tarfile.open(archive, "r:gz") as tf:
-            _safe_extract(tf, extract)
-        # codeload extracts to a single <name>-<ref>/ top dir; find the payload.
-        payload = None
-        for rdir in (p for p in extract.iterdir() if p.is_dir()):
-            if rdir.is_symlink():
-                # rdir.is_dir() above already follows a symlink -- checking
-                # only payload (rdir / "worktree-manager") afterward misses
-                # THIS case: a symlinked top-level extraction dir whose own
-                # "worktree-manager" subpath is a real (non-symlink) file
-                # within the symlinked target, so payload.is_symlink() alone
-                # would be False even though the whole tree was reached via
-                # a symlinked parent.
-                raise OSError(f"extracted tarball entry {rdir} is a symlink -- refusing")
-            cand = rdir / "worktree-manager"
-            if (cand / "pyproject.toml").is_file():
-                payload = cand
-                break
-        if payload is None:
-            raise OSError(f"worktree-manager payload not found in tarball from {url}")
-        if payload.is_symlink():
-            raise OSError(f"worktree-manager payload at {payload} is a symlink -- refusing")
-        _clear_dir(staging)
-        # symlinks=True on every copytree below: shutil.copytree's default
-        # (symlinks=False) DEREFERENCES a symlink anywhere in the source
-        # tree, silently copying whatever file it points to -- a malicious
-        # or corrupted tarball could include a symlink entry pointing
-        # outside the extracted archive, and a naive copytree would smuggle
-        # that external content straight into staging before
-        # materialize_main ever gets a chance to reject it. Preserving
-        # symlinks as symlinks instead lets the existing canonical-symlink
-        # validation (_find_symlink()) correctly detect and refuse them
-        # downstream, the same as it already does for a real dev checkout.
-        # NOTE: symlinks=True does NOT protect the copytree's own SOURCE
-        # ROOT -- shutil.copytree always creates dst as a real directory,
-        # so if the root argument itself were a symlink, os.scandir would
-        # transparently follow it with nowhere for a preserved-symlink
-        # object to even go. Each root (payload, libs_source) is
-        # explicitly is_symlink()-checked before its own copy call.
-        shutil.copytree(payload, staging / "worktree-manager", symlinks=True)
-        libs_source = payload.parent / "libs"
-        if libs_source.is_symlink():
-            raise OSError(f"{libs_source} is a symlink -- refusing")
-        if libs_source.is_dir():
-            shutil.copytree(libs_source, staging / "libs", symlinks=True)
+    return _payload_fetch_via_tarball(staging, url, timeout=timeout, _extract=_safe_extract)
 
 
 def self_update(

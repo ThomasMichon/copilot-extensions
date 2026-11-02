@@ -4438,6 +4438,54 @@ configured-source authentication may still access its selected Git origin.
 Default marketplace/bootstrap integration, production dependency/native
 qualification and measured cold/warm speedup remain separate gates.
 
+### Local wheel applications for Manager and Worktrees
+
+The explicit `--install-source` adapters accept locally prepared Manager or
+Worktrees inputs without changing ordinary bootstrap selection. Native entry
+points advertise support through their read-only `--describe-source-inputs`
+descriptor; callers must not send the option to an older executable that does
+not advertise it. PowerShell entry points use `-InstallSource`. Other services
+can continue using their existing source installers.
+
+`tools/local_install_source.py` freezes one full Git commit, materializes its
+declared resources and builds associated first-party wheels without consuming
+changefiles or changing package versions. Its default selects Manager only.
+Repeated `--project` options select a bounded set, such as
+`--project standalone:worktree-manager --project agent-worktrees`; `--suite`
+is a separate, explicit portfolio-wide choice. A first-party-only snapshot is
+preparation data and refuses runtime installation until its native profile is
+complete.
+
+`tools/local_install_profile.py --prepare-profile` completes one selected
+component's native dependency closure through the existing configured-feed
+compiler and acquisition owners. Supply `--component worktree-manager` or
+`--component agent-worktrees`, the first-party snapshot through
+`--install-source`, a fresh `--output`, and the selected absolute `--uv`.
+Consume the returned `snapshot` path, not an inferred output directory.
+Existing feed policy, artifact seasoning, source identity and installation
+custody still apply; a local snapshot is not independent authorization.
+
+The completed snapshot contains a copyable, locked UV application with its
+associated wheels and slot-local install entries. `install --stage` creates
+only the nested `.venv`; it does not run setup, publish globals, select a
+generation or start a service. Regular installation runs the component's
+setup, publication and startup owners. Global command shims follow the
+existing selected generation and invoke its slot-local UV project without
+dependency synchronization. Construction and reuse retain the canonical
+health, completion, retention and rollback checks.
+
+Flat historical slots remain supported alongside nested applications.
+Manager wheels carry the launchers' complete operational bin-resource closure,
+including pane helpers and mux configuration. Shell callbacks and companion
+handoffs resolve the immutable owning slot from those installed assets, using
+its flat or nested interpreter without following a selector or resolving a UV
+project at the asset directory.
+Resource-packaging hooks on ordinary source installations use the existing
+isolated source-build fallback rather than the static-project wheel cache.
+An explicitly prepared application installs its first-party wheels offline
+without running those first-party backends. Neither path upgrades, stops or
+removes unrelated service installations.
+
 ### Bounded wheel inspection
 
 `libs/installer-engine/installer_wheel_inputs.py` is a stdlib-only input

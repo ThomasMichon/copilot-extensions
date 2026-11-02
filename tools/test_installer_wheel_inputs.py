@@ -260,7 +260,7 @@ def test_archive_deadline_is_checked_after_final_fact_parsing(wheel_path, limits
 @pytest.mark.parametrize("name", [
     "../escape", "/absolute", "C:drive", "a\\b", "a//b", "a/./b",
     "a/../b", "other-1.0.dist-info/METADATA", "a\0tail",
-    "shadow-9.0.DIST-INFO/METADATA", "nested/shadow-9.0.Dist-Info/METADATA",
+    "shadow-9.0.DIST-INFO/METADATA",
     "demo_pkg/__init__.py.", "demo_pkg/__init__.py ",
     "demo_pkg./module.py", "demo_pkg /module.py", "trailing//",
 ])
@@ -272,6 +272,34 @@ def test_unsafe_and_ambiguous_members_refuse(wheel_path, limits, name):
     wheel_path.write_bytes(data)
     with pytest.raises(inspection.WheelError):
         inspect(wheel_path, limits)
+
+
+@pytest.mark.parametrize("corrupt_record", [False, True])
+def test_vendored_metadata_is_payload_checked_by_the_outer_record(wheel_path, limits, corrupt_record):
+    prefix = "demo_pkg/_vendor/shadow-9.0.Dist-Info/"
+    entries = {
+        prefix + "METADATA": b"Metadata-Version: 2.4\nName: shadow\nVersion: 9.0\n\n",
+        prefix + "WHEEL": b"vendored wheel metadata",
+        prefix + "RECORD": b"vendored record",
+    }
+
+    def mutate(rows):
+        if corrupt_record:
+            next(row for row in rows if row[0] == prefix + "METADATA")[1] = (
+                "sha256=" + base64.urlsafe_b64encode(b"\0" * 32).rstrip(b"=").decode()
+            )
+
+    wheel_path.write_bytes(wheel_bytes(extra=entries, record_mutator=mutate))
+    if corrupt_record:
+        with pytest.raises(inspection.WheelError, match="digest"):
+            inspect(wheel_path, limits)
+    else:
+        facts = inspect(wheel_path, limits)
+        assert (facts.name, facts.version) == ("demo-pkg", "1.0")
+        assert all(
+            facts.member_hashes[name] == hashlib.sha256(data).hexdigest()
+            for name, data in entries.items()
+        )
 
 
 @pytest.mark.parametrize("name", ["NUL.py", "folder/COM1.txt", "folder/conout$", "a?b", "control\x01"])

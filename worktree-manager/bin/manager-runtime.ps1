@@ -5,15 +5,39 @@ param(
     [string]$Cwd
 )
 
-function Get-ManagerRuntimeInvocation {
-    param([string]$PayloadRoot, [string[]]$ModuleArguments, [switch]$RequireInstalled)
+function Get-ManagerRuntimeSlot {
+    param([string]$PayloadRoot)
     $slot = Split-Path -Parent $PayloadRoot
     $versions = Split-Path -Parent $slot
+    if ((Split-Path -Leaf $PayloadRoot) -eq 'payload' -and (Split-Path -Leaf $versions) -eq 'versions') {
+        return $slot
+    }
+    if ((Split-Path -Leaf $PayloadRoot) -ne '_runtime_assets') { return $null }
+    $directory = [IO.DirectoryInfo]::new([IO.Path]::GetFullPath($PayloadRoot))
+    while ($directory.Parent -and $directory.Parent.Name -ne 'versions') { $directory = $directory.Parent }
+    if ($directory.Parent -and $directory.Parent.Name -eq 'versions') {
+        $prefix = if (Test-Path -LiteralPath (Join-Path $directory.FullName 'application.json') -PathType Leaf) {
+            Join-Path $directory.FullName '.venv'
+        } else { $directory.FullName }
+        if (Test-Path -LiteralPath (Join-Path $prefix 'pyvenv.cfg') -PathType Leaf) {
+            return $directory.FullName
+        }
+    }
+    return $null
+}
+
+function Get-ManagerRuntimeInvocation {
+    param([string]$PayloadRoot, [string[]]$ModuleArguments, [switch]$RequireInstalled)
+    $slot = Get-ManagerRuntimeSlot -PayloadRoot $PayloadRoot
     $environment = @{}
     $clearEnvironment = @()
-    if ((Split-Path -Leaf $PayloadRoot) -eq 'payload' -and (Split-Path -Leaf $versions) -eq 'versions') {
-        $python = Join-Path $slot 'Scripts\python.exe'
-        if (-not (Test-Path -LiteralPath $python)) { $python = Join-Path $slot 'bin/python' }
+    if ($slot) {
+        $versions = Split-Path -Parent $slot
+        $prefix = if (Test-Path -LiteralPath (Join-Path $slot 'application.json') -PathType Leaf) {
+            Join-Path $slot '.venv'
+        } else { $slot }
+        $python = Join-Path $prefix 'Scripts\python.exe'
+        if (-not (Test-Path -LiteralPath $python)) { $python = Join-Path $prefix 'bin/python' }
         $bootstrap = Join-Path $slot '.runtime-bootstrap/runtime_launcher.py'
         if (-not (Test-Path -LiteralPath $python) -or -not (Test-Path -LiteralPath $bootstrap) -or
             -not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json'))) {
@@ -24,7 +48,9 @@ function Get-ManagerRuntimeInvocation {
         $clearEnvironment = @('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', '__PYVENV_LAUNCHER__')
         $environment['WORKTREE_MANAGER_ROOT'] = Split-Path -Parent $versions
     } else {
-        if ($RequireInstalled) { throw 'Companion pane requires a constructed Manager runtime' }
+        if ($RequireInstalled -or (Split-Path -Leaf $PayloadRoot) -eq '_runtime_assets') {
+            throw 'Companion pane requires a constructed Manager runtime'
+        }
         $fileName = (Get-Command uv -CommandType Application -ErrorAction Stop).Source
         $commandArguments = @('run', '--quiet', '--project', $PayloadRoot)
     }

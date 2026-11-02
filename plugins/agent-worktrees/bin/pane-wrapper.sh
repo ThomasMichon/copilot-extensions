@@ -77,12 +77,14 @@ aw_pane_boundary_process() (
 ) 2>/dev/null
 
 aw_pane_boundary() {
-    local action="$1" version slot python bootstrap
+    local action="$1" version slot prefix python bootstrap
     [[ "$AW_MANAGER_ROOT" == /* && -f "$AW_MANAGER_ROOT/current-version" ]] || return 1
     IFS= read -r version < "$AW_MANAGER_ROOT/current-version" || [[ -n "$version" ]] || return 1
     [[ "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,255}$ ]] || return 1
     slot="$AW_MANAGER_ROOT/versions/$version"
-    python="$slot/bin/python"
+    prefix="$slot"
+    [[ ! -f "$slot/application.json" ]] || prefix="$slot/.venv"
+    python="$prefix/bin/python"
     bootstrap="$slot/.runtime-bootstrap/runtime_launcher.py"
     [[ -x "$python" && -f "$bootstrap" && -f "$slot/.install-complete.json" ]] || return 1
     local -a arguments=(

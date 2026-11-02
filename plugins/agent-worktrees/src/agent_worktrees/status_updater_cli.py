@@ -250,7 +250,7 @@ def _runtime_superseded(
             arguments["generation"] = generation
         return override(**arguments)
     try:
-        root = install_root if install_root is not None else cfg.install_dir()
+        root = install_root if install_root is not None else cfg.runtime_install_dir()
         versions_root = os.path.realpath(os.path.join(str(root), "versions"))
         try:
             ver = (Path(str(root)) / "current-version").read_text("utf-8").strip()
@@ -260,6 +260,8 @@ def _runtime_superseded(
             return False  # no marker -> cannot determine; keep serving
         active = os.path.realpath(os.path.join(str(root), "versions", ver))
         mine = os.path.realpath(prefix if prefix is not None else sys.prefix)
+        if os.path.basename(mine) == ".venv":
+            mine = os.path.dirname(mine)
     except Exception:
         return False
     if _slot_superseded(active, mine, versions_root):

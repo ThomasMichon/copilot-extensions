@@ -11,6 +11,7 @@ from pathlib import Path
 from agent_procutil import python_cache_args
 
 from .mux_daemon_process import scrub_session_credentials
+from .runtime_identity import running_slot
 
 _CLEAR_ENVIRONMENT = (
     "GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
@@ -21,14 +22,16 @@ _CLEAR_ENVIRONMENT = (
 def companion_command(arguments: list[str]) -> tuple[list[str], dict[str, str]]:
     """Build a foreground invocation pinned to this constructed runtime."""
     prefix = Path(sys.prefix).resolve()
-    bootstrap = prefix / ".runtime-bootstrap" / "runtime_launcher.py"
+    slot = running_slot()
+    if slot is None:
+        raise RuntimeError("Companion pane requires a constructed Manager runtime")
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
     python = prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if (
-        prefix.parent.name != "versions"
-        or prefix.name == "dev"
+        slot.name == "dev"
         or not python.is_file()
         or not bootstrap.is_file()
-        or not (prefix / ".install-complete.json").is_file()
+        or not (slot / ".install-complete.json").is_file()
     ):
         raise RuntimeError("Companion pane requires a constructed Manager runtime")
     if arguments[:2] not in (
@@ -39,10 +42,10 @@ def companion_command(arguments: list[str]) -> tuple[list[str], dict[str, str]]:
     env = scrub_session_credentials(dict(os.environ))
     for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__"):
         env.pop(name, None)
-    env["WORKTREE_MANAGER_ROOT"] = str(prefix.parent.parent)
+    env["WORKTREE_MANAGER_ROOT"] = str(slot.parent.parent)
     return [
         str(python), "-I", "-S", "-B", "-X", "utf8",
-        *python_cache_args(prefix.parent.parent), str(bootstrap), *arguments,
+        *python_cache_args(slot.parent.parent), str(bootstrap), *arguments,
     ], env
 
 

@@ -799,7 +799,7 @@ def test_session_start_old_runtime_uses_legacy_compatibility(
     (runtime / "current-version").write_text(
         "1.5.3-dev744", encoding="utf-8"
     )
-    # An installed but idle Manager must not suppress stale-runtime recovery.
+    # An installed but idle Manager must not suppress non-install compatibility.
     monkeypatch.setattr(
         hook_client.shutil, "which",
         lambda name: str(tmp_path / "manager-stub") if installed else None,
@@ -835,14 +835,10 @@ def test_session_start_old_runtime_uses_legacy_compatibility(
     assert seen["sessionId"] == "session-1"
 
 
-def test_session_start_old_runtime_skips_legacy_when_worktree_manager_active(
+def test_session_start_old_runtime_keeps_non_install_hooks_while_update_active(
     monkeypatch, tmp_path
 ):
-    """A stale runtime must not trigger this hook's own legacy reconcile
-    fallback (which can shell out to a full installer build) when an external
-    driver like worktree-manager already owns update/reconcile duties --
-    otherwise every session start redundantly races its own install attempt
-    against the same runtime slot."""
+    """An external update owner does not suppress non-install lifecycle work."""
     runtime = tmp_path / ".agent-worktrees"
     python = runtime / "versions" / "1.5.3-dev744" / (
         "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
@@ -895,10 +891,14 @@ def test_session_start_old_runtime_skips_legacy_when_worktree_manager_active(
     assert hook_client._fallback_session_start(payload, tmp_path) == {
         "additionalContext": "registered"
     }
-    assert seen == {"skip_reconcile": True, "sessionId": "session-1"}
+    assert seen == {"skip_reconcile": False, "sessionId": "session-1"}
 
 
-def test_active_update_preserves_non_reconcile_legacy_hooks(monkeypatch):
+@pytest.mark.parametrize("skip_reconcile", [False, True])
+@pytest.mark.parametrize("caller_flags", [False, True])
+def test_session_start_always_preserves_only_non_install_legacy_hooks(
+    monkeypatch, skip_reconcile, caller_flags,
+):
     launched = []
 
     class Process:
@@ -911,15 +911,20 @@ def test_active_update_preserves_non_reconcile_legacy_hooks(monkeypatch):
 
     monkeypatch.setattr(hook_client.shutil, "which", lambda name: "shell")
     monkeypatch.setattr(hook_client.subprocess, "Popen", Process)
+    for flag in ("WORKTREE_NO_RECONCILE", "WORKTREE_NO_PROVISION"):
+        if caller_flags:
+            monkeypatch.setenv(flag, "caller-value")
+        else:
+            monkeypatch.delenv(flag, raising=False)
     assert hook_client._fallback_legacy_session_start(
-        {"sessionId": "session-1"}, skip_reconcile=True
+        {"sessionId": "session-1"}, skip_reconcile=skip_reconcile
     ) == {"additionalContext": "lifecycle"}
     assert {name for name, env in launched} == {
-        "project-hooks", "register-nudge", "register-session", "anchor-hygiene-check"
+        "project-hooks", "register-nudge", "register-session", "anchor-hygiene-check", "provision-check"
     }
     for name, env in launched:
-        assert env["WORKTREE_NO_RECONCILE"] == "1"
-        assert env["WORKTREE_NO_PROVISION"] == "1"
+        for flag in ("WORKTREE_NO_RECONCILE", "WORKTREE_NO_PROVISION"):
+            assert env.get(flag) == ("caller-value" if caller_flags else None)
 
 
 @pytest.mark.parametrize(
@@ -2049,7 +2054,7 @@ def test_session_start_catalog_exists_before_lifecycle_decision(
     assert json.loads(capsys.readouterr().out) == {}
 
 
-def test_first_install_preserves_bootstrap_output(monkeypatch, tmp_path):
+def test_first_install_never_invokes_legacy_bootstrap_output(monkeypatch, tmp_path):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     shutil.copyfile(_SCRIPT.with_name("hook_lifecycle_runtime.py"),
@@ -2073,13 +2078,10 @@ def test_first_install_preserves_bootstrap_output(monkeypatch, tmp_path):
 
     result = hook_client._bootstrap_first_install({"sessionId": "session-1"})
 
-    assert result == {
-        "additionalContext": "[agent-worktrees] Runtime not installed.",
-        "_stderr": "bootstrap warning\n",
-    }
+    assert result == {}
 
 
-def test_first_install_preserves_non_object_json_output(monkeypatch, tmp_path):
+def test_first_install_never_invokes_non_object_bootstrap_output(monkeypatch, tmp_path):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     shutil.copyfile(_SCRIPT.with_name("hook_lifecycle_runtime.py"),
@@ -2103,12 +2105,12 @@ def test_first_install_preserves_non_object_json_output(monkeypatch, tmp_path):
 
     result = hook_client._bootstrap_first_install({"sessionId": "session-1"})
 
-    assert result == {"additionalContext": '"runtime not installed"'}
+    assert result == {}
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows cold-stamp path")
 @pytest.mark.parametrize("returncode", [0, 3])
-def test_windows_first_install_enters_exact_canonical_lifecycle(
+def test_windows_first_install_never_enters_installation_lifecycle(
     monkeypatch, tmp_path, returncode,
 ):
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -2123,26 +2125,11 @@ def test_windows_first_install_enters_exact_canonical_lifecycle(
 
     monkeypatch.setattr(hook_client.subprocess, "run", run)
     result = hook_client._bootstrap_first_install({"sessionId": "session-1"})
-    argv = seen["argv"]
-    assert argv[:6] == [sys.executable, "-I", "-B", "-X", "utf8", str(_SCRIPT.parent / "command_binding.py")]
-    assert argv[argv.index("--payload-root") + 1] == str(_SCRIPT.parents[1])
-    assert argv[argv.index("--legacy-root") + 1] == str(Path.home() / ".agent-worktrees")
-    assert argv[argv.index("--source-payload-root") + 1] == str(_SCRIPT.parents[1])
-    assert argv[argv.index("--deferred-runtime"):argv.index("--") + 2] == [
-        "--deferred-runtime", "--run-lifecycle", "--lifecycle-timeout", "10.0", "--", shell,
-    ]
-    assert argv[-5:] == ["-File", str(_SCRIPT.parent / "install.ps1"), "stamp", "-BootstrapPython", sys.executable]
-    assert "bootstrap-check.ps1" not in " ".join(argv)
-    assert seen["kwargs"]["timeout"] is None
-    assert seen["kwargs"]["encoding"] == "utf-8"
-    assert seen["kwargs"]["creationflags"] == subprocess.CREATE_NO_WINDOW
-    assert result["_stderr"].startswith("stamp diagnostic\nwarning\n")
-    assert "additionalContext" not in result
-    assert ("failed (exit 3)" in result["_stderr"]) == bool(returncode)
+    assert seen == {} and result == {}
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ANSI parent / UTF-8 child")
-def test_windows_first_install_decodes_real_non_ascii_child_diagnostics(monkeypatch, tmp_path):
+def test_windows_first_install_never_executes_binding_child(monkeypatch, tmp_path):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     for name in ("bootstrap-check.ps1", "install.ps1"):
@@ -2155,32 +2142,26 @@ def test_windows_first_install_decodes_real_non_ascii_child_diagnostics(monkeypa
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent"))
     monkeypatch.setattr(hook_client, "__file__", str(scripts / "hook_client.py"))
     result = hook_client._bootstrap_first_install({})
-    assert result == {"_stderr": f"{chr(0x410)}\n{chr(0x410)}\n"}
+    assert result == {}
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows cold hook consumer")
-def test_windows_first_install_direct_hook_stamps_without_runtime(monkeypatch, tmp_path):
-    import shutil
-    from test_first_install_bootstrap import PLUGIN, _materialize_installed_payload
-
-    payload = tmp_path / "payload"
-    shutil.copytree(
-        PLUGIN, payload,
-        ignore=shutil.ignore_patterns("tests", "__pycache__", "*.pyc", "libs"),
-    )
-    _materialize_installed_payload(payload)
-    monkeypatch.setattr(hook_client, "__file__", str(payload / "scripts" / "hook_client.py"))
-    home = Path.home()
+def test_windows_first_install_never_constructs_runtime_or_binstub(monkeypatch, tmp_path):
+    scripts = tmp_path / "payload/scripts"
+    scripts.mkdir(parents=True)
+    for name in ("bootstrap-check.ps1", "install.ps1", "command_binding.py"):
+        (scripts / name).write_text("installation must not execute")
+    monkeypatch.setattr(hook_client, "__file__", str(scripts / "hook_client.py"))
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent"))
     result = hook_client._bootstrap_first_install({"sessionId": "cold-hook"})
-    assert "Bootstrap stamp failed" not in result.get("_stderr", ""), result
+    assert result == {}
     runtime = home / ".agent-worktrees"
-    assert (runtime / "stamped-version").is_file(), result
-    snapshot = Path((runtime / "payload-dir").read_text().strip())
-    assert (snapshot / "scripts/hook_runtime.py").is_file()
-    assert (home / ".local/bin/agent-worktrees.cmd").is_file()
-    assert not (runtime / "versions").exists()
+    assert not runtime.exists()
+    assert not (home / ".local").exists()
     assert not runtime.with_name(runtime.name + ".command-binding-publication.lock").exists()
 
 
@@ -2200,7 +2181,7 @@ def test_windows_first_install_paused_before_any_lifecycle_child(
 
     monkeypatch.setattr(hook_client.subprocess, "run", forbidden)
     result = hook_client._bootstrap_first_install({})
-    assert "ACTIVE" in result["_stderr"]
+    assert result == {}
     assert not (tmp_path / ".agent-worktrees").exists()
 
 
@@ -2216,7 +2197,7 @@ def test_first_install_explicit_context_never_enters_legacy_bootstrap(monkeypatc
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows cold-stamp path")
 @pytest.mark.parametrize("state", ['{"active":false}', "malformed", "[]", "{}"])
-def test_windows_first_install_inactive_or_malformed_switch_fails_open(
+def test_windows_first_install_does_not_consult_inactive_or_malformed_switch(
     monkeypatch, tmp_path, state,
 ):
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -2232,12 +2213,11 @@ def test_windows_first_install_inactive_or_malformed_switch_fails_open(
 
     monkeypatch.setattr(hook_client.subprocess, "run", run)
     assert hook_client._bootstrap_first_install({}) == {}
-    assert len(invoked) == 1
-    assert "--run-lifecycle" in invoked[0]
+    assert invoked == []
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows cold-stamp path")
-def test_windows_first_install_launch_error_is_explicit(monkeypatch, tmp_path):
+def test_windows_first_install_never_launches_an_installer(monkeypatch, tmp_path):
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent"))
     monkeypatch.setattr(hook_client.shutil, "which", lambda name: str(tmp_path / name))
@@ -2246,7 +2226,7 @@ def test_windows_first_install_launch_error_is_explicit(monkeypatch, tmp_path):
         raise OSError("interpreter launch refused")
 
     monkeypatch.setattr(hook_client.subprocess, "run", run)
-    assert "interpreter launch refused" in hook_client._bootstrap_first_install({})["_stderr"]
+    assert hook_client._bootstrap_first_install({}) == {}
 
 
 def test_project_hook_uses_exact_current_session_environment(

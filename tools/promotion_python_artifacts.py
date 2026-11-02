@@ -501,7 +501,7 @@ def validate_wheel_sources(
                     for part in path.relative_to(base).parts
                 )
             }
-            required_python.update(injected)
+            required_python.update(name for name in injected if name.endswith(".py"))
         if settings.get("package-dir", {"": str(base.relative_to(source_dir))}) != {
             "": str(base.relative_to(source_dir)),
         }:
@@ -521,7 +521,7 @@ def validate_wheel_sources(
         package_data = settings.get("package-data", {})
         if not isinstance(package_data, dict) or settings.get("exclude-package-data") or settings.get("data-files"):
             raise PromotionArtifactError("invalid wheel package-data configuration")
-        required_data: set[str] = set()
+        required_data: set[str] = {name for name in injected if not name.endswith(".py")}
         for package, patterns in package_data.items():
             if not isinstance(package, str) or not isinstance(patterns, list) or any(
                 not isinstance(pattern, str) or "\\" in pattern or pattern.startswith("/")

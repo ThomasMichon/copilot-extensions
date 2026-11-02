@@ -169,32 +169,26 @@ def test_session_start_prefers_payload_lifecycle_client_with_installed_fallback(
     assert ".agent-worktrees/bin/bootstrap-check.sh" in lifecycle["bash"]
 
     client = (PLUGIN / "scripts" / "hook_client.py").read_text(encoding="utf-8")
-    assert '"bootstrap-check.ps1"' in client
-    assert '"bootstrap-check.sh"' in client
+    assert '"bootstrap-check.ps1"' not in client
+    assert '"bootstrap-check.sh"' not in client
 
 
-def test_bootstrap_stamps_payload_when_runtime_is_unprovisioned() -> None:
+def test_bootstrap_never_stamps_payload_when_runtime_is_unprovisioned() -> None:
     sh = (PLUGIN / "scripts" / "bootstrap-check.sh").read_text(encoding="utf-8")
     ps1 = (PLUGIN / "scripts" / "bootstrap-check.ps1").read_text(encoding="utf-8")
 
-    assert 'bash "$_installer" stamp' in sh
-    assert "! _aw_provisioned" in sh
-    assert "-File $installer stamp" in ps1
-    assert "Test-AwProvisioned" in ps1
-    assert "deploy-manifest.json" in sh
-    assert "deploy-manifest.json" in ps1
+    for text in (sh, ps1):
+        assert "deploy-manifest.json" not in text
+        assert "install.ps1" not in text and "install.sh" not in text
 
 
 def test_bootstrap_stands_down_for_explicit_installation_context() -> None:
     sh = (PLUGIN / "scripts" / "bootstrap-check.sh").read_text(encoding="utf-8")
     ps1 = (PLUGIN / "scripts" / "bootstrap-check.ps1").read_text(encoding="utf-8")
 
-    assert 'if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]' in sh
-    assert "if ($env:COPILOT_EXTENSIONS_CONTEXT) { exit 0 }" in ps1
-    assert sh.index("COPILOT_EXTENSIONS_CONTEXT") < sh.index('INSTALL_DIR="$HOME/.agent-worktrees"')
-    assert ps1.index("COPILOT_EXTENSIONS_CONTEXT") < ps1.index(
-        "Join-Path $env:USERPROFILE '.agent-worktrees'"
-    )
+    for text in (sh, ps1):
+        assert "COPILOT_EXTENSIONS_CONTEXT" not in text
+        assert ".agent-worktrees" not in text
 
 
 def test_register_nudge_stands_down_before_legacy_registry_reads() -> None:

@@ -1272,7 +1272,7 @@ def test_native_stamp_directory_copy_preserves_complete_tree(tmp_path: Path, hos
 
 
 @pytest.mark.parametrize("paused", [False, True])
-def test_powershell_hook_bootstrap_uses_canonical_lifecycle(tmp_path: Path, paused):
+def test_powershell_hook_bootstrap_never_enters_installation_lifecycle(tmp_path: Path, paused):
     powershell = shutil.which("powershell.exe")
     if not powershell:
         pytest.skip("Windows PowerShell 5.1 is unavailable")
@@ -1297,15 +1297,9 @@ def test_powershell_hook_bootstrap_uses_canonical_lifecycle(tmp_path: Path, paus
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {}
     runtime = home / ".agent-worktrees"
-    if paused:
-        assert not runtime.exists()
-        assert "bootstrap-killswitch" in result.stderr
-    else:
-        assert (runtime / "stamped-version").is_file(), result.stderr
-        snapshot = Path((runtime / "payload-dir").read_text().strip())
-        assert (snapshot / "scripts" / "command_binding.py").is_file()
-        assert (home / ".local" / "bin" / "agent-worktrees.cmd").is_file()
-        assert not (runtime / "versions").exists()
+    assert not runtime.exists()
+    assert not (home / ".local").exists()
+    assert not result.stderr
 
 
 def test_powershell_51_stamp_succeeds(tmp_path: Path):

@@ -53,8 +53,15 @@ def _installed_identity(target: Path) -> str | None:
             or re.fullmatch(r"[0-9a-f]{64}", completion["payload_hash"]) is None
         ):
             return None
-        locations = [target / "Lib" / "site-packages"]
-        locations += sorted((target / "lib").glob("python*/site-packages"))
+        environment = target / ".venv" if os.path.lexists(target / ".venv") else target
+        environment_info = environment.lstat()
+        if (
+            not stat.S_ISDIR(environment_info.st_mode)
+            or getattr(environment_info, "st_file_attributes", 0) & 0x400
+        ):
+            return None
+        locations = [environment / "Lib" / "site-packages"]
+        locations += sorted((environment / "lib").glob("python*/site-packages"))
         records = sorted(path for location in locations for path in location.glob("*.dist-info/RECORD"))
         if not records:
             return None
@@ -91,6 +98,8 @@ def cache_arguments(
         raise ValueError("Python cache requires an absolute target runtime")
     if target.parent.name in {"Scripts", "bin"}:
         target = target.parent.parent
+    if target.name == ".venv" and target.parent.parent.name == "versions":
+        target = target.parent
     identity = _installed_identity(target)
     scope = "installed-" + identity if identity is not None else "unsealed-" + uuid.uuid4().hex
     prefix = os.path.normpath(os.path.join(owned_root, "cache", "python", scope))

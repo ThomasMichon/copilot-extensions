@@ -141,13 +141,15 @@ def _source_digest(payload: Path) -> str:
 
 def _native_arguments(args) -> list[str]:
     values = ["-Action", args.action, "-InstallDir", str(args.root.resolve())]
-    for option in ("project_name", "bootstrap_python", "owner"):
-        value = getattr(args, option)
+    for option in ("project_name", "bootstrap_python", "owner", "install_source"):
+        value = getattr(args, option, None)
         if value is not None:
             values.extend(["-" + "".join(word.title() for word in option.split("_")), str(value)])
     for option in ("force", "zero_downtime", "provision_missing_runtime", "remove_config"):
         if getattr(args, option, False):
             values.append("-" + "".join(word.title() for word in option.split("_")))
+    if getattr(args, "source_descriptor", None) is not None:
+        values.extend(["-RuntimeSourceDescriptor", json.dumps(args.source_descriptor, sort_keys=True)])
     return values
 
 
@@ -249,13 +251,15 @@ def _foreground(args, driver) -> int:
         "--payload", str(args.payload), "--root", str(args.root),
         "--shell", str(args.shell), "--action", args.action, "--participant",
     ]
-    for option in ("project_name", "bootstrap_python", "owner"):
-        value = getattr(args, option)
+    for option in ("project_name", "bootstrap_python", "owner", "install_source"):
+        value = getattr(args, option, None)
         if value is not None:
             command.extend(["--" + option.replace("_", "-"), str(value)])
     for option in ("force", "zero_downtime", "provision_missing_runtime", "remove_config"):
         if getattr(args, option, False):
             command.append("--" + option.replace("_", "-"))
+    if getattr(args, "source_descriptor", None) is not None:
+        command.extend(["--source-descriptor", json.dumps(args.source_descriptor, sort_keys=True)])
     context = {key: os.environ[key] for key in CONTEXT_KEYS if key in os.environ}
     request = driver.enqueue(
         driver.RequestSpec(
@@ -287,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project-name")
     parser.add_argument("--bootstrap-python", type=Path)
     parser.add_argument("--owner", type=Path)
+    parser.add_argument("--install-source", type=Path)
+    parser.add_argument("--source-descriptor", type=json.loads, help=argparse.SUPPRESS)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--zero-downtime", action="store_true")
     parser.add_argument("--provision-missing-runtime", action="store_true")
@@ -297,6 +303,12 @@ def main(argv: list[str] | None = None) -> int:
     inspection.add_argument("--check-removal", action="store_true", help=argparse.SUPPRESS)
     inspection.add_argument("--remove-runtime", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.install_source and args.action not in ("install", "update", "provision", "repair"):
+        parser.error("--install-source selects only installation, update, provisioning or independent repair")
+    if args.install_source and not args.install_source.is_absolute():
+        parser.error("--install-source requires an absolute snapshot")
+    if args.source_descriptor is not None and not args.install_source:
+        parser.error("--source-descriptor requires --install-source")
     if os.name != "nt":
         parser.error("Native Worktrees driver entry requires Windows")
     args.payload = args.payload.resolve(strict=True)
@@ -319,6 +331,20 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("Native Worktrees installation requires an exact PowerShell executable")
     if args.payload != SCRIPTS.parent:
         parser.error("Native installation uses only this executing payload")
+    if args.install_source:
+        from install_source import select_project
+        import versioned_runtime_source as sources
+
+        selected = select_project(args.install_source, "agent-worktrees")
+        if selected.source_descriptor is None:
+            parser.error("--install-source requires portable repository source provenance")
+        if args.source_descriptor is not None and args.source_descriptor != selected.source_descriptor:
+            parser.error("installation source repository changed after driver admission")
+        if sources.read_source_identity(
+            args.payload, selected.identity.package_version, plugin="agent-worktrees",
+        ) != selected.identity:
+            parser.error("invocation payload differs from selected installation source")
+        args.source_descriptor = selected.source_descriptor
     driver = bootstrap(args.payload)
     with custody() as owner:
         if owner is None:

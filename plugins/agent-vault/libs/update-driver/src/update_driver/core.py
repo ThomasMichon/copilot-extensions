@@ -175,7 +175,9 @@ def _spec_document(spec: RequestSpec) -> dict:
 
 
 def _automatic_update_inhibited(spec: RequestSpec) -> bool:
-    if spec.repair or dict(spec.context).get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+    # Older Manager/engine update requests retained flags without the verb.
+    update = spec.argv[:1] == ("update",) or spec.backend in {"manager", "engine"}
+    if not update or "--auto" not in spec.argv or dict(spec.context).get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
         return False
     override = spec.killswitch_path
     try:
@@ -245,12 +247,14 @@ def runtime_command(
         raise InvalidRequestError("runtime module must be an import identifier")
     executable, env = direct_python(sys.executable)
     prefix = Path(sys.prefix)
-    bootstrap = prefix / ".runtime-bootstrap" / "runtime_launcher.py"
+    application = prefix.name == ".venv" and prefix.parent.parent.name == "versions"
+    slot = prefix.parent if application else prefix
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
     installed = (
-        (prefix / ".install-complete.json").exists()
-        or (prefix / ".install-complete.json").is_symlink()
+        (slot / ".install-complete.json").exists()
+        or (slot / ".install-complete.json").is_symlink()
         or bootstrap.parent.exists() or bootstrap.parent.is_symlink()
-        or prefix.parent.name == "versions"
+        or not application and slot.parent.name == "versions"
     )
     if bootstrap.exists() or bootstrap.is_symlink():
         info = bootstrap.lstat()

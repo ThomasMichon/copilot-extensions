@@ -51,7 +51,7 @@ def test_killswitch_retires_pending_normal_work_but_executes_repair(area, monkey
     root = area / "state"
     switch = area / "killswitch.json"
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
-    normal = sample(area)
+    normal = sample(area, argv=("update", "--auto"))
     repair = sample(area, repair=True)
     assert repair.id != normal.id
     switch.write_text('{"active":true}', encoding="utf-8")
@@ -78,7 +78,7 @@ def test_killswitch_rechecked_between_jobs_without_interrupting_active_work(area
     switch = area / "killswitch.json"
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
     first = sample(area, source="first")
-    later = sample(area, source="later")
+    later = sample(area, source="later", argv=("update", "--auto"))
     seen = []
 
     def execute(tx):
@@ -102,7 +102,8 @@ def test_killswitch_real_runner_never_starts_normal_child(area, monkeypatch):
 
     def submit(marker, repair):
         return enqueue(
-            RequestSpec("fixture", repair=repair, cwd=str(area)), root=root,
+            RequestSpec("fixture", repair=repair, cwd=str(area),
+                        argv=() if repair else ("update", "--auto")), root=root,
             runner=TrustedRunner((
                 sys.executable, "-c",
                 "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('ran')",
@@ -126,9 +127,9 @@ def test_each_request_retains_its_own_override_not_the_workers(area, monkeypatch
     active.write_text('{"active":true}', encoding="utf-8")
     inactive.write_text('{"active":false}', encoding="utf-8")
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(active))
-    first = sample(area)
+    first = sample(area, argv=("update", "--auto"))
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(inactive))
-    second = sample(area)
+    second = sample(area, argv=("update", "--auto"))
     assert first.id != second.id
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(active))
     seen = []
@@ -147,7 +148,7 @@ def test_killswitch_default_path_and_namespaced_isolation(area, monkeypatch, leg
     switch = base / ("bootstrap-killswitch.json" if legacy else "killSwitches/bootstrap-killswitch.json")
     switch.parent.mkdir(parents=True)
     switch.write_text('{"active":true}', encoding="utf-8")
-    normal = sample(area)
+    normal = sample(area, argv=("update", "--auto"))
     namespaced = sample(
         area, argv=("--auto",), context=(("COPILOT_EXTENSIONS_CONTEXT", "explicit-cell"),),
     )
@@ -172,7 +173,7 @@ def test_manual_and_auto_admission_do_not_coalesce_or_force_the_native_runner(ar
         str(marker),
     ), str(area))
     # Even identical construction/runner arguments must retain distinct admission.
-    automatic = enqueue(RequestSpec("fixture"), runner=runner, root=root)
+    automatic = enqueue(RequestSpec("fixture", argv=("update", "--auto")), runner=runner, root=root)
     manual = enqueue(RequestSpec("fixture", repair=True), runner=runner, root=root)
     assert automatic.id != manual.id
     assert enqueue(RequestSpec("fixture", repair=True), runner=runner, root=root).id == manual.id
@@ -187,6 +188,50 @@ def test_manual_and_auto_admission_do_not_coalesce_or_force_the_native_runner(ar
     assert marker.read_text().splitlines() == ["ran"] * (1 if held else 2)
 
 
+@pytest.mark.parametrize(
+    "argv,repair,inhibited",
+    [
+        (("update",), False, False),
+        (("install",), False, False),
+        (("setup",), False, False),
+        (("doctor", "--json"), False, False),
+        (("list",), False, False),
+        (("launch",), False, False),
+        (("install", "--auto"), False, False),
+        (("setup", "--auto"), False, False),
+        (("doctor", "--auto"), False, False),
+        (("launch", "--auto"), False, False),
+        (("stage-update", "--auto"), False, False),
+        (("update", "--auto"), False, True),
+        (("update", "--auto", "--force"), True, True),
+    ],
+)
+def test_active_switch_only_inhibits_explicit_automatic_requests(area, monkeypatch, argv, repair, inhibited):
+    switch = area / "auto-only.json"
+    switch.write_text('{"active":true}', encoding="utf-8")
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
+    request = sample(area, argv=argv, repair=repair)
+    ran = []
+    assert drain(root=area / "state", executor=lambda tx: ran.append(tx.request.id) or 0) == 0
+    result = status(request.id, root=area / "state")
+    assert result.exit_code == (3 if inhibited else 0)
+    assert ran == ([] if inhibited else [request.id])
+
+
+@pytest.mark.parametrize("backend", ["manager", "engine"])
+def test_retained_update_backend_without_verb_still_obeys_automatic_hold(area, backend):
+    from update_driver.core import _automatic_update_inhibited
+
+    switch = area / "automatic-hold.json"
+    switch.write_text('{"active":true}', encoding="utf-8")
+    assert _automatic_update_inhibited(RequestSpec(
+        backend, ("--auto",), killswitch_path=str(switch),
+    ))
+    assert not _automatic_update_inhibited(RequestSpec(
+        backend, ("--force",), killswitch_path=str(switch), repair=True,
+    ))
+
+
 @pytest.mark.parametrize("content", ['{"active":"true"}', "{", '{"active":false}'])
 def test_invalid_or_inactive_killswitch_preserves_existing_fail_open_policy(
     area, monkeypatch, capsys, content,
@@ -194,7 +239,7 @@ def test_invalid_or_inactive_killswitch_preserves_existing_fail_open_policy(
     switch = area / "killswitch.json"
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch))
     switch.write_text(content, encoding="utf-8")
-    request = sample(area)
+    request = sample(area, argv=("update", "--auto"))
     assert drain(root=area / "state", executor=lambda tx: 0) == 0
     assert status(request.id, root=area / "state").exit_code == 0
     if content != '{"active":false}':
@@ -228,7 +273,7 @@ def test_unsearchable_switch_directory_does_not_block_queued_repair(area, monkey
         return exists(path)
 
     monkeypatch.setattr(Path, "exists", denied)
-    normal, repair = sample(area), sample(area, repair=True)
+    normal, repair = sample(area, argv=("update", "--auto")), sample(area, repair=True)
     seen = []
     assert drain(root=area / "state", executor=lambda tx: seen.append(tx.request.id) or 0) == 0
     assert seen == [normal.id, repair.id]
@@ -641,13 +686,16 @@ def test_debug_contends_with_same_lock(area):
     assert results == [first.id, second.id]
 
 
-def test_runtime_command_uses_original_bootstrap(area, monkeypatch):
+@pytest.mark.parametrize("nested", [False, True])
+def test_runtime_command_uses_original_bootstrap(area, monkeypatch, nested):
     import agent_procutil
-    monkeypatch.setattr(sys, "prefix", str(area))
+    slot = area / "versions" / "1.2.3" if nested else area
+    slot.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv" if nested else slot))
     monkeypatch.setattr(agent_procutil, "direct_python", lambda exe: (exe, {}))
     argv, env = runtime_command("some.adapter", ("update",))
     assert argv == (sys.executable, "-m", "some.adapter", "update")
-    bootstrap = area / ".runtime-bootstrap" / "runtime_launcher.py"
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
     bootstrap.parent.mkdir()
     bootstrap.write_text("# fixture", encoding="utf-8")
     argv, env = runtime_command("some.adapter", ("update",))
@@ -657,11 +705,14 @@ def test_runtime_command_uses_original_bootstrap(area, monkeypatch):
     )
 
 
-def test_completed_installed_runtime_never_uses_source_fallback(area, monkeypatch):
+@pytest.mark.parametrize("nested", [False, True])
+def test_completed_installed_runtime_never_uses_source_fallback(area, monkeypatch, nested):
     import agent_procutil
-    monkeypatch.setattr(sys, "prefix", str(area))
+    slot = area / "versions" / "1.2.3" if nested else area
+    slot.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv" if nested else slot))
     monkeypatch.setattr(agent_procutil, "direct_python", lambda exe: (exe, {}))
-    (area / ".install-complete.json").write_text("{}", encoding="utf-8")
+    (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
     with pytest.raises(StateError, match="missing its retention bootstrap"):
         runtime_command("some.adapter")
 

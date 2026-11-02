@@ -3,24 +3,104 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
+import sys
 import venv
+import zipfile
 from contextlib import contextmanager
+from email import message_from_bytes
 from pathlib import Path
 
 import pytest
 from agent_procutil import no_window_kwargs
 
 from worktree_manager import self_install as si
+from _manager_process_fixture import synthetic_runtime
 
 
-def _run(argv, *, env, cwd):
+def _run(argv, *, env, cwd, timeout=20):
     return subprocess.run(
         argv, env=env, cwd=cwd, capture_output=True, text=True,
-        encoding="utf-8", timeout=20, **no_window_kwargs(),
+        encoding="utf-8", timeout=timeout, **no_window_kwargs(),
     )
+
+
+@pytest.mark.parametrize("shell", ["ps1", "sh"] if os.name == "nt" else ["sh"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_installed_application_wheel_launch_callbacks_without_source_or_uv(
+    tmp_path, monkeypatch, shell, nested,
+):
+    source = tmp_path / "wheel-source"
+    si._copy_payload(si.running_payload_dir(), source)
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    result = _run(
+        [sys.executable, "-I", "-c",
+         "from setuptools.build_meta import build_wheel; import sys; build_wheel(sys.argv[1])",
+         str(wheels)], env=dict(os.environ), cwd=source, timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    wheel, = wheels.glob("*.whl")
+    repository = Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(repository / "tools"))
+    from promotion_python_artifacts import validate_wheel_sources
+
+    with zipfile.ZipFile(wheel) as bundle:
+        metadata_name, = (name for name in bundle.namelist() if name.endswith(".dist-info/METADATA"))
+        validate_wheel_sources(
+            bundle, {name: hashlib.sha256(bundle.read(name)).hexdigest() for name in bundle.namelist()},
+            source_dir=repository / "worktree-manager",
+            prefix=metadata_name.rsplit("/", 1)[0] + "/",
+            metadata=message_from_bytes(bundle.read(metadata_name)),
+            component="worktree-manager", candidate_root=repository,
+        )
+    root = tmp_path / "Manager root with spaces"
+    slot = synthetic_runtime(root, "1.2.3", nested=nested)
+    prefix = slot / ".venv" if nested else slot
+    python = prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    uv = shutil.which("uv")
+    assert uv
+    installed = _run(
+        [uv, "pip", "install", "--python", str(python), "--offline", "--no-deps", str(wheel)],
+        env=dict(os.environ), cwd=tmp_path,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    shutil.rmtree(source)
+    if (slot / "payload").exists():
+        shutil.rmtree(slot / "payload")
+    located = _run([
+        str(python), "-I", "-B", "-c",
+        "import json;from worktree_manager.relocated_launch import _relocated_launch_script;"
+        "print(json.dumps(str(_relocated_launch_script())))",
+    ], env=dict(os.environ), cwd=tmp_path)
+    assert located.returncode == 0, located.stdout + located.stderr
+    payload = Path(json.loads(located.stdout)).parents[1]
+    assert payload.is_relative_to(prefix)
+    assert not (slot / "payload").exists()
+    for name in ("pane-args.ps1", "pane-wrapper.ps1", "pane-wrapper.sh", "pane-launch.ps1",
+                 "session-options.ps1", "session-options.sh", "psmux-passthrough.conf"):
+        assert (payload / "bin" / name).is_file()
+    policy = _run([
+        getattr(sys, "_base_executable", sys.executable), "-I", "-B",
+        str(payload / "bin" / "check-automatic-maintenance.py"),
+    ], env=dict(os.environ, WORKTREE_MANAGER_ROOT=str(root)), cwd=tmp_path)
+    assert policy.returncode == 0, policy.stdout + policy.stderr
+    warmed = _run([
+        str(python), "-I", "-S", "-B", "-X", "utf8",
+        str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
+        "-m", "worktree_manager", "--version",
+    ], env=dict(os.environ, WORKTREE_MANAGER_ROOT=str(root)), cwd=tmp_path)
+    assert warmed.returncode == 0, warmed.stdout + warmed.stderr
+    (root / "current-version").write_text(slot.name + "\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(Path(__file__).parent / "native"))
+    from test_manager_mux_callbacks import exercise_retained_callbacks
+
+    exercise_retained_callbacks({
+        "directory": str(tmp_path), "root": str(root), "slot": str(slot), "payload": str(payload),
+    }, tmp_path, monkeypatch, shell)
 
 
 @pytest.fixture(params=["cmd", "ps1", "sh"] if os.name == "nt" else ["sh"])

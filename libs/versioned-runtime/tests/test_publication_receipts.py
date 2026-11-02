@@ -22,16 +22,24 @@ HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 def case(tmp_path: Path, names: tuple[str, ...]) -> tuple[Path, Path, Path, list[list[str]]]:
     root, evidence, payload = tmp_path / "runtime", tmp_path / "evidence", tmp_path / "payload"
-    root.mkdir(mode=0o700)
+    if os.name == "nt":
+        sys.path.insert(0, str(REPOSITORY / "libs/installer-engine"))
+        from installer_dependency_config import private_retained_root
+
+        root = private_retained_root(tmp_path, name="runtime", error_type=ValueError)
+    else:
+        root.mkdir(mode=0o700)
     evidence.mkdir(mode=0o700)
     payload.mkdir()
     bindings = []
     for index, name in enumerate(names):
         value = f"previous-{name}\n".encode()
-        (root / name).write_bytes(value)
+        with os.fdopen(proof._created_file(root / name), "wb") as stream:
+            stream.write(value)
         (root / name).chmod(0o600)
         backup = evidence / f"before.{index}"
-        backup.write_bytes(value)
+        with os.fdopen(proof._created_file(backup), "wb") as stream:
+            stream.write(value)
         backup.chmod(0o600)
         bindings.append([str(root / name), str(backup), hashlib.sha256(value).hexdigest()])
     context = evidence / "context.json"
@@ -74,7 +82,8 @@ def test_same_bytes_peer_after_success_is_not_owned(tmp_path: Path) -> None:
     target = root / "payload-dir"
     producer = target.stat()
     replacement = root / "peer"
-    replacement.write_bytes(target.read_bytes())
+    with os.fdopen(proof._created_file(replacement), "wb") as stream:
+        stream.write(target.read_bytes())
     os.replace(replacement, target)
     peer = target.stat()
     assert (producer.st_dev, producer.st_ino) != (peer.st_dev, peer.st_ino)
@@ -103,7 +112,8 @@ def test_invalid_required_proof_refuses_whole_set(tmp_path: Path, fault: str) ->
         receipt.write_bytes(receipt.read_bytes()[:-1])
     elif fault == "same-byte-replacement":
         peer = context.parent / "peer"
-        peer.write_bytes(receipt.read_bytes())
+        with os.fdopen(proof._created_file(peer), "wb") as stream:
+            stream.write(receipt.read_bytes())
         os.replace(peer, receipt)
     elif fault == "directory":
         receipt.unlink()
@@ -223,7 +233,8 @@ def test_actual_producer_identity_not_post_return_peer(tmp_path: Path, producer:
     declared = [[str(root / name), hashlib.sha256(data).hexdigest()] for name in names]
     proof.check_owned(context, [receipt], [target], declared)
     peer = root / "peer"
-    peer.write_bytes(target.read_bytes())
+    with os.fdopen(proof._created_file(peer), "wb") as stream:
+        stream.write(target.read_bytes())
     os.replace(peer, target)
     with pytest.raises(proof.PublicationProofError, match="producer-created"):
         proof.check_owned(context, [receipt], [target], declared)

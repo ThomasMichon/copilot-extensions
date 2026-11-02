@@ -70,7 +70,7 @@ BRIDGE_CONTEXT_KEYS = (
 )
 BRIDGE_HELPERS = (
     "installer-engine.ps1", "installer-engine.sh",
-    "installer_engine.py", "installer_engine_process.py", "runtime_launcher.py",
+    "installer_engine.py", "installer_engine_health.py", "installer_engine_process.py", "runtime_launcher.py",
     "installer_wheel_inputs.py", "installer_wheel_snapshot.py", "installer_wheel_acquisition.py",
     "installer_dependency_policy.py", "installer_dependency_config.py",
     "installer_source_build.py", "installer_source_wheel_cache.py",
@@ -321,7 +321,7 @@ def inspect(
         ],
     )
     result = subprocess.run(
-        argv, env={**_environment(payload), **imports}, cwd=project,
+        argv, executable=argv[0], env={**_environment(payload), **imports}, cwd=project,
         stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
         timeout=60, **no_window_kwargs(),
     )
@@ -540,7 +540,7 @@ def _run_installer(
     # The queue's existing owned process encloses this entire native tree.
     # The installer retains its staging, lifecycle and publication checks.
     return subprocess.call(
-        argv, env=environment, cwd=project,
+        argv, executable=argv[0], env=environment, cwd=project,
         stdin=subprocess.DEVNULL, **no_window_kwargs(),
     )
 

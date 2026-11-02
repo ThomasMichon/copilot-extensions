@@ -221,7 +221,8 @@ def test_explicit_context_selects_all_three_registry_files(monkeypatch, tmp_path
     assert repos._adopted_project_names() == {"example"}
 
 
-def test_installed_registry_validation_never_executes_live_payload_code(monkeypatch, tmp_path):
+@pytest.mark.parametrize("nested", [False, True])
+def test_installed_registry_validation_never_executes_live_payload_code(monkeypatch, tmp_path, nested):
     payload = _payload(tmp_path, "payload")
     context, plugin_root = _stamp(
         tmp_path / "durable", payload,
@@ -231,7 +232,7 @@ def test_installed_registry_validation_never_executes_live_payload_code(monkeypa
     prefix = tmp_path / "installed"
     bootstrap = prefix / ".runtime-bootstrap"
     shutil.copytree(payload / "scripts", bootstrap)
-    monkeypatch.setattr(registry_paths.sys, "prefix", str(prefix))
+    monkeypatch.setattr(registry_paths.sys, "prefix", str(prefix / ".venv" if nested else prefix))
     (payload / "scripts" / "registry_root.py").write_text(
         'raise AssertionError("executed mutable registry helper")\n', encoding="utf-8",
     )
@@ -240,6 +241,36 @@ def test_installed_registry_validation_never_executes_live_payload_code(monkeypa
     )
     assert config.install_dir() == plugin_root
     assert registry_paths.installation_context()["pluginRoot"] == str(plugin_root)
+
+
+def test_wheel_registry_helper_does_not_fall_back_to_mutable_payload(monkeypatch, tmp_path):
+    package = tmp_path / "installed-package"
+    scripts = package / "_runtime_assets" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "registry_root.py").write_text("OWNER = 'wheel'\n", encoding="utf-8")
+    payload = _payload(tmp_path, "payload")
+    (payload / "scripts" / "registry_root.py").write_text(
+        'raise AssertionError("mutable payload executed")\n', encoding="utf-8",
+    )
+    monkeypatch.setattr(registry_paths, "__file__", str(package / "registry_paths.py"))
+    monkeypatch.setattr(registry_paths.sys, "prefix", str(tmp_path / "environment"))
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(payload))
+    assert registry_paths._helper().OWNER == "wheel"
+
+
+def test_wheel_resident_hook_client_uses_packaged_policy(monkeypatch, tmp_path):
+    package = tmp_path / "installed-package"
+    scripts = package / "_runtime_assets" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "hook_client.py").write_text("OWNER = 'wheel'\n", encoding="utf-8")
+    data = tmp_path / "data"
+    (data / "bin").mkdir(parents=True)
+    (data / "bin" / "hook_client.py").write_text(
+        'raise AssertionError("mutable policy executed")\n', encoding="utf-8",
+    )
+    monkeypatch.setattr(m, "__file__", str(package / "__main__.py"))
+    monkeypatch.setattr(config, "install_dir", lambda: data)
+    assert m._load_hook_client_module().OWNER == "wheel"
 
 
 def test_incomplete_installed_registry_bootstrap_cannot_fall_back_to_payload(monkeypatch, tmp_path):

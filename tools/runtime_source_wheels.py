@@ -170,8 +170,9 @@ def retain_source_profile(
     procutil=None, construction_fd: int | None = None,
     retained_runtime: tuple[Path, str, Path] | None = None,
     opaque_identity=None,
+    first_party: dict[str, Path] | None = None,
 ):
-    """Build and freeze the exact complete source closure before construction.
+    """Complete the source closure with associated wheels or an owned build.
 
     Third-party inputs must already be acquired under the candidate's retained
     policy. Every supplied byte must match that lock; there is no resolution,
@@ -220,6 +221,16 @@ def retain_source_profile(
     selected_projects = _selected_projects(
         projects, root, record["extras"], record["target"]["environment"], deadline,
     )
+    associated = None if first_party is None else dict(first_party)
+    if associated is not None:
+        declared = {
+            canonicalize_name(_toml(path / "pyproject.toml")["project"]["name"])
+            for path in selected_projects
+        }
+        if set(associated) != declared:
+            raise ProfileError("associated first-party wheels do not complete the selected source closure")
+        if build_profile is not None or offline:
+            raise ProfileError("associated first-party wheels cannot request backend construction")
     pins = {entry["name"]: entry for entry in record["pins"]}
     if len(selected_projects) + len(pins) > max_wheels:
         raise ProfileError("source closure exceeds the wheel count budget")
@@ -308,7 +319,10 @@ def retain_source_profile(
                 verify_compact_source()
                 candidate.verify(deadline=deadline)
 
-            if cache_binding is None:
+            if associated is not None:
+                wheel = associated[canonicalize_name(declaration["name"])]
+                _ordinary(wheel)
+            elif cache_binding is None:
                 wheel = build(output)
             else:
                 binding = json.dumps({

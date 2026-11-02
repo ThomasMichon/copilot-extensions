@@ -85,7 +85,10 @@ def _legacy_windows_lease_acl(value: str, *, directory: bool) -> bool:
     )
 
 
-def _windows_private_lease_file(root: Path, directory: Path, name: str) -> int:
+def _windows_private_lease_file(
+    root: Path, directory: Path, name: str, *, create_new: bool = False,
+    protect_directory: bool = True,
+) -> int:
     """Bind new lease state to TokenUser, not an elevated token's default owner."""
     import ctypes as c
     from ctypes import wintypes as w
@@ -165,8 +168,9 @@ def _windows_private_lease_file(root: Path, directory: Path, name: str) -> int:
         ):
             raise c.WinError(c.get_last_error())
         attributes = Attributes(c.sizeof(Attributes), descriptor, False)
-        root.mkdir(parents=True, exist_ok=True)
-        if not kernel.CreateDirectoryW(str(directory), c.byref(attributes)):
+        if protect_directory:
+            root.mkdir(parents=True, exist_ok=True)
+        if protect_directory and not kernel.CreateDirectoryW(str(directory), c.byref(attributes)):
             if c.get_last_error() != 183:
                 raise c.WinError(c.get_last_error())
             metadata = directory.lstat()
@@ -246,7 +250,8 @@ def _windows_private_lease_file(root: Path, directory: Path, name: str) -> int:
                     file=sys.stderr, flush=True,
                 )
         handle = kernel.CreateFileW(
-            str(directory / name), 0xC0000000, 3, c.byref(attributes), 4, 0x200080, None,
+            str(directory / name), 0xC0000000, 3, c.byref(attributes),
+            1 if create_new else 4, 0x200080, None,
         )
         if handle == c.c_void_p(-1).value:
             raise c.WinError(c.get_last_error())
@@ -261,6 +266,17 @@ def _windows_private_lease_file(root: Path, directory: Path, name: str) -> int:
         if text:
             kernel.LocalFree(c.cast(text, w.LPVOID))
         kernel.CloseHandle(token)
+
+
+def windows_private_created_file(path: Path) -> int:
+    """Create a new owner-bound file without changing its containing directory."""
+    value = os.path.abspath(path)
+    if not value.startswith("\\\\?\\"):
+        value = "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
+    target = Path(value)
+    return _windows_private_lease_file(
+        target.parent, target.parent, target.name, create_new=True, protect_directory=False,
+    )
 
 
 def _windows_account_full_control(kind: int, flags: int, mask: int, sid: str, account: str) -> bool:

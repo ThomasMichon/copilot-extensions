@@ -545,10 +545,11 @@ def test_changed_configured_source_does_not_inherit_an_old_installations_exit(tm
     assert not (tmp_path / "mux-mapping.json").exists()
 
 
-def test_captured_or_incomplete_runtime_is_not_a_current_handler(tmp_path, monkeypatch):
+@pytest.mark.parametrize("nested", [False, True])
+def test_captured_or_incomplete_runtime_is_not_a_current_handler(tmp_path, monkeypatch, nested):
     slot = tmp_path / "versions" / "A"
     slot.mkdir(parents=True)
-    monkeypatch.setattr(pane_lifecycle.sys, "prefix", str(slot))
+    monkeypatch.setattr(pane_lifecycle.sys, "prefix", str(slot / ".venv" if nested else slot))
     (tmp_path / "current-version").write_text("B\n", encoding="utf-8")
     with pytest.raises(ValueError, match="current completed runtime"):
         pane_lifecycle.require_current_runtime(tmp_path)

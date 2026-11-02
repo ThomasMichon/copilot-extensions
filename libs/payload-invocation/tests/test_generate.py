@@ -1041,6 +1041,19 @@ def test_required_context_inner_command_external_cache(tmp_path: Path, host: str
         "print(json.dumps([agent_worktrees.VALUE, agent_worktrees.__cached__, "
         "sys.dont_write_bytecode, sys.argv[1:]]))\n", encoding="utf-8",
     )
+    procutil = package.parent / "agent_procutil"
+    procutil.mkdir()
+    (procutil / "__init__.py").touch()
+    shutil.copyfile(
+        REPO / "libs" / "agent-procutil" / "src" / "agent_procutil" / "python_cache.py",
+        procutil / "python_cache.py",
+    )
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
+    }), encoding="utf-8")
+    record = package.parent / "fixture.dist-info" / "RECORD"
+    record.parent.mkdir()
+    record.write_text("fixture.py,sha256=" + "a" * 43 + ",1\n", encoding="utf-8")
     (payload / "scripts" / "resolve-runtime.ps1").write_text(
         "$AgentRtPy = '" + str(python).replace("'", "''") + "'\n", encoding="utf-8",
     )
@@ -3714,6 +3727,131 @@ _IN_PROCESS_ADOPTERS = (
 def _catalog_parts(context):
     prose, encoded = context.split("```json\n", 1)
     return prose, json.loads(encoded.split("\n```", 1)[0])
+
+
+def _flight_snapshot(home):
+    # Native PowerShell owns its AppData startup cache, independently of the hook.
+    return {
+        path.relative_to(home): path.read_bytes()
+        for path in home.rglob("*")
+        if path.is_file() and path.relative_to(home).parts[0] != "AppData"
+    }
+
+
+def _flight_fixture(tmp_path, monkeypatch, state, *, multi=False):
+    manifest = (_multi_manifest if multi else _manifest)(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["inProcessCatalog"] = True
+    manifest.write_text(json.dumps(data))
+    generator.process_manifest(manifest, check=False)
+    scripts = manifest.parent / "scripts"
+    shutil.copyfile(SCRIPT.parent / "command_binding.py", scripts / "command_binding.py")
+    for source in (REPO / "libs/versioned-runtime").glob("*.py"):
+        shutil.copyfile(source, scripts / source.name)
+    for suffix in (".ps1", ".sh"):
+        shutil.copyfile(
+            REPO / "plugins/agent-codespaces/scripts" / ("resolve-runtime" + suffix),
+            scripts / ("resolve-runtime" + suffix),
+        )
+    home = tmp_path / "home"
+    home.mkdir()
+    for key, value in (
+        ("HOME", str(home)), ("USERPROFILE", str(home)),
+        ("HOMEDRIVE", home.drive), ("HOMEPATH", str(home)[len(home.drive):]),
+    ):
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    runtime = home / ".agent-example"
+    if state != "missing":
+        slot = runtime / "versions/1.2.3"
+        (slot / "Scripts").mkdir(parents=True)
+        (slot / "bin").mkdir()
+        for path in (slot / "Scripts/python.exe", slot / "bin/python"):
+            path.write_text("This interpreter must never be invoked.", encoding="utf-8")
+            path.chmod(0o755)
+        if state != "incomplete":
+            _write_runtime_completion(slot, "1.2.3")
+        (runtime / ("last-known-good" if state == "lkg" else "current-version")).write_text(
+            "1.2.3", encoding="utf-8",
+        )
+    if state == "unverified-context":
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(home / "unverified-context.json"))
+    before = _flight_snapshot(home)
+    return manifest, home, before
+
+
+@pytest.mark.parametrize("multi", [False, True])
+@pytest.mark.parametrize("state, expected", [
+    ("missing", "not installed"), ("incomplete", "incomplete or unavailable"),
+    ("installed", "already installed"), ("lkg", "already installed"),
+    ("unverified-context", "could not be verified for this installation context"),
+])
+def test_in_process_catalog_flight_check_is_passive(tmp_path, monkeypatch, multi, state, expected):
+    manifest, home, before = _flight_fixture(tmp_path, monkeypatch, state, multi=multi)
+    module_path = manifest.parent / "scripts/emit_command_catalog.py"
+    spec = importlib.util.spec_from_file_location("_flight_catalog_test", module_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("A passive catalog must not spawn tools or services")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    context = module.render_context()
+    catalog = _catalog_parts(context)[1]
+    assert expected in context.split("\n```", 1)[1]
+    assert "binding" not in catalog
+    assert all(row["availability"] == "ready" for row in catalog["commands"])
+    assert _flight_snapshot(home) == before
+    assert not list(manifest.parent.rglob("__pycache__"))
+
+
+@pytest.mark.parametrize("shell", [
+    pytest.param("powershell", marks=pytest.mark.skipif(os.name != "nt", reason="native Windows host")),
+    "pwsh",
+    pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="native POSIX host")),
+])
+@pytest.mark.parametrize("state, expected", [
+    ("missing", "not installed"), ("incomplete", "incomplete or unavailable"),
+    ("installed", "already installed"), ("lkg", "already installed"),
+    ("unverified-context", "could not be verified for this installation context"),
+])
+def test_native_catalog_flight_check_is_passive(tmp_path, monkeypatch, shell, state, expected):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip("native catalog shell unavailable")
+    manifest, home, before = _flight_fixture(tmp_path, monkeypatch, state)
+    if shell == "bash":
+        command = [executable, str(manifest.parent / "scripts/emit-command-catalog.sh")]
+    else:
+        command = [executable, "-NoProfile", "-NonInteractive", "-File",
+                   str(manifest.parent / "scripts/emit-command-catalog.ps1")]
+    result = subprocess.run(command, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    context = json.loads(result.stdout)["additionalContext"]
+    assert expected in context.split("\n```", 1)[1]
+    catalog = _catalog_parts(context)[1]
+    assert "binding" not in catalog
+    assert all(row["availability"] == "ready" for row in catalog["commands"])
+    assert _flight_snapshot(home) == before
+    assert not list(manifest.parent.rglob("__pycache__"))
+
+
+def test_flight_check_selected_root_does_not_substitute_legacy(tmp_path, monkeypatch):
+    manifest, home, before = _flight_fixture(tmp_path, monkeypatch, "installed")
+    spec = importlib.util.spec_from_file_location(
+        "_selected_flight", manifest.parent / "scripts/command_binding.py",
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    legacy = home / ".agent-example"
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(home / "unverified-context.json"))
+    selected = {"status": "selected", "installation": {"runtimeRoot": str(home / "selected")}}
+    assert "not installed" in module.runtime_installation_status(selected, legacy)
+    assert "could not be verified" in module.runtime_installation_status({"status": "blocked"}, legacy)
+    assert _flight_snapshot(home) == before
 
 
 @pytest.mark.parametrize("plugin", _IN_PROCESS_ADOPTERS)

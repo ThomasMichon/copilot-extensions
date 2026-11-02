@@ -74,6 +74,65 @@ def constructed_update(tmp_path, monkeypatch):
     return state
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows rollback-backup permissions")
+@pytest.mark.parametrize("failure", [False, True], ids=["repeat-install", "rollback"])
+def test_selector_backups_stay_private_under_a_writable_parent(
+    constructed_update, monkeypatch, failure,
+):
+    state = constructed_update
+    publication = state.installer.runtime._runtime_component("versioned_runtime_publication")
+    directory = state.root / ".installer-inputs"
+    directory.mkdir()
+    flags = subprocess.CREATE_NO_WINDOW
+    grant = subprocess.run(
+        ["icacls", str(directory), "/grant", "*S-1-5-11:(OI)(CI)(M)"],
+        capture_output=True, text=True, creationflags=flags, timeout=15,
+    )
+    assert grant.returncode == 0, grant.stdout + grant.stderr
+    before = subprocess.run(
+        ["icacls", str(directory)], capture_output=True, text=True,
+        creationflags=flags, timeout=15, check=True,
+    ).stdout
+    plain = directory / "plain-control"
+    plain.write_bytes(b"untrusted inherited permissions")
+    with pytest.raises(publication.PublicationProofError, match="not owned"):
+        publication.state_path(plain)
+    original_directory = state.installer.tempfile.TemporaryDirectory
+
+    @contextmanager
+    def inherited_workspace(*args, **kwargs):
+        with original_directory(*args, **kwargs) as workspace:
+            inherited = subprocess.run(
+                ["icacls", workspace, "/grant", "*S-1-5-11:(OI)(CI)(M)"],
+                capture_output=True, text=True, creationflags=flags, timeout=15,
+            )
+            assert inherited.returncode == 0, inherited.stdout + inherited.stderr
+            yield workspace
+
+    monkeypatch.setattr(state.installer.tempfile, "TemporaryDirectory", inherited_workspace)
+
+    def refused():
+        raise RuntimeError("activation refused")
+
+    if failure:
+        with pytest.raises(RuntimeError, match="activation refused"):
+            state.installer.activate(
+                state.root, state.slot.name, expected=state.previous, after_publish=refused,
+            )
+    else:
+        state.installer.activate(state.root, state.slot.name, expected=state.previous)
+        state.installer.activate(state.root, state.slot.name, expected=state.slot.name)
+    for name, original in state.selectors.items():
+        path = state.root / name
+        assert path.read_bytes() == (original if failure else (state.slot.name + "\n").encode())
+        assert publication.state_path(path) is not None
+    after = subprocess.run(
+        ["icacls", str(directory)], capture_output=True, text=True,
+        creationflags=flags, timeout=15, check=True,
+    ).stdout
+    assert after == before
+
+
 @pytest.mark.parametrize("cutover_ok", [True, False], ids=["running-daemon", "failed-cutover"])
 def test_repair_bootstrap_activates_before_releasing_candidate(
     constructed_update, monkeypatch, cutover_ok,
@@ -149,11 +208,12 @@ def test_activation_refuses_unrecognized_result(constructed_update, monkeypatch,
     ({"action": "error"}, 1),
     ({"action": "refused"}, 1),
 ])
-def test_activation_preserves_daemon_owner_outcome(constructed_update, monkeypatch, result, code):
+@pytest.mark.parametrize("nested", [False, True])
+def test_activation_preserves_daemon_owner_outcome(constructed_update, monkeypatch, result, code, nested):
     from worktree_manager import bootstrap_activation, mux_daemon_cutover
 
     state = constructed_update
-    monkeypatch.setattr(sys, "prefix", str(state.slot))
+    monkeypatch.setattr(sys, "prefix", str(state.slot / ".venv" if nested else state.slot))
     monkeypatch.setattr(mux_daemon_cutover, "activate_after_update", lambda **kwargs: result)
     assert bootstrap_activation.main(["--root", str(state.root)]) == code
 
@@ -163,6 +223,39 @@ def test_activation_refuses_a_base_interpreter(constructed_update):
 
     with pytest.raises(RuntimeError, match="constructed Manager slot"):
         bootstrap_activation.main(["--root", str(constructed_update.root)])
+
+
+@pytest.mark.parametrize("start,ready", [(False, False), (True, False), (True, True)])
+def test_explicit_application_start_preserves_update_noop_and_checks_startup(
+    constructed_update, monkeypatch, start, ready,
+):
+    from worktree_manager import bootstrap_activation, mux_daemon, mux_daemon_cutover
+
+    state = constructed_update
+    monkeypatch.setattr(sys, "prefix", str(state.slot / ".venv"))
+    activations, starts = [], []
+
+    def activate(**options):
+        activations.append(options)
+        return {"action": "noop", "reason": (
+            "already-active-version" if starts and ready else "no-live-daemon"
+        )}
+
+    def ensure(root):
+        assert root == state.root
+        starts.append(root)
+        return ready
+
+    monkeypatch.setattr(mux_daemon_cutover, "activate_after_update", activate)
+    monkeypatch.setattr(mux_daemon, "ensure_daemon_running", ensure)
+    arguments = ["--root", str(state.root), *(["--start-if-missing"] if start else [])]
+    if start and not ready:
+        with pytest.raises(RuntimeError, match="startup did not become ready"):
+            bootstrap_activation.main(arguments)
+    else:
+        assert bootstrap_activation.main(arguments) == 0
+    assert len(starts) == int(start)
+    assert len(activations) == (2 if start and ready else 1)
 
 
 def test_interruption_waits_for_owned_activation_before_rollback(constructed_update, monkeypatch):
