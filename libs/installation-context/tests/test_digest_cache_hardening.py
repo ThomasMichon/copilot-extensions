@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import os
 import shlex
 import shutil
@@ -10,11 +11,22 @@ import sys
 import time
 from pathlib import Path
 from threading import Event, Thread
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 
 from _powershell_fixture import _run_owner_probe
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing_extensions import assert_type
+    from installation_context import _validation_scope
+
+    def _typed_validation(value: int, /) -> str:
+        return str(value)
+
+    assert_type(_validation_scope(_typed_validation), Callable[[int], str])
 
 LIB = Path(__file__).resolve().parents[1]
 POSIX_SCRIPT = LIB / "installation-context.sh"
@@ -28,7 +40,7 @@ EXEMPLAR_SCRIPTS = (
 )
 
 
-def _load_python_module():
+def _load_python_module() -> ModuleType:
     path = LIB / "installation_context.py"
     spec = importlib.util.spec_from_file_location("digest_cache_installation_context", path)
     assert spec and spec.loader
@@ -338,6 +350,31 @@ digest_file "$path" >/dev/null
 
     assert result.returncode != 0
     assert "changed after it was validated" in result.stderr.lower()
+
+
+def test_python_validation_scope_preserves_callable_contract() -> None:
+    module = _load_python_module()
+
+    def local(value: int, *, enabled: bool = False) -> str:
+        """A keyword-only validated operation."""
+        assert module._VALIDATION_SCOPE_DEPTH.get() == 1
+        assert module._VALIDATED_FILE_SHA256.get() == {}
+        if not enabled:
+            raise ValueError("disabled")
+        return str(value)
+
+    wrapped = module._validation_scope(local)
+    assert wrapped.__wrapped__ is local
+    assert wrapped.__name__ == local.__name__
+    assert wrapped.__doc__ == local.__doc__
+    assert inspect.signature(wrapped) == inspect.signature(local)
+    assert wrapped(3, enabled=True) == "3"
+    assert module._VALIDATED_FILE_SHA256.get() is None
+    assert module._VALIDATION_SCOPE_DEPTH.get() == 0
+    with pytest.raises(ValueError, match="disabled"):
+        wrapped(3)
+    assert module._VALIDATED_FILE_SHA256.get() is None
+    assert module._VALIDATION_SCOPE_DEPTH.get() == 0
 
 
 def test_python_cache_hit_rehashes_same_metadata_rewrite(tmp_path: Path) -> None:
