@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current slice:** #10036 canonical Fleet Index and Vault adapter source/test contracts. #10029 canonical Repository Policy admission is complete.
+- **Current slice:** #10039 canonical Work Coalescing Singleton source/test contracts. #10036 canonical Fleet Index and Vault adapter admission is complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The lead owns #10036's canonical Fleet adapter scopes, shared admission/coverage manifests, documentation, the effort and full completion judgment. The Fleet Contracts worker and prior test-cohort delegates are complete.
+- **Delegates:** The lead owns #10039's canonical Work Coalescing Singleton scope, shared admission/coverage manifests, documentation, the effort and full completion judgment. The Fleet Contracts worker and prior test-cohort delegates are complete.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -119,7 +119,8 @@ rewrite.
 - [x] Strictly admit all five canonical Core Delegation source/test modules (#10025).
 - [x] Strictly admit all six canonical Fleet Contracts source/test modules (#10026).
 - [x] Strictly admit canonical Repository Policy source/test modules, including the executable guest reader (#10029).
-- [ ] Strictly admit all canonical Fleet Index and Vault adapter source/test modules (#10036).
+- [x] Strictly admit all canonical Fleet Index and Vault adapter source/test modules (#10036).
+- [ ] Strictly admit all canonical Work Coalescing Singleton source/test modules (#10039).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -1381,3 +1382,50 @@ composition prerequisites, and review/validation rules.
   assertion, name and decorator remains. Module-size, changefile,
   install-contract, vendoring, documentation-consistency, Ruff `F,E9` and diff
   guards pass. Required remote CI and review remain before merge.
+
+### 2026-11-02 - Fleet adapters merged; Work Coalescing Singleton selected
+
+- #10038 merged as `15b910907169da99887dac09aa35408e7bdcf40a`
+  after exact-head approval, zero open review threads and green required CI in
+  [run 41505959750](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41505959750).
+  #10036 is complete; managed source sync passed. Re-reading this Plan and
+  Validation Plan leaves 48 pending projects and the larger completion gate open.
+- #10039 owns the next eight-file canonical Work Coalescing Singleton scope.
+  Its initial Linux strict probe reports 137 diagnostics in five files.
+  Diagnose real wire/callback, queue/completion and native transport boundaries
+  before implementation; preserve all deadline, coalescing and cleanup behavior.
+  No service deployment or runtime rollout is part of this slice.
+
+### 2026-11-02 - Work Coalescing Singleton strict qualification
+
+- The complete eight-file canonical source/test project passes strict MyPy
+  for Linux and Windows, reducing the admitted inventory to 47 pending and
+  increasing the strict cohort to 21 projects. The manifest selects the
+  existing base checker environment without exceptions or exclusions.
+- Protocol-agnostic payloads and compute results retain explicit dynamic JSON
+  boundaries. Rendezvous uses a typed record; TCP server/handler ownership and
+  socket overrides honor the stdlib contracts. Narrowing the in-flight value
+  directly preserves the existing owner/joiner branch and completion behavior.
+  All prior test names and assertions are preserved; typed socket doubles and
+  scoped monkeypatches replace untyped callback/method-assignment seams.
+- The contained canonical suite passes all 43 tests, including actual TCP
+  round trips, shared execution and absolute completion deadlines. Relevant
+  editable consumers pass Worktrees 180, Pull Requests 42 and Worktree Manager
+  159 tests. The Pull Requests cleanup fixture initially hit Windows' executable
+  path-length limit; an extended-length temporary root did not survive its
+  path normalization. Re-running the identical tests with a shorter owned
+  pytest base path passes, retaining the native fixture runtimes, process
+  ownership and cleanup checks. No test or product code was changed to evade
+  that failure. The deliberately injected early serve-thread failure retains
+  its existing warning in the canonical suite.
+- Both consumer maps identify the same three editable consumers and no
+  physical copies. The promotion-unit source closure contains no library
+  input, so its hashes, nodes and budget remain unchanged. The changefile
+  names the library and all three consumers. The full admitted cohort,
+  install-contract, vendoring, documentation and Ruff checks pass.
+- Validation tiers: existing unit tests and actual native TCP/consumer
+  integration were exercised. A fresh-machine clean-room scenario and a live
+  external deployment are not applicable to this annotation-only admission:
+  no installation, discovery, wire format, service activation or cutover
+  behavior changes. Required remote CI and review remain before merge; the
+  larger campaign's Plan and Validation Plan remain open.

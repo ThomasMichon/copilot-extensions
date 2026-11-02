@@ -11,14 +11,24 @@ from __future__ import annotations
 
 import json
 import secrets
+import socket
 import socketserver
 import threading
 import time
 from collections.abc import Callable
+from typing import Any, TypedDict
 
 #: ``compute(kind, payload) -> result``. Raise to surface an error to every
 #: joiner of the same in-flight (kind, key) execution.
-Compute = Callable[[str, dict], dict]
+Compute = Callable[[str, dict[str, Any]], dict[str, Any]]
+
+
+class Rendezvous(TypedDict):
+    transport: str
+    endpoint: str
+    token: str
+    generation: str
+
 
 PROTOCOL_VERSION = 1
 _READ_TIMEOUT_S = 5.0
@@ -42,7 +52,7 @@ class Unavailable(Exception):
     single-shot-caller admission-discipline contract this implements.
     """
 
-    def __init__(self, reason: str | None = None):
+    def __init__(self, reason: str | None = None) -> None:
         super().__init__(reason or "")
         self.reason = reason
 
@@ -52,15 +62,19 @@ class _InFlight:
 
     def __init__(self) -> None:
         self.event = threading.Event()
-        self.result: dict | None = None
+        self.result: dict[str, Any] | None = None
         self.error: BaseException | None = None
 
 
 class _Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = False
     daemon_threads = True
+    server_address: tuple[str, int]
 
-    def __init__(self, address, handler_cls, *, owner: CoalescingServer):
+    def __init__(
+        self, address: tuple[str, int], handler_cls: type[socketserver.BaseRequestHandler],
+        *, owner: CoalescingServer,
+    ) -> None:
         self.owner = owner
         super().__init__(address, handler_cls)
 
@@ -75,7 +89,10 @@ class _Server(socketserver.ThreadingTCPServer):
         # Repeated calls are harmless (`Event.set()` is idempotent).
         self.owner._serve_running.set()
 
-    def process_request(self, request, client_address) -> None:
+    def process_request(
+        self, request: socket.socket | tuple[bytes, socket.socket],
+        client_address: tuple[str, int],
+    ) -> None:
         # copilot-extensions#3798: counted the instant a connection is
         # accepted, strictly BEFORE `ThreadingMixIn.process_request` spawns
         # the per-request handler thread -- the narrow accept-to-dispatch
@@ -99,7 +116,9 @@ class _Server(socketserver.ThreadingTCPServer):
             self.owner._on_request_finished()
             raise
 
-    def process_request_thread(self, request, client_address) -> None:
+    def process_request_thread(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: tuple[str, int],
+    ) -> None:
         try:
             super().process_request_thread(request, client_address)
         finally:
@@ -107,8 +126,10 @@ class _Server(socketserver.ThreadingTCPServer):
 
 
 class _Handler(socketserver.StreamRequestHandler):
+    server: _Server
+
     def handle(self) -> None:
-        owner: CoalescingServer = self.server.owner  # type: ignore[attr-defined]
+        owner = self.server.owner
         try:
             self.request.settimeout(_READ_TIMEOUT_S)
             raw = self.rfile.readline(2 * 1024 * 1024)
@@ -154,7 +175,7 @@ class _Handler(socketserver.StreamRequestHandler):
             self._write({"version": PROTOCOL_VERSION, "result": result})
         except Unavailable as exc:
             try:
-                response = {"version": PROTOCOL_VERSION, "fallback": True}
+                response: dict[str, Any] = {"version": PROTOCOL_VERSION, "fallback": True}
                 if exc.reason:
                     response["reason"] = exc.reason
                 self._write(response)
@@ -163,7 +184,7 @@ class _Handler(socketserver.StreamRequestHandler):
         except Exception:
             return
 
-    def _write(self, obj: dict) -> None:
+    def _write(self, obj: dict[str, Any]) -> None:
         self.wfile.write(json.dumps(obj, separators=(",", ":")).encode("utf-8") + b"\n")
 
 
@@ -186,7 +207,7 @@ class CoalescingServer:
         bind_host: str = "127.0.0.1",
         bind_port: int = 0,
         token: str | None = None,
-    ):
+    ) -> None:
         self.token = token or secrets.token_urlsafe(32)
         self.generation = secrets.token_hex(16)
         self._compute = compute
@@ -353,7 +374,7 @@ class CoalescingServer:
             self._admission_closed = False
             self._admission_closed_reason = None
 
-    def rendezvous(self) -> dict:
+    def rendezvous(self) -> Rendezvous:
         host, port = self._server.server_address
         return {
             "transport": "tcp",
@@ -497,7 +518,9 @@ class CoalescingServer:
 
     # -- coalesced requests ------------------------------------------------
 
-    def handle_request(self, kind: str, key: str, payload: dict, deadline: float) -> dict:
+    def handle_request(
+        self, kind: str, key: str, payload: dict[str, Any], deadline: float,
+    ) -> dict[str, Any]:
         """Run (or join) the coalesced execution for ``(kind, key)``.
 
         Raises ``Unavailable`` if ``deadline`` passes before a result (either
@@ -513,7 +536,7 @@ class CoalescingServer:
         with self._lock:
             inflight = self._inflight.get(map_key)
             is_owner = inflight is None
-            if is_owner:
+            if inflight is None:
                 inflight = _InFlight()
                 self._inflight[map_key] = inflight
 

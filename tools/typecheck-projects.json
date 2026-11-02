@@ -318,7 +318,7 @@
         "libs/work-coalescing-singleton"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-worktree-identity",
