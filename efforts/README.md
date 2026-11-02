@@ -103,7 +103,7 @@ that pattern to this repository.
 | [Agent-Process Self-Report Registry](active/agent-process-self-report-registry/README.md) | Draft | #5559 |
 | [Full-Harness Startup Reliability](active/full-harness-startup-reliability/README.md) | Active | #3303 |
 | [Unified Skill Review](active/unified-skill-review/README.md) | Draft | #2847 |
-| [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Active; complete retained acceptance, implementation/native gates open | Plan/Validation/Journal and open bounded-source issues; #2457 is source provenance after reviewed complete intake |
+| [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Blocked; parked by maintainer direction, source slices credited and complete acceptance retained | Explicit resumption required; existing Plan/Validation, issue owners and claims unchanged; #2457 remains source provenance |
 | [Handoff Live Cutover](active/handoff-live-cutover/README.md) | Active | #2249† |
 | [Handoff Cutover Reload Robustness](active/handoff-cutover-reload-robustness/README.md) | Active | #5250† |
 | [Context-Handoff Overhaul](active/context-handoff-overhaul/README.md) | Active; complete retained acceptance, implementation/native gates open | Plan/Validation/Journal and open bounded-source issues; #2594 is source provenance after reviewed complete intake |
@@ -123,7 +123,7 @@ that pattern to this repository.
 | [Migration Intake](active/migration-intake/README.md) | Draft | See effort |
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
 | [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Active | #1418 historical; retained reset/prelaunch use reviewed Plan/Validation/Journal and open per-slice claims |
-| [Review Automation Reliability](active/review-automation-reliability/README.md) | Draft | See effort |
+| [Review Automation Reliability](active/review-automation-reliability/README.md) | Blocked; parked by maintainer direction, delivered slices retained | Explicit resumption required; #2423 and existing phase/ground/native owners retain complete acceptance |
 | [Marketplace-Scoped Installations](active/marketplace-scoped-installations/README.md) | Active | #1096 |
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
 | [Tiered Payload Provisioning](active/tiered-payload-provisioning/README.md) | Draft | See effort |

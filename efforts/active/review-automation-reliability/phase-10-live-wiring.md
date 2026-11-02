@@ -3,6 +3,16 @@
 Linked from the effort [`README.md`](README.md) Plan. Read this only when
 working this phase.
 
+## Current execution status
+
+Parked with the parent effort on explicit maintainer direction, 2026-11-02.
+Existing completed source slices and unchecked acceptance remain unchanged;
+resume only after an explicit decision and current owner/source reconciliation.
+The original design rationale below describes the pre-wiring baseline, not a
+claim that the current task/provider runtime still lacks all integration.
+Issue #2423 remains the authoritative retained phase contract; parking the
+parent does not change independent implementation owners or release custody.
+
 ## Why this phase exists
 
 Phase 9 deliberately declared four machines --
@@ -340,9 +350,11 @@ here but not blocking the start of 1/2/5.
   already uses, translates the coarse live/gone/unknown verdict to a
   `BridgeState` via a new `spawn_reservation_machine.verdict_to_bridge_state`
   (unknown maps to `None`/not-applicable rather than guessing), and logs
-  any detected anomaly or single-assignment violation. Scheduling this
-  sweep on a periodic cadence is left as a follow-up decision; the method
-  itself is safe to call at any time. Backed by
+  any detected anomaly or single-assignment violation. **Later source delivery
+  (#2759):** `poll_once` schedules the read-only sweep on its own cadence;
+  current `supervisor_cycle.py` retains that call while
+  `consistency_sweep` is enabled. This source integration does not prove a
+  particular deployed configuration or the whole Validation Plan. Backed by
   `test_spawn_consistency_sweep.py` (6 tests): a consistent live
   reservation reports zero anomalies; a `SPAWNED` reservation whose
   liveness read is `gone` is detected; a non-local-body or `unknown`-
