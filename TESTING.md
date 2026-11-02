@@ -3546,6 +3546,44 @@ rule or collection-root restriction is rewritten. Every admitted case must
 contribute actual library call coverage under the same observer and budget.
 This qualifies that bounded library cohort, not the whole historical census.
 
+`tools/promotion_unit_tests/test_pr_target_probes.py` re-exports the nine
+original in-process controls from Worktrees' `test_pr_target_probes.py`.
+Their source, adapter and canonical import closure are hash-bound. Each case
+must contribute actual `pr_publish` call coverage under the unchanged effect
+observer and unit budget. The controls preserve fresh destination authority
+and lock coverage while rejecting redundant target enumeration and nested
+lock resolution. Git and bounded-process modules load native spawn helpers
+only in their actual process callers, not when importing target policy.
+Real-Git missing-remote, repoint and lock-count counterparts
+in `test_pr_remote_evidence.py` remain outside the unit packet. This enrollment
+does not establish native latency or complete Windows qualification.
+
+Credential replay and native identity controls in Worktrees'
+`test_update_auth.py` and `test_update_auth_probe.py` remain native tests,
+outside that unit enrollment. Their isolated helper resolves the candidate's
+explicit immutable module roots, not another editable checkout or site hooks.
+The rendered Git helper retains `-I -S -B -X utf8`, the selected interpreter
+and the five-second deadline. A timed-out owned child reports no successful status,
+even if its recorded exit code is zero. Import-closure controls keep installer
+cleanup and command-rendering dependencies out of the helper's startup path;
+native process, routing and cleanup controls still qualify the actual behavior.
+The cold policy-import control uses a 45-second child watchdog and a 60-second
+item guard for native filesystem/import contention. This is a functional
+import-boundary check, not latency qualification; authentication deadlines,
+two-worker execution and the 240/900-second packet limits remain unchanged.
+Registered-only find and strict-list first-touch calls use independent cases,
+preserving each real CLI launch rather than accumulating two child deadlines
+in one item. These calls and native strict-inventory ancestor controls use the
+same 45-second child watchdog and 60-second item guard after native cold starts
+exceeded twenty seconds. These functional allowances do not qualify startup
+latency or change the original performance-packet limits.
+The manual `Installation context full` workflow's `worktrees-git-probes`
+portfolio runs the complete twelve-file Git/credential/observation packet on hosted Linux and
+Windows at the exact dispatch SHA through the canonical contained runner.
+It retains two actual workers, 240 seconds per group and 900 seconds including
+preparation and cleanup. It is opt-in source qualification, not required PR CI,
+installed rollout or completion of the broader publication-performance effort.
+
 `tools/promotion_unit_tests/test_worktree_identity.py` re-exports the eight
 original codec test functions and their unchanged parameterization from
 `libs/worktree-identity/tests/test_worktree_identity.py`. Replacing only the
@@ -5787,15 +5825,15 @@ just as standalone test preparation does; it does not bypass policy or build
 from a mutable source fallback.
 
 The independent `libs/docker-resource-producer/tests` suite uses only a fake
-Docker process and temporary JSON state, never a live daemon. Required PR guards
-select it when that library, its selector, promotion tool/tests, or the CI workflow changes, and run it
-on the declared minimum Python 3.10 with bounded per-test and step timeouts.
-The same selection runs the canonical package's focused promotion-compatibility
-regression on guard Python, before minimum-runtime setup.
-Minimum-runtime dependency provisioning uses the canonical seasoned UV adapter.
+Docker process and temporary JSON state, never a live daemon. Current required
+PR CI admits only the source-bound unit packet and does not run this independent
+suite. A green PR gate is not evidence that these fixtures ran. Run the suite
+explicitly under the existing test containment, including Linux on the declared
+minimum Python 3.10 for POSIX-only cases; record unavailable platform coverage.
+Isolated dependency provisioning uses the canonical seasoned UV adapter.
 The library also declares the native seven-day UV cutoff for direct consumers.
-Minimum-runtime setup uses its explicit interpreter output without replacing
-the guard job's Python 3.12 environment. This catches fractional-timestamp and
+Use the selected interpreter explicitly without replacing the caller's Python
+environment. This catches fractional-timestamp and
 optional TLS client-identity compatibility; it is not live Docker lifecycle
 acceptance.
 

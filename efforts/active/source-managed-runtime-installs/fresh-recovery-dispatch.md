@@ -43,13 +43,26 @@ Persisted pin changes, if requested at all, remain a separate explicit operation
 - The existing footprint provider/history, scoped removal owners and durable
   execution driver retain recognition, repair, exclusive custody and outcomes.
 
-The released Manager/Worktrees prepared-input adapters are not evidence that
-every application supports this journey. Negotiate the actual selected entry's
-capability before changing runtime state. An unsupported historical source or
-portfolio is an explicit unsupported result, never permission to install a
-different commit, use a raw-source fallback or claim suite recovery from a
-Manager-only construction. Existing application-adapter owners retain their
-qualification work; this slice must not add another constructor or supervisor.
+### New-flow and legacy compatibility - operator-requested
+
+> We'll need to support the new install flows now, with compat for the old ones, and allow handling the new flows for other packages when they come online
+
+Support available new installation flows and existing native legacy flows in
+the same recovery journey. The released Manager/Worktrees prepared-input
+adapters are not a permanently closed package list or a reason to wait for
+complete portfolio migration. Recognize additional packages' new-flow
+capabilities through the native installation owner, without changing external
+consumers or copying a package/version matrix into them.
+
+Negotiate the actual selected entry's capability before changing runtime
+state. Prefer its new local-promotion/wheel-input path where supported; retain
+the native legacy path where that is the supported compatibility contract.
+Report which path each target actually uses. Compatibility never changes the
+selected commit, silently downloads a newer target or licenses a false
+whole-suite result from Manager-only construction. A genuinely unsupported
+source remains an explicit failure, not an installed-dispatch fallback.
+Existing application-adapter owners retain their qualification work; this slice
+must not add another constructor, dependency planner or supervisor.
 
 ## Footprint and authority
 
@@ -81,7 +94,10 @@ separate outcomes. This proposal authorizes no installed-host action.
 - [ ] Resolve the selected source and configured Main pin through existing
   source owners; retain the immutable selection through native handoff.
 - [ ] Compose existing promotion/profile/application entries with capability
-  checks, exact exit propagation and no installed-dispatch fallback.
+  checks, native legacy compatibility, exact exit propagation and no
+  installed-dispatch fallback.
+- [ ] Admit later packages' native new-flow capabilities without a new external
+  helper release or a hardcoded Manager/Worktrees-only consumer branch.
 - [ ] Compose current upstream footprint inspection and any explicitly
   authorized repair; preserve native execution and resource custody.
 - [ ] Qualify the actual Windows entry and publish its supported argument and
@@ -98,6 +114,8 @@ separate outcomes. This proposal authorizes no installed-host action.
   perform no runtime mutation and never substitute source or dispatch code.
 - [ ] Exercise the selected source's real promotion/profile/native installer
   in a disposable Windows environment, not only mocked argument forwarding.
+- [ ] Exercise available new flows, legacy-compatible targets and a later
+  package's advertised new flow while preserving one selected commit.
 - [ ] Old, absent, incompatible and corrupt footprints reach the upstream
   recognition/fresh path without an external copy of the version matrix.
 - [ ] Preview, repeated attempts and partial failures preserve configuration,

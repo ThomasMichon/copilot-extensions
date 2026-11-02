@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -98,14 +99,14 @@ class DockerClient:
                 ("--tlskey", self.endpoint.tls_key),
             ):
                 transport += [option, value if value is not None else ""]
-        kwargs: dict[str, int] = {}
-        if os.name == "nt":
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # headless-guard: allow dependency-free Docker primitive
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = subprocess.CREATE_NO_WINDOW  # headless-guard: allow dependency-free Docker primitive
         try:
             return subprocess.run(
                 [*self.docker_argv, *transport, *args], env=environment,
                 stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8",
-                errors="strict", timeout=self.timeout, **kwargs,
+                errors="strict", timeout=self.timeout, creationflags=creationflags,
             )
         except (OSError, subprocess.SubprocessError, UnicodeError) as error:
             raise VerificationError(f"Docker invocation failed: {type(error).__name__}") from error
@@ -169,7 +170,7 @@ class DockerClient:
         elif names and tls:
             storage = entry.get("Storage")
             root = storage.get("TLSPath") if isinstance(storage, dict) else None
-            text(root, "Docker TLS root")
+            root = text(root, "Docker TLS root")
             if not Path(root).is_absolute():
                 raise VerificationError("Docker TLS root must be absolute")
             for field, name in zip(paths, ("ca.pem", "cert.pem", "key.pem")):
@@ -213,7 +214,10 @@ class DockerClient:
         epoch = labels.get(LABEL_GENERATION)
         if not isinstance(epoch, str) or re.fullmatch(r"[1-9][0-9]{0,18}", epoch) is None:
             raise VerificationError("Docker resource allocation label is invalid")
-        return Identity(resource_type, identifier, result.get("Created" if resource_type == "container" else "CreatedAt"),
+        created = result.get("Created" if resource_type == "container" else "CreatedAt")
+        if not isinstance(created, str):
+            raise VerificationError("Invalid creation evidence")
+        return Identity(resource_type, identifier, created,
                         self.endpoint.daemon_id, token, creator, generation(int(epoch)))
 
     def diagnostic_observation(self, identity: Identity) -> DiagnosticObservation:

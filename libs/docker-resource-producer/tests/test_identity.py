@@ -6,22 +6,25 @@ import os
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
 from docker_resource_producer import DiagnosticObservation, DockerClient, Endpoint, Identity, VerificationError, birth_labels
+from fake_docker import FixtureState, Invocation
 
 TOKEN = "r" * 43
 CREATOR = "machine/project/creator"
 CONTAINER = "a" * 64
 CREATED = "2026-10-13T00:00:00.123456789Z"
+ClientFixture = tuple[DockerClient, Path, FixtureState]
 
 
 @pytest.fixture
-def fixture(tmp_path: Path) -> tuple[DockerClient, Path, dict]:
+def fixture(tmp_path: Path) -> ClientFixture:
     path = tmp_path / "fake state.json"
     labels = birth_labels(TOKEN, CREATOR, 1)
-    state = {
+    state: FixtureState = {
         "daemon_id": "fixture-daemon",
         "container": {
             CONTAINER: {
@@ -52,7 +55,7 @@ def identity(kind: str = "container") -> Identity:
                     CREATED, "fixture-daemon", TOKEN, CREATOR, 1)
 
 
-def logs(path: Path) -> list[dict]:
+def logs(path: Path) -> list[Invocation]:
     return [json.loads(line) for line in path.with_suffix(".log").read_text().splitlines()]
 
 
@@ -63,7 +66,7 @@ def test_nested_json_is_a_verification_error() -> None:
         _json("[" * 10000 + "0" + "]" * 10000)
 
 
-def test_diagnostic_snapshot_cannot_authorize_proof_or_removal(fixture: tuple) -> None:
+def test_diagnostic_snapshot_cannot_authorize_proof_or_removal(fixture: ClientFixture) -> None:
     client, path, _state = fixture
     kind = "container"
     observation = client.diagnostic_observation(identity(kind))
@@ -90,7 +93,7 @@ def test_diagnostic_snapshot_cannot_authorize_proof_or_removal(fixture: tuple) -
 
 
 @pytest.mark.parametrize("kind", ["container", "volume"])
-def test_authoritative_probe_refuses_before_any_transport(fixture: tuple, kind: str) -> None:
+def test_authoritative_probe_refuses_before_any_transport(fixture: ClientFixture, kind: str) -> None:
     client, path, _state = fixture
     with pytest.raises(VerificationError, match="daemon-bound"):
         client.probe(identity(kind))
@@ -106,7 +109,7 @@ def test_diagnostic_coercion_is_not_presence_or_absence_authority(observed: bool
 
 
 @pytest.mark.parametrize("state_name", ["running", "exited", "created"])
-def test_container_rename_and_stopped_state_preserve_identity(fixture: tuple, state_name: str) -> None:
+def test_container_rename_and_stopped_state_preserve_identity(fixture: ClientFixture, state_name: str) -> None:
     client, path, state = fixture
     state["container"][CONTAINER]["Name"] = "/renamed"
     state["container"][CONTAINER]["State"]["Status"] = state_name
@@ -115,7 +118,7 @@ def test_container_rename_and_stopped_state_preserve_identity(fixture: tuple, st
 
 
 @pytest.mark.parametrize("change", ["birth", "creator", "token", "generation", "daemon", "inspect-id"])
-def test_changed_birth_identity_never_removes(fixture: tuple, change: str) -> None:
+def test_changed_birth_identity_never_removes(fixture: ClientFixture, change: str) -> None:
     client, path, state = fixture
     resource = state["volume"]["unique-volume"]
     if change == "birth":
@@ -136,7 +139,7 @@ def test_changed_birth_identity_never_removes(fixture: tuple, change: str) -> No
 
 @pytest.mark.parametrize("kind", ["container", "volume"])
 @pytest.mark.parametrize("failure", ["ls", "inspect"])
-def test_permission_or_backend_failure_is_never_absence(fixture: tuple, kind: str, failure: str) -> None:
+def test_permission_or_backend_failure_is_never_absence(fixture: ClientFixture, kind: str, failure: str) -> None:
     client, path, state = fixture
     state["fail"] = f"{kind} {failure}"
     path.write_text(json.dumps(state), encoding="utf-8")
@@ -145,7 +148,7 @@ def test_permission_or_backend_failure_is_never_absence(fixture: tuple, kind: st
 
 
 @pytest.mark.parametrize("operation", ["info", "container ls", "container inspect", "volume ls", "volume inspect"])
-def test_malformed_response_keeps_identity_unknown(fixture: tuple, operation: str) -> None:
+def test_malformed_response_keeps_identity_unknown(fixture: ClientFixture, operation: str) -> None:
     client, path, state = fixture
     state["malformed"] = operation
     path.write_text(json.dumps(state), encoding="utf-8")
@@ -153,7 +156,7 @@ def test_malformed_response_keeps_identity_unknown(fixture: tuple, operation: st
         client.diagnostic_observation(identity("volume" if operation.startswith("volume") else "container"))
 
 
-def test_absence_needs_same_daemon_after_inventory(fixture: tuple) -> None:
+def test_absence_needs_same_daemon_after_inventory(fixture: ClientFixture) -> None:
     client, path, state = fixture
     state["container"] = {}
     state["change_daemon_after"] = "container ls"
@@ -162,7 +165,7 @@ def test_absence_needs_same_daemon_after_inventory(fixture: tuple) -> None:
         client.diagnostic_observation(identity())
 
 
-def test_daemon_aba_routing_cannot_prove_absence(fixture: tuple) -> None:
+def test_daemon_aba_routing_cannot_prove_absence(fixture: ClientFixture) -> None:
     client, path, state = fixture
     state["inventory_on_other_daemon"] = {
         "daemon_id": "another-daemon", "container": {}, "volume": {},
@@ -180,7 +183,7 @@ def test_daemon_aba_routing_cannot_prove_absence(fixture: tuple) -> None:
     assert len(logs(path)) == before
 
 
-def test_reservation_search_covers_all_resource_types_and_attempts(fixture: tuple) -> None:
+def test_reservation_search_covers_all_resource_types_and_attempts(fixture: ClientFixture) -> None:
     client, path, state = fixture
     state["volume"]["unique-volume"]["Labels"]["copilot-extensions.disposable.generation"] = "2"
     path.write_text(json.dumps(state), encoding="utf-8")
@@ -189,14 +192,14 @@ def test_reservation_search_covers_all_resource_types_and_attempts(fixture: tupl
     assert all(o.to_json()["authority"] == "diagnostic-only" for o in observations)
 
 
-def test_cleanup_requires_explicit_authority_before_any_probe(fixture: tuple) -> None:
+def test_cleanup_requires_explicit_authority_before_any_probe(fixture: ClientFixture) -> None:
     client, path, _state = fixture
     with pytest.raises(VerificationError, match="not authorized"):
         client.remove(identity())
     assert not path.with_suffix(".log").exists()
 
 
-def test_retained_resource_does_not_receive_a_cleanup_success(fixture: tuple) -> None:
+def test_retained_resource_does_not_receive_a_cleanup_success(fixture: ClientFixture) -> None:
     client, path, state = fixture
     state["retain"] = True
     path.write_text(json.dumps(state), encoding="utf-8")
@@ -206,7 +209,7 @@ def test_retained_resource_does_not_receive_a_cleanup_success(fixture: tuple) ->
     assert not path.with_suffix(".log").exists()
 
 
-def test_pin_resolves_context_once_then_ignores_ambient_host(fixture: tuple) -> None:
+def test_pin_resolves_context_once_then_ignores_ambient_host(fixture: ClientFixture) -> None:
     client, path, _state = fixture
     env = {**client.environment, "DOCKER_CONTEXT": "fixture"}
     env.pop("DOCKER_HOST")
@@ -217,7 +220,7 @@ def test_pin_resolves_context_once_then_ignores_ambient_host(fixture: tuple) -> 
     assert all(c["args"][0] == "--host" for c in logs(path)[1:])
 
 
-def test_explicit_host_environment_wins_over_context_environment(fixture: tuple) -> None:
+def test_explicit_host_environment_wins_over_context_environment(fixture: ClientFixture) -> None:
     client, path, _state = fixture
     env = {**client.environment, "DOCKER_CONTEXT": "fixture", "DOCKER_TLS": "", "DOCKER_TLS_VERIFY": ""}
     pinned = DockerClient.pin(docker_argv=client.docker_argv, environment=env)
@@ -232,7 +235,7 @@ def test_explicit_host_environment_wins_over_context_environment(fixture: tuple)
     ("localhost:5555", "tcp://localhost:5555"),
     ("unix://", "unix:///var/run/docker.sock"),
 ])
-def test_host_shorthand_uses_cli_resolved_default_endpoint(fixture: tuple, configured: str, resolved: str) -> None:
+def test_host_shorthand_uses_cli_resolved_default_endpoint(fixture: ClientFixture, configured: str, resolved: str) -> None:
     client, path, state = fixture
     state["default_context"] = {
         "Name": "default", "Endpoints": {"docker": {"Host": resolved, "SkipTLSVerify": False}}, "TLSMaterial": {},
@@ -246,7 +249,7 @@ def test_host_shorthand_uses_cli_resolved_default_endpoint(fixture: tuple, confi
     assert all(call["args"][:2] == ["--host", resolved] for call in logs(path)[1:])
 
 
-def test_socket_context_does_not_replay_unused_tls_material(fixture: tuple) -> None:
+def test_socket_context_does_not_replay_unused_tls_material(fixture: ClientFixture) -> None:
     client, path, state = fixture
     state["context"]["Endpoints"]["docker"]["SkipTLSVerify"] = True
     state["context"]["TLSMaterial"] = {"docker": ["ca.pem"]}
@@ -259,7 +262,7 @@ def test_socket_context_does_not_replay_unused_tls_material(fixture: tuple) -> N
 
 
 @pytest.mark.parametrize("verify", [True, False])
-def test_default_context_in_memory_tls_uses_default_files(fixture: tuple, verify: bool) -> None:
+def test_default_context_in_memory_tls_uses_default_files(fixture: ClientFixture, verify: bool) -> None:
     client, path, state = fixture
     certs = path.parent / "default context certificates"
     certs.mkdir()
@@ -285,7 +288,9 @@ def test_default_context_in_memory_tls_uses_default_files(fixture: tuple, verify
 
 
 @pytest.mark.parametrize("context", [None, "default"])
-def test_tls_home_fallback_uses_supplied_environment_not_ambient(fixture: tuple, monkeypatch, context: str | None) -> None:
+def test_tls_home_fallback_uses_supplied_environment_not_ambient(
+    fixture: ClientFixture, monkeypatch: pytest.MonkeyPatch, context: str | None,
+) -> None:
     client, path, state = fixture
     isolated = path.parent / "isolated home"
     ambient = path.parent / "ambient home"
@@ -318,7 +323,7 @@ def test_tls_home_fallback_uses_supplied_environment_not_ambient(fixture: tuple,
             assert call["tls_files"] == {"ca.pem": str(isolated / ".docker" / "ca.pem"), "cert.pem": "", "key.pem": ""}
 
 
-def test_tls_missing_supplied_home_refuses_ambient_fallback(fixture: tuple) -> None:
+def test_tls_missing_supplied_home_refuses_ambient_fallback(fixture: ClientFixture) -> None:
     client, path, _state = fixture
     env = {key: value for key, value in client.environment.items() if key not in {
         "HOME", "USERPROFILE", "DOCKER_CONFIG", "DOCKER_CERT_PATH", "DOCKER_CONTEXT",
@@ -329,7 +334,9 @@ def test_tls_missing_supplied_home_refuses_ambient_fallback(fixture: tuple) -> N
 
 
 @pytest.mark.parametrize("directory_key", ["DOCKER_CERT_PATH", "DOCKER_CONFIG"])
-def test_explicit_tls_directory_does_not_expand_parent_home(fixture: tuple, monkeypatch, directory_key: str) -> None:
+def test_explicit_tls_directory_does_not_expand_parent_home(
+    fixture: ClientFixture, monkeypatch: pytest.MonkeyPatch, directory_key: str,
+) -> None:
     client, path, _state = fixture
     monkeypatch.chdir(path.parent)
     certs = path.parent / "~" / "literal certificates"
@@ -364,14 +371,14 @@ def test_identity_and_endpoint_round_trip_strictly(tmp_path: Path) -> None:
         Endpoint.from_json({**endpoint.to_json(), "extra": "refused"})
 
 
-def test_volume_cleanup_refuses_before_probe_or_name_based_mutation(fixture: tuple) -> None:
+def test_volume_cleanup_refuses_before_probe_or_name_based_mutation(fixture: ClientFixture) -> None:
     client, path, _state = fixture
     with pytest.raises(VerificationError, match="birth-conditional"):
         client.remove(identity("volume"), authorized=True)
     assert not path.with_suffix(".log").exists()
 
 
-def test_reused_container_name_never_selects_the_replacement(fixture: tuple) -> None:
+def test_reused_container_name_never_selects_the_replacement(fixture: ClientFixture) -> None:
     client, path, state = fixture
     replacement_id = "b" * 64
     replacement = state["container"].pop(CONTAINER)
@@ -385,7 +392,7 @@ def test_reused_container_name_never_selects_the_replacement(fixture: tuple) -> 
     assert all("rm" not in call["args"] for call in logs(path))
 
 
-def test_container_cleanup_refuses_changed_creator_labels(fixture: tuple) -> None:
+def test_container_cleanup_refuses_changed_creator_labels(fixture: ClientFixture) -> None:
     client, path, state = fixture
     state["container"][CONTAINER]["Config"]["Labels"]["copilot-extensions.disposable.creator"] = "another/owner/id"
     path.write_text(json.dumps(state), encoding="utf-8")
@@ -397,7 +404,7 @@ def test_container_cleanup_refuses_changed_creator_labels(fixture: tuple) -> Non
 
 
 @pytest.mark.parametrize("verify", [True, False])
-def test_named_context_tls_paths_and_verification_are_pinned(fixture: tuple, verify: bool) -> None:
+def test_named_context_tls_paths_and_verification_are_pinned(fixture: ClientFixture, verify: bool) -> None:
     client, path, state = fixture
     root = path.parent / "tls material"
     state["context"]["Endpoints"]["docker"] = {
@@ -428,7 +435,7 @@ def test_valid_timestamp_fraction_preserves_original_identity(fraction: str) -> 
     assert value.to_json()["created"] == created
 
 
-def test_explicit_host_ca_only_tls_omits_absent_client_identity(fixture: tuple) -> None:
+def test_explicit_host_ca_only_tls_omits_absent_client_identity(fixture: ClientFixture) -> None:
     client, path, _state = fixture
     certs = path.parent / "CA only material"
     certs.mkdir()
@@ -452,7 +459,9 @@ def test_explicit_host_ca_only_tls_omits_absent_client_identity(fixture: tuple) 
 
 
 @pytest.mark.parametrize("material,skip_verify", [([], True), (["cert.pem", "key.pem"], False)])
-def test_context_without_ca_preserves_tls_and_system_roots(fixture: tuple, material: list[str], skip_verify: bool) -> None:
+def test_context_without_ca_preserves_tls_and_system_roots(
+    fixture: ClientFixture, material: list[str], skip_verify: bool,
+) -> None:
     client, path, state = fixture
     state["context"]["Endpoints"]["docker"] = {
         "Host": "tcp://example.invalid:2376", "SkipTLSVerify": skip_verify,
@@ -482,7 +491,7 @@ def test_context_without_ca_preserves_tls_and_system_roots(fixture: tuple, mater
         }
 
 
-def test_explicit_host_client_identity_files_are_retained(fixture: tuple) -> None:
+def test_explicit_host_client_identity_files_are_retained(fixture: ClientFixture) -> None:
     client, path, _state = fixture
     certs = path.parent / "client material"
     certs.mkdir()
@@ -497,10 +506,12 @@ def test_explicit_host_client_identity_files_are_retained(fixture: tuple) -> Non
     assert "--tlscert" in logs(path)[1]["args"] and "--tlskey" in logs(path)[1]["args"]
 
 
-def test_inaccessible_optional_client_identity_is_not_ca_only_fallback(monkeypatch, tmp_path: Path) -> None:
+def test_inaccessible_optional_client_identity_is_not_ca_only_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     from docker_resource_producer.client import _optional_client_file
 
-    def denied(_path: Path, *args, **kwargs):
+    def denied(_path: Path, *args: object, **kwargs: object) -> NoReturn:
         raise PermissionError("fixture permission denial")
 
     monkeypatch.setattr(Path, "stat", denied)
@@ -508,7 +519,7 @@ def test_inaccessible_optional_client_identity_is_not_ca_only_fallback(monkeypat
         _optional_client_file(tmp_path / "key.pem")
 
 
-def test_partial_client_identity_refuses_before_docker_invocation(fixture: tuple) -> None:
+def test_partial_client_identity_refuses_before_docker_invocation(fixture: ClientFixture) -> None:
     client, path, _state = fixture
     certs = path.parent / "partial client material"
     certs.mkdir()
@@ -522,7 +533,7 @@ def test_partial_client_identity_refuses_before_docker_invocation(fixture: tuple
 
 
 @pytest.mark.parametrize("restore", [False, True])
-def test_verified_tls_without_material_refuses_before_invocation(fixture: tuple, restore: bool) -> None:
+def test_verified_tls_without_material_refuses_before_invocation(fixture: ClientFixture, restore: bool) -> None:
     client, path, _state = fixture
     endpoint = Endpoint("tcp://example.invalid:2376", "fixture-daemon", tls=True)
     with pytest.raises(VerificationError, match="requires pinned CA or client TLS material"):

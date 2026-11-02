@@ -262,7 +262,7 @@ def test_actual_observation_consumer_reaches_atomic_adapter_and_real_facade(
     monkeypatch.setattr(pt, "time", SimpleNamespace(monotonic=lambda: launch.clock[0]))
     monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
     monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
-    monkeypatch.setattr(pt, "spawn_sync_in_kill_on_close_job", lambda *a, **k: pytest.fail(
+    monkeypatch.setattr("agent_procutil.spawn_sync_in_kill_on_close_job", lambda *a, **k: pytest.fail(
         "generic post-create assignment factory was used",
     ))
     if interrupted:

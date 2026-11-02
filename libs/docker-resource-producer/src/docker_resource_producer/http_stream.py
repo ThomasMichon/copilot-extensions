@@ -1,8 +1,8 @@
 """Strict, bounded HTTP/1.1 framing for a non-reconnecting daemon stream."""
 from __future__ import annotations
 
-import io
 import re
+from typing import Protocol
 
 from .models import VerificationError
 
@@ -13,14 +13,22 @@ _CHUNK = re.compile(rb"[0-9A-Fa-f]+")
 _FIELD = re.compile(_TOKEN)
 
 
-def _line(source: io.BufferedReader, remaining: int) -> bytes:
+class ResponseStream(Protocol):
+    """The binary reads required by the sequential response parser."""
+
+    def read(self, size: int = -1, /) -> bytes: ...
+
+    def readline(self, size: int = -1, /) -> bytes: ...
+
+
+def _line(source: ResponseStream, remaining: int) -> bytes:
     line = source.readline(min(8192, remaining) + 1)
     if len(line) > min(8192, remaining) or not line.endswith(b"\r\n"):
         raise VerificationError("Malformed or truncated daemon HTTP line")
     return line
 
 
-def _headers(source: io.BufferedReader, *, trailers: bool = False) -> dict[bytes, list[bytes]]:
+def _headers(source: ResponseStream, *, trailers: bool = False) -> dict[bytes, list[bytes]]:
     result: dict[bytes, list[bytes]] = {}
     remaining = _MAX_HEADERS
     while True:
@@ -39,14 +47,14 @@ def _headers(source: io.BufferedReader, *, trailers: bool = False) -> dict[bytes
         result.setdefault(name, []).append(value.strip(b" \t"))
 
 
-def _exact(source: io.BufferedReader, count: int) -> bytes:
+def _exact(source: ResponseStream, count: int) -> bytes:
     value = source.read(count)
     if len(value) != count:
         raise VerificationError("Truncated daemon HTTP body")
     return value
 
 
-def read_response(source: io.BufferedReader) -> tuple[int, bytes]:
+def read_response(source: ResponseStream) -> tuple[int, bytes]:
     """Accept only a complete persistent response within strict size limits.
 
     Chunk extensions are deliberately unsupported; no metadata omitted by this

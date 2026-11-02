@@ -43,6 +43,12 @@ no-admin Win32-OpenSSH `sshd` when needed, prompts `dtssh login` if the
 Dev Tunnel account is not signed in (unless `-SkipLogin`), installs the hidden
 Startup-folder launcher, and starts it unless `-NoStart`.
 
+The launcher runs a Python helper, so the host needs Python 3.10 or newer as
+`python` on PATH, in the PATH order a logon process sees (machine entries before
+user entries). The Microsoft Store `python` alias stub does not count. Before
+launching, the script checks this with one isolated `python` run and stops with
+that remedy if it fails.
+
 The installer also preserves the dedicated SSH server host identity before any
 update and restores it before relaunch. When `OneDriveCommercial` points at an
 available OneDrive for Business folder, the key pair is backed up under its
