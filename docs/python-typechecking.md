@@ -143,8 +143,13 @@ separately from `candidate_types_active`. A prepared source proposal does not
 activate Main's independently owned controller. Reviewed Main adoption landed in
 #9914. [Run 41370906756](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41370906756)
 then passed both candidate MyPy steps and completed the normal generated
-promotion #9918. The negative candidate-regression completion gate remains open
-under #9862; a successful provider run does not prove that negative control.
+promotion #9918. A separate unpublished, owner-frozen candidate passed immutable
+identity validation but its actual `--enforced` command rejected a deliberate
+type regression after fresh checker preparation; identities still validated
+afterward. The provider success, non-skippable failure contract and real
+candidate-local rejection jointly qualify #9862. No required source gate was
+bypassed to publish a deliberately invalid Dev commit or release dispatch.
+Remaining project admission and final strict-portfolio qualification stay open.
 
 For local checking of an already imported, owner-validated candidate, run the
 ordinary `--prepare` and `--enforced` commands **from that candidate checkout**,

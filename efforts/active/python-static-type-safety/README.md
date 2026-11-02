@@ -93,7 +93,7 @@ rewrite.
 - [x] Add required source-PR static checks using the same front door and project policies; preserve existing unit selection.
 - [x] Land candidate-local static-checking source/controller contracts with frozen-input identity, failure propagation and helper decision qualification.
 - [x] Adopt exact-candidate release static checks in Main through the separately approved workflow-only change; preserve Main control.
-- [ ] Prove live candidate enforcement and regression rejection under the adopted Main controller.
+- [x] Prove live candidate enforcement and regression rejection under the adopted Main controller.
 - [x] Document and validate local `--prepare`, per-project, `--enforced`, `--changed`, `--all` and inventory commands. Default checking never implicitly installs tooling.
 
 ### Phase 2 - Source and platform qualification
@@ -139,7 +139,7 @@ rewrite.
 - [ ] Each typing change preserves behavior through the smallest existing focused tests plus directly relevant integration/native checks. Skips are explicitly justified in that PR.
 - [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
 - [x] Required source gate actually rejects a type regression on activated code.
-- [ ] Required exact-candidate release gate rejects a type regression on activated code.
+- [x] Required exact-candidate release gate rejects a type regression on activated code.
 - [ ] Final strict gate rejects a newly unclassified Python file.
 - [ ] Final full inventory, all strict projects/targets, documented boundary exceptions and live PR/release qualification are green together.
 
@@ -361,3 +361,29 @@ composition prerequisites, and review/validation rules.
   One actor-free candidate-unit control checks real canonical composition,
   diagnostic mapping and stale bytes/membership rejection. The whole-packet
   deadline remains 300 seconds; full packet qualification is still required.
+
+### 2026-11-02 - Frozen-candidate rejection proven; source-view qualification green
+
+- The normal non-publishing candidate owner froze a synthetic source commit
+  containing one incompatible assignment in the already-strict Worktree
+  Identity library. Its existing unit-source digest was coherently updated;
+  no stale-manifest or integrity failure substitutes for the typing control.
+- Normal frozen import and materialized source/Main/candidate-tree validation
+  passed. The candidate-local checker first refused missing preparation,
+  explicit fresh `--prepare` passed, then `--enforced` returned 1 for exactly
+  the deliberate `[assignment]` regression. The other admitted projects passed
+  both analysis targets. Materialized identities still validated afterward.
+- Together with the adopted Main run 41370906756 and the non-skippable
+  failure-propagation contract controls, this closes P3's candidate gate.
+  The negative control was local and unpublished: no deliberately broken Dev
+  commit or failing release dispatch was submitted, because the required
+  source type gate must not be bypassed to manufacture that provider run.
+- P4a's hosted exact-head [run 41374055516](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41374055516)
+  executed all 3,554 units with coverage once in 66.505 seconds and passed
+  required guards. The local Windows run passed every assertion in 306.24
+  seconds but exceeded the unchanged 300-second packet deadline; that local
+  attempt was correctly refused and is not a qualifying receipt.
+- The active stretch is now Phase 2's canonical source views, copy
+  correspondence and environment/module qualification. Source views do not
+  admit the remaining library/test debt: the full campaign stays Active at
+  four strict / 64 pending projects.
