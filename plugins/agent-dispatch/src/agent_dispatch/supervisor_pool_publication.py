@@ -128,9 +128,10 @@ class SupervisorPoolPublication(SupervisorPoolSender):
                 self._prune_probe_inflight()
                 before = self._bounded_read("pool-catalog-before", self.client.pool_catalog_metadata)
                 before = PoolCatalogRead.from_dict(before)
-                self._require_pool_metadata_target(client, before)
                 if self._source_observations["pool-catalog-before"].state != "fresh":
                     reasons.append("coordinator-input-read-not-fresh")
+                    raise PoolPublicationError("pool metadata requires a fresh initial queue observation")
+                self._require_pool_metadata_target(client, before)
                 try:
                     self._effective_registrations()
                     snapshot = self._pool_source_snapshot

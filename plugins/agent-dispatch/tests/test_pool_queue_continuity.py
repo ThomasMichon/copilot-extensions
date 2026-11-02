@@ -387,3 +387,65 @@ def test_repeated_rejected_candidates_do_not_accumulate_idle_transports(
     finally:
         for candidate in clients:
             candidate.close()
+
+
+def test_timed_out_before_read_cannot_publish_declarations_after_foreign_reconnect(
+    wire_owner: Any, tmp_path: Any,
+) -> None:
+    daemon, _queue, original, _replacement, _paths, _gate = wire_owner
+    daemon.prepare_pool_metadata_request()
+    daemon.send_pool_metadata_request()
+    entered, finish = Event(), Event()
+    read = original.pool_catalog_metadata
+
+    def blocked() -> dict:
+        observed = read()
+        entered.set()
+        assert finish.wait(3)
+        return observed
+
+    original.pool_catalog_metadata = blocked
+    daemon._reconcile_call_budget = 0.05
+    unavailable = daemon.capture_pool_publication_inputs()
+    assert entered.is_set() and not unavailable.coherent
+    future = daemon._discovery_futures["pool-catalog-before"]
+    assert not future.done()
+    foreign = TaskQueue(tmp_path / "foreign.db")
+    requests = []
+    with _client(foreign) as api:
+        def handle(wire: httpx.Request) -> httpx.Response:
+            requests.append((wire.method, wire.url.path))
+            response = api.request(
+                wire.method, str(wire.url), headers=wire.headers, content=wire.content,
+            )
+            return httpx.Response(response.status_code, json=response.json())
+
+        with DispatchClient(
+            "http://foreign.test", token="data", control_token="control",
+            transport=httpx.MockTransport(handle),
+        ) as replacement:
+            try:
+                daemon._client_factory = lambda: replacement
+                assert daemon._reconnect()
+                finish.set()
+                assert future.result(timeout=1)["queue_identity"] != foreign.pool_catalog_snapshot().queue_identity
+                collected = []
+
+                def declarations() -> Any:
+                    collected.append(True)
+                    pytest.fail("stale queue identity must not permit declaration collection")
+
+                daemon.declared_source = declarations
+                daemon._reconcile_call_budget = 1
+                with pytest.raises(PoolPublicationError):
+                    daemon.prepare_pool_metadata_request()
+                assert daemon._source_observations["pool-catalog-before"].state == "delayed"
+                assert not collected and not requests and foreign.list_registrations() == []
+                assert daemon._pool_publisher_custody.pending is None
+                # Once the delayed read is consumed, the actual foreign read also refuses.
+                with pytest.raises(PoolPublicationError):
+                    daemon.prepare_pool_metadata_request()
+                assert not collected and foreign.list_registrations() == []
+                assert not any(method == "POST" for method, _path in requests)
+            finally:
+                finish.set()

@@ -410,6 +410,9 @@ withdrawals, a changed publisher or closed admission refuse the write.
 The original and current final local-read revisions are retained separately from
 the collection revision and must both match it. A repeated final-read failure
 cannot qualify merely because its reason and earlier collection stayed equal.
+The initial catalog observation must also be fresh before declaration collection:
+a completed read retained from an earlier timeout is not current queue identity,
+even when its data matches the original queue after a reconnect.
 The original capture deadline is checked again immediately before POST admission,
 after parsing and final comparisons, not just before source collection.
 That final closed-state/deadline decision shares the short shutdown admission
