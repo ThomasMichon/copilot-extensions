@@ -28,6 +28,27 @@ def _load(name, path):
     return module
 
 
+@pytest.mark.real_installer_processes
+def test_generated_windowless_parent_starts_with_fresh_annotation_semantics(tmp_path):
+    from test_installer_guardian_windowless import _parent_source
+
+    prelude, marker, _ = _parent_source().partition("spec = json.loads(sys.argv[1])")
+    assert marker
+    sibling = tmp_path / "sibling.py"
+    sibling.write_text("VALUE = 37\n", encoding="utf-8")
+    parent = tmp_path / "parent-prelude.py"
+    parent.write_text(
+        prelude + '\nloaded = _load("windowless_parent_probe", Path(sys.argv[1]))\n'
+        "assert loaded.VALUE == 37\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", str(parent), str(sibling)],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.fixture
 def guardian():
     source = Path(__file__).resolve().parents[3] / "libs" / "installer-engine" / "installer_engine_process.py"

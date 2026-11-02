@@ -141,6 +141,13 @@ def _load(name: str, path: Path):
     return module
 
 
+def _parent_source():
+    return (
+        "from __future__ import annotations\n"
+        + inspect.getsource(_load) + textwrap.dedent(_PARENT)
+    )
+
+
 @pytest.mark.parametrize("failure", ["timeout", "cancel"])
 def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp_path, failure):
     repo = Path(__file__).resolve().parents[3]
@@ -163,7 +170,7 @@ def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp
     child = tmp_path / "console-child.py"
     child.write_text(textwrap.dedent(_CHILD), encoding="utf-8")
     parent = tmp_path / "windowless-parent.py"
-    parent.write_text(inspect.getsource(_load) + textwrap.dedent(_PARENT), encoding="utf-8")
+    parent.write_text(_parent_source(), encoding="utf-8")
     spec = {
         "root": str(tmp_path),
         "guardian": guardian.__file__,

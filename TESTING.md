@@ -3896,6 +3896,11 @@ timeout and owner-cancellation cases require pinned process handles to signal
 exit and canonical cleanup custody to become available. Breakaway remains
 refused; no resident service is installed or escaped from test containment.
 
+The focused generated-parent startup case in `test_installer_guardian.py`
+launches an isolated interpreter, without inherited future-annotation flags,
+and loads a sibling through the actual generated prelude. Desktop observation
+remains the separate opt-in check above.
+
 The existing `test_python_installer_engine.py` teardown-fault regression injects
 its first accounting failure inside the guardian, not through parent-only
 monkeypatches. It checks frozen inputs, construction/retention exclusion,
