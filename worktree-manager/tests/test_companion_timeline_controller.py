@@ -64,6 +64,105 @@ class BrokenSource(Source):
         raise RuntimeError("broken provider contract")
 
 
+class SlowCleanupSource(Source):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cleanup_started = asyncio.Event()
+        self.page_cleanup_started = asyncio.Event()
+        self.cleanup_release = asyncio.Event()
+        self.cleanup_interrupted = asyncio.Event()
+        self.page_cleanup_finished = asyncio.Event()
+        self.observations_started = 0
+
+    async def _cleanup(self) -> None:
+        try:
+            await self.cleanup_release.wait()
+        except asyncio.CancelledError:
+            self.cleanup_interrupted.set()
+            raise
+
+    async def observe(self, selected: SourceToken) -> AsyncGenerator[TimelineSnapshot | LiveDelta, None]:
+        self.observations_started += 1
+        try:
+            yield snapshot(selected)
+            await asyncio.Event().wait()
+        finally:
+            self.cleanup_started.set()
+            await self._cleanup()
+            self.closed.set()
+
+    async def history(self, selected: SourceToken, before: SourcePosition) -> HistoryPage:
+        self.page_started.set()
+        try:
+            await self.page_release.wait()
+            return HistoryPage(selected, before, None, (), Completeness.PARTIAL)
+        finally:
+            self.page_cleanup_started.set()
+            await self._cleanup()
+            self.page_cleanup_finished.set()
+
+
+@pytest.mark.parametrize("operation", ["select", "close"])
+@pytest.mark.parametrize("history", [False, True])
+def test_caller_cancellation_waits_for_owned_awaited_cleanup(operation: str, history: bool) -> None:
+    async def run() -> None:
+        source = SlowCleanupSource()
+        controller = TimelineController(
+            {Provider.WORKTREES: source}, observation=lambda value: None,
+            page=lambda value: None, error=lambda selected, message: pytest.fail(message),
+        )
+        selected = token()
+        await controller.select((selected,))
+        await asyncio.sleep(0)
+        if history:
+            assert controller.request_history(selected, position(selected))
+            await source.page_started.wait()
+        action = controller.close() if operation == "close" else controller.select((token(epoch=1),))
+        caller = asyncio.create_task(action)
+        try:
+            await source.cleanup_started.wait()
+            if history:
+                await source.page_cleanup_started.wait()
+            caller.cancel()
+            await asyncio.sleep(0)
+            caller.cancel()
+            await asyncio.sleep(0)
+            assert not caller.done() and not source.cleanup_interrupted.is_set()
+            assert controller.reader_count == 1 and controller.page_count == int(history)
+        finally:
+            source.cleanup_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+        assert source.closed.is_set() and not source.cleanup_interrupted.is_set()
+        assert not history or source.page_cleanup_finished.is_set()
+        assert controller.reader_count == controller.page_count == 0
+        await controller.close()
+        assert source.observations_started == 1
+    asyncio.run(run())
+
+
+def test_close_during_selection_cleanup_does_not_start_replacement_reader() -> None:
+    async def run() -> None:
+        source = SlowCleanupSource()
+        controller = TimelineController(
+            {Provider.WORKTREES: source}, observation=lambda value: None,
+            page=lambda value: None, error=lambda selected, message: pytest.fail(message),
+        )
+        await controller.select((token(),))
+        await asyncio.sleep(0)
+        replacing = asyncio.create_task(controller.select((token(epoch=1),)))
+        await source.cleanup_started.wait()
+        closing = asyncio.create_task(controller.close())
+        await asyncio.sleep(0)
+        source.cleanup_release.set()
+        with pytest.raises(TimelineSourceError, match="closed during"):
+            await replacing
+        await closing
+        assert source.closed.is_set() and source.observations_started == 1
+        assert controller.reader_count == controller.page_count == 0
+    asyncio.run(run())
+
+
 def test_unexpected_adapter_failure_is_visible_before_close() -> None:
     async def run() -> None:
         errors: list[str] = []

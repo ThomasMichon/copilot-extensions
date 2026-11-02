@@ -55,6 +55,7 @@ class TimelineController:
         self._revision = 0
         self._closed = False
         self._selection_lock = asyncio.Lock()
+        self._teardown: asyncio.Future[list[None | BaseException]] | None = None
 
     @property
     def reader_count(self) -> int:
@@ -86,6 +87,8 @@ class TimelineController:
         if len(selected) != len(tokens):
             raise TimelineContractError("timeline selection repeats a provider")
         await self._stop()
+        if self._closed:
+            raise TimelineSourceError("timeline controller closed during selection replacement")
         self._selected = selected
         revision = self._revision
         for provider, token in selected.items():
@@ -173,17 +176,31 @@ class TimelineController:
                 self._error(token, f"Timeline history error: {exc}")
 
     async def _stop(self) -> None:
-        self._revision += 1
-        self._selected.clear()
-        tasks = (*self._pages.values(), *self._readers.values())
+        if self._teardown is None:
+            self._revision += 1
+            self._selected.clear()
+            tasks = (*self._pages.values(), *self._readers.values())
+            for task in tasks:
+                task.cancel()
+            self._teardown = asyncio.gather(*tasks, return_exceptions=True)
+        teardown = self._teardown
+        cancelled: asyncio.CancelledError | None = None
+        while True:
+            try:
+                outcomes = await asyncio.shield(teardown)
+                break
+            except asyncio.CancelledError as exc:
+                if teardown.cancelled():
+                    raise TimelineSourceError("timeline adapter teardown was interrupted") from exc
+                cancelled = exc
         self._pages.clear()
         self._readers.clear()
-        for task in tasks:
-            task.cancel()
-        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        self._teardown = None
         for outcome in outcomes:
             if isinstance(outcome, BaseException) and not isinstance(outcome, asyncio.CancelledError):
                 raise TimelineSourceError(f"timeline adapter cleanup failed: {outcome}") from outcome
+        if cancelled is not None:
+            raise cancelled
 
     async def close(self) -> None:
         self._closed = True

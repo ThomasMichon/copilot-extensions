@@ -170,6 +170,35 @@ class TimelineWindow:
             for values in self._cursors.values() for position in values
         )
 
+    def _merge_ordered(
+        self, loaded: list[TimelineEvent], incoming: tuple[TimelineEvent, ...], *, history: bool,
+    ) -> list[TimelineEvent] | WindowResult:
+        common = {event.ref for event in loaded} & {event.ref for event in incoming}
+        anchors = [event.ref for event in loaded if event.ref in common]
+        if anchors != [event.ref for event in incoming if event.ref in common]:
+            return self._result(
+                False, ResultCode.CONTENT_CONFLICT,
+                "Provider order contradicts the loaded order of shared source events.",
+            )
+        rows: list[TimelineEvent] = []
+        old_index = new_index = 0
+        # Shared identities anchor both ordered tuples. Unshared loaded rows
+        # remain history; IDs and timestamps never establish source order.
+        for anchor in anchors:
+            old_end, new_end = old_index, new_index
+            while loaded[old_end].ref != anchor:
+                old_end += 1
+            while incoming[new_end].ref != anchor:
+                new_end += 1
+            old_gap, new_gap = loaded[old_index:old_end], incoming[new_index:new_end]
+            rows.extend(new_gap if history else old_gap)
+            rows.extend(old_gap if history else new_gap)
+            rows.append(incoming[new_end])
+            old_index, new_index = old_end + 1, new_end + 1
+        rows.extend(incoming[new_index:] if history else loaded[old_index:])
+        rows.extend(loaded[old_index:] if history else incoming[new_index:])
+        return rows
+
     def _commit(
         self, events: tuple[TimelineEvent, ...], state: SourceState, *, history: bool = False,
         replace_source: bool = False,
@@ -177,6 +206,16 @@ class TimelineWindow:
         key = state.token.identity.source_key
         if key in self.reconciliation_required:
             return self._result(False, ResultCode.LIMIT, "Source is awaiting explicit observation reconciliation.")
+        old_rows = [event for event in self.events if event.source.source_key == key]
+        if history or replace_source:
+            ordered = self._merge_ordered(old_rows, events, history=history)
+            if isinstance(ordered, WindowResult):
+                return ordered
+        else:
+            loaded = {event.ref for event in old_rows}
+            ordered = old_rows + [
+                event for event in events if event.ref not in loaded and event.ref not in self._proofs
+            ]
         rejected = self._check(events, key)
         if rejected is not None:
             return rejected
@@ -195,22 +234,15 @@ class TimelineWindow:
             ))
         if self._integrity_size() + integrity_added > MAX_WINDOW_BYTES:
             return self._integrity_gap(key, "Integrity evidence byte budget exhausted.")
-        existing = {event.ref: event for event in self.events}
         fresh = {event.ref for event in events if event.ref not in self._proofs}
-        for event in events:
-            existing[event.ref] = event
         # Source tuples preserve provider order. Across sources, timestamps are
         # a display merge hint, never causal or ownership evidence.
         source_rows: dict[str, deque[TimelineEvent]] = {}
-        for event in existing.values():
+        for event in self.events:
+            if event.source.source_key == key:
+                continue
             source_rows.setdefault(event.source.source_key, deque()).append(event)
-        old_rows = [event for event in self.events if event.source.source_key == key]
-        loaded = {event.ref for event in old_rows}
-        additions = [
-            event for event in events if event.ref not in loaded
-            and (history or replace_source or event.ref not in self._proofs)
-        ]
-        source_rows[key] = deque(additions + old_rows if history else old_rows + additions)
+        source_rows[key] = deque(ordered)
         rows: list[TimelineEvent] = []
         while any(source_rows.values()):
             candidates = [(items[0].occurred_at or items[0].observed_at, source_key)
@@ -286,11 +318,16 @@ class TimelineWindow:
         if snapshot.position == state.snapshot_position and state.snapshot_digest is not None:
             if digest != state.snapshot_digest:
                 return self._result(False, ResultCode.CONTENT_CONFLICT, "Snapshot content changed at the same position.")
+        oldest = next((
+            event for event in self.events if event.source.source_key == snapshot.token.identity.source_key
+        ), None)
+        snapshot_refs = {event.ref for event in snapshot.events}
+        before = state.before if oldest is not None and oldest.ref not in snapshot_refs else snapshot.before
+        pending = state.requested_before if (
+            state.availability is Availability.OBSERVED and state.requested_before == before
+        ) else None
         return self._commit(snapshot.events, replace(
-            state, position=snapshot.position,
-            before=state.before if state.snapshot is not None and any(
-                event.source.source_key == snapshot.token.identity.source_key for event in self.events
-            ) else snapshot.before, requested_before=None,
+            state, position=snapshot.position, before=before, requested_before=pending,
             availability=snapshot.availability, completeness=snapshot.completeness,
             snapshot=replace(snapshot, events=()), snapshot_position=snapshot.position, snapshot_digest=digest,
         ), replace_source=True)

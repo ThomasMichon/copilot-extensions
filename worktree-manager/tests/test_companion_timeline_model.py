@@ -292,3 +292,123 @@ def test_integrity_limit_requires_explicit_baseline_reconciliation_not_epoch_evi
     assert fresh.apply_snapshot(snapshot(renewed, (event(renewed, 3),), cursor="current-owner-baseline")).applied
     assert fresh.events[-1].event_id == "event-3"
     assert model.events == before
+
+
+@pytest.mark.parametrize("refresh,expected", [
+    ((0, 1, 2), (1, 2)),
+    ((1, 2, 3), (2, 3)),
+    ((4, 5), (4, 5)),
+    ((0, 1), (1, 2)),
+])
+def test_snapshot_refresh_preserves_provider_order_after_eviction(
+    refresh: tuple[int, ...], expected: tuple[int, ...],
+) -> None:
+    source = token()
+    model = TimelineWindow(max_events=2)
+    model.bind(source)
+    # Deliberately reversed timestamps and opaque IDs cannot order these rows.
+    rows = tuple(replace(
+        event(source, number), event_id=identifier,
+        observed_at=event(source, 10 - number).observed_at,
+    ) for number, identifier in enumerate(("z", "a", "m", "b", "x", "c")))
+    initial = snapshot(source, rows[:3])
+    assert model.apply_snapshot(initial).applied
+    assert model.events == rows[1:3]
+    refreshed = snapshot(
+        source, tuple(rows[number] for number in refresh),
+        cursor="live-0" if refresh == (0, 1, 2) else "opaque-refresh",
+    )
+    assert model.apply_snapshot(refreshed).applied
+    assert model.events == tuple(rows[number] for number in expected)
+    assert model.apply_snapshot(refreshed).applied
+    assert model.events == tuple(rows[number] for number in expected)
+
+
+def test_snapshot_refresh_preserves_loaded_backward_history_and_live_bottom() -> None:
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    rows = tuple(event(source, number) for number in range(9))
+    assert model.apply_snapshot(snapshot(source, rows[5:8])).applied
+    assert model.request_history(source, position(source, "older-0")).applied
+    assert model.prepend_page(HistoryPage(
+        source, position(source, "older-0"), position(source, "older-1"),
+        rows[3:6], Completeness.PARTIAL,
+    )).applied
+    refreshed = snapshot(source, rows[5:9], cursor="live-1")
+    assert model.apply_snapshot(refreshed).applied
+    assert model.events == rows[3:9]
+    assert model.sources[source.identity.source_key].before == position(source, "older-1")
+    assert model.apply_snapshot(refreshed).applied and model.events == rows[3:9]
+
+
+def test_conflicting_snapshot_order_is_visible_and_atomic() -> None:
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    rows = tuple(event(source, number) for number in range(3))
+    assert model.apply_snapshot(snapshot(source, rows)).applied
+    assert model.request_history(source, position(source, "older-0")).applied
+    state = model.sources[source.identity.source_key]
+    result = model.apply_snapshot(snapshot(source, (rows[2], rows[1]), cursor="live-1"))
+    assert not result.applied and result.code is ResultCode.CONTENT_CONFLICT
+    assert "order" in result.reason
+    assert model.events == rows and model.sources[source.identity.source_key] == state
+
+
+@pytest.mark.parametrize("mode", ["same-position", "after-delta", "after-history"])
+def test_matching_history_request_survives_observed_snapshot_refresh(mode: str) -> None:
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    rows = tuple(event(source, number) for number in range(7))
+    assert model.apply_snapshot(snapshot(source, rows[3:6])).applied
+    before = position(source, "older-0")
+    if mode == "after-history":
+        assert model.request_history(source, before).applied
+        before = position(source, "older-1")
+        assert model.prepend_page(HistoryPage(
+            source, position(source, "older-0"), before, (rows[2],), Completeness.PARTIAL,
+        )).applied
+    assert model.request_history(source, before).applied
+    if mode == "after-delta":
+        assert model.apply_delta(LiveDelta(
+            source, position(source, "live-0"), position(source, "live-1"), (rows[6],),
+        )).applied
+        refreshed = snapshot(source, rows[4:7], cursor="live-1")
+    else:
+        refreshed = snapshot(source, rows[3:6])
+    assert model.apply_snapshot(refreshed).applied
+    assert model.sources[source.identity.source_key].requested_before == before
+    page = HistoryPage(source, before, None, (rows[1],), Completeness.COMPLETE)
+    assert model.prepend_page(page).applied
+    assert model.events[0] == rows[1]
+    assert model.events[-1] == (rows[6] if mode == "after-delta" else rows[5])
+    assert model.sources[source.identity.source_key].requested_before is None
+
+
+@pytest.mark.parametrize("change", ["boundary", "availability", "head", "generation"])
+def test_changed_history_scope_invalidates_pending_page(change: str) -> None:
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    observed = snapshot(source, (event(source, 3),))
+    assert model.apply_snapshot(observed).applied
+    before = position(source, "older-0")
+    assert model.request_history(source, before).applied
+    if change == "boundary":
+        assert model.apply_snapshot(replace(
+            observed, before=position(source, "different-boundary"),
+        )).applied
+    elif change == "availability":
+        assert model.apply_snapshot(replace(
+            observed, availability=Availability.UNAVAILABLE, events=(), position=None, before=None,
+        )).applied
+    else:
+        renewed = token(1, head="head-b") if change == "head" else token(1, generation="generation-b")
+        assert model.bind(renewed).applied
+    assert model.sources[source.identity.source_key].requested_before is None
+    result = model.prepend_page(HistoryPage(
+        source, before, None, (event(source, 2),), Completeness.COMPLETE,
+    ))
+    assert not result.applied and result.code is ResultCode.STALE_TOKEN

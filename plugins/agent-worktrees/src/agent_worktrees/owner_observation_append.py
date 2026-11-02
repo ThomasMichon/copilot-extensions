@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import closing
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from . import owner_observation_contract as c
@@ -30,6 +32,43 @@ SCHEMA = (
     "(generation TEXT, id TEXT, digest TEXT, position INTEGER, PRIMARY KEY(generation,id))",
 )
 MAX_GUARDS = 50000
+
+
+def prepare(
+    record: CanonicalObservation, entries: list[dict], post_save: bool
+) -> tuple[list, str]:
+    capture = c.utf8(c.encode(asdict(record), c.BODY_BYTES - 2048))
+    frozen = c.decode(c.utf8(c.encode(entries, c.BODY_BYTES)), c.BODY_BYTES)
+    for item in frozen:
+        c.entry(item, post_save=post_save)
+        if item["evidence_kind"] == "persisted-mutation" and c.encode(
+            item["record_fence"]
+        ) != c.encode(record.record_fence):
+            raise c.ObservationError("post-save evidence does not match the selected record fence")
+    digest = hashlib.sha256()
+    for part in (capture, c.utf8(c.encode(frozen, c.BODY_BYTES)), c.utf8(c.encode(post_save))):
+        digest.update(len(part).to_bytes(8, "big"))
+        digest.update(part)
+    return frozen, digest.hexdigest()
+
+
+def delivery_failed(
+    owner: OwnerObservationHistory,
+    selected: c.Selection,
+    record: CanonicalObservation,
+    expected_cursor: str,
+    error: c.ObservationError,
+) -> None:
+    with owner._lock, closing(owner._connect(write=True)) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        owner._fence(conn)
+        row = owner._row(conn, selected)
+        if row["source"] != record.source:
+            raise c.ObservationError("record source incarnation changed", "source-replaced")
+        if c.sequence(expected_cursor, owner._source(row)) != row["position"]:
+            raise c.ObservationError("owner observation position changed", "stale-cursor")
+        owner._fence(conn)
+        owner.append_failed(record.key, error, reason="cursor-unavailable")
 
 
 def append(
@@ -90,6 +129,8 @@ def append(
             row["facts"] != c.encode(record.facts)
             or row["head"] != record.head_session_id
             or row["fence"] != c.encode(record.record_fence)
+            or row["availability"] != record.availability
+            or row["completeness"] != record.completeness
         ):
             raise c.ObservationError(
                 "duplicate source records cannot replace current facts", "event-conflict"
@@ -105,6 +146,7 @@ def append(
         head=record.head_session_id,
         facts=c.encode(record.facts),
         availability=record.availability,
+        completeness=record.completeness,
     )
     source = owner._source(candidate)
     body = owner._body(candidate, c.Selection(*record.key, record.head_session_id))

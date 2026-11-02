@@ -527,6 +527,25 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - Observation freshness and viewer lifetime fences
+
+- Availability and completeness participate in both unchanged-capture and
+  duplicate-evidence checks; qualification changes require observed-change
+  publication rather than acknowledging stale observed facts.
+- Internal batch hashes use separately bounded inputs. Actual admitted
+  delivery overflow invalidates only the matching current source/cursor and
+  wakes subscribers with explicit unavailable/gap evidence.
+- Viewer teardown retains its reader/page handles and shields awaited cleanup
+  through caller cancellation. A concurrent close cannot start replacement readers.
+- Snapshot refresh merges preserve provider order and retained history after
+  display eviction. An unchanged effective before-boundary retains its pending
+  history demand, so a matching page remains admissible.
+- Updated focused packets passed: 88 Manager model/layout/widget/app/controller
+  cases and 73 owner cases; unchanged contract/policy and Bridge coverage remains
+  qualified. The independent four-module strict check also passed.
+- These source corrections remain in the same open foundation PR. No feed,
+  native, measurement or whole-effort gate is closed by this journal entry.
+
 ### 2026-11-02 - Sidecar foundation source qualification
 
 - Authored the bounded typed timeline, virtual Line-API renderer and caller-owned

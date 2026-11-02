@@ -6,6 +6,7 @@ import json
 import sqlite3
 import sys
 from copy import deepcopy
+from dataclasses import asdict, replace
 
 import pytest
 from agent_procutil.owned_process import run_caller_owned
@@ -108,6 +109,67 @@ def test_publication_text_handoffs_preserve_utf8_in_index_and_replayed_entries(h
     assert replay["entries"][0]["payload"] == one.facts
     page = store.page(selected(one), current["source_generation"], None)
     assert page["entries"][0]["payload"] == one.facts
+
+
+def test_digest_is_not_a_wire_envelope_and_separately_valid_inputs_can_publish(history):
+    store, _alive = history
+    initial = store.initialize(record())
+    large = replace(
+        record(1),
+        facts={"details": ["x" * 3500] * 4},
+        record_fence={"record_revision": 1, "evidence": ["y" * 3500] * 4},
+    )
+    item = event(large, identity="large:1")
+    item["payload"] = {}
+    c.entry(item, post_save=True)
+    c.encode(asdict(large), c.BODY_BYTES - 2048)
+    c.encode([item], c.BODY_BYTES)
+    with pytest.raises(c.ObservationError) as error:
+        c.encode([asdict(large), [item], True])
+    assert error.value.code == "oversized"
+    accepted = store.publish(
+        large,
+        [item],
+        batch_id="large:1",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    assert accepted["facts"] == large.facts
+    replay, gap = store.snapshot(selected(large), initial["cursor"])
+    assert gap is None and replay["entries"][0]["record_fence"] == large.record_fence
+
+
+@pytest.mark.parametrize("qualifier", ["availability", "completeness"])
+def test_initialize_and_reidentified_duplicate_do_not_silently_change_qualifiers(
+    history, qualifier
+):
+    store, _alive = history
+    initial = store.initialize(record())
+    one = record(1)
+    item = event(one)
+    accepted = store.publish(
+        one,
+        [item],
+        batch_id="batch:1",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    changed = replace(
+        one, **{qualifier: "unavailable" if qualifier == "availability" else "complete"}
+    )
+    with pytest.raises(c.ObservationError) as error:
+        store.initialize(changed)
+    assert error.value.code == "stale-record"
+    with pytest.raises(c.ObservationError) as error:
+        store.publish(
+            changed,
+            [item],
+            batch_id="duplicate:qualifier",
+            expected_cursor=accepted["cursor"],
+            post_save=True,
+        )
+    assert error.value.code == "event-conflict"
+    assert store.snapshot(selected())[0] == accepted
 
 
 def test_batch_and_source_identity_conflicts_never_overwrite_current_capture(history):

@@ -46,6 +46,9 @@ def observed_entry(
             "before": previous.facts,
             "after": current.facts,
             "previous_availability": previous.availability,
+            "availability": current.availability,
+            "previous_completeness": previous.completeness,
+            "completeness": current.completeness,
             "head_before": previous.head_session_id,
             "head_after": current.head_session_id,
         },
@@ -202,7 +205,6 @@ class OwnerObservationRuntime:
                 elif error.code == "journal-write-failed":
                     self._changed(record.key)
                 elif error.code == "cursor-unavailable":
-                    self.history.append_failed(record.key, error, reason="cursor-unavailable")
                     self._changed(record.key)
                 raise
             self._changed(record.key)

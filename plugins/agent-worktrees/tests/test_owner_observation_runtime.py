@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import asdict, replace
 
 import pytest
 from test_owner_observation_history import event, record
@@ -333,6 +334,144 @@ def test_head_change_clears_active_facts_and_ends_only_old_selection(runtime):
         stream.close()
     fresh = owner.read(request(head="new-head"))
     assert fresh["availability"] == "observed" and fresh["facts"] == current.facts
+
+
+def oversized_delivery():
+    capture = replace(record(2), facts={"details": ["\u6f22" * 1200] * 7})
+    item = event(capture)
+    assert len(c.utf8(c.encode(asdict(capture), c.BODY_BYTES - 2048))) < c.BODY_BYTES
+    c.entry(item, post_save=True)
+    c.encode([item], c.BODY_BYTES)
+    return capture, item
+
+
+def test_admitted_delivery_oversize_withholds_old_facts_and_notifies_gap(runtime):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    capture, item = oversized_delivery()
+    stream = owner.stream(request(), lambda: False)
+    try:
+        assert next(stream) == initial
+        with pytest.raises(c.ObservationError) as error:
+            owner.publish(
+                capture,
+                [item],
+                batch_id="oversized:1",
+                expected_cursor=initial["cursor"],
+                post_save=True,
+            )
+        assert error.value.code == "cursor-unavailable"
+        assert capture.facts["details"] == ["\u6f22" * 1200] * 7
+        gap, snapshot = next(stream), next(stream)
+        assert gap["type"] == "gap" and gap["reason"] == "cursor-unavailable"
+        assert snapshot["availability"] == "unavailable" and snapshot["facts"] is None
+        assert snapshot["durability"] == "pending" and snapshot["completeness"] == "partial"
+        assert snapshot["cursor"] == initial["cursor"]
+        with sqlite3.connect(owner.history.path) as conn:
+            assert conn.execute("SELECT count(*) FROM owner_observation_entry").fetchone()[0] == 0
+    finally:
+        stream.close()
+
+
+@pytest.mark.parametrize(
+    "rejection", ["stale", "wrong-source", "malformed", "bad-cursor", "wire-oversize"]
+)
+def test_rejected_oversize_submission_cannot_poison_current_facts(runtime, monkeypatch, rejection):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    one = record(1)
+    current = owner.publish(
+        one, [event(one)], batch_id="batch:1", expected_cursor=initial["cursor"], post_save=True
+    )
+    capture, item = oversized_delivery()
+    cursor = current["cursor"]
+    if rejection == "stale":
+        cursor = initial["cursor"]
+    elif rejection == "wrong-source":
+        capture = replace(capture, source="another:record")
+    elif rejection == "malformed":
+        item["evidence_kind"] = "invented"
+    elif rejection == "wire-oversize":
+        item["payload"]["details"].extend(["\u6f22" * 1200] * 2)
+    else:
+        cursor = "not-a-position"
+    notifications = []
+    monkeypatch.setattr(owner, "_changed", notifications.append)
+    with pytest.raises(c.ObservationError):
+        owner.publish(
+            capture, [item], batch_id="invalid:oversized", expected_cursor=cursor, post_save=True
+        )
+    assert owner.read(request()) == current
+    assert notifications == [] and owner.history._failures == {}
+
+
+def test_qualification_only_reconciliation_advances_cursor_and_replays_observed_changes(runtime):
+    owner, _clock, _wakes = runtime
+    capture = record()
+    initial = owner.initialize(capture)
+    stream = owner.stream(request(), lambda: False)
+    try:
+        next(stream)
+        unavailable = replace(capture, availability="unavailable", completeness="partial")
+        failed = owner.reconcile(unavailable, batch_id="qualification:unavailable")
+        first = next(stream)
+        assert first["type"] == "delta" and first["availability"] == "unavailable"
+        assert first["facts"] is None and first["cursor"] != initial["cursor"]
+        assert first["entries"][0]["kind"] == "observed-change"
+        assert first["entries"][0]["payload"]["availability"] == "unavailable"
+        assert (
+            owner.reconcile(unavailable, batch_id="qualification:same")["cursor"]
+            == failed["cursor"]
+        )
+        recovered = owner.reconcile(capture, batch_id="qualification:observed")
+        second = next(stream)
+        assert second["type"] == "delta" and second["facts"] == capture.facts
+        assert second["base_cursor"] == failed["cursor"]
+        assert second["cursor"] == recovered["cursor"] != failed["cursor"]
+        page = owner.history.page(
+            c.Selection("project", "full-worktree", "head"),
+            initial["source_generation"],
+            None,
+        )
+        assert len(page["entries"]) == 2
+        assert {item["kind"] for item in page["entries"]} == {"observed-change"}
+        assert {item["evidence_kind"] for item in page["entries"]} == {"observed-change"}
+        assert page["entries"][0]["record_fence"] == page["entries"][1]["record_fence"]
+    finally:
+        stream.close()
+
+
+def test_oversize_failure_rechecks_owner_before_marking_source_unavailable(runtime, monkeypatch):
+    from agent_worktrees import owner_observation_history
+
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    capture, item = oversized_delivery()
+    original = owner_observation_history.delivery_failed
+    reached = []
+
+    def replaced(history, selected, current, expected_cursor, error):
+        reached.append(error.code)
+        with sqlite3.connect(history.path) as conn:
+            conn.execute(
+                "UPDATE owner_observation_owner SET generation=?,writer=? WHERE singleton=1",
+                ("c" * 32, "d" * 32),
+            )
+        return original(history, selected, current, expected_cursor, error)
+
+    monkeypatch.setattr(owner_observation_history, "delivery_failed", replaced)
+    with pytest.raises(c.ObservationError) as error:
+        owner.publish(
+            capture,
+            [item],
+            batch_id="superseded:oversize",
+            expected_cursor=initial["cursor"],
+            post_save=True,
+        )
+    assert reached == ["oversized"] and error.value.code == "superseded"
+    assert owner.history._failures == {}
+    with sqlite3.connect(owner.history.path) as conn:
+        assert conn.execute("SELECT position FROM owner_observation_journal").fetchone()[0] == 0
 
 
 def test_identity_guard_bound_is_gap_not_silent_eviction_or_empty_history(runtime, monkeypatch):

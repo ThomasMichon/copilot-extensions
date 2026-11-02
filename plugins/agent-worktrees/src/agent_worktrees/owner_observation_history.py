@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 import threading
 import uuid
@@ -13,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import owner_observation_contract as c
-from .owner_observation_append import SCHEMA, append
+from .owner_observation_append import SCHEMA, append, delivery_failed, prepare
 
 
 @dataclass(frozen=True)
@@ -293,6 +292,8 @@ class OwnerObservationHistory:
                     old["facts"] == c.encode(record.facts)
                     and old["head"] == record.head_session_id
                     and old["fence"] == c.encode(record.record_fence)
+                    and old["availability"] == record.availability
+                    and old["completeness"] == record.completeness
                 )
                 if not same:
                     raise c.ObservationError(
@@ -351,19 +352,10 @@ class OwnerObservationHistory:
             raise c.ObservationError(
                 "observation publication requires a bounded explicit entry batch"
             )
-        frozen = c.decode(c.utf8(c.encode(entries, c.BODY_BYTES)), c.BODY_BYTES)
-        for item in frozen:
-            c.entry(item, post_save=post_save)
-            if (
-                item["evidence_kind"] == "persisted-mutation"
-                and item["record_fence"] != record.record_fence
-            ):
-                raise c.ObservationError(
-                    "post-save evidence does not match the selected record fence"
-                )
-        digest = hashlib.sha256(c.utf8(c.encode([asdict(record), frozen, post_save]))).hexdigest()
+        frozen, digest = prepare(record, entries, post_save)
         selected = c.Selection(record.project, record.worktree_id, record.head_session_id)
         with self._lock:
+            admitted = False
             try:
                 with closing(self._connect(write=True)) as conn, conn:
                     conn.execute("BEGIN IMMEDIATE")
@@ -387,8 +379,16 @@ class OwnerObservationHistory:
                             raise c.ObservationError(
                                 "owner observation position changed", "stale-cursor"
                             )
+                        admitted = True
                         append(self, conn, row, record, frozen, batch_id, digest)
                     self._fence(conn)
+            except c.ObservationError as error:
+                if admitted and error.code in {"oversized", "cursor-unavailable"}:
+                    delivery_failed(self, selected, record, expected_cursor, error)
+                    raise c.ObservationError(
+                        "admitted owner publication requires reconciliation", "cursor-unavailable"
+                    ) from error
+                raise
             except (OSError, sqlite3.Error) as error:
                 self.append_failed(record.key, error)
                 raise c.ObservationError(
