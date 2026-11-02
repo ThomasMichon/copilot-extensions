@@ -142,14 +142,14 @@ class PreparedCutover:
             raise CutoverError(
                 "unfinished cutover requires owner-led recovery before conditional repair"
             )
+        from .darwin_identity import valid_start_time
+
         if (
             type(self.old.pid) is not int
             or self.old.pid <= 0
             or type(self.old.generation) is not int
             or self.old.generation <= 0
-            or not isinstance(self.old.process_start_time, str)
-            or not self.old.process_start_time
-            or not self.old.process_start_time.isdigit()
+            or not valid_start_time(self.old.process_start_time)
         ):
             raise CutoverError(
                 "conditional cutover requires published PID/start identity/generation"

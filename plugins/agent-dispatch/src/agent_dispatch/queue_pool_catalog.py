@@ -86,8 +86,8 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
 
     Only that owner may account for a publisher and publish its effective set.
     Metadata authorization is not proof of the publisher's OS-lock admission.
-    Ordinary allocators cannot supply their preferred pool subset. No production
-    supervisor or allocator consumes these primitives.
+    Ordinary allocators cannot supply their preferred pool subset. Opt-in master
+    maintenance consumes these primitives without migrating ordinary allocation.
     """
 
     if TYPE_CHECKING:

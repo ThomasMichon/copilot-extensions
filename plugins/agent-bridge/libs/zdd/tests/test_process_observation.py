@@ -104,7 +104,7 @@ def test_invalid_observation_never_opens_a_native_process(monkeypatch, pid, toke
 
 
 def test_unsupported_observation_never_uses_tolerant_diagnostics(monkeypatch):
-    monkeypatch.setattr(process_exit.sys, "platform", "darwin")
+    monkeypatch.setattr(process_exit.sys, "platform", "unsupported")
     monkeypatch.setattr(
         diagnostics, "process_start_time", lambda *_: pytest.fail("no tolerant birth lookup"),
     )

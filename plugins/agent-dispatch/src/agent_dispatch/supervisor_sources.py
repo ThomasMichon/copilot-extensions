@@ -238,8 +238,19 @@ class SupervisorSources(SupervisorPoolPublication):
         return set(self._last_override_veto)
 
     def _effective_registrations(self) -> dict[str, dict]:
-        with self._source_collection_lock:
+        deadline = self._source_read_deadline()
+        acquired = (
+            self._source_collection_lock.acquire()
+            if deadline is None else self._source_collection_lock.acquire(
+                timeout=max(0.0, deadline - time.monotonic()),
+            )
+        )
+        if not acquired:
+            raise CompanionIndeterminate("effective source collection remains in progress")
+        try:
             return self._collect_effective_registrations()
+        finally:
+            self._source_collection_lock.release()
 
     def _collect_effective_registrations(self) -> dict[str, dict]:
         self._source_attempt += 1

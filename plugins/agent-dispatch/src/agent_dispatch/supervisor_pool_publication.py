@@ -22,7 +22,7 @@ log = logging.getLogger("agent-dispatch.supervisor-daemon")
 
 
 class SupervisorPoolPublication(SupervisorPoolSender):
-    """Explicit preparation/sending, never called by the serve loop."""
+    """Per-scope preparation/sending under the master's existing acquisition."""
 
     if TYPE_CHECKING:
         machine: str | None
@@ -185,3 +185,29 @@ class SupervisorPoolPublication(SupervisorPoolSender):
             request = custody.prepare(inputs)
             self._bind_pool_metadata_request(request, client)
             return request
+
+    def reconcile_pool_metadata(self) -> None:
+        """One opt-in metadata operation, inside the existing reconcile budget."""
+        deadline = self._reconcile_deadline
+        if deadline is None:
+            deadline = time.monotonic() + self._reconcile_call_budget
+        token = self._pool_capture_deadline.set(deadline)
+        request = None
+        try:
+            with self._pool_request_state(deadline):
+                custody = self._pool_publisher_custody
+                request = None if custody is None else custody.pending
+            if request is None:
+                request = self.prepare_pool_metadata_request()
+            if request.expected_cohort_revision is None:
+                raise PoolPublicationError("automatic publication requires the configured coordinator cohort")
+            self.send_pool_metadata_request()
+        except Exception as exc:
+            log.warning("pool metadata reconciliation withheld: error_type=%s", type(exc).__name__)
+            if request is not None:
+                try:
+                    self.discard_unaccepted_pool_metadata_request(request)
+                except PoolPublicationError:
+                    log.warning("pool metadata reconciliation retains its unresolved original request")
+        finally:
+            self._pool_capture_deadline.reset(token)

@@ -14,6 +14,58 @@ client does not import daemon diagnostics or singleton supervision. Existing
 root imports, `from zdd import *`, and canonical object identities are preserved;
 this changes import work, not routing, cutover or process-retirement policy.
 
+`CutoverOrchestrator` also supports opt-in `self_retirement=True` with an
+`activate_successor(endpoint)` callback and optional `serving_health_check`.
+It health-gates and publishes the
+candidate and commits the durable route before invoking the adopter's promotion
+callback, which may open admission. It then verifies serving readiness (using
+the separate check when preparation health is not sufficient) without contacting
+the predecessor. Publication itself is irreversible in this mode, including
+failure of the intervening transition record. A postcommit promotion/readiness failure remains an explicit
+failed, committed result; it never disposes of a possibly admitted successor or
+rolls the route back. Failed recovery-record removal is also an explicit failed
+commit, not a successful cleanup. The resident owns supersession,
+accepted-work draining and eventual exit independently of the installer.
+`retirement_pending` reports that separation; it never certifies predecessor
+exit, including an error after irreversible publication. This mode cannot be combined with conditional writer transfer or
+pre-publication drain. Existing adopters keep their synchronous cutover
+contract unless they explicitly opt in.
+Adopters must qualify the incoming runtime's actual capability before publication
+and keep displaced code retained independently of the installing process until
+native exit is positively observed. The library does not supply that retention
+or prove completion of accepted work.
+They must also qualify the outgoing resident's safe retirement protocol before
+changing its selector: supersession waits for a genuinely ready successor, and
+accepted work cannot be discarded on a grace deadline. Unsupported incumbents
+are an explicit refusal, not a silent synchronous downgrade. Recovery records
+include the full predecessor endpoint so uncertain publication can be reconciled
+against its original native identity. Once a ready successor is observed,
+outgoing retirement must remain latched even if that successor later dies.
+Self-retirement records carry an explicit marker through every phase. Legacy
+recovery and a following cutover refuse a pending marked witness rather than
+overwriting it or treating it as a synchronous failure. The adopter may complete
+an interrupted `started` publication only when its exact candidate is selected.
+`routing.confirm_active()` confirms that native owner durably while preserving
+the existing fallback and generation; it does not perform another route flip.
+Initial and updated witnesses use the same flushed-file and durable replacement
+boundary as routing. Adopters own guarded cancellation of proven uncommitted
+preparation and settlement of positively exited successors; neither permits
+revoking an irreversible retirement grant or discarding live admitted work.
+`owner_process_start_time` captures the original installer's native birth;
+`breadcrumb.owner_exited()` distinguishes proven original exit from a matching
+live process and unknown evidence through strict native observation, including
+readable exited objects and Darwin zombies. Same-attempt recovery preserves that birth
+instead of inferring it from a reused PID. Exact asynchronous child registration
+also preserves its native candidate birth across a parent update that has not
+yet acquired that token.
+Witness writes serialize the complete read/merge/write with the native routing
+lock. Existing lexical owners pass `_routing_locked=True` to avoid nested
+file-lock acquisition; `_routing_deadline` preserves a tighter caller budget.
+Candidate publication binds a freshly verified native birth after health
+preparation and refuses a changed identity at the publication boundary.
+On macOS, native birth identity uses the process start seconds and microseconds;
+the same bounded token is accepted by routing and receiver-bound protocols.
+
 ## What's inside
 
 ### `zdd.lifecycle` -- durable transition history
@@ -95,12 +147,12 @@ Missing/malformed history, a changed epoch, an unknown birth token or a matching
 PID/port publication cannot authorize disposal. PID/port reuse conservatively
 blocks cleanup instead of weakening custody.
 Conservative custody is durably committed while the old route remains visible,
-before publishing a route that can admit work. Linux writes flush the file and
+before publishing a route that can admit work. Linux and macOS writes flush the file and
 parent directory; Windows uses a flushed file plus native write-through
-replacement. Other POSIX platforms, including macOS, retain flushed-file
-atomic replacement without the Linux-only directory barrier; power-loss
-durability and native identity-bound conditional retirement are not validated
-there. A failed final flip may retain an extra protected candidate; it
+replacement. Other POSIX platforms retain flushed-file atomic replacement
+without the directory barrier. Native macOS power-loss behavior remains
+unqualified; simulated directory-barrier regressions are not host qualification.
+A failed final flip may retain an extra protected candidate; it
 must never manufacture a false negative after a crash.
 Replacement visibility and durability are separate outcomes. A post-replace
 directory-flush failure raises `PublicationCommitUncertain`; cutover retains
@@ -188,9 +240,13 @@ handle, without requesting termination rights. Linux reuses canonical pidfd
 capture and validates the birth token while that reference remains live.
 The shared POSIX wait uses native polling, including descriptors above
 `FD_SETSIZE`; invalid-descriptor and native wait errors are not exit evidence.
-Missing native proof or mismatched/exited identity refuses explicitly. Other
-platforms, including macOS, raise `NotImplementedError`; there is no
+macOS checks native birth before and after registering a kqueue `NOTE_EXIT`
+watch, retaining the original process instance across PID reuse. Waiting
+consumes only that watch's native exit evidence. Missing native proof or
+mismatched/exited identity refuses explicitly. Other unsupported
+platforms raise `NotImplementedError`; there is no
 unverified PID-liveness or signaling fallback.
+Darwin regressions are simulated; native macOS execution remains unqualified.
 
 This is only process-exit evidence. The adopter must independently revalidate
 exact installation, receipt, instance, route and governance authority before
@@ -204,8 +260,10 @@ confirmed exit through an opened reference, or a different native birth at
 the same PID. Access denial, unavailable/malformed birth evidence, native
 API failures and unsupported platforms raise rather than mean absence.
 Windows uses query/synchronization rights only; Linux uses a pidfd and strict
-birth evidence without tolerant diagnostics. macOS remains explicitly
-unsupported. This observation cannot signal a reused PID, authorize graceful
+birth evidence without tolerant diagnostics. Darwin queries native libproc
+birth and zombie state; only native `ESRCH` proves absence. Denied, incomplete
+or malformed evidence does not mean exit. These Darwin paths remain
+mock-qualified only. This observation cannot signal a reused PID, authorize graceful
 control, transfer writer authority or substitute for installation/transaction
 custody. A consumer must still acquire the real writer lease before reload
 or resumption.

@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import Literal
 
-from zdd import breadcrumb, diagnostics, routing
+from zdd import breadcrumb, diagnostics, process_exit, routing
 from zdd.cutover_lock import CutoverLock
 
 from . import locks
@@ -16,13 +17,15 @@ from .status_monitor_cutover import ControlClient
 def recover_owned_publication(
     root: Path, record: dict, predecessor: tuple[int, str] | None,
     handles: list[subprocess.Popen],
-) -> bool:
+) -> bool | Literal["committed", "rolled_back"]:
     """Retry attributable publication; never delegate to a blocked next owner."""
     route_root = root / "status-monitor-routing"
     if record.get("pid") != os.getpid() or record.get("state") not in (
-        "publication-uncertain", "started", "spawned", "flipped", "draining", "rolled_back",
+        "publication-uncertain", "started", "spawned", "flipped", "draining", "rolled_back", "committed",
     ):
         return False
+    if record.get("self_retirement") is True:
+        return _recover_async_owned(root, record)
     handle = next((child for child in handles if child.pid == record.get("new_pid")), None)
     if handle is None:
         return False
@@ -32,11 +35,8 @@ def recover_owned_publication(
     ):
         return False
     old = routing.Endpoint.from_dict(record.get("old")) if isinstance(record.get("old"), dict) else None
-    if old is not None and predecessor is None:
-        return False
-    if predecessor is not None and (
-        old is None or old.pid != predecessor[0]
-        or locks.process_start_time(old.pid) != predecessor[1]
+    if (old is None) != (predecessor is None) or (
+        old is not None and old.pid != predecessor[0]
     ):
         return False
     new_port = record.get("new_port")
@@ -49,8 +49,12 @@ def recover_owned_publication(
         if not isinstance(table, dict):
             return False
         active = routing.Endpoint.from_dict(table.get("active")) if isinstance(table.get("active"), dict) else None
-        if active is not None and active.pid not in (handle.pid, old.pid if old is not None else None):
-            return False
+        if active is not None and active.pid != handle.pid:
+            if (
+                predecessor is None or active.pid != predecessor[0]
+                or locks.process_start_time(active.pid) != predecessor[1]
+            ):
+                return False
         candidate = ControlClient(f"http://127.0.0.1:{new_port}")
         health = candidate.health() if handle.poll() is None else None
         committed = bool(
@@ -58,18 +62,19 @@ def recover_owned_publication(
             and health.get("published") is True
         )
         if committed:
-            routing.publish_active(
-                route_root, bind="127.0.0.1", port=new_port, pid=handle.pid,
-                process_start_time=start, demote_existing=True,
-            )
-            if old is not None:
-                client = ControlClient(old.base_url, config_dir=route_root, timeout=65.0)
-                if client.health().get("pid") != old.pid:
-                    return False
-                drained = client.drain(timeout=300.0, poll=0.2, force=False)
-                if drained.get("drained") is not True:
-                    return False
-                client.shutdown()
+            if active is not None and (
+                active.pid, active.process_start_time, active.port,
+            ) == (handle.pid, start, new_port):
+                routing.confirm_active(route_root, active)
+            else:
+                routing.publish_active(
+                    route_root, bind="127.0.0.1", port=new_port, pid=handle.pid,
+                    process_start_time=start, demote_existing=True,
+                )
+            if old is not None and not _retire_synchronous_predecessor(
+                route_root, old, predecessor[1],
+            ):
+                return False
         else:
             # A live formerly-published or unhealthy candidate is not a passive
             # failure. Keep custody until its service outcome can be established.
@@ -78,7 +83,10 @@ def recover_owned_publication(
                 or health.get("status") != "ready"
             ):
                 return False
-            if old is None:
+            if (
+                old is None or predecessor is None or old.pid != predecessor[0]
+                or locks.process_start_time(old.pid) != predecessor[1]
+            ):
                 return False
             client = ControlClient(old.base_url)
             if client.health().get("pid") != old.pid:
@@ -103,3 +111,61 @@ def recover_owned_publication(
             new_process_start_time=start, started_at=record.get("started_at"),
         )
     return True
+
+
+def _retire_synchronous_predecessor(
+    directory: Path, old: routing.Endpoint, native_start: str,
+) -> bool:
+    try:
+        exited = process_exit.observe_original_exit(old.pid, native_start)
+        if exited is True:
+            return True
+        if exited is not False or locks.process_start_time(old.pid) != native_start:
+            return False
+        with process_exit.open_process(old.pid, native_start) as reference:
+            client = ControlClient(old.base_url, config_dir=directory, timeout=65.0)
+            if (
+                locks.process_start_time(old.pid) != native_start
+                or client.health().get("pid") != old.pid
+                or locks.process_start_time(old.pid) != native_start
+            ):
+                return False
+            drained = client.drain(timeout=300.0, poll=0.2, force=False)
+            if drained.get("drained") is not True:
+                return False
+            if locks.process_start_time(old.pid) != native_start:
+                return reference.wait(0) is True
+            client.shutdown()
+            return reference.wait(30.0) is True
+    except (OSError, ValueError, NotImplementedError):
+        # A failed identity observation or graceful request is not native exit.
+        return False
+
+
+def _recover_async_owned(root: Path, record: dict) -> bool | Literal["committed", "rolled_back"]:
+    from .runtime_monitor_abort import abort, settle_dead_committed
+    from .runtime_monitor_completion import finish
+    from .runtime_monitor_retirements import _exit_state
+    from .status_monitor_recovery_contract import successor_healthy
+
+    directory = root / "status-monitor-routing"
+    with CutoverLock(directory):
+        if breadcrumb.read_breadcrumb(directory) != record:
+            return False
+        table = routing.read_table(directory, strict=True) or {}
+        routing._validate_endpoint_rows(table)
+        active = routing.Endpoint.from_dict(table["active"]) if table.get("active") else None
+        pid, start, port = record.get("new_pid"), record.get("new_process_start_time"), record.get("new_port")
+        if active is not None and (active.pid, active.process_start_time, active.port) == (pid, start, port):
+            if _exit_state({"pid": pid, "start": start}) is False:
+                candidate = ControlClient(active.base_url, config_dir=directory)
+                completed = finish(
+                    root, record, active, promote=candidate.promote,
+                    ready=lambda: successor_healthy(
+                        active.client_host, active.port, lambda _url: candidate, expected=active,
+                    ),
+                )
+                return "committed" if completed else False
+        if settle_dead_committed(root, record):
+            return "committed"
+        return "rolled_back" if abort(root, record) else False

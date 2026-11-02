@@ -110,7 +110,10 @@ def cmd_dev_release(args: argparse.Namespace) -> int:
         output.err(record.get("error") or record.get("message") or "Dev release failed")
     else:
         result = json.loads(text)
-        output.info(f"Dev released; current-version -> {result['runtime_version']}")
+        state = "Dev claim release pending resident retirement" if result.get(
+            "dev_claim_release_pending",
+        ) else "Dev released"
+        output.info(f"{state}; current-version -> {result['runtime_version']}")
     return code
 
 

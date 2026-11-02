@@ -1,14 +1,7 @@
 """Active/passive cutover orchestration for zero-downtime redeploys.
 
-This is the headline of the zero-downtime effort: stand the **new** daemon up
-beside the **old** one on a fresh port, confirm it is healthy, flip the routing
-table so clients follow it, drain the old daemon's in-flight work, then retire
-the old daemon -- with no client ever dialing a dead port and no active turn
-hard-killed.
-
-Orchestration is app-level and OS-agnostic. Injected spawning, health, HTTP
-and free-port collaborators support isolated rollback tests; the deploy CLI
-wires the real implementations rather than delegating handoff to a service manager.
+OS-agnostic, injected collaborators keep publication, readiness and retirement
+under application ownership rather than delegating them to a service manager.
 
 Default sequence (each step before the commit point is reversible)::
 
@@ -24,8 +17,12 @@ Default sequence (each step before the commit point is reversible)::
 
 A failure anywhere before the commit point rolls back: re-publish the old
 endpoint as active, undrain the old daemon, and terminate the freshly spawned
-passive. After the commit point the new daemon is the sole survivor, so
-remaining steps are best-effort and never roll back.
+passive. After the commit point, retirement is irreversible.
+
+An adopter with resident-owned supersession can opt into ``self_retirement``.
+Publication is irreversible before its ``activate_successor`` callback can
+admit work. Serving readiness completes installation without contacting or
+waiting for the predecessor's independently owned retirement.
 """
 
 from __future__ import annotations
@@ -33,13 +30,13 @@ from __future__ import annotations
 import logging
 import socket
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from zdd import breadcrumb, routing
 from zdd.routing import Endpoint
 from . import routing_persistence
+from .cutover_result import CutoverResult as CutoverResult
 
 if TYPE_CHECKING:
     from zdd.cutover_lock import CutoverLock
@@ -79,46 +76,6 @@ class _Client(Protocol):
     def adopt_relay(self) -> dict[str, Any]: ...
 
 
-@dataclass
-class CutoverResult:
-    """Outcome of a cutover attempt."""
-
-    ok: bool
-    new_port: int | None = None
-    old_endpoint: Endpoint | None = None
-    steps: list[str] = field(default_factory=list)
-    rolled_back: bool = False
-    committed: bool = False
-    error: str | None = None
-    drain: dict[str, Any] | None = None
-    serving_endpoint: Endpoint | None = None
-    retirement_requested: bool = False
-    retirement_confirmed: bool = False
-    conditional: bool = False
-    publication_uncertain: bool = False
-
-    def to_dict(self) -> dict[str, Any]:
-        data = {
-            "ok": self.ok,
-            "new_port": self.new_port,
-            "old_port": self.old_endpoint.port if self.old_endpoint else None,
-            "steps": self.steps,
-            "rolled_back": self.rolled_back,
-            "committed": self.committed,
-            "error": self.error,
-            "drain": self.drain,
-        }
-        if self.conditional:
-            data["retirement_confirmed"] = self.retirement_confirmed
-            data["serving_endpoint"] = (
-                self.serving_endpoint.to_dict() if self.serving_endpoint else None
-            )
-            data["retirement_requested"] = self.retirement_requested
-        if self.publication_uncertain:
-            data["publication_uncertain"] = True
-        return data
-
-
 class _NeverRaised(Exception):
     """Stands in for a refusal a routing module can't raise."""
 
@@ -149,11 +106,18 @@ class CutoverOrchestrator:
         expected_old: Endpoint | None = None,
         on_published: Callable[[Endpoint], None] | None = None,
         predecessor_health_check: Callable[[str, int], bool] | None = None,
+        self_retirement: bool = False,
+        activate_successor: Callable[[Endpoint], None] | None = None,
+        serving_health_check: Callable[[str, int], bool] | None = None,
     ) -> None:
         if expected_old is not None and refuse_old is None:
             raise ValueError("an expected predecessor also requires a publication refusal guard")
         if on_published is not None and expected_old is None:
             raise ValueError("publication notification requires an observed predecessor")
+        if self_retirement and (activate_successor is None or drain_before_publish):
+            raise ValueError("self-retirement requires successor activation without predecessor drain")
+        if activate_successor is not None and not self_retirement:
+            raise ValueError("successor activation requires self-retirement")
         self.config_dir = Path(config_dir)
         self.bind = bind
         self.version = version
@@ -169,6 +133,9 @@ class CutoverOrchestrator:
         self.drain_before_publish = drain_before_publish
         self.expected_old = expected_old
         self.on_published = on_published
+        self.self_retirement = self_retirement
+        self.activate_successor = activate_successor
+        self.serving_health_check = serving_health_check
         # Uniform lifecycle log context. ``service`` defaults to the config-dir
         # convention (``~/.agent-bridge`` -> ``agent-bridge``); ``node`` is the
         # source machine. Both are captured once for every emitted record.
@@ -229,12 +196,16 @@ class CutoverOrchestrator:
             try:
                 if check(self._client_host(), port):
                     return True
+            except CutoverError:
+                raise
             except Exception:
                 pass
             self.sleep(poll)
         # one last probe at the deadline
         try:
             return bool(check(self._client_host(), port))
+        except CutoverError:
+            raise
         except Exception:
             return False
 
@@ -298,6 +269,8 @@ class CutoverOrchestrator:
         """
         from zdd.cutover_lock import CutoverBorrowError, CutoverLock, CutoverLockedError, lock_path
 
+        if self.self_retirement and conditional is not None:
+            return CutoverResult(ok=False, error="conditional cutover cannot defer retirement", conditional=True)
         if self.drain_before_publish and conditional is not None:
             reason = "conditional cutover cannot use pre-publication drain"
             log.error(reason)
@@ -402,19 +375,25 @@ class CutoverOrchestrator:
             kwargs["publication_witness"] = publication_witness
             kwargs["new_process_start_time"] = new_process_start_time
             kwargs["requires_writer_reconciliation"] = self.drain_before_publish or self.expected_old is not None
-            return breadcrumb.write_breadcrumb(self.config_dir, **kwargs)
+            if self.self_retirement:
+                kwargs["self_retirement"] = True
+            try:
+                return breadcrumb.write_breadcrumb(self.config_dir, _routing_deadline=conditional.routing_deadline() if conditional else None, **kwargs)
+            except routing.RoutingLockTimeout:
+                if not conditional or not result.error or result.ok:
+                    raise
+                result.error += "; recovery witness retained: routing authority unavailable"
+                log.error(result.error)
+                return breadcrumb.read_breadcrumb(self.config_dir) or {}
 
         spawn_passive = conditional.spawn if conditional else self.spawn_passive
         health_check = conditional.healthy if conditional else self.health_check
         make_client = conditional.snapshot.make_client if conditional else self.make_client
         if self._refuse_current_old(result):
             return result
-        # Dead-port watchdog: before standing up the new daemon, retire any
-        # advertised-but-dead endpoint a previously-aborted cutover may have left
-        # behind (the state that wedged the pipeline). Best-effort -- it only acts
-        # when the active endpoint has no listener *and* a dead pid, so a healthy
-        # or still-starting daemon is never disturbed. Logs its own reap.
-        if conditional is None and not self.drain_before_publish:
+        # Exact-predecessor callers own recovery; preserve their route witness
+        # even when the observed native predecessor exited before selection.
+        if conditional is None and not self.drain_before_publish and self.expected_old is None:
             try:
                 self.routing.reap_stale_active(self.config_dir, service=self.service)
             except Exception:  # noqa: BLE001 -- watchdog is best-effort, never fatal
@@ -431,10 +410,7 @@ class CutoverOrchestrator:
                 result.steps.append(f"refused: {result.error}")
                 log.error(result.error)
                 return result
-        # The CAS expectation is the raw ``active`` row only: a clean shutdown
-        # leaves active absent with the old claim demoted to ``previous``, and
-        # the guarded publish compares against the raw row. Only the guarded
-        # flip uses it, so an unguarded routing stand-in needs no read_table.
+        # CAS uses raw active, not the previous row left by a clean shutdown.
         old_for_cas = None
         selection_table = None
         if conditional is not None:
@@ -479,18 +455,16 @@ class CutoverOrchestrator:
             result.error = "candidate port must differ from predecessor"
             result.steps.append(f"refused: {result.error}")
             return result
-        # Durable breadcrumb (#1756): written *before* the drain gate is ever
-        # touched, so if this orchestrator dies mid-cutover the aborted attempt
-        # leaves an attributable trace on disk (and recover_stale_cutover can
-        # undrain the stranded old daemon). started_at is threaded through every
-        # later update so the record keeps its original timestamp.
+        # Record custody before drain; preserve started_at across later updates.
         old_dict = (
-            old.to_dict() if (conditional or self.expected_old is not None) and old is not None else
+            old.to_dict() if (conditional or self.expected_old is not None or self.self_retirement) and old is not None else
             {"bind": old.bind, "port": old.port} if old is not None else None
         )
-        started_at = write_breadcrumb(
-            state="started", old=old_dict, new_port=new_port,
-        )["started_at"]
+        try:
+            started_at = write_breadcrumb(state="started", old=old_dict, new_port=new_port)["started_at"]
+        except routing.RoutingLockTimeout:
+            result.error = "cutover witness unavailable: routing authority acquisition timed out"
+            return result
         self._emit(
             lifecycle.CUTOVER_BEGIN, lifecycle.BEGIN, port=new_port,
             detail={"old_port": old.port if old is not None else None},
@@ -518,12 +492,7 @@ class CutoverOrchestrator:
             new_process_start_time = process_start_time(new_pid)
         result.steps.append(f"spawned passive pid={new_pid if new_pid is not None else '?'} "
                             f"port={new_port}")
-        # Record the passive's own pid the moment it is known -- before the
-        # health gate, flip, or drain even begin -- so a crash anywhere past
-        # this point (including one that never reaches the flip) leaves a
-        # breadcrumb naming the passive to reap if it is never promoted
-        # (#5195, reap_abandoned_passive). Threaded through every later update
-        # like started_at.
+        # Record the passive PID before health, publication or drain (#5195).
         flipped = False
         drain_started = False
 
@@ -542,12 +511,15 @@ class CutoverOrchestrator:
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                 )
             healthy = self._await_health(new_port, health_timeout, poll, health_check)
-            if self.expected_old is not None:
+            if self.expected_old is not None or self.self_retirement:
                 new_pid = getattr(handle, "pid", None)
                 captured_start = getattr(handle, "process_start_time", None)
+                observed_start = process_start_time(new_pid) if new_pid else None
+                if isinstance(captured_start, str) and captured_start != observed_start:
+                    raise CutoverError("healthy successor native identity changed")
                 new_process_start_time = (
                     captured_start if isinstance(captured_start, str)
-                    else process_start_time(new_pid) if new_pid else None
+                    else observed_start
                 )
                 write_breadcrumb(
                     state="started", old=old_dict, new_port=new_port,
@@ -566,8 +538,10 @@ class CutoverOrchestrator:
                     f"within {health_timeout:.0f}s"
                 )
             result.steps.append("new daemon healthy")
-            if self.expected_old is not None:
-                if not new_pid or not new_process_start_time:
+            if self.expected_old is not None or self.self_retirement:
+                from .darwin_identity import valid_start_time
+
+                if type(new_pid) is not int or new_pid <= 0 or not valid_start_time(new_process_start_time):
                     raise CutoverError("healthy successor native identity unavailable")
             self._emit(
                 lifecycle.CUTOVER_NEW_BOUND, lifecycle.OK, port=new_port,
@@ -586,24 +560,17 @@ class CutoverOrchestrator:
                     on_drain=mark_drain_started,
                 )
 
-            # Flip the route: new active, old demoted to previous. From here a
-            # new CLI resolution lands on the new daemon; long-lived sockets stay
-            # on the old one until their turn completes (migrate at a breakpoint).
-            # Without ``refuse_old`` this is exactly the plain publish it always
-            # was (a caller's routing stand-in may override ``publish_active``,
-            # e.g. to promote its passive first). With it, the publish is
-            # guarded: the current route is re-checked under the routing lock
-            # that writes the new one -- and only a routing object that itself
-            # defines the guarded publish can do that (``getattr_static``, so a
-            # stand-in forwarding unknown names to zdd.routing doesn't count);
-            # otherwise the cutover refuses rather than flip unguarded.
+            # Publication directs new readers at the successor. Guarded adopters
+            # compare the route under its write lease. For self-retirement this
+            # frontier is irreversible even if readiness or recording later fails.
             refused = _NeverRaised
             try:
                 if self.refuse_old is None and conditional is None and not self.drain_before_publish:
-                    self.routing.publish_active(
+                    new_for_cas = self.routing.publish_active(
                         self.config_dir, bind=self.bind, port=new_port,
                         pid=getattr(handle, "pid", None), version=self.version,
                         demote_existing=True,
+                        **({"process_start_time": new_process_start_time} if self.self_retirement else {}),
                     )
                 else:
                     import inspect
@@ -625,7 +592,7 @@ class CutoverOrchestrator:
                             "lock_deadline": conditional.routing_deadline(),
                             "process_start_time": candidate.process_start_time,
                         }
-                    elif self.expected_old is not None:
+                    elif self.expected_old is not None or self.self_retirement:
                         conditional_kwargs = {"process_start_time": new_process_start_time}
                     publication = self.routing.publish_active_with_previous_guarded(
                         self.config_dir, bind=self.bind, port=new_port,
@@ -639,12 +606,15 @@ class CutoverOrchestrator:
                         published, _ = publication
                         conditional.new = published
                         result.serving_endpoint = published
-                    if self.drain_before_publish or self.expected_old is not None:
+                    if self.drain_before_publish or self.expected_old is not None or self.self_retirement:
                         new_for_cas = (
                             publication[0]
                             if isinstance(publication, tuple) and len(publication) == 2
                             else publication
                         )
+                if self.self_retirement:
+                    result.committed = True
+                    result.retirement_pending = old is not None and old.port != new_port
             except (refused, _UnguardedRouting, routing.RoutingLockTimeout) as exc:
                 result.error = str(exc)
                 result.steps.append(f"refused: {exc}")
@@ -718,6 +688,27 @@ class CutoverOrchestrator:
                 detail={"old_port": old.port if old is not None else None},
             )
 
+            if self.self_retirement:
+                if not isinstance(new_for_cas, Endpoint) or new_for_cas.process_start_time != new_process_start_time:
+                    raise CutoverError("published successor native identity unavailable")
+                successor = new_for_cas
+                activate_successor = self.activate_successor
+                assert activate_successor is not None
+                write_breadcrumb(
+                    state="committed", old=old_dict, new_port=new_port,
+                    new_pid=new_pid, started_at=started_at,
+                )
+                activate_successor(successor)
+                if not self._await_health(
+                    new_port, health_timeout, poll, self.serving_health_check or health_check,
+                ):
+                    raise CutoverError("published successor did not become ready")
+                if not breadcrumb.clear_breadcrumb(self.config_dir):
+                    raise CutoverError("committed recovery record retained; retry cleanup")
+                result.ok = True
+                result.steps.append("successor ready; predecessor retirement is asynchronous")
+                return result
+
             if conditional and conditional.snapshot.activate_successor is not None:
                 conditional.activate_successor()
                 result.steps.append("published successor activated and ready")
@@ -739,13 +730,8 @@ class CutoverOrchestrator:
                         on_drain=mark_drain_started if self.expected_old is not None else None,
                     )
 
-                # Verify-before-retire GATE: re-confirm the new daemon is still
-                # live right before we retire the old one. If it died between the
-                # flip and here, retiring the old daemon would strand every
-                # client (active -> dead new, previous -> retired old). Raising
-                # *before* the commit point routes into rollback, which restores
-                # and undrains the old daemon -- so a cutover can never retire the
-                # old daemon while the new one is already dead (#5322).
+                # Verify before retirement: an unhealthy successor must not
+                # strand clients by retiring the still-serving predecessor.
                 new_live = False
                 try:
                     new_live = bool(
@@ -775,9 +761,10 @@ class CutoverOrchestrator:
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                     requires_writer_reconciliation=self.drain_before_publish,
                 )
-                result.retirement_requested = conditional is not None or self.drain_before_publish
+                result.retirement_requested = self.drain_before_publish
                 if conditional:
                     conditional.retire_predecessor()
+                    result.retirement_requested = True
                 else:
                     retirement = old_client.shutdown()
                     if self.drain_before_publish and (
@@ -812,8 +799,6 @@ class CutoverOrchestrator:
                     detail={"note": "no prior active daemon"},
                 )
 
-            # Best-effort: hand the credential relay (9857) to the new daemon
-            # once the old one has released it.
             if conditional and conditional.snapshot.activate_successor is not None:
                 conditional.adopt_successor()
                 result.steps.append("successor resource adoption confirmed")
@@ -826,12 +811,30 @@ class CutoverOrchestrator:
             if conditional:
                 conditional.complete(result)
             else:
+                if not breadcrumb.clear_breadcrumb(self.config_dir):
+                    result.error = "post-commit error (new daemon is live): committed recovery record retained; retry cleanup"
+                    return result
                 result.ok = True
-                breadcrumb.clear_breadcrumb(self.config_dir)
             return result
 
         except Exception as exc:  # noqa: BLE001 -- convert to a rollback
+            if conditional and isinstance(exc, routing.RoutingLockTimeout):
+                result.error = "conditional cutover routing authority unavailable; recovery witness retained"
+                result.serving_endpoint = None
+                return result
             if isinstance(exc, routing_persistence.PublicationCommitUncertain):
+                if self.self_retirement and not result.committed:
+                    try:
+                        active = Endpoint.from_dict(self._raw_active())
+                        result.committed = active is not None and (
+                            active.bind, active.port, active.pid, active.version, active.process_start_time,
+                        ) == (self.bind, new_port, new_pid, self.version, new_process_start_time) and (
+                            active.generation > (old.generation if old is not None else 0)
+                        )
+                    except (OSError, ValueError, RuntimeError):
+                        pass
+                if self.self_retirement and result.committed:
+                    result.retirement_pending = old is not None and old.port != new_port
                 result.publication_uncertain = True
                 result.error = "publication commit uncertain; generations retained"
                 result.serving_endpoint = None
@@ -848,7 +851,7 @@ class CutoverOrchestrator:
                     f"post-commit conditional error ({type(exc).__name__})" if conditional
                     else f"post-commit error (new daemon is live): {exc}"
                 )
-                result.ok = conditional is None and self.expected_old is None
+                result.ok = conditional is None and self.expected_old is None and not self.self_retirement
                 if conditional:
                     result.serving_endpoint = None
                 log.error("Cutover post-commit error: %s", result.error)
@@ -858,12 +861,19 @@ class CutoverOrchestrator:
                         new_port=new_port, new_pid=new_pid, started_at=started_at,
                         error=result.error,
                     )
-                elif self.drain_before_publish or self.expected_old is not None:
-                    write_breadcrumb(
-                        state="committed", old=old_dict,
-                        new_port=new_port, new_pid=new_pid, started_at=started_at,
-                        error=result.error,
-                    )
+                elif self.drain_before_publish or self.expected_old is not None or self.self_retirement:
+                    try:
+                        write_breadcrumb(
+                            state="committed", old=old_dict,
+                            new_port=new_port, new_pid=new_pid, started_at=started_at,
+                            error=result.error,
+                        )
+                    except (OSError, ValueError, RuntimeError) as persistence_error:
+                        if not self.self_retirement:
+                            raise
+                        result.error += f"; committed recovery record unavailable: {persistence_error}"
+                        result.steps.append(result.error)
+                        log.error(result.error)
                 else:
                     breadcrumb.clear_breadcrumb(self.config_dir)
                 self._emit(
@@ -887,6 +897,7 @@ class CutoverOrchestrator:
                 self._rollback(
                     old, handle, new_port, result, flipped=flipped,
                     expected_old=old_for_cas, expected_new=new_for_cas,
+                    drain_started=not self.self_retirement,
                 )
             # Record the terminal outcome durably. On a clean rollback (or
             # commit-forward) no daemon is left stranded; the breadcrumb marks
@@ -914,14 +925,8 @@ class CutoverOrchestrator:
                     started_at=started_at,
                     requires_writer_reconciliation=self.drain_before_publish,
                 )
-            # A rollback outcome reflects service AVAILABILITY, not cutover
-            # success. `result.ok` only marks a completed cutover (commit
-            # forward); a normal rollback that *restored the old daemon* leaves
-            # `result.ok` False even though service recovered. So confirm from
-            # the live routing table + a health probe: `ok` when something is
-            # serving again, `fail` only for the alertable case where the
-            # rollback left nothing serving. Best-effort -- a probe failure is
-            # treated as not-serving, never raised.
+            # Availability is separate from cutover success: verify a restored
+            # predecessor too. An unavailable probe is conservatively non-serving.
             serving = result.ok
             if not serving:
                 try:

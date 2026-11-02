@@ -157,15 +157,70 @@ def _open_windows(pid: int, token: str, *, allow_exited: bool = False) -> Proces
 
 
 def _validate_identity(pid: int, expected_start_time: str) -> None:
+    from .darwin_identity import valid_start_time
+
     if (
         type(pid) is not int
         or not 0 < pid <= 0xFFFFFFFF
-        or not isinstance(expected_start_time, str)
-        or not 0 < len(expected_start_time) <= 64
-        or not expected_start_time.isascii()
-        or not expected_start_time.isdecimal()
+        or not valid_start_time(expected_start_time)
+        or len(expected_start_time) > 64
     ):
-        raise ValueError("process identity requires a positive PID and ASCII decimal start token")
+        raise ValueError("process identity requires a positive PID and native birth token")
+
+
+def _open_darwin(pid: int, token: str, *, allow_exited: bool = False) -> ProcessExitReference:
+    import select
+
+    from .darwin_identity import native_identity
+
+    if not hasattr(select, "kqueue"):
+        raise NotImplementedError("native Darwin process exit references require kqueue")
+    queue = select.kqueue()
+    exited = False
+
+    def wait(timeout: float) -> bool:
+        nonlocal exited
+        if exited:
+            return True
+        events = queue.control(None, 1, timeout)
+        if not events:
+            return False
+        event = events[0]
+        if event.flags & select.KQ_EV_ERROR:
+            raise OSError(event.data, "native Darwin process exit observation failed")
+        if (
+            len(events) != 1 or event.ident != pid or event.filter != select.KQ_FILTER_PROC
+            or not event.fflags & select.KQ_NOTE_EXIT
+        ):
+            raise ValueError("native Darwin process exit evidence is malformed")
+        exited = True
+        return True
+
+    reference = ProcessExitReference(pid, token, wait, queue.close)
+
+    def require_birth_match() -> None:
+        actual, _exited = native_identity(pid)
+        if actual != token:
+            raise ProcessLookupError("process identity does not match captured reference")
+
+    try:
+        require_birth_match()
+        event = select.kevent(
+            pid, filter=select.KQ_FILTER_PROC,
+            flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+            fflags=select.KQ_NOTE_EXIT,
+        )
+        # Bracket registration with exact native birth checks. Otherwise an
+        # old watch's exit could be misattributed to a newer PID incarnation
+        # first observed after registration, especially with allow_exited.
+        queue.control([event], 0, 0)
+        require_birth_match()
+        if reference.wait(0) and not allow_exited:
+            raise ProcessLookupError("captured process exited before identity validation")
+        return reference
+    except BaseException:
+        reference.close()
+        raise
 
 
 def open_process(
@@ -187,7 +242,9 @@ def open_process(
         if allow_exited:
             return _open_linux(pid, expected_start_time, allow_exited=True)
         return _open_linux(pid, expected_start_time)
-    raise NotImplementedError("native process exit references require Windows or Linux")
+    if sys.platform == "darwin":
+        return _open_darwin(pid, expected_start_time, allow_exited=allow_exited)
+    raise NotImplementedError("native process exit references require Windows, Linux or Darwin")
 
 
 def _observe_linux(pid: int, token: str) -> bool:
@@ -230,6 +287,18 @@ def _observe_windows(pid: int, token: str) -> bool:
         close()
 
 
+def _observe_darwin(pid: int, token: str) -> bool:
+    from .darwin_identity import native_identity
+
+    try:
+        actual, exited = native_identity(pid)
+    except ProcessLookupError as exc:
+        if exc.errno == errno.ESRCH:
+            return True
+        raise
+    return actual != token or exited
+
+
 def observe_original_exit(pid: int, expected_start_time: str) -> bool:
     """Read-only crash recovery: prove the original identity is no longer live.
 
@@ -242,4 +311,6 @@ def observe_original_exit(pid: int, expected_start_time: str) -> bool:
         return _observe_windows(pid, expected_start_time)
     if sys.platform == "linux":
         return _observe_linux(pid, expected_start_time)
-    raise NotImplementedError("native original-exit observation requires Windows or Linux")
+    if sys.platform == "darwin":
+        return _observe_darwin(pid, expected_start_time)
+    raise NotImplementedError("native original-exit observation requires Windows, Linux or Darwin")

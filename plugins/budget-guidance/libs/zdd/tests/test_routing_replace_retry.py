@@ -13,7 +13,9 @@ from zdd import routing
     pytest.param("linux", 1, marks=pytest.mark.skipif(
         sys.platform != "linux", reason="native Linux directory fsync",
     )),
-    ("darwin", 0),
+    pytest.param("darwin", 1, marks=pytest.mark.skipif(
+        sys.platform not in {"linux", "darwin"}, reason="native POSIX directory fsync",
+    )),
 ])
 def test_directory_barrier_matches_supported_platform(
     tmp_path, monkeypatch, platform, directory_flushes,
@@ -33,7 +35,11 @@ def test_directory_barrier_matches_supported_platform(
     monkeypatch.setattr(routing_persistence.sys, "platform", platform)
     monkeypatch.setattr(routing_persistence.os, "fsync", fsync)
     path = tmp_path / "active.json"
-    routing_persistence.write(path, {"active": "new"})
+    if platform == "darwin":
+        with pytest.raises(routing_persistence.PublicationCommitUncertain):
+            routing_persistence.write(path, {"active": "new"})
+    else:
+        routing_persistence.write(path, {"active": "new"})
     assert json.loads(path.read_text()) == {"active": "new"}
     assert calls.count(False) == 1
     assert calls.count(True) == directory_flushes

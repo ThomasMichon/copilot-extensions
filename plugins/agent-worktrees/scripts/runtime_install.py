@@ -278,60 +278,29 @@ def _restore_selectors(root: Path, version: str, snapshot: dict[str, bytes | Non
                 os.replace(temporary, path)
 
 
-def _wait_for_exit(pid: int, identity: str, *, label: str) -> None:
-    from agent_worktrees import locks
-    from zdd import diagnostics
-
-    announced = False
-    while diagnostics._pid_alive(pid):
-        observed = locks.process_start_time(pid)
-        if observed is not None and observed != identity:
-            return
-        if not announced:
-            print(f"Retaining installer custody until {label} pid={pid} exits", file=sys.stderr)
-            announced = True
-        time.sleep(0.2)
-
-
 def _monitor_identity(root: Path) -> tuple[int, str] | None:
     from agent_worktrees import locks, status_monitor_cutover as cutover
 
-    record = locks.read_lock(root / "status-monitor.lock")
-    if not locks.lock_is_live(record):
-        routed = cutover.routed_monitor_identity(root)
-        return routed[:2] if routed is not None else None
-    pid = record.get("pid")
-    if type(pid) is not int or pid <= 0:
-        raise InstallationRefused("Serving monitor has no attributable PID")
-    identity = locks.process_start_time(pid)
-    if identity is None:
-        raise InstallationRefused("Serving monitor process identity cannot be established")
-    return pid, identity
+    try:
+        routed = cutover.routed_monitor_identity(root, require_async_retirement=True)
+    except (OSError, ValueError, ConnectionError) as error:
+        raise InstallationRefused(f"Asynchronous predecessor retirement is unavailable: {error}") from error
+    if routed is not None:
+        return routed[:2]
+    lock_record = locks.read_lock(root / "status-monitor.lock")
+    if locks.lock_is_live(lock_record):
+        from agent_worktrees.runtime_monitor_retirements import retirement_only
+
+        if retirement_only(root, lock_record):
+            return None
+        raise InstallationRefused("Live unrouted monitor cannot safely retire asynchronously")
+    return None
 
 
 def _candidate_serving(root: Path, slot: Path) -> bool:
-    from agent_worktrees import locks, status_monitor_cutover as cutover
-    from agent_worktrees.runtime_identity import slot_generation
+    from agent_worktrees.runtime_monitor_identity import candidate_serving
 
-    record = locks.read_lock(root / "status-monitor.lock")
-    generation = slot_generation(slot)
-    if (
-        not locks.lock_is_live(record)
-        or not record.get("prefix")
-        or Path(record["prefix"]).resolve() != slot.resolve()
-        or (generation is not None and record.get("runtime_generation") != generation)
-    ):
-        return False
-    endpoint = cutover.live_endpoint()
-    if endpoint is None or endpoint.pid != record.get("pid"):
-        return False
-    health = cutover.ControlClient(endpoint.base_url).health()
-    return (
-        health.get("status") == "ready"
-        and health.get("published") is True
-        and health.get("pid") == endpoint.pid
-        and (generation is None or health.get("runtime_generation") == generation)
-    )
+    return candidate_serving(root, slot)
 
 
 def _monitor_slot(root: Path, identity: tuple[int, str]) -> str | None:
@@ -347,82 +316,12 @@ def _settle_monitor(
     root: Path, slot: Path, summary: dict,
     predecessor: tuple[int, str] | None, handles: list[subprocess.Popen],
 ) -> bool:
-    from zdd import breadcrumb
+    from agent_worktrees.runtime_monitor_settlement import settle_monitor
 
-    action = summary.get("action")
-    if action == "noop":
-        if summary.get("reason") not in ("disabled", "no-live-monitor"):
-            raise InstallationRefused(f"Monitor transition refused: {summary.get('reason')}")
-        return True
-    result = summary.get("result") or {}
-    committed = result.get("committed") is True
-    restart = summary.get("restart") or {}
-    committed = committed or (action == "restart" and (
-        restart.get("spawned") is True or restart.get("already_current") is True
-    ))
-    announcements: set[str] = set()
-
-    def announce(message: str) -> None:
-        if message not in announcements:
-            print(message, file=sys.stderr, flush=True)
-            announcements.add(message)
-
-    while True:
-        interrupted_record = (
-            breadcrumb.read_breadcrumb(root / "status-monitor-routing")
-            if action == "interrupted" else None
-        )
-        if action == "interrupted" and (
-            interrupted_record is not None and breadcrumb.is_stale(interrupted_record)
-            or interrupted_record is None and breadcrumb.breadcrumb_path(root / "status-monitor-routing").exists()
-        ):
-            result["publication_uncertain"] = True
-        if result.get("publication_uncertain"):
-            record = breadcrumb.read_breadcrumb(root / "status-monitor-routing")
-            # Missing/corrupt evidence cannot settle a durable-publication
-            # failure. Only the recovery owner's terminal witness can.
-            if record is None or record.get("state") not in ("committed", "rolled_back", "failed"):
-                announce("Monitor publication is uncertain; retaining both generations for owner-led recovery")
-                if record is not None:
-                    from agent_worktrees.runtime_monitor_recovery import recover_owned_publication
-
-                    try:
-                        if recover_owned_publication(root, record, predecessor, handles):
-                            continue
-                    except (OSError, ValueError, ConnectionError) as error:
-                        announce(f"Owned monitor recovery unavailable: {error}")
-                time.sleep(1)
-                continue
-            committed = record["state"] == "committed"
-        try:
-            ready = _candidate_serving(root, slot)
-        except (OSError, ValueError, ConnectionError) as error:
-            announce(f"Monitor serving attestation unavailable: {error}")
-            time.sleep(0.2)
-            continue
-        if ready:
-            if predecessor is not None and _monitor_identity(root) != predecessor:
-                _wait_for_exit(*predecessor, label="retired predecessor")
-                if not _candidate_serving(root, slot):
-                    raise InstallationRefused("Candidate stopped serving before predecessor retirement completed")
-            return True
-        live_handles = [handle for handle in handles if handle.poll() is None]
-        if live_handles and result.get("rolled_back"):
-            from agent_worktrees.runtime_monitor_recovery import recover_owned_publication
-
-            record = breadcrumb.read_breadcrumb(root / "status-monitor-routing")
-            if record is not None:
-                try:
-                    recover_owned_publication(root, record, predecessor, handles)
-                except (OSError, ValueError, ConnectionError) as error:
-                    announce(f"Owned monitor recovery unavailable: {error}")
-        if not live_handles:
-            # A vanished failed/restarted child is an observed failure, not
-            # an indefinitely pending success based on its spawn return.
-            if not committed or handles:
-                return False
-        announce("Retaining both generations until the candidate serves or every failed child exits")
-        time.sleep(0.2)
+    return settle_monitor(
+        root, slot, summary, predecessor, handles,
+        candidate_serving=_candidate_serving, refused=InstallationRefused,
+    )
 
 
 def _source_provenance(
@@ -659,6 +558,7 @@ def settle_candidate(
     base_python: Path | None = None,
     governance: Governance | None = None,
     recover_adopted_manager: bool = False,
+    release_dev_claim: dict | None = None,
 ) -> dict:
     governance = governance if governance is not None else Governance(
         root, payload,
@@ -684,6 +584,7 @@ def settle_candidate(
         from agent_worktrees import (
             config as cfg, status_monitor_cutover as cutover, runtime_deployment as deployment,
         )
+        from agent_worktrees.runtime_monitor_settlement import PublicationOutcomePending
 
         identity = _installed_identity(candidate_slot)
         if package_version is not None:
@@ -708,7 +609,14 @@ def settle_candidate(
                 custody.enter_context(runtime.retention_lease(root, selected, timeout=wait_timeout))
             snapshot = _selector_snapshot(root)
             manifest_snapshot = deployment.read_manifest(root)
+            if monitor_scope:
+                from agent_worktrees.runtime_monitor_abort import recover_abandoned
+                from zdd.cutover_lock import CutoverLock
+
+                with CutoverLock(root / "status-monitor-routing"):
+                    recover_abandoned(root)
             predecessor = _monitor_identity(root) if monitor_scope else None
+            serving_slot = None
             if predecessor is not None:
                 serving_slot = _monitor_slot(root, predecessor)
                 if serving_slot is not None and serving_slot not in (version, previous, selected):
@@ -741,8 +649,18 @@ def settle_candidate(
                     descriptor, timeout=child_timeout, base_python=base_python,
                 )
             handles: list[subprocess.Popen] = []
-            summary = {"action": "interrupted"}
+            summary = {"action": "interrupted", "self_retirement": True}
+            retirement_predecessor = (
+                {
+                    "pid": predecessor[0], "start": predecessor[1], "slot": serving_slot,
+                    "release_claim": release_dev_claim if serving_slot == "dev" else None,
+                } if predecessor is not None and not already_serving else None
+            )
             try:
+                if retirement_predecessor is not None:
+                    from agent_worktrees import runtime_monitor_retirements as retirements
+
+                    retirements.reserve(root, retirement_predecessor, runtime=runtime, committed=False)
                 if helpers is not None:
                     helpers.verify()
                 governance.recheck()
@@ -755,7 +673,10 @@ def settle_candidate(
                         monitor_was_live=predecessor is not None, cutover_guard=guard,
                         spawned_handles=handles,
                         transition_custody=custody,
+                        asynchronous_retirement=True,
+                        retirement_predecessor=retirement_predecessor,
                     )
+                    summary["self_retirement"] = True
                     print(
                         f"Runtime {version}: monitor transition action={summary.get('action')} "
                         f"reason={summary.get('reason')} result={summary.get('result')}", flush=True,
@@ -763,7 +684,15 @@ def settle_candidate(
                     committed = _settle_monitor(root, candidate_slot, summary, predecessor, handles)
                 if not committed:
                     raise InstallationRefused("Monitor cutover rolled back; previous selection restored")
+                if summary.get("action") == "cutover" and (summary.get("result") or {}).get("ok") is not True:
+                    raise InstallationRefused(
+                        f"Monitor activation failed after settlement: {(summary.get('result') or {}).get('error')}"
+                    )
                 deployment.publish(root, manifest)
+            except PublicationOutcomePending:
+                if helpers is not None:
+                    helpers.keep()
+                raise
             except BaseException:
                 announced = False
                 while True:
@@ -776,6 +705,10 @@ def settle_candidate(
                         if not committed:
                             _restore_selectors(root, version, snapshot)
                             deployment.restore(root, manifest_snapshot, manifest)
+                            if retirement_predecessor is not None:
+                                from agent_worktrees import runtime_monitor_retirements as retirements
+
+                                retirements.cancel(root, retirement_predecessor, runtime=runtime)
                         elif any(content not in (
                             (version + "\n").encode("utf-8"), (version + "\r\n").encode("utf-8"),
                         ) for content in _selector_snapshot(root).values()):
@@ -783,6 +716,10 @@ def settle_candidate(
                         if committed:
                             deployment.publish(root, manifest)
                         break
+                    except PublicationOutcomePending:
+                        if helpers is not None:
+                            helpers.keep()
+                        raise
                     except BaseException as error:
                         if not announced:
                             print(
@@ -807,6 +744,11 @@ def settle_candidate(
             "runtime_generation": identity["build_info"].get("runtime_generation"),
             "deployment_manifest_published": True,
             "helpers_published": helpers is not None,
+            "retirement_pending": (summary.get("result") or {}).get("retirement_pending") is True,
+            "dev_claim_release_pending": (
+                release_dev_claim is not None and serving_slot == "dev"
+                and (summary.get("result") or {}).get("retirement_pending") is True
+            ),
             "runtime_python": str(runtime.slot_python(root, version)),
             "payload_hash": payload_hash,
         }

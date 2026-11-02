@@ -106,6 +106,7 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
         wake_is_active=_owns_active_route,
         replay_consumer_factory=replay_consumer_factory,
         cohort_sources=RegistrarSources(),
+        pool_publication_enabled=cfg.pool_publication_enabled,
     )
 
 
