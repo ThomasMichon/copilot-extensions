@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current slice:** Installer Readiness (#10044), followed by Single Instance Lease (#10084). Process Telemetry (#10083) awaits its optional-dependency checker environment. Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Single Instance Lease (#10084). Process Telemetry (#10083) is implementing against its prepared optional-dependency checker environment. Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The lead owns #10044 and #10084 integration, #10083's checker environment, all shared admission/coverage manifests, global documentation, the effort and full completion judgment. Source-only worktrees retain the completed Readiness and Single Instance Lease implementations; the Process Telemetry worker is paused at its declared optional-dependency prerequisite. Publication remains with the lead. Prior implementation workers are complete.
+- **Delegates:** The lead owns #10084 integration, #10083's checker environment, all shared admission/coverage manifests, global documentation, the effort and full completion judgment. A source-only worktree retains the completed Single Instance Lease implementation; the Process Telemetry worker has resumed after its declared optional-dependency prerequisite was prepared. Publication remains with the lead. Prior implementation workers are complete.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -127,8 +127,9 @@ rewrite.
 - [x] Strictly admit all canonical Fleet Index and Vault adapter source/test modules (#10036).
 - [x] Strictly admit all canonical Work Coalescing Singleton source/test modules (#10039).
 - [x] Strictly admit all eight canonical Update Telemetry source modules; owning consumer tests remain independently pending (#10043).
-- [ ] Strictly admit all canonical Installer Readiness source/test modules (#10044).
+- [x] Strictly admit all canonical Installer Readiness source/test modules (#10044).
 - [x] Strictly admit all canonical Docker Resource Producer source/test modules (#10045).
+- [ ] Strictly admit all canonical Single Instance Lease source/test modules (#10084).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -1683,3 +1684,60 @@ composition prerequisites, and review/validation rules.
   it is not a physical copy or a newly admitted checker scope. The changefile
   now names both `libs/installer-readiness` and `agent-machines`, preserving
   runtime rebuild propagation without changing the consumer's admission level.
+
+### 2026-11-02 - Readiness admission merged; Lease integration selected
+
+- #10096 merged as `3b4e9ca876464ec91aa9ed4d4e613ddfb6901715`
+  after exact-head approval, the resolved consumer-bump finding and green
+  required CI in
+  [run 41539947371](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41539947371).
+  There are now 24 merged strict projects and 44 pending. This Plan and
+  Validation Plan remain active; the full strict-compliance gate is not closed.
+- A managed pull-forward replay conflict auto-aborted. A preserved backup and
+  exact equality of all eight published blobs proved there was no unpublished
+  survivor before advancing only merged history; managed synchronization then
+  passed. Unrelated incoming Dev changes were preserved.
+- The lead selected #10084. Independent verification retains all 59 test names,
+  113 assertion ASTs and seven parametrizations in its six edited test files.
+  Actual Linux/Python 3.10.21 contained execution passes 60 tests with twelve
+  native-Windows skips in 1.98 seconds; the successful container and volume were
+  removed. Copy/consumer qualification, admission and the unchanged source-bound
+  unit packet remain before publication.
+- #10083's isolated child now declares a separate universal, seasoned,
+  SHA256-locked OTLP checker environment matching its existing optional extra
+  and base checker pins. Preparation passed; the same source-only worker has
+  resumed. This does not activate that pending scope or change runtime deps.
+
+### 2026-11-02 - Single Instance Lease strict qualification
+
+- The lead integrated the reviewed fourteen-file artifact and activated the
+  canonical source/test project in strict mode on both targets. All 25 proposed
+  strict projects pass; 43 remain pending, with 7,574 physical Python paths
+  classified. There are no new exclusions, import suppressions or runtime deps.
+- Runtime annotations cover handles, liveness probes, ownership tables and
+  collaborators. Independent verification retains all 59 test names, 113
+  assertion ASTs and seven parametrizations in the six edited test files.
+  Actual Linux/Python 3.10.21 execution passes 60 tests with twelve native-Windows
+  skips in 1.98 seconds; the isolated successful container and volume were removed.
+- All seven shipped physical-copy source files exactly matched canonical's
+  pre-change content before the existing materializer refreshed only the
+  Customizing Copilot copy. The same-version override was limited to that
+  verified canonical update, without manually changing any version.
+  Canonical/copy correspondence passes. A contained Windows run verifies that
+  the package actually imports from the shipped copy and passes the canonical
+  suite's 52 tests with twenty existing native-POSIX skips in 13.55 seconds.
+- The changefile names the canonical library and all eleven release consumers,
+  including the physical copy and ten editable references. Their complete
+  checker scopes remain independently pending. The typing guide documents the
+  canonical admission and concrete boundary shapes.
+- Only four changed Lease source-input hashes are refreshed in the source-bound
+  packet; all 3,675 nodes, 210 coverage targets and the 300-second budget remain
+  unchanged. Complete qualification passes 3,675 tests with sixteen existing
+  deselections in 255.093 seconds, including the single coverage collection.
+  Ruff, install-contract, vendored-copy, documentation and diff checks pass.
+- Validation tiers retain real kernel-lock/platform fixtures and actor-free
+  consumer decisions. Native Linux and Windows contracts are exercised through
+  the isolated library/copy suites; no installer, fresh-machine provisioning,
+  live service takeover or installed runtime rollout changes. No external
+  development venue or additional CI lane is required. Review, required CI
+  and merge remain open gates for #10084.

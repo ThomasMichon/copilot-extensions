@@ -1,11 +1,13 @@
 """Real Linux native-to-Python custody, never a cold foundation installation."""
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 import subprocess
 import sys
 import threading
 import time
+from typing import BinaryIO, Protocol, TextIO, cast
 
 import pytest
 
@@ -17,7 +19,16 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux per-descr
 SOURCE = Path(__file__).parents[1] / "src" / "single_instance_lease" / "operation.sh"
 
 
-def await_file(path, process, log):
+class _LinuxFcntl(Protocol):
+    LOCK_SH: int
+    LOCK_EX: int
+    LOCK_UN: int
+    LOCK_NB: int
+
+    def flock(self, fd: int, operation: int) -> None: ...
+
+
+def await_file(path: Path, process: subprocess.Popen[str], log: Path) -> None:
     deadline = time.monotonic() + 10
     while not path.exists():
         assert process.poll() is None, log.read_text()
@@ -26,7 +37,7 @@ def await_file(path, process, log):
 
 
 @pytest.mark.parametrize("mode", ["native", "handoff", "death"])
-def test_bash_custody_excludes_python_and_transfers_without_unlock(tmp_path, mode):
+def test_bash_custody_excludes_python_and_transfers_without_unlock(tmp_path: Path, mode: str) -> None:
     lock = tmp_path / "execution.lock"
     log = tmp_path / "native.log"
     fixture = Path(__file__).with_name("fixture_linux_native_owner.sh")
@@ -60,12 +71,14 @@ def test_bash_custody_excludes_python_and_transfers_without_unlock(tmp_path, mod
             if owner.poll() is None:
                 owner.kill()
             owner.wait(timeout=5)
-            owner.stdin.close()
+            cast(TextIO, owner.stdin).close()
 
 
 @pytest.mark.parametrize("kind", ["unlocked", "shared", "wrong-path", "closed"])
-def test_inherited_admission_requires_actual_kernel_custody(tmp_path, kind):
-    import fcntl
+def test_inherited_admission_requires_actual_kernel_custody(tmp_path: Path, kind: str) -> None:
+    import fcntl as native_fcntl
+
+    fcntl = cast(_LinuxFcntl, native_fcntl)
 
     lock = tmp_path / "execution.lock"
     lock.touch()
@@ -88,17 +101,19 @@ def test_inherited_admission_requires_actual_kernel_custody(tmp_path, kind):
             os.close(fd)
 
 
-def test_inherited_owner_rechecks_kernel_custody_identity_thread_and_fork(tmp_path):
-    import fcntl
+def test_inherited_owner_rechecks_kernel_custody_identity_thread_and_fork(tmp_path: Path) -> None:
+    import fcntl as native_fcntl
+
+    fcntl = cast(_LinuxFcntl, native_fcntl)
 
     lock = tmp_path / "execution.lock"
     fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
     fcntl.flock(fd, fcntl.LOCK_EX)
     owned = OperationLock.from_inherited(lock, fd)
     try:
-        errors = []
+        errors: list[OperationOwnershipError] = []
 
-        def foreign_thread():
+        def foreign_thread() -> None:
             try:
                 owned.assert_owned()
             except OperationOwnershipError as error:
@@ -108,7 +123,8 @@ def test_inherited_owner_rechecks_kernel_custody_identity_thread_and_fork(tmp_pa
         thread.start()
         thread.join(timeout=5)
         assert len(errors) == 1
-        child = os.fork()
+        fork = cast(Callable[[], int], getattr(os, "fork"))
+        child = fork()
         if child == 0:
             try:
                 try:
@@ -127,7 +143,7 @@ def test_inherited_owner_rechecks_kernel_custody_identity_thread_and_fork(tmp_pa
         _pid, code = os.waitpid(child, 0)
         assert code == 0
         owned.assert_owned()
-        fcntl.flock(owned._file.fileno(), fcntl.LOCK_UN)
+        fcntl.flock(cast(BinaryIO, owned._file).fileno(), fcntl.LOCK_UN)
         with pytest.raises(OperationOwnershipError, match="exclusive whole-file"):
             owned.assert_owned()
     finally:
@@ -136,8 +152,10 @@ def test_inherited_owner_rechecks_kernel_custody_identity_thread_and_fork(tmp_pa
         pass
 
 
-def test_inherited_owner_refuses_replaced_lock_file(tmp_path):
-    import fcntl
+def test_inherited_owner_refuses_replaced_lock_file(tmp_path: Path) -> None:
+    import fcntl as native_fcntl
+
+    fcntl = cast(_LinuxFcntl, native_fcntl)
 
     lock = tmp_path / "execution.lock"
     fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
@@ -152,12 +170,15 @@ def test_inherited_owner_refuses_replaced_lock_file(tmp_path):
         owned.release()
 
 
-def test_inherited_directory_refusal_does_not_leak_a_duplicated_lock(tmp_path):
-    import fcntl
+def test_inherited_directory_refusal_does_not_leak_a_duplicated_lock(tmp_path: Path) -> None:
+    import fcntl as native_fcntl
+
+    fcntl = cast(_LinuxFcntl, native_fcntl)
+    directory_flag = cast(int, getattr(os, "O_DIRECTORY"))
 
     directory = tmp_path / "directory"
     directory.mkdir()
-    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    fd = os.open(directory, os.O_RDONLY | directory_flag)
     fcntl.flock(fd, fcntl.LOCK_EX)
     try:
         before = len(os.listdir("/proc/self/fd"))
@@ -167,7 +188,7 @@ def test_inherited_directory_refusal_does_not_leak_a_duplicated_lock(tmp_path):
         assert os.fstat(fd).st_ino == directory.stat().st_ino
     finally:
         os.close(fd)
-    probe = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    probe = os.open(directory, os.O_RDONLY | directory_flag)
     try:
         fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
     finally:
@@ -175,7 +196,9 @@ def test_inherited_directory_refusal_does_not_leak_a_duplicated_lock(tmp_path):
 
 
 @pytest.mark.parametrize("mode", ["cleanup", "foreign"])
-def test_native_cleanup_closes_only_its_owned_reference_after_path_invalidation(tmp_path, mode):
+def test_native_cleanup_closes_only_its_owned_reference_after_path_invalidation(
+    tmp_path: Path, mode: str,
+) -> None:
     lock = tmp_path / "execution.lock"
     fixture = Path(__file__).with_name("fixture_linux_native_owner.sh")
     result = subprocess.run(
