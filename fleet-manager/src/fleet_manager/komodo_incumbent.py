@@ -346,6 +346,9 @@ class KomodoIncumbentMaterialization:
             info = path.stat()
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise PlanError("Komodo incumbent retained file custody is ambiguous")
+            if remote is not None and (info.st_dev, info.st_ino) != (
+                    remote["device"], remote["inode"]):
+                raise PlanError("Komodo local retained file differs from its original storage")
             content = (read_private_file(path, 1024 * 1024) if path in private_files
                        else _bytes(path, 1024 * 1024, allow_empty=True))
             if (path == username_path and (

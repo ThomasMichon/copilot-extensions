@@ -360,6 +360,32 @@ def test_original_storage_rereads_retained_files_under_overlapping_bind_director
     assert material.evidence() != before
 
 
+@pytest.mark.parametrize("field", ["device", "inode"])
+@pytest.mark.parametrize("source", ["bind-descendant", "login"])
+def test_original_storage_checks_locally_reread_file_identity(incumbent, source, field):
+    material = incumbent.material
+    value = decode(material.encoded)
+    if source == "login":
+        local = material.keys / material.admin_password.name
+        material.admin_password.rename(local)
+        material = replace(
+            material, admin_password=local, retained_files=(*material.retained_files, local))
+    else:
+        local = material.keys / "core.key"
+        value["mounts"]["periphery"].append({
+            "Type": "bind", "Source": str(material.keys),
+            "Destination": "/original-bind-view", "RW": False,
+        })
+    material = replace(material, encoded=canonical(value))
+    storage, snapshot, _ = _observed_storage(SimpleNamespace(
+        material=material, volumes=incumbent.volumes))
+    material = replace(material, storage=storage)
+    snapshot["entries"][str(local)][field] = (
+        max(entry[field] for entry in snapshot["entries"].values()) + 1)
+    with pytest.raises(PlanError, match="local retained file differs from its original storage"):
+        material.evidence()
+
+
 def _socket_mount(material, source):
     value = decode(material.encoded)
     value["mounts"]["periphery"].append({
