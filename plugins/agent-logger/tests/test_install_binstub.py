@@ -713,10 +713,8 @@ def test_native_uninstall_removes_only_owned_commands(tmp_path, monkeypatch, nat
         elif dry_run:
             assert (local_bin / name).read_bytes() == original[name]
             assert name in result.stdout
-        elif (native == "ps1") == (os.name == "nt"):
-            assert not (local_bin / name).exists(), name
         else:
-            assert (local_bin / name).read_bytes() == original[name]
+            assert not (local_bin / name).exists(), name
     assert (root / "deploy-manifest.json").read_bytes() == manifest
     assert (root / "config.yaml").read_bytes() == b"preserved configuration\n"
     assert (root / "session-state" / "sentinel").read_bytes() == b"preserved session data\n"

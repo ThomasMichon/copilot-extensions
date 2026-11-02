@@ -2281,8 +2281,10 @@ declared setuptools/wheel distributions or qualify native UV/backend execution.
 The actual foundation
 constructor, source/wheel verification, native custody and runtime health remain
 enabled; successful first use must include a recorded wheel build. Native stamp
-and first-use subprocess limits stay at 60 and 420 seconds.
-The outer observation window is 600 seconds to include release-payload
+uses the base's 90-second Windows allowance (60 seconds on POSIX); first use
+retains its 420-second subprocess limit.
+The outer observation window is 630 seconds on Windows and 600 on POSIX,
+retaining 120 seconds of setup headroom above both child limits for release-payload
 materialization and synthetic backend staging before those individually bounded calls;
 it does not extend either native subprocess or constructor phase allowance.
 Logger's existing Windows retry fixtures allow 180 seconds for their native

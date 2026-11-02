@@ -1050,19 +1050,27 @@ def test_logger_bootstrap_windows_keeps_disjoint_storage_packets() -> None:
 
 def test_logger_snapshot_fixture_outer_budget_preserves_inner_deadlines() -> None:
     source = HERE.parent / "plugins/agent-logger/tests/test_install_binstub.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    stamp = next(
+        node.value for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "_STAMP_TIMEOUT_SECONDS"
+                for target in node.targets)
+    )
+    assert ast.unparse(stamp) == "90 if os.name == 'nt' else 60"
     function = next(
-        node for node in ast.parse(source.read_text(encoding="utf-8")).body
+        node for node in tree.body
         if isinstance(node, ast.FunctionDef)
         and node.name == "test_stamp_supports_first_use_provision_from_snapshot_only"
     )
     outer = next(
-        decorator.args[0].value for decorator in function.decorator_list
+        decorator.args[0] for decorator in function.decorator_list
         if isinstance(decorator, ast.Call)
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr == "timeout"
     )
     inner = [
-        keyword.value.value
+        ast.unparse(keyword.value)
         for node in ast.walk(function)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
@@ -1071,9 +1079,11 @@ def test_logger_snapshot_fixture_outer_budget_preserves_inner_deadlines() -> Non
         and node.func.attr == "run"
         for keyword in node.keywords if keyword.arg == "timeout"
     ]
-    assert sorted(inner) == [60, 420]
-    assert outer == 600
-    assert outer >= sum(inner) + 120
+    assert sorted(inner) == ["420", "_STAMP_TIMEOUT_SECONDS"]
+    assert ast.unparse(outer) == "630 if os.name == 'nt' else 600"
+    for allowance, stamp_limit in ((outer.body.value, stamp.body.value),
+                                   (outer.orelse.value, stamp.orelse.value)):
+        assert allowance == stamp_limit + 420 + 120
 
 
 def test_codespaces_recipes_remain_manual_and_bounded() -> None:
