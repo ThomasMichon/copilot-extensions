@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the repository catch-all selector and reviewed offline fallback from the current instruction source.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

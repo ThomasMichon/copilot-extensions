@@ -111,15 +111,21 @@
     {
       "applyTo": "**",
       "customizationKind": "instructions",
+      "deliveryMode": "selector",
       "destination": ".github/instructions/customizing-copilot/local-cache-catchall.instructions.md",
+      "fallback": {
+        "destination": ".github/copilot/context-fallbacks/customizing-copilot/local-cache-catchall.md",
+        "renderedBytes": 2917,
+        "renderedSha256": "ad3b12274bc9cb2401e47f4f4d865d13498be0be551f7d32c395ab1f519042ac"
+      },
       "plugin": "customizing-copilot@copilot-extensions",
       "pluginVersion": "0.1.0-dev97",
-      "renderedBytes": 4038,
-      "renderedSha256": "34256fe2b364c3acb05532b97cd4985489d47694e903be70fa48344f6fabb212",
+      "renderedBytes": 1303,
+      "renderedSha256": "a4de10edbc02472da7225f2727d494685e266c6dde5d821d03f893b398914faf",
       "sourceId": "local-cache-catchall",
       "template": "instructions/local-cache-catchall.instructions.md",
-      "templateBytes": 2970,
-      "templateSha256": "8dd4f1ac7d716ff5a2ed3f02e11ccfbcedbfed9e8071c4fd7f1f61cfd457fd9e"
+      "templateBytes": 2126,
+      "templateSha256": "7a570bc3e67c29b5ad7d3225f578d0ee7814045fde8434f61422c4554c11cdb0"
     },
     {
       "applyTo": "**",
