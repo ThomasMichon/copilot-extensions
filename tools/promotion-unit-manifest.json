@@ -3855,7 +3855,7 @@
         "libs/worktree-identity/tests/test_worktree_identity.py": "1f002d9e72682e6c68e47e51c5962a8540af73484391f4525b6f0d55ccf9b39b",
         "libs/zdd/src/zdd/__init__.py": "4b259725bc9abf0626bd9c3700d1e02e40dcbd425b6d72e46c60f34a6939ad8b",
         "libs/zdd/src/zdd/private_peer.py": "b1737ad4eb91727caef79e68fd6046f88349b09e11f4930b8e7ca136a5428be2",
-        "libs/zdd/src/zdd/private_protocol.py": "b693ed29912fb5f17c982ef7ed1a6b7a20e4354023a7628b8cff190017f34001",
+        "libs/zdd/src/zdd/private_protocol.py": "cf27a35453f83eb1717b7c1992bf228cf4b908450aed5ff0d897ff89ac8debed",
         "libs/zdd/src/zdd/private_windows.py": "358dac30bf8d7f4cdcc212dec8cacb187c8e00b43fe2591ef4fff7e0fa418e1d",
         "libs/zdd/src/zdd/private_windows_native.py": "80df5f71f4962a64eb96670a15511cdfddc50e989cc667271642c442613fab9d",
         "plugins/agent-bridge/src/agent_bridge/_peer_launch.py": "db5827090c1a946334b593629a068a8f3f2af639ed4b1279920b0948811cfb96",

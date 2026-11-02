@@ -22,6 +22,18 @@ from zdd.private_unix import UnixChannel
 from zdd.private_windows import WindowsChannel
 
 
+@pytest.mark.parametrize("birth", ["1001:0", "1001:999999"])
+def test_native_peer_accepts_bounded_bsd_birth(birth):
+    assert PeerIdentity(101, birth, "fixture").start_time == birth
+
+
+@pytest.mark.parametrize("birth", ["1001:1000000", "1001:22:3", "0:22"])
+def test_native_peer_refuses_malformed_bsd_birth(birth):
+    with pytest.raises(PrivateIPCError) as caught:
+        PeerIdentity(101, birth, "fixture")
+    assert caught.value.reason is Refusal.IDENTITY
+
+
 class MemoryChannel:
     peer = PeerIdentity(1, "1", "fixture")
 
