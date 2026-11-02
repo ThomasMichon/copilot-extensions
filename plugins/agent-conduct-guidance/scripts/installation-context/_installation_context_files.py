@@ -543,7 +543,7 @@ def _snapshot_content_sha256(
         def directory_path(relative_parts: tuple[str, ...]) -> Path:
             return snapshot_root.joinpath(*relative_parts)
 
-        def enter_directory(
+        def enter_path_directory(
             relative_parts: tuple[str, ...],
             expected_stat: os.stat_result | None,
         ) -> _SnapshotWalkFrame:
@@ -653,7 +653,7 @@ def _snapshot_content_sha256(
             if frame.relative_parts or name != SNAPSHOT_PROVENANCE_FILE:
                 records.append((encoded, file_digest))
 
-        def leave_directory(frame: _SnapshotWalkFrame) -> None:
+        def leave_path_directory(frame: _SnapshotWalkFrame) -> None:
             directory = directory_path(frame.relative_parts)
             try:
                 current_directory_stat = os.lstat(directory)
@@ -705,7 +705,7 @@ def _snapshot_content_sha256(
             ):
                 _fail("Snapshot content tree changed during hashing.")
 
-        stack = [enter_directory((), None)]
+        stack = [enter_path_directory((), None)]
         while stack:
             frame = stack[-1]
             if frame.next_entry < len(frame.entries):
@@ -714,7 +714,7 @@ def _snapshot_content_sha256(
                 name, _relative_text, _encoded, entry_stat, kind = entry
                 if kind == "D":
                     stack.append(
-                        enter_directory(
+                        enter_path_directory(
                             (*frame.relative_parts, name),
                             entry_stat,
                         )
@@ -722,12 +722,12 @@ def _snapshot_content_sha256(
                 else:
                     hash_path_file(frame, entry)
                 continue
-            leave_directory(frame)
+            leave_path_directory(frame)
             stack.pop()
     digest = hashlib.sha256()
-    for relative_bytes, file_sha256 in sorted(records, key=lambda item: item[0]):
+    for relative_path_bytes, file_sha256 in sorted(records, key=lambda item: item[0]):
         digest.update(b"F\0")
-        digest.update(relative_bytes)
+        digest.update(relative_path_bytes)
         digest.update(b"\0")
         digest.update(file_sha256.encode("ascii"))
         digest.update(b"\n")
