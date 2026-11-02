@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, TypedDict, cast
 
 CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 PEERS = {
@@ -34,10 +34,14 @@ OWNERS = {
 }
 
 
-def no_window_kwargs() -> dict[str, int]:
+class _NoWindowKwargs(TypedDict, total=False):
+    creationflags: int
+
+
+def no_window_kwargs() -> _NoWindowKwargs:
     """Keep the standalone bootstrap dependency-free and its children windowless."""
     if os.name == "nt":
-        return {"creationflags": subprocess.CREATE_NO_WINDOW}  # headless-guard: allow dependency-free canonical bootstrap
+        return {"creationflags": cast(int, getattr(subprocess, "CREATE_NO_WINDOW"))}  # headless-guard: allow dependency-free canonical bootstrap
     return {}
 
 
@@ -70,10 +74,10 @@ def _active_context(
     primitive: ModuleType, receipt: Path, durable: Path, plugin: str,
     cell: Path, environment: dict[str, str],
 ) -> dict[str, Any]:
-    context = primitive.validate_context_receipt(
+    context = cast(dict[str, Any], primitive.validate_context_receipt(
         receipt, durable, expected_plugin_id=plugin,
         expected_cell_root=cell, environment=environment,
-    )
+    ))
     namespace = primitive.validate_namespace_receipt(
         context["namespaceReceipt"], durable,
     )
@@ -169,13 +173,13 @@ def _governance(
     environment: dict[str, str],
 ) -> dict[str, Any]:
     plugin = context["pluginId"]
-    resolution = primitive.resolve_installation_mode(
+    resolution = cast(dict[str, Any], primitive.resolve_installation_mode(
         legacy_root=Path.home() / f".{plugin}",
         payload_root=context["payloadRoot"], plugin_id=plugin,
         context=context["installReceipt"], durable_home=durable,
         expected_cell_root=context["cellRoot"],
         environment=environment,
-    )
+    ))
     allowed = (
         resolution["status"] == "ready"
         and resolution["reason"] == "namespaced-active"
