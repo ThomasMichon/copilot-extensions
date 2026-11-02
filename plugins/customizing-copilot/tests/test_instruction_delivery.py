@@ -209,6 +209,11 @@ def test_selector_has_no_body_receipt_and_fallback_is_not_discovered(tmp_path: P
     fallback = (repo / delivery.fallback_destination(spec.destination)).read_bytes()
     assert b"Never assume authorization." not in selector
     assert delivery.RECEIPT_PREFIX.encode() not in selector
+    direct_read = b"Read the named files directly with repository file tools"
+    optional_lookup = b"Only if the source path is unclear, invoke `reviewing-customizations`"
+    assert direct_read in selector
+    assert b"These file reads do not require a skill, Python, or the resolver below." in selector
+    assert selector.index(direct_read) < selector.index(optional_lookup)
     assert delivery.complete_body(fallback, delivery.parse_marker(fallback))
     assert not projections.scan_repository(repo, [source]).blocking
     from context_budget import _repo_instruction_files

@@ -11,7 +11,7 @@ exclude-newer = "7 days"
 # import module is ``lazy_cli_dispatch``. Mirrors agent-procutil / agent-
 # ssh-manager.
 name = "agent-lazy-cli-dispatch"
-version = "0.1.0-dev1"
+version = "0.1.1-dev1"
 description = "Shared two-phase (argv-peek, lazy-import-by-table) fast-dispatch mechanism for agent-* Copilot CLI entry roots"
 readme = "README.md"
 license = "MIT"

@@ -4,17 +4,22 @@ own Validation Plan requirement)."""
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import sys
 import types
+from typing import TYPE_CHECKING
 
 import pytest
 
 from lazy_cli_dispatch import core_helper, dispatch_lazy, self_override
 
+if TYPE_CHECKING:
+    from typing_extensions import assert_type
+
 
 def _make_fake_module(
     monkeypatch: pytest.MonkeyPatch, name: str, *, register_attr: str = "add_parsers"
-):
+) -> tuple[types.SimpleNamespace, list[argparse.Namespace]]:
     """Register a fake importable module ``<pkg>.<name>`` in ``sys.modules``
     exposing ``add_parsers``/``register_cli`` (per ``register_attr``) plus a
     ``cmd_<name>`` handler, and return (module, calls) so a test can assert
@@ -25,7 +30,7 @@ def _make_fake_module(
         calls.append(args)
         return 7
 
-    def register(sub) -> None:
+    def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         p = sub.add_parser(name, help=f"the {name} command")
         p.add_argument("--flag", action="store_true")
 
@@ -37,7 +42,7 @@ def _make_fake_module(
 class TestDispatchLazy:
     def test_dispatches_to_the_table_owned_module_and_handler(
         self, monkeypatch: pytest.MonkeyPatch
-    ):
+    ) -> None:
         _, calls = _make_fake_module(monkeypatch, "widget")
         rc = dispatch_lazy(
             "widget", ["widget", "--flag"],
@@ -53,7 +58,7 @@ class TestDispatchLazy:
 
     def test_loads_cluster_for_a_not_yet_cluster_free_module(
         self, monkeypatch: pytest.MonkeyPatch
-    ):
+    ) -> None:
         _make_fake_module(monkeypatch, "gizmo")
         loaded = []
         dispatch_lazy(
@@ -66,9 +71,11 @@ class TestDispatchLazy:
         )
         assert loaded == [1]
 
-    def test_cluster_free_module_never_loads_cluster(self, monkeypatch: pytest.MonkeyPatch):
+    def test_cluster_free_module_never_loads_cluster(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         _make_fake_module(monkeypatch, "sprocket")
-        loaded = []
+        loaded: list[int] = []
         dispatch_lazy(
             "sprocket", ["sprocket"],
             dispatch_table={"sprocket": ("sprocket", "cmd_sprocket")},
@@ -81,7 +88,7 @@ class TestDispatchLazy:
 
     def test_register_cli_modules_uses_register_cli_instead_of_add_parsers(
         self, monkeypatch: pytest.MonkeyPatch
-    ):
+    ) -> None:
         _, calls = _make_fake_module(monkeypatch, "pane", register_attr="register_cli")
         rc = dispatch_lazy(
             "pane", ["pane"],
@@ -95,7 +102,9 @@ class TestDispatchLazy:
         assert rc == 7
         assert len(calls) == 1
 
-    def test_command_map_override_wins_over_module_handler(self, monkeypatch: pytest.MonkeyPatch):
+    def test_command_map_override_wins_over_module_handler(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         _make_fake_module(monkeypatch, "widget")
         override_calls = []
 
@@ -115,7 +124,9 @@ class TestDispatchLazy:
         assert rc == 99
         assert len(override_calls) == 1
 
-    def test_scoped_parser_prog_matches_caller(self, monkeypatch: pytest.MonkeyPatch, capsys):
+    def test_scoped_parser_prog_matches_caller(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    ) -> None:
         _make_fake_module(monkeypatch, "widget")
         with pytest.raises(SystemExit):
             dispatch_lazy(
@@ -129,7 +140,7 @@ class TestDispatchLazy:
         out = capsys.readouterr().out
         assert "my-cli" in out
 
-    def test_unknown_command_raises_keyerror_not_silently_ignored(self):
+    def test_unknown_command_raises_keyerror_not_silently_ignored(self) -> None:
         with pytest.raises(KeyError):
             dispatch_lazy(
                 "nope", ["nope"],
@@ -141,34 +152,37 @@ class TestDispatchLazy:
 
 
 class TestSelfOverride:
-    def test_prefers_a_monkeypatched_global_over_local(self):
-        def real_impl():
-            return "real"
+    def test_prefers_a_monkeypatched_global_over_local(self) -> None:
+        def real_impl(value: int, /) -> str:
+            return f"real:{value}"
 
-        def fake_impl():
-            return "fake"
+        def fake_impl(value: int, /) -> str:
+            return f"fake:{value}"
 
         module_globals = {"some_name": fake_impl}
         resolved = self_override(module_globals, "some_name", real_impl)
+        if TYPE_CHECKING:
+            assert_type(resolved, Callable[[int], str])
         assert resolved is fake_impl
+        assert resolved(3) == "fake:3"
 
-    def test_falls_back_to_local_when_absent(self):
-        def real_impl():
+    def test_falls_back_to_local_when_absent(self) -> None:
+        def real_impl() -> str:
             return "real"
 
         resolved = self_override({}, "some_name", real_impl)
         assert resolved is real_impl
 
-    def test_falls_back_to_local_when_global_is_identical_to_local(self):
-        def real_impl():
+    def test_falls_back_to_local_when_global_is_identical_to_local(self) -> None:
+        def real_impl() -> str:
             return "real"
 
         module_globals = {"some_name": real_impl}
         resolved = self_override(module_globals, "some_name", real_impl)
         assert resolved is real_impl
 
-    def test_ignores_a_non_callable_global(self):
-        def real_impl():
+    def test_ignores_a_non_callable_global(self) -> None:
+        def real_impl() -> str:
             return "real"
 
         module_globals = {"some_name": "not-a-function"}
@@ -177,27 +191,30 @@ class TestSelfOverride:
 
 
 class TestCoreHelper:
-    def test_prefers_a_bound_attribute_on_core_module_over_local(self):
-        def real_impl():
-            return "real"
+    def test_prefers_a_bound_attribute_on_core_module_over_local(self) -> None:
+        def real_impl(value: int, /) -> str:
+            return f"real:{value}"
 
-        def fake_impl():
-            return "fake"
+        def fake_impl(value: int, /) -> str:
+            return f"fake:{value}"
 
         core = types.SimpleNamespace(some_name=fake_impl)
         resolved = core_helper(core, "some_name", real_impl)
+        if TYPE_CHECKING:
+            assert_type(resolved, Callable[[int], str])
         assert resolved is fake_impl
+        assert resolved(3) == "fake:3"
 
-    def test_falls_back_to_local_when_core_module_lacks_the_attribute(self):
-        def real_impl():
+    def test_falls_back_to_local_when_core_module_lacks_the_attribute(self) -> None:
+        def real_impl() -> str:
             return "real"
 
         core = types.SimpleNamespace()
         resolved = core_helper(core, "some_name", real_impl)
         assert resolved is real_impl
 
-    def test_falls_back_to_local_when_core_attribute_is_identical_to_local(self):
-        def real_impl():
+    def test_falls_back_to_local_when_core_attribute_is_identical_to_local(self) -> None:
+        def real_impl() -> str:
             return "real"
 
         core = types.SimpleNamespace(some_name=real_impl)

@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -552,3 +552,83 @@ composition prerequisites, and review/validation rules.
   The changefile covers all three libraries and their eight unique consumers.
   No installer/bootstrap or runtime source changed, so a provisioning clean
   room and external runtime rollout are not applicable.
+
+### 2026-11-02 - Initial leaf tests merged; Lazy CLI Dispatch selected
+
+- #9949 merged as `7f64116586b9343ab15aec8203f703a18581b00b`
+  after exact-head Copilot approval with no findings, no unresolved threads
+  and all required checks in
+  [run 41423907266](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41423907266).
+  The source worktree is pulled forward. Ten projects are strict and 58
+  remain pending; the full effort stays active.
+- #9951 selects all three canonical Lazy CLI Dispatch source/test/helper
+  files. Its initial strict probe reported 30 diagnostics across two files.
+  The candidate annotates tests and preserves each reflective helper's
+  callable signature through `ParamSpec` and a return type variable.
+  Narrow casts record the existing requirement that a dynamically selected
+  override honors the callable it replaces; no runtime validation is removed.
+- Both declared targets and all 22 admitted targets pass. All 14 original
+  behavior tests and their release adapter pass; existing override-selection
+  tests additionally invoke the selected callable. Real pinned MyPy client
+  controls accept valid calls and reject two incorrect arguments and two
+  incorrect return assignments, rather than silently erasing signatures.
+- Only the two changed release-unit source digests are refreshed; selected
+  nodes, decision targets and packet budget are unchanged. The changefile
+  covers the library and its sole consumer, Agent Worktrees, whose editable
+  reference already resolves the canonical source. No physical-copy rewrite
+  or pending-caller qualification is claimed.
+- This proposes 11 strict projects and 57 pending projects. Hosted
+  source/packet CI and normal review remain required. No installation,
+  bootstrap, dispatch selection or lifecycle behavior changes, so a separate
+  provisioning clean room and installed-runtime rollout are not applicable.
+- #9953's first review recommended retaining the locally exercised MyPy
+  clients as automated regressions. Four checked-in checker cases now cover
+  valid and invalid clients for both helpers; exact callable assertions in the
+  library tests also run in the required static cohort, so signature erasure
+  cannot quietly pass CI. The tests reuse the existing checker environment
+  and dependency pins. All 58 library/checker tests and both library targets
+  pass; the updated test-source digest is refreshed without changing packet
+  selection or budgets.
+
+### 2026-11-02 - Remaining hosted-review selectors repaired
+
+- #9953's post-fix reviews confirmed the callable regression finding was
+  resolved but deferred guidance acquisition again. The earlier catch-all
+  repair was incomplete: five other checked-in selectors still required the
+  obsolete CLI-only resolver/authentication workflow. No review document
+  reference was missing or deleted.
+- #9959 merged as `b5cf658c3b6871e471160b98594f85c020ea787a`,
+  addressing #9957 after exact-head Copilot approval with no findings and all
+  required checks in
+  [run 41429360484](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41429360484).
+  Its isolated worktree is finalized. All 171 focused delivery controls,
+  eight actual offline fallback selections, offline scan and deterministic
+  regeneration pass.
+- The complete existing eight-source roster now uses current locators and
+  reviewed offline fallbacks. Enabled plugins, review gates and runtime code
+  are unchanged; no installed rollout occurred. The typing worktree is pulled
+  forward for a genuine fresh assessment of #9953. Ten projects remain strict
+  and 58 pending until that proposed admission actually merges.
+
+### 2026-11-02 - Direct guidance-file reads clarified
+
+- The next #9953 review still deferred on the skill/resolver despite the
+  refreshed roster. The current renderer listed file paths but did not
+  explicitly distinguish ordinary repository file reads from source lookup.
+  #9957 retained that remaining delivery gap rather than treating a deferred
+  assessment as a passing review.
+- #9963 merged as `adafc0cee68b4a6b03fc9cb6a9592005ce0b35e3`
+  after exact-head Copilot approval with no findings and green required
+  [run 41432156252](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41432156252).
+  Its isolated worktree is finalized. The renderer and all eight committed
+  locators now explicitly allow file-tool reads without a skill, Python or
+  resolver, reserving source lookup for an unclear path.
+- All 279 focused projection/delivery controls pass, including the unchanged
+  legacy/current authority non-override controls. An initial wording that
+  imposed selection precedence was rejected by those controls and is not part
+  of the merged change. Actual offline selection, deterministic generation,
+  offline scan, Ruff and install-contract checks pass.
+- Source-specific delivery/full-read rules, reviewed fallback bodies,
+  production budgets, enablement and review gates are unchanged. No installed
+  rollout occurred. The typing worktree is pulled forward for #9953's fresh
+  assessment; the full strict-typing campaign remains active.

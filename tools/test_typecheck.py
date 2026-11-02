@@ -498,6 +498,63 @@ def test_actual_mypy_rejects_type_regressions(
     assert not (environment / "typecheck-mypy.ini").exists()
 
 
+@pytest.mark.parametrize("helper", ["self_override", "core_helper"])
+@pytest.mark.parametrize("invalid", [False, True])
+def test_actual_mypy_preserves_lazy_helper_callable_signatures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    helper: str, invalid: bool,
+) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    shutil.copyfile(
+        typecheck.ROOT / "libs/lazy-cli-dispatch/src/lazy_cli_dispatch/__init__.py",
+        root / "lazy_cli_dispatch.py",
+    )
+    owner = "{}" if helper == "self_override" else "SimpleNamespace()"
+    resolve = f"{helper}({owner}, 'local', local)"
+    source = (
+        f"from lazy_cli_dispatch import {helper}\n"
+        "from types import SimpleNamespace\n"
+        "def local(value: int, *, enabled: bool = False) -> str:\n"
+        "    return str(value)\n"
+        f"valid: str = {resolve}(3, enabled=True)\n"
+    )
+    if invalid:
+        source += (
+            f"{resolve}('wrong', enabled=True)\n"
+            f"wrong_return: int = {resolve}(3, enabled=True)\n"
+        )
+    (root / "sample.py").write_text(source, encoding="utf-8")
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return environment, "test-context"
+
+    def environment_python(_path: Path) -> Path:
+        return Path(sys.executable)
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        return lease
+
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", environment_python)
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    paths = ("sample.py", "lazy_cli_dispatch.py")
+    assert typecheck.check_project(root, project(), paths, all_paths=paths) == int(invalid)
+    output = capsys.readouterr().out
+    if invalid:
+        assert output.count(": error:") == 2
+        assert "[arg-type]" in output and "[assignment]" in output
+    else:
+        assert "Success: no issues found" in output
+    assert lease.released
+
+
 def fragment_source(tmp_path: Path) -> tuple[str, ...]:
     """Use the real loader with a small, deliberately interdependent namespace."""
     directory = tmp_path / "libs" / "installation-context"
