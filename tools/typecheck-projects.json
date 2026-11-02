@@ -81,7 +81,7 @@
         "libs/core-delegation"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-credential-relay",
