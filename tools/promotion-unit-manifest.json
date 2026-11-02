@@ -4287,7 +4287,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/pr_publication_labels.py": "aa08119bc1d1c5f3e4cd192810829ea5adbe7f7f5d1f77e869d9f68aeb37444b",
         "tools/bundle_lock.py": "83fb9d1cfd1b8901db4e8d72a521799d00fcc23390ddeb11dc6584f698c1b2f4",
         "tools/bundle_input_cases.py": "e7cd20d8ac9fb1ebeb8c9033cd77dbb6c888230dabf85117fe28795405236075",
-        "tools/promotion_unit_tests/test_bundle_inputs.py": "2a447aaf19a6f847d420e597e555096a473e6edb3888f896d2abb5937c55b24c",
+        "tools/promotion_unit_tests/test_bundle_inputs.py": "58fe264c28fe361c0e0417b6ed4f09d3ff04ebd053dcfb9310485093fa590d20",
         "tools/dependency_age.py": "8e0cbc94c78cfa9d1a3649b939571bb46c5c395601a695460fbc938c6e319a07"
     },
     "coverage_targets": [
