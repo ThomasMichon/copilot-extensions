@@ -26,7 +26,8 @@ class PivotRequestsMixin:
         """Distinguish a replacement read from an already-published held channel."""
         with self._lock:
             return (
-                machine in self._starting_scopes
+                (not self.pivot.subscribe and machine in self._inflight)
+                or machine in self._starting_scopes
                 or machine in self._refresh_pending
                 or machine in self._scope_retirements
                 or machine in self._resetting_scopes

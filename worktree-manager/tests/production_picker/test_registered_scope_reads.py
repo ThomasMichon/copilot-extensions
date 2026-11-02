@@ -731,7 +731,7 @@ def test_explicit_source_reload_replaces_only_its_owned_held_channel(tmp_path, o
     try:
         runtime.ensure_many(["a", "b"])
         wait(lambda: all(runtime.get(scope)[0] == "ready" for scope in ("a", "b")))
-        assert not runtime.read_pending("a") and not runtime.read_pending("b")
+        wait(lambda: not runtime.read_pending("a") and not runtime.read_pending("b"))
         other = next(proc for proc in runtime._procs if proc._picker_scope == "b")
         getattr(runtime, operation)("a")
         if operation == "invalidate":
@@ -852,7 +852,8 @@ def test_terminal_registered_error_footer_does_not_claim_global_loading():
     ("ready", "read settled"),
     ("error", "read failed or incomplete"),
 ])
-def test_refresh_footer_tracks_read_completion_and_origin(terminal, expected):
+@pytest.mark.parametrize("width", [80, 180])
+def test_refresh_footer_tracks_read_completion_and_origin(terminal, expected, width):
     states = {
         "host-a": ("ready", [{"id": "a"}], ""),
         "host-b": ("ready", [], ""),
@@ -867,24 +868,25 @@ def test_refresh_footer_tracks_read_completion_and_origin(terminal, expected):
     screen = engine(runtime, pivot())
     screen.sel = ("T", 0)
     screen._dispatch_key("r")
-    assert "reading declared scope(s)" in screen.footer(180).plain
+    assert "reading declared scope(s)" in screen.footer(width).plain
+    assert screen.footer(width).cell_len <= width
     states["host-a"] = (terminal, [{"id": "a"}], "unavailable" if terminal == "error" else "")
     states["host-b"] = ("ready", [], "")
-    assert expected in screen.footer(180).plain
-    assert "refreshing" not in screen.footer(180).plain
+    assert expected in screen.footer(width).plain
+    assert "refreshing" not in screen.footer(width).plain
 
     screen.machine_idx = 1
-    assert "Fixture tasks:" not in screen.footer(180).plain
+    assert "Fixture tasks:" not in screen.footer(width).plain
     screen.machine_idx = 0
-    assert expected in screen.footer(180).plain
+    assert expected in screen.footer(width).plain
     screen.pivots.append({"kind": "worktrees", "label": "Worktrees", "pivot": None})
     screen.htab = 1
     screen.sel = ("M", 0)
-    assert "Fixture tasks:" not in screen.footer(180).plain
+    assert "Fixture tasks:" not in screen.footer(width).plain
     screen.debug = "independent diagnostic"
     screen.htab = 0
     screen.sel = ("T", 0)
-    assert "independent diagnostic" in screen.footer(180).plain
+    assert "independent diagnostic" in screen.footer(width).plain
 
 
 def test_registered_row_focus_explains_actions_and_reload():
@@ -899,12 +901,17 @@ def test_registered_row_focus_explains_actions_and_reload():
     assert "Tab region" in footer and "r reload" in footer
 
 
-def test_refresh_footer_does_not_mistake_retained_ready_rows_for_a_completed_read():
-    runtime = tasks.RegisteredPivotRuntime(pivot(machine=False))
+@pytest.mark.parametrize("stream", [False, True])
+def test_refresh_footer_does_not_mistake_retained_ready_rows_for_a_completed_read(stream):
+    runtime = tasks.RegisteredPivotRuntime(pivot(machine=False, stream=stream))
     runtime._cache[""] = ("ready", [{"id": "retained"}], "")
     entered, release = threading.Event(), threading.Event()
 
     def read(scope, generation):
+        if stream:
+            with runtime._lock:
+                runtime._cache[scope] = ("ready", [{"id": "partial"}], "")
+            runtime._release_startup(scope)
         entered.set()
         assert release.wait(3)
         runtime._finish(scope, ("ready", [{"id": "current"}], ""), {})
