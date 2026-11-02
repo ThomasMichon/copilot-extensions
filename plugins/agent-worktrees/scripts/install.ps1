@@ -4031,21 +4031,29 @@ function Deploy-CopilotPlugin {
     $runningFromInstalled = (Get-SourceKind -PluginPath $PluginDir.Path) -eq 'marketplace'
 
     # 1. Register marketplace if not present
-    $marketplaces = (& $copilotExecutable @copilotPrefix plugin marketplace list 2>$null) -join "`n"
-    if ($marketplaces -notmatch 'copilot-extensions') {
-        $addOut = & $copilotExecutable @copilotPrefix plugin marketplace add ThomasMichon/copilot-extensions 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-ServiceWarn "Failed to register marketplace: $addOut"
+    $marketplaces = Invoke-NativeCapture { & $copilotExecutable @copilotPrefix plugin marketplace list }
+    if ($marketplaces.ExitCode -ne 0) {
+        Write-ServiceWarn "Failed to inspect marketplaces: $($marketplaces.Output)"
+        return
+    }
+    if ($marketplaces.Output -notmatch 'copilot-extensions') {
+        $addOut = Invoke-NativeCapture { & $copilotExecutable @copilotPrefix plugin marketplace add ThomasMichon/copilot-extensions }
+        if ($addOut.ExitCode -ne 0) {
+            Write-ServiceWarn "Failed to register marketplace: $($addOut.Output)"
             return
         }
         Write-ServiceChanged "Registered copilot-extensions marketplace"
     }
 
     # 2. Parse current plugin state
-    $pluginList = & $copilotExecutable @copilotPrefix plugin list 2>$null
+    $pluginList = Invoke-NativeCapture { & $copilotExecutable @copilotPrefix plugin list }
+    if ($pluginList.ExitCode -ne 0) {
+        Write-ServiceWarn "Failed to inspect plugins: $($pluginList.Output)"
+        return
+    }
     $hasMarketplace = $false
     $hasDirect = $false
-    foreach ($line in $pluginList) {
+    foreach ($line in ($pluginList.Output -split '\r?\n')) {
         if ($line -match 'agent-worktrees@copilot-extensions') {
             $hasMarketplace = $true
         } elseif ($line -match 'agent-worktrees' -and $line -notmatch '@') {
@@ -4057,19 +4065,21 @@ function Deploy-CopilotPlugin {
     if ($runningFromInstalled) {
         Write-ServiceOk "Copilot plugin updated (marketplace)"
     } elseif ($hasMarketplace) {
-        $out = & $copilotExecutable @copilotPrefix plugin update agent-worktrees@copilot-extensions 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-ServiceWarn "Plugin update failed: $out"
+        $out = Invoke-NativeCapture { & $copilotExecutable @copilotPrefix plugin update agent-worktrees@copilot-extensions }
+        if ($out.ExitCode -ne 0) {
+            Write-ServiceWarn "Plugin update failed: $($out.Output)"
         } else {
             Write-ServiceOk "Copilot plugin updated (marketplace)"
         }
     } else {
         $copilotCommandJson = ConvertTo-Json -Compress -InputObject @($copilotCommand)
-        $out = & $VenvPython -m agent_worktrees.activation_preservation `
-            agent-worktrees@copilot-extensions `
-            --copilot-command-json $copilotCommandJson 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-ServiceWarn "Plugin install failed: $out"
+        $out = Invoke-NativeCapture {
+            & $VenvPython -m agent_worktrees.activation_preservation `
+                agent-worktrees@copilot-extensions `
+                --copilot-command-json $copilotCommandJson
+        }
+        if ($out.ExitCode -ne 0) {
+            Write-ServiceWarn "Plugin install failed: $($out.Output)"
             return
         }
         Write-ServiceChanged "Copilot plugin installed (agent-worktrees@copilot-extensions)"
@@ -4077,10 +4087,14 @@ function Deploy-CopilotPlugin {
 
     # 4. Remove stale _direct install if marketplace is now present
     if ($hasDirect) {
-        $verify = (& $copilotExecutable @copilotPrefix plugin list 2>$null) -join "`n"
-        if ($verify -match 'agent-worktrees@copilot-extensions') {
-            & $copilotExecutable @copilotPrefix plugin uninstall agent-worktrees 2>$null | Out-Null
-            Write-ServiceChanged "Removed stale _direct plugin install"
+        $verify = Invoke-NativeCapture { & $copilotExecutable @copilotPrefix plugin list }
+        if ($verify.ExitCode -eq 0 -and $verify.Output -match 'agent-worktrees@copilot-extensions') {
+            $removed = Invoke-NativeCapture { & $copilotExecutable @copilotPrefix plugin uninstall agent-worktrees }
+            if ($removed.ExitCode -eq 0) {
+                Write-ServiceChanged "Removed stale _direct plugin install"
+            } else {
+                Write-ServiceWarn "Failed to remove stale _direct plugin install: $($removed.Output)"
+            }
         }
     }
 }
