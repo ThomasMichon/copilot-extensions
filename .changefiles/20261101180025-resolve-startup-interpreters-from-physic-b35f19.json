@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve startup interpreters from physical application environments while preserving legacy flat slots and marker precedence",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

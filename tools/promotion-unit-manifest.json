@@ -1,6 +1,15 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py::test_physical_layout_preserves_selection_tiers[current-False]",
+        "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py::test_physical_layout_preserves_selection_tiers[current-True]",
+        "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py::test_physical_layout_preserves_selection_tiers[last-good-False]",
+        "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py::test_physical_layout_preserves_selection_tiers[last-good-True]",
+        "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py::test_physical_layout_preserves_selection_tiers[complete-False]",
+        "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py::test_physical_layout_preserves_selection_tiers[complete-True]",
+        "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py::test_physical_layout_preserves_selection_tiers[newest-False]",
+        "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py::test_physical_layout_preserves_selection_tiers[newest-True]",
+        "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py::test_nested_precedence_and_reparse_refusal",
         "tools/promotion_unit_tests/test_configuration_layers.py::test_knowledge_grafts_below_machine_and_exact_repository_machine",
         "tools/promotion_unit_tests/test_configuration_layers.py::test_exact_scope_excludes_foreign_repository_machine_and_cell",
         "tools/promotion_unit_tests/test_configuration_layers.py::test_unresolved_binding_and_atomic_replacement_do_not_fall_back",
@@ -3556,6 +3565,8 @@
         "tools/promotion_unit_tests/test_native_process_driver.py::test_required_tool_closure_contains_actual_owner_startup_imports"
     ],
     "sources": {
+        "plugins/agent-dispatch/src/agent_dispatch/procutil.py": "28dc351896ffb1bce5f630ecaf2fdb4b5fb81d25d6ac372779e7d892a145503c",
+        "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py": "9a7fe55b700db622145650a2ea0842259a8598fb19a5df932ddc35547df8bfa5",
         "libs/configuration-layers/src/configuration_layers/__init__.py": "e522797fe6207e3648705759db4234936df60bcf255b36deb23f8d400b52a890",
         "libs/configuration-layers/src/configuration_context/__init__.py": "f2ff3b40d00d9f5d11bcbc337a5e5ec365a2f67600511b017dbdae2b6f481d15",
         "tools/promotion_unit_tests/test_configuration_layers.py": "42055a6e802be3bd94987cb1f60616d2d561f78a1973d91c1e2b27387a769ace",
@@ -4006,6 +4017,7 @@
         "tools/promotion_unit_tests/test_native_process_driver.py": "d7979d33c53225d5c010e8e71636542b85f61fe68f44d81e63e65bf1628ee462"
     },
     "coverage_targets": [
+        "plugins/agent-dispatch/src/agent_dispatch/procutil.py",
         "libs/installer-engine/installer_engine_footprint.py",
         "libs/configuration-layers/src/configuration_layers/__init__.py",
         "tools/core_runtime_profile.py",
