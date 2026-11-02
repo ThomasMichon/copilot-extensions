@@ -1675,3 +1675,11 @@ composition prerequisites, and review/validation rules.
   and were not performed. Linux execution uses isolated local test capacity;
   no external development venue or new CI lane is required for this library.
   Review, required CI and merge remain open gates for #10044.
+
+### 2026-11-02 - Readiness consumer release propagation
+
+- #10096's guard and review identified the missing literal `agent-machines`
+  patch entry. Its editable library reference is a release consumer even though
+  it is not a physical copy or a newly admitted checker scope. The changefile
+  now names both `libs/installer-readiness` and `agent-machines`, preserving
+  runtime rebuild propagation without changing the consumer's admission level.

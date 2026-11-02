@@ -4,6 +4,10 @@
     {
       "plugin": "libs/installer-readiness",
       "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
     }
   ]
 }
