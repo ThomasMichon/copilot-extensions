@@ -1,4 +1,4 @@
-"""Collected by the already-wired install-contract suite."""
+"""Development cases; selected in-process cases also run in the hosted unit packet."""
 from __future__ import annotations
 
 import json
@@ -172,6 +172,65 @@ class TestBundleInputs:
         project(source, "plugins/consumer", "consumer", ["client[missing]"])
         with pytest.raises(bundle.InputError, match="unknown or ambiguous extra missing"):
             bundle.render(source)
+
+    @pytest.mark.parametrize("mapped", [False, True], ids=["canonical", "mapped"])
+    @pytest.mark.parametrize("constraint", ["==2.0.0", ">=2", "<1"])
+    def test_selected_first_party_version_must_satisfy_requirement(
+        self, source, mapped, constraint,
+    ):
+        project(source, "libs/shared", "shared", ["attrs>=1"])
+        sources = None
+        if mapped:
+            project(source, "plugins/client/libs/shared", "shared", ["attrs>=1"])
+            sources = {"shared": {"path": "libs/shared"}}
+        project(
+            source, "plugins/client", "client", ["shared" + constraint],
+            {"store": []}, sources,
+        )
+        with pytest.raises(bundle.InputError, match="incompatible first-party dependency"):
+            bundle.render(source)
+
+    def test_mapped_first_party_version_is_checked_not_canonical_version(self, source):
+        project(source, "libs/shared", "shared", ["attrs>=1"])
+        selected = project(source, "plugins/client/libs/shared", "shared", ["attrs>=1"])
+        selected.write_text(
+            selected.read_text(encoding="utf-8").replace('version = "1.0.0"', 'version = "2.0.0"'),
+            encoding="utf-8",
+        )
+        project(
+            source, "plugins/client", "client", ["shared==1.0.0"], {"store": []},
+            {"shared": {"path": "libs/shared"}},
+        )
+        with pytest.raises(bundle.InputError, match="incompatible first-party dependency"):
+            bundle.render(source)
+
+    def test_first_party_development_version_remains_compatible(self, source):
+        selected = project(source, "libs/shared", "shared", ["attrs>=1"])
+        selected.write_text(
+            selected.read_text(encoding="utf-8").replace('version = "1.0.0"', 'version = "1.1.dev1"'),
+            encoding="utf-8",
+        )
+        project(source, "plugins/client", "client", ["shared>=1.0"], {"store": []})
+        assert bundle.collect_inputs(source)[0]["core"] == ["attrs>=1"]
+
+    def test_malformed_existing_output_can_be_regenerated(self, source):
+        output = source / bundle.OUTPUT
+        output.parent.mkdir(parents=True)
+        output.write_text("[project\n", encoding="utf-8")
+        assert bundle.main(["generate", "--root", str(source)]) == 0
+        bundle.check(source)
+        assert tomllib.loads(output.read_text(encoding="utf-8"))["project"]["name"] == (
+            "copilot-extensions-bundle-inputs"
+        )
+
+    def test_in_process_check_refuses_drift_without_rewriting(self, source):
+        assert bundle.main(["generate", "--root", str(source)]) == 0
+        output = source / bundle.OUTPUT
+        before = output.read_bytes()
+        project(source, "plugins/client", "client", ["pyyaml>=7"], {"store": ["numpy>=2"]})
+        with pytest.raises(bundle.InputError, match="inputs are stale"):
+            bundle.check(source)
+        assert output.read_bytes() == before
 
 
     def test_duplicate_normalized_first_party_identity_refuses(self, source):

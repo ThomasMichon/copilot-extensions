@@ -37,6 +37,8 @@ def _read(path: Path) -> dict:
 def _catalog(root: Path) -> dict[str, tuple[Path, dict]]:
     result = {}
     for manifest in manifests(root):
+        if manifest == root / OUTPUT:
+            continue
         manifest = contained_path(manifest, root)
         data = _read(manifest)
         if "project" not in data:
@@ -303,6 +305,12 @@ def collect_inputs(
                 )
                 if dependency in catalog:
                     selected = selected or catalog[dependency][0]
+                    try:
+                        version = Version(_read(selected)["project"]["version"])
+                    except (KeyError, TypeError, InvalidVersion) as exc:
+                        raise InputError(f"{dependency}: selected source version is invalid") from exc
+                    if not requirement.specifier.contains(version, prereleases=True):
+                        raise InputError(f"{name}: incompatible first-party dependency {value}")
                     pending.append((dependency, "", conditions, selected))
                     pending.extend(
                         (dependency, canonicalize_name(extra_name), conditions, selected)
