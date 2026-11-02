@@ -1,20 +1,16 @@
 {
-  "evidence_family": "http51-unchanged-source-link-v1",
-  "preserved_from": {
-    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-inbox_custody-py-38c7081a4d75.json",
-    "sha256": "becc12c661cf0e765de7da71caa6842fe1cc36fceb64183b2324cb58a430a982"
-  },
-  "advertisement_evidence": {
+  "evidence_family": "http51-shared-asgi-v1",
+  "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
-    "sha256": "50a07d4b95df52568bd34ff9cb3f1a1c93943d24cf610b62718c4c2c0de77902"
+    "sha256": "74681f27eacfc689100255d288fd5af21530eb101e04ced603a102defd07e280"
   },
-  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "b7a60683c81651b3aafce22ff205ea4ee688d412",
+    "commit": "81989cc86daf8071b71858a6e311938da9b129a2",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 51,
     "source_path": "plugins/agent-bridge/src/agent_bridge/inbox_custody.py",
-    "source_git_blob": "f5c2e89e47f9b7c77f4ddb0931645b3083ccf785",
-    "source_sha256": "3400f262278222031ebef397d316f586be2ebd05aa5a7be8bbb244923bbaa4ab"
+    "source_git_blob": "a1bd0bdeb7d4cd6b91ef74d8e3acf199dab662f7",
+    "source_sha256": "17e78684fc2697e3ce3ae6501a922929be6ddb1ac4e96c0d6892e680925e331e"
   }
 }

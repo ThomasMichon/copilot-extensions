@@ -6,11 +6,11 @@
   },
   "advertisement_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
-    "sha256": "50a07d4b95df52568bd34ff9cb3f1a1c93943d24cf610b62718c4c2c0de77902"
+    "sha256": "74681f27eacfc689100255d288fd5af21530eb101e04ced603a102defd07e280"
   },
   "scope": "unchanged source and immutable prior operation; no new runtime observation",
   "captured_from": {
-    "commit": "b7a60683c81651b3aafce22ff205ea4ee688d412",
+    "commit": "81989cc86daf8071b71858a6e311938da9b129a2",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 51,
     "source_path": "libs/zdd/src/zdd/conditional.py",
