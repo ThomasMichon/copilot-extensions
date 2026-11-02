@@ -1,0 +1,9 @@
+{
+  "comment": "Advance idle owned PR snapshots after confirmed publication and identify exact finalization blockers without weakening unmerged-work checks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

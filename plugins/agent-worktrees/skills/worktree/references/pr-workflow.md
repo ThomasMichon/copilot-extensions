@@ -1028,6 +1028,13 @@ Either way HEAD stays on
 checked out on a legacy feature branch is accepted too and pushed as-is.) It
 does not create a PR; it updates the existing one.
 
+After successful publication is recorded, an existing idle local PR snapshot
+advances to the published head only when its history is contained in the
+previously recorded head. Checked-out, symbolic, independently changed, or
+concurrently moved refs are retained. Finalization still checks every ref it
+would remove; a merged PR does not waive unpublished history. Its refusal names
+the blocking ref and commit count rather than assuming the checkout is ahead.
+
 Ordinary `push-changes` accepts only incremental publication or the bounded
 source-owned replay proof described above; an arbitrary squash or rewrite
 does not inherit that permission. To publish an **intentional local rebase

@@ -632,7 +632,11 @@ def merged_pr_block_message(
         if count is not None:
             checked.add(ref)
             if count > 0:
-                return f"Worktree/{record.worktree_id}: PR merged but carries further commits."
+                return (
+                    f"Worktree/{record.worktree_id}: PR merged but carries further commits: "
+                    f"ref '{ref}' has {count} commit(s) beyond its merged head "
+                    f"{head_sha} and {upstream}."
+                )
     return (
         f"Worktree/{record.worktree_id}: PR merged, but its merge boundary "
         f"can't be verified (unresolvable head_sha/upstream/checkout ref) -- "

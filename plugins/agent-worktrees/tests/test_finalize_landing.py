@@ -21,7 +21,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import finalize, finalize_landing, finalize_ref
+from agent_worktrees import (
+    finalize, finalize_landing, finalize_open_pr_gate, finalize_ref, git_ops, pr_publish, tracking,
+)
 from conftest import _published_seed_environment, _seed_directory
 
 
@@ -91,6 +93,85 @@ def _topology_snapshot(root: Path) -> dict[Path, bytes]:
         path.relative_to(root): path.read_bytes()
         for path in root.rglob("*") if path.is_file()
     }
+
+
+@pytest.mark.parametrize("guard", ["none", "divergent", "checked-out", "racing", "tracking-race"])
+def test_rewritten_publication_advances_only_its_idle_published_snapshot(env, monkeypatch, guard):
+    _commit(env.clone, "first.txt", "first\n")
+    snapshot = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("branch", env.slug, snapshot, cwd=env.clone)
+    _commit(env.clone, "second.txt", "second\n")
+    published = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("checkout", "-q", "-b", "rewritten", "origin/main", cwd=env.clone)
+    _commit(env.clone, "new.txt", "rewritten\n")
+    replacement = _git("rev-parse", "HEAD", cwd=env.clone)
+    pr = tracking.PRRecord(state="open", branch=env.slug, head_sha=published)
+    record = SimpleNamespace(worktree_path=str(env.clone))
+    config = SimpleNamespace(default_repo=SimpleNamespace(remote="origin"))
+    saved = []
+    def persist(*args, **kwargs):
+        saved.append(kwargs["expected"])
+        if guard == "tracking-race":
+            raise ValueError("tracking authority changed")
+
+    monkeypatch.setattr(pr_publish, "persist_publication", persist)
+    expected = replacement
+    if guard == "divergent":
+        _git("update-ref", f"refs/heads/{env.slug}", replacement, snapshot, cwd=env.clone)
+        _commit(env.clone, "later.txt", "unpublished\n")
+        replacement = _git("rev-parse", "HEAD", cwd=env.clone)
+        expected = _git("rev-parse", env.slug, cwd=env.clone)
+    elif guard == "checked-out":
+        _git("worktree", "add", "-q", str(env.tmp_path / "other"), env.slug, cwd=env.clone)
+        expected = snapshot
+    elif guard == "racing":
+        original = git_ops.git
+        expected = _git(
+            "commit-tree", f"{snapshot}^{{tree}}", "-p", snapshot,
+            "-m", "unpublished racing commit", cwd=env.clone,
+        )
+
+        def race(*args, **kwargs):
+            if args[0] == "update-ref":
+                _git("update-ref", f"refs/heads/{env.slug}", expected, snapshot, cwd=env.clone)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(git_ops, "git", race)
+    if guard == "tracking-race":
+        with pytest.raises(ValueError, match="tracking authority"):
+            pr_publish.record_reconciled_head(config, record, pr, replacement)
+        assert _git("rev-parse", env.slug, cwd=env.clone) == snapshot
+        return
+    pr_publish.record_reconciled_head(config, record, pr, replacement)
+    assert pr.head_sha == replacement and saved[0].head_sha == published
+    assert _git("rev-parse", env.slug, cwd=env.clone) == expected
+    assert _git("rev-parse", "HEAD", cwd=env.clone) == replacement
+    if guard == "none":
+        _git("push", "-q", "origin", f"{replacement}:refs/heads/{env.slug}", cwd=env.clone)
+        _git("fetch", "-q", "origin", env.slug, cwd=env.seed)
+        _git("merge", "--squash", "FETCH_HEAD", cwd=env.seed)
+        _git("commit", "-q", "-m", "merge rewritten publication", cwd=env.seed)
+        _git("push", "-q", "origin", "main", cwd=env.seed)
+        _git("fetch", "-q", "origin", cwd=env.clone)
+        pr.state = "merged"
+        record.worktree_id, record.branch, record.prs, record.pr = env.worktree_id, "rewritten", [pr], pr
+        assert not finalize_open_pr_gate.content_exceeds_merged_head_any(
+            record, "rewritten", "origin/main", cwd=str(env.clone),
+        )
+
+
+def test_finalize_refusal_identifies_stale_cleanup_snapshot(env):
+    head = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("branch", env.slug, head, cwd=env.clone)
+    _git("checkout", "-q", env.slug, cwd=env.clone)
+    _commit(env.clone, "unpublished.txt", "keep this work\n")
+    _git("checkout", "-q", f"worktree/{env.worktree_id}", cwd=env.clone)
+    pr = tracking.PRRecord(state="merged", branch=env.slug, head_sha=head)
+    record = SimpleNamespace(worktree_id=env.worktree_id, branch=f"worktree/{env.worktree_id}", pr=pr, prs=[pr])
+    message = finalize_open_pr_gate.merged_pr_block_message(
+        record, record.branch, "origin/main", cwd=str(env.clone),
+    )
+    assert f"ref '{env.slug}' has 1 commit(s)" in message
 
 
 @pytest.mark.parametrize(

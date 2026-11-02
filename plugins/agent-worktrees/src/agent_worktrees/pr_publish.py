@@ -623,6 +623,33 @@ def push_history_message(pushed, feature: str, source: str) -> str:
     )
 
 
+def _advance_published_snapshot(pr, head_sha: str, *, cwd: str) -> None:
+    """Advance only an idle snapshot contained in the previous published head."""
+    if not pr.branch or not pr.head_sha:
+        return
+    ref = f"refs/heads/{pr.branch}"
+    result = git_ops.git(
+        "for-each-ref", "--format=%(refname)%09%(objectname)%09%(worktreepath)%09%(symref)",
+        ref, cwd=cwd, check=False,
+    )
+    if result.returncode:
+        return
+    rows = [line.split("\t") for line in result.stdout.splitlines()]
+    row = next((fields for fields in rows if len(fields) == 4 and fields[0] == ref), None)
+    if row is None or row[1] == head_sha:
+        return
+    previous = row[1]
+    if row[2] or row[3] or not git_ops.is_commit_ancestor(previous, pr.head_sha, cwd=cwd):
+        output.warn(f"Local PR ref '{ref}' was retained; it is checked out or has unpublished history.")
+        return
+    updated = git_ops.git(
+        "update-ref", "--no-deref", "-m", "agent-worktrees: successful PR publication",
+        ref, head_sha, previous, cwd=cwd, check=False,
+    )
+    if updated.returncode:
+        output.warn(f"Local PR ref '{ref}' changed during publication and was retained.")
+
+
 def _persist_head(
     config: Config, record: tracking.WorktreeRecord, pushed_pr: tracking.PRRecord | None, head_sha: str,
     *, remote: str = "", head_repo: str = "", head_identity: str = "", rebase_base_sha: str = "",
@@ -644,6 +671,7 @@ def _persist_head(
             record_remote_identity(pushed_pr, remote, config.default_repo.remote, head_repo, head_identity)
     if pushed_pr is not None:
         persist_publication(config, record, pushed_pr, expected=expected)
+        _advance_published_snapshot(expected, head_sha, cwd=record.worktree_path)
 
 
 def record_reconciled_head(
