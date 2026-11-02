@@ -429,7 +429,8 @@ def test_current_worktrees_does_not_forward_a_channel_to_a_legacy_manager(tmp_pa
     assert list(tmp_path.glob("ce-terminal-*")) == []
 
 
-def test_retired_runtime_after_query_cannot_reselect_or_execute_the_receiver(tmp_path, monkeypatch):
+@pytest.mark.parametrize("damage", ["completion", "executable", "executable-without-offer"])
+def test_retired_runtime_after_query_cannot_reselect_or_execute_the_receiver(tmp_path, monkeypatch, damage):
     from _manager_process_fixture import synthetic_runtime
     from agent_procutil.owned_process import run_caller_owned
 
@@ -455,6 +456,24 @@ def test_retired_runtime_after_query_cannot_reselect_or_execute_the_receiver(tmp
     )
     assert selected == command
     assert environment["CE_TERMINAL_LAUNCH"] == "foreground-request"
+    if damage != "completion":
+        from types import SimpleNamespace
+        from agent_worktrees import picker_fast_entry
+
+        Path(selected[0]).unlink()
+        monkeypatch.delenv("WORKTREE_MANAGER_ENGINE_CMD", raising=False)
+        monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
+        monkeypatch.setattr(picker_fast_entry.registry_paths, "registry_root", lambda *_: root)
+        monkeypatch.setattr(picker_fast_entry, "_request", lambda *_: {"manager_command": command})
+        monkeypatch.setattr(terminal_launch, "select_receiver", lambda *_: (selected, environment))
+        if damage == "executable":
+            with pytest.raises(RuntimeError, match="no fallback was admitted"):
+                picker_fast_entry.dispatch(["--project", "fixture"])
+        else:
+            monkeypatch.setattr(terminal_launch, "_channel", None)
+            assert picker_fast_entry.dispatch(["--project", "fixture"]) is None
+        assert not unexpected.exists()
+        return
     (slot / ".install-complete.json").unlink()
     result = run_caller_owned(
         [*selected, "--project", "fixture"], env=environment, timeout=10,
@@ -463,6 +482,31 @@ def test_retired_runtime_after_query_cannot_reselect_or_execute_the_receiver(tmp
     assert result.returncode != 0
     assert "requires attributable completion" in result.stderr
     assert not unexpected.exists()
+
+
+def test_launcher_exception_records_failure_before_restoring_terminal_state(tmp_path):
+    from _terminal_console_fixture import Console
+    from worktree_manager.launch_attempts import LaunchAttempts
+
+    argv, _ = _scripts(tmp_path, "selected", "helper")
+    next(tmp_path.glob("selected*.ps1")).write_text("throw 'fixture launch failed'\n", encoding="utf-8")
+    environment = dict(os.environ, TEMP=str(tmp_path), TMP=str(tmp_path))
+    environment.pop("CE_TERMINAL_LAUNCH", None)
+    environment["WORKTREE_MANAGER_ROOT"] = str(tmp_path / "manager")
+    with Console(argv, env=environment, cwd=tmp_path) as console:
+        ready = _wait(tmp_path / "prepared.json", console)
+        (tmp_path / "release").touch()
+        assert console.wait() == 1, console.output.decode("utf-8", "replace")
+        assert not Path(ready["request"]).parent.exists()
+    result = json.loads((tmp_path / "host-result.json").read_text(encoding="utf-8-sig"))
+    assert result["code"] == 1 and not result["channel"]
+    assert Path(result["cwd"]) == tmp_path
+    events = LaunchAttempts(Path(environment["WORKTREE_MANAGER_ROOT"])).detail("d" * 32)["events"]
+    assert [event["phase"] for event in events] == [
+        "confirmed", "launch-requested", "launcher-returned",
+    ]
+    assert events[-1]["details"]["exit_code"] == 1
+    assert b"fixture launch failed" in console.output
 
 
 def test_legacy_forwarder_can_call_a_current_manager_without_inheriting_its_offer(tmp_path):

@@ -455,3 +455,18 @@ reviewed admission revision is implemented and qualified.
 - Exact-head required CI and review must still qualify publication. The full
   local unit packet's previously recorded privilege/platform limitation and
   the no-rollout boundary remain unchanged.
+
+### 2026-11-02 - Close post-admission failure paths
+
+- Review identified a fast-entry spawn failure that could return to ordinary
+  dispatch after a Manager had already been admitted. An active foreground
+  offer now reports that failure explicitly instead of resolving a second
+  runtime or opening another Picker. The no-offer compatibility path remains.
+- Moved the shell's finite completion observer into the attachment's cleanup
+  path. A throwing launcher now records failure before original terminal
+  environment and location are restored; it cannot leave an admitted attempt
+  without its return event merely because the script raised an exception.
+- Native regression cases remove the actual admitted executable after the
+  query, preserve the no-offer fallback, and throw from the selected shell
+  script while checking the recorded failure. These cases and the existing
+  terminal handoff packet pass without installed runtime changes.

@@ -115,7 +115,11 @@ def dispatch(argv: list[str]) -> int | None:
             os.execvpe(command[0], command, environment)
             return 1
         process, custody = spawn_sync_in_kill_on_close_job(command, env=environment)
-    except OSError:
+    except OSError as error:
+        if available():
+            raise RuntimeError(
+                "Admitted Manager could not be started; no fallback was admitted"
+            ) from error
         return None
     try:
         try:

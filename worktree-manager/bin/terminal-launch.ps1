@@ -186,6 +186,7 @@ function Invoke-WorktreeTerminalLaunch {
         }
         $savedLocation = Get-Location
         $savedNativeDirectory = [IO.Directory]::GetCurrentDirectory()
+        $launchExit = 1
         try {
             Set-Location -LiteralPath $result.cwd
             [IO.Directory]::SetCurrentDirectory($result.cwd)
@@ -194,17 +195,20 @@ function Invoke-WorktreeTerminalLaunch {
             & $result.script @launchArguments
             $launchExit = $LASTEXITCODE
         } finally {
-            Set-Location -LiteralPath $savedLocation.Path
-            [IO.Directory]::SetCurrentDirectory($savedNativeDirectory)
-        }
-        if ($result.completion.Count) {
-            $completion = @($result.completion)
             try {
-                $completionArguments = @($completion | Select-Object -Skip 1) + @([string]$launchExit)
-                & $completion[0] @completionArguments
-                if ($LASTEXITCODE -ne 0) { throw 'Completion observer returned nonzero.' }
-            } catch {
-                [Console]::Error.WriteLine('Could not retain terminal launch outcome; do not retry automatically.')
+                Set-Location -LiteralPath $savedLocation.Path
+                [IO.Directory]::SetCurrentDirectory($savedNativeDirectory)
+            } finally {
+                if ($result.completion.Count) {
+                    $completion = @($result.completion)
+                    try {
+                        $completionArguments = @($completion | Select-Object -Skip 1) + @([string]$launchExit)
+                        & $completion[0] @completionArguments
+                        if ($LASTEXITCODE -ne 0) { throw 'Completion observer returned nonzero.' }
+                    } catch {
+                        [Console]::Error.WriteLine('Could not retain terminal launch outcome; do not retry automatically.')
+                    }
+                }
             }
         }
         $global:LASTEXITCODE = $launchExit
