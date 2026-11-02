@@ -147,6 +147,28 @@ def test_missing_selected_script_does_not_publish(channel):
     assert not channel.result.exists()
 
 
+@pytest.mark.parametrize("damage", ["missing", "malformed", "consumed"])
+def test_invalid_offer_never_reaches_entrypoint_or_launch_resolution(channel, monkeypatch, capsys, damage):
+    from worktree_manager import __main__ as main
+
+    if damage == "missing":
+        channel.request.unlink()
+    elif damage == "malformed":
+        channel.request.write_text("{", encoding="utf-8")
+    else:
+        channel.result.write_text("{}", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(main, "_resolve_for", lambda *_args, **_kwargs: calls.append("resolve"))
+    monkeypatch.setattr(main, "accept_inherited_engine_command", lambda: calls.append("engine"))
+    with pytest.raises(SystemExit) as stopped:
+        main.main(["--project", "example"])
+    assert stopped.value.code == 1
+    assert "Invalid terminal launch offer" in capsys.readouterr().err
+    with pytest.raises((OSError, ValueError)):
+        main._execute_launch(SimpleNamespace(project="example", mode="new"))
+    assert calls == [] and channel.events == []
+
+
 @pytest.mark.parametrize(("offered", "selector"), [
     (False, None), (True, None), (True, "1"), (True, "0"),
 ])

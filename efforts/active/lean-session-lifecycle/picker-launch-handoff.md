@@ -470,3 +470,9 @@ reviewed admission revision is implemented and qualified.
   query, preserve the no-offer fallback, and throw from the selected shell
   script while checking the recorded failure. These cases and the existing
   terminal handoff packet pass without installed runtime changes.
+- A subsequent review identified expired offers reaching effectful resolution
+  before publication validated them. The same request validator now runs at
+  native/ordinary entry and immediately before launch resolution, while
+  publication revalidates it. Missing, malformed and already-consumed offers
+  cannot reach engine acceptance or worktree allocation. The combined query
+  and native packet passes 62 cases; focused admission cases pass 36.

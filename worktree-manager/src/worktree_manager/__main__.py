@@ -14,26 +14,25 @@ Everything here is **programmatic and non-agentic**: no AI agent is in the loop.
 
 from __future__ import annotations
 
+import sys
 from . import terminal_launch as _terminal_launch
 
 if __name__ == "__main__":
     if _terminal_launch.answer_query():
         raise SystemExit(0)
-    import sys as _entry_sys
-
-    if _entry_sys.argv[1:2] == ["--resident-picker"]:
+    _terminal_launch.validate_or_exit()
+    if sys.argv[1:2] == ["--resident-picker"]:
         from .resident_picker import main as _resident_picker_main
 
-        raise SystemExit(_resident_picker_main(_entry_sys.argv[2:]))
-    if _entry_sys.argv[1:2] == ["--resident-result"]:
+        raise SystemExit(_resident_picker_main(sys.argv[2:]))
+    if sys.argv[1:2] == ["--resident-result"]:
         from .resident_picker import finish as _resident_picker_finish
 
-        raise SystemExit(_resident_picker_finish(_entry_sys.argv[2:]))
+        raise SystemExit(_resident_picker_finish(sys.argv[2:]))
 
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1253,6 +1252,7 @@ def _run_launch(req) -> int:
 
 def _execute_launch(req) -> int:
     """Resolve + execute the operator's launch/resume (real engine)."""
+    _terminal_launch.validate()
     from . import engine_client, launch_observations, launcher
 
     attempt_id = getattr(req, "attempt_id", None)
@@ -1539,6 +1539,7 @@ def _cmd_update_steps(
 
 
 def main(argv: list[str] | None = None) -> int:
+    _terminal_launch.validate_or_exit()
     inherited_warning = accept_inherited_engine_command()
     if inherited_warning:
         print(f"worktree-manager: ignoring invalid provider handoff: "

@@ -35,10 +35,10 @@ def answer_query(arguments: list[str] | None = None) -> bool:
     return True
 
 
-def prepare(script: Path, arguments: list[str], attempt_id: str | None) -> bool:
+def validate() -> tuple[Path, dict[str, object]] | None:
     raw = _channel
     if not raw:
-        return False
+        return None
     request = Path(raw)
     info = request.lstat()
     if (
@@ -59,6 +59,24 @@ def prepare(script: Path, arguments: list[str], attempt_id: str | None) -> bool:
         or type(data.get("host_pid")) is not int or data["host_pid"] <= 0
     ):
         raise ValueError("Invalid terminal launch identity")
+    if (request.parent / "result.json").exists():
+        raise FileExistsError("Terminal launch request was already consumed")
+    return request, data
+
+
+def validate_or_exit() -> None:
+    try:
+        validate()
+    except (OSError, ValueError) as error:
+        print(f"Invalid terminal launch offer: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
+
+
+def prepare(script: Path, arguments: list[str], attempt_id: str | None) -> bool:
+    validated = validate()
+    if validated is None:
+        return False
+    request, data = validated
     from . import engine_client, launch_observations
     from .warm_picker_contract import runtime_command
 
@@ -73,7 +91,7 @@ def prepare(script: Path, arguments: list[str], attempt_id: str | None) -> bool:
     )
     launch_observations.observe(attempt_id, "launch-requested")
     result = {
-        "version": 1, "nonce": nonce, "script": str(script.resolve(strict=True)),
+        "version": 1, "nonce": data["nonce"], "script": str(script.resolve(strict=True)),
         "arguments": arguments, "cwd": str(Path.cwd()),
         "environment": environment, "completion": completion,
     }
