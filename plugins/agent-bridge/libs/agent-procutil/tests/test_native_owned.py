@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -15,6 +16,82 @@ import agent_procutil as pu
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows native prerequisite custody")
 HELPER = Path(__file__).resolve().parents[1] / "src" / "agent_procutil" / "native_owned.ps1"
+
+
+@pytest.mark.parametrize("mode", ["success", "overflow", "timeout"])
+def test_transient_native_query_bounds_capture_and_retires_its_helper(tmp_path, native_shell, mode):
+    marker = tmp_path / "query.pid"
+    release = tmp_path / "query.release"
+    program = (
+        "import os,pathlib,sys,time;"
+        f"pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n"
+        f"while not pathlib.Path({str(release)!r}).exists(): time.sleep(.01)\n"
+        + {
+            "success": "print('finite response');sys.exit(7)",
+            "overflow": "sys.stdout.write('x'*100000);sys.stdout.flush();time.sleep(30)",
+            "timeout": "time.sleep(30)",
+        }[mode]
+    )
+    body = (
+        f"$ErrorActionPreference='Stop'; . {quoted(HELPER.with_name('daemon_instances.ps1'))}; "
+        "$environment=@{}; foreach($entry in [Environment]::GetEnvironmentVariables().GetEnumerator())"
+        "{$environment[[string]$entry.Key]=[string]$entry.Value}; "
+        "$clock=[Diagnostics.Stopwatch]::StartNew(); "
+        "try { "
+        "$result=Invoke-DaemonInstanceRequest -Transient @{command='run-query';parameters=@{"
+        f"executable={quoted(sys.executable)};arguments=@('-I','-B','-c',{quoted(program)});"
+        f"cwd={quoted(tmp_path)};environment=$environment;timeout_ms=5000;limit=4096}}}}; "
+        "@{result=$result;error=$null;elapsed=$clock.ElapsedMilliseconds;"
+        "globalHelper=($null -ne [AppDomain]::CurrentDomain.GetData('copilot-daemon-instance-shell-v1'))}"
+        " | ConvertTo-Json -Compress "
+        "}catch{"
+        "@{result=$null;error=$_.Exception.Message;elapsed=$clock.ElapsedMilliseconds;"
+        "globalHelper=($null -ne [AppDomain]::CurrentDomain.GetData('copilot-daemon-instance-shell-v1'))}"
+        "|ConvertTo-Json -Compress}"
+    )
+    process, custody = pu.spawn_sync_in_kill_on_close_job(
+        [str(native_shell), "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded(body)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **pu.no_window_kwargs(),
+    )
+    target = None
+    try:
+        deadline = time.monotonic() + 15
+        while not marker.exists() or not marker.read_text().isdigit():
+            if process.poll() is not None:
+                output, error = process.communicate()
+                pytest.fail(output + error)
+            assert time.monotonic() < deadline, "query did not reach its native observation gate"
+            time.sleep(.02)
+        from agent_procutil.daemon_broker import WindowsDaemonProcess
+
+        target = WindowsDaemonProcess(int(marker.read_text()), ["query-target"])
+        assert target.poll() is None
+        release.touch()
+        stdout, stderr = process.communicate(timeout=35)
+        assert process.returncode == 0, stderr
+        target.wait(timeout=2)
+    finally:
+        if custody is not None:
+            custody.close()
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        if target is not None:
+            try:
+                target.wait(timeout=2)
+            finally:
+                target.close()
+        for stream in (process.stdout, process.stderr):
+            stream.close()
+    outcome = json.loads(stdout)
+    assert not outcome["globalHelper"], outcome
+    assert outcome["elapsed"] < 30000
+    assert marker.exists(), outcome
+    if mode == "success":
+        assert outcome["result"] == {"returncode": 7, "stdout": "finite response\n", "stderr": ""}
+        assert outcome["error"] is None
+    else:
+        assert outcome["result"] is None and outcome["error"], outcome
 
 
 def quoted(path):

@@ -135,6 +135,17 @@ guard, native-handle, finite Job and fresh-process compatibility details.
 Portable facade/transaction controls and actual Windows process/desktop
 qualification remain distinct.
 
+Finite shell queries use `Invoke-DaemonInstanceRequest -Transient` with the
+private `run-query` operation. It borrows the existing transport and strict
+child-Job/capture owner, not a daemon or new supervisor. A dedicated helper
+state closes before the response returns and never replaces the shell's
+existing instance guard. Requests supply literal argv, cwd and an explicit
+environment, a target deadline of at most 30 seconds, and per-stream capture
+limits of at most 65536 bytes. Actual child-tree settlement is required;
+timeout, output overflow and unknown cleanup cannot become successful output.
+The caller still owns applicability and capability interpretation. This
+operation does not authorize installation or target effects.
+
 The private `_windows_parent_job.transfer_lifetime_to_parent` primitive is
 a startup-only building block for a qualified, sacrificial Python helper.
 It pins the original direct parent's process handle and creation identity,

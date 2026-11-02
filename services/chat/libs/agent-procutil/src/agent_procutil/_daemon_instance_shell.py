@@ -105,10 +105,14 @@ class ShellInstanceSession:
         ):
             raise ValueError("invalid instance shell environment")
         parameters = request.get("parameters", {})
-        if command == "run-owned":
+        if command in ("run-owned", "run-query"):
             from ._native_owned import NativeOwnedFailure, run
 
             try:
+                if command == "run-query":
+                    from ._native_query import run as run_query
+
+                    return run_query(parameters)
                 return {"returncode": run(parameters)}
             except NativeOwnedFailure as error:
                 if not error.cleanup_confirmed or error.output is not None:
@@ -303,7 +307,7 @@ def _serve_requests(session: ShellInstanceSession, nonce: str) -> int:
             result = session.dispatch(request)
         except (OSError, ValueError, KeyError, TypeError) as error:
             response = {"ok": False, "error": str(error)}
-            if request.get("command") == "run-owned":
+            if request.get("command") in ("run-owned", "run-query"):
                 response["cleanup_confirmed"] = getattr(error, "cleanup_confirmed", False)
         else:
             response = {"ok": True, "result": result}

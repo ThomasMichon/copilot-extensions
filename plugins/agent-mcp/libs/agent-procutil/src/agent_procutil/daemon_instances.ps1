@@ -187,20 +187,20 @@ function Read-DaemonInstanceResponse {
 }
 
 function Invoke-DaemonInstanceRequest {
-    param([Parameter(Mandatory)][hashtable]$Request)
+    param([Parameter(Mandatory)][hashtable]$Request, [switch]$Transient)
     $gate = [string]::Intern('copilot-daemon-instance-shell-v1')
     $pendingState = $null
     $outcomeReceived = $false
     $cleanupAttempted = $false
     [Threading.Monitor]::Enter($gate)
     try {
-        $state = [AppDomain]::CurrentDomain.GetData($gate)
+        $state = if ($Transient) { $null } else { [AppDomain]::CurrentDomain.GetData($gate) }
         if ($null -eq $state) {
             $state = @{
                 process=$null; worker=$null; job=$null; input=$null; output=$null; error=$null
                 diagnostics=$null; nonce=$null; sequence=0; broken=$true; offerPermitted=$false
             }
-            [AppDomain]::CurrentDomain.SetData($gate, $state)
+            if (-not $Transient) { [AppDomain]::CurrentDomain.SetData($gate, $state) }
             $pendingState = $state
             try { Start-DaemonInstanceWorker $state }
             catch {
@@ -229,7 +229,7 @@ function Invoke-DaemonInstanceRequest {
         $Request.nonce = $state.nonce
         $seconds = 30.0
         if ($Request.command -eq 'reconcile') { $seconds = [Math]::Max(30, $Request.parameters.max_seconds + 5) }
-        if ($Request.command -eq 'run-owned') {
+        if ($Request.command -in @('run-owned', 'run-query')) {
             $seconds = [Math]::Max(30, $Request.parameters.timeout_ms / 1000.0 + 15)
         }
         $clock = [Diagnostics.Stopwatch]::StartNew()
@@ -268,6 +268,10 @@ function Invoke-DaemonInstanceRequest {
             # Runspace cancellation can bypass catch, but must retire pending work.
             if ($null -ne $pendingState -and -not $outcomeReceived -and -not $cleanupAttempted) {
                 $pendingState.broken = $true
+                $cleanupAttempted = $true
+                Close-DaemonInstanceWorker $pendingState
+            }
+            if ($Transient -and $null -ne $pendingState -and -not $cleanupAttempted) {
                 Close-DaemonInstanceWorker $pendingState
             }
         } finally { [Threading.Monitor]::Exit($gate) }
