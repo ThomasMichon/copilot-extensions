@@ -1,8 +1,8 @@
 # Pool-owned assignment startup and retry eligibility
 
 Status: **reviewed design; due-time admission, explicit atomic placement/start
-provider and opt-in caller source merged; ordinary startup integration and
-native qualification pending**.
+provider, opt-in caller and bounded explicit startup/retry source merged;
+ordinary publisher/caller integration and native qualification pending**.
 The documentation/design slice merged in
 [#9710](https://github.com/ThomasMichon/copilot-extensions/pull/9710).
 The existing due-time reservation check merged separately in
@@ -16,6 +16,11 @@ from ordinary supervisor/prompt migration and the selected startup policy.
 That explicit source slice merged in
 [#9955](https://github.com/ThomasMichon/copilot-extensions/pull/9955);
 it does not enable automatic publisher/cohort or supervisor migration.
+The bounded [startup/retry source receipt](journal/2026/11.02-bounded-startup-source.md)
+records [#9976](https://github.com/ThomasMichon/copilot-extensions/pull/9976).
+Its explicit assignment consumers use the existing supervision owner; complete
+configured publication, ordinary initial prompts and installed/native adoption
+remain separate acceptance gates.
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
 Parent: [monitor and confirmed-state effort](README.md).
 Standing intent: [Dispatch vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup).
@@ -48,7 +53,8 @@ an operational root cause.
 
 ### Selected startup and retry policy
 
-**Operator-selected policy, 2026-10-31; implementation pending:**
+**Operator-selected policy, 2026-10-31; explicit source implemented in #9976,
+ordinary integration and installed/native qualification pending:**
 
 - Allow **3 startup attempts** per claim episode, retaining the same assignment
   and reservation while those attempts remain accountable.
@@ -127,7 +133,7 @@ Recovery attempts must not erase startup history, reset counters on prompt
 delivery or override a later scheduled `not_before`. Uncertain native effects
 remain accountable until cancellation/fencing permits replacement capacity.
 
-**Source findings, not installed qualification:** fresh reservation currently
+**Legacy ordinary-source findings, not installed qualification:** fresh reservation currently
 does not transition the task to `CLAIMED`; worker `claim` and `start` remain
 separate from supervisor `reserve -> spawn -> record`. The supervisor's
 reservation/startup deadline, failed-reservation cap and stall nudge are
@@ -165,7 +171,9 @@ process exists; a launched process or delivered prompt does not prove acceptance
 ## Implementation plan
 
 The following sequencing and transaction means are **agent-recommended**;
-they implement the requested guarantees without claiming these APIs exist.
+they implement the requested guarantees. The source receipts above identify
+the explicit implemented boundaries; remaining integration means are not
+claims of an installed or complete automatic lane.
 
 1. Define one coordinator-owned supervised-placement operation. Recheck
    the complete effective instance set, priority ordering, routing, retry
@@ -264,6 +272,12 @@ The existing scalar `not_before` reservation boundary and preserved
 active/suspended paths have source coverage in #9755 (13 new controls and
 100 total passing reservation cases). This is partial credit only; it does
 not resolve the selected retry scope, atomic placement or mixed-runtime matrix.
+
+The [#9976 source receipt](journal/2026/11.02-bounded-startup-source.md) adds
+coupled queue/API, existing-supervisor, exact-native transport and rollback
+controls for the selected explicit startup/retry policy. This is partial source
+credit, not completion of the ordinary-caller, mixed-cohort or installed/native
+matrix below.
 
 - [ ] Fake-clock selection and admission before, exactly at and after retry
   eligibility; direct reservation/claim bypass attempts refuse early work.
