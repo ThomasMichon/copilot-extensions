@@ -1,0 +1,9 @@
+{
+  "comment": "Fence fresh legacy spawn admission after configured-cohort projection while preserving existing custody",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

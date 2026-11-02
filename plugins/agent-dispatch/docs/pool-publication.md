@@ -66,8 +66,11 @@ its otherwise-valid subset. An unknown write response must be recovered by
 retrying the **original** request; successful immediate replay observes the
 retained result without extending freshness. Inspection also never renews it.
 
-This is a provider-first expansion: legacy registration requests/responses and
-supervisor behavior are unchanged; ordinary callers emit no new syntax.
+This is a provider-first expansion: legacy registration requests/responses are
+unchanged and ordinary callers emit no new syntax. After cohort projection,
+the [legacy reservation fence](pool-claim-start.md#configured-cohort-legacy-reservation-fence)
+blocks fresh queued spawning through an unqualified ordinary caller; it does
+not migrate that caller or reinterpret its driver.
 Missing/out-of-range transport declarations on old or rolled-back providers
 are unsupported for this new operation, not permission to replay a write as a
 legacy registration or to reject an otherwise-supported legacy operation.
@@ -490,7 +493,8 @@ readers preserve the optional attribution and reject malformed revisions.
 The existing unfenced request-custody owner cannot acknowledge a response as
 though its original request carried a cohort fence.
 
-No HTTP configuration-publisher route or ordinary consumer is wired. This
+The [explicit projection transport](pool-cohort-transport.md) is available;
+no automatic configuration publisher is wired. This
 projection is retained metadata, not proof that an external file is still
 unchanged, that all configured writers enforce the fence, or that the named
 process holds its singleton. External atomicity, runtime publisher integration,
@@ -536,8 +540,11 @@ metadata support, not executing-runtime qualification. Only migrate callers
 after those capabilities, actual lock-holder publication and complete-source
 collection are qualified. A legacy
 peer cannot be treated as enforcing required placement semantics by ignoring
-new metadata. This expansion changes no existing registration response,
-subprocess spec, reservation, worker claim, startup or suspension behavior.
+new metadata. The provider-side
+[legacy reservation fence](pool-claim-start.md#configured-cohort-legacy-reservation-fence)
+now refuses fresh queued non-pool spawning after projection. Registration
+responses, subprocess specs, existing reservation replay, direct interactive
+claim/start and suspended recovery retain their separate contracts.
 
 See [pool definitions](pool-instances.md) for the lossless instance model and
 [current-versus-target architecture](spawn-supervisor.md#assignment-lifecycle-current-versus-target)

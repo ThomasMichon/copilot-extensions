@@ -255,6 +255,11 @@ live claim token. No new blanket ACK or executor appointment is created.
       this source boundary only; complete configured publication, ordinary
       initial-prompt/caller migration, suspended recovery, closeout and
       installed/native qualification remain open.
+- [x] Land [explicit client-backed configured-cohort projection](journal/2026/11.02-configured-cohort-transport.md)
+      and exact-history recovery in
+      [#10050](https://github.com/ThomasMichon/copilot-extensions/pull/10050).
+      This connects the existing owner/custody boundary; it does not activate
+      ordinary publication, membership, allocation or worker-prompt migration.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
       reservation admission; preserve active replay and suspended re-embodiment.
       This bounded admission fix does not complete atomic pool placement,
