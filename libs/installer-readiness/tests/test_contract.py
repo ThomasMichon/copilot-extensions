@@ -7,6 +7,7 @@ import platform as platform_module
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TypedDict, cast
 
 import pytest
 from installation_context import normalize_source, source_identity, stamp_context
@@ -69,6 +70,30 @@ payload_generator = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(payload_generator)
 
 
+class _InvocationFixture(TypedDict, total=False):
+    kind: str
+    path: str
+    command: str
+    arguments: list[str]
+
+
+class _ReadinessFixture(TypedDict):
+    schema: str
+    version: int
+    configurationEmpty: str
+    invocations: dict[str, _InvocationFixture]
+
+
+class _ModuleFixture(TypedDict, total=False):
+    id: str
+    platforms: list[str]
+    classification: str
+    installer: dict[str, _InvocationFixture]
+    readiness: _ReadinessFixture
+    dependsOn: list[str]
+    restart: str
+
+
 def _write(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
@@ -81,9 +106,9 @@ def _command_id(plugin: str) -> str:
 def _invocations(
     plugin: str,
     platforms: tuple[str, ...] = ("windows", "linux"),
-) -> tuple[dict[str, object], dict[str, object]]:
-    installer: dict[str, object] = {}
-    readiness: dict[str, object] = {}
+) -> tuple[dict[str, _InvocationFixture], dict[str, _InvocationFixture]]:
+    installer: dict[str, _InvocationFixture] = {}
+    readiness: dict[str, _InvocationFixture] = {}
     for platform in platforms:
         suffix = "ps1" if platform == "windows" else "sh"
         installer[platform] = {
@@ -107,7 +132,7 @@ def _module(
     classification: str = "required",
     configuration_empty: str = "satisfied",
     platforms: tuple[str, ...] = ("windows", "linux"),
-) -> dict[str, object]:
+) -> _ModuleFixture:
     installer, readiness = _invocations(plugin, platforms)
     return {
         "id": f"{plugin}/{local_id}",
@@ -129,7 +154,7 @@ def _script_module(
     plugin: str,
     *,
     platforms: tuple[str, ...] = ("windows", "linux"),
-) -> dict[str, object]:
+) -> _ModuleFixture:
     module = _module(plugin, platforms=platforms)
     readiness = module["readiness"]
     assert isinstance(readiness, dict)
@@ -149,7 +174,7 @@ def _payload(
     root: Path,
     plugin: str,
     *,
-    modules: list[dict[str, object]] | None = None,
+    modules: list[_ModuleFixture] | None = None,
     declined: str | None = None,
     include_reference: bool = True,
     include_command_manifest: bool = True,
@@ -296,7 +321,7 @@ def _user_settings(
     )
 
 
-def test_user_settings_discover_enabled_plugin(tmp_path):
+def test_user_settings_discover_enabled_plugin(tmp_path: Path) -> None:
     durable = tmp_path / "durable"
     copilot_home = tmp_path / "copilot"
     _user_settings(copilot_home, ("demo",))
@@ -312,7 +337,7 @@ def test_user_settings_discover_enabled_plugin(tmp_path):
     assert report.modules[0].owner.scopes == ("global",)
 
 
-def test_project_disable_overrides_user_enablement_before_filtering(tmp_path):
+def test_project_disable_overrides_user_enablement_before_filtering(tmp_path: Path) -> None:
     durable = tmp_path / "durable"
     copilot_home = tmp_path / "copilot"
     repo = tmp_path / "repo"
@@ -340,7 +365,7 @@ def test_project_disable_overrides_user_enablement_before_filtering(tmp_path):
     assert report.machine_gated_owners == ()
 
 
-def test_project_group_does_not_read_top_level_settings(tmp_path):
+def test_project_group_does_not_read_top_level_settings(tmp_path: Path) -> None:
     durable = tmp_path / "durable"
     repo = tmp_path / "repo"
     _user_settings(repo, ("demo",))
@@ -355,7 +380,7 @@ def test_project_group_does_not_read_top_level_settings(tmp_path):
     assert report.modules == ()
 
 
-def test_fixture_inventory_covers_every_enabled_machine_gated_plugin(tmp_path):
+def test_fixture_inventory_covers_every_enabled_machine_gated_plugin(tmp_path: Path) -> None:
     durable = tmp_path / "home"
     repo = tmp_path / "repo"
     _settings(repo, ("supported", "declined"))
@@ -381,7 +406,7 @@ def test_fixture_inventory_covers_every_enabled_machine_gated_plugin(tmp_path):
     assert [decline.owner.plugin_id for decline in report.declines] == ["declined"]
 
 
-def test_adapter_fixture_is_complete_and_attributable(tmp_path):
+def test_adapter_fixture_is_complete_and_attributable(tmp_path: Path) -> None:
     """The setup foundation is fixture-required despite its universal scope."""
     installations = []
     for plugin in ADAPTER_FIXTURE:
@@ -464,8 +489,8 @@ def test_adapter_fixture_is_complete_and_attributable(tmp_path):
 
 @pytest.mark.parametrize("plugin", tuple(sorted(SCRIPT_READINESS_ADAPTERS)))
 def test_self_provisioning_adapter_wrapper_is_read_only_when_runtime_absent(
-    tmp_path, plugin
-):
+    tmp_path: Path, plugin: str
+) -> None:
     source = REPO_ROOT / "plugins" / plugin
     environment = dict(os.environ)
     environment["HOME"] = str(tmp_path)
@@ -506,7 +531,7 @@ def test_self_provisioning_adapter_wrapper_is_read_only_when_runtime_absent(
     "missing",
     tuple(plugin for plugin in ADAPTER_FIXTURE if plugin != "agent-worktrees"),
 )
-def test_enabled_adapter_fixture_fails_when_metadata_is_missing(tmp_path, missing):
+def test_enabled_adapter_fixture_fails_when_metadata_is_missing(tmp_path: Path, missing: str) -> None:
     installations = []
     for plugin in ADAPTER_FIXTURE:
         source = REPO_ROOT / "plugins" / plugin
@@ -529,7 +554,7 @@ def test_enabled_adapter_fixture_fails_when_metadata_is_missing(tmp_path, missin
     )
 
 
-def test_malformed_universal_opt_in_is_not_machine_gated(tmp_path):
+def test_malformed_universal_opt_in_is_not_machine_gated(tmp_path: Path) -> None:
     payload = _payload(tmp_path / "foundation", "foundation")
     manifest_path = payload / "plugin.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -548,8 +573,8 @@ def test_malformed_universal_opt_in_is_not_machine_gated(tmp_path):
 @pytest.mark.parametrize("runtime_scope", ["machine-gated", "universal"])
 @pytest.mark.parametrize("name", [None, "different"])
 def test_manifest_name_error_preserves_completeness_scope(
-    tmp_path, runtime_scope, name
-):
+    tmp_path: Path, runtime_scope: str, name: str | None
+) -> None:
     payload = _payload(tmp_path / "demo", "demo")
     manifest_path = payload / "plugin.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -573,7 +598,7 @@ def test_manifest_name_error_preserves_completeness_scope(
     assert "plugin manifest name" in report.findings[0].message
 
 
-def test_fixture_inventory_rejects_silent_omission(tmp_path):
+def test_fixture_inventory_rejects_silent_omission(tmp_path: Path) -> None:
     durable = tmp_path / "home"
     repo = tmp_path / "repo"
     _settings(repo, ("declared", "omitted"))
@@ -602,7 +627,7 @@ def test_fixture_inventory_rejects_silent_omission(tmp_path):
     )
 
 
-def test_settings_join_uses_provenance_not_marketplace_key(tmp_path):
+def test_settings_join_uses_provenance_not_marketplace_key(tmp_path: Path) -> None:
     durable = tmp_path / "home"
     repo = tmp_path / "repo"
     _settings(repo, ("demo",), key="renamed")
@@ -619,7 +644,7 @@ def test_settings_join_uses_provenance_not_marketplace_key(tmp_path):
     assert report.modules[0].owner.provenance.marketplace_id.startswith("original--")
 
 
-def test_direct_discovery_rejects_ambiguous_payload_roots(tmp_path):
+def test_direct_discovery_rejects_ambiguous_payload_roots(tmp_path: Path) -> None:
     first = _installation(_payload(tmp_path / "one", "demo"), "demo")
     second = _installation(_payload(tmp_path / "two", "demo"), "demo")
 
@@ -630,7 +655,7 @@ def test_direct_discovery_rejects_ambiguous_payload_roots(tmp_path):
     assert report.findings[0].code == "ambiguous-installation-owner"
 
 
-def test_same_module_id_in_different_cells_is_not_a_duplicate(tmp_path):
+def test_same_module_id_in_different_cells_is_not_a_duplicate(tmp_path: Path) -> None:
     first = _installation(_payload(tmp_path / "one", "demo"), "demo")
     second = _installation(
         _payload(tmp_path / "two", "demo"),
@@ -657,7 +682,9 @@ def test_same_module_id_in_different_cells_is_not_a_duplicate(tmp_path):
         ),
     ],
 )
-def test_invalid_or_contradictory_declaration_fails(tmp_path, change, expected):
+def test_invalid_or_contradictory_declaration_fails(
+    tmp_path: Path, change: dict[str, object], expected: str
+) -> None:
     payload = _payload(tmp_path / "demo", "demo")
     path = payload / "installer-readiness.json"
     contract = json.loads(path.read_text(encoding="utf-8"))
@@ -678,9 +705,9 @@ def test_invalid_or_contradictory_declaration_fails(tmp_path, change, expected):
         ("restart", "daemon"),
     ],
 )
-def test_invalid_module_enums_fail(tmp_path, field, value):
+def test_invalid_module_enums_fail(tmp_path: Path, field: str, value: object) -> None:
     module = _module("demo")
-    module[field] = value
+    cast("dict[str, object]", module)[field] = value
     payload = _payload(tmp_path / "demo", "demo", modules=[module])
 
     report = discover_modules([_installation(payload, "demo")])
@@ -689,7 +716,7 @@ def test_invalid_module_enums_fail(tmp_path, field, value):
     assert report.findings[0].code == "invalid-module-metadata"
 
 
-def test_unknown_payload_command_fails(tmp_path):
+def test_unknown_payload_command_fails(tmp_path: Path) -> None:
     module = _module("demo")
     module["readiness"]["invocations"]["windows"]["command"] = "other"
     payload = _payload(tmp_path / "demo", "demo", modules=[module])
@@ -700,7 +727,7 @@ def test_unknown_payload_command_fails(tmp_path):
     assert "not declared" in report.findings[0].message
 
 
-def test_script_only_module_does_not_require_payload_command_manifest(tmp_path):
+def test_script_only_module_does_not_require_payload_command_manifest(tmp_path: Path) -> None:
     payload = _payload(
         tmp_path / "demo",
         "demo",
@@ -715,7 +742,7 @@ def test_script_only_module_does_not_require_payload_command_manifest(tmp_path):
     assert report.modules[0].readiness[Platform.LINUX].kind == "payload-script"
 
 
-def test_payload_command_requires_payload_command_manifest(tmp_path):
+def test_payload_command_requires_payload_command_manifest(tmp_path: Path) -> None:
     payload = _payload(
         tmp_path / "demo",
         "demo",
@@ -730,7 +757,7 @@ def test_payload_command_requires_payload_command_manifest(tmp_path):
     )
 
 
-def test_payload_command_accepts_installation_context_v2(tmp_path):
+def test_payload_command_accepts_installation_context_v2(tmp_path: Path) -> None:
     payload = _payload(tmp_path / "agent-demo", "agent-demo")
     manifest = payload / "payload-invocation.json"
     data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -745,7 +772,7 @@ def test_payload_command_accepts_installation_context_v2(tmp_path):
     assert report.modules[0].module_id == "agent-demo/runtime"
 
 
-def test_payload_command_rejects_mixed_installation_context_versions(tmp_path):
+def test_payload_command_rejects_mixed_installation_context_versions(tmp_path: Path) -> None:
     payload = _payload(tmp_path / "agent-demo", "agent-demo")
     manifest = payload / "payload-invocation.json"
     data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -760,7 +787,7 @@ def test_payload_command_rejects_mixed_installation_context_versions(tmp_path):
     assert "version 2 installation context is invalid" in report.findings[0].message
 
 
-def test_contradictory_payload_command_shapes_match_canonical_rejection(tmp_path):
+def test_contradictory_payload_command_shapes_match_canonical_rejection(tmp_path: Path) -> None:
     payload = _payload(tmp_path / "agent-demo", "agent-demo")
     manifest = payload / "payload-invocation.json"
     data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -782,7 +809,7 @@ def test_contradictory_payload_command_shapes_match_canonical_rejection(tmp_path
     assert "cannot be combined" in report.findings[0].message
 
 
-def test_payload_command_cannot_escape_through_linked_output_dir(tmp_path):
+def test_payload_command_cannot_escape_through_linked_output_dir(tmp_path: Path) -> None:
     payload = _payload(tmp_path / "demo", "demo")
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -803,7 +830,7 @@ def test_payload_command_cannot_escape_through_linked_output_dir(tmp_path):
     assert "not contained in the payload" in report.findings[0].message
 
 
-def test_contract_version_boolean_is_invalid(tmp_path):
+def test_contract_version_boolean_is_invalid(tmp_path: Path) -> None:
     payload = _payload(tmp_path / "demo", "demo")
     path = payload / "installer-readiness.json"
     contract = json.loads(path.read_text(encoding="utf-8"))
@@ -816,7 +843,7 @@ def test_contract_version_boolean_is_invalid(tmp_path):
     assert "contract version must be integer 1" in report.findings[0].message
 
 
-def test_depends_on_is_required(tmp_path):
+def test_depends_on_is_required(tmp_path: Path) -> None:
     module = _module("demo")
     del module["dependsOn"]
     payload = _payload(tmp_path / "demo", "demo", modules=[module])
@@ -827,7 +854,7 @@ def test_depends_on_is_required(tmp_path):
     assert "module.dependsOn is required" in report.findings[0].message
 
 
-def test_duplicate_unknown_self_and_cycle_dependencies_are_findings(tmp_path):
+def test_duplicate_unknown_self_and_cycle_dependencies_are_findings(tmp_path: Path) -> None:
     duplicate = _payload(
         tmp_path / "duplicate",
         "duplicate",
@@ -870,7 +897,7 @@ def test_duplicate_unknown_self_and_cycle_dependencies_are_findings(tmp_path):
     assert "dependency-cycle" in codes
 
 
-def test_failed_prerequisite_blocks_dependent_but_not_independent(tmp_path):
+def test_failed_prerequisite_blocks_dependent_but_not_independent(tmp_path: Path) -> None:
     base = _payload(tmp_path / "base", "base")
     dependent = _payload(
         tmp_path / "dependent",
@@ -905,7 +932,7 @@ def test_failed_prerequisite_blocks_dependent_but_not_independent(tmp_path):
     }
 
 
-def test_configuration_empty_semantics_control_dependency_blocking(tmp_path):
+def test_configuration_empty_semantics_control_dependency_blocking(tmp_path: Path) -> None:
     base_module = _module("base", configuration_empty="unsatisfied")
     base = _payload(tmp_path / "base", "base", modules=[base_module])
     dependent = _payload(
@@ -933,7 +960,7 @@ def test_configuration_empty_semantics_control_dependency_blocking(tmp_path):
     assert plan.steps[0].module.configuration_empty is ConfigurationEmpty.UNSATISFIED
 
 
-def test_plan_is_deterministic_and_marks_unsupported_platform(tmp_path):
+def test_plan_is_deterministic_and_marks_unsupported_platform(tmp_path: Path) -> None:
     zeta = _payload(tmp_path / "zeta", "zeta")
     alpha = _payload(tmp_path / "alpha", "alpha")
     report = discover_modules(
@@ -951,7 +978,7 @@ def test_plan_is_deterministic_and_marks_unsupported_platform(tmp_path):
     assert all(step.state is PlanState.UNSUPPORTED for step in first.steps)
 
 
-def test_readiness_parser_accepts_only_contract_states():
+def test_readiness_parser_accepts_only_contract_states() -> None:
     result = parse_readiness(
         {
             "schema": "copilot-extensions.module-readiness",
@@ -984,7 +1011,7 @@ def test_readiness_parser_accepts_only_contract_states():
         )
 
 
-def test_readiness_parser_rejects_non_string_mapping_keys_as_value_error():
+def test_readiness_parser_rejects_non_string_mapping_keys_as_value_error() -> None:
     with pytest.raises(ValueError, match="property names must be strings"):
         parse_readiness(
             {
@@ -997,7 +1024,7 @@ def test_readiness_parser_rejects_non_string_mapping_keys_as_value_error():
         )
 
 
-def test_invalid_enabled_cell_is_reported_by_fingerprint_prefix(tmp_path):
+def test_invalid_enabled_cell_is_reported_by_fingerprint_prefix(tmp_path: Path) -> None:
     durable = tmp_path / "home"
     repo = tmp_path / "repo"
     _settings(repo, ("demo",))

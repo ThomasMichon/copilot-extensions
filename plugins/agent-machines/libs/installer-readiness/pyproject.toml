@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-installer-readiness"
-version = "0.1.0-dev1"
+version = "0.1.1-dev1"
 description = "Declarative installer and readiness modules for attributed Copilot plugins"
 readme = "README.md"
 license = "MIT"

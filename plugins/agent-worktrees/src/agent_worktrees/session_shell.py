@@ -39,8 +39,6 @@ def _plain(path: Path, *, directory: bool = False) -> None:
     info = path.stat()
     if not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)):
         raise ValueError("Invalid session shell asset")
-    if not directory and info.st_nlink != 1:
-        raise ValueError("Session shell assets must not be hard-linked")
 
 
 def prepare(
