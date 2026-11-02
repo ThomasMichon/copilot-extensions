@@ -103,13 +103,13 @@ and original denials retain existing semantics; no new waiter/daemon is created.
 
 ## Source acceptance
 
-- [ ] Actual CLI parser/JSON frontdoor and bound façade execute real load/sync,
+- [x] Actual CLI parser/JSON frontdoor and bound façade execute real load/sync,
   materialization, selected submit/inspect and honest unsupported states.
-- [ ] Source-local Git fixtures prove separate attachment, retained exact
+- [x] Source-local Git fixtures prove separate attachment, retained exact
   head/common reads, text/binary/deletion, path/scope/ref drift and no lazy fetch.
-- [ ] Synthetic actual store/owner consumers preserve late-read unattempted
+- [x] Synthetic actual store/owner consumers preserve late-read unattempted
   versus unknown outcomes and confirmed/partial receipts without blind replay.
-- [ ] Old CLI/native/watch contracts remain unchanged; focused contained tests,
+- [x] Old CLI/native/watch contracts remain unchanged; focused contained tests,
   changefiles, lint/install/docs gates and current-head review/CI/merge pass.
 
 Actual allocation/preparation, tool-host registration, protected owner adoption,
