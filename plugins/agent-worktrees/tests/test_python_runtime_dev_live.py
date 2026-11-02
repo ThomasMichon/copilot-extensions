@@ -30,6 +30,13 @@ def test_real_native_dev_selects_immutable_source_and_release_restores_original(
     spec.loader.exec_module(lifecycle)
     inputs = lifecycle.engine.freeze_inputs(scripts.parent, tmp_path / "worktree")
     plugin, owner = inputs.plugin, tmp_path / "worktree"
+    (owner / "marketplace.json").write_text(json.dumps({
+        "name": "runtime-fixture",
+        "plugins": [{
+            "name": "agent-worktrees",
+            "source": plugin.relative_to(owner).as_posix(),
+        }],
+    }), encoding="utf-8")
     manifest_path = plugin / "pyproject.toml"
     original_project = manifest_path.read_text(encoding="utf-8")
     extra = plugin / "original-only"
@@ -189,6 +196,9 @@ def test_real_native_dev_selects_immutable_source_and_release_restores_original(
     )
     original = json.loads(result_path.read_text(encoding="utf-8"))
     original_manifest = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8"))
+    if not namespaced:
+        assert original_manifest["commandBinding"]["source"]["kind"] == "directory"
+        assert original_manifest["commandBinding"]["payloadRoot"] == str(plugin.resolve())
     marker_path = root / "versions" / original["runtime_version"] / ".install-complete.json"
     original_marker = marker_path.read_bytes()
     original_python = Path(original["runtime_python"])
@@ -357,3 +367,5 @@ def test_real_native_dev_selects_immutable_source_and_release_restores_original(
     assert restored["source"] == original_manifest["source"]
     assert restored["runtime_generation"] == original_identity[1]
     assert restored["runtime_slot"] == original["runtime_version"]
+    if not namespaced:
+        assert restored["commandBinding"] == original_manifest["commandBinding"]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import importlib.util
 import json
 import math
@@ -366,11 +367,17 @@ def _procutil(payload_root: Path) -> Any:
         import agent_procutil
         return agent_procutil
     helper = payload_root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py"
-    spec = importlib.util.spec_from_file_location("_lifecycle_procutil", helper)
+    namespace = "_lifecycle_procutil_" + hashlib.sha256(str(helper).encode("utf-8")).hexdigest()
+    spec = importlib.util.spec_from_file_location(namespace, helper)
     if spec is None or spec.loader is None:
         raise ValueError(f"Lifecycle containment helper is unavailable: {helper}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(spec.name, None)
+        raise
     return module
 
 
