@@ -160,10 +160,14 @@ def verify_installed_origins() -> None:
         if source_wheels is not None and name in source_wheels:
             wheel = source_wheels[name]
             digest = wheel["sha256"].removeprefix("sha256:")
+            archive = origin.get("archive_info")
             valid_origin = (
                 "dir_info" not in origin
                 and distribution.version == wheel["version"]
-                and origin.get("archive_info", {}).get("hashes") == {"sha256": digest}
+                and isinstance(archive, dict)
+                and set(archive) <= {"hash", "hashes"}
+                and archive.get("hash", "sha256=" + digest) == "sha256=" + digest
+                and (archive == {} or archive.get("hashes") == {"sha256": digest})
                 and str(origin.get("url", "")).endswith("#sha256=" + digest)
             )
         if (

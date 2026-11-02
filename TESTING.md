@@ -5223,6 +5223,11 @@ to the test-cache key. Real-installer fixtures materialize the complete
 execution closure once while retaining each preflight refusal and product-byte
 snapshot.
 
+Retained-control origin validation uses the constructor's PEP 610 archive
+contract. Empty `archive_info` retains the exact hash-pinned URL and version
+binding; an explicit wrong hash, contradictory hash fields or unsupported
+archive metadata remains a refusal.
+
 The copied-pane boundary controls are an explicit, non-serving native lane:
 
 ```text
