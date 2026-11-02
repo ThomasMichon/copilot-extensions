@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.24.402-dev1"
+    "version": "1.24.403-dev1"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.24.402-dev1",
+      "version": "1.24.403-dev1",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -74,7 +74,7 @@
     {
       "name": "efforts",
       "description": "Efforts planning system - comprehensive planning folders with explicit repository adoption, a read-only target capability probe, a README-as-shared-contract, a static completion-gate fallback, and a staged session policy producer; ships the planning-efforts and efforts-setup skills",
-      "version": "0.1.13-dev1",
+      "version": "0.1.14-dev1",
       "source": "plugins/efforts"
     },
     {
@@ -86,13 +86,13 @@
     {
       "name": "customizing-copilot",
       "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, orchestrating multi-file componentization campaigns, authoring <repo>-harness plugins, and setting up an instruction-projection sync worker - with the per-skill folder conventions and Agent Skills best practices; ships twelve focused skills",
-      "version": "0.2.55-dev1",
+      "version": "0.2.56-dev1",
       "source": "plugins/customizing-copilot"
     },
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.18.202-dev1",
+      "version": "0.18.203-dev1",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -104,7 +104,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo. Primary: help any consumer identify which local scripts/processes belong to this suite and enforce never-monkey-patch (file a bug upstream or auto-update instead). Secondary: portable contribution, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.23-dev1",
+      "version": "0.1.24-dev1",
       "source": "plugins/copilot-extensions-harness"
     },
     {
