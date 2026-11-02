@@ -450,12 +450,14 @@ def test_retired_runtime_after_query_cannot_reselect_or_execute_the_receiver(tmp
         "-S", str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
         "-m", "worktree_manager",
     ]
-    monkeypatch.setattr(terminal_launch, "_channel", "foreground-request")
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps({"version": 1, "nonce": "a" * 32, "host_pid": os.getpid()}))
+    monkeypatch.setattr(terminal_launch, "_channel", str(request))
     selected, environment = terminal_launch.select_receiver(
         command, dict(os.environ, WORKTREE_MANAGER_ROOT=str(root)),
     )
     assert selected == command
-    assert environment["CE_TERMINAL_LAUNCH"] == "foreground-request"
+    assert environment["CE_TERMINAL_LAUNCH"] == str(request)
     if damage != "completion":
         from types import SimpleNamespace
         from agent_worktrees import picker_fast_entry

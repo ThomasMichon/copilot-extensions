@@ -476,3 +476,13 @@ reviewed admission revision is implemented and qualified.
   publication revalidates it. Missing, malformed and already-consumed offers
   cannot reach engine acceptance or worktree allocation. The combined query
   and native packet passes 62 cases; focused admission cases pass 36.
+- Closed the same admission gap at the Worktrees front door and before
+  receiver queries, including legacy receivers, using one shared read-only
+  offer validator rather than diverging parsers. Preparation also publishes
+  the absolute Manager journal root so completion cannot reinterpret a
+  relative root after the terminal restores its original working directory.
+- Required Linux unit CI exposed the SDK fixture's explicit package closure
+  omitting the new query module. Added both new shared modules to that closure
+  and refreshed only its reviewed source admission. Its 170 focused cases
+  pass; the Worktrees admission packet passes 41 and Manager query/native
+  packet passes 63. Full required unit evidence still awaits the new head.

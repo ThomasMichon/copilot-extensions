@@ -48,18 +48,18 @@ The ``agent-worktrees`` prefix is stripped for SSH compatibility
 
 from __future__ import annotations
 
+import sys
 from . import terminal_launch as _terminal_launch
 
 if __name__ == "__main__":
     _terminal_launch.exit_for_query()
+    _terminal_launch.validate_or_exit()
     from .current_roster_entry import run_module_if_selected
     run_module_if_selected()
-    import sys as _entry_sys
-
-    if len(_entry_sys.argv) == 3 and _entry_sys.argv[1] == "--project":
+    if len(sys.argv) == 3 and sys.argv[1] == "--project":
         from .picker_fast_entry import dispatch as _dispatch_resident_picker
 
-        _resident_picker_result = _dispatch_resident_picker(_entry_sys.argv[1:])
+        _resident_picker_result = _dispatch_resident_picker(sys.argv[1:])
         if _resident_picker_result is not None:
             raise SystemExit(_resident_picker_result)
 
@@ -75,7 +75,6 @@ import shutil
 import signal
 import socket as _socket
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Callable
@@ -243,6 +242,7 @@ def cmd_launch(argv: list[str]) -> int:
     Consumes ``--no-update``, ``--no-mux``, and ``--verbose`` and propagates
     them as environment variables so launch-session.sh can read them.
     """
+    _terminal_launch.validate_or_exit()
     passthrough: list[str] = []
     for arg in argv:
         if arg == "--no-update":

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 import sys
 from pathlib import Path
 
@@ -36,40 +35,15 @@ def answer_query(arguments: list[str] | None = None) -> bool:
 
 
 def validate() -> tuple[Path, dict[str, object]] | None:
-    raw = _channel
-    if not raw:
-        return None
-    request = Path(raw)
-    info = request.lstat()
-    if (
-        not request.is_absolute() or request.name != "request.json"
-        or not stat.S_ISREG(info.st_mode)
-        or getattr(info, "st_file_attributes", 0) & 0x400
-        or info.st_size > 4096
-    ):
-        raise ValueError("Invalid terminal launch request")
-    data = json.loads(request.read_text(encoding="utf-8-sig"))
-    if not isinstance(data, dict):
-        raise ValueError("Invalid terminal launch identity")
-    nonce = data.get("nonce")
-    if (
-        data.get("version") != 1 or type(data.get("version")) is not int
-        or not isinstance(nonce, str) or len(nonce) != 32
-        or any(char not in "0123456789abcdef" for char in nonce)
-        or type(data.get("host_pid")) is not int or data["host_pid"] <= 0
-    ):
-        raise ValueError("Invalid terminal launch identity")
-    if (request.parent / "result.json").exists():
-        raise FileExistsError("Terminal launch request was already consumed")
-    return request, data
+    from agent_procutil._terminal_offer import validate as validate_offer
+
+    return validate_offer(_channel)
 
 
 def validate_or_exit() -> None:
-    try:
-        validate()
-    except (OSError, ValueError) as error:
-        print(f"Invalid terminal launch offer: {error}", file=sys.stderr)
-        raise SystemExit(1) from error
+    from agent_procutil._terminal_offer import validate_or_exit as require_offer
+
+    require_offer(_channel)
 
 
 def prepare(script: Path, arguments: list[str], attempt_id: str | None) -> bool:
@@ -80,9 +54,10 @@ def prepare(script: Path, arguments: list[str], attempt_id: str | None) -> bool:
     from . import engine_client, launch_observations
     from .warm_picker_contract import runtime_command
 
+    root = os.environ.get("WORKTREE_MANAGER_ROOT")
     environment = {
         "WORKTREE_MANAGER_ENGINE_ARGV": json.dumps(engine_client.engine_base_command()),
-        "WORKTREE_MANAGER_ROOT": os.environ.get("WORKTREE_MANAGER_ROOT"),
+        "WORKTREE_MANAGER_ROOT": str(Path(root).resolve()) if root else None,
         "WORKTREE_NO_MUX": os.environ.get("WORKTREE_NO_MUX"),
     }
     completion = (

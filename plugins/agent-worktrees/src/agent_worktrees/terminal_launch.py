@@ -18,6 +18,12 @@ def available() -> bool:
     return bool(_channel)
 
 
+def validate_or_exit() -> None:
+    from agent_procutil._terminal_offer import validate_or_exit as require_offer
+
+    require_offer(_channel)
+
+
 def exit_for_query(arguments: list[str] | None = None) -> None:
     if (sys.argv[1:] if arguments is None else arguments) != ["--version"]:
         return
@@ -34,6 +40,7 @@ def select_receiver(
     environment.pop(ENVIRONMENT, None)
     if not _channel or os.name != "nt":
         return list(command), environment
+    validate_or_exit()
     selector = command[-1:] if command[-1:] == ["--resident-picker"] else []
     query_command = command[:-1] if selector else command
     from agent_procutil.owned_process import run_caller_owned

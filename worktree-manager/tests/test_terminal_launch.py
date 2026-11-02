@@ -169,6 +169,37 @@ def test_invalid_offer_never_reaches_entrypoint_or_launch_resolution(channel, mo
     assert calls == [] and channel.events == []
 
 
+def test_completion_keeps_the_preparation_journal_after_caller_cwd_is_restored(tmp_path, monkeypatch):
+    from worktree_manager.launch_attempts import LaunchAttempts
+
+    preparation = tmp_path / "preparation"
+    preparation.mkdir()
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps({"version": 1, "nonce": "a" * 32, "host_pid": os.getpid()}))
+    script = tmp_path / "selected.ps1"
+    script.write_text("exit 0\n")
+    monkeypatch.setattr(terminal_launch, "_channel", str(request))
+    monkeypatch.setattr(engine_client, "engine_base_command", lambda: ["fixture-engine"])
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "manager")
+    monkeypatch.chdir(preparation)
+    attempt = "e" * 32
+    LaunchAttempts().record_intent(
+        attempt, action="resume", project="fixture", surface="native", is_local=True,
+    )
+    assert terminal_launch.prepare(script, [], attempt)
+    result = json.loads((tmp_path / "result.json").read_text())
+    assert result["environment"]["WORKTREE_MANAGER_ROOT"] == str(preparation / "manager")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", result["environment"]["WORKTREE_MANAGER_ROOT"])
+    assert terminal_launch.main([attempt, "23"]) == 0
+    events = LaunchAttempts().detail(attempt)["events"]
+    assert [event["phase"] for event in events] == [
+        "confirmed", "launch-requested", "launcher-returned",
+    ]
+    assert events[-1]["details"]["exit_code"] == 23
+    assert not (tmp_path / "manager").exists()
+
+
 @pytest.mark.parametrize(("offered", "selector"), [
     (False, None), (True, None), (True, "1"), (True, "0"),
 ])
