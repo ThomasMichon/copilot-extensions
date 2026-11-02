@@ -257,11 +257,11 @@ def enter_maintenance(
         )
         if activation["state"] in {"valid", "revalidation"}:
             metadata["activationGeneration"] = int(activation["activationGeneration"])
-    marker_entry = (
-        profile / ".copilot-extensions" / "maintenance"
-        if scope == "user"
-        else plugin_root / "maintenance"
-    )
+    if scope == "user":
+        marker_entry = profile / ".copilot-extensions" / "maintenance"
+    else:
+        assert plugin_root is not None
+        marker_entry = plugin_root / "maintenance"
     marker_entry.parent.mkdir(parents=True, exist_ok=True)
     if os.path.lexists(marker_entry):
         existing = _maintenance_inspection(
@@ -355,11 +355,11 @@ def release_maintenance(
             environment={},
         )
         plugin_root = canonical_path(validated["pluginRoot"])
-    marker_entry = (
-        profile / ".copilot-extensions" / "maintenance"
-        if scope == "user"
-        else plugin_root / "maintenance"
-    )
+    if scope == "user":
+        marker_entry = profile / ".copilot-extensions" / "maintenance"
+    else:
+        assert plugin_root is not None
+        marker_entry = plugin_root / "maintenance"
     if not os.path.lexists(marker_entry):
         return {
             "action": "maintenance-release",

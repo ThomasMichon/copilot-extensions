@@ -188,7 +188,7 @@ def _required_string(value: Mapping[str, Any], name: str, label: str) -> str:
 
 
 def _required_integer(value: Mapping[str, Any], name: str, label: str) -> int:
-    result = _exact_property(value, name)
+    result: object = _exact_property(value, name)
     if isinstance(result, bool) or not isinstance(result, int):
         _fail(f"{label}.{name} must be an integer.")
     if result < 1 or result > MAX_RECEIPT_GENERATION:
@@ -234,7 +234,7 @@ def _maintenance_candidates(
 
 
 def _optional_integer(value: Mapping[str, Any], name: str, label: str) -> int | None:
-    result = _exact_property(value, name)
+    result: object = _exact_property(value, name)
     if result is _MISSING:
         return None
     if isinstance(result, bool) or not isinstance(result, int):

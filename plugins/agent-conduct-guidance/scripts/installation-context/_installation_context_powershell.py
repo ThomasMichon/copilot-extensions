@@ -82,6 +82,7 @@ def _powershell_arguments(
     if action == "guest-status" and "Distribution" in supplied and not parameters.get("Distribution"):
         _fail("distribution must be a non-empty WSL distribution name.")
 
+    names: tuple[str, ...]
     if action in {"guest-register", "guest-status"}:
         names = ("Distribution",)
     elif action == "source-id":
