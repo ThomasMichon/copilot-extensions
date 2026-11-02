@@ -3683,6 +3683,16 @@ release metadata; configured-feed availability remains an installation check.
 Dependabot's seven-day cooldown is complementary, not a substitute for that
 guard or the resolver cutoff.
 
+The declaration audit has one reviewed required-transitive prerelease exception:
+`opentelemetry-semantic-conventions==0.66b1` in
+`tools/typecheck-otlp-requirements.txt`, only while that same lock pins its
+requiring stable SDK to `opentelemetry-sdk==1.45.1`. Other files, versions,
+ranges and conditional parent pins remain subject to the stable-only rule.
+Every artifact of the reviewed pin must still be non-yanked and at least seven
+days old, with known timestamps. Checker preparation retains its mandatory
+SHA256 hash lock and canonical installer cutoff; this declaration exception
+does not relax installation integrity or enable an optional runtime dependency.
+
 `installer_dependency_policy.py` is the canonical stdlib-only installer policy,
 with private settings-projection and configuration-retention primitives in
 `installer_dependency_config.py`; both ship beside each versioned runtime helper

@@ -47,7 +47,7 @@ def test_actual_interrupted_tail_rolls_under_existing_operation_owner(tmp_path: 
 
 def test_actual_lock_contention_prevents_record_and_effect(tmp_path: Path) -> None:
     writer = store(tmp_path)
-    called = []
+    called: list[str] = []
     with OperationLock(tmp_path / ".synthetic.lock"):
         with pytest.raises(RuntimeError):
             writer.write_event_strict(EVENT)
@@ -71,7 +71,7 @@ def test_actual_append_with_sync_failure_is_unknown_not_permission_or_replay(
         sync(fd)
 
     monkeypatch.setattr(append.os, "fsync", fail_sync)
-    called = []
+    called: list[str] = []
     with pytest.raises(OSError, match="synthetic sync"):
         writer.write_event_strict(EVENT)
         called.append("backend")
@@ -91,7 +91,7 @@ def test_actual_nonordinary_target_refuses_without_modifying_other_file(
     elif kind == "hardlink":
         os.link(other, target)
     else:
-        os.mkfifo(target)
+        getattr(os, "mkfifo")(target)
     with pytest.raises(OSError):
         append.append_bytes_strict(target, b"{}\n")
     assert other.read_bytes() == b"original"

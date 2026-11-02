@@ -1,0 +1,21 @@
+{
+  "comment": "Qualify canonical Process Telemetry source and tests with strict MyPy using its declared optional OTLP checker environment.",
+  "changes": [
+    {
+      "plugin": "libs/process-telemetry",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
