@@ -9,17 +9,17 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event, Thread
-from types import ModuleType, SimpleNamespace
-from typing import TYPE_CHECKING
+from types import ModuleType, SimpleNamespace, TracebackType
+from typing import TYPE_CHECKING, ParamSpec, Protocol, TypeVar, cast
 
 import pytest
 
 from _powershell_fixture import _run_owner_probe
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from typing_extensions import assert_type
     from installation_context import _validation_scope
 
@@ -27,6 +27,20 @@ if TYPE_CHECKING:
         return str(value)
 
     assert_type(_validation_scope(_typed_validation), Callable[[int], str])
+
+_Parameters = ParamSpec("_Parameters")
+_Result = TypeVar("_Result")
+
+
+class _ValidationScope(Protocol):
+    def __call__(
+        self, function: Callable[_Parameters, _Result],
+    ) -> Callable[_Parameters, _Result]: ...
+
+
+def _validation_scope_for(module: ModuleType) -> _ValidationScope:
+    return cast(_ValidationScope, module._validation_scope)
+
 
 LIB = Path(__file__).resolve().parents[1]
 POSIX_SCRIPT = LIB / "installation-context.sh"
@@ -166,7 +180,7 @@ def test_windows_path_comparison_retains_extended_io_paths(
     module = _load_python_module()
     resolved = []
 
-    def physical_path(path):
+    def physical_path(path: Path) -> Path:
         resolved.append(path)
         return path
 
@@ -181,7 +195,7 @@ def test_powershell_safe_open_preserves_extended_length_file_reads(
     tmp_path: Path, path_units: int,
 ) -> None:
     directory = tmp_path / "long-open"
-    prefix_units = lambda value: len(str(value).encode("utf-16le")) // 2
+    prefix_units: Callable[[Path], int] = lambda value: len(str(value).encode("utf-16le")) // 2
     while path_units - prefix_units(directory) - 1 > 240:
         directory /= "component"
     filename_units = path_units - prefix_units(directory) - 1
@@ -207,7 +221,7 @@ def test_powershell_atomic_directory_preserves_extended_length_paths(
     tmp_path: Path, path_units: int,
 ) -> None:
     parent = tmp_path / "atomic-directory"
-    prefix_units = lambda value: len(str(value).encode("utf-16le")) // 2
+    prefix_units: Callable[[Path], int] = lambda value: len(str(value).encode("utf-16le")) // 2
     while path_units - prefix_units(parent) - 1 > 240:
         parent /= "component"
     parent.mkdir(parents=True)
@@ -243,7 +257,7 @@ def test_powershell_atomic_publication_preserves_long_paths_without_replacement(
     tmp_path: Path, path_units: int,
 ) -> None:
     parent = tmp_path / "atomic-move"
-    prefix_units = lambda value: len(str(value).encode("utf-16le")) // 2
+    prefix_units: Callable[[Path], int] = lambda value: len(str(value).encode("utf-16le")) // 2
     while path_units - prefix_units(parent) - 1 > 240:
         parent /= "component"
     parent.mkdir(parents=True)
@@ -383,7 +397,7 @@ def test_python_cache_hit_rehashes_same_metadata_rewrite(tmp_path: Path) -> None
     path.write_bytes(b'{"value":"first"}\n')
     original = path.stat()
 
-    @module._validation_scope
+    @_validation_scope_for(module)
     def probe() -> None:
         module.read_json(path)
         path.write_bytes(b'{"value":"other"}\n')
@@ -426,19 +440,19 @@ def test_python_validation_cache_is_isolated_between_threads(
     release_second = Event()
     outcomes: dict[str, object] = {}
 
-    @module._validation_scope
+    @_validation_scope_for(module)
     def nested_cache_identity() -> int:
         cache = module._VALIDATED_FILE_SHA256.get()
         assert cache is not None
         return id(cache)
 
-    @module._validation_scope
+    @_validation_scope_for(module)
     def first_validation() -> None:
         module.read_json(path)
         first_cached.set()
         assert second_cached.wait(5)
 
-    @module._validation_scope
+    @_validation_scope_for(module)
     def second_validation() -> None:
         assert first_cached.wait(5)
         module.read_json(path)
@@ -630,30 +644,33 @@ def test_python_wide_directory_stops_on_first_over_limit_entry(
     root.mkdir()
     for index in range(32):
         (root / f"{index:02d}").write_bytes(b"x")
-    real_scandir = module.os.scandir
+    real_scandir = os.scandir
 
     class GuardedScandir:
-        def __init__(self, source: object) -> None:
+        def __init__(self, source: int | str | os.PathLike[str]) -> None:
             self._iterator = real_scandir(source)
             self._consumed = 0
 
-        def __enter__(self):
+        def __enter__(self) -> GuardedScandir:
             self._iterator.__enter__()
             return self
 
-        def __exit__(self, *args: object) -> object:
-            return self._iterator.__exit__(*args)
+        def __exit__(
+            self, exc_type: type[BaseException] | None,
+            exc_value: BaseException | None, traceback: TracebackType | None,
+        ) -> None:
+            return self._iterator.__exit__(exc_type, exc_value, traceback)
 
-        def __iter__(self):
+        def __iter__(self) -> GuardedScandir:
             return self
 
-        def __next__(self):
+        def __next__(self) -> os.DirEntry[str]:
             self._consumed += 1
             if self._consumed > 4:
                 raise AssertionError("enumeration continued beyond max_entries + 1")
             return next(self._iterator)
 
-    def guarded_scandir(source: object) -> GuardedScandir:
+    def guarded_scandir(source: int | str | os.PathLike[str]) -> GuardedScandir:
         return GuardedScandir(source)
 
     monkeypatch.setattr(module.os, "scandir", guarded_scandir)
@@ -679,32 +696,37 @@ def test_python_final_membership_scan_is_bounded(
     root = tmp_path / "snapshot"
     root.mkdir()
     (root / "original").write_bytes(b"x")
-    real_scandir = module.os.scandir
+    real_scandir = os.scandir
     scan_count = 0
 
     class GuardedScandir:
-        def __init__(self, source: object, limit: int | None) -> None:
+        def __init__(
+            self, source: int | str | os.PathLike[str], limit: int | None,
+        ) -> None:
             self._iterator = real_scandir(source)
             self._limit = limit
             self._consumed = 0
 
-        def __enter__(self):
+        def __enter__(self) -> GuardedScandir:
             self._iterator.__enter__()
             return self
 
-        def __exit__(self, *args: object) -> object:
-            return self._iterator.__exit__(*args)
+        def __exit__(
+            self, exc_type: type[BaseException] | None,
+            exc_value: BaseException | None, traceback: TracebackType | None,
+        ) -> None:
+            return self._iterator.__exit__(exc_type, exc_value, traceback)
 
-        def __iter__(self):
+        def __iter__(self) -> GuardedScandir:
             return self
 
-        def __next__(self):
+        def __next__(self) -> os.DirEntry[str]:
             self._consumed += 1
             if self._limit is not None and self._consumed > self._limit:
                 raise AssertionError("final comparison scan was not bounded")
             return next(self._iterator)
 
-    def guarded_scandir(source: object) -> GuardedScandir:
+    def guarded_scandir(source: int | str | os.PathLike[str]) -> GuardedScandir:
         nonlocal scan_count
         scan_count += 1
         if scan_count == 2:
@@ -745,14 +767,17 @@ def test_python_deep_snapshot_tree_exceeds_default_recursion_limit(
         leaf.write_bytes(b"x")
         max_entries = depth + 1
         max_path_bytes = len(("d/" * depth + "f").encode("utf-8"))
-        real_open = module.os.open
-        real_close = module.os.close
+        real_open = os.open
+        real_close = os.close
         live_descriptors: set[int] = set()
         descriptor_high_water = 0
 
-        def tracking_open(*args: object, **kwargs: object) -> int:
+        def tracking_open(
+            path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+            flags: int, mode: int = 0o777, *, dir_fd: int | None = None,
+        ) -> int:
             nonlocal descriptor_high_water
-            descriptor = real_open(*args, **kwargs)
+            descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
             live_descriptors.add(descriptor)
             descriptor_high_water = max(
                 descriptor_high_water,
@@ -908,7 +933,8 @@ capture_regular_file "$1" "Probe file" "$2" true true
     )
     probe.chmod(0o755)
     fifo = tmp_path / "receipt.fifo"
-    os.mkfifo(fifo)
+    if sys.platform != "win32":
+        os.mkfifo(fifo)
     reaped_timer = tmp_path / "reaped-timer"
     started = time.monotonic()
 
@@ -948,8 +974,10 @@ done
     )
     target = tmp_path / "receipt"
     target.write_bytes(b"receipt\n\n")
+    bash = shutil.which("bash")
+    assert bash is not None
     result = subprocess.run(
-        (shutil.which("bash"), str(probe), "status", str(target), str(tmp_path / "capture")),
+        (bash, str(probe), "status", str(target), str(tmp_path / "capture")),
         capture_output=True,
         timeout=5,
         check=False,
