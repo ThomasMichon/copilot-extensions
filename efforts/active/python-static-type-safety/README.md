@@ -598,7 +598,7 @@ composition prerequisites, and review/validation rules.
   obsolete CLI-only resolver/authentication workflow. No review document
   reference was missing or deleted.
 - #9959 merged as `b5cf658c3b6871e471160b98594f85c020ea787a`,
-  closing #9957 after exact-head Copilot approval with no findings and all
+  addressing #9957 after exact-head Copilot approval with no findings and all
   required checks in
   [run 41429360484](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41429360484).
   Its isolated worktree is finalized. All 171 focused delivery controls,
@@ -609,3 +609,26 @@ composition prerequisites, and review/validation rules.
   are unchanged; no installed rollout occurred. The typing worktree is pulled
   forward for a genuine fresh assessment of #9953. Ten projects remain strict
   and 58 pending until that proposed admission actually merges.
+
+### 2026-11-02 - Direct guidance-file reads clarified
+
+- The next #9953 review still deferred on the skill/resolver despite the
+  refreshed roster. The current renderer listed file paths but did not
+  explicitly distinguish ordinary repository file reads from source lookup.
+  #9957 retained that remaining delivery gap rather than treating a deferred
+  assessment as a passing review.
+- #9963 merged as `adafc0cee68b4a6b03fc9cb6a9592005ce0b35e3`
+  after exact-head Copilot approval with no findings and green required
+  [run 41432156252](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41432156252).
+  Its isolated worktree is finalized. The renderer and all eight committed
+  locators now explicitly allow file-tool reads without a skill, Python or
+  resolver, reserving source lookup for an unclear path.
+- All 279 focused projection/delivery controls pass, including the unchanged
+  legacy/current authority non-override controls. An initial wording that
+  imposed selection precedence was rejected by those controls and is not part
+  of the merged change. Actual offline selection, deterministic generation,
+  offline scan, Ruff and install-contract checks pass.
+- Source-specific delivery/full-read rules, reviewed fallback bodies,
+  production budgets, enablement and review gates are unchanged. No installed
+  rollout occurred. The typing worktree is pulled forward for #9953's fresh
+  assessment; the full strict-typing campaign remains active.
