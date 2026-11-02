@@ -2,6 +2,22 @@
   "schema": "http51-standard-native-send-cases-v1",
   "generation": 51,
   "requests": {
+    "live_cli_request": {
+      "version": 1, "expected_session_id": "fixture-live-original",
+      "idempotency_key": "fixture-live-prompt", "sender": "fixture-controller",
+      "body": "Fixture original native input."
+    },
+    "live_cli_commands": {
+      "prompt": ["--json", "send", "fixture-live-original", "--live-exact",
+        "--expected-session-id", "fixture-live-original", "--idempotency-key", "fixture-live-prompt",
+        "--sender", "fixture-controller", "--prompt-file", "-", "--no-wait"],
+      "receipt": ["--json", "send", "fixture-live-original", "--live-receipt-only",
+        "--expected-session-id", "fixture-live-original", "--idempotency-key", "fixture-live-prompt",
+        "--sender", "fixture-controller", "--prompt-file", "-", "--no-wait"],
+      "notify": ["--json", "send", "fixture-live-original", "--live-exact-notify", "--kind", "notify",
+        "--expected-session-id", "fixture-live-original", "--idempotency-key", "fixture-live-notify",
+        "--sender", "fixture-controller", "--prompt-file", "-", "--no-wait"]
+    },
     "prompt": "Continue the original assignment.\nKeep \"prior context\".",
     "receipt_route": "/api/v1/sessions/bridge-a/turns/native-bound/send/receipt",
     "receipt_command": [
@@ -26,6 +42,20 @@
     }
   },
   "expected": {
+    "live_cli": {
+      "capabilities": {"live_keyed_receipt": 1, "live_exact_notify": 1},
+      "prompt": {"exit": 0, "stage": "admitted"},
+      "receipt": {"exit": 0, "same_original": true, "readonly": true},
+      "notify": {"exit": 0, "kind": "notify", "delivery": "steer"},
+      "poll_binding": {"old_reader_hidden": true, "original_native": true},
+      "cold_rollback": {"refused": true, "unchanged": true, "no_fabricated_custody": true},
+      "replay_rejections": {"passed": 18, "failed": 0},
+      "old_prompt": {"exit": 69, "outcome": "refused_unavailable", "posts": []},
+      "old_notify": {"exit": 69, "outcome": "refused_unavailable", "posts": []},
+      "rollover": {"original_rows": true, "successor_pending": [], "successor_ack": 0,
+        "original_receipt": true, "post_probe_notify": 409},
+      "no_hosted_queue": true, "no_ensure": true
+    },
     "advertised": {"protocol_version": 51, "min_protocol_version": 1},
     "receipt": {"version": 1, "session_id": "bridge-a", "native_session_id": "native-a", "invocation_key": "same-operation", "turn_index": 0, "queued": false, "admission": "accepted"},
     "same_retry": true,

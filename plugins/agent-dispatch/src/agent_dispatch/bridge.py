@@ -741,6 +741,8 @@ def send_nudge(
     sender: str = "agent-dispatch-supervisor",
     idempotency_key: str | None = None,
     timeout: float | None = 20.0,
+    machine: str | None = None,
+    expected_session_id: str | None = None,
 ) -> bool:
     """Send a non-blocking **nudge** to a live embodied session via agent-bridge.
 
@@ -751,7 +753,29 @@ def send_nudge(
     Best-effort: returns ``True`` on a clean send, ``False`` if the bridge CLI is
     absent or the send fails -- a failed nudge is never fatal (a genuinely-gone
     worker is handled by liveness recovery, not the nudge).
+
+    Supplying ``machine`` requires ``expected_session_id`` and uses the existing
+    host-bound command transport and negotiated exact-notify operation.
+    That raw fence refuses a changed live target, including a routing alias;
+    notification never requests a new native or queues a work-bearing prompt.
     """
+    if expected_session_id is not None or machine is not None:
+        from .bridge_command_delivery import send_command
+
+        if not isinstance(expected_session_id, str) or not expected_session_id.strip():
+            raise ValueError("host-bound nudge requires an exact retained session")
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+            raise ValueError("host-bound nudge requires an original notification key")
+        return send_command(
+            [
+                "--json", "send", "--no-wait", "--live-exact-notify", "--kind", "notify", "--sender", sender,
+                "--expected-session-id", expected_session_id,
+                "--idempotency-key", idempotency_key,
+                expected_session_id, "--prompt-file", "-",
+            ],
+            message, machine=machine, launch_prefix=_agent_bridge_launch_prefix,
+            run_ssh=run_ssh_command, timeout=timeout,
+        )
     exe = _agent_bridge_launch_prefix()
     if exe is None:
         return False

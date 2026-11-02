@@ -39,6 +39,44 @@ def _validate_contract(result: object, *, explicit_start: bool = False) -> dict:
     return result
 
 
+def validate_placement_result(
+    result: object, *, task_id: str, reserved_by: str, catalog_revision: int, driver: str,
+) -> dict:
+    """Validate the shared explicit placement result without authorizing replay."""
+    if not isinstance(result, dict):
+        raise DispatchError(502, "pool placement outcome is unknown: invalid response")
+    assignment = result.get("assignment")
+    reservation = result.get("reservation")
+    if (
+        result.get("protocol") != POOL_PLACEMENT_PROTOCOL
+        or type(result.get("version")) is not int or result["version"] != POOL_PLACEMENT_VERSION
+        or type(result.get("reserved")) is not bool
+        or not isinstance(assignment, dict) or not isinstance(reservation, dict)
+    ):
+        raise DispatchError(502, "pool placement outcome is unknown: invalid claim envelope")
+    if (
+        assignment.get("task_id") != task_id or reservation.get("task_id") != task_id
+        or any(
+            not isinstance(assignment.get(name), str) or not assignment[name].strip()
+            for name in ("registration_id", "machine", "env", "reservation_key")
+        )
+        or reservation.get("key") != assignment["reservation_key"]
+        or not _positive_integer(assignment.get("task_generation"))
+        or type(assignment.get("catalog_revision")) is not int or assignment["catalog_revision"] < 0
+        or result["reserved"] and (
+            assignment["catalog_revision"] != catalog_revision
+            or reservation.get("reserved_by") != reserved_by
+            or reservation.get("state") != "reserving"
+            or reservation.get("driver") != driver
+            or reservation.get("release_requested") is not False
+            or reservation.get("startup_fenced") is not False
+            or not _positive_integer(reservation.get("startup_revision"))
+        )
+    ):
+        raise DispatchError(502, "pool placement outcome is unknown: inconsistent claim binding")
+    return result
+
+
 class PoolPlacementClientMixin:
     """Negotiate with the executing coordinator before explicit pool effects."""
 
@@ -96,38 +134,10 @@ class PoolPlacementClientMixin:
             ))
         except ValueError as exc:
             raise DispatchError(502, "pool placement outcome is unknown: invalid response") from exc
-        if not isinstance(result, dict):
-            raise DispatchError(502, "pool placement outcome is unknown: invalid response")
-        assignment = result.get("assignment")
-        reservation = result.get("reservation")
-        if (
-            result.get("protocol") != POOL_PLACEMENT_PROTOCOL
-            or type(result.get("version")) is not int or result["version"] != POOL_PLACEMENT_VERSION
-            or type(result.get("reserved")) is not bool
-            or not isinstance(assignment, dict) or not isinstance(reservation, dict)
-        ):
-            raise DispatchError(502, "pool placement outcome is unknown: invalid claim envelope")
-        if (
-            assignment.get("task_id") != task_id or reservation.get("task_id") != task_id
-            or any(
-                not isinstance(assignment.get(name), str) or not assignment[name].strip()
-                for name in ("registration_id", "machine", "env", "reservation_key")
-            )
-            or reservation.get("key") != assignment["reservation_key"]
-            or not _positive_integer(assignment.get("task_generation"))
-            or type(assignment.get("catalog_revision")) is not int or assignment["catalog_revision"] < 0
-            or result["reserved"] and (
-                assignment["catalog_revision"] != catalog_revision
-                or reservation.get("reserved_by") != reserved_by
-                or reservation.get("state") != "reserving"
-                or reservation.get("driver") != driver
-                or reservation.get("release_requested") is not False
-                or reservation.get("startup_fenced") is not False
-                or not _positive_integer(reservation.get("startup_revision"))
-            )
-        ):
-            raise DispatchError(502, "pool placement outcome is unknown: inconsistent claim binding")
-        return result
+        return validate_placement_result(
+            result, task_id=task_id, reserved_by=reserved_by,
+            catalog_revision=catalog_revision, driver=driver,
+        )
 
     def start_pool_task(
         self, task_id: str, worker_id: str, *, owner_session_id: str,

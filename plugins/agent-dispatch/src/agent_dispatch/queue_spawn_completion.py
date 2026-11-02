@@ -59,6 +59,7 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
         now: float | None = None,
         authority_expected: tuple | None = None,
         ordinary_redrive: dict | None = None,
+        pool_startup_retry: dict | None = None,
     ) -> SpawnReservation:
         """Publish a body identity, optionally closing the launch caller.
 
@@ -84,6 +85,12 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
                 startup_complete=startup_complete, startup_revision=startup_revision,
                 session_handle=session_handle, worktree=worktree, now=now,
             )
+        if pool_startup_retry is not None and (
+            ordinary_redrive is not None or authority_expected is not None
+            or worktree != pool_startup_retry.get("worktree")
+            or session_handle != pool_startup_retry.get("native_id")
+        ):
+            raise TaskError("pool retry requires its own exact publication operation")
 
         def authority_guard(row: sqlite3.Row) -> None:
             if startup_complete is True and not row["startup_complete"] and row["agent_info"]:
@@ -112,8 +119,10 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
             key,
             to_state=SpawnState.SPAWNED,
             allowed_from=frozenset({SpawnState.RESERVING, SpawnState.SPAWNED, SpawnState.COLD})
-            | (frozenset({SpawnState.RELEASING}) if startup_complete is True else frozenset()),
-            preserve_releasing=startup_complete is True,
+            | (frozenset({SpawnState.RELEASING}) if startup_complete is True or (
+                pool_startup_retry is not None and pool_startup_retry.get("action") == "complete"
+            ) else frozenset()),
+            preserve_releasing=startup_complete is True or pool_startup_retry is not None,
             session_handle=session_handle,
             startup_complete=startup_complete,
             expected_startup_revision=startup_revision,
@@ -121,4 +130,5 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
             exclusive_released=False,
             now=now,
             guard=authority_guard,
+            pool_startup_retry=pool_startup_retry,
         )

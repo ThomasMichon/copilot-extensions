@@ -105,6 +105,7 @@ export class InFlightMessages {
   constructor(limit = 50) {
     this.pending = new Map();
     this.consumed = new Set();
+    this.consumptionObservers = new Set();
     this.limit = limit;
   }
 
@@ -119,12 +120,45 @@ export class InFlightMessages {
   observe(event) {
     const id = consumedMessageId(event);
     if (id !== null) {
-      this.pending.delete(id);
-      this.consumed.add(id);
-      while (this.consumed.size > this.limit) {
-        this.consumed.delete(this.consumed.values().next().value);
-      }
+      this._rememberConsumed(id);
+      for (const observer of this.consumptionObservers) observer(id);
     }
+  }
+
+  _rememberConsumed(id) {
+    this.pending.delete(id);
+    this.consumed.delete(id);
+    this.consumed.add(id);
+    while (this.consumed.size > this.limit) {
+      this.consumed.delete(this.consumed.values().next().value);
+    }
+  }
+
+  watchConsumption() {
+    // Keep active delivery observations even when the bounded history evicts them.
+    const consumed = new Set(this.consumed);
+    const polled = new Set();
+    let selected = false;
+    const observer = (id) => {
+      if (!selected || polled.has(id)) consumed.add(id);
+    };
+    this.consumptionObservers.add(observer);
+    return {
+      has: (id) => consumed.has(id),
+      select: (ids) => {
+        for (const id of ids) polled.add(id);
+        for (const id of consumed) {
+          if (!polled.has(id)) consumed.delete(id);
+        }
+        selected = true;
+      },
+      close: () => {
+        this.consumptionObservers.delete(observer);
+        for (const id of polled) {
+          if (consumed.has(id)) this._rememberConsumed(id);
+        }
+      },
+    };
   }
 
   // The unconsumed messages older than `id`, oldest first, removed from tracking.
@@ -257,6 +291,7 @@ export function transcriptTail(text, types, maxEvents = REPLAY_MAX_EVENTS) {
 export const REJECTED_RETRY_MS = 5 * 60 * 1000;
 
 export function adoptSessionId(state, eventSessionId, now = Date.now()) {
+  if (eventSessionId) state.nativeSessionId = eventSessionId;
   if (!eventSessionId || eventSessionId === state.sessionId) return false;
   // An id the bridge refused for this process (see serializedRegister) is
   // tried again only after a while, not on every event.
@@ -355,19 +390,49 @@ export function serializedRegister(
 //
 // ``mainTurn`` (a MainTurn) says whether an interrupt has a main turn to abort;
 // without one, every interrupt aborts first (the historical behavior).
-export async function drainInbox(sid, { getJson, post, session, inFlight, mainTurn,
-  pluginReadiness = false, isCurrent = () => true, log = () => {} }) {
+export async function drainInbox(sid, options) {
+  const consumption = options.inFlight.watchConsumption();
+  try {
+    return await drainObservedInbox(sid, options, consumption);
+  } finally {
+    consumption.close();
+  }
+}
+
+async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainTurn,
+  pluginReadiness = false, isCurrent = () => true, log = () => {} }, consumption) {
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
-  const inbox = `${base}/messages${pluginReadiness ? "?plugin_readiness=true" : ""}`;
+  const inbox = `${base}/messages?exact_native=true${pluginReadiness ? "&plugin_readiness=true" : ""}`;
   const data = await getJson(inbox);
   const messages = data?.messages;
   if (!Array.isArray(messages) || messages.length === 0) return [];
+  consumption.select(messages.filter((msg) => msg && typeof msg.id === "number").map((msg) => msg.id));
   const delivered = [];
   let interrupted = false;
+  const currentNative = async (msg) => {
+    if (!msg.exact_session) return true;
+    if (!isCurrent() || msg.original_session_id !== sid
+        || typeof session.rpc?.metadata?.snapshot !== "function") {
+      log(`exact message ${msg.id} held: native context unavailable or changed`);
+      return false;
+    }
+    const context = await session.rpc.metadata.snapshot();
+    if (!isCurrent() || context?.sessionId !== msg.original_session_id) {
+      log(`exact message ${msg.id} held: native context changed before delivery`);
+      return false;
+    }
+    return true;
+  };
+  const stillCurrent = (msg) => !msg.exact_session || isCurrent();
   for (const incoming of messages) {
     let msg = incoming;
     if (!msg || typeof msg.id !== "number") continue;
     try {
+      if (!await currentNative(msg) || !stillCurrent(msg)) continue;
+      if (consumption.has(msg.id)) {
+        delivered.push(msg.id);
+        continue;
+      }
       if (String(msg.kind || "").startsWith("startup:prompt:")) {
         if (!pluginReadiness || !msg.plugin_readiness) {
           log(`startup message ${msg.id} held: readiness context unavailable`);
@@ -389,6 +454,10 @@ export async function drainInbox(sid, { getJson, post, session, inFlight, mainTu
         }
         msg = { ...msg, kind: "prompt" };
       }
+      if (consumption.has(msg.id)) {
+        delivered.push(msg.id);
+        continue;
+      }
       const plan = deliveryPlan(msg, { mainTurnRunning: mainTurn ? mainTurn.running : true });
       // One interrupt per batch: a second interrupt in the same batch must not
       // cancel the turn the first one just started.
@@ -402,13 +471,23 @@ export async function drainInbox(sid, { getJson, post, session, inFlight, mainTu
         }
         // The abort discarded every message still pending in the CLI;
         // re-send those (oldest first) so the interrupt loses nothing.
-        for (const earlier of inFlight.takeBefore(msg.id)) {
+        const replay = inFlight.takeBefore(msg.id);
+        // Restore the whole batch before any awaited operation can reject.
+        // Only an observed user.message consumes an acknowledged input.
+        for (const earlier of replay) inFlight.sent(earlier);
+        for (const earlier of replay) {
+          if (!await currentNative(earlier) || !stillCurrent(earlier)
+              || !inFlight.pending.has(earlier.id)) {
+            continue;
+          }
           await session.send({ ...deliveryPlan(earlier).options, mode: "immediate" });
-          inFlight.sent(earlier);
         }
       }
-      await session.send(plan.options);
-      inFlight.sent(msg);
+      if (!await currentNative(msg) || !stillCurrent(msg)) continue;
+      if (!consumption.has(msg.id)) {
+        await session.send(plan.options);
+        if (!consumption.has(msg.id)) inFlight.sent(msg);
+      }
       delivered.push(msg.id);
     } catch (e) {
       log(`deliver failed for message ${msg.id}: ${e.message}`);

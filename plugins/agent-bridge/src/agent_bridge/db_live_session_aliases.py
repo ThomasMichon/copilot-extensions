@@ -14,7 +14,7 @@ CANONICAL_SESSION_SQL = (
 # Retained rows name their original native context; only legacy rows follow
 # routing aliases. Binds the requested id three times.
 MESSAGE_TARGET_SQL = (
-    "(CASE WHEN runtime_custody_json IS NOT NULL OR handoff_json IS NOT NULL "
+    "(CASE WHEN exact_session=1 OR runtime_custody_json IS NOT NULL OR handoff_json IS NOT NULL "
     f"THEN ? ELSE {CANONICAL_SESSION_SQL} END)"
 )
 
@@ -341,7 +341,7 @@ def _fold_in_predecessor(
         # Retained custody belongs to the original native context, not its
         # temporary routing alias. Legacy messages still follow the rename.
         "UPDATE live_messages SET session_id=? WHERE session_id=? "
-        "AND runtime_custody_json IS NULL AND handoff_json IS NULL",
+        "AND exact_session=0 AND runtime_custody_json IS NULL AND handoff_json IS NULL",
         (session_id, predecessor_id),
     )
     conn.execute(

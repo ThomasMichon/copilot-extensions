@@ -60,6 +60,8 @@ def test_plan_changes_only_exact_source_declarations_and_doc_reference(source):
     before, after = original["contracts"][0], updated["contracts"][0]
     assert before["provenance"] == after["provenance"]
     assert before["fixtures"] == after["fixtures"]
+    assert all(after["capability_versions"][key] == value
+               for key, value in evidence.CAPABILITY_VERSIONS.items())
     assert {row["path"] for row in after["source_paths"]} == set(evidence.AFFECTED)
     for row in after["source_paths"]:
         assert row["semantic"] is True and row["non_semantic_reason"] is None
@@ -133,3 +135,6 @@ def test_semantic_portfolio_requires_receipt_sources_and_probe():
     assert evidence.previous.PREFIX + "routes/health.py" in evidence.AFFECTED
     assert "plugins/agent-bridge/tests/http51_receipt_probes.py" in evidence.EXTRA_PATHS
     assert ("NATIVE_SEND_RECEIPT_CAPABILITY_VERSION", 1) in evidence.SPEC.capability_floors
+    assert evidence.previous.PREFIX + "live_exact_notify.py" in evidence.AFFECTED
+    assert evidence.previous.PREFIX + "live_keyed_receipt.py" in evidence.AFFECTED
+    assert "plugins/agent-bridge/tests/http51_live_cli_probes.py" in evidence.EXTRA_PATHS

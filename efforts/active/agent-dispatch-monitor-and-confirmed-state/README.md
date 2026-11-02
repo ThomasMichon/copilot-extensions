@@ -23,7 +23,8 @@ Admitted caller/startup integration, the remaining design and installed/native
 qualification remain open.
 The [explicit caller boundary](../../../plugins/agent-dispatch/docs/pool-claim-start.md)
 adds negotiated allocator requests and opt-in current-worker acceptance;
-automatic supervisor/prompt migration and startup policy remain separate gates.
+its source merged in [#9955](https://github.com/ThomasMichon/copilot-extensions/pull/9955).
+Automatic supervisor/prompt migration and startup policy remain separate gates.
 Existing submission/conversation phases and their custodians remain unchanged.
 
 **Priority clarification (2026-10-31):** drive the
@@ -236,6 +237,12 @@ live claim token. No new blanket ACK or executor appointment is created.
       have coupled queue/API/source coverage. Admitted caller migration,
       bounded startup decisions/exhaustion, selected counters/backoffs,
       suspended recovery and installed qualification remain unchecked above.
+- [x] Land explicit runtime-negotiated placement and current-worker acceptance
+      callers in [#9955](https://github.com/ThomasMichon/copilot-extensions/pull/9955).
+      The opt-in CLI and rollback-safe explicit start route have coupled
+      transport/parser coverage. Automatic publisher/cohort/supervisor/prompt
+      migration, startup decisions/exhaustion/counters and native qualification
+      remain open; this is not the comprehensive implementation item's exit.
 - [x] Implement and source-test existing queued `not_before` enforcement at fresh
       reservation admission; preserve active replay and suspended re-embodiment.
       This bounded admission fix does not complete atomic pool placement,
@@ -2106,3 +2113,22 @@ older provider no matching operation and refuses before mutation. A two-provider
 transport control switches after the successful health read and proves no
 legacy start or ownership mutation occurs; a direct legacy control confirms
 the ordinary route would otherwise accept that same claim.
+
+### 2026-11-02 - Explicit caller source reviewed and merged
+
+[#9955](https://github.com/ThomasMichon/copilot-extensions/pull/9955) is actually
+squash-merged to `dev` as `dfb0c6e648e43abfd91b5deae89c00fa41db99ca`
+from source `c0b65780702348fd1895ffc9b9e76b7fb492f5a9`. The current-head
+review is APPROVED with no active issues; the concrete between-read/write
+rollback defect is corrected, not waived. Required CI and the managed
+submitter-direct merge completed. The parent coordination issue remains open.
+
+The bounded coupled matrix passes 475 controls with verified cleanup, alongside
+focused caller typing, lint, install, documentation and changed-module guards.
+Only the explicit caller-source item receives completion credit. Continue the
+claim/start work with durable reservation-preserving startup episodes,
+reachable-worker decisions, queued exhaustion retaining unknown effects and
+the selected retry/cooldown policy through existing owners. Complete configured
+publication and ordinary lane/prompt integration still need their own
+qualification. Suspended recovery, own-worktree closeout and every remaining
+parent/native gate stay open; this source merge activates no runtime.
