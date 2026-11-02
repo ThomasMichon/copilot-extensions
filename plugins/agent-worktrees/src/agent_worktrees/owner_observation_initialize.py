@@ -49,11 +49,12 @@ def _apply(owner, record, expected_source_generation, boundaries):
                     "source replacement needs the current incarnation", "source-replaced"
                 )
             boundaries.append(failures.before(old))
-            if old is not None and record.key in owner._failures:
+            pending = None if old is None else owner.pending_failure(old)
+            if pending is not None:
                 conn.execute(
                     "UPDATE owner_observation_journal SET gap=? WHERE generation=?",
                     (
-                        owner._failure_reasons.get(record.key, "journal-write-failed"),
+                        pending.reason,
                         old["generation"],
                     ),
                 )
@@ -104,8 +105,8 @@ def initialize(
                         raise c.ObservationError(
                             "replacement changed before qualification", "source-replaced"
                         )
-                owner._failures.pop(record.key, None)
-                owner._failure_reasons.pop(record.key, None)
+                boundary = boundaries[0]
+                owner._clear_failure(record.key, boundary.generation, boundary.source)
             return owner.snapshot(selected)[0]
         except (OSError, sqlite3.Error) as error:
             boundary = boundaries[0] if boundaries else None

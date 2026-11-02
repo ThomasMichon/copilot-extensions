@@ -99,6 +99,11 @@ invalidation requires fresh agreement with the admitted journal boundary or
 the materialized target, not a project/worktree key or a lock-timeout exception.
 If that agreement cannot be established, report the unavailable operation
 without guessing that the current projection belongs to the failed mutation.
+Pending invalidation belongs to the verified journal generation and source,
+not every retained journal for the same project/worktree. A replacement's
+failure cannot change its predecessor's healthy retained history; an existing
+predecessor gap remains its own coverage qualification across replacement
+failure and recovery.
 
 Native event identity is source, generation and record identity. A payload
 locator participates in content integrity, not identity: changed content or

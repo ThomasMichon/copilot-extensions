@@ -527,6 +527,21 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - Journal-local pending failures
+
+- Pending invalidation records the verified journal generation and source.
+  Snapshots, gaps, archived pages, initialization and append/recovery consume
+  only a matching failure; replacement B cannot contaminate healthy retained A.
+- Replacement persists A's own preexisting gap before retiring its pending
+  failure. B's failure/recovery neither changes that coverage nor erases it.
+  Recovery clears only the matching materialized target's pending failure.
+- Legacy key-based failure recording acquires the current owner/journal fence;
+  invalid reason metadata is rejected before any state change.
+- The focused owner packet passed 119 cases, including healthy and failed
+  predecessors across replacement failure/recovery and rejected legacy failure
+  admission. This remains source awaiting review, not attached feeds, rollout,
+  native qualification or whole-parent completion.
+
 ### 2026-11-02 - Admission-qualified database failure handling
 
 - Connection and transaction-lock failures before source/cursor/replacement

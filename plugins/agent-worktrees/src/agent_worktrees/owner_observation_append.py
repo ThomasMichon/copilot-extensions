@@ -86,7 +86,7 @@ def delivery_failed(
             if c.sequence(expected_cursor, owner._source(row)) != row["position"]:
                 raise c.ObservationError("owner observation position changed", "stale-cursor")
             owner._fence(conn)
-            owner.append_failed(record.key, error, reason="cursor-unavailable")
+            owner._mark_failed(row, error, reason="cursor-unavailable")
     except (OSError, sqlite3.Error) as failure:
         raise MutationFailure(
             f"delivery failure could not establish admission: {type(failure).__name__}: {failure}",
@@ -196,11 +196,8 @@ def append(
             ),
         )
     conn.executemany("INSERT INTO owner_observation_identity VALUES (?,?,?,?)", identities)
-    gap = (
-        owner._failure_reasons.get(record.key, "journal-write-failed")
-        if record.key in owner._failures
-        else row["gap"]
-    )
+    pending_failure = owner.pending_failure(row)
+    gap = pending_failure.reason if pending_failure is not None else row["gap"]
     conn.execute(
         "UPDATE owner_observation_journal SET head=?,qualified=?,position=?,facts=?,fence=?,"
         "observed_at=?,availability=?,completeness=?,gap=? WHERE generation=?",

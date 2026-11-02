@@ -17,6 +17,172 @@ from agent_worktrees.owner_observation_history import OwnerObservationHistory
 from agent_worktrees.owner_observation_runtime import OwnerObservationRuntime
 
 
+def journal_page(owner, generation):
+    return owner.history_page(
+        {
+            "contract_version": 1,
+            "project": "project",
+            "worktree_id": "full-worktree",
+            "expected_head_session_id": "head",
+            "source_generation": generation,
+            "before_cursor": None,
+            "limit": 64,
+        }
+    )
+
+
+def test_replacement_append_failure_does_not_contaminate_healthy_predecessor_history(runtime):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(replace(record(), completeness="complete"))
+    one = replace(record(1), completeness="complete")
+    old = owner.publish(
+        one, [event(one)], batch_id="A:1", expected_cursor=initial["cursor"], post_save=True
+    )
+    old_page = journal_page(owner, old["source_generation"])
+    replacement = replace(record(2, incarnation="record:B"), completeness="complete")
+    new = owner.initialize(replacement, expected_source_generation=old["source_generation"])
+    three = replace(record(3, incarnation="record:B"), completeness="complete")
+    accepted = owner.publish(
+        three, [event(three)], batch_id="B:1", expected_cursor=new["cursor"], post_save=True
+    )
+    stream = owner.stream(request(), lambda: False)
+    try:
+        assert next(stream) == accepted
+        with sqlite3.connect(owner.history.path) as conn:
+            conn.execute(
+                "CREATE TRIGGER fail_B BEFORE INSERT ON owner_observation_entry "
+                "BEGIN SELECT RAISE(ABORT,'B journal append failure'); END",
+            )
+        four = replace(record(4, incarnation="record:B"), completeness="complete")
+        with pytest.raises(c.ObservationError):
+            owner.publish(
+                four,
+                [event(four)],
+                batch_id="B:2",
+                expected_cursor=accepted["cursor"],
+                post_save=True,
+            )
+        assert next(stream)["reason"] == "journal-write-failed"
+        assert next(stream)["facts"] is None
+        assert owner.read(request())["facts"] is None
+        assert journal_page(owner, old["source_generation"]) == old_page
+        with sqlite3.connect(owner.history.path) as conn:
+            conn.execute("DROP TRIGGER fail_B")
+        duplicate = owner.publish(
+            three,
+            [event(three)],
+            batch_id="B:1",
+            expected_cursor=accepted["cursor"],
+            post_save=True,
+        )
+        assert duplicate["facts"] is None
+        assert journal_page(owner, old["source_generation"]) == old_page
+        current = owner.publish(
+            four, [event(four)], batch_id="B:2", expected_cursor=accepted["cursor"], post_save=True
+        )
+        assert current["facts"] == four.facts
+        assert owner.read(request())["source_generation"] == new["source_generation"]
+        assert journal_page(owner, old["source_generation"]) == old_page
+    finally:
+        stream.close()
+
+
+def test_failed_predecessor_retains_own_gap_when_replacement_fails_and_recovers(runtime):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(replace(record(), completeness="complete"))
+    one = replace(record(1), completeness="complete")
+    old = owner.publish(
+        one, [event(one)], batch_id="A:1", expected_cursor=initial["cursor"], post_save=True
+    )
+    with sqlite3.connect(owner.history.path) as conn:
+        conn.execute(
+            "CREATE TRIGGER fail_A BEFORE INSERT ON owner_observation_entry "
+            "BEGIN SELECT RAISE(ABORT,'A original failure'); END",
+        )
+    with pytest.raises(c.ObservationError):
+        owner.publish(
+            record(2),
+            [event(record(2))],
+            batch_id="A:2",
+            expected_cursor=old["cursor"],
+            post_save=True,
+        )
+    with sqlite3.connect(owner.history.path) as conn:
+        conn.execute("DROP TRIGGER fail_A")
+    replacement = record(2, incarnation="record:B")
+    new = owner.initialize(replacement, expected_source_generation=old["source_generation"])
+    old_page = journal_page(owner, old["source_generation"])
+    assert old_page["availability"] == "observed"
+    assert old_page["durability"] == "committed" and old_page["completeness"] == "partial"
+    large = event(record(3, incarnation="record:B"))
+    large["payload"] = {"details": ["x" * 3500] * 9}
+    with pytest.raises(c.ObservationError) as error:
+        owner.publish(
+            record(3, incarnation="record:B"),
+            [large],
+            batch_id="B:oversize",
+            expected_cursor=new["cursor"],
+            post_save=True,
+        )
+    assert error.value.code == "cursor-unavailable"
+    assert (
+        owner.history.snapshot(c.Selection("project", "full-worktree", "head"))[1]["reason"]
+        == "cursor-unavailable"
+    )
+    assert journal_page(owner, old["source_generation"]) == old_page
+    with sqlite3.connect(owner.history.path) as conn:
+        assert (
+            conn.execute(
+                "SELECT gap FROM owner_observation_journal WHERE generation=?",
+                (old["source_generation"],),
+            ).fetchone()[0]
+            == "journal-write-failed"
+        )
+    for bad_cursor, source in ((old["cursor"], "record:B"), (new["cursor"], "record:one")):
+        candidate = record(3, incarnation=source)
+        with pytest.raises(c.ObservationError):
+            owner.publish(
+                candidate,
+                [event(candidate)],
+                batch_id="late:A",
+                expected_cursor=bad_cursor,
+                post_save=True,
+            )
+    assert owner.read(request())["facts"] is None
+    current = record(3, incarnation="record:B")
+    recovered = owner.publish(
+        current,
+        [event(current)],
+        batch_id="B:recovery",
+        expected_cursor=new["cursor"],
+        post_save=True,
+    )
+    assert recovered["facts"] == current.facts
+    assert journal_page(owner, old["source_generation"]) == old_page
+
+
+def test_private_key_failure_requires_current_owner_journal_and_valid_reason_first(runtime):
+    owner, _clock, _wakes = runtime
+    old = owner.initialize(record())
+    with pytest.raises(c.ObservationError):
+        owner.history.append_failed(record().key, OSError("invalid reason"), reason="invented")
+    assert owner.history._failures == {}
+    new = owner.initialize(
+        record(1, incarnation="record:B"), expected_source_generation=old["source_generation"]
+    )
+    with sqlite3.connect(owner.history.path) as blocker:
+        blocker.execute("BEGIN IMMEDIATE")
+        with pytest.raises(sqlite3.OperationalError):
+            owner.history.append_failed(record().key, OSError("no acquisition"))
+        assert owner.history._failures == {}
+        blocker.rollback()
+    owner.history.append_failed(record().key, OSError("verified current journal"))
+    pending = owner.history._failures[record().key]
+    assert pending.generation == new["source_generation"] and pending.source == "record:B"
+    assert owner.read(request())["facts"] is None
+    assert journal_page(owner, old["source_generation"])["availability"] == "observed"
+
+
 def request(head="head", after=None):
     return {
         "contract_version": 1,

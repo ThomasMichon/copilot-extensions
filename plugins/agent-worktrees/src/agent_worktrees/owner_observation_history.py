@@ -72,8 +72,7 @@ class OwnerObservationHistory:
         self._lock = threading.RLock()
         self._active = False
         self._retired = False
-        self._failures: dict[tuple[str, str], str] = {}
-        self._failure_reasons: dict[tuple[str, str], str] = {}
+        self._failures: dict[tuple[str, str], failures.PendingFailure] = {}
 
     def _authority(self) -> None:
         if self._retired or self.authority_check() is not True:
@@ -181,7 +180,7 @@ class OwnerObservationHistory:
             state = "unknown"
         elif selected.expected_head_session_id != row["head"]:
             state = "head-changed"
-        failure = self._failures.get((row["project"], row["worktree"]))
+        failure = self.pending_failure(row)
         if failure:
             state = "unavailable"
         return {
@@ -241,10 +240,9 @@ class OwnerObservationHistory:
             body.update(entries=[], replay_complete=False)
             snapshot = c.frame("snapshot", source, body["replay_barrier"], body)
             reason = "cursor-unavailable"
-        if self._failures.get((row["project"], row["worktree"])):
-            reason = self._failure_reasons.get(
-                (row["project"], row["worktree"]), "journal-write-failed"
-            )
+        failure = self.pending_failure(row)
+        if failure is not None:
+            reason = failure.reason
         return snapshot, reason
 
     def snapshot(
@@ -266,7 +264,9 @@ class OwnerObservationHistory:
             completeness="partial",
             reason=reason,
             base_cursor=base,
-            details=self._failures.get((row["project"], row["worktree"]), reason),
+            details=failure.details
+            if (failure := self.pending_failure(row)) is not None
+            else reason,
             reconcile="snapshot-and-history",
             source_ref=None,
         )
@@ -358,8 +358,7 @@ class OwnerObservationHistory:
                 with closing(self._connect()) as conn:
                     self._fence(conn)
                 if materialized:
-                    self._failures.pop(record.key, None)
-                    self._failure_reasons.pop(record.key, None)
+                    self._clear_failure(record.key, boundary.after_generation, record.source)
                 return self.snapshot(selected)[0]
             except (OSError, sqlite3.Error) as error:
                 raise failures.qualify(self, record, boundary, error) from error
@@ -447,6 +446,44 @@ class OwnerObservationHistory:
         *,
         reason: str = "journal-write-failed",
     ) -> None:
-        with self._lock:
-            self._failures[key] = str(error)[:1024] or type(error).__name__
-            self._failure_reasons[key] = c.enum(reason, c.GAP_REASONS, "gap reason")
+        c.enum(reason, c.GAP_REASONS, "gap reason")
+        selected = c.Selection(*key, None)
+        with self._lock, closing(self._connect(write=True)) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._fence(conn)
+            row = self._row(conn, selected)
+            self._fence(conn)
+            self._mark_failed(row, error, reason=reason)
+
+    def _mark_failed(self, row, error: Exception, *, reason: str = "journal-write-failed") -> None:
+        reason = c.enum(reason, c.GAP_REASONS, "gap reason")
+        generation = c.generation(row["generation"])
+        source = c.reference(row["source"], "journal source")
+        self._failures[(row["project"], row["worktree"])] = failures.PendingFailure(
+            generation,
+            source,
+            reason,
+            str(error)[:1024] or type(error).__name__,
+        )
+
+    def pending_failure(self, row) -> failures.PendingFailure | None:
+        pending = self._failures.get((row["project"], row["worktree"]))
+        return (
+            pending
+            if pending is not None
+            and (
+                pending.generation,
+                pending.source,
+            )
+            == (row["generation"], row["source"])
+            else None
+        )
+
+    def _clear_failure(self, key, generation, source) -> None:
+        pending = self._failures.get(key)
+        if pending is not None and (pending.generation, pending.source) == (generation, source):
+            self._failures.pop(key)
+
+    @property
+    def _failure_reasons(self) -> dict:
+        return {key: pending.reason for key, pending in self._failures.items()}

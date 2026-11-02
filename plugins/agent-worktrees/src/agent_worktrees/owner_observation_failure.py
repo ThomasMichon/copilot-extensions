@@ -20,6 +20,14 @@ class MutationFailure(c.ObservationError):
 
 
 @dataclass(frozen=True)
+class PendingFailure:
+    generation: str
+    source: str
+    reason: str
+    details: str
+
+
+@dataclass(frozen=True)
 class Admission:
     generation: str | None
     source: str | None
@@ -110,7 +118,11 @@ def qualify(
                     invalidated=False,
                 )
             owner._fence(conn)
-            owner.append_failed(record.key, error)
+            if current is None:
+                return MutationFailure(
+                    "admitted initialization has no journal to invalidate", invalidated=False
+                )
+            owner._mark_failed(current, error)
     except (OSError, sqlite3.Error):
         return MutationFailure(
             "owner failure could not reestablish its admitted source fence", invalidated=False
