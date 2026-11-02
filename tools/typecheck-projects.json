@@ -121,7 +121,7 @@
         "libs/fleet-contracts"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-fleet-index-adapter",

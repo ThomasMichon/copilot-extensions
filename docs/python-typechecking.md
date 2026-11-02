@@ -6,7 +6,7 @@ and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
 The admitted cohort qualifies the checker code/tests, the complete Bootstrap
 Killswitch, Config Migrate, Configuration Layers, Core Delegation, Dropin Registry,
-Endpoint Rendezvous, Installation Context, Lazy CLI Dispatch,
+Endpoint Rendezvous, Fleet Contracts, Installation Context, Lazy CLI Dispatch,
 Peer Launch, Remote Login Shell, Session Liveness Probe and Worktree Identity
 source/test projects.
 Other projects are explicitly pending. Source CI and the
@@ -29,6 +29,7 @@ python tools/typecheck.py lib-configuration-layers
 python tools/typecheck.py lib-core-delegation
 python tools/typecheck.py lib-dropin-registry
 python tools/typecheck.py lib-endpoint-rendezvous
+python tools/typecheck.py lib-fleet-contracts
 python tools/typecheck.py lib-installation-context
 python tools/typecheck.py lib-lazy-cli-dispatch
 python tools/typecheck.py lib-peer-launch
@@ -99,6 +100,15 @@ canonical source/test project, including native ownership/concurrency fixtures.
 JSON record values remain an explicit dynamic serialization boundary. This
 admission does not claim that existing malformed-record or publication-race
 tracking is resolved, nor that independent in-package variants inherit checking.
+
+Fleet Contracts checks all six canonical source/test files in the base
+environment on both targets. Serialization dictionaries and dataclass
+introspection retain explicit dynamic boundaries; runtime validation and
+frozen-record semantics are unchanged. Positive test factories preserve real
+keyword contracts, while intentionally invalid constructor vectors use
+narrow invocation boundaries confined to negative tests. The SSH consumer
+remains independently pending; canonical admission does not qualify its
+whole runtime.
 
 Lazy CLI Dispatch checks all three canonical files, including its tests and
 helper, on both declared targets. Its reflective override helpers preserve the
