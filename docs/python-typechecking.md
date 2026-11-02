@@ -7,7 +7,7 @@ and #9807. Project policy lives in `tools/typecheck-projects.json`.
 The admitted cohort qualifies the checker code/tests, the complete Bootstrap
 Killswitch, Config Migrate, Configuration Layers, Core Delegation, Dropin Registry,
 Endpoint Rendezvous, Fleet Contracts, Installation Context, Lazy CLI Dispatch,
-Peer Launch, Remote Login Shell, Session Liveness Probe and Worktree Identity
+Peer Launch, Remote Login Shell, Repository Policy, Session Liveness Probe and Worktree Identity
 source/test projects.
 Other projects are explicitly pending. Source CI and the
 exact-candidate release gate enforce this cohort. A passing admitted cohort is
@@ -33,6 +33,7 @@ python tools/typecheck.py lib-fleet-contracts
 python tools/typecheck.py lib-installation-context
 python tools/typecheck.py lib-lazy-cli-dispatch
 python tools/typecheck.py lib-peer-launch
+python tools/typecheck.py lib-repository-policy
 python tools/typecheck.py lib-remote-login-shell-remaining
 python tools/typecheck.py lib-session-liveness-probe-remaining
 python tools/typecheck.py lib-worktree-identity-remaining
@@ -109,6 +110,14 @@ keyword contracts, while intentionally invalid constructor vectors use
 narrow invocation boundaries confined to negative tests. The SSH consumer
 remains independently pending; canonical admission does not qualify its
 whole runtime.
+
+Repository Policy checks all six canonical source/test files with the declared
+YAML/stub environment. Its guest reader is a separately checked module whose
+source is sent to fresh `-I -S` receivers; building the probe reads that file
+without import-time I/O. YAML and receiver JSON remain validated dynamic
+boundaries. The archive builder retains its existing filesystem-distribution
+requirement at the metadata path boundary and preserves required licenses.
+The five consuming runtimes remain independently pending.
 
 Lazy CLI Dispatch checks all three canonical files, including its tests and
 helper, on both declared targets. Its reflective override helpers preserve the
