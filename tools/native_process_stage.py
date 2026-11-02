@@ -101,7 +101,7 @@ def run(
         output / "candidate/process-safety-result.json", sdk_sources, boundary, time.monotonic,
     )
     junit = runner.verify_native_junit(output / "candidate", root, prepared["case_packets"])
-    if junit != report.get("native_junit") or junit.get("case_count") != 44:
+    if json.loads(json.dumps(junit)) != report.get("native_junit") or junit.get("case_count") != 44:
         raise contract.QualificationError("Process candidate JUnit differs from its exact 44-case roster.")
     sources.load(launcher, manifest_sha256, boundary, time.monotonic)
     qualification = contract.Qualification(boundary, scope, manifest_sha256, runtime_root, mode=contract.PROCESS_MODE)

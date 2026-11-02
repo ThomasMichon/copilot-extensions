@@ -3544,7 +3544,12 @@
         "tools/promotion_unit_tests/test_sdk_process_safety.py::test_process_adapter_refuses_invalid_or_extended_original_clock[41]",
         "tools/promotion_unit_tests/test_sdk_process_safety.py::test_process_adapter_refuses_invalid_or_extended_original_clock[9]",
         "tools/promotion_unit_tests/test_native_process_driver.py::test_process_preparation_refuses_unbound_source_before_launch[orphan]",
-        "tools/promotion_unit_tests/test_native_process_driver.py::test_process_preparation_refuses_unbound_source_before_launch[bytecode]"
+        "tools/promotion_unit_tests/test_native_process_driver.py::test_process_preparation_refuses_unbound_source_before_launch[bytecode]",
+        "tools/promotion_unit_tests/test_native_process_stage.py::test_stage_verifies_actual_junit_through_its_json_report_boundary[none]",
+        "tools/promotion_unit_tests/test_native_process_stage.py::test_stage_verifies_actual_junit_through_its_json_report_boundary[changed]",
+        "tools/promotion_unit_tests/test_native_process_stage.py::test_stage_verifies_actual_junit_through_its_json_report_boundary[missing]",
+        "tools/promotion_unit_tests/test_native_process_stage.py::test_stage_verifies_actual_junit_through_its_json_report_boundary[failed]",
+        "tools/promotion_unit_tests/test_native_process_stage.py::test_stage_verifies_actual_junit_through_its_json_report_boundary[renamed]"
     ],
     "sources": {
         "libs/configuration-layers/src/configuration_layers/__init__.py": "e522797fe6207e3648705759db4234936df60bcf255b36deb23f8d400b52a890",
@@ -3989,11 +3994,11 @@
         "libs/agent-procutil/tests/sdk_native_win32.py": "38f0102bec252be6e60975cb316d94b1b5c87ec5021d4f774fcfa525a0228c73",
         "tools/promotion_unit_tests/test_sdk_process_commands.py": "037de71dce65b2dfa5bbe012b65492b8478f1084e43f0a505187d6c609d94c1a",
         "libs/agent-procutil/src/agent_procutil/owned_budget.py": "72e1ca79f9be6ed44c606f14ed12061b68f8dd0b478025374efbf279805566bd",
-        "tools/native_process_stage.py": "a964e3fe31e81faf050ff7287a898b099c0a851dfd23fea67e9854767e32770b",
+        "tools/native_process_stage.py": "e5302f428f783f9ff8d273d91a6d8b5078dc45a81849ab5751a48c2e656d4544",
         "tools/native_process_artifacts.py": "010b85899b1937c09ac74e12b5cb092b5483edcce83b5d29af7bdd14645a7eb2",
         "tools/native_process_sources.py": "7ff66417c49a2838e8296dc41db5f5efc6ea354f1159d48d48013a5539dd04b9",
         "tools/native_process_qualification.py": "4077845593a48eb3f3e4cef07832d00a96b2954c9cdf542bf5a02c0fbe2d49e7",
-        "tools/promotion_unit_tests/test_native_process_stage.py": "8d7e9438e760d6dc32c54455df6e6a5512b0b7356d4a6fd7f5437694936f4d63",
+        "tools/promotion_unit_tests/test_native_process_stage.py": "2ab469148194d5c9f416392a3a5b316652c964a82e041a0a88903a2772f161e2",
         "tools/promotion_unit_tests/test_native_process_driver.py": "31b2cc2757e9ecc8539b31324fc6b7b9e527086b718044bef8eaf5fc7acaab4a"
     },
     "coverage_targets": [

@@ -6,6 +6,8 @@ import io
 import json
 import base64
 import hashlib
+import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +17,7 @@ from tools import native_process_stage as stage
 from tools import native_qualification_contract as contract
 from tools import native_qualification_receiver as receiver
 from tools.promotion_unit_tests.test_native_qualification_contract import receiver_report
+from tools.promotion_unit_tests.test_sdk_desktop_observer import case_packets
 
 UTC = "2026-10-31T08:00:00+00:00"
 
@@ -134,6 +137,72 @@ def test_stage_refuses_foreign_admission_before_candidate_or_native_membership(p
     with pytest.raises(contract.QualificationError, match="admission"):
         stage.run(**args)
     assert events == ["sources"]
+
+
+@pytest.mark.parametrize("change", ["none", "changed", "missing", "failed", "renamed"])
+def test_stage_verifies_actual_junit_through_its_json_report_boundary(
+    prepared_stage, monkeypatch, change,
+):
+    args, _, _, _ = prepared_stage
+    sdk = args["runtime_root"].parent
+    packets = case_packets(sdk)
+    cases = sys.modules["sdk_visibility_cases"]
+    original_candidate, original_load = stage.candidate, stage.sources.load
+
+    def load(*a):
+        root, prepared, rows = original_load(*a)
+        prepared["case_packets"] = packets
+        return root, prepared, rows
+
+    def select(root, rows, selected):
+        assert selected == packets
+        return SimpleNamespace(
+            __file__="fixture-runner", verify_native_junit=cases.verify_native_junit,
+        ), rows
+
+    def candidate(argv, output, boundary):
+        code = original_candidate(argv, output, boundary)
+        target = output / "candidate"
+        for i, nodes in enumerate(packets):
+            suite = ET.Element("testsuite")
+            for node in nodes:
+                ET.SubElement(suite, "testcase", {
+                    "classname": cases.NATIVE_CLASSNAME, "name": node.partition("::")[2],
+                })
+            ET.ElementTree(suite).write(target / f"native-{i + 1:02}.xml")
+        observed = cases.verify_native_junit(target, sdk, packets)
+        assert isinstance(observed["packets"][0]["cases"][0], tuple)
+        path = target / "process-safety-result.json"
+        value = json.loads(path.read_bytes())
+        value["native_junit"] = observed
+        path.write_text(json.dumps(value))
+        assert isinstance(json.loads(path.read_bytes())["native_junit"]["packets"][0]["cases"][0], list)
+        junit = target / "native-01.xml"
+        if change == "changed":
+            with junit.open("ab") as stream:
+                stream.write(b"\n")
+        elif change == "missing":
+            junit.rename(target / "unqualified-01.xml")
+        elif change in {"failed", "renamed"}:
+            tree = ET.parse(junit)
+            if change == "failed":
+                ET.SubElement(tree.getroot()[0], "failure")
+            else:
+                tree.getroot()[0].set("name", "test_unqualified_replacement")
+            tree.write(junit)
+        return code
+
+    monkeypatch.setattr(stage.sources, "load", load)
+    monkeypatch.setattr(stage.sources, "sdk", select)
+    monkeypatch.setattr(stage, "candidate", candidate)
+    if change == "none":
+        assert stage.run(**args)["process_safety_positive"] is True
+        assert (args["runtime_root"] / "evidence/work-completed.json").exists()
+    else:
+        with pytest.raises((RuntimeError, OSError)):
+            stage.run(**args)
+        assert not (args["runtime_root"] / "evidence/work-completed.json").exists()
+        assert not (args["runtime_root"] / "artifacts/sha256.json").exists()
 
 
 @pytest.mark.parametrize("field,value", [
