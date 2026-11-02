@@ -1,0 +1,9 @@
+{
+  "comment": "Merge plugin-shipped containersConfig fleet fragments beneath containers.yaml per fleet and per key, with config-sources provenance",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

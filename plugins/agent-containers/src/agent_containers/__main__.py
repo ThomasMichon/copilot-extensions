@@ -31,7 +31,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_flags as _creation_flags
 
-from . import claim_provider_cli, hosting_policy, rescue_capture_cli
+from . import claim_provider_cli, hosting_policy, plugin_config, rescue_capture_cli
 from . import copilot_process_auth as process_auth
 from .config import (
     RESTRICTED_PROFILE,
@@ -72,9 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command")
 
     fleet_p = sub.add_parser("fleet", help="List fleet containers + lease status")
-    fleet_p.add_argument(
-        "--json", action="store_true", help="Emit the fleet as a JSON array."
-    )
+    fleet_p.add_argument("--json", action="store_true", help="Emit the fleet as a JSON array.")
 
     up_p = sub.add_parser("up", help="Provision/top-up a fleet")
     up_p.add_argument("fleet", help="Fleet name (from containers.yaml)")
@@ -115,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--force", action="store_true", help="Force removal")
 
     claim_provider_cli.add_claim_provider_parsers(sub)
+    plugin_config.add_subparsers(sub)
     rescue_capture_cli.add_rescue_capture_parser(sub)
     borrow_p = sub.add_parser("borrow", help="Lease a free container to an effort")
     borrow_p.add_argument("effort", help="Effort name (lease holder)")
@@ -706,6 +705,7 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
                 "state": c.state,
                 "status": c.status,
                 "fleet": c.fleet,
+                "fleet_source": config.fleet_source(c.fleet),
                 "local_folder": c.local_folder,
                 "lease": lease.effort if lease else None,
                 "lifecycle_hold": hold_status,

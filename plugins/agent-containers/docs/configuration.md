@@ -45,6 +45,35 @@ the native parser's ignored-key behavior, except independently strict protected
 fields. Reads are live; running containers do not change posture merely because
 a file changed. A later admitted lifecycle operation must reconcile them.
 
+## Plugin-shipped fleet fragments
+
+An active plugin may declare `"containersConfig": "<relative path>"` in its
+`plugin.json`. Such fragments form the lowest layer, **beneath the builtins and
+every tier above** (or beneath the single `AGENT_CONTAINERS_CONFIG` /
+compatibility file when no owner context applies). Activation is resolved with
+the canonical identity-verified resolver for the invoking repository: global
+activation plus that checkout's own settings, which can also disable a globally
+enabled plugin. Without an invoking checkout only global activation applies.
+
+- Fragments may define `fleets:` only (`schema_version` is accepted); other
+  top-level keys are ignored with a warning.
+- Operator values override a shipped fleet per key; nested mappings merge per
+  key. Unlike ordinary tier composition, an explicit `null` over a shipped
+  value removes it, so the field falls back to its default/global value.
+- The plugin whose `name@marketplace` sorts first owns a duplicated fleet name;
+  the other definition is ignored as a whole, with a warning.
+- Relative `devcontainer_path`, `host_workspace_path` and `host_home_path`
+  (and `devcontainer_config` without a `devcontainer_path`) resolve against the
+  fragment's directory.
+- Unreadable, invalid, escaping or cyclic (self-referencing YAML anchor)
+  fragments are skipped with a warning, including in strict reads.
+
+Contributions extend `configuration_provenance` with `tier: plugin` owners
+(`source` names the plugin root and fragment path), and contributing fragment
+IDs (`plugin:<name>@<marketplace>`) are prepended to `configuration_layers`.
+`agent-containers config-sources [--json]` prints the layers, fragments and
+per-pointer owners; `fleet --json` reports each member's `fleet_source`.
+
 ## Top-level YAML fields
 
 All fields are optional; defaults are below. `fleets` is a name→mapping.
