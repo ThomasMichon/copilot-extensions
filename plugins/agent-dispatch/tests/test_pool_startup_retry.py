@@ -149,6 +149,81 @@ def test_late_original_retry_completion_preserves_exhausted_generation_and_capac
     assert (q.get(t.id), q.pool_startup(t.id).cooldown_stage) == before
 
 
+def conclude_retry(q, client, t, r, *, verified):
+    client.retry_pool_startup(t.id, r.key, **arguments(t))
+    with q._connect() as conn:
+        conn.execute("UPDATE tasks SET require_verification=? WHERE id=?", (verified, t.id))
+    client.start_pool_task(t.id, "host-a/worktree", owner_session_id="native", expected_generation=1)
+    q.complete_with_outcome(
+        t.id, "host-a/worktree", expected_generation=1, expected_owner_session_id="native",
+    )
+
+
+@pytest.mark.parametrize("verified", [False, True])
+@pytest.mark.parametrize("identity", ["record", "event"])
+def test_original_completion_after_task_conclusion_preserves_task_and_budget(
+    q, api, monkeypatch, verified, identity,
+):
+    t, r, clock = failed(q, api, monkeypatch)
+    with controls.connected(api, []) as client:
+        conclude_retry(q, client, t, r, verified=verified)
+        if identity == "event":
+            with q._connect() as conn:
+                conn.execute("UPDATE tasks SET completed_by=NULL WHERE id=?", (t.id,))
+        before = q.get(t.id), q.pool_startup(t.id)
+        assert before[0].status == (Status.SUBMITTED if verified else Status.COMPLETED)
+        complete(client, t, r)
+        assert complete(client, t, r)["reservation"]["startup_complete"]
+    assert q.get(t.id) == before[0]
+    assert q.pool_startup(t.id) == before[1]
+    current = q.get_reservation(r.key)
+    assert current.startup_complete and not current.exclusive_released
+    assert not current.release_requested and current.session_handle == "native"
+    assert len(q.list_reservations(task_id=t.id)) == 1
+
+
+@pytest.mark.parametrize("condition", [
+    "completer", "missing-completer", "ambiguous-completer", "native", "generation",
+    "revision", "held", "steer", "retired", "fenced", "cooling",
+])
+def test_concluded_retry_completion_rechecks_retained_identity_and_holds_in_write(
+    q, api, monkeypatch, condition,
+):
+    t, r, clock = failed(q, api, monkeypatch)
+    with controls.connected(api, []) as client:
+        conclude_retry(q, client, t, r, verified=True)
+        with q._connect() as conn:
+            if condition == "completer":
+                conn.execute("UPDATE tasks SET completed_by='other/worktree' WHERE id=?", (t.id,))
+            elif condition in {"missing-completer", "ambiguous-completer"}:
+                conn.execute("UPDATE tasks SET completed_by=NULL WHERE id=?", (t.id,))
+                if condition == "missing-completer":
+                    conn.execute("DELETE FROM task_events WHERE task_id=?", (t.id,))
+                else:
+                    q._audit(conn, t.id, ts=101, from_status=Status.STARTED,
+                             to_status=Status.SUBMITTED, worker="other/worktree", note="ambiguous")
+            elif condition == "native":
+                conn.execute("UPDATE tasks SET owner_session_id='successor' WHERE id=?", (t.id,))
+            elif condition == "generation":
+                conn.execute("UPDATE tasks SET generation=generation+1 WHERE id=?", (t.id,))
+            elif condition == "held":
+                conn.execute("UPDATE tasks SET hold_reason='operator' WHERE id=?", (t.id,))
+            elif condition == "steer":
+                conn.execute("UPDATE tasks SET awaiting_steer=1 WHERE id=?", (t.id,))
+            elif condition == "revision":
+                conn.execute("UPDATE spawn_reservations SET startup_revision=3 WHERE key=?", (r.key,))
+            elif condition in {"retired", "fenced"}:
+                field = "conversation_retired" if condition == "retired" else "startup_fenced"
+                conn.execute(f"UPDATE spawn_reservations SET {field}=1 WHERE key=?", (r.key,))
+            elif condition == "cooling":
+                conn.execute("UPDATE spawn_reservations SET cooling_token='held' WHERE key=?", (r.key,))
+        before = q.get(t.id), q.pool_startup(t.id), q.get_reservation(r.key)
+        with pytest.raises(DispatchError) as failure:
+            complete(client, t, r)
+        assert failure.value.status_code == 409
+    assert (q.get(t.id), q.pool_startup(t.id), q.get_reservation(r.key)) == before
+
+
 def test_concurrent_exact_retry_charges_only_one_original_invocation(q, api, monkeypatch):
     t, r, clock = failed(q, api, monkeypatch)
     barrier = Barrier(2)

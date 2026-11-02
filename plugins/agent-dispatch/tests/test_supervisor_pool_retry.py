@@ -71,7 +71,7 @@ def test_committed_response_loss_never_sends_again_and_reconciles_only_receipt(
     assert q.pool_startup(t.id).startup_attempts == 2
 
 
-@pytest.mark.parametrize("later", ["started", "exhausted"])
+@pytest.mark.parametrize("later", ["started", "submitted", "completed", "exhausted"])
 def test_pending_original_receipt_can_complete_after_start_or_exhaust_without_reset(
     q, api, monkeypatch, later,
 ):
@@ -85,10 +85,19 @@ def test_pending_original_receipt_can_complete_after_start_or_exhaust_without_re
     monkeypatch.setattr(pool_startup_delivery, "deliver_retry", deliver)
     with owner.client:
         assert controls.cycle(owner, clock, 101) == 0
-        if later == "started":
+        if later in {"started", "submitted", "completed"}:
+            if later != "started":
+                with q._connect() as conn:
+                    conn.execute("UPDATE tasks SET require_verification=? WHERE id=?",
+                                 (later == "submitted", t.id))
             owner.client.start_pool_task(
                 t.id, "host-a/worktree", owner_session_id="native", expected_generation=1,
             )
+            if later != "started":
+                q.complete_with_outcome(
+                    t.id, "host-a/worktree", expected_generation=1, expected_owner_session_id="native",
+                )
+                assert q.get(t.id).status == (Status.SUBMITTED if later == "submitted" else Status.COMPLETED)
             before = q.get(t.id), q.pool_startup(t.id).startup_attempts
             assert owner.redrive_unclaimed_spawns(now=102) == 1
         else:
@@ -100,3 +109,33 @@ def test_pending_original_receipt_can_complete_after_start_or_exhaust_without_re
         assert (q.get(t.id), q.pool_startup(t.id).startup_attempts) == before
     assert sends[-1][1] is True and q.get_reservation(r.key).startup_complete
     assert len(q.list_reservations(task_id=t.id)) == 1
+    assert len(sends) == 2 and sends[0][1] is False and not nudges
+
+
+@pytest.mark.parametrize("release", [False, True])
+def test_concluded_original_receipt_remains_observation_only_with_retained_release_intent(
+    q, api, monkeypatch, release,
+):
+    owner, clock, t, r, probes, nudges, requests, sends = setup(q, api, monkeypatch)
+    monkeypatch.setattr(pool_startup_delivery, "deliver_retry", lambda invocation, *, observe_only:
+                        sends.append((invocation, observe_only)) or ("startup_unknown", "lost reply"))
+    with owner.client:
+        assert controls.cycle(owner, clock, 101) == 0
+        owner.client.start_pool_task(t.id, "host-a/worktree", owner_session_id="native",
+                                    expected_generation=1)
+        q.complete_with_outcome(t.id, "host-a/worktree", expected_generation=1,
+                                expected_owner_session_id="native")
+        if release:
+            q.request_spawn_release(r.key)
+        before = q.get(t.id), q.pool_startup(t.id), q.get_reservation(r.key)
+        # The original request's receipt becomes available; no new delivery occurs.
+        monkeypatch.setattr(pool_startup_delivery, "deliver_retry", lambda invocation, *, observe_only:
+                            sends.append((invocation, observe_only)) or
+                            ("startup_succeeded", "original admission receipt"))
+        action = owner.release_requested_bodies if release else owner.redrive_unclaimed_spawns
+        assert action(now=102) == 1
+    assert q.get(t.id) == before[0] and q.pool_startup(t.id) == before[1]
+    after = q.get_reservation(r.key)
+    assert after.state == before[2].state and after.release_requested == release
+    assert after.startup_complete and not after.exclusive_released
+    assert sends[-1][1] is True and len(sends) == 2 and not nudges

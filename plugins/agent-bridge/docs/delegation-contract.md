@@ -117,6 +117,10 @@ extensions cannot ignore unfamiliar provenance and inject those inputs.
 The extension observes actual SDK metadata and checks
 the independent current native identity immediately before each exact SDK send,
 including replay after an interrupt and later messages in an awaited batch.
+An interrupt restores the whole acknowledged replay batch to tracking before
+any awaited metadata observation or SDK send. A rejection retains all
+unconsumed inputs for a later interrupt; only observed root `user.message`
+events remove them, without delivering exact inputs into a successor.
 Rejected rollover registration cannot restore the previous native identity;
 held inputs are not acknowledged as delivered.
 The input is `prompt`-kind with `steer` delivery; there is no

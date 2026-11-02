@@ -4,14 +4,32 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
+import re
+import subprocess
 import time
 from unittest.mock import Mock
 
+from agent_procutil import no_window_kwargs
 from agent_bridge import __main__ as core
 from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.db import Database
 from agent_bridge.db_schema import _SchemaMixin
 from test_live_exact_rollback import prior_owners
+
+
+def observe_replay_controls() -> dict:
+    """Exercise the actual extension's model-free rejected replay controls."""
+    result = subprocess.run(
+        ["node", "--test", "--test-name-pattern=replay retains|rejected legacy replay",
+         str(Path(__file__).with_name("delivery.test.mjs"))],
+        capture_output=True, text=True, timeout=25, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    passed = re.search(r"^# pass (\d+)$", result.stdout, re.MULTILINE)
+    failed = re.search(r"^# fail (\d+)$", result.stdout, re.MULTILINE)
+    assert passed is not None and failed is not None, result.stdout
+    return {"passed": int(passed[1]), "failed": int(failed[1])}
 
 
 def observe(api, db, vector, monkeypatch, capsys, *, client_factory) -> dict:
@@ -115,6 +133,7 @@ def observe(api, db, vector, monkeypatch, capsys, *, client_factory) -> dict:
             for row in original
         ),
     }
+    observed["replay_rejections"] = observe_replay_controls()
     for mode, capability in (("prompt", "live_keyed_receipt"), ("notify", "live_exact_notify")):
         masked[0] = capability
         posts.clear()

@@ -95,12 +95,25 @@ def prepare_mutation(
             or task.status == Status.STARTED and task.owner_session_id == binding["native_id"]
             and task.owner == f"{assignment['machine']}/{row['worktree']}"
         )
+        completed_worker = task.completed_by
+        if task.status in {Status.SUBMITTED, Status.COMPLETED} and completed_worker is None:
+            workers = owner._completion_event_workers(conn, task.id)
+            completed_worker = workers[0] if len(workers) == 1 else None
+        concluded = (
+            task.generation == binding["generation"]
+            and task.status in {Status.SUBMITTED, Status.COMPLETED} and task.owner is None
+            and task.owner_session_id == binding["native_id"]
+            and completed_worker == f"{assignment['machine']}/{row['worktree']}"
+        )
         late = (
             task.generation == binding["generation"] + 1 and task.status == Status.QUEUED
             and assignment["exhausted_at"] is not None and row["state"] == SpawnState.RELEASING
             and row["release_requested"]
         )
-        if not (current or late) or row["state"] not in {SpawnState.SPAWNED, SpawnState.RELEASING}:
+        if (
+            not (current or concluded or late) or task.hold_reason is not None or task.awaiting_steer
+            or row["state"] not in {SpawnState.SPAWNED, SpawnState.RELEASING}
+        ):
             raise TaskError("pool retry completion task incarnation changed")
         stored_kind = None if outcome == "startup_succeeded" else outcome
         if row["startup_complete"]:

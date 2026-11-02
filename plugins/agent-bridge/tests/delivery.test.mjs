@@ -454,6 +454,67 @@ test("exact delivery requires raw native provenance and the public metadata obse
   }
 });
 
+for (const failure of ["metadata", "send"]) {
+  for (const failedId of [1, 2]) {
+    test(`replay retains its unconsumed batch after ${failure} rejects at ${failedId}`, async () => {
+      const interrupt = { ...exactMessage(5), delivery: "interrupt" };
+      const earlier = [1, 2, 3].map((id) => exactMessage(id));
+      const { calls, deps } = exactHarness(earlier);
+      assert.deepEqual(await drainInbox("s", deps), [1, 2, 3]);
+      assert.deepEqual(calls.at(-1), ["ack", [1, 2, 3]]);
+      calls.length = 0;
+      deps.getJson = async () => ({ messages: [interrupt] });
+      let metadataCalls = 0;
+      const sent = [];
+      deps.session.rpc.metadata.snapshot = async () => {
+        metadataCalls++;
+        if (failure === "metadata" && metadataCalls === failedId + 1) {
+          throw new Error("metadata unavailable");
+        }
+        return { sessionId: "s" };
+      };
+      deps.session.send = async (options) => {
+        const id = Number(/msg-id="(\d+)"/.exec(options.prompt)[1]);
+        if (failure === "send" && id === failedId) throw new Error("SDK rejected");
+        sent.push(id);
+        deps.inFlight.observe(recorded(exactMessage(id)));
+      };
+      assert.deepEqual(await drainInbox("s", deps), []);
+      assert.deepEqual([...deps.inFlight.pending.keys()], earlier.slice(failedId - 1).map((m) => m.id));
+      assert.equal(calls.filter(([type]) => type === "ack").length, 0);
+      assert.match(calls.at(-1)[1], /deliver failed/);
+
+      deps.session.rpc.metadata.snapshot = async () => ({ sessionId: "s" });
+      deps.session.send = async (options) => {
+        const id = Number(/msg-id="(\d+)"/.exec(options.prompt)[1]);
+        sent.push(id);
+        deps.inFlight.observe(recorded(exactMessage(id)));
+      };
+      assert.deepEqual(await drainInbox("s", deps), [5]);
+      assert.deepEqual(sent, [1, 2, 3, 5]);
+      assert.equal(deps.inFlight.pending.size, 0);
+      assert.deepEqual(calls.at(-1), ["ack", [5]]);
+    });
+  }
+}
+
+test("a rejected legacy replay retains acknowledged inputs for a later interrupt", async () => {
+  const { deps } = interruptHarness([{ id: 5, delivery: "interrupt" }]);
+  for (const id of [1, 2, 3]) deps.inFlight.sent({ id });
+  deps.session.send = async () => { throw new Error("SDK rejected"); };
+  assert.deepEqual(await drainInbox("s", deps), []);
+  assert.deepEqual([...deps.inFlight.pending.keys()], [1, 2, 3]);
+  const sent = [];
+  deps.session.send = async (options) => {
+    const id = Number(/msg-id="(\d+)"/.exec(options.prompt)[1]);
+    sent.push(id);
+    deps.inFlight.observe(recorded({ id }));
+  };
+  assert.deepEqual(await drainInbox("s", deps), [5]);
+  assert.deepEqual(sent, [1, 2, 3, 5]);
+  assert.equal(deps.inFlight.pending.size, 0);
+});
+
 test("legacy alias-following messages keep their delivery behavior across a rollover", async () => {
   const message = { id: 1, sender: "peer", body: "legacy" };
   const { calls, deps, rollover } = exactHarness([message]);

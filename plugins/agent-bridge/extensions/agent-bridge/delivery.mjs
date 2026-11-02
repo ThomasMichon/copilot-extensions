@@ -419,13 +419,15 @@ export async function drainInbox(sid, { getJson, post, session, inFlight, mainTu
         }
         // The abort discarded every message still pending in the CLI;
         // re-send those (oldest first) so the interrupt loses nothing.
-        for (const earlier of inFlight.takeBefore(msg.id)) {
+        const replay = inFlight.takeBefore(msg.id);
+        // Restore the whole batch before any awaited operation can reject.
+        // Only an observed user.message consumes an acknowledged input.
+        for (const earlier of replay) inFlight.sent(earlier);
+        for (const earlier of replay) {
           if (!await currentNative(earlier) || !stillCurrent(earlier)) {
-            inFlight.sent(earlier);
             continue;
           }
           await session.send({ ...deliveryPlan(earlier).options, mode: "immediate" });
-          inFlight.sent(earlier);
         }
       }
       if (!await currentNative(msg) || !stillCurrent(msg)) continue;

@@ -1,4 +1,4 @@
-"""Reconcile original retry completion after acceptance or claim exhaustion."""
+"""Reconcile original retry completion after acceptance, completion or exhaustion."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def reconcile_retry_completion(
     """Observe only; None means unrelated, False retains an unresolved caller."""
     if (
         reservation.get("driver") != "cli" or reservation.get("startup_complete") is not False
-        or task.get("status") not in {Status.STARTED, Status.QUEUED}
+        or task.get("status") not in {Status.STARTED, Status.SUBMITTED, Status.COMPLETED, Status.QUEUED}
         or task.get("status") == Status.QUEUED and not reservation.get("release_requested")
     ):
         return None
