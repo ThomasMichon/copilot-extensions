@@ -164,7 +164,9 @@ def validate_static_build(source_dir: Path, *, trusted_setup: bytes | None = Non
             if (
                 name == "setup.py" and trusted_setup is not None
                 and not (source_dir / name).is_symlink()
-                and (source_dir / name).read_bytes() == trusted_setup
+                # Git archives retain LF even when the trusted working copy uses CRLF.
+                and (source_dir / name).read_bytes().replace(b"\r\n", b"\n")
+                == trusted_setup.replace(b"\r\n", b"\n")
             ):
                 continue
             raise PromotionArtifactError(f"unsupported executable or alternate build configuration: {name}")

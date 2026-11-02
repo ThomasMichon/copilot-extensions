@@ -387,14 +387,17 @@ def test_source_wheels_bind_generation_and_retain_existing_candidate_contract(tm
     calls = _capture(adapter, monkeypatch)
     local = ("copilot-extensions-worktree-manager",)
     validate = lambda slot: None
+    app = tmp_path / "application"
     with _closed_inputs(tmp_path) as wheels, adapter.candidate(
         payload, root, assemble=si._copy_payload, uv=uv,
         wheel_inputs=wheels, local_packages=local, validate_candidate=validate,
+        application=app,
     ) as ready:
         assert ready.slot.name == generation + ".profile." + wheels.receipt()["lock_id"][7:23]
         options = calls[0][2]
         assert options["wheel_inputs"] is wheels and options["local_packages"] == local
         assert options["validate_candidate"] is validate
+        assert options["application"] == app
         assert options["process_retention"] is True and options["reuse_generations"] is False
         assert options["expected_source_identity"]["runtime_version"] == generation
         assert options["plugin"] != payload
@@ -449,6 +452,7 @@ def test_self_install_forwards_source_inputs_without_replacing_completion_owner(
     before = lambda: None
     python = tmp_path / "selected-python"
     uv = tmp_path / "selected-uv"
+    app = tmp_path / "application"
 
     @contextmanager
     def candidate(payload, root, **options):
@@ -470,6 +474,7 @@ def test_self_install_forwards_source_inputs_without_replacing_completion_owner(
             _local_packages=("copilot-extensions-worktree-manager",),
             _validate_candidate=validate, _before_publish=before,
             _base_python=python, _uv=uv,
+            _application=app,
         )
         assert actual is result
         assert calls == [{
@@ -478,6 +483,7 @@ def test_self_install_forwards_source_inputs_without_replacing_completion_owner(
             "validate_candidate": validate,
             "python": python,
             "uv": uv,
+            "application": app,
         }]
 
 

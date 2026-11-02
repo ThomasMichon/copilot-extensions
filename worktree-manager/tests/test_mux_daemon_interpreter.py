@@ -123,6 +123,23 @@ def test_detached_child_uses_its_durable_external_cache(tmp_path, with_root):
     assert mux_daemon_process.detached_child_argv(root)[2] != command[2]
 
 
+def test_completed_application_start_retains_its_outer_slot_before_imports(tmp_path, monkeypatch):
+    root = tmp_path / "manager"
+    slot = root / "versions" / "1.2.3"
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    bootstrap.parent.mkdir(parents=True)
+    bootstrap.write_text("fixture retained bootstrap", encoding="utf-8")
+    (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv"))
+    command = mux_daemon_process.detached_child_argv(root)
+    assert command[:2] == [sys.executable, "-X"]
+    assert command[2].startswith("pycache_prefix=")
+    assert command[3:] == [
+        "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
+        "-m", "worktree_manager", "mux-daemon", "run", f"--root={root}",
+    ]
+
+
 @pytest.mark.parametrize("gui_name", ["pythonw.exe", "gui-host.exe"], ids=["relocated", "renamed"])
 def test_linked_gui_keeps_console_and_venv_from_configured_home(tmp_path, monkeypatch, gui_name):
     base = tmp_path / "base"

@@ -1,9 +1,11 @@
+from email import message_from_bytes
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import tarfile
+import zipfile
 
 import pytest
 
@@ -160,7 +162,7 @@ print(json.dumps({
 
 
 def test_wheel_and_independent_sdist_deliver_exact_canonical_construction(
-    tmp_path, installed_chat,
+    tmp_path, installed_chat, monkeypatch,
 ):
     import hashlib
 
@@ -177,14 +179,26 @@ def test_wheel_and_independent_sdist_deliver_exact_canonical_construction(
         },
         **{
             name: installer / name for name in (
-                "installer_engine.py", "installer_engine_process.py",
+                "installer_engine.py", "installer_engine_health.py", "installer_engine_process.py",
                 "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
-                "installer_source_wheel_cache.py", "installer_source_build.py",
                 "installer_wheel_inputs.py", "installer_wheel_snapshot.py",
                 "runtime_launcher.py",
+                "installer_source_wheel_cache.py", "installer_source_build.py",
             )
         },
     }
+    monkeypatch.syspath_prepend(str(root / "tools"))
+    from promotion_python_artifacts import validate_wheel_sources
+
+    wheel, = (installed_chat.root / "wheels").glob("agent_chat_service-*.whl")
+    with zipfile.ZipFile(wheel) as bundle:
+        metadata_name, = (name for name in bundle.namelist() if name.endswith(".dist-info/METADATA"))
+        validate_wheel_sources(
+            bundle, {name: hashlib.sha256(bundle.read(name)).hexdigest() for name in bundle.namelist()},
+            source_dir=root / "services" / "chat", prefix=metadata_name.rsplit("/", 1)[0] + "/",
+            metadata=message_from_bytes(bundle.read(metadata_name)),
+            component="chat-service", candidate_root=root,
+        )
     catalog = json.loads(installed_chat.run([
         str(installed_chat.console), "catalog",
     ], cwd=tmp_path))

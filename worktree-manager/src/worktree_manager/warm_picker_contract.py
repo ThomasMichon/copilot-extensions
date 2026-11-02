@@ -8,6 +8,8 @@ import json
 import sys
 from pathlib import Path
 
+from .runtime_identity import running_slot
+
 KIND = "picker-session-v1"
 CONTEXT_KEYS = (
     "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
@@ -80,11 +82,11 @@ def mux_arguments(environment: dict[str, str], *, windows: bool = os.name == "nt
 
 
 def runtime_command(module: str, *arguments: str) -> list[str]:
-    prefix = Path(sys.prefix).resolve()
+    slot = running_slot()
     command = [sys.executable, "-I", "-B", "-X", "utf8"]
-    if prefix.parent.name == "versions":
-        bootstrap = prefix / ".runtime-bootstrap" / "runtime_launcher.py"
-        if not bootstrap.is_file() or not (prefix / ".install-complete.json").is_file():
+    if slot is not None:
+        bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+        if not bootstrap.is_file() or not (slot / ".install-complete.json").is_file():
             raise RuntimeError("warm Picker requires a constructed Manager runtime")
         command += ["-S", str(bootstrap)]
     return [*command, "-m", module, *arguments]

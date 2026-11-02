@@ -10,22 +10,23 @@ from agent_procutil import python_cache_args
 from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_finite_worker
 
 from .mux_daemon_process import direct_daemon_python, scrub_session_credentials, selected_root
+from .runtime_identity import running_slot
 from .self_install import default_root
 
 
 def callback_command(arguments: list[str]) -> tuple[list[str], dict[str, str], Path]:
     if not arguments or arguments[0] not in ("register", "remove"):
         raise ValueError("mux callback requires register or remove")
-    prefix = Path(sys.prefix).resolve()
+    slot = running_slot()
     env = scrub_session_credentials(dict(os.environ))
     python, extra = direct_daemon_python(sys.executable)
     command = [python]
     root = selected_root(default_root())
-    if prefix.parent.name == "versions":
-        bootstrap = prefix / ".runtime-bootstrap" / "runtime_launcher.py"
-        if not bootstrap.is_file() or not (prefix / ".install-complete.json").is_file():
+    if slot is not None:
+        bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+        if not bootstrap.is_file() or not (slot / ".install-complete.json").is_file():
             raise RuntimeError("mux callback requires a constructed Manager runtime")
-        root = prefix.parent.parent
+        root = slot.parent.parent
         command += [
             "-I", "-S", "-B", "-X", "utf8", *python_cache_args(root), str(bootstrap),
         ]

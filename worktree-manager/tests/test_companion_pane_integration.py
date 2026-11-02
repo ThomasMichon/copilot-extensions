@@ -48,18 +48,20 @@ def test_legacy_popup_dispatch_is_unchanged(monkeypatch):
     assert calls == [True]
 
 
-def test_companion_command_pins_runtime_and_scrubs_credentials(tmp_path, monkeypatch):
-    prefix = tmp_path / "versions" / "1.2.3"
-    (prefix / ".runtime-bootstrap").mkdir(parents=True)
-    (prefix / ".runtime-bootstrap" / "runtime_launcher.py").touch()
-    (prefix / ".install-complete.json").write_text(json.dumps({
-        "version": prefix.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
+@pytest.mark.parametrize("nested", [False, True])
+def test_companion_command_pins_runtime_and_scrubs_credentials(tmp_path, monkeypatch, nested):
+    slot = tmp_path / "versions" / "1.2.3"
+    prefix = slot / ".venv" if nested else slot
+    (slot / ".runtime-bootstrap").mkdir(parents=True)
+    (slot / ".runtime-bootstrap" / "runtime_launcher.py").touch()
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": slot.name, "completed_at": "fixture", "pid": 0, "payload_hash": "a" * 64,
     }), encoding="utf-8")
     record = prefix / "Lib" / "site-packages" / "fixture.dist-info" / "RECORD"
     record.parent.mkdir(parents=True)
     record.write_text("fixture.py,sha256=" + "a" * 43 + ",1\n", encoding="utf-8")
     python = prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    python.parent.mkdir()
+    python.parent.mkdir(parents=True)
     python.touch()
     monkeypatch.setattr(sys, "prefix", str(prefix))
     names = ("GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
@@ -70,7 +72,7 @@ def test_companion_command_pins_runtime_and_scrubs_credentials(tmp_path, monkeyp
     command, env = companion_runtime.companion_command(tail)
     assert command == [str(python), "-I", "-S", "-B", "-X", "utf8",
                        *companion_runtime.python_cache_args(tmp_path, runtime=prefix),
-                       str(prefix / ".runtime-bootstrap" / "runtime_launcher.py"), *tail]
+                       str(slot / ".runtime-bootstrap" / "runtime_launcher.py"), *tail]
     assert all(name not in env for name in names)
     assert env["WORKTREE_MANAGER_ROOT"] == str(tmp_path)
 
@@ -138,7 +140,8 @@ raise SystemExit(17)
 
 
 @pytest.mark.parametrize("action", ["show", "return"])
-def test_installed_companion_pane_wrapper_uses_bootstrap_without_uv(tmp_path, action):
+@pytest.mark.parametrize("nested", [False, True])
+def test_installed_companion_pane_wrapper_uses_bootstrap_without_uv(tmp_path, action, nested):
     if os.name == "nt":
         shell = shutil.which("pwsh")
     else:
@@ -146,7 +149,11 @@ def test_installed_companion_pane_wrapper_uses_bootstrap_without_uv(tmp_path, ac
     if not shell:
         pytest.skip("native wrapper shell unavailable")
     root = tmp_path / "Manager with spaces"
-    slot = synthetic_runtime(root, "1.2.3", program=PROGRAM)
+    slot = synthetic_runtime(root, "1.2.3", program=PROGRAM, nested=nested)
+    prefix = slot / ".venv" if nested else slot
+    payload = prefix / ("Lib/site-packages" if os.name == "nt" else
+                        f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
+    payload = payload / "worktree_manager" / "_runtime_assets" if nested else slot / "payload"
     env = dict(os.environ, GH_TOKEN="fixture", GITHUB_TOKEN="fixture",
                AGENT_WORKTREES_AHP_AUTH_TOKEN="fixture", PYTHONPATH="foreign",
                PYTHONHOME="foreign", VIRTUAL_ENV="foreign",
@@ -154,18 +161,18 @@ def test_installed_companion_pane_wrapper_uses_bootstrap_without_uv(tmp_path, ac
     # The interpreter and wrapper shell are absolute; no uv is available.
     env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32") if os.name == "nt" else "/usr/bin:/bin"
     if os.name == "nt":
-        command = [shell, "-NoProfile", "-File", str(slot / "payload" / "bin" / "manager-runtime.ps1"),
+        command = [shell, "-NoProfile", "-File", str(payload / "bin" / "manager-runtime.ps1"),
                    "-CompanionPane", "-Action", action, "-Cwd", str(tmp_path)]
     else:
         command = [shell, "-c", 'source "$1"; aw_manager_companion_pane "$2" "$3" "$4"', "fixture",
-                   str(slot / "payload" / "bin" / "manager-runtime.sh"),
-                   str(slot / "payload"), action, str(tmp_path)]
+                   str(payload / "bin" / "manager-runtime.sh"),
+                   str(payload), action, str(tmp_path)]
     result = subprocess.run(command, env=env, capture_output=True, text=True,
                             timeout=25, **no_window_kwargs())
     assert result.returncode == 17, result.stdout + result.stderr
     captured = json.loads(result.stdout)
     assert captured["arguments"] == ["companion-pane", "--action", action, "--cwd", str(tmp_path)]
-    assert Path(captured["prefix"]).resolve() == slot.resolve()
+    assert Path(captured["prefix"]).resolve() == prefix.resolve()
     assert Path(captured["root"]).resolve() == root.resolve()
     assert captured["credentials"] == []
 

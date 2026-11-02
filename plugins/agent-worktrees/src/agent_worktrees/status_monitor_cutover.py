@@ -7,7 +7,6 @@ from agent_procutil.daemon_instances import DaemonInstanceSpec
 import json
 import os
 import secrets
-import select
 import socket
 import socketserver
 import subprocess
@@ -27,6 +26,7 @@ from zdd.cutover import CutoverOrchestrator
 from . import locks, status_monitor_recovery_contract as guarded_recovery
 from .status_monitor_drain import DrainTrace
 from .status_monitor_python import direct_monitor_python
+from .status_monitor_control_frames import handle_control_request
 from .handoff_prompt_receipt_control import ACTION as RECEIPT_ACTION, FRAME_BYTES, unique_object
 
 _BIND = "127.0.0.1"
@@ -114,104 +114,10 @@ class _ControlServer(socketserver.ThreadingTCPServer):
 
 class _ControlHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
-        current_read = None
-        action = None
-        try:
-            self.request.settimeout(_READ_TIMEOUT_S)
-            raw = self.rfile.readline(256 * 1024)
-            request = json.loads(raw.decode("utf-8"))
-            if (
-                not isinstance(request, dict)
-                or not secrets.compare_digest(
-                    str(request.get("token") or ""), self.server.token  # type: ignore[attr-defined]
-                )
-            ):
-                return
-            action = str(request.get("action") or "health")
-            if action in {"agenda-read", "agenda-publish", "agenda-feed"}:
-                from . import agenda_contract
-
-                try:
-                    request = agenda_contract.decode(raw)
-                    agenda_contract.exact(request, {"version", "token", "action", "payload"})
-                    if not raw.endswith(b"\n") or (
-                        type(request["version"]) is not int or request["version"] != 1
-                    ):
-                        raise agenda_contract.AgendaError("invalid agenda control frame")
-                except agenda_contract.AgendaError as exc:
-                    error = agenda_contract.failure(
-                        exc.code, str(exc), version=agenda_contract.error_version(request.get("payload")),
-                    )
-                    reply = {"type": "error", **error} if action == "agenda-feed" else {
-                        "version": 1, "result": error,
-                    }
-                    self.wfile.write(agenda_contract.encode(reply).encode("utf-8") + b"\n")
-                    return
-            if action == RECEIPT_ACTION and (
-                len(raw) > FRAME_BYTES or not raw.endswith(b"\n")
-                or set(request) != {"version", "token", "action", "payload"}
-                or type(request.get("version")) is not int or request["version"] != 1
-            ):
-                self.wfile.write(b'{"version":1,"result":{"contractVersion":1,'
-                                 b'"status":"unavailable","reason":"invalid-frame",'
-                                 b'"replayed":false,"subject":null,"owner":null}}\n')
-                return
-            if action == RECEIPT_ACTION:
-                request = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object)
-            if action == guarded_recovery.ACTION:
-                request = guarded_recovery.decode_request(raw)
-            payload = request.get("payload")
-            if not isinstance(payload, dict):
-                payload = {}
-            owner = self.server.owner
-            if action in {"worktrees-read", "repos-map-read", "picker-bootstrap",
-                          "agenda-read", "agenda-publish"}:
-                current_read = "worktrees-read" if action == "picker-bootstrap" else action
-                owner._on_current_read_started(current_read)
-            if owner.stream_handle is not None and action in {"worktrees-feed", "agenda-feed"}:
-                def disconnected():
-                    readable, _, _ = select.select([self.request], [], [], 0)
-                    return bool(readable)
-
-                frames = owner.stream_handle(action, payload, disconnected)
-                try:
-                    for frame in frames:
-                        if action == "agenda-feed":
-                            from .agenda_contract import encode
-
-                            encoded = encode(frame).encode("utf-8") + b"\n"
-                        else:
-                            encoded = json.dumps(
-                                frame, separators=(",", ":"), ensure_ascii=False,
-                            ).encode("utf-8") + b"\n"
-                        self.wfile.write(
-                            encoded
-                        )
-                        self.wfile.flush()
-                finally:
-                    frames.close()
-                return
-            result = self.server.owner.handle(action, payload)  # type: ignore[attr-defined]
-            if not isinstance(result, dict):
-                result = {}
-            encoded = json.dumps(
-                {"version": 1, "result": result}, separators=(",", ":"), ensure_ascii=False,
-            ).encode("utf-8") + b"\n"
-            if action == RECEIPT_ACTION and len(encoded) > FRAME_BYTES:
-                encoded = (b'{"version":1,"result":{"contractVersion":1,'
-                           b'"status":"unknown","reason":"response-too-large",'
-                           b'"replayed":false,"subject":null,"owner":null}}\n')
-            self.wfile.write(encoded)
-        except guarded_recovery.RecoveryUnavailable as exc:
-            self.wfile.write(guarded_recovery.encode_result(guarded_recovery.refused(str(exc))))
-        except Exception as exc:
-            if action == guarded_recovery.ACTION:
-                print(f"guarded-undrain receiver failed: {type(exc).__name__}", file=sys.stderr)
-                self.wfile.write(guarded_recovery.encode_result(guarded_recovery.refused("receiver-error")))
-            return
-        finally:
-            if current_read:
-                self.server.owner._on_current_read_finished(current_read)
+        handle_control_request(
+            self, read_timeout_s=_READ_TIMEOUT_S, receipt_action=RECEIPT_ACTION,
+            frame_bytes=FRAME_BYTES, unique_object=unique_object,
+        )
 
 
 class ControlServer:
@@ -582,6 +488,98 @@ def routed_monitor_identity(runtime_home: Path | None = None) -> tuple[int, str,
         raise ValueError("Routed monitor identity changed during admission")
     slot = health.get("runtime_slot")
     return pid, before, slot if isinstance(slot, str) else None
+
+
+def start_application(*, health_timeout: float = _DEFAULT_HEALTH_TIMEOUT_S) -> int:
+    """Publish a healthy new generation; the predecessor retires itself."""
+    from zdd import diagnostics
+    from . import status_monitor_runtime as smr
+    from .runtime_identity import PROCESS_GENERATION
+
+    if not smr._status_monitor_enabled():
+        return 0
+    environment = Path(sys.prefix).resolve()
+    slot = environment.parent if environment.name == ".venv" else environment
+    directory = routing_dir()
+    guard = _acquire_cutover_lock(directory, timeout_s=health_timeout)
+    child = None
+    birth = None
+    published = None
+    installed = False
+    try:
+        table = routing.read_table(directory, strict=True) or {}
+        raw = table.get("active")
+        previous = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+        token = load_or_create_control_token()
+        if previous is not None:
+            try:
+                current = ControlClient(previous.base_url, token=token).health()
+                if (
+                    current.get("status") == "ready" and current.get("published") is True
+                    and current.get("pid") == previous.pid
+                    and current.get("runtime_slot") == slot.name
+                    and current.get("runtime_generation") == PROCESS_GENERATION
+                    and previous.process_start_time is not None
+                    and diagnostics.process_start_time(previous.pid) == previous.process_start_time
+                    and routing.read_table(directory, strict=True) == table
+                ):
+                    return 0
+            except (OSError, ValueError):
+                pass
+        port = pick_free_port()
+        child = spawn_passive(sys.executable, port=port)
+        birth = diagnostics.process_start_time(child.pid)
+        if birth is None:
+            raise RuntimeError("New monitor process identity is unavailable")
+        client = ControlClient(f"http://{_BIND}:{port}", token=token)
+        deadline = time.monotonic() + health_timeout
+        while True:
+            try:
+                health = client.health()
+                ready = (
+                    health.get("status") == "ready" and health.get("pid") == child.pid
+                    and health.get("runtime_slot") == slot.name
+                    and health.get("runtime_generation") == PROCESS_GENERATION
+                    and diagnostics.process_start_time(child.pid) == birth
+                )
+            except (OSError, ValueError):
+                ready = False
+            if ready:
+                break
+            if child.poll() is not None or time.monotonic() >= deadline:
+                raise RuntimeError("New application monitor did not become healthy")
+            time.sleep(0.1)
+        published, _ = routing.publish_active_with_previous_guarded(
+            directory, bind=_BIND, port=port, pid=child.pid, version=slot.name,
+            process_start_time=birth, demote_existing=True, expected_active=previous,
+            lock_deadline=deadline,
+        )
+        if not client.promote().get("adopted"):
+            raise RuntimeError("New application monitor refused publication")
+        health = client.health()
+        if (
+            health.get("status") != "ready" or health.get("published") is not True
+            or health.get("pid") != child.pid or health.get("runtime_slot") != slot.name
+            or health.get("runtime_generation") != PROCESS_GENERATION
+            or diagnostics.process_start_time(child.pid) != birth
+            or active_generation_for_pid(child.pid) != published.generation
+        ):
+            raise RuntimeError("Published application monitor health is unconfirmed")
+        installed = True
+        return 0
+    finally:
+        try:
+            if not installed and child is not None:
+                if published is not None and not routing.restore_previous_if_owner(
+                    directory, pid=child.pid, generation=published.generation,
+                ):
+                    raise RuntimeError("New monitor publication changed; retained for owner recovery")
+                if child.poll() is None and birth is not None:
+                    cleanup = diagnostics.terminate_pid_if_identity(child.pid, birth, exit_timeout=10)
+                    if cleanup.get("exit_confirmed") is not True:
+                        raise RuntimeError("New monitor cleanup is unconfirmed")
+        finally:
+            guard.release()
 
 
 def _health_check(host: str, port: int) -> bool:

@@ -31,7 +31,8 @@ def main() -> None:
         import site
 
         site.main()
-        if Path(sys.prefix).resolve() != slot:
+        python = runtime.slot_python(root, slot.name)
+        if python is None or Path(sys.prefix).resolve() != python.parent.parent.resolve():
             raise RuntimeError("Retained runtime interpreter resolved outside its slot")
         if len(sys.argv) < 3 or sys.argv[1] != "-m":
             raise ValueError("Runtime retention bootstrap requires a module invocation")

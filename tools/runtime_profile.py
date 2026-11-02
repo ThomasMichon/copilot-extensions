@@ -67,7 +67,7 @@ def _digest(value: Any, label: str) -> str:
     return value
 
 
-def _strings(value: Any, label: str, deadline: float) -> list[str]:
+def _strings(value: Any, label: str, deadline: float, *, unique: bool = True) -> list[str]:
     if not isinstance(value, list):
         raise ProfileError(f"{label}: expected a list")
     result = []
@@ -75,7 +75,7 @@ def _strings(value: Any, label: str, deadline: float) -> list[str]:
         _check_deadline(deadline)
         result.append(_text(item, label))
     _check_deadline(deadline)
-    if len(set(result)) != len(result):
+    if unique and len(set(result)) != len(result):
         raise ProfileError(f"{label}: duplicate values")
     return result
 
@@ -174,7 +174,7 @@ def _closure(record: dict, max_tags: int, deadline: float) -> None:
         if not selected <= provided:
             raise ProfileError(f"{name}: selected extra not provided")
         requirements = [_requirement(text, deadline) for text in
-                        _strings(entry["requires_dist"], "Requires-Dist", deadline)]
+                        _strings(entry["requires_dist"], "Requires-Dist", deadline, unique=False)]
         wheels[name] = entry, requirements
 
     wanted = _reachable(wheels, record["roots"], target["environment"], deadline)

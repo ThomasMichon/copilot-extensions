@@ -40,6 +40,7 @@ def render_context(*, windows: bool | None = None) -> str:
         "plugin": _PLUGIN, "payload": {"provenance": "payload-local"},
         "commands": commands,
     }
+@@CATALOG_FLIGHT_IN_PROCESS@@
     instruction = (
         "Select the command by `id` and invoke its exact `argv`. "
         if _MULTI else "Invoke the exact `argv` below. "
@@ -55,4 +56,4 @@ def render_context(*, windows: bool | None = None) -> str:
             "so a multi-line argument is silently cut off. Pass multi-line or quote-heavy "
             "input through stdin or a file option instead."
         )
-    return context + "\n\n```json\n" + json.dumps(catalog, sort_keys=True) + "\n```"
+    return context + "\n\n```json\n" + json.dumps(catalog, sort_keys=True) + "\n```\n\n" + runtime_status

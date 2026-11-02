@@ -21,6 +21,7 @@ import pytest
 import runtime_source_wheels as completion
 from build_toolchain_lock import ToolchainLock
 from runtime_profile import ProfileError
+from installer_dependency_policy import _write_toml
 from installer_wheel_inputs import WheelError
 from runtime_source_lock import SourceLockCandidate
 from test_installer_dependency_policy import source_project
@@ -45,7 +46,9 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     for extra, requirements in project.get("optional-dependencies", {}).items():
         metadata += "Provides-Extra: " + extra + "\\n"
         for requirement in requirements:
-            metadata += "Requires-Dist: " + requirement + "; extra == '" + extra + "'\\n"
+            base, separator, marker = requirement.partition(";")
+            condition = ("(" + marker.strip() + ") and ") if separator else ""
+            metadata += "Requires-Dist: " + base.strip() + "; " + condition + "extra == '" + extra + "'\\n"
     files = {
         prefix + "METADATA": (metadata + "\\n").encode(),
         prefix + "WHEEL": b"Wheel-Version: 1.0\\nGenerator: setuptools (0)\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n",
@@ -87,12 +90,13 @@ def source(tmp_path):
         ignore=shutil.ignore_patterns("tests", "__pycache__", ".pytest_cache", "*.egg-info"),
     )
     manifest = procutil / "pyproject.toml"
-    manifest.write_text(
-        manifest.read_text().replace(
-            'requires = ["setuptools>=83.0.0"]\nbuild-backend = "setuptools.build_meta"',
-            'requires = []\nbuild-backend = "fixture_backend"\nbackend-path = ["."]',
-        ), encoding="utf-8",
-    )
+    declaration = completion._toml(manifest)
+    declaration["build-system"] = {
+        "requires": [], "build-backend": "fixture_backend", "backend-path": ["."],
+    }
+    # This fixture selects plain process helpers, not their optional broker role.
+    declaration.get("tool", {}).get("uv", {}).get("sources", {}).pop("agent-zdd", None)
+    _write_toml(manifest, declaration)
     (procutil / "fixture_backend.py").write_text(BACKEND, encoding="utf-8")
     with (payload / "pyproject.toml").open("a") as stream:
         stream.write(
@@ -132,7 +136,10 @@ def built_wheels(monkeypatch):
         metadata += "".join(f"Requires-Dist: {item}\n" for item in data.get("dependencies", []))
         for extra, dependencies in data.get("optional-dependencies", {}).items():
             metadata += f"Provides-Extra: {extra}\n"
-            metadata += "".join(f"Requires-Dist: {item}; extra == '{extra}'\n" for item in dependencies)
+            for item in dependencies:
+                base, separator, marker = item.partition(";")
+                condition = f"({marker.strip()}) and " if separator else ""
+                metadata += f"Requires-Dist: {base.strip()}; {condition}extra == '{extra}'\n"
         output.mkdir(parents=True, exist_ok=True)
         wheel = output / f"{name}-{version}-py3-none-any.whl"
         wheel.write_bytes(wheel_bytes(
@@ -169,6 +176,44 @@ def selected_source(source, target, adopter):
     return SourceLockCandidate(
         json.dumps(record, sort_keys=True, separators=(",", ":")).encode(), b"", source[0],
     )
+
+
+@pytest.mark.parametrize("failure", [None, "missing", "wrong-project"])
+def test_associated_wheels_complete_real_source_profile_without_backend_work(
+    adopter, source, target, toolchain, tmp_path, monkeypatch, built_wheels, failure,
+):
+    candidate = selected_source(source, target, adopter)
+    projects = completion._selected_projects(
+        completion._package_roots(source[0]), "fixture-source", (),
+        target["environment"], time.monotonic() + 60,
+    )
+    associated = {
+        completion.canonicalize_name(completion._toml(path / "pyproject.toml")["project"]["name"]):
+            built_wheels(path, tmp_path / "associated")
+        for path in projects
+    }
+    if failure == "missing":
+        associated.pop("fixture-helper")
+    elif failure == "wrong-project":
+        associated["fixture-source"] = associated["fixture-helper"]
+    monkeypatch.setattr(completion, "build_wheel", lambda *a, **kw: pytest.fail(
+        "an associated-wheel installation must not execute a backend",
+    ))
+
+    def consume():
+        with completion.retain_source_profile(
+            candidate, third_party={}, first_party=associated, **arguments(toolchain),
+        ) as prepared:
+            assert prepared.local_packages == ("agent-procutil", "fixture-helper", "fixture-source")
+            prepared.wheels.verify()
+            assert {row[0] for row in prepared.wheels.distributions} == set(associated)
+            assert prepared.profile.record()["release"]["identity"] == "source:" + source[1].source_commit
+
+    if failure is None:
+        consume()
+    else:
+        with pytest.raises(ProfileError, match="first-party wheel"):
+            consume()
 
 
 @pytest.mark.parametrize("uv_selection", ["absolute", "path"])

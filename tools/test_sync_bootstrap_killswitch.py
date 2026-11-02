@@ -131,7 +131,26 @@ def test_check_passes_when_call_site_wired(fake_repo, capsys):
     rc = sync_bootstrap_killswitch.main(["--check"])
     out = capsys.readouterr()
     assert rc == 0
-    assert "All 1 wired adopters call their guard." in out.out
+    assert "All 1 adopters guard reconciliation or use inert compatibility hooks." in out.out
+
+
+@pytest.mark.parametrize("hook,body,effect", [
+    ("bootstrap-check.sh", "#!/usr/bin/env bash\nprintf '{}'\nexit 0\n", "touch state"),
+    ("bootstrap-check.ps1",
+     "param([string]$BootstrapPython = '')\n[Console]::Out.Write('{}')\nexit 0\n",
+     "New-Item state"),
+])
+def test_inert_compatibility_hook_requires_guard_after_any_added_command(
+    fake_repo, hook, body, effect,
+):
+    scripts = _mk_adopter(fake_repo, "agent-example")
+    path = scripts / hook
+    path.write_text(body, encoding="utf-8")
+    assert sync_bootstrap_killswitch.main([]) == 0
+    assert sync_bootstrap_killswitch.main(["--check"]) == 0
+
+    path.write_text(body.replace("exit 0", f"{effect}\nexit 0"), encoding="utf-8")
+    assert sync_bootstrap_killswitch.main(["--check"]) == 1
 
 
 def test_index_metadata_stamp_requires_guard_call_site(fake_repo, capsys):

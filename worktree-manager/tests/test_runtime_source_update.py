@@ -320,6 +320,19 @@ def test_preparer_process_is_own_isolated_code_and_receipt_checked(
         assert record == {"payload": str(payload), "identity": {"runtime_source": document, "runtime_version": version}}
 
 
+def test_installed_preparer_does_not_treat_wheel_assets_as_a_source_payload(tmp_path, monkeypatch):
+    scripts = tmp_path / "_runtime_assets" / "scripts"
+    tool = scripts / "runtime-source-tools" / "prepare_runtime_source.py"
+    tool.parent.mkdir(parents=True)
+    tool.write_text("# installed preparer", encoding="utf-8")
+    monkeypatch.setattr(preparation, "_runtime_scripts", lambda: scripts)
+    monkeypatch.setattr(
+        preparation, "running_payload_dir",
+        lambda: pytest.fail("installed asset lookup attempted source-payload discovery"),
+    )
+    assert preparation.preparer() == tool
+
+
 def test_json_and_passthrough_share_exact_scoped_command_and_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

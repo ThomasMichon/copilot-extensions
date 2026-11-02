@@ -321,6 +321,21 @@ def test_runtime_superseded_true_when_active_slot_differs(tmp_path):
     ) is False
 
 
+def test_application_supersession_keeps_current_nested_environment(monkeypatch, tmp_path):
+    from agent_worktrees import config, status_updater_cli
+
+    root = tmp_path / "application"
+    old = root / "versions" / "1.2.3" / ".venv"
+    current = root / "versions" / "1.2.4" / ".venv"
+    old.mkdir(parents=True)
+    current.mkdir(parents=True)
+    (root / "current-version").write_text("1.2.4", encoding="utf-8")
+    monkeypatch.setattr(config.sys, "prefix", str(current))
+    monkeypatch.setattr(config, "install_dir", lambda: tmp_path / "original-data")
+    assert not status_updater_cli._runtime_superseded(prefix=str(current))
+    assert status_updater_cli._runtime_superseded(prefix=str(old))
+
+
 def test_runtime_superseded_degrades_safe_on_missing_root(tmp_path):
     """No versions/ layout at all -> never superseded (keep serving)."""
     assert m._runtime_superseded(

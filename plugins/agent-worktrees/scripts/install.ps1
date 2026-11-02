@@ -53,6 +53,8 @@ param(
     [string]$ProjectName,
 
     [string]$InstallDir,
+    [string]$InstallSource,
+    [Parameter(DontShow)][string]$RuntimeSourceDescriptor,
     [string]$BootstrapPython,
     [Parameter(DontShow)][switch]$ProvisionMissingRuntime,
     [Parameter(DontShow)][string]$RuntimePublicationPlan,
@@ -75,6 +77,9 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
 
 # Keep native staging and the updater on the same declared installation budget.
 if (-not $env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC -and -not $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC) { $env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC = '900' }
+if ($InstallSource -and $Action -notin @('install', 'update', 'provision', 'repair')) {
+    throw '-InstallSource selects only installation, update, provisioning or independent repair.'
+}
 
 function Resolve-InstallerProjectName {
     param([AllowEmptyString()][string]$Name)
@@ -368,6 +373,8 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         )
         if ($ProjectName) { $driverArguments += @('--project-name', $ProjectName) }
         if ($BootstrapPython) { $driverArguments += @('--bootstrap-python', $BootstrapPython) }
+        if ($InstallSource) { $driverArguments += @('--install-source', $InstallSource) }
+        if ($RuntimeSourceDescriptor) { $driverArguments += @('--source-descriptor', $RuntimeSourceDescriptor) }
         if ($Owner) { $driverArguments += @('--owner', $Owner) }
         if ($Force) { $driverArguments += '--force' }
         if ($ZeroDowntime) { $driverArguments += '--zero-downtime' }
@@ -392,6 +399,7 @@ print(json.dumps(sys.executable, ensure_ascii=True))
             '--legacy-root', $InstallDir, '--source-payload-root', $admissionSource,
             '--project-root', $admissionProject
         )
+        if ($RuntimeSourceDescriptor) { $admissionArgs += @('--source-descriptor', $RuntimeSourceDescriptor) }
         $admissionOperation = if ($Action -eq 'uninstall') { 'teardown' } else { 'publish' }
         if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
             & $invokeAdmissionPython -Candidate $admissionPython -StreamOutput -Arguments (
@@ -3059,6 +3067,7 @@ function Deploy-PythonRuntime {
     if ($Action -in @('repair', 'dev', 'dev-release')) { $modeArgs = @('--mode', $Action) }
     $runtimeInputs = if ($Action -in @('repair', 'dev', 'dev-release')) { $RuntimeInputPlugin } else { $PluginDir.ToString() }
     if ($Owner) { $modeArgs += @('--owner', $Owner) }
+    if ($InstallSource) { $modeArgs += @('--install-source', $InstallSource) }
     if ($Action -ne 'dev-release') {
         $scope = if ($Action -in @('install', 'update')) { 'wrappers' } else { 'resolvers' }
         $frontend = @{shell='ps1'; executable=(Get-Process -Id $PID).Path; scope=$scope} |
@@ -4477,9 +4486,9 @@ switch ($Action) {
             exit 0
         }
         Write-V3Manifest
-        Deploy-CopilotPlugin
+        if (-not $InstallSource) { Deploy-CopilotPlugin }
         Deploy-GlobalBinstub
-        Ensure-CopilotExperimental
+        if (-not $InstallSource) { Ensure-CopilotExperimental }
         Assert-PathIncludes $LocalBin
         Remove-LegacyBinstubs
         Reconcile-Binstubs

@@ -43,7 +43,8 @@ def validate_manager_ownership(
             project = tomllib.loads(metadata.read_text(encoding="utf-8")).get("project", {})
             name = project.get("name", "")
             if not isinstance(name, str) or re.sub(r"[-_.]+", "-", name).lower() != (
-                "copilot-extensions-worktree-manager"
+                "uv-application-copilot-extensions-worktree-manager"
+                if (slot / "application.json").is_file() else "copilot-extensions-worktree-manager"
             ):
                 raise RuntimeError("Manager slot belongs to another package")
     home = Path(os.environ.get("USERPROFILE") or Path.home())
@@ -87,7 +88,7 @@ def validate_manager_ownership(
     )
     owns = runpy.run_path(str(ownership))["owns_launcher"] if not manager_seen else None
     commands = {}
-    for name in ("worktree-manager", "worktree-manager.cmd", "worktree-manager.ps1"):
+    for name in ("worktree-manager", "worktree-manager.cmd", "worktree-manager.ps1", "worktree-manager.sh"):
         path = local_bin / name
         _ordinary(path)
         if path.exists() and not path.is_file():

@@ -32,6 +32,92 @@ from test_promotion_python_artifacts import _write_index
 from installer_wheel_acquisition import AcquisitionUnavailable, acquire_wheel_inputs
 
 
+@pytest.mark.parametrize("wrapper", ["SafeUrl", "DisplaySafeUrl"])
+@pytest.mark.parametrize(("username", "password", "expected"), [
+    ('""', "None", ("https://feed.example:8443/simple/", "", False)),
+    ('"fixture%40user"', 'Some("redacted")',
+     ("https://feed.example:8443/simple/", "fixture@user", True)),
+])
+def test_native_index_url_preserves_uv_wrapper_compatibility(wrapper, username, password, expected):
+    from installer_native_feed import _index_url
+
+    projection = (
+        "Url(VerbatimUrl { url: " + wrapper + " {"
+        'scheme: "https", cannot_be_a_base: false, username: ' + username + ","
+        "password: " + password + ', host: Some(Domain("feed.example")),'
+        'port: Some(8443), path: "/simple/", query: None, fragment: None,'
+        "}, given: None, expanded: false, })"
+    )
+    assert _index_url(projection) == expected
+
+
+@pytest.mark.parametrize("wrapper", ["UnknownUrl", "UnsafeUrl", "SafeUrlExtra"])
+def test_native_index_url_refuses_unknown_uv_wrapper(wrapper):
+    from installer_native_feed import NativeFeedError, _index_url
+
+    with pytest.raises(NativeFeedError, match="unsupported"):
+        _index_url("Url(VerbatimUrl { url: " + wrapper + " {}, given: None, })")
+
+
+@pytest.mark.parametrize("quote", ["", "`"])
+@pytest.mark.parametrize("authentication", ["Auto", "Always"])
+def test_native_uv_missing_credentials_message_compatibility(
+    tmp_path, monkeypatch, quote, authentication,
+):
+    from types import SimpleNamespace
+
+    from installer_native_feed import _credentials
+
+    origin = "https://feed.example"
+    transaction = SimpleNamespace(
+        environment={"HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}, cwd=tmp_path,
+    )
+
+    def missing(command, **_kwargs):
+        assert command == ["fixture-uv", "auth", "token", origin]
+        message = "error: Failed to fetch credentials for " + quote + origin + "/" + quote
+        return subprocess.CompletedProcess(command, 2, "", message + "\n")
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    if authentication == "Always":
+        with pytest.raises(AcquisitionUnavailable, match="requires unavailable authentication"):
+            _credentials(
+                {"name": None, "authenticate": authentication}, transaction,
+                origin + "/simple/", "", False, [], "fixture-uv", time.monotonic() + 10,
+            )
+    else:
+        assert _credentials(
+            {"name": None, "authenticate": authentication}, transaction,
+            origin + "/simple/", "", False, [], "fixture-uv", time.monotonic() + 10,
+        ) == ()
+
+
+@pytest.mark.parametrize(("exit_code", "message"), [
+    (2, "error: credential store unavailable"),
+    (2, "error: Failed to fetch credentials for https://other.example/"),
+    (1, "error: Failed to fetch credentials for https://feed.example/"),
+])
+def test_native_uv_credential_lookup_errors_are_not_absence(
+    tmp_path, monkeypatch, exit_code, message,
+):
+    from types import SimpleNamespace
+
+    from installer_native_feed import NativeFeedError, _credentials
+
+    transaction = SimpleNamespace(
+        environment={"HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}, cwd=tmp_path,
+    )
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, exit_code, "", message),
+    )
+    with pytest.raises(NativeFeedError, match="credential lookup failed"):
+        _credentials(
+            {"name": None, "authenticate": "Auto"}, transaction,
+            "https://feed.example/simple/", "", False, [], "fixture-uv", time.monotonic() + 10,
+        )
+
+
 @pytest.fixture
 def selected(adopter, release, monkeypatch):
     record = release[2]

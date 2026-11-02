@@ -152,6 +152,32 @@ def _resolve(fixture: dict) -> dict:
     return result
 
 
+def test_archive_source_keeps_command_ownership_across_generations(binding_fixture):
+    fixture = binding_fixture
+    descriptor = {"source": "github", "repo": "Example/Plugins"}
+    initial_state = (fixture["legacy"] / "retained-state.json").read_bytes()
+    receipts = []
+    for name in ("first-source", "second-source"):
+        payload = fixture["home"] / name / "agent-worktrees"
+        payload.mkdir(parents=True)
+        fixture["arguments"].update(
+            payload_root=payload, mode_arguments={"source_descriptor": descriptor},
+        )
+        receipts.append(_publish(fixture))
+        assert _resolve(fixture)["status"] == "selected"
+    assert receipts[0]["installationId"] == receipts[1]["installationId"]
+    assert receipts[0]["sourceFingerprint"] == receipts[1]["sourceFingerprint"]
+    assert receipts[0]["payloadRoot"] != receipts[1]["payloadRoot"]
+    assert (fixture["legacy"] / "retained-state.json").read_bytes() == initial_state
+    before = _snapshot(fixture["home"])
+    fixture["arguments"]["mode_arguments"] = {
+        "source_descriptor": {"source": "github", "repo": "Other/Plugins"},
+    }
+    with pytest.raises(fixture["binding"].CommandOwnershipConflict, match="another source"):
+        _publish(fixture)
+    assert _snapshot(fixture["home"]) == before
+
+
 @pytest.mark.parametrize("borrowed", [False, True])
 @pytest.mark.parametrize("commit", [False, True])
 def test_manifest_publication_binds_before_commit_without_early_write(
@@ -961,7 +987,7 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
     launcher_path.write_text(
         "if ($args[0] -ne '-3') { throw 'Python launcher must select Python 3' }\n"
         "if (($args[1..6] -join ' ') -ne '-I -B -E -X utf8 -c') { throw 'Unexpected probe flags' }\n"
-        "if ($args.Count -ne 15 -or $args[8] -ne "
+        "if ($args.Count -ne 16 -or $args[-1] -ne '--flight-check' -or $args[8] -ne "
         "(Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts/command_binding.py')) {\n"
         "    throw 'Expected binding helper in the admitted interpreter process'\n"
         "}\n"

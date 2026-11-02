@@ -1398,10 +1398,11 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             'import json,sys; print(json.load(sys.stdin).get("record_path") or "")')" || exit 3
         PANE_SHELL_VERSION="$(printf '%s' "$JSON" | "$PYTHON" -c \
             'import json,sys; print(json.load(sys.stdin).get("pane_shell_version") or "")')" || exit 3
+        source "$SCRIPT_DIR/manager-runtime.sh"
         if [[ "$PANE_SHELL_VERSION" == 1 && -n "$RECORD_PATH" \
-              && "$SCRIPT_DIR" == */versions/*/payload/bin \
-              && "$OSTYPE" != msys* && "$OSTYPE" != cygwin* ]]; then
-            PANE_MANAGER_ROOT="${SCRIPT_DIR%/versions/*}"
+              && "$OSTYPE" != msys* && "$OSTYPE" != cygwin* ]] \
+              && MANAGER_SLOT="$(aw_manager_runtime_slot "${SCRIPT_DIR%/bin}")"; then
+            PANE_MANAGER_ROOT="${MANAGER_SLOT%/versions/*}"
             if ! PREPARED_SHELL=$(
                 "$PYTHON" -I -m agent_worktrees.session_shell \
                     --record "$RECORD_PATH" --wrapper "$PANE_WRAPPER" \

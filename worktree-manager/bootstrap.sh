@@ -21,6 +21,11 @@
 
 set -euo pipefail
 
+if [ "$#" -eq 1 ] && [ "${1-}" = --describe-source-inputs ]; then
+    printf '%s\n' '{"schema":"copilot-extensions.manager-source-inputs","version":1,"capabilities":["install-source"]}'
+    exit 0
+fi
+
 _bootstrap_progress() {
     local message="$1" state="${2:-running}" stamp line
     stamp="$(date -u '+%H:%M:%SZ' 2>/dev/null)" || stamp="time unavailable"
@@ -53,6 +58,7 @@ explicit_source=0
 if [ "$#" -ge 4 ] && [ "${1-}" = --repair-update ] && [ "${4-}" = update ]; then
     explicit_source=1
 fi
+if [ "${1-}" = --install-source ]; then explicit_source=1; fi
 if [ -f "$CONFIG" ] && [ "$explicit_source" -eq 0 ]; then
     source_config="$(awk '
         function value(text, quote, out, i, c, e, tail) {
@@ -103,6 +109,20 @@ fi
 
 installer_args=()
 recovery_only=0
+install_source=""
+if [ "${1-}" = --install-source ]; then
+    [ "$#" -ge 2 ] || { _bootstrap_progress '--install-source requires an absolute snapshot.' failed; exit 2; }
+    case "$2" in /*) ;; *) _bootstrap_progress '--install-source requires an absolute snapshot.' failed; exit 2 ;; esac
+    [ -d "$2" ] && [ ! -L "$2" ] || { _bootstrap_progress 'install-source must be an ordinary directory.' failed; exit 2; }
+    install_source="$2"
+    installer_args+=(--install-source "$install_source")
+    shift 2
+    case "${1-}" in
+        --install-source|--recover-for-repair|--repair-update|--bootstrap-update|--system-python)
+            _bootstrap_progress 'local install-source cannot be combined with another source or repair entry.' failed
+            exit 2 ;;
+    esac
+fi
 if [ "${1-}" = --recover-for-repair ]; then
     recovery_only=1
     installer_args+=(--recover-for-repair)
@@ -168,7 +188,7 @@ fi
 
 have_git=0
 command -v git >/dev/null 2>&1 && have_git=1
-if [ "$have_git" -eq 0 ]; then
+if [ "$have_git" -eq 0 ] && [ -z "$install_source" ]; then
     os="$(uname -s)"
     if [ "$os" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
         _bootstrap_progress 'git not found - installing via Homebrew...'
@@ -185,7 +205,9 @@ if [ "$have_git" -eq 0 ]; then
 fi
 
 # -- Fetch the payload (git clone/fetch when available, else GitHub tarball) ---
-if [ "$have_git" -eq 1 ]; then
+if [ -n "$install_source" ]; then
+    payload_parent="$install_source/source"
+elif [ "$have_git" -eq 1 ]; then
     mkdir -p "$STAGING"
     if [ ! -d "$STAGING/.git" ]; then
         rm -rf "$STAGING"; mkdir -p "$STAGING"

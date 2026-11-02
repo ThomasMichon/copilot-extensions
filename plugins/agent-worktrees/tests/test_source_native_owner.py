@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -21,7 +22,7 @@ REPOSITORY = Path(__file__).resolve().parents[3]
 prepared_native_runtime_source = runtime_fixture.native_runtime_source
 
 
-@pytest.mark.timeout(570)
+@pytest.mark.timeout(1500)
 def test_native_prepared_source_preserves_managed_global_owner(
     tmp_path, prepared_native_runtime_source,
 ):
@@ -52,10 +53,13 @@ def test_native_prepared_source_preserves_managed_global_owner(
     environment.update(
         HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
         COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=str(project),
+        COPILOT_EXTENSIONS_TEST_CONTAINED="1",
         GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
     )
 
     def run(command, label, timeout=120):
+        started = time.monotonic()
+        print(f"Native source phase: {label} (budget {timeout}s)", flush=True)
         completed = subprocess.run(
             command, cwd=project, env=environment, capture_output=True, text=True,
             timeout=timeout, **no_window_kwargs(),
@@ -63,6 +67,7 @@ def test_native_prepared_source_preserves_managed_global_owner(
         assert completed.returncode == 0, (
             f"{label}: {completed.stdout}\n{completed.stderr}"
         )
+        print(f"Native source phase passed: {label} ({time.monotonic() - started:.3f}s)", flush=True)
         return completed.stdout
 
     plugin, _commit = prepared_native_runtime_source

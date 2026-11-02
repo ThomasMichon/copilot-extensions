@@ -42,9 +42,9 @@ from pathlib import Path
 import agent_chat_service as chat
 root=Path(chat.__file__).parent
 runtime=importlib.import_module("agent_chat_service._versioned_runtime")
-sys.modules["versioned_runtime"]=runtime
-sys.path.insert(0,str(root))
 if sys.version_info < (3,11):
+    sys.modules["versioned_runtime"]=runtime
+    sys.path.insert(0,str(root))
     try:
         import installer_engine
     except ModuleNotFoundError as error:
@@ -53,14 +53,17 @@ if sys.version_info < (3,11):
         raise AssertionError("canonical constructor unexpectedly supports this bootstrap")
     print(json.dumps({"construction":"requires-python-3.11"}))
     raise SystemExit(0)
-import installer_engine as engine
+from agent_chat_service.construction import _engine
+engine=_engine()
 assert Path(engine.__file__).parent == root
 assert engine.runtime is runtime
 for name in ("versioned_runtime_source","installer_engine_process","installer_dependency_policy",
              "installer_wheel_inputs","installer_wheel_snapshot",
-             "installer_source_wheel_cache","installer_source_build"):
-    assert Path(sys.modules[name].__file__).parent == root
-policy=sys.modules["installer_dependency_policy"]
+             "installer_source_wheel_cache","installer_source_build","installer_engine_health"):
+    assert Path(sys.modules["agent_chat_service."+name].__file__).parent == root
+    assert name not in sys.modules
+assert "versioned_runtime" not in sys.modules
+policy=sys.modules["agent_chat_service.installer_dependency_policy"]
 assert Path(policy._configuration_path).parent == root
 assert Path(policy._configuration._content_path).parent == root
 assert callable(engine.numbered_candidate)
@@ -86,8 +89,8 @@ from agent_chat_service.client import ClientError
 from agent_chat_service.construction import _engine
 names=("versioned_runtime","versioned_runtime_source",
        "installer_dependency_policy","installer_engine_process",
-       "installer_wheel_inputs","installer_wheel_snapshot")
-names += ("installer_source_wheel_cache","installer_source_build")
+       "installer_wheel_inputs","installer_wheel_snapshot",
+       "installer_source_wheel_cache","installer_source_build","installer_engine_health")
 for name in names:
     foreign=ModuleType(name)
     sys.modules[name]=foreign
@@ -107,7 +110,11 @@ print(json.dumps({"foreign_imports_preserved":len(names)}))
 """
     assert json.loads(installed_chat.run(
         [str(installed_chat.core_python), "-I", "-B", "-c", probe], cwd=tmp_path,
+<<<<<<< HEAD
     )) == {"foreign_imports_preserved": 8}
+=======
+    )) == {"foreign_imports_preserved": 9}
+>>>>>>> 7b3e68b03c (Add bounded Manager and Worktrees wheel applications)
 
 
 def independent_inputs(tmp_path, installed_chat, chat_library_sdists):

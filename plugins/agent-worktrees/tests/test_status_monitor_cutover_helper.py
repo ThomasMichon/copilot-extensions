@@ -112,6 +112,113 @@ def test_r1a_guarded_rollback_revalidates_owner_at_undrain_boundary(monkeypatch,
     assert not result.rolled_back
 
 
+@pytest.mark.parametrize("failure", [None, "health", "promotion", "route-race"])
+def test_source_start_publishes_own_generation_without_stopping_the_predecessor(
+    tmp_path, monkeypatch, failure,
+):
+    from zdd import diagnostics
+    from agent_worktrees import runtime_identity
+
+    slot = tmp_path / "application" / "versions" / "1.2.3"
+    events = []
+    previous = routing.Endpoint(bind="127.0.0.1", port=12001, pid=101, generation=1)
+    table = {"active": previous.to_dict()}
+    following = routing.Endpoint(bind="127.0.0.1", port=12002, pid=202, generation=2)
+    monkeypatch.setattr(smc.sys, "prefix", str(slot / ".venv"))
+    monkeypatch.setattr(runtime_identity, "PROCESS_GENERATION", "a" * 32)
+    monkeypatch.setattr(smc, "routing_dir", lambda: tmp_path)
+    monkeypatch.setattr("agent_worktrees.status_monitor_runtime._status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_acquire_cutover_lock", lambda *a, **k: SimpleNamespace(
+        release=lambda: events.append("release"),
+    ))
+    monkeypatch.setattr(routing, "read_table", lambda *a, **k: table)
+    monkeypatch.setattr(smc, "load_or_create_control_token", lambda: "fixture-token")
+    monkeypatch.setattr(smc, "pick_free_port", lambda: 12002)
+    child = SimpleNamespace(pid=202, poll=lambda: None)
+    monkeypatch.setattr(smc, "spawn_passive", lambda python, **k: events.append("spawn") or child)
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "123")
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 2)
+
+    class Client:
+        def __init__(self, url, **kwargs):
+            self.prior = url.endswith(":12001")
+            assert kwargs["token"] == "fixture-token"
+
+        def health(self):
+            if self.prior:
+                events.append("prior-health")
+                raise ConnectionError("prior generation is unavailable")
+            if failure == "health":
+                raise ConnectionError("new generation is unavailable")
+            events.append("new-health")
+            return {
+                "status": "ready", "published": "promote" in events, "pid": 202,
+                "runtime_slot": slot.name, "runtime_generation": "a" * 32,
+            }
+
+        def promote(self):
+            events.append("promote")
+            return {"adopted": failure != "promotion"}
+
+    def publish(*args, **kwargs):
+        events.append("publish")
+        assert kwargs["expected_active"] == previous
+        assert kwargs["pid"] == 202 and kwargs["process_start_time"] == "123"
+        if failure == "route-race":
+            raise routing.ActivePublicationRefused("route changed")
+        return following, previous
+
+    def cleanup(pid, birth, **kwargs):
+        assert pid == 202 and birth == "123"
+        events.append("cleanup-new")
+        return {"exit_confirmed": True}
+
+    monkeypatch.setattr(smc, "ControlClient", Client)
+    monkeypatch.setattr(routing, "publish_active_with_previous_guarded", publish)
+    monkeypatch.setattr(routing, "restore_previous_if_owner", lambda *a, **k: (
+        events.append("restore-own-route") or True
+    ))
+    monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", cleanup)
+    monkeypatch.setattr(smc, "activate_after_update", lambda **k: pytest.fail("legacy cutover entered"))
+    if failure is None:
+        assert smc.start_application(health_timeout=0.01) == 0
+        assert events == ["prior-health", "spawn", "new-health", "publish", "promote", "new-health", "release"]
+    else:
+        with pytest.raises(RuntimeError if failure != "route-race" else routing.ActivePublicationRefused):
+            smc.start_application(health_timeout=0.01)
+        assert events[-2:] == ["cleanup-new", "release"]
+        assert ("restore-own-route" in events) == (failure == "promotion")
+
+
+def test_source_start_reuses_an_authenticated_current_generation(monkeypatch, tmp_path):
+    from agent_worktrees import runtime_identity
+    from zdd import diagnostics
+
+    slot = tmp_path / "versions" / "1.2.3"
+    endpoint = routing.Endpoint(
+        bind="127.0.0.1", port=12002, pid=202, generation=2, process_start_time="123",
+    )
+    table = {"active": endpoint.to_dict()}
+    released = []
+    monkeypatch.setattr(smc.sys, "prefix", str(slot / ".venv"))
+    monkeypatch.setattr(runtime_identity, "PROCESS_GENERATION", "a" * 32)
+    monkeypatch.setattr("agent_worktrees.status_monitor_runtime._status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "routing_dir", lambda: tmp_path)
+    monkeypatch.setattr(smc, "_acquire_cutover_lock", lambda *a, **k: SimpleNamespace(
+        release=lambda: released.append(True),
+    ))
+    monkeypatch.setattr(routing, "read_table", lambda *a, **k: table)
+    monkeypatch.setattr(smc, "load_or_create_control_token", lambda: "fixture-token")
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "123")
+    monkeypatch.setattr(smc, "ControlClient", lambda *a, **k: SimpleNamespace(health=lambda: {
+        "status": "ready", "published": True, "pid": 202,
+        "runtime_slot": slot.name, "runtime_generation": "a" * 32,
+    }))
+    monkeypatch.setattr(smc, "spawn_passive", lambda *a, **k: pytest.fail("current daemon replaced"))
+    assert smc.start_application() == 0
+    assert released == [True]
+
+
 def test_failed_monitor_census_is_not_an_empty_inventory(monkeypatch):
     monkeypatch.setattr(smc, "os", SimpleNamespace(name="posix"))
     monkeypatch.setattr(
@@ -298,11 +405,12 @@ def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):
     threading.Thread(target=_self_retire, args=(first_new,), daemon=True).start()
 
     old.busy.set()
-    release_old = threading.Thread(
-        target=lambda: (time.sleep(1.0), old.busy.clear()),
+    release_old = threading.Event()
+    release_thread = threading.Thread(
+        target=lambda: (release_old.wait(10), old.busy.clear()),
         daemon=True,
     )
-    release_old.start()
+    release_thread.start()
 
     monkeypatch.setattr(smc, "routing_dir", lambda runtime_home=None: route_dir)
     monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
@@ -349,14 +457,16 @@ def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):
     assert first_pid == first_new.pid
     assert old.alive, "the old daemon exited before the new route was active"
 
-    second_result = smc.activate_after_update(runtime_python="python")
-    assert second_result["action"] == "cutover"
-    assert second_result["result"]["ok"] is True
-
+    release_old.set()
+    release_thread.join(timeout=2)
     first_thread.join(timeout=10)
     assert not first_thread.is_alive(), "first cutover never completed"
     assert first_result["action"] == "cutover"
-    assert "result" in first_result
+    assert first_result["result"]["ok"] is True
+
+    second_result = smc.activate_after_update(runtime_python="python")
+    assert second_result["action"] == "cutover", second_result
+    assert second_result["result"]["ok"] is True
     assert second_new.promoted is True
 
     final_pid = _wait_for(

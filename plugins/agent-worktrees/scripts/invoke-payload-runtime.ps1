@@ -478,7 +478,7 @@ try:
 except ImportError:
     print(sys.pycache_prefix)
 else:
-    print(cache_arguments(sys.argv[1], runtime=sys.executable)[1].split("=", 1)[1])
+    print(cache_arguments(sys.argv[1], runtime=sys.executable)[1].split('=', 1)[1])
 '@
         $selectedCache = & $Python -I -B -X "pycache_prefix=$pythonCache" -c $cacheSelector $runtimeRoot
         if ($LASTEXITCODE -ne 0 -or @($selectedCache).Count -ne 1 -or -not $selectedCache) {

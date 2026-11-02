@@ -214,20 +214,22 @@ def self_install_request(operation: Callable[[], int]) -> int:
     import update_driver as driver
 
     from .self_install import _runtime_installer, default_root, running_payload_dir
+    from .runtime_identity import running_application_slot
 
     with _runtime_installer()._installation_custody() as custody:
         if custody is not None:
             return operation()
         argv, environment = driver.runtime_command("worktree_manager", ["self-install", "--apply"])
+        workspace = running_application_slot() or running_payload_dir()
         root = str(default_root().resolve())
         context = {**request_context(), "WORKTREE_MANAGER_ROOT": root}
         request = driver.enqueue(
             driver.RequestSpec(
                 "manager-self-install", ("--apply",), project=root,
-                cwd=str(running_payload_dir()), source=_source_key(), context=tuple(context.items()),
+                cwd=str(workspace), source=_source_key(), context=tuple(context.items()),
             ),
             runner=driver.TrustedRunner(
-                argv, str(running_payload_dir()), env=tuple(environment.items()), context_keys=_CONTEXT_KEYS,
+                argv, str(workspace), env=tuple(environment.items()), context_keys=_CONTEXT_KEYS,
             ),
         )
         driver.drain()
