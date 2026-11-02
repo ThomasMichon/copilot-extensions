@@ -3,18 +3,43 @@ from __future__ import annotations
 
 import importlib.util
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol, cast
 
 REPO = Path(__file__).resolve().parents[3]
 TOOL = REPO / "tools" / "sync-installation-context.py"
 
 
-def _load_tool():
+class _VendoringTool(Protocol):
+    REPO: Path
+    CANONICAL_DIR: Path
+    ADOPTERS: tuple[str, ...]
+    LEGACY_ENTRYPOINT_ADOPTERS: tuple[str, ...]
+    PAYLOAD_PYTHON_ADOPTERS: tuple[str, ...]
+    STANDALONE_PYTHON_ADOPTERS: tuple[tuple[str, str], ...]
+    STANDALONE_ASSETS: tuple[tuple[str, str], ...]
+    lifecycle_archive: Callable[[Path], bytes]
+
+    @property
+    def FILES(self) -> tuple[str, ...]: ...
+
+    @property
+    def LEGACY_ENTRYPOINT_FILES(self) -> tuple[str, ...]: ...
+
+    def verify(self) -> list[str]: ...
+
+    def sync(self) -> list[str]: ...
+
+    def unregistered_adopters(self) -> list[str]: ...
+
+
+def _load_tool() -> _VendoringTool:
     spec = importlib.util.spec_from_file_location("sync_installation_context", TOOL)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module
+    return cast(_VendoringTool, module)
 
 
 def test_real_repo_vendored_copies_are_in_sync() -> None:
