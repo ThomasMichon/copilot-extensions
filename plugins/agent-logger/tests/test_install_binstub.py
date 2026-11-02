@@ -29,6 +29,8 @@ _COMMANDS = (
     "session-sync",
 )
 _HARNESS_TIMEOUT_SECONDS = 20
+# Cold native payload copies need fixture headroom, not a larger installer deadline.
+_STAMP_TIMEOUT_SECONDS = 90 if os.name == "nt" else 60
 
 
 def _offline_uv(tmp_path: Path, env: dict[str, str]) -> Path:
@@ -225,10 +227,10 @@ if sources or wheel_arguments:
         assert len(sources) == 3 and '--no-editable' not in args and '--link-mode' in args
         assert args[args.index('--link-mode') + 1] == 'copy'
     elif 'agent-logger' in names:
-        expected = {{'agent-config-migrate', 'agent-procutil', 'agent-single-instance-lease',
+        expected = {{'agent-configuration-layers', 'agent-config-migrate', 'agent-procutil', 'agent-single-instance-lease',
                     'agent-update-driver', 'agent-dropin-registry', 'agent-plugin-resolve',
                     'agent-plugin-activation', 'agent-logger'}}
-        assert names == expected and len(sources) == 8 and '--no-editable' not in args, args
+        assert names == expected and len(sources) == 9 and '--no-editable' not in args, args
         assert {{args[i + 1] for i, arg in enumerate(args) if arg == '--reinstall-package'}} == expected
         assert (site / 'setuptools-83.0.0.dist-info').is_dir()
         assert (site / 'yaml').is_dir()
@@ -435,6 +437,7 @@ def _stage_payload(tmp_path: Path) -> Path:
     for lib in (
         "installer-engine",
         "versioned-runtime",
+        "configuration-layers",
         "config-migrate",
         "agent-procutil",
         "zdd",
@@ -505,6 +508,7 @@ def test_legacy_uninstall_guard_uses_teardown_admission(tmp_path, monkeypatch):
         binding.publish_legacy_binding(
             primitive, payload_root=payload, plugin_id="agent-logger",
             legacy_root=root, project_root=Path.cwd(),
+            mode_arguments={"os_profile": root.parent},
         )
     _, receipt = guard["validate"](root)
     assert receipt["pluginId"] == "agent-logger"
@@ -602,7 +606,10 @@ def test_native_uninstall_removes_only_owned_commands(tmp_path, monkeypatch, nat
         assert (local_bin / name).read_bytes() == original[name], name
         assert str(local_bin / name) not in result.stdout
     for name in owned:
-        if dry_run:
+        if not dry_run and (native == "ps1") != (os.name == "nt"):
+            assert (local_bin / name).read_bytes() == original[name]
+            assert name not in result.stdout
+        elif dry_run:
             assert (local_bin / name).read_bytes() == original[name]
             assert name in result.stdout
         else:
@@ -786,9 +793,9 @@ def test_stamp_replaces_dangling_legacy_binstub(tmp_path: Path) -> None:
 @pytest.mark.skipif(os.name != "nt", reason="Windows installer behavior")
 # Regression (coverage-guided-ci's full-matrix local validation pass,
 # 2026-10-04): same class of gap -- two sequential subprocess calls
-# (timeout=60, timeout=30) mean a worst case near 90s, past the 30s
+# (timeout=90, timeout=30) mean a worst case near 120s, past the 30s
 # blanket default.
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(150)
 def test_windows_stamp_publishes_complete_command_family(tmp_path: Path) -> None:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
@@ -808,7 +815,7 @@ def test_windows_stamp_publishes_complete_command_family(tmp_path: Path) -> None
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=_STAMP_TIMEOUT_SECONDS,
         check=False,
     )
 
@@ -1048,10 +1055,10 @@ def test_provision_publishes_durable_compatibility_wrappers(
 
 # Regression (coverage-guided-ci's full-matrix local validation pass,
 # 2026-10-04): same class as `test_provision_publishes_durable_compatibility_
-# wrappers` above -- two sequential subprocess.run calls (timeout=60,
-# timeout=420) mean a worst case near 480s, well past the 30s blanket
-# pytest-timeout default. Real headroom above the combined internal ceiling.
-@pytest.mark.timeout(520)
+# wrappers` above -- two sequential subprocess.run calls (timeout=90,
+# timeout=420) mean a worst case near 510s on Windows (480s on POSIX).
+# Keep fixture headroom above the combined internal ceiling.
+@pytest.mark.timeout(550 if os.name == "nt" else 520)
 def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -> None:
     payload = _stage_release_payload(tmp_path)
     home = tmp_path / "home"
@@ -1095,7 +1102,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=_STAMP_TIMEOUT_SECONDS,
         check=False,
     )
     assert stamped.returncode == 0, stamped.stderr
@@ -1240,7 +1247,7 @@ def test_auxiliary_pre_contract_dispatch_uses_effective_runtime(tmp_path: Path, 
         env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
-    result = subprocess.run(stamp, **kwargs)
+    result = subprocess.run(stamp, **{**kwargs, "timeout": _STAMP_TIMEOUT_SECONDS})
     assert result.returncode == 0, result.stdout + result.stderr
     installation = home / ".agent-logger"
     snapshot = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())

@@ -1328,6 +1328,7 @@ function Materialize-DispatchSnapshot {
     param([string]$SnapshotDir, [string]$PluginDir)
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     $libraries = [ordered]@{
+        'agent-configuration-layers' = 'configuration-layers'
         'agent-update-driver' = 'update-driver'
         'agent-zdd' = 'zdd'
         'agent-procutil' = 'agent-procutil'
