@@ -29,6 +29,9 @@ def launcher(request, tmp_path):
     path = tmp_path / f"manager.{kind}"
     path.write_text(getattr(si, f"_{kind}_binstub")(), encoding="utf-8", newline="")
     if kind == "cmd":
+        (tmp_path / "worktree-manager.ps1").write_text(
+            si._ps1_binstub(), encoding="utf-8",
+        )
         argv = [os.environ["COMSPEC"], "/d", "/c", str(path)]
     elif kind == "ps1":
         shell = shutil.which("pwsh") or shutil.which("powershell")
@@ -76,6 +79,30 @@ def _payload(slot, version="1.2.3"):
         '[tool.uv]\nexclude-newer = "7 days"\n',
         encoding="utf-8",
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native CMD compatibility")
+@pytest.mark.parametrize("launcher", ["cmd"], indirect=True)
+def test_cmd_without_powershell_keeps_the_legacy_picker_entry(launcher, tmp_path):
+    argv, env, slot = launcher
+    _payload(slot)
+    runtime = slot / ".venv"
+    venv.EnvBuilder(with_pip=False).create(runtime)
+    python = runtime / "Scripts" / "python.exe"
+    uv = shutil.which("uv")
+    assert uv, "the contained runner requires uv"
+    installed = _run(
+        [uv, "pip", "install", "--python", str(python), "--no-deps", str(slot)],
+        env=env, cwd=slot,
+    )
+    assert installed.returncode == 0, installed.stderr
+    env["PATH"] = str(Path(os.environ["SYSTEMROOT"]) / "System32")
+    assert shutil.which("pwsh.exe", path=env["PATH"]) is None
+
+    result = _run(argv, env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["args"] == []
 
 
 def test_constructed_slot_runs_installed_package_without_resolution(launcher, tmp_path):

@@ -111,6 +111,11 @@ def _run_relocated_mux_launch(req, plan, script) -> int:
     if no_mux:
         os.environ["WORKTREE_NO_MUX"] = "1"
     if is_windows:
+        if not no_mux:
+            from .terminal_launch import prepare
+
+            if prepare(script, args, attempt_id):
+                return 0
         argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(script), *args]
         proc = subprocess.Popen(argv)
         try:

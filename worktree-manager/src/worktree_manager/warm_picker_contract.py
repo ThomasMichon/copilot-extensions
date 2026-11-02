@@ -22,6 +22,7 @@ _TRANSPORT_KEYS = {
     "PYTHONUTF8", "AGENT_WORKTREES_LAUNCH_ID", "AGENT_WORKTREES_BINSTUB_STARTED",
     "UV_INTERNAL__PYTHONHOME", "__PYVENV_LAUNCHER__",
     "WORKTREE_MANAGER_ENGINE_ARGV", "WORKTREE_MANAGER_RESIDENT_BOOTSTRAP",
+    "CE_TERMINAL_LAUNCH",
     "PYTEST_CURRENT_TEST",  # pytest changes its phase marker inside one invocation
 }
 
@@ -39,7 +40,10 @@ def _private_key(key: str) -> bool:
 
 
 def worker_environment(environment: dict[str, str]) -> dict[str, str]:
-    return {key: value for key, value in environment.items() if not _private_key(key)}
+    return {
+        key: value for key, value in environment.items()
+        if not _private_key(key) and key.upper() != "CE_TERMINAL_LAUNCH"
+    }
 
 
 def invocation_context(

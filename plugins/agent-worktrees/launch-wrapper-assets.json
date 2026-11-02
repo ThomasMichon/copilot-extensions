@@ -13,6 +13,7 @@
     "psmux-path.ps1",
     "psmux-passthrough.conf",
     "session-options.ps1",
-    "session-options.sh"
+    "session-options.sh",
+    "terminal-launch.ps1"
   ]
 }
