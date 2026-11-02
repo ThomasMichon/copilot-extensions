@@ -598,3 +598,81 @@ def test_operator_only_values_are_not_attributed_to_the_plugin(tmp_path, layered
     }
     assert PLUGIN not in owners.values()
     assert cfg.fleet_source("example") == str(base_file)
+
+
+DRIVER_FRAGMENT = """\
+    fleets:
+      example:
+        image: example:latest
+        driver: example-driver
+        driver_options:
+          endpoint: shipped
+    """
+
+
+@pytest.mark.parametrize("entry", ["example:\n", "example: {}\n", "example: null\n"])
+@pytest.mark.parametrize("strict", [False, True])
+def test_empty_operator_fleet_entry_removes_the_shipped_fleet(
+    tmp_path, monkeypatch, isolated, entry, strict,
+):
+    root = _plugin(tmp_path / "plugins" / "example-harness", DRIVER_FRAGMENT)
+    isolated.append(("example-harness@example", [root]))
+    path = _operator_config(tmp_path, monkeypatch, "schema_version: 2\nfleets:\n  " + entry)
+
+    cfg = load_config(strict=strict)
+
+    assert "example" not in cfg.fleets
+    marker = cfg.configuration_provenance["/fleets/example"]
+    assert marker["id"] == str(path) and marker["removed"] is True
+    assert not [p for p in cfg.configuration_provenance if p.startswith("/fleets/example/")]
+    assert cfg.fleet_source("example") is None
+    assert cfg.plugin_fragments[0]["removed"] == ["example"]
+
+    from agent_containers import fleet as fleet_mod
+
+    with pytest.raises(RuntimeError, match="'example' is not defined"):
+        fleet_mod.reconcile_up(cfg, "example")
+
+
+def test_composed_removal_then_higher_tier_redefinition_starts_from_scratch(
+    tmp_path, layered, isolated, capsys,
+):
+    base, knowledge, machine, write = layered
+    root = _plugin(tmp_path / "plugins" / "example-harness", DRIVER_FRAGMENT)
+    isolated.append(("example-harness@example", [root]))
+    base_file = write(base, {"fleets": {"example": None, "other": {"image": "other:latest"}}})
+
+    removed = load_config(strict=True)
+    assert "example" not in removed.fleets and "other" in removed.fleets
+    assert removed.configuration_provenance["/fleets/example"]["id"] == str(base_file)
+
+    assert cli.main(["config-sources", "--json"]) == 0
+    view = json.loads(capsys.readouterr().out)
+    assert view["provenance"]["/fleets/example"]["removed"] is True
+    assert cli.main(["config-sources"]) == 0
+    assert f"/fleets/example: {base_file} (removed)" in capsys.readouterr().out
+
+    machine_file = write(machine, {"fleets": {"example": {"image": "local:latest", "size": 2}}},
+                         machine_file=True)
+    cfg = load_config(strict=True)
+
+    fleet = cfg.fleets["example"]
+    assert (fleet.image, fleet.size) == ("local:latest", 2)
+    owners = {p: o for p, o in cfg.configuration_provenance.items() if p.startswith("/fleets/example")}
+    assert "/fleets/example" not in owners
+    assert {o["id"] for o in owners.values()} == {str(machine_file)}
+    assert not [p for p in owners if "driver" in p]
+    assert cfg.fleet_source("example") == str(machine_file)
+
+
+def test_empty_entry_for_a_fleet_without_a_fragment_keeps_existing_behavior(
+    tmp_path, monkeypatch, isolated,
+):
+    root = _plugin(tmp_path / "plugins" / "example-harness", DRIVER_FRAGMENT)
+    isolated.append(("example-harness@example", [root]))
+    _operator_config(tmp_path, monkeypatch, "schema_version: 2\nfleets:\n  own: {}\n")
+
+    cfg = load_config(strict=True)
+
+    assert cfg.fleets["own"].size == 1
+    assert "example" in cfg.fleets

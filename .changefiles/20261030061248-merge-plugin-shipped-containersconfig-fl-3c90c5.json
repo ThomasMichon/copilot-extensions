@@ -1,5 +1,5 @@
 {
-  "comment": "Merge plugin-shipped containersConfig fleet fragments beneath containers.yaml per fleet and per key, with config-sources provenance",
+  "comment": "Merge plugin-shipped containersConfig fleet fragments beneath the composed configuration per fleet and per key (an empty operator fleet entry removes a shipped fleet), with config-sources provenance",
   "changes": [
     {
       "plugin": "agent-containers",

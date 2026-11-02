@@ -19,6 +19,10 @@ Rules:
 * A fragment contributes named ``fleets:`` entries only. ``schema_version`` is
   accepted and ignored; any other top-level key is ignored with a warning, so
   global defaults, relay, dotfiles and harness settings remain operator-owned.
+* An empty operator fleet entry (``example:``, ``example: null`` or
+  ``example: {}``) removes the plugin-shipped fleet entirely; a higher layer may
+  define it again from scratch. Provenance records the removing layer at
+  ``/fleets/<name>`` with ``removed: true``.
 * Operator configuration overrides a plugin fleet **per key**: the fleet's
   mapping is deep-merged (nested mappings such as ``environment`` merge per
   key; lists and scalars replace). An explicit ``null`` clears a fragment value
@@ -383,23 +387,42 @@ def merge_fragments(
         return data, provenance, layers, summaries
 
     merged_fleets: dict[str, Any] = dict(user_fleets)
+    removed: dict[str, dict[str, Any]] = {}
     for name, fragment in owners.items():
         effective = user_fleets.get(name)
         if effective is not None and not isinstance(effective, dict):
             continue  # an invalid operator value reaches native validation
         prefix = _pointer("/fleets", name)
         replayed: dict[str, Any] = {}
-        value = _replay({}, plugin_fleets[name], prefix, fragment.owner(), replayed)
+        value: dict[str, Any] | None = _replay(
+            {}, plugin_fleets[name], prefix, fragment.owner(), replayed,
+        )
         for owner, values in operator_layers:
             layer_fleets = values.get("fleets") if isinstance(values, dict) else None
-            if not isinstance(layer_fleets, dict) or layer_fleets.get(name) is None:
+            if not isinstance(layer_fleets, dict) or name not in layer_fleets:
                 continue
             layer_value = layer_fleets[name]
+            if layer_value is None or layer_value == {}:
+                # An empty fleet entry removes the plugin-shipped fleet; a
+                # higher layer may define it again from scratch.
+                replayed.clear()
+                replayed[prefix] = {**copy.deepcopy(owner), "removed": True}
+                value = None
+                continue
             if not isinstance(layer_value, dict):
                 replayed.clear()
                 value = {}
                 continue
+            if value is None:
+                replayed.clear()
+                value = {}
             value = _replay(value, layer_value, prefix, owner, replayed)
+        if value is None:
+            merged_fleets.pop(name, None)
+            _drop(provenance, prefix)
+            provenance.update(replayed)
+            removed[name] = replayed[prefix]
+            continue
         # Operator-owned source-relative paths keep the composition's resolution.
         for key in _SOURCE_RELATIVE_KEYS:
             owner = replayed.get(_pointer(prefix, key))
@@ -412,6 +435,8 @@ def merge_fragments(
         _drop(provenance, prefix)
         provenance.update(replayed)
 
+    for summary in summaries:
+        summary["removed"] = [n for n in summary["fleets"] if n in removed]
     merged = dict(data)
     merged["fleets"] = merged_fleets
     return merged, provenance, layers, summaries
@@ -422,6 +447,9 @@ def fleet_source(provenance: dict[str, Any], fleet_name: str | None) -> str | No
     if not fleet_name:
         return None
     prefix = _pointer("/fleets", fleet_name)
+    marker = provenance.get(prefix)
+    if isinstance(marker, dict) and marker.get("removed"):
+        return None
     owners = [
         owner for pointer, owner in provenance.items()
         if (pointer == prefix or pointer.startswith(prefix + "/")) and isinstance(owner, dict)
@@ -465,10 +493,15 @@ def cmd_config_sources(args: Any) -> int:
         line += (", ".join(fragment["fleets"]) or "-") + ")"
         if fragment.get("shadowed"):
             line += f" [shadowed: {', '.join(fragment['shadowed'])}]"
+        if fragment.get("removed"):
+            line += f" [removed by operator: {', '.join(fragment['removed'])}]"
         print(line)
     provenance = view["provenance"]
     print("Provenance:" if provenance else "Provenance: (none recorded)")
     for pointer in sorted(provenance):
         owner = provenance[pointer]
-        print(f"  {pointer}: {owner.get('id') if isinstance(owner, dict) else owner}")
+        label = owner.get("id") if isinstance(owner, dict) else owner
+        if isinstance(owner, dict) and owner.get("removed"):
+            label = f"{label} (removed)"
+        print(f"  {pointer}: {label}")
     return 0

@@ -65,7 +65,9 @@ and the current harness is bound to external state) a knowledge-overlay
 fragment path in their `plugin.json`) merge **beneath** all of that configuration at lowest
 precedence: override only the keys you need (e.g. `size`, or a nested
 `environment` entry) per fleet, and run `<catalog argv[0]> config-sources` to
-see which source supplied each fleet and key. Fragments may define `fleets:`
+see which source supplied each fleet and key. An empty entry (`example:`,
+`example: null` or `example: {}`) removes a plugin-shipped fleet entirely.
+Fragments may define `fleets:`
 only; same-named fleets from two plugins resolve to the plugin whose
 `name@marketplace` sorts first. Copy the starter example,
 [`references/containers.yaml`](references/containers.yaml), and adapt. A fleet

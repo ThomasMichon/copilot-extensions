@@ -64,6 +64,11 @@ enabled plugin. Without an invoking checkout only global activation applies.
   plugin-backed fleet removes the value, so the field falls back to its
   default/global value; such clears are exempt from per-tier value validation,
   while any non-null value is still validated.
+- An empty operator fleet entry (`example:`, `example: null` or `example: {}`)
+  removes a plugin-shipped fleet entirely, including every shipped key; a
+  higher layer may define it again from scratch. The removing layer is recorded
+  at `/fleets/<name>` with `removed: true`. Empty entries for fleets that no
+  plugin ships keep their native meaning (a fleet with defaults).
 - The plugin whose `name@marketplace` sorts first owns a duplicated fleet name;
   the other definition is ignored as a whole, with a warning.
 - Relative `devcontainer_path`, `host_workspace_path` and `host_home_path`
