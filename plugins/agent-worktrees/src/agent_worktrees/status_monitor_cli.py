@@ -170,7 +170,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import handoff_prompt_receipt_control as receipt_control
     from . import worktree_status_daemon
     from .status_monitor_drain import DrainTrace, drain_with_diagnostics
-    from .status_monitor_retirement import surface_busy
+    from .status_monitor_retirement import drain_observations, prune_retired_surfaces, surface_busy
     from .worktrees_runtime import READ_ACTION, WorktreesRuntime
     from .worktrees_projection_index import ProjectionError, ProjectionUnavailable
     from .worktrees_producer import publish_active_project
@@ -619,8 +619,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         ) or tracking_write.has_inflight_write()
 
     def _cleanup_retired_request_surfaces() -> None:
-        from .status_monitor_retirement import prune_retired_surfaces
-
         with state_lock:
             prune_retired_surfaces(
                 retired_hook_servers, retired_classify_servers, retired_tracking_write_servers,
@@ -654,8 +652,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         return reasons
 
     def _drain_observations() -> dict[str, int]:
-        from .status_monitor_retirement import drain_observations
-
         return drain_observations(
             sweep_active=sweep_active,
             hooks=([hook_server] if hook_server is not None else []) + retired_hook_servers,

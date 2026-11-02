@@ -24,27 +24,33 @@ def launch(monkeypatch):
     monkeypatch.setattr(ctypes, "WinError", lambda code: OSError(code, "injected native failure"), raising=False)
 
     class Job:
-        closed = False
-
         def __init__(self, handle, *, name=None):
-            self.handle = handle
+            self._handle = handle
             self.name = name
             jobs.append(self)
+
+        @property
+        def handle(self):
+            return self._handle
+
+        @property
+        def closed(self):
+            return self._handle is None
 
         def terminate_and_wait(self, timeout):
             calls.append(("terminate", timeout))
             assert timeout > 0
             if kernel.cancel_cleanup is not None:
                 raise kernel.cancel_cleanup
-            self.closed = True
+            self._handle = None
             clock[0] += 1
 
         def close(self):
-            self.closed = True
+            self._handle = None
 
         def try_terminate_and_confirm_empty(self):
             calls.append("zero-job")
-            self.closed = True
+            self._handle = None
             return True
 
     class Kernel:

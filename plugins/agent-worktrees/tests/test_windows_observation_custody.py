@@ -505,6 +505,14 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
         server = None
         cache = None
         feed = SimpleNamespace(active_count=lambda: 0, wait_closed=lambda *a: None)
+        agendas = SimpleNamespace(feed=SimpleNamespace(
+            active_count=lambda: 0, wait_closed=lambda *a: None,
+        ))
+        agenda_counts = worktrees_runtime.WorktreesRuntime.agenda_counts
+        agenda_busy = worktrees_runtime.WorktreesRuntime.agenda_busy
+
+        def stream(self, *args):
+            pytest.fail("shutdown fixture must not start a stream")
 
         def __init__(self, *a, **k):
             pass

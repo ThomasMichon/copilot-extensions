@@ -55,7 +55,7 @@ def test_parent_loss_kills_helper_and_atomic_job_child_before_test_cleanup(
     )
     try:
         deadline = time.monotonic() + 10
-        while not report.exists():
+        while not report.with_suffix(".published").exists():
             assert parent.poll() is None, parent.communicate(timeout=3)
             assert time.monotonic() < deadline, "parent Job fixture startup timed out"
             time.sleep(0.01)

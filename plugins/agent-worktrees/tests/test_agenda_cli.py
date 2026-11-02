@@ -197,7 +197,9 @@ def test_missing_support_not_success_shaped_or_provisioned(monkeypatch, capsys, 
     assert output.err and len(calls) == 1
 
 
-@pytest.mark.parametrize("raw", ['{"schema":1,"schema":2}', '{"x":NaN}', " " * 32769])
+@pytest.mark.parametrize("raw", [
+    '{"schema":1,"schema":2}', '{"x":NaN}', pytest.param(" " * 32769, id="oversize"),
+])
 def test_publisher_stdin_is_strict_and_bounded_before_health(monkeypatch, capsys, raw):
     monkeypatch.setattr(cli.sys, "stdin", io.StringIO(raw))
     monkeypatch.setattr(

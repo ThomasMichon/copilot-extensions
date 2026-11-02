@@ -597,3 +597,34 @@ preparation/cleanup. Receipt:
 15/5-second bounds and fixture assertions are unchanged. Later SDK successors,
 actual dependency merge, final current-base canonical CI and #8458 source
 review/merge still require qualification.
+
+## 2026-11-02 merged-dependency qualification
+
+The actual #9578 merge is `1ff5d8c5d7662fdb769653c92a42235e9dc67bd2`.
+Only the 28 owned observation commits are replayed from SDK523; current source
+retains the admitted Windows-first and guarded-recovery contracts.
+
+- Complete 16-file worktrees/native/resident selection: **834 passed, no skips
+  or failures**, 473.72 seconds.
+- Combined canonical SDK launch/budget/standalone/stdio packet: **46 passed**.
+- Agenda/control compatibility: **146 passed**, with unchanged oversized
+  input cases and Windows-safe short pytest parameter IDs.
+- Complete standalone procutil suite: **1,220 passed, 291 explicit platform/
+  opt-in skips**, 398.29 seconds. All 56 shell/cell native controls separately
+  pass with the original readiness, whole-deadline and retirement bounds.
+- Existing source guards, immutable Main controller compatibility and
+  generated-asset synchronization pass. Unit selectors, coverage targets and
+  the 300-second ceiling are unchanged.
+
+The earlier failed packets remain diagnostic history, not qualification:
+stale interface doubles, synthetic storage inheriting a surrounding checkout,
+an unsupported default child interpreter, unbounded pytest-generated test IDs,
+invalid-scope helper startup, and publication/actor readiness were corrected
+without relaxing production deadlines or native assertions.
+
+The original canonical local unit attempt's source-read fence is not bypassed.
+The existing required CI lane must supply exact final-source execution,
+coverage and proof. Fresh review, resolved threads and actual #8458 merge
+remain independent gates. Installed/native-ACP/model admission, clean-room/
+live rollout, nominal performance and unadmitted platform/phase work remain
+outside these source receipts.

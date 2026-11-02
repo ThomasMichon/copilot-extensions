@@ -557,3 +557,42 @@ review-gated platform slice, not disabling ordinary POSIX classification.
   `24bf961599f8664d76efb138465fdd1b52d1c378` (410.01 seconds pytest, 456.81 managed
   total). This is current owned-code evidence on SDK523, not qualification of
   its later successors or a source merge.
+
+### 2026-11-02 - Actual SDK merge and final source qualification
+
+- #9578 actually merged as `1ff5d8c5d7662fdb769653c92a42235e9dc67bd2`.
+  A preserved backup precedes replay of only this PR's 28 owned commits from
+  its SDK523 dependency. No obsolete SDK implementation is reapplied.
+- Reconciliation preserves the merged aggregate budget, known no-target versus
+  uncertain creation, settlement callbacks, preparation-resource custody and
+  native thread/stdio behavior alongside R1a's explicit cleanup deadline and
+  retained readers. Command-only and budget-only calls do not require an
+  explicit cleanup deadline. Lazy native accounting remains self-contained;
+  the combined initializer is 990 lines.
+- Current agenda decoding, agenda feed shutdown and drain counts remain in the
+  monitor. Fixture doubles model those interfaces and actual Job-handle state;
+  existing cutoff, byte/age preservation and positive retirement assertions
+  are not removed. Oversized-input agenda tests use short parameter IDs so
+  Windows can represent their test environment; input bytes remain unchanged.
+- The complete 16-file affected/native worktrees selection passes **834 cases,
+  zero failures or skips**, in 473.72 seconds. The combined canonical
+  launch/budget/standalone/stdio packet passes **46 cases**, and the agenda/
+  control compatibility packet passes **146 cases**.
+- The complete standalone procutil suite passes **1,220 cases with 291 explicit
+  platform/opt-in skips**, in 398.29 seconds. Earlier failures are repaired,
+  not waived: mocked module interfaces retain exception-state access; malformed
+  original Job scopes refuse before helper startup with truthful no-child
+  custody; parent-Job fixture reads wait for closed publication; synthetic cell
+  actors use the existing base interpreter without redundant venv redirectors.
+  The separate real-venv matrix, original deadlines and native pin/retirement
+  checks remain. All 56 shell/cell native controls pass.
+- Canonical lifecycle assets and existing immutable source bindings are
+  regenerated without changing qualification nodes, coverage targets or the
+  300-second ceiling. Ruff, module ceilings, runtime-resolution, install and
+  changefile contracts, vendor synchronization, effort/documentation checks,
+  bridge evidence and actual Main controller compatibility pass.
+- These are source/contained-consumer receipts, not installed or nominal
+  performance acceptance. Existing #8458 publication, fresh current-head
+  review, exact-source required CI and actual merge remain gates. The effort
+  stays Active; R1b/R2/POSIX observation and broader #7944/#7945/#2619/#6086
+  obligations are not completed or reassigned.

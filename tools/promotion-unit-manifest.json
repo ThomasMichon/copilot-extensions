@@ -3667,7 +3667,7 @@
         "libs/agent-procutil/tests/sdk_visibility_sources.py": "2d0c44e7ee087220f91d776913331f09eb0018cc039cf2834afaf1b9f9a93176",
         "libs/agent-procutil/tests/test_daemon_lifecycle_deadline.py": "93f856ec9217f2bae8032ba22e57b58ddb2a05d707650c54cf8556175907d69d",
         "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py": "ccfe54ab6c03376318535cd379a24b08ad6368aa25964bab6f3d4e498cbf11e2",
-        "libs/agent-procutil/tests/test_shell_caller_owned_native.py": "9387ec4b81c5b5fe0d834493309b2863f1f0deac8001bf2b8b6df1c0e13b13e1",
+        "libs/agent-procutil/tests/test_shell_caller_owned_native.py": "a1dfaf794e7eee7792ec287ea329366786de11fda8bf4c3c83de89d482b4def2",
         "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
         "libs/config-migrate/src/config_migrate/core.py": "77d2469a245ee27ff80a1f24a236f38b896c23d011e2c8e4720a77df19a748c6",
         "libs/config-migrate/src/config_migrate/registry.py": "e542436a67d0ca488261e5fd17f921d2947296bc2aa04a46d46611a57c7a1f42",

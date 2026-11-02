@@ -36,6 +36,7 @@ def test_retirement_settles_observations_after_workers_and_before_authority_rele
     runtime = SimpleNamespace(
         shutdown=record("shutdown"),
         feed=SimpleNamespace(wait_closed=record("feed-closed")),
+        agendas=SimpleNamespace(feed=SimpleNamespace(wait_closed=record("agenda-feed-closed"))),
         shutdown_and_wait=record("workers-settled"),
     )
     monkeypatch.setattr(retirement.resident_push, "reset", record("reset"))
@@ -54,5 +55,6 @@ def test_retirement_settles_observations_after_workers_and_before_authority_rele
         )
     assert caught.value is expected
     assert attempts == 2 and settled
+    assert events.index("agenda-feed-closed") < events.index("cleanup")
     assert events.index("workers-settled") < events.index("cleanup")
     assert events[-1] == "route-release"

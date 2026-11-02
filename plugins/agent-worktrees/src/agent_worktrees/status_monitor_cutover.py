@@ -484,13 +484,10 @@ def monitor_log_path(cwd: str) -> Path:
 
 
 def spawn_monitor(argv: list[str], env: dict[str, str], *, console_children: bool):
-    """Launch a resident status-monitor generation through ``spawn_daemon``.
-
-    Runs from the monitor's install root (``_daemon_cwd``), breaks away from a
-    kill-on-close Job around the caller (an installer, an updater, a hook) and
-    appends its stdout/stderr to :func:`monitor_log_path`. A Job that forbids
-    breakaway fails the spawn rather than starting a monitor that would die
-    with its caller.
+    """Use ``spawn_daemon`` from the install root (``_daemon_cwd``).
+    Escape the caller's kill-on-close Job and append stdout/stderr to
+    :func:`monitor_log_path`. If breakaway is forbidden, refuse rather than
+    starting a monitor that would die with its caller.
     """
     from agent_procutil import python_cache_args
     from . import status_monitor_runtime as smr
