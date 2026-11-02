@@ -3560,13 +3560,16 @@ does not establish native latency or complete Windows qualification.
 
 Credential replay and native identity controls in Worktrees'
 `test_update_auth.py` and `test_update_auth_probe.py` remain native tests,
-outside that unit enrollment. Their isolated helper must resolve the candidate
-checkout through its selected environment, not a different editable checkout.
-The helper retains `-I -X utf8`, its selected virtual environment and the
-five-second deadline. A timed-out owned child reports no successful status,
+outside that unit enrollment. Their isolated helper resolves the candidate's
+explicit immutable module roots, not another editable checkout or site hooks.
+The rendered Git helper retains `-I -S -B -X utf8`, the selected interpreter
+and the five-second deadline. A timed-out owned child reports no successful status,
 even if its recorded exit code is zero. Import-closure controls keep installer
 cleanup and command-rendering dependencies out of the helper's startup path;
 native process, routing and cleanup controls still qualify the actual behavior.
+Registered-only find and strict-list first-touch calls use independent cases,
+preserving each real CLI launch, twenty-second child deadline and thirty-second
+item limit rather than accumulating two child deadlines in one item.
 
 `tools/promotion_unit_tests/test_worktree_identity.py` re-exports the eight
 original codec test functions and their unchanged parameterization from

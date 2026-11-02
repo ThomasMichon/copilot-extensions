@@ -101,7 +101,8 @@ def test_registered_only_cli_refuses_malformed_remote(registry_path, tmp_path, c
 
 
 @pytest.mark.guard
-def test_registered_only_native_cli_first_touch(tmp_path):
+@pytest.mark.parametrize("operation", ["find", "list"])
+def test_registered_only_native_cli_first_touch(tmp_path, operation):
     home = tmp_path / "home"
     root = tmp_path / "tools"
     root.mkdir()
@@ -114,9 +115,12 @@ def test_registered_only_native_cli_first_touch(tmp_path):
         encoding="utf-8",
     )
     before = registry.read_bytes()
+    arguments = (
+        ["find", "tools", "--registered-only", "--json"]
+        if operation == "find" else ["list", "--strict", "--json"]
+    )
     result = subprocess.run(
-        [sys.executable, "-m", "agent_worktrees", "repos", "find", "tools",
-         "--registered-only", "--json"],
+        [sys.executable, "-m", "agent_worktrees", "repos", *arguments],
         cwd=tmp_path,
         env={**os.environ, "AGENT_HOME": str(home)},
         capture_output=True, text=True, check=False, timeout=20,
@@ -124,20 +128,14 @@ def test_registered_only_native_cli_first_touch(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["registration"] == "ready"
-    assert payload["name"] == "tools"
-    assert payload["class"] == "worktree"
-    assert payload["path"] == str(root)
-    assert registry.read_bytes() == before
-    inventory = subprocess.run(
-        [sys.executable, "-m", "agent_worktrees", "repos", "list", "--strict", "--json"],
-        cwd=tmp_path, env={**os.environ, "AGENT_HOME": str(home)},
-        capture_output=True, text=True, check=False, timeout=20, **no_window_kwargs(),
-    )
-    assert inventory.returncode == 0, inventory.stderr
-    listed = json.loads(inventory.stdout)
-    assert listed["inventory_authority"] == "complete"
-    assert [entry["name"] for entry in listed["repos"]] == ["tools"]
+    if operation == "find":
+        assert payload["registration"] == "ready"
+        assert payload["name"] == "tools"
+        assert payload["class"] == "worktree"
+        assert payload["path"] == str(root)
+    else:
+        assert payload["inventory_authority"] == "complete"
+        assert [entry["name"] for entry in payload["repos"]] == ["tools"]
     assert registry.read_bytes() == before
 
 
