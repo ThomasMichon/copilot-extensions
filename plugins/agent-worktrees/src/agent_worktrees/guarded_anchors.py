@@ -171,10 +171,18 @@ def _view_data(path: Path, reader) -> object:
     return json.loads(raw)
 
 
+def _view_paths(directory: Path) -> list[Path]:
+    with os.scandir(directory) as entries:
+        return [
+            directory / entry.name for entry in entries
+            if os.path.normcase(entry.name).endswith(".json")
+        ]
+
+
 def _withdraw_views(directory: Path, *, paths=None, reader=None) -> None:
     reader = reader if reader is not None else _reader()
     reader.validate_directory(directory)
-    for path in directory.glob("*.json") if paths is None else paths:
+    for path in _view_paths(directory) if paths is None else paths:
         try:
             data = _view_data(path, reader)
         except (OSError, ValueError):
@@ -201,7 +209,7 @@ def _refresh_locked(
     prepared = set()
     prior_projects = {}
     old_paths = []
-    for path in directory.glob("*.json") if include_prepared else ():
+    for path in _view_paths(directory) if include_prepared else ():
         old_paths.append(path)
         try:
             data = _view_data(path, reader)

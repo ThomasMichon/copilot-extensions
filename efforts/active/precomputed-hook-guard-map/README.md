@@ -256,3 +256,8 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   actual Windows extended-path directories. The wider run passed 47 cases with
   one native FIFO capability skip; a normal Win32 trailing-space fixture needed
   extended paths, and its corrected focused selection passed both cases.
+- Replaced prepared-view globbing with failure-visible directory enumeration.
+  Refresh and managed-write regressions prove an unreadable inventory cannot
+  report empty success, change source bytes or leave old facts paired with a
+  newly changed policy. The focused listing/concurrency/real-graft selection
+  passed four cases.

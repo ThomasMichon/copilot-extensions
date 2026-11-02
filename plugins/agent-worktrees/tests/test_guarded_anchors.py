@@ -530,6 +530,32 @@ def test_missing_reader_refuses_source_mutation_without_destroying_retry_scopes(
     assert [path.read_bytes() for path in paths] == before
 
 
+@pytest.mark.parametrize("operation", ["refresh", "managed_write"])
+def test_failed_map_listing_cannot_mutate_sources_or_report_empty_success(producer, monkeypatch, operation):
+    p = producer
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *args: p.root)
+    p.module.refresh(p.callers)
+    directory = p.root / "guarded-anchors"
+    paths = [p.reader.map_path(caller, p.root) for caller in p.callers]
+    before = [path.read_bytes() for path in paths]
+    original = os.scandir
+    effects = []
+
+    def unavailable(path):
+        if isinstance(path, (str, Path)) and Path(path) == directory:
+            raise PermissionError("synthetic unreadable map inventory")
+        return original(path)
+
+    monkeypatch.setattr(p.module.os, "scandir", unavailable)
+    with pytest.raises(PermissionError, match="unreadable map inventory"):
+        if operation == "refresh":
+            p.module.refresh()
+        else:
+            p.module.managed_write(lambda: effects.append("source written"))
+    assert effects == []
+    assert [path.read_bytes() for path in paths] == before
+
+
 def test_indirected_map_store_cannot_read_or_mutate_another_store(producer, monkeypatch):
     import shutil
 

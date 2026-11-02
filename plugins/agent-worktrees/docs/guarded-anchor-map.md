@@ -56,6 +56,9 @@ snapshot is computed before taking that writer lock. Managed source writes
 share the lock and withdraw existing views before changing source bytes.
 Registry locking precedes publication locking, including when a registry-owned
 operation calls the writer reentrantly.
+Prepared-view inventory uses failure-visible directory enumeration, not a glob
+that can suppress listing errors. Failed enumeration prevents source mutation
+and cannot report a successful empty refresh.
 Removed policy entries disappear on the next managed push.
 Before rebuilding, old views are atomically withdrawn without deleting their
 caller scopes. An interrupted refresh can therefore retry the complete prepared
