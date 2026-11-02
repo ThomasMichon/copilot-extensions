@@ -202,6 +202,69 @@ def test_ambiguous_resume_is_not_retried(monkeypatch):
     assert calls == ["close", "exit", "close"]
 
 
+@pytest.mark.parametrize(("platform", "inspection_seconds"), [("win32", 60), ("win32", 211), ("linux", 31)])
+def test_native_inspection_grace_preserves_pins_but_bounds_a_stall(monkeypatch, platform, inspection_seconds):
+    from zdd.private_protocol import PrivateIPCError, Refusal
+
+    from agent_procutil import _retirement_custodian as worker
+
+    monkeypatch.setattr(worker.sys, "platform", platform)
+    clock, effects = [0], []
+
+    class Deadline:
+        def __init__(self, seconds):
+            self.end = clock[0] + seconds
+
+        def remaining(self):
+            if clock[0] >= self.end:
+                raise OSError("inspection grace exhausted")
+
+    class Pin:
+        def __init__(self, *_):
+            pass
+
+        def pause(self):
+            effects.append("pause")
+
+        def terminate(self):
+            effects.append("terminate")
+
+        def close(self):
+            effects.append("close")
+
+    class Channel:
+        def check_peer(self, deadline):
+            deadline.remaining()
+
+        def close(self):
+            pass
+
+    requests = iter([
+        {"operation": "pin", "pid": 42, "birth": "original"},
+        {"operation": "pause", "pid": 42},
+        {"operation": "terminate", "pid": 42},
+    ])
+
+    def read(_channel, deadline):
+        try:
+            request = next(requests)
+        except StopIteration:
+            raise PrivateIPCError(Refusal.CLOSED) from None
+        if request["operation"] == "terminate":
+            clock[0] += inspection_seconds
+        deadline.remaining()
+        return request
+
+    monkeypatch.setattr(worker, "Deadline", Deadline)
+    monkeypatch.setattr(worker, "PinnedProcess", Pin)
+    monkeypatch.setattr(worker, "read_frame", read)
+    monkeypatch.setattr(worker, "write_frame", lambda *_: None)
+    worker.serve(Channel(), 41)
+    assert effects == (
+        ["pause", "terminate", "close"] if platform == "win32" and inspection_seconds == 60 else ["pause", "close"]
+    )
+
+
 def test_lost_owner_cannot_dispatch_buffered_termination(monkeypatch):
     from zdd.private_protocol import PrivateIPCError, Refusal
 

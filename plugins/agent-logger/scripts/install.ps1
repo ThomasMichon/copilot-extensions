@@ -1417,6 +1417,11 @@ function Install-Package {
     $installArgs = @('--python', $VenvPython)
     foreach ($lib in @(
         @{
+            Name = 'configuration-layers'
+            Package = 'agent-configuration-layers'
+            Dir = 'configuration-layers'
+        },
+        @{
             Name = 'config-migrate'
             Package = 'agent-config-migrate'
             Dir = 'config-migrate'

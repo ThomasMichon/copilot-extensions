@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 import ctypes
 import hashlib
+import importlib.util
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -21,7 +22,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import installer_dependency_policy as policy
 import installer_wheel_acquisition as acquisition
-from installer_engine_process import _load_resource
 
 CERTIFICATE = Path(__file__).with_name("fixtures") / "wheel-feed-localhost.pem"
 IDENTITY = "sha256:" + "a" * 64
@@ -119,10 +119,20 @@ def limits(**changes):
     ), **changes)
 
 
+def _load_fixture_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Fixture module cannot be loaded: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def worker_procutil():
     name = "_wheel_acquisition_test_procutil"
     if name not in sys.modules:
-        _load_resource(
+        _load_fixture_module(
             name, Path(__file__).resolve().parents[1] / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py",
         )
     return sys.modules[name]
@@ -649,7 +659,7 @@ def test_acquisition_console_workers_from_windowless_parent_surface_no_ui(feeds,
     project(state)
     root = Path(__file__).resolve().parents[1]
     monkeypatch.syspath_prepend(str(root / "libs" / "agent-procutil" / "src"))
-    observer = _load_resource(
+    observer = _load_fixture_module(
         "_acquisition_window_observer",
         root / "libs" / "agent-procutil" / "tests" / "test_spawn_daemon_windows_integration.py",
     )
@@ -658,13 +668,18 @@ def test_acquisition_console_workers_from_windowless_parent_surface_no_ui(feeds,
     script = tmp_path / "windowless-parent.py"
     result_path, workers_path = tmp_path / "result.json", tmp_path / "workers.jsonl"
     script.write_text("""
-import json, pathlib, ssl, sys, time, traceback
+import importlib.util, json, pathlib, ssl, sys, time, traceback
 spec = json.loads(sys.argv[1])
 try:
     sys.path.insert(0, spec["engine"])
     import installer_wheel_acquisition as acquisition
-    from installer_engine_process import _load_resource
-    procutil = _load_resource("_windowless_acquisition_procutil", pathlib.Path(spec["procutil"]))
+    module_spec = importlib.util.spec_from_file_location(
+        "_windowless_acquisition_procutil", pathlib.Path(spec["procutil"]),
+    )
+    assert module_spec is not None and module_spec.loader is not None
+    procutil = importlib.util.module_from_spec(module_spec)
+    sys.modules[module_spec.name] = procutil
+    module_spec.loader.exec_module(procutil)
     sources = acquisition._worker_sources
     def observed_sources():
         result = sources()
