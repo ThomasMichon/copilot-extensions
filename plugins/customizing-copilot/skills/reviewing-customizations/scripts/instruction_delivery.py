@@ -295,7 +295,9 @@ def render_selector(provenance: Mapping[str, object]) -> tuple[bytes, dict]:
     body = (
         "Guidance locator only; no instruction body is delivered here.\n"
         f"Managed candidate: `{local}`; reviewed fallback: `{fallback}`.\n"
-        "For source lookup, invoke `reviewing-customizations`; use its returned base "
+        "Read the named files directly with repository file tools to acquire the source's "
+        "guidance. These file reads do not require a skill, Python, or the resolver below.\n"
+        "Only if the source path is unclear, invoke `reviewing-customizations`; use its returned base "
         "and an absolute Python interpreter. Substitute the three placeholders:\n"
         + json.dumps(command, separators=(",", ":")) + "\n"
         "Acquire and follow the source's applicable guidance, including its delivery "

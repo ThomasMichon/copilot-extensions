@@ -2194,11 +2194,16 @@ def test_repository_config_raises_the_aggregate_budget(tmp_path: Path) -> None:
             f"policy-{index}",
             body="x" * 2700 + "\n",
         )[1]
-        for index in range(16)
+        for index in range(12)
     ]
 
     result = projections.sync_repository(repo, sources)
 
+    total = sum(
+        _projection(repo, f"policy-{index}").stat().st_size
+        for index in range(12)
+    )
+    assert projections.MAX_AGGREGATE_BYTES < total <= 20 * 1024
     assert not any(
         finding.check in {"projection-budget", "projection-aggregate-budget"}
         for finding in result.findings
