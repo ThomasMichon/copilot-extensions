@@ -1,9 +1,0 @@
-{
-  "comment": "Retain externally hosted ACP conversations as protected host-worktree relationships with replay-safe acquisition and verified local retirement",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}
