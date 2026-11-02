@@ -596,3 +596,13 @@ review-gated platform slice, not disabling ordinary POSIX classification.
   review, exact-source required CI and actual merge remain gates. The effort
   stays Active; R1b/R2/POSIX observation and broader #7944/#7945/#2619/#6086
   obligations are not completed or reassigned.
+
+The qualified candidate is preserved at `6a38cf557281fa17329a120e8359950f1d8afd2d`.
+Subsequent target movement is reconciled onto
+`312f9fe424c2c2be445cf25e2c2001121eeb1ec5`, retaining all 29 owned commits.
+Only canonical archive and producer-digest conflicts require resolution;
+the qualified SDK/R1a and ZDD implementation bytes remain unchanged. The
+incoming NUL-framed worktree-list behavior passes all 122 Git tests, and the
+incoming retirement-census base plus both deadline contracts passes 48
+controls. Generated assets retain the current default's source qualification
+selection and footprint semantics. Fresh provider review/CI still govern merge.
