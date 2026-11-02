@@ -128,6 +128,15 @@ locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
 
+**Git-addressed local promotion (2026-11-01), settled summary:** when local
+configuration selects Dev installation, `<repo> update` uses local promotion
+and reuses complete outputs for the unchanged selected Git hash. Locally
+sourced installs do not increment package versions; official Main releases
+remain the version authority. Different source hashes may share package
+versions without sharing installed code. The
+[verbatim agreement](inception-transcript.md#git-addressed-local-promotion-without-version-increments)
+refines the wheel-first proposal, not the current installer implementation.
+
 **Promotion-mediated source inputs and app staging (2026-10-31), settled summary:**
 stay out of the existing cached-source-wheel-assembly effort's UV-native,
 wheel-first and pyproject-strict implementation. Preserve install-from-any-backing-
@@ -376,6 +385,9 @@ disposable scope while preserving config and durable data.
 - [x] Review and merge the [upstream intent checkpoint and W0–W4 plan](wheel-first-transition.md#plan-and-acceptance) before implementing the new direction. #9623 lands the intent; implementation and installation/fleet acceptance remain open.
 - [ ] Reconcile the promotion-mediated backing-checkout and every-app staging/activation contract with the existing #9290 owners; consume their UV-native, pyproject-strict implementation without taking over construction/cache/profile/publisher work.
 - [ ] Deliver the Manager-only fast path and complete locally promoted uv/wheel inputs through existing source/release owners.
+- [ ] Route configured Dev `<repo> update` through that local promotion provider,
+  reusing complete unchanged-Git-hash outputs without local package-version
+  increments; retain official Main version authority and the app stage/activate split.
 - [ ] Prove whole-system Windows-container installation, source/version update, cutover, state survival and the generic recovery cases.
 - [ ] Integrate independent maintenance and bounded prepared plugin/guidance selection without foreground rebuilds/scans.
 - [ ] Complete review/CI and Main promotion of one final implementation PR, then hand installation/fleet work to its assigned deployment owner.
@@ -1139,6 +1151,10 @@ implementation, rollout or parent completion is declared.
 - [ ] Resolve every [W0–W4 acceptance item](wheel-first-transition.md#plan-and-acceptance), including actual tools/daemon health and source-change reinstall, before claiming the wheel-first transition complete.
 - [ ] Keep [construction measurements](wheel-first-performance.md) distinct from installed readiness, native lifecycle, SSH-shaped execution and rollout evidence.
 - [ ] Prove preservation/explicit refusal for all [generic recovery classes](wheel-first-recovery-cases.md), without private identifiers or unofficial workarounds.
+- [ ] Qualify unchanged-Git-hash promotion reuse and changed-source replacement
+  with identical package versions through configured Dev update. Official Main
+  version composition remains separate; incomplete or incompatible outputs
+  cannot count as a reusable installation candidate.
 
 Completed refusal controls below retain their historical component evidence.
 They do not exempt an explicitly requested installation from the newer

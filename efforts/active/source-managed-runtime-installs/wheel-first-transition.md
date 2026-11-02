@@ -61,6 +61,29 @@ parser/process tests before callers use them. Retain existing supported bootstra
 overrides during migration. Unsupported old entrypoints report a precise
 prerequisite or capability gap; they do not reinterpret arguments.
 
+### Configured Dev update and output reuse
+
+The [2026-11-01 agreement](inception-transcript.md#git-addressed-local-promotion-without-version-increments)
+selects local promotion for configured Dev updates. `<repo> update` resolves
+the selected source commit and reuses its complete promoted snapshot and
+matching wheel outputs when that Git hash has not changed. It invokes the
+canonical local promotion flow when those outputs are missing, rather than
+installing the raw checkout or creating a second wheel builder.
+
+Local promotion does not increment package versions or consume changefiles as
+an unofficial version release. Official Main composition owns version advances.
+Two locally selected commits may retain identical package versions; their
+Git identities distinguish promoted outputs and installed source generations.
+Main-equivalent means the install-ready representation, not official release
+status or a newly assigned local package version.
+
+_(Agent-recommended realization:)_ retain the selected official Main seed in
+the promotion result and use the provider's existing target compatibility and
+completion checks when reusing wheels. A matching source hash cannot substitute
+for missing outputs or permit reuse across incompatible interpreters/platforms.
+This introduces no parallel cache identity or source-fingerprint framework.
+Staging and activation still obey the following application boundary.
+
 ## Installation and activation
 
 Every app exposes a stage-only preparation boundary and a normal-install
@@ -190,17 +213,26 @@ edit installed code, add privilege, or replace other contributors' open fixes.
 - [ ] Qualify locally, then submit one final implementation PR for the complete flow.
 
 ### W1 — Complete local promotion and Manager fast path
-- [ ] Reuse canonical Main seeding/changefile composition before all source/wheel locking.
+- [ ] Reuse canonical official Main version seeding before source/wheel locking;
+  local promotion preserves those package versions without local increments
+  or unofficial changefile version composition.
 - [ ] Consume complete promoted projects and matching prebuilt first-party closures; keep wheel binaries outside Git and production with its existing owners.
 - [ ] Consume backing-checkout promotion and Manager-only acquisition through existing owners, preserving main-equivalent snapshot/wheel correspondence and strict native project declarations without another builder/cache/profile system.
 - [ ] Preserve promotion-mediated source fallback, configured feed, seasoning, resources and honest diagnostics.
 - [ ] Require a stage-only readiness boundary and a normal-install publication/launch boundary for every app, including Manager; qualify provider support before callers send proposed flags.
+- [ ] Connect configured Dev `<repo> update` to Git-addressed local promotion
+  output reuse through the existing provider; qualify unchanged-source reuse
+  and distinct same-package-version source commits without first-party rebuild
+  on a valid reuse hit.
 
 ### W2 — Real whole-system Windows-container acceptance
 - [ ] Use local install-source snapshots for every container deployment, with no host credentials or mounts.
 - [ ] Install all selected daemons through supported fixture authentication and role configuration.
 - [ ] Prove real Manager and agent-command operations: repository/worktree and task/state round trips, required service health and installed new code.
-- [ ] Change source and a canonical changefile; promote V2, prepare/reinstall it, prove new command behavior, owner retirement, preserved state and last-good failure behavior.
+- [ ] Change source and retain its canonical changefile for official release;
+  locally promote V2 without incrementing package versions, prepare/reinstall it,
+  and prove changed Git identity selects new command behavior, owner retirement,
+  preserved state and last-good failure behavior.
 - [ ] Prove every app's stage-only operation leaves current redirects, global commands/registrations and serving ownership unchanged; normal installation publishes the selected version and starts it before the displaced owner sunsets.
 - [ ] Exercise atomic selection/readiness/rollback and the generic legacy recovery cases.
 - [ ] Retain failed containers and literal phase/child diagnostics; success cleanup remains scoped.
