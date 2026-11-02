@@ -13,6 +13,37 @@ from zdd import diagnostics, routing
 from . import locks, status_monitor_cutover as cutover
 
 
+def _runtime_slot(root: Path, prefix: str | Path) -> Path:
+    path = Path(prefix).resolve(strict=True)
+    if path.name == ".venv" and path.parent.parent == (root / "versions").resolve():
+        return path.parent
+    return path
+
+
+def candidate_serving(root: Path, slot: Path) -> bool:
+    from .runtime_identity import slot_generation
+
+    record = locks.read_lock(root / "status-monitor.lock")
+    generation = slot_generation(slot)
+    if (
+        not locks.lock_is_live(record)
+        or not record.get("prefix")
+        or _runtime_slot(root, record["prefix"]) != slot.resolve()
+        or (generation is not None and record.get("runtime_generation") != generation)
+    ):
+        return False
+    endpoint = cutover.live_endpoint()
+    if endpoint is None or endpoint.pid != record.get("pid"):
+        return False
+    health = cutover.ControlClient(endpoint.base_url).health()
+    return (
+        health.get("status") == "ready"
+        and health.get("published") is True
+        and health.get("pid") == endpoint.pid
+        and (generation is None or health.get("runtime_generation") == generation)
+    )
+
+
 def routed_identity(
     runtime_home: Path | None = None, *, require_async_retirement: bool = False,
 ) -> tuple[int, str, str | None] | None:
@@ -82,8 +113,8 @@ def routed_identity(
         if not isinstance(prefix, str) or not Path(prefix).is_absolute():
             raise ValueError("Serving monitor runtime prefix is unavailable")
     if isinstance(prefix, str) and Path(prefix).is_absolute():
-        path = Path(prefix).resolve(strict=True)
         root = directory.parent if runtime_home is None else runtime_home
+        path = _runtime_slot(root, prefix)
         slot = path.name if path.parent == (root / "versions").resolve() else None
     return pid, before, slot if isinstance(slot, str) else None
 
@@ -97,7 +128,7 @@ def monitor_slot(root: Path, identity: tuple[int, str]) -> str | None:
             or not record["prefix"]
         ):
             raise ValueError("Serving monitor runtime identity changed before retention")
-        prefix = Path(record["prefix"]).resolve(strict=True)
+        prefix = _runtime_slot(root, record["prefix"])
         return prefix.name if prefix.parent == (root / "versions").resolve() else None
     else:
         routed = cutover.routed_monitor_identity(root)

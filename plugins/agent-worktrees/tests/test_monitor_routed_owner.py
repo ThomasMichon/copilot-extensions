@@ -21,6 +21,30 @@ def legacy_routed_owner_contract(monkeypatch):
     monkeypatch.setattr(control.guarded_recovery, "enabled", lambda: False)
 
 
+@pytest.mark.parametrize("nested", [False, True])
+def test_candidate_serving_uses_owned_slot_for_nested_runtime_prefix(tmp_path, monkeypatch, nested):
+    from agent_worktrees import runtime_monitor_identity as identity
+
+    slot = tmp_path / "versions" / "candidate"
+    slot.mkdir(parents=True)
+    prefix = slot / ".venv" if nested else slot
+    prefix.mkdir(exist_ok=True)
+    pid = os.getpid()
+    endpoint = routing.Endpoint("127.0.0.1", 41001, pid)
+    monkeypatch.setattr(identity.locks, "read_lock", lambda path: {"pid": pid, "prefix": str(prefix)})
+    monkeypatch.setattr(identity.locks, "lock_is_live", lambda record: True)
+    monkeypatch.setattr(identity.cutover, "live_endpoint", lambda: endpoint)
+    monkeypatch.setattr(
+        identity.cutover, "ControlClient",
+        lambda url: SimpleNamespace(health=lambda: {"status": "ready", "published": True, "pid": pid}),
+    )
+    assert identity.candidate_serving(tmp_path, slot)
+    assert identity.monitor_slot(tmp_path, (pid, identity.locks.process_start_time(pid))) == "candidate"
+    outside = tmp_path / "outside" / ".venv"
+    outside.mkdir(parents=True)
+    assert identity._runtime_slot(tmp_path, outside) == outside.resolve()
+
+
 @pytest.mark.parametrize("failure", [None, "pid", "native", "authentication", "route"])
 def test_missing_legacy_lock_uses_only_a_verified_routed_owner(tmp_path, monkeypatch, failure):
     token = "fixture-token"

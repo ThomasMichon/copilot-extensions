@@ -18,6 +18,23 @@ def native_original_exit():
     return process_exit.observe_original_exit
 
 
+@pytest.mark.parametrize("nested", [False, True])
+def test_retirement_runtime_helpers_follow_the_retained_slot(tmp_path, monkeypatch, nested):
+    slot = tmp_path / "versions" / "current"
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir(parents=True)
+    (bootstrap / "versioned_runtime.py").write_text("MARKER = 'retained'\n", encoding="utf-8")
+    prefix = slot / ".venv" if nested else slot
+    prefix.mkdir(exist_ok=True)
+    monkeypatch.setattr(retirements.sys, "prefix", str(prefix))
+    monkeypatch.setitem(sys.modules, "_monitor_retirement_runtime", None)
+    retirements._runtime.cache_clear()
+    try:
+        assert retirements._runtime().MARKER == "retained"
+    finally:
+        retirements._runtime.cache_clear()
+
+
 @pytest.fixture
 def retained(tmp_path, monkeypatch, native_original_exit):
     helper = Path(__file__).resolve().parents[3] / "libs/versioned-runtime/versioned_runtime.py"

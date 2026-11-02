@@ -24,7 +24,10 @@ _REFERENCE_PREFIX = "worktrees-monitor-retirement:"
 
 @lru_cache(maxsize=1)
 def _runtime() -> ModuleType:
-    helper = Path(sys.prefix) / ".runtime-bootstrap" / "versioned_runtime.py"
+    prefix = Path(sys.prefix)
+    if prefix.name == ".venv":
+        prefix = prefix.parent
+    helper = prefix / ".runtime-bootstrap" / "versioned_runtime.py"
     if helper.parent.is_symlink() or helper.is_symlink() or not helper.is_file():
         raise RuntimeError("Monitor retirement requires its retained runtime helpers")
     spec = importlib.util.spec_from_file_location("_monitor_retirement_runtime", helper)

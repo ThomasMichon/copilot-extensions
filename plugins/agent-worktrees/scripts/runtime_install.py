@@ -278,21 +278,6 @@ def _restore_selectors(root: Path, version: str, snapshot: dict[str, bytes | Non
                 os.replace(temporary, path)
 
 
-def _wait_for_exit(pid: int, identity: str, *, label: str) -> None:
-    from agent_worktrees import locks
-    from zdd import diagnostics
-
-    announced = False
-    while diagnostics._pid_alive(pid):
-        observed = locks.process_start_time(pid)
-        if observed is not None and observed != identity:
-            return
-        if not announced:
-            print(f"Retaining installer custody until {label} pid={pid} exits", file=sys.stderr)
-            announced = True
-        time.sleep(0.2)
-
-
 def _monitor_identity(root: Path) -> tuple[int, str] | None:
     from agent_worktrees import locks, status_monitor_cutover as cutover
 
@@ -313,28 +298,9 @@ def _monitor_identity(root: Path) -> tuple[int, str] | None:
 
 
 def _candidate_serving(root: Path, slot: Path) -> bool:
-    from agent_worktrees import locks, status_monitor_cutover as cutover
-    from agent_worktrees.runtime_identity import slot_generation
+    from agent_worktrees.runtime_monitor_identity import candidate_serving
 
-    record = locks.read_lock(root / "status-monitor.lock")
-    generation = slot_generation(slot)
-    if (
-        not locks.lock_is_live(record)
-        or not record.get("prefix")
-        or Path(record["prefix"]).resolve() != slot.resolve()
-        or (generation is not None and record.get("runtime_generation") != generation)
-    ):
-        return False
-    endpoint = cutover.live_endpoint()
-    if endpoint is None or endpoint.pid != record.get("pid"):
-        return False
-    health = cutover.ControlClient(endpoint.base_url).health()
-    return (
-        health.get("status") == "ready"
-        and health.get("published") is True
-        and health.get("pid") == endpoint.pid
-        and (generation is None or health.get("runtime_generation") == generation)
-    )
+    return candidate_serving(root, slot)
 
 
 def _monitor_slot(root: Path, identity: tuple[int, str]) -> str | None:

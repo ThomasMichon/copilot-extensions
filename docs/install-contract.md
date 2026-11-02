@@ -4976,6 +4976,11 @@ installer opts into resident-owned predecessor retirement: it promotes and
 attests the published successor, then finishes without an old drain RPC or a
 predecessor-exit wait. The outgoing resident observes supersession and drains
 and retires independently; `retirement_pending` is not an exit receipt.
+Monitor identity and retirement accept both an owned version directory as the
+interpreter prefix and its managed `.venv` child. Health keeps the version slot
+name; slot retention, serving attestation and retained-helper lookup normalize
+only that owned layout, without treating an unrelated external environment as
+an installed slot.
 Both the outgoing and incoming monitors must advertise
 `status-monitor-async-retirement-v1` for this flow. The outgoing peer is
 authenticated before selector mutation; an unsupported or unrouted incumbent

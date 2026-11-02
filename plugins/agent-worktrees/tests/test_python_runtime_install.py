@@ -637,7 +637,7 @@ def test_failed_passive_exit_is_observed_before_returning(driver, tmp_path, monk
 def test_ready_successor_does_not_wait_for_predecessor_exit(driver, tmp_path, monkeypatch):
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: True)
     monkeypatch.setattr(
-        driver, "_wait_for_exit", lambda *_args, **_kwargs: pytest.fail("installer waited for drain"),
+        driver.time, "sleep", lambda *_args: pytest.fail("installer waited for drain"),
     )
     assert driver._settle_monitor(
         tmp_path, tmp_path / "candidate",
@@ -902,7 +902,8 @@ def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, mo
 
 @pytest.mark.parametrize("legacy_lock", ["absent", "stale"])
 @pytest.mark.parametrize("slot", ["serving", None, "..", "missing"])
-def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_path, legacy_lock, slot):
+@pytest.mark.parametrize("nested", [False, True])
+def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_path, legacy_lock, slot, nested):
     from agent_worktrees import locks, status_monitor_cutover as cutover
     from agent_worktrees.runtime_monitor_retirements import CAPABILITY
     from agent_worktrees.status_monitor_recovery_contract import CAPABILITY as RECOVERY
@@ -910,14 +911,19 @@ def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_pat
 
     root = tmp_path / "runtime"
     (root / "versions" / "serving").mkdir(parents=True)
+    if nested:
+        (root / "versions" / "serving" / ".venv").mkdir()
     (root / "status-monitor-control.token").write_text("fixture-token", encoding="utf-8")
     if legacy_lock == "stale":
         (root / "status-monitor.lock").write_text(json.dumps({"pid": 0}), encoding="utf-8")
     pid = os.getpid()
+    prefix = root / "versions" / slot if isinstance(slot, str) else None
+    if nested and prefix is not None:
+        prefix = prefix / ".venv"
     server = cutover.ControlServer(
         lambda *_args: {
             "pid": pid, "status": "ready", "runtime_slot": slot,
-            "runtime_prefix": str(root / "versions" / slot) if isinstance(slot, str) else None,
+            "runtime_prefix": str(prefix) if prefix is not None else None,
             "capabilities": [CAPABILITY, RECOVERY], "runtime_generation": "a" * 32,
         },
         token="fixture-token",
