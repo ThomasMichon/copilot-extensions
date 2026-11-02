@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import Any, TypedDict, cast
 
 from configuration_layers import ConfigurationError, plan_layers
 
@@ -17,7 +19,14 @@ MAX_REPORT_BYTES = 64 * 1024
 CONTEXT_ENV = "AGENT_CONFIGURATION_CONTEXT"
 
 
-def ready_owner_prefix(runtime_root, module, *, resolver):
+class _ProcessOptions(TypedDict, total=False):
+    creationflags: int
+
+
+def ready_owner_prefix(
+    runtime_root: str | os.PathLike[str] | None, module: str, *,
+    resolver: Callable[[Path], str | os.PathLike[str] | None],
+) -> list[str]:
     """Use the caller's canonical completion-gated resolver; never bootstrap."""
     if not isinstance(module, str) or not all(
         part.isidentifier() for part in module.split(".")
@@ -42,7 +51,7 @@ def ready_owner_prefix(runtime_root, module, *, resolver):
     return [str(executable), "-m", module]
 
 
-def context_from_owner(report):
+def context_from_owner(report: object) -> dict[str, Any]:
     """Detach the composer context from the native owner's read-side report."""
     if (
         not isinstance(report, dict)
@@ -56,10 +65,13 @@ def context_from_owner(report):
     root = report.get("repository_machine_root")
     if root is not None and (not isinstance(root, str) or not Path(root).is_absolute()):
         raise ConfigurationError("configuration owner returned an invalid machine root")
-    return json.loads(json.dumps(context))
+    return cast(dict[str, Any], json.loads(json.dumps(context)))
 
 
-def delivered_context(environment=None, *, repository_root=None):
+def delivered_context(
+    environment: Mapping[str, str] | None = None, *,
+    repository_root: str | os.PathLike[str] | None = None,
+) -> dict[str, Any] | None:
     """Read the native launcher's data projection, without owner discovery.
 
     Data is not authority: consumers must still apply their own source, trust
@@ -80,10 +92,13 @@ def delivered_context(environment=None, *, repository_root=None):
         or Path(context["base_root"]).resolve() != Path(repository_root).resolve()
     ):
         return None
-    return report
+    return cast(dict[str, Any], report)
 
 
-def read_owner_context(prefix, repository_root, *, required=False, environment=None):
+def read_owner_context(
+    prefix: Sequence[str], repository_root: str | os.PathLike[str], *,
+    required: bool = False, environment: Mapping[str, str] | None = None,
+) -> dict[str, Any] | None:
     """Read Worktrees data through a caller-qualified native command prefix.
 
     A namespaced caller must supply its existing same-cell peer launch prefix,
@@ -98,6 +113,9 @@ def read_owner_context(prefix, repository_root, *, required=False, environment=N
         isinstance(item, str) and item for item in prefix
     ):
         raise ConfigurationError("configuration owner prefix must be native argv")
+    options: _ProcessOptions = (
+        {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
+    )
     try:
         result = subprocess.run(
             [*prefix, "state-root", "--configuration", "--json"],
@@ -106,7 +124,7 @@ def read_owner_context(prefix, repository_root, *, required=False, environment=N
             capture_output=True,
             timeout=20,
             check=False,
-            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+            **options,
         )
     except FileNotFoundError as error:
         if required:
@@ -130,4 +148,4 @@ def read_owner_context(prefix, repository_root, *, required=False, environment=N
     except (ValueError, UnicodeError) as error:
         raise ConfigurationError("configuration owner report is not JSON") from error
     context_from_owner(report)
-    return report
+    return cast(dict[str, Any], report)

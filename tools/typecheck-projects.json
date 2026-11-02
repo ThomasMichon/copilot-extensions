@@ -73,7 +73,7 @@
         "libs/configuration-layers"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "lib-core-delegation",

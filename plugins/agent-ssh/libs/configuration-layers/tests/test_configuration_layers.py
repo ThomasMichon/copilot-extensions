@@ -9,33 +9,41 @@ import shutil
 import subprocess
 import unittest
 import uuid
+from typing import TYPE_CHECKING, Any
 
 
 LIB = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location(
-    "configuration_layers", LIB / "src" / "configuration_layers" / "__init__.py",
-)
-sdk = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(sdk)
+if TYPE_CHECKING:
+    import configuration_layers as sdk
+else:
+    SPEC = importlib.util.spec_from_file_location(
+        "configuration_layers", LIB / "src" / "configuration_layers" / "__init__.py",
+    )
+    assert SPEC and SPEC.loader
+    sdk = importlib.util.module_from_spec(SPEC)
+    SPEC.loader.exec_module(sdk)
 FIXTURES = json.loads((LIB / "tests" / "fixtures.json").read_text(encoding="utf-8"))
 
 
-def node(requests):
+def node(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
     completed = subprocess.run(
         ["node", str(LIB / "tests" / "node_driver.mjs")],
         input=json.dumps(requests), text=True, encoding="utf-8",
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
-    return json.loads(completed.stdout)
+    results: list[dict[str, Any]] = json.loads(completed.stdout)
+    return results
 
 
-def layer(identity, tier, origin, values, **fields):
+def layer(
+    identity: str, tier: str, origin: str, values: object, **fields: Any,
+) -> dict[str, Any]:
     return {"id": identity, "tier": tier, "origin": origin, "values": values, **fields}
 
 
 class CompositionTests(unittest.TestCase):
-    def test_cross_language_order_and_replacement(self):
+    def test_cross_language_order_and_replacement(self) -> None:
         requests = [{"context": FIXTURES["context"], "layers": case["layers"]}
                     for case in FIXTURES["cases"]]
         results = node(requests)
@@ -57,7 +65,7 @@ class CompositionTests(unittest.TestCase):
         self.assertNotIn("/a~1b~0c", provenance)
         self.assertEqual(provenance["/a~1b~0c/nested"]["id"], "base")
 
-    def test_exact_identity_and_cell_are_not_names(self):
+    def test_exact_identity_and_cell_are_not_names(self) -> None:
         case = FIXTURES["cases"][0]
         requests = []
         for field, value in [("repository_id", "repo-beta"), ("installation_cell", "cell-two"),
@@ -73,7 +81,7 @@ class CompositionTests(unittest.TestCase):
         self.assertNotIn("exact", results[1]["value"]["layers"])
         self.assertTrue(results[2]["value"]["values"]["wrong_machine"])
 
-    def test_unbound_and_explicit_binding_errors(self):
+    def test_unbound_and_explicit_binding_errors(self) -> None:
         context = copy.deepcopy(FIXTURES["context"])
         knowledge = layer("knowledge", "repository", "knowledge", {"private": True},
                           repository_id=context["repository_id"])
@@ -89,7 +97,7 @@ class CompositionTests(unittest.TestCase):
                 sdk.compose(**request)
             self.assertTrue(result["error"])
 
-    def test_malformed_and_conflicting_layers_never_fallback(self):
+    def test_malformed_and_conflicting_layers_never_fallback(self) -> None:
         context = FIXTURES["context"]
         base = layer("base", "repository", "base", {}, repository_id=context["repository_id"])
         invalid = [
@@ -109,10 +117,10 @@ class CompositionTests(unittest.TestCase):
                 sdk.compose(**request)
             self.assertTrue(result["error"])
 
-    def test_non_json_native_values_and_detached_results(self):
+    def test_non_json_native_values_and_detached_results(self) -> None:
         invalid = [float("nan"), float("inf"), 10**1000, {1: "value"},
                    {"nested": (1, 2)}, object()]
-        cyclic = {}; cyclic["self"] = cyclic
+        cyclic: dict[str, object] = {}; cyclic["self"] = cyclic
         invalid.append(cyclic)
         for value in invalid:
             with self.assertRaises(sdk.ConfigurationError):
@@ -127,7 +135,7 @@ class CompositionTests(unittest.TestCase):
 
 
 class SourceTests(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         # A task-owned workspace under this library, never a system temp directory.
         self.workspace = LIB / (".test-work-" + uuid.uuid4().hex)
         self.base = self.workspace / "base"
@@ -136,10 +144,10 @@ class SourceTests(unittest.TestCase):
         for root in (self.base, self.knowledge, self.outside):
             (root / "config").mkdir(parents=True)
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         shutil.rmtree(self.workspace)
 
-    def test_knowledge_same_tier_and_source_relative_ownership(self):
+    def test_knowledge_same_tier_and_source_relative_ownership(self) -> None:
         (self.base / "config" / "prefs.json").write_text(
             '{"asset":"base.txt","retained":"base.txt","value":"base"}', encoding="utf-8")
         (self.knowledge / "config" / "prefs.json").write_text(
@@ -148,6 +156,7 @@ class SourceTests(unittest.TestCase):
                    "base_root": str(self.base), "knowledge_root": str(self.knowledge)}
         base = sdk.read_source(str(self.base), "config/prefs.json")
         knowledge = sdk.read_source(str(self.knowledge), "config/prefs.json")
+        assert base is not None and knowledge is not None
         layers = [
             layer("knowledge", "repository", "knowledge", **knowledge,
                   repository_id=context["repository_id"]),
@@ -162,7 +171,7 @@ class SourceTests(unittest.TestCase):
                          str(self.knowledge / "config" / "knowledge.txt"))
         self.assertEqual(sdk.resolve_path(result, "/retained"),
                          str(self.base / "config" / "base.txt"))
-        requests = [{"context": context, "layers": layers},
+        requests: list[dict[str, Any]] = [{"context": context, "layers": layers},
                     {"action": "read", "root": str(self.knowledge), "path": "config/prefs.json"},
                     {"action": "path", "result": result, "pointer": "/asset"}]
         outputs = node(requests)
@@ -177,7 +186,7 @@ class SourceTests(unittest.TestCase):
         with self.assertRaises(sdk.ConfigurationError):
             sdk.resolve_path(result, "/value")  # Machine values have no file owner.
 
-    def test_optional_missing_and_present_invalid_sources(self):
+    def test_optional_missing_and_present_invalid_sources(self) -> None:
         bad = {
             "list.json": b"[]", "broken.json": b"{",
             "duplicate.json": b'{"key":1,"\\u006bey":2}',
@@ -188,7 +197,7 @@ class SourceTests(unittest.TestCase):
         for name, content in bad.items():
             (self.base / name).write_bytes(content)
         paths = ["missing.json", *bad, "config", "missing-required.json"]
-        requests = [{"action": "read", "root": str(self.base), "path": name,
+        requests: list[dict[str, Any]] = [{"action": "read", "root": str(self.base), "path": name,
                      "optional": name != "missing-required.json"} for name in paths]
         outputs = node(requests)
         self.assertIsNone(sdk.read_source(str(self.base), "missing.json"))
@@ -199,18 +208,20 @@ class SourceTests(unittest.TestCase):
             self.assertTrue(output["error"], request["path"])
         document = sdk.read_source(str(self.base), "list.json",
                                    parser=lambda text: {"native": json.loads(text)})
+        assert document is not None
         self.assertEqual(document["values"], {"native": []})
         self.assertEqual(node([{"action": "read", "root": str(self.base),
                                "path": "list.json", "native_parser": True}])[0]["value"], document)
         with self.assertRaises(sdk.ConfigurationError):
             sdk.read_source(str(self.base), "list.json", parser=lambda _: {1: "not-json"})
 
-    def test_winning_path_must_remain_source_owned(self):
+    def test_winning_path_must_remain_source_owned(self) -> None:
         (self.base / "assets").mkdir()
         (self.base / "assets" / "file").write_text("asset", encoding="utf-8")
         (self.base / "config" / "prefs.json").write_text(
             '{"path":"../assets/file"}', encoding="utf-8")
         document = sdk.read_source(str(self.base), "config/prefs.json")
+        assert document is not None
         result = sdk.compose(FIXTURES["context"], [
             layer("source", "repository", "base", **document,
                   repository_id=FIXTURES["context"]["repository_id"]),
@@ -219,7 +230,7 @@ class SourceTests(unittest.TestCase):
         self.assertEqual(sdk.resolve_path(result, "/path"), expected)
         self.assertEqual(node([{"action": "path", "result": result,
                                "pointer": "/path"}])[0]["value"], expected)
-        requests = []
+        requests: list[dict[str, Any]] = []
         for value in ["../../outside/file", "C:\\absolute", "../NUL",
                       "../assets/file:stream", "../assets/file\n"]:
             source_layer = layer("source", "repository", "base", {"path": value},
@@ -231,14 +242,14 @@ class SourceTests(unittest.TestCase):
             with self.assertRaises(sdk.ConfigurationError):
                 sdk.resolve_path(request["result"], request["pointer"])
             self.assertTrue(output["error"])
-        for value, expected in [(".", self.base / "config"), ("..", self.base),
+        for value, expected_path in [(".", self.base / "config"), ("..", self.base),
                                 ("../assets/./file", self.base / "assets" / "file")]:
             result["values"]["path"] = value
-            self.assertEqual(sdk.resolve_path(result, "/path"), str(expected))
+            self.assertEqual(sdk.resolve_path(result, "/path"), str(expected_path))
             self.assertEqual(node([{"action": "path", "result": result,
-                                   "pointer": "/path"}])[0]["value"], str(expected))
+                                   "pointer": "/path"}])[0]["value"], str(expected_path))
 
-    def test_symlink_loop_is_a_configuration_error(self):
+    def test_symlink_loop_is_a_configuration_error(self) -> None:
         try:
             (self.base / "loop").symlink_to("loop", target_is_directory=True)
         except OSError as exc:
@@ -259,7 +270,7 @@ class SourceTests(unittest.TestCase):
         self.assertTrue(node([{"action": "path", "result": result,
                                "pointer": "/path"}])[0]["error"])
 
-    def test_unsafe_paths_and_symlink_escapes(self):
+    def test_unsafe_paths_and_symlink_escapes(self) -> None:
         unsafe = ["../outside/a.json", "config/../../outside/a.json",
                   "/absolute.json", "C:\\absolute.json", "config\\..\\a.json",
                   "file.json:stream", "config//a.json", "NUL", "a.json.", "a.json "]

@@ -5,7 +5,7 @@ The repository is migrating to strict MyPy through the
 and #9807. Project policy lives in `tools/typecheck-projects.json`.
 
 The admitted cohort qualifies the checker code/tests, the complete Bootstrap
-Killswitch, Config Migrate, Dropin Registry, Endpoint Rendezvous, Installation Context, Lazy CLI Dispatch,
+Killswitch, Config Migrate, Configuration Layers, Dropin Registry, Endpoint Rendezvous, Installation Context, Lazy CLI Dispatch,
 Peer Launch, Remote Login Shell, Session Liveness Probe and Worktree Identity
 source/test projects.
 Other projects are explicitly pending. Source CI and the
@@ -24,6 +24,7 @@ python tools/typecheck.py lib-worktree-identity
 python tools/typecheck.py lib-bootstrap-killswitch
 python tools/typecheck.py lib-config-migrate --prepare
 python tools/typecheck.py lib-config-migrate
+python tools/typecheck.py lib-configuration-layers
 python tools/typecheck.py lib-dropin-registry
 python tools/typecheck.py lib-endpoint-rendezvous
 python tools/typecheck.py lib-installation-context
@@ -57,6 +58,16 @@ declared analysis targets. Serialization documents remain explicitly dynamic
 existing runtime validation. There are no new missing-import ignores or
 unchecked first-party stubs. Other projects do not implicitly gain YAML
 dependencies from this environment.
+
+Configuration Layers checks all four canonical source/test modules strictly
+on both declared targets in the base environment. Raw contract inputs remain
+`object` until existing validation succeeds. Source, layer, document and
+composition results use typed records; recursive JSON merging has a concrete
+value union, while arbitrary configuration keys and serialized owner reports
+retain explicit `dict[str, Any]` boundaries. Optional reads retain their
+`None` result and callers narrow it before use. Runtime validation, precedence,
+source ownership and Python/Node parity are unchanged. The four synchronized
+standalone payload copies remain independently pending with their consumers.
 
 Bootstrap Killswitch checks all three canonical Python source/test files in
 the base environment on both declared targets. State documents expose

@@ -3,11 +3,49 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 import json
 import math
 import ntpath
 import os
 from pathlib import Path
+from typing import Any, TypeAlias, TypedDict, cast
+
+
+_JSONValue: TypeAlias = "dict[str, _JSONValue] | list[_JSONValue] | str | int | float | bool | None"
+
+
+class Source(TypedDict):
+    root: str
+    path: str
+
+
+class _LayerScope(TypedDict, total=False):
+    source: Source
+    repository_id: str
+    execution_machine: str
+    installation_cell: str
+
+
+class LayerOwner(_LayerScope):
+    id: str
+    tier: str
+    origin: str
+
+
+class Layer(LayerOwner):
+    values: dict[str, Any]
+
+
+class Composition(TypedDict):
+    values: dict[str, Any]
+    provenance: dict[str, LayerOwner]
+    layers: list[str]
+
+
+class Document(TypedDict):
+    values: dict[str, Any]
+    source: Source
 
 
 class ConfigurationError(ValueError):
@@ -31,14 +69,14 @@ _LAYER = {
 }
 
 
-def _json(value, ancestors=(), depth=0):
+def _json(value: object, ancestors: tuple[int, ...] = (), depth: int = 0) -> None:
     if depth > 128:
         raise ConfigurationError("configuration nesting exceeds 128")
     if value is None or type(value) in (str, bool):
         if isinstance(value, str) and any(0xD800 <= ord(c) <= 0xDFFF for c in value):
             raise ConfigurationError("unpaired surrogate in string")
         return
-    if type(value) in (int, float):
+    if type(value) is int or type(value) is float:
         if abs(value) > 9007199254740991 or not math.isfinite(value):
             raise ConfigurationError("number is not portable JSON")
         return
@@ -52,11 +90,11 @@ def _json(value, ancestors=(), depth=0):
             _json(key, chain, depth + 1)
             _json(child, chain, depth + 1)
     else:
-        for child in value:
+        for child in cast(list[object], value):
             _json(child, chain, depth + 1)
 
 
-def _object(value, allowed=None):
+def _object(value: object, allowed: set[str] | None = None) -> None:
     _json(value)
     if type(value) is not dict:
         raise ConfigurationError("document must be an object")
@@ -64,18 +102,18 @@ def _object(value, allowed=None):
         raise ConfigurationError("unknown contract field")
 
 
-def _identity(value):
+def _identity(value: object) -> None:
     if type(value) is not str or not value or value.strip() != value:
         raise ConfigurationError("identity must be a nonempty exact string")
 
 
-def _root(value):
+def _root(value: object) -> str:
     if type(value) is not str or "\0" in value or not os.path.isabs(value):
         raise ConfigurationError("source root must be absolute")
     return os.path.normpath(value)
 
 
-def _relative(value, *, allow_dots=False):
+def _relative(value: object, *, allow_dots: bool = False) -> str:
     if type(value) is not str or not value or "\0" in value:
         raise ConfigurationError("source path must be a nonempty relative path")
     parts = value.replace("\\", "/").split("/")
@@ -95,16 +133,18 @@ def _relative(value, *, allow_dots=False):
     return os.path.join(*parts)
 
 
-def _source(value):
+def _source(value: object) -> Source:
     _object(value, {"root", "path"})
-    if set(value) != {"root", "path"}:
+    record = cast(dict[str, object], value)
+    if set(record) != {"root", "path"}:
         raise ConfigurationError("source requires root and path")
-    return {"root": _root(value["root"]), "path": _relative(value["path"])}
+    return {"root": _root(record["root"]), "path": _relative(record["path"])}
 
 
-def plan_layers(context, layers):
+def plan_layers(context: object, layers: object) -> list[Layer]:
     """Validate and return selected, ordered detached layer records; no I/O."""
     _object(context, _CONTEXT)
+    context = cast(dict[str, object], context)
     for field in ("repository_id", "execution_machine", "installation_cell"):
         _identity(context.get(field))
     binding = context.get("binding")
@@ -121,10 +161,11 @@ def plan_layers(context, layers):
         raise ConfigurationError("unbound context cannot supply knowledge root")
     if type(layers) is not list:
         raise ConfigurationError("layers must be an array")
-    seen = set()
-    selected = []
+    seen: set[str] = set()
+    selected: list[Layer] = []
     for layer in layers:
         _object(layer, _LAYER)
+        layer = cast(dict[str, Any], layer)
         for field in ("id", "tier", "origin"):
             _identity(layer.get(field))
         if layer["id"] in seen:
@@ -163,29 +204,31 @@ def plan_layers(context, layers):
             ):
                 raise ConfigurationError("repository source has the wrong root owner")
         if matches:
-            selected.append(entry)
+            selected.append(cast(Layer, entry))
     # Named fragments and local settings retain explicit caller order within machine tier.
     return sorted(selected, key=lambda x: (
         _TIERS[x["tier"]], 1 if x["origin"] == "knowledge" else 0,
     ))
 
 
-def _pointer(parent, key):
+def _pointer(parent: str, key: str) -> str:
     return parent + "/" + key.replace("~", "~0").replace("/", "~1")
 
 
-def compose(context, layers):
+def compose(context: object, layers: object) -> Composition:
     """Return {values, provenance, layers}; arrays/scalars/null replace atomically."""
     plan = plan_layers(context, layers)
-    values = {}
-    provenance = {}
+    values: _JSONValue = {}
+    provenance: dict[str, LayerOwner] = {}
 
-    def remove(pointer):
+    def remove(pointer: str) -> None:
         for key in list(provenance):
             if key == pointer or key.startswith(pointer + "/"):
                 del provenance[key]
 
-    def merge(target, incoming, pointer, owner):
+    def merge(
+        target: _JSONValue, incoming: _JSONValue, pointer: str, owner: LayerOwner,
+    ) -> _JSONValue:
         # Empty mappings merge, rather than deleting existing mapping contents.
         if isinstance(incoming, dict):
             if not isinstance(target, dict):
@@ -204,12 +247,18 @@ def compose(context, layers):
         return copy.deepcopy(incoming)
 
     for layer in plan:
-        owner = {key: copy.deepcopy(value) for key, value in layer.items() if key != "values"}
+        owner = cast(LayerOwner, {
+            key: copy.deepcopy(value) for key, value in layer.items() if key != "values"
+        })
         values = merge(values, layer["values"], "", owner)
-    return {"values": values, "provenance": provenance, "layers": [x["id"] for x in plan]}
+    return {
+        "values": cast(dict[str, Any], values),
+        "provenance": provenance,
+        "layers": [x["id"] for x in plan],
+    }
 
 
-def _contained(root, relative, *, allow_dots=False):
+def _contained(root: object, relative: object, *, allow_dots: bool = False) -> Path:
     """Resolve physically, rejecting escapes; not a filesystem race/permission boundary."""
     base = Path(_root(root)).resolve(strict=True)
     if not base.is_dir():
@@ -225,8 +274,8 @@ def _contained(root, relative, *, allow_dots=False):
     return target
 
 
-def _pairs(pairs):
-    result = {}
+def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
             raise ConfigurationError("duplicate document key")
@@ -234,7 +283,10 @@ def _pairs(pairs):
     return result
 
 
-def read_source(root, relative, *, parser=None, optional=True):
+def read_source(
+    root: str, relative: str, *, parser: Callable[[str], object] | None = None,
+    optional: bool = True,
+) -> Document | None:
     """Read one exact owner-selected document; parser(text) must return JSON object.
 
     Only a genuinely absent optional file returns None. Parsing and access failures
@@ -255,12 +307,15 @@ def read_source(root, relative, *, parser=None, optional=True):
             raise
         value = parser(text) if parser else json.loads(text, object_pairs_hook=_pairs)
         _object(value)
-        return {"values": value, "source": _source({"root": root, "path": relative})}
+        return {
+            "values": cast(dict[str, Any], value),
+            "source": _source({"root": root, "path": relative}),
+        }
     except (OSError, ValueError, TypeError, RuntimeError) as exc:
         raise ConfigurationError(f"cannot read selected source: {exc}") from exc
 
 
-def resolve_path(result, pointer):
+def resolve_path(result: Composition, pointer: str) -> str:
     """Resolve a winning string leaf relative to its source document, within root."""
     try:
         owner = result["provenance"][pointer]

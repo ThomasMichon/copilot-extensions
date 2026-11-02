@@ -15,7 +15,7 @@ from configuration_context import ready_owner_prefix  # noqa: E402
 from configuration_layers import ConfigurationError  # noqa: E402
 
 
-def test_absent_runtime_uses_actual_read_only_resolver_without_creating_it(tmp_path):
+def test_absent_runtime_uses_actual_read_only_resolver_without_creating_it(tmp_path: Path) -> None:
     path = ROOT / "libs" / "versioned-runtime" / "versioned_runtime.py"
     spec = importlib.util.spec_from_file_location("configuration_runtime_owner", path)
     assert spec and spec.loader
@@ -27,11 +27,11 @@ def test_absent_runtime_uses_actual_read_only_resolver_without_creating_it(tmp_p
     assert not missing.exists()
 
 
-def test_ready_prefix_retains_qualified_interpreter_and_module(tmp_path):
+def test_ready_prefix_retains_qualified_interpreter_and_module(tmp_path: Path) -> None:
     selected = tmp_path / "versions" / "complete" / "python"
-    roots = []
+    roots: list[Path] = []
 
-    def resolve(root):
+    def resolve(root: Path) -> Path:
         roots.append(root)
         return selected
 
@@ -42,8 +42,8 @@ def test_ready_prefix_retains_qualified_interpreter_and_module(tmp_path):
     assert not selected.exists()
 
 
-def test_readiness_failure_never_becomes_optional_absence(tmp_path):
-    def refuse(root):
+def test_readiness_failure_never_becomes_optional_absence(tmp_path: Path) -> None:
+    def refuse(root: Path) -> Path:
         raise ValueError("unconfirmed selection")
 
     with pytest.raises(ConfigurationError, match="readiness read failed"):
@@ -52,7 +52,7 @@ def test_readiness_failure_never_becomes_optional_absence(tmp_path):
         ready_owner_prefix(tmp_path, "agent_worktrees", resolver=lambda root: Path("python"))
 
 
-def test_standalone_payloads_ship_the_same_canonical_reader():
+def test_standalone_payloads_ship_the_same_canonical_reader() -> None:
     spec = importlib.util.spec_from_file_location(
         "configuration_payload_sync", ROOT / "tools" / "sync-configuration-layers.py",
     )
