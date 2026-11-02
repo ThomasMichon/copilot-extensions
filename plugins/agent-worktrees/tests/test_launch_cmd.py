@@ -599,8 +599,9 @@ def test_namespaced_launch_uses_direct_fallback_without_legacy_launcher(
     rc = m.cmd_launch([])
 
     assert rc == 0
-    assert resolve_calls[0][0] == [
-        sys.executable,
+    assert resolve_calls[0][0][:2] == [sys.executable, "-X"]
+    assert resolve_calls[0][0][2].startswith("pycache_prefix=")
+    assert resolve_calls[0][0][3:] == [
         "-m",
         "agent_worktrees",
         "--project",
@@ -615,8 +616,9 @@ def test_namespaced_launch_uses_direct_fallback_without_legacy_launcher(
         tmp_path / "anchor"
     )
     assert child["env"]["COPILOT_THEME"] == "dark"
-    assert post_exit[0][0] == [
-        sys.executable,
+    assert post_exit[0][0][:2] == [sys.executable, "-X"]
+    assert post_exit[0][0][2].startswith("pycache_prefix=")
+    assert post_exit[0][0][3:] == [
         "-m",
         "agent_worktrees",
         "--project",
@@ -1020,8 +1022,9 @@ def test_cmd_launch_passes_active_project_explicitly(monkeypatch, tmp_path):
     )
     rc = m.cmd_launch([])
     assert rc == 0
-    assert calls[0][0] == [
-        sys.executable,
+    assert calls[0][0][:2] == [sys.executable, "-X"]
+    assert calls[0][0][2].startswith("pycache_prefix=")
+    assert calls[0][0][3:] == [
         "-m",
         "agent_worktrees",
         "--project",

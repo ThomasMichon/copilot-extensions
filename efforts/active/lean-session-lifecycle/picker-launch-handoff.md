@@ -439,3 +439,19 @@ reviewed admission revision is implemented and qualified.
 - The three review findings, required CI, source merge, promotion and installed
   proof remain open until their respective owners confirm them. No installed
   rollout, live-session change or hold change occurred.
+
+### 2026-11-02 - Preserve newer source contracts through rebase
+
+- Rebased onto the newer typed bootstrap and peer-launch source. Regenerated
+  both runtime and installation-context archives from the merged canonical
+  sources; retained the MCP footprint revision and upstream unit admissions.
+- The merged source passes 74 finite-process owner cases, 56 Manager query and
+  native terminal cases, and the 164-case Worktrees launch packet. Corrected
+  the direct-fallback expectations to preserve the existing external bytecode
+  cache arguments rather than asserting a cache-free interpreter command.
+- The native query measured 1528.68 ms cold and 856.47 ms warm. Its birth-pinned
+  sample observed five Python and five console-host processes across both
+  queries; this remains a lower bound, not exhaustive transient attribution.
+- Exact-head required CI and review must still qualify publication. The full
+  local unit packet's previously recorded privilege/platform limitation and
+  the no-rollout boundary remain unchanged.
