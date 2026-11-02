@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current slice:** #10018 canonical Installation Context strict admission, integrating #10013 (POSIX fixtures/callbacks), #10014 (guest-environment family) and #10015 (lead-owned remaining native adapters). #10006, #10007 and #10010 are complete.
+- **Current slice:** #10021 canonical Configuration Layers source/test contracts and strict admission. #10018 canonical Installation Context admission and its final #10013/#10014/#10015 test cohorts are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** #10013 owns only `test_installation_context_posix.py`; #10014 owns only the four guest-environment/revalidation test modules, each family in an independent source worktree. Their diagnosis/planning milestones passed; isolated implementation and validation are authorized. The lead owns #10015's legacy-entrypoint, path-capture and deployment-adapter contracts, directly dependent fixture clients, the effort, shared checker controls and full completion judgment.
+- **Delegates:** No active delegated implementation. The lead owns #10021's four canonical Configuration Layers source/test modules, the effort, shared checker controls and full completion judgment. The prior POSIX and guest-environment delegates completed their isolated cohorts.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -114,7 +114,8 @@ rewrite.
 - [x] Strictly admit all Config Migrate source/test files with a declared YAML/stub environment (#9924).
 - [x] Strictly admit all canonical Dropin Registry source/test files; keep copies independently pending (#9930).
 - [x] Strictly admit all canonical Endpoint Rendezvous source/test files, preserving native ownership fixtures (#9933).
-- [ ] Strictly admit canonical Installation Context source, worker and every test/helper after the final fixture cohorts (#10018).
+- [x] Strictly admit canonical Installation Context source, worker and every test/helper after the final fixture cohorts (#10018).
+- [ ] Strictly admit all four canonical Configuration Layers source/test modules (#10021).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -1159,3 +1160,59 @@ composition prerequisites, and review/validation rules.
   external runtime venues do not apply to unchanged production behavior.
   Source CI must still validate this exact candidate before merge; #9807
   remains active.
+
+### 2026-11-02 - Canonical Installation Context strict admission merged
+
+- #10019 merged as `c9335651029f80e4f22520291e92929044965cbf`
+  after exact-head approval with no findings, zero open review threads and
+  green required CI in
+  [run 41484654768](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41484654768).
+  Its real pinned-environment preparation and admitted type-contract steps
+  passed in source CI. The managed source sync completed.
+- #10013, #10014, #10015 and #10018 are complete. The canonical library's
+  source, worker and every test/helper are now strict; its independent copies
+  and the larger campaign remain pending. The completed admission advances
+  the shared-library Plan, not the full objective. #9807 remains open.
+- Re-reading the remaining Plan and Validation Plan selects #10021's four-file
+  Configuration Layers scope. Its initial complete-project strict probes
+  report 116 Linux / 114 Windows diagnostics. Source and tests were read
+  before implementation; preserve JSON validation, configuration precedence,
+  source ownership, optional absence and the real cross-language controls.
+
+### 2026-11-02 - Canonical Configuration Layers strict admission prepared
+
+- #10021 adds source/layer/document/composition records, an explicit recursive
+  JSON merge contract, qualified resolver callables and nullable reader results.
+  Raw inputs still pass the original validation; arbitrary configuration values
+  and serialized owner reports retain documented dynamic JSON boundaries.
+  Tests use the canonical SDK for static analysis while preserving the existing
+  runtime import and all native/cross-language assertions.
+- All four canonical modules pass strict on Linux and Windows; the manifest
+  admits them without changing includes, excludes, pins or declared targets.
+  The expanded cohort passes all 30 platform checks: 15 strict / 53 pending
+  projects across 7,446 physical files. Independent payload copies remain
+  pending. The local prepared command
+  `python tools/typecheck.py lib-configuration-layers` passes in 13.15 seconds;
+  this is not a cold CI budget measurement.
+- The contained parity and affected Index/model-routing consumer suites pass
+  109 tests and three subtests. The 52 checker controls also pass. An earlier
+  uncontained diagnostic invocation inherited the host's ready Worktrees owner
+  and failed seven synthetic-repository cases; the standard isolated environment
+  removes that accidental host dependency and all seven pass unchanged.
+- Four standalone Python copies are synchronized. Ruff, copy correspondence,
+  vendoring, documentation consistency, install contracts and whitespace checks
+  pass. Documentation impact: `docs/python-typechecking.md` records the scope,
+  dynamic boundaries, local command and independently pending copies.
+  This is below runtime-architecture altitude; validation, source ownership,
+  precedence, native subprocess options and optional absence are unchanged.
+  Fresh provisioning and external-venue runtime tests do not apply to this
+  type-contract-only slice. Exact-candidate source CI and review remain required
+  before merge; #9807 remains active.
+- The first source-CI unit job correctly rejected stale admission hashes for
+  the two edited canonical source files. After reviewing their pure unit/import
+  closure, only those two hashes were refreshed; the 3,665 nodes, 458 source
+  entries, 209 coverage targets and 300-second budget were preserved exactly.
+  The complete existing packet then passed locally in 234.78 seconds under
+  owned process containment, with coverage recorded and cleanup/audit complete.
+  Its 16 non-admitted collected cases remain deselected by the unchanged exact
+  whitelist. Updated-head review and source CI remain required.

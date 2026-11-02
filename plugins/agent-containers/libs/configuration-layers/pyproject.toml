@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-configuration-layers"
-version = "0.1.0"
+version = "0.1.1-dev1"
 description = "Inert owner-supplied ordinary configuration composition"
 readme = "README.md"
 license = "MIT"
