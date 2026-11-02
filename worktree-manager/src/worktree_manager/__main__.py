@@ -1339,6 +1339,12 @@ def _execute_launch(req) -> int:
         )
     if getattr(req, "machine", None) is None and plan.action == "exec":
         if script is not None:
+            if (
+                _is_windows() and os.environ.get("CE_TERMINAL_LAUNCH")
+                and not new_window and not getattr(req, "no_mux", False)
+            ):
+                # The shell owns launch/return observations after Python exits.
+                return _run_relocated_mux_launch(req, plan, script)
             return launch_observations.launch(
                 attempt_id, lambda: _run_relocated_mux_launch(req, plan, script),
             )

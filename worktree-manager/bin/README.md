@@ -10,6 +10,35 @@ of the `worktree-manager-control-plane` effort.
   JSON launch plan from `agent-worktrees resolve`, execute it natively
   (mux session creation/attach, profile selection, seed injection, handoff
   cutover argv), then call `agent-worktrees post-exit` for finalization.
+- `terminal-launch.ps1` - the foreground Windows shell's finite Picker handoff.
+  At an interactive native entry it offers a version-1 `CE_TERMINAL_LAUNCH`
+  return channel before invoking Python. A capable Manager returns its prepared
+  local mux launch, then exits. Only after preparation has returned and its
+  Python-owned Jobs have closed does the outer shell consume the one-shot result
+  and invoke `launch-session.ps1` in its own PowerShell process. Nested entry
+  points share that outer channel rather than attaching inside another Python
+  waiter. The existing launcher retains attach-return, detach/exit and terminal
+  cleanup duties; neither forwarding interpreter is a session-lifetime host.
+  The consumed result and request directory are removed before attachment;
+  literal argv arrays are splatted without shell evaluation or flattening.
+  The selected script runs in the foreground host, but its process-environment
+  additions, removals and changed values are restored on return, matching the
+  previous child-shell isolation when the caller reuses its PowerShell session.
+  A finite callback records a journaled attempt's actual launcher return, not
+  preparation success. No credentials or seed prompt bodies use this channel.
+  If that observer fails, a diagnostic is emitted without replacing the
+  launcher's original exit result or automatically repeating a launch.
+  Manager's PowerShell entry and ordinary bare/project-only CMD entry use the
+  helper; Worktrees' user and attributable PowerShell entries consume the same
+  canonical asset through the existing launch-wrapper manifest.
+  A CMD entry without PowerShell 7 on PATH retains its existing direct Python
+  route rather than making an unavailable terminal host a new Picker dependency.
+  The response itself negotiates version 1 against the outer shell's request;
+  no new command-line option is sent to an older runtime. A missing helper,
+  older Manager that returns no prepared result, redirected stdin, explicit
+  Python invocation, no-mux and remote paths retain their existing behavior
+  and cannot be credited with removing both forwarding roles. New-window launch
+  remains separately owned. POSIX keeps native process replacement.
 - `pane-wrapper.sh` / `pane-wrapper.ps1` — wrap the actual mux pane command for
   graceful exit-code handling, initial-prompt injection, and AHP token handoff.
   The Windows wrapper binds its kill-on-close Job Object calls directly through
