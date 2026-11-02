@@ -3567,6 +3567,10 @@ and the five-second deadline. A timed-out owned child reports no successful stat
 even if its recorded exit code is zero. Import-closure controls keep installer
 cleanup and command-rendering dependencies out of the helper's startup path;
 native process, routing and cleanup controls still qualify the actual behavior.
+The cold policy-import control uses a 45-second child watchdog and a 60-second
+item guard for native filesystem/import contention. This is a functional
+import-boundary check, not latency qualification; authentication deadlines,
+two-worker execution and the 240/900-second packet limits remain unchanged.
 Registered-only find and strict-list first-touch calls use independent cases,
 preserving each real CLI launch, twenty-second child deadline and thirty-second
 item limit rather than accumulating two child deadlines in one item.

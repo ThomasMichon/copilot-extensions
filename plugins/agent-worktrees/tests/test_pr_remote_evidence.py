@@ -14,6 +14,7 @@ from agent_worktrees.git_push_transport import REMOTE_TRANSPORT_SETTINGS
 from pr_test_helpers import _stub_remote_target
 
 
+@pytest.mark.timeout(60)
 def test_cold_target_import_does_not_load_native_process_helpers():
     from agent_procutil import no_window_kwargs
 
@@ -41,7 +42,7 @@ assert publication_deadline.validate(30) == 30
         roots = [str(Path(__file__).resolve().parents[1] / "src"), *sys.path]
         result = subprocess.run(
             [python, "-I", "-S", "-B", "-c", script, json.dumps(roots)],
-            capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+            capture_output=True, text=True, timeout=45, **no_window_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
         pytest.fail(f"cold target import timed out: {exc.stdout!r} {exc.stderr!r}")
