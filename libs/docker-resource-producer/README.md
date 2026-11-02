@@ -146,12 +146,11 @@ remain at their standard-library adapter boundaries. Typing does not grant
 resource ownership, cleanup authority or admission to unsupported transports.
 
 Source tests and API inspection are not a live or native Docker lifecycle proof.
-Required PR CI runs this fixture-only suite on the declared minimum Python 3.10
-when the library or its CI selector changes. The selector uses the actual PR
-head, and minimum-runtime setup does not replace the guard job's Python.
-Inherited Git repository/config overrides cannot redirect the scope probe.
-The same path selector gates a focused canonical-library promotion regression
-and includes changes to the promotion tool and its test.
+Run this independent fixture-only suite explicitly under containment on the
+declared minimum Python 3.10, including Linux for POSIX-only cases. Required PR
+CI runs the admitted source-unit packet, not this suite; a green PR gate is not
+minimum-runtime fixture evidence. Record the actual source snapshot, interpreter,
+platform, result and any skips separately.
 
 Transport semantics: [Docker CLI options](https://github.com/docker/cli/blob/master/cli/flags/options.go).
 Volume deletion contract: [Moby client API](https://github.com/moby/moby/blob/master/client/volume_remove.go).

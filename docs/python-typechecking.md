@@ -94,8 +94,9 @@ constructor checks; JSON responses remain dynamically shaped until validation.
 A minimal binary-read protocol describes HTTP framing, and synthetic Docker
 state/invocation records remain separate from malformed response vectors.
 Standard-library socket capabilities retain their native transport admission.
-The existing minimum-Python fixture lane uses a fake Docker process, not a live
-daemon; canonical admission grants no resource or cleanup authority.
+Explicit contained fixture execution on minimum Python uses a fake Docker
+process, not a live daemon. Required PR CI does not execute this independent
+suite; canonical admission grants no resource or cleanup authority.
 
 Bootstrap Killswitch checks all three canonical Python source/test files in
 the base environment on both declared targets. State documents expose
