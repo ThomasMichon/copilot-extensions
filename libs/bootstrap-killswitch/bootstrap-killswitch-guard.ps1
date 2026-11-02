@@ -72,19 +72,43 @@ function Get-LiveReconcilingPlugins {
   # exact lock convention and aren't detected here -- see README.md's Known
   # limitations.
   $found = @()
+  # Older/guard-only payloads need no installer helper to activate the switch.
+  $watchdog = Join-Path $PSScriptRoot 'installer-watchdog.ps1'
+  if (Test-Path -LiteralPath $watchdog) { . $watchdog }
   $scanRoot = $env:BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT
   if (-not $scanRoot) { $scanRoot = $HOME }
   $pattern = Join-Path (Join-Path $scanRoot ".*") "reconcile.lock"
   foreach ($lock in (Get-ChildItem -Path $pattern -Force -ErrorAction SilentlyContinue)) {
     try {
-      $pidText = (Get-Content -LiteralPath $lock.FullName -Raw).Trim()
-      $procId = [int]$pidText
+      if (Get-Command Test-InstallReconcileLock -CommandType Function -ErrorAction SilentlyContinue) {
+        if (Test-InstallReconcileLock -Path $lock.FullName) {
+          $found += $lock.Directory.Name.TrimStart('.')
+        }
+        continue
+      }
+      $parts = (Get-Content -LiteralPath $lock.FullName -Raw).Trim() -split '\s+'
+      $procId = 0
+      if (-not [int]::TryParse($parts[0], [ref]$procId) -or $procId -le 0) { continue }
+      $process = Get-Process -Id $procId -ErrorAction SilentlyContinue
+      if (-not $process) { continue }
+      try {
+        $birth = ([DateTimeOffset]$process.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds()
+      } catch {
+        $found += $lock.Directory.Name.TrimStart('.')
+        continue
+      }
+      if ($parts.Count -eq 1) {
+        $written = ([DateTimeOffset][IO.File]::GetLastWriteTimeUtc($lock.FullName)).ToUnixTimeMilliseconds()
+        if ($birth -gt ($written + 999)) { continue }
+      } else {
+        $recorded = 0L
+        if ($parts.Count -ne 2 -or -not [long]::TryParse($parts[1], [ref]$recorded) -or
+            $recorded -ne $birth) { continue }
+      }
     } catch {
       continue
     }
-    if (Get-Process -Id $procId -ErrorAction SilentlyContinue) {
-      $found += $lock.Directory.Name.TrimStart('.')
-    }
+    $found += $lock.Directory.Name.TrimStart('.')
   }
   return $found
 }

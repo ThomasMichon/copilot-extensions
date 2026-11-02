@@ -23,5 +23,6 @@
   "runtimeScope": "universal",
   "installerReadiness": "installer-readiness.json",
   "installerDeadlineSeconds": 900,
+  "cutoverDeadlineSeconds": 1200,
   "zeroDowntimeUpdate": true
 }

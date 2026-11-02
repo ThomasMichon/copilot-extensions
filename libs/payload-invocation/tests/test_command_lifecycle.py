@@ -997,6 +997,8 @@ def _real_installer(fixture: dict, shell: str, location: str) -> tuple[Path, dic
         "COPILOT_PLUGIN_INSTALL_STAGED": "1",
         "COPILOT_PLUGIN_STAGED_FROM": str(payload),
     }
+    if os.name == "nt":
+        environment["PATH"] = str(Path(sys.executable).parent) + os.pathsep + environment["PATH"]
     return installer, environment
 
 
@@ -1057,7 +1059,8 @@ def test_command_binding_real_installer_reenters_under_admitted_lease(
     _publish(binding_fixture)
     command = (
         ["bash", str(installer), "stamp"] if shell == "bash" else
-        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "stamp"]
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "stamp",
+         "-BootstrapPython", sys.executable]
     )
     if location == "local-copy":
         binding = binding_fixture["binding"]
@@ -1067,7 +1070,8 @@ def test_command_binding_real_installer_reenters_under_admitted_lease(
         ) as lease:
             command = (
                 ["bash", str(installer), "stamp"] if shell == "bash" else
-                [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "stamp"]
+                [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "stamp",
+                 "-BootstrapPython", sys.executable]
             )
             admitted = subprocess.run(
                 command, env={
@@ -1127,7 +1131,8 @@ def test_command_binding_native_selfstage_preserves_human_optin(
     host = shutil.which("powershell.exe") if windows_powershell else POWERSHELL
     command = (
         ["bash", str(installer), action] if shell == "bash" else
-        [host, "-NoLogo", "-NoProfile", "-File", str(installer), action]
+        [host, "-NoLogo", "-NoProfile", "-File", str(installer), action,
+         "-BootstrapPython", sys.executable]
     )
     completed = subprocess.run(
         command, env=environment, cwd=binding_fixture["home"], capture_output=True,
@@ -1265,7 +1270,10 @@ def test_command_binding_bootstrap_preserves_off_path_spaced_interpreter_through
     _prepare_catalog(binding_fixture)
     payload = binding_fixture["payload"]
     scripts = payload / "scripts"
-    for name in ("install.ps1", "bootstrap-check.ps1", "bootstrap-killswitch-guard.ps1"):
+    for name in (
+        "install.ps1", "installer-watchdog.ps1",
+        "bootstrap-check.ps1", "bootstrap-killswitch-guard.ps1",
+    ):
         shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/{name}", scripts / name)
     _write(payload / "plugin.json", {"name": PLUGIN_ID})
     python_root = binding_fixture["home"] / "Python with spaces"
