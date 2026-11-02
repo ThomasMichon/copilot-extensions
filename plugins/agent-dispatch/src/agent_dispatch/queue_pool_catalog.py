@@ -40,6 +40,15 @@ def advance_pool_registry_revision(conn: sqlite3.Connection) -> None:
     )
 
 
+def require_pool_queue_identity(conn: sqlite3.Connection, expected: str | None) -> str:
+    identity = conn.execute(
+        "SELECT identity FROM workspace_queue_identity WHERE singleton = 1"
+    ).fetchone()["identity"]
+    if expected is not None and _identity(expected, "queue identity") != identity:
+        raise TaskError("pool publication queue identity changed; refusing another queue")
+    return identity
+
+
 @dataclass(frozen=True)
 class PoolPublicationScope:
     machine: str
@@ -68,6 +77,7 @@ class PoolCatalogSnapshot:
     definitions: tuple[PoolInstanceDefinition, ...]
     blockers: tuple[str, ...]
     configured_cohort: PoolConfiguredCohort
+    queue_identity: str
 
     @property
     def ready(self) -> bool:
@@ -156,6 +166,7 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
         self, machine: str, env: str, publisher_id: str, *,
         expected_generation: int, now: float | None = None,
         expected_cohort_revision: int | None = None,
+        expected_queue_identity: str | None = None,
     ) -> PoolPublicationScope:
         """CAS a new lock-holder incarnation; never auto-take over from age.
 
@@ -173,6 +184,7 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
             raise TaskError("pool publication requires a finite observation time")
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            require_pool_queue_identity(conn, expected_queue_identity)
             row = conn.execute(
                 "SELECT * FROM pool_publication_scopes WHERE machine = ? AND env = ?",
                 (machine, env),
@@ -222,6 +234,7 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
         input_revision: str, definitions: tuple[PoolInstanceDefinition, ...],
         reason: str | None = None, now: float | None = None,
         expected_cohort_revision: int | None = None,
+        expected_queue_identity: str | None = None,
     ) -> PoolPublicationScope:
         """Atomically replace the entire scope, or record unavailable inputs.
 
@@ -260,6 +273,7 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
             raise TaskError("pool publication requires a finite observation time")
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            require_pool_queue_identity(conn, expected_queue_identity)
             row = conn.execute(
                 "SELECT * FROM pool_publication_scopes WHERE machine = ? AND env = ?",
                 (machine, env),
@@ -350,7 +364,7 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
         return PoolCatalogSnapshot(
             POOL_CATALOG_VERSION, clock["revision"], clock["registration_revision"],
             scopes, ordered_pool_instances(value for scope in scopes for value in scope.definitions),
-            tuple(blockers), cohort,
+            tuple(blockers), cohort, require_pool_queue_identity(conn, None),
         )
 
     def pool_catalog_snapshot(self, *, now: float | None = None) -> PoolCatalogSnapshot:

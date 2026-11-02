@@ -130,6 +130,51 @@ def test_legacy_direct_row_without_complete_filters_withholds_entire_publication
     assert "effective-worker-definition-invalid" in owners.daemon.pool_source_snapshot().reasons
 
 
+@pytest.mark.parametrize("lost", [False, True])
+def test_actual_scope_cadence_continues_same_queue_after_endpoint_reconnect(
+    owners: Any, lost: bool,
+) -> None:
+    _tick(owners)
+    if lost:
+        send = owners.client.send_pool_metadata
+
+        def accepted(request: Any, *, boundary: Any) -> Any:
+            send(request, boundary=boundary)
+            raise httpx.ReadError("synthetic original accepted reply lost")
+
+        owners.client.send_pool_metadata = accepted
+    owners.daemon.reconcile_once()
+    before = owners.queue.pool_catalog_snapshot().scopes[0]
+    original = owners.daemon._pool_publisher_custody.pending
+    with TestClient(create_app(
+        owners.queue, token="data", control_token="control",
+        enable_mcp=False, verification_interval=0,
+    )) as api:
+        def handle(wire: httpx.Request) -> httpx.Response:
+            response = api.request(
+                wire.method, str(wire.url), headers=wire.headers, content=wire.content,
+            )
+            return httpx.Response(response.status_code, json=response.json())
+
+        with DispatchClient(
+            "http://replacement", token="data", control_token="control",
+            transport=httpx.MockTransport(handle),
+        ) as replacement:
+            owners.daemon._client_factory = lambda: replacement
+            assert owners.daemon._reconnect()
+            owners.daemon.reconcile_once()
+            if lost:
+                assert owners.daemon._pool_publisher_custody.settled == (original, before)
+                assert owners.queue.pool_catalog_snapshot().scopes[0] == before
+                owners.daemon.reconcile_once()
+            after = owners.queue.pool_catalog_snapshot().scopes[0]
+            assert after.publisher_id == before.publisher_id
+            assert after.generation == before.generation
+            assert after.revision == before.revision + 1 and after.state == "complete"
+            assert owners.queue.pool_catalog_snapshot().configured_ready
+            assert owners.client._http.is_closed
+
+
 @pytest.mark.parametrize("blocked", ["disabled", "unprojected", "excluded", "no-lock"])
 def test_automatic_scope_publication_requires_opt_in_cohort_membership_and_singleton(
     owners: Any, blocked: str,

@@ -32,6 +32,7 @@ class PoolCatalogRead:
     positions: tuple[PoolPublisherPosition, ...]
     scopes: tuple[PoolPublicationScope, ...] = ()
     configured_cohort: PoolConfiguredCohort | None = None
+    queue_identity: str | None = None
 
     def permits_scope(self, machine: str, env: str) -> bool:
         cohort = self.configured_cohort
@@ -55,6 +56,12 @@ class PoolCatalogRead:
             or not isinstance(value.get("scopes"), list)
         ):
             raise PoolPublicationError("pool catalog input observation is malformed or unsupported")
+        queue_identity = value.get("queue_identity")
+        if "queue_identity" in value and (
+            not isinstance(queue_identity, str) or not queue_identity.strip()
+            or queue_identity != queue_identity.strip()
+        ):
+            raise PoolPublicationError("pool catalog queue identity is malformed")
         positions = []
         scopes = []
         seen = set()
@@ -80,7 +87,7 @@ class PoolCatalogRead:
             read_pool_configured_cohort(value["configured_cohort"])
             if "configured_cohort" in value else None
         )
-        return cls(value["registration_revision"], tuple(positions), tuple(scopes), cohort)
+        return cls(value["registration_revision"], tuple(positions), tuple(scopes), cohort, queue_identity)
 
 
 @dataclass(frozen=True)
@@ -114,6 +121,11 @@ class PoolMetadataRequest:
     reason: str | None = None
 
     @property
+    def expected_queue_identity(self) -> str | None:
+        catalog = self.inputs.catalog
+        return None if catalog is None else catalog.queue_identity
+
+    @property
     def expected_cohort_revision(self) -> int | None:
         catalog = self.inputs.catalog
         cohort = None if catalog is None else catalog.configured_cohort
@@ -135,6 +147,8 @@ class PoolMetadataRequest:
         }
         if self.expected_cohort_revision is not None:
             body["expected_cohort_revision"] = self.expected_cohort_revision
+        if self.expected_queue_identity is not None:
+            body["expected_queue_identity"] = self.expected_queue_identity
         if self.operation == "begin":
             body["expected_generation"] = self.generation
         else:
@@ -177,6 +191,10 @@ class PoolPublisherCustody:
             raise PoolPublicationError("configured pool cohort is uncertain or excludes the execution scope")
         if self.settled is not None:
             original = self.settled[0].inputs.catalog
+            if original is not None and original.queue_identity is not None and (
+                original.queue_identity != catalog.queue_identity
+            ):
+                raise PoolPublicationError("pool publisher queue identity changed after settlement")
             prior_cohort = None if original is None else original.configured_cohort
             cohort = catalog.configured_cohort
             if prior_cohort is not None and prior_cohort.revision > 0 and (

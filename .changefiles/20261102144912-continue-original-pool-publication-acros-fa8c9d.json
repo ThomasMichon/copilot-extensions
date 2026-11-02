@@ -1,0 +1,9 @@
+{
+  "comment": "Continue original pool publication across same-queue endpoints with transactional queue identity fences",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -17,6 +17,8 @@ the ordinary supervisor.
 The running coordinator's existing `/health` response adds
 `pool_catalog_transport`, with protocol `pool_catalog_transport/v1`, supported
 metadata/definition versions and whether control authority is configured.
+`queue_identity_fencing_versions: [1]` advertises the existing queue identity's
+transactional begin/publish fence, independently of package versions.
 The additive `configured_cohort_fencing_versions: [1]` advertises parsing and
 storage fences only, not an active configuration publisher or runtime admission.
 The separate `configured_cohort_projection_versions: [1]` advertises the
@@ -63,6 +65,13 @@ preserves legacy metadata writes only while no configured observation has been
 projected. After projection, fresh writes require its current coordinator
 revision and a complete observation containing that actual execution scope.
 An unfenced legacy writer receives `409` before mutation, not guessed coverage.
+The authenticated whole-catalog read also includes `queue_identity`, taken from
+the queue's existing durable workspace identity in the same SQLite snapshot.
+Both write bodies accept `expected_queue_identity`; the transaction compares it
+before either mutation or idempotent result recovery. Absence preserves legacy
+metadata semantics. An identity-pinned client requires the advertised fence
+before POST and never drops that field on provider rollback. No legacy wire
+form is retired by this expansion.
 
 Malformed request bodies yield `422`; invalid normalized definitions yield
 `400`; stale generation/revision/input fences or incompatible scope publication
@@ -324,12 +333,26 @@ waiter cannot acknowledge an old result against a newer pending request.
 Preparation binds the original client object and, for the concrete HTTP client,
 its bound base URL. Reconnection may replace the ordinary coordinator client,
 but retains an unresolved request's original transport instead of closing it
-under its future. Recovery uses only that transport; an identical catalog at a
-different target cannot settle the request. A fresh POST refuses if the daemon
-has switched clients. Changed targets also refuse later preparation from an
-already-settled publisher position; reconnect alone does not establish queue
-continuity or authorize re-enrollment. No new store or endpoint-identity protocol
-is introduced. The retained client closes after acknowledgment, confirmed
+under its future. Once the original flight and its source children are finished,
+a replacement client can continue the immutable request only after a fresh
+authenticated read confirms the same retained `queue_identity`. Matching
+positions or definitions at another queue cannot settle it, even at the same
+URL. Candidate transports remain owned while their reads run, including through
+another reconnect; failed qualification keeps the original binding and request.
+The next quiescent attempt closes superseded idle candidates before retaining
+another, so repeated wrong-target reads do not accumulate transports. Failed
+closure stays visible and retained.
+The sender's existing future and deadline own this read, without a new timer,
+executor, identity registry or prerequisite RPC.
+
+After same-queue qualification the sender can recover the original accepted
+result or retry under every original source/revision fence. Fresh POST still
+requires the currently selected client, actual singleton and the provider's
+transactional identity fence. Settled preparation likewise permits an endpoint
+change only with the same known queue identity and unchanged retained scope.
+Legacy reads without an identity keep their prior target pin and cannot cross
+endpoints; a known identity cannot silently disappear on rollback.
+The original accepted-request transports close after acknowledgment, confirmed
 pre-effect discard, or final worker retirement, never under an active flight.
 Source reads and declaration-publication futures launched by a send retain
 their binding too. A timed-out parent future does not retire those children;
@@ -340,6 +363,9 @@ confirmed and acknowledged the original result, unfinished children or a
 logged transport-close failure defer cleanup without withholding that result.
 The binding remains retained; later preparation and final retirement still
 require actual child completion and successful transport cleanup.
+`tests/test_pool_queue_continuity.py` exercises real client/HTTP/SQLite
+continuation, lookalike foreign catalogs, route replacement between read and
+POST, replay fences, reconnect during candidate reads and supported rollback.
 
 `discard_unaccepted_pool_metadata_request(original)` is the shared preparation
 operation used by explicit and opt-in cadence callers. It requires the exact pending request,
