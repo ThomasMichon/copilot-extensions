@@ -1540,3 +1540,18 @@ def test_producer_uses_real_caller_overlay_precedence_and_managed_removal(tmp_pa
     assert guarded_anchors.refresh()["published"] == 2
     assert rows("second") == second
     assert rows("first")["target"]["locus"]["preferred"] == "machine:global"
+
+
+def test_installed_runtime_reads_its_shipped_map_without_published_wrappers(tmp_path, monkeypatch):
+    from agent_worktrees import config as cfg, guarded_anchors
+
+    package = tmp_path / "site-packages" / "agent_worktrees"
+    assets = package / "_runtime_assets" / "scripts"
+    assets.mkdir(parents=True)
+    (assets / "guarded_anchor_map.py").write_text("ORIGIN = 'runtime-assets'\n", encoding="utf-8")
+    install_dir = tmp_path / "install"
+    (install_dir / "bin").mkdir(parents=True)  # resolvers-only publication: no guard map in bin/
+    monkeypatch.setattr(guarded_anchors, "__file__", str(package / "guarded_anchors.py"))
+    monkeypatch.setattr(cfg, "install_dir", lambda: install_dir)
+
+    assert guarded_anchors._reader().ORIGIN == "runtime-assets"

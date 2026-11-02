@@ -1,0 +1,9 @@
+{
+  "comment": "Read the cross-repository guard map from the installed runtime's own shipped scripts, so registry writes work when bin/ holds only the runtime resolvers.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
