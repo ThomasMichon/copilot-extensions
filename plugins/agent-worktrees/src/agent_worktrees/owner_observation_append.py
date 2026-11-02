@@ -33,6 +33,7 @@ SCHEMA = (
     "(generation TEXT, id TEXT, digest TEXT, position INTEGER, PRIMARY KEY(generation,id))",
 )
 MAX_GUARDS = 50000
+COMPARISON_BYTES = c.FRAME_BYTES * c.PAGE_ENTRIES
 
 
 class PreparationOverflow(c.ObservationError):
@@ -107,6 +108,36 @@ def event_identity(source: c.Source, item: dict, batch_id: str, offset: int) -> 
     )
 
 
+def content_digest(
+    item: dict, *, limit: int = c.BODY_BYTES - 1024, budget: list[int] | None = None
+) -> str:
+    """Hash already validated JSON incrementally, with explicit byte/work bounds."""
+    digest, used = hashlib.sha256(), 1
+    encoder = c.json.JSONEncoder(
+        ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    )
+    for text in encoder.iterencode(item):
+        raw = c.utf8(text)
+        used += len(raw)
+        if budget is not None:
+            budget[0] -= len(raw)
+            if budget[0] < 0:
+                raise c.ObservationError("owner identity comparison exceeds work bound")
+        if used > limit:
+            raise c.ObservationError("owner observation exceeds byte bound", "oversized")
+        digest.update(raw)
+    return digest.hexdigest()
+
+
+def comparison_digest(item: dict, budget: list[int]) -> str:
+    try:
+        return content_digest(item, limit=COMPARISON_BYTES, budget=budget)
+    except c.ObservationError as error:
+        if error.code != "oversized":
+            raise
+        raise c.ObservationError("owner identity comparison exceeds work bound") from error
+
+
 def reject_overflow_conflicts(conn, row, source, batch_id, entries) -> None:
     if (
         conn.execute(
@@ -118,15 +149,29 @@ def reject_overflow_conflicts(conn, row, source, batch_id, entries) -> None:
         raise c.ObservationError(
             "oversized content conflicts with an accepted batch identity", "batch-conflict"
         )
+    pending, budget = {}, [COMPARISON_BYTES]
     for offset, item in enumerate(entries, 1):
+        event_id = event_identity(source, item, batch_id, offset)
+        previous = pending.get(event_id)
+        if previous is None:
+            pending[event_id] = (item, None)
+        else:
+            previous_item, previous_digest = previous
+            if previous_digest is None:
+                previous_digest = comparison_digest(previous_item, budget)
+            if comparison_digest(item, budget) != previous_digest:
+                raise c.ObservationError(
+                    "source record identity changed content within batch", "event-conflict"
+                )
+            pending[event_id] = (previous_item, previous_digest)
         prior = conn.execute(
             "SELECT digest FROM owner_observation_identity WHERE generation=? AND id=?",
-            (row["generation"], event_identity(source, item, batch_id, offset)),
+            (row["generation"], event_id),
         ).fetchone()
         if prior is None:
             continue
         try:
-            text = c.encode(item, c.BODY_BYTES - 1024)
+            digest = content_digest(item, budget=budget)
         except c.ObservationError as error:
             if error.code != "oversized":
                 raise
@@ -134,7 +179,7 @@ def reject_overflow_conflicts(conn, row, source, batch_id, entries) -> None:
             raise c.ObservationError(
                 "source record identity changed content", "event-conflict"
             ) from error
-        if hashlib.sha256(c.utf8(text)).hexdigest() != prior[0]:
+        if digest != prior[0]:
             raise c.ObservationError("source record identity changed content", "event-conflict")
 
 
@@ -182,7 +227,7 @@ def append(
     stored, identities, pending = [], [], {}
     for offset, item in enumerate(entries, 1):
         event_id = event_identity(source, item, batch_id, offset)
-        entry_digest = hashlib.sha256(c.utf8(c.encode(item))).hexdigest()
+        entry_digest = content_digest(item)
         prior = conn.execute(
             "SELECT digest FROM owner_observation_identity WHERE generation=? AND id=?",
             (row["generation"], event_id),

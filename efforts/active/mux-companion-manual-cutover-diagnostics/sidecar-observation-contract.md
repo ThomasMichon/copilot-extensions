@@ -109,6 +109,9 @@ Accepted batch/native identity conflicts are rejected before overflow can
 invalidate current facts; oversized content cannot impersonate previously
 accepted bounded evidence. Actual qualified new-batch delivery failure still
 reports its source-local gap.
+This includes conflicts among new identities within one batch. Comparison uses
+bounded canonical JSON content, retaining numeric/type distinctions; exhausting
+the comparison budget rejects the operation without invalidation.
 
 Native event identity is source, generation and record identity. A payload
 locator participates in content integrity, not identity: changed content or

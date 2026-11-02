@@ -527,6 +527,21 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - Within-batch identity admission
+
+- Overflow admission checks the complete detached batch for conflicting native
+  identities, not only identities already stored in the journal. Matching
+  duplicates remain valid; null native IDs retain batch-offset identity.
+- Bounded streamed canonical JSON digests preserve boolean/integer/float/signed
+  zero distinctions without allocating an unrestricted oversized serialization.
+  Comparison-budget exhaustion rejects explicitly without changing facts or
+  sending gap notifications.
+- The expanded owner packet passed 200 cases, covering new and mixed identities,
+  combined/individual overflow, typed content conflicts, healthy/failed state,
+  duplicate controls, mutation during lock waits and comparison exhaustion.
+- This remains a source-review correction; provider attachment, native evidence,
+  deployment and the original whole-parent gates remain open.
+
 ### 2026-11-02 - Conflict admission before overflow invalidation
 
 - Private size-only preflight failures retain detached, structurally validated
