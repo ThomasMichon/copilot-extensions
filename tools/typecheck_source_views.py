@@ -103,6 +103,7 @@ def _read(root: Path, relative: str) -> bytes:
 
 def _parse(content: bytes, filename: str) -> ast.Module:
     try:
+        compile(content, filename, "exec", dont_inherit=True)
         return ast.parse(content, filename=filename)
     except SyntaxError as exc:
         raise SourceViewError(
@@ -175,7 +176,8 @@ def installation_view(root: Path, paths: tuple[str, ...], output: Path) -> Sourc
     ) -> None:
         source_lines = content.splitlines(keepends=True)
         source_tree = _parse(content, path) if fragment else None
-        for token in tokenize.tokenize(io.BytesIO(content).readline):
+        normalized = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        for token in tokenize.tokenize(io.BytesIO(normalized).readline):
             if token.type == tokenize.COMMENT and (
                 re.match(r"#\s*mypy:", token.string)
                 or (

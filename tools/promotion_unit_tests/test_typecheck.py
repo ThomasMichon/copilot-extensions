@@ -147,3 +147,11 @@ def test_candidate_source_view_binds_fragment_membership_bytes_and_diagnostics(t
         views.installation_view(
             tmp_path, (*paths, new.relative_to(tmp_path).as_posix()), view.output,
         )
+    new.unlink()
+    for invalid in (
+        b"# harmless\r# mypy: ignore-errors\rwrong: int = 'text'\r",
+        b"value: int = 1\nfrom __future__ import annotations\n",
+    ):
+        fragment.write_bytes(invalid)
+        with pytest.raises(views.SourceViewError):
+            views.installation_view(tmp_path, paths, view.output)

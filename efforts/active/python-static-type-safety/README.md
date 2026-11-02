@@ -387,3 +387,11 @@ composition prerequisites, and review/validation rules.
   correspondence and environment/module qualification. Source views do not
   admit the remaining library/test debt: the full campaign stays Active at
   four strict / 64 pending projects.
+- P4a review found two source-correspondence gaps: byte tokenization missed a
+  directive after a CR-only newline, and AST parsing alone accepted a misplaced
+  future import that actual runtime compilation rejects. Original sources now
+  pass non-executing compilation, and directive scanning normalizes universal
+  newlines before tokenization. Both cases have focused and required actor-free
+  regression controls; physical source maps also cover LF, CRLF and CR input.
+  Final focused validation passes 40 checker controls and 48 release/helper
+  controls, plus all eight admitted MyPy analysis targets and Ruff F/E9.

@@ -522,9 +522,16 @@ def fragment_source(tmp_path: Path) -> tuple[str, ...]:
     return tuple(path.relative_to(tmp_path).as_posix() for path in sorted(directory.glob("*.py")))
 
 
-def test_source_view_accounts_for_order_bytes_and_physical_lines(tmp_path: Path) -> None:
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"])
+def test_source_view_accounts_for_order_bytes_and_physical_lines(
+    tmp_path: Path, newline: bytes,
+) -> None:
     """Every physical line, including replaced future imports, has a source mapping."""
     paths = fragment_source(tmp_path)
+    for path in paths:
+        source = tmp_path / path
+        content = source.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        source.write_bytes(content.replace(b"\n", newline))
     view = views.installation_view(tmp_path, paths, tmp_path / "view" / "installation_context.py")
     view.verify(tmp_path)
     assert tuple(path for path, _content in view.inputs) == (
@@ -583,6 +590,9 @@ def test_source_view_refuses_stale_or_incomplete_composition(tmp_path: Path, cha
         "from __future__ import annotations; wrong: int = 'text'\n",
         "# mypy: ignore-errors\nwrong: int = 'text'\n",
         "# type: ignore\nwrong: int = 'text'\n",
+        "# harmless\r# mypy: ignore-errors\rwrong: int = 'text'\r",
+        "# harmless\r# type: ignore\rwrong: int = 'text'\r",
+        "value: int = 1\nfrom __future__ import annotations\n",
     ],
 )
 def test_composition_cannot_drop_code_or_spread_file_wide_suppressions(
