@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -818,3 +818,35 @@ composition prerequisites, and review/validation rules.
   standalone declaration at 1,001 lines. Move that same annotation onto its
   first assignment, retaining the 1,000-line bound without widening the
   baseline, deleting unrelated content or changing the contract.
+
+### 2026-11-02 - Result contracts merged; native API contracts selected
+
+- #9981 merged as `9ec39a4c5634ddefea338cce1bb23153e9b8706b`
+  after fresh exact-head approval with no findings, zero open review comments
+  and all required checks in
+  [run 41446180511](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41446180511).
+  The source worktree is pulled forward after proving exact combined-patch
+  equivalence with the merged squash. #9980 is complete.
+- #9983 selects the native API typing boundary for existing platform-gated
+  liveness, lock exclusion, account-home lookup and guest identity. Preserve
+  native flags, runtime platform selection and validated outputs. Runtime
+  cleanup protocols, worker/test typing and whole-project/copy admission
+  remain open. Counts remain 13 strict / 55 pending.
+- Four canonical fragments now declare narrow native callable/constant
+  boundaries while retaining the existing runtime platform guards and
+  attribute lookup failures. Opaque registry handles/results remain `object`
+  until the existing value validators narrow them; account-home records use
+  a read-only structural contract. No lock flags, native lifetime checks,
+  guest identity or ownership validation changes.
+- Full-project probes still fail: Linux 185 basic / 403 strict, Win32
+  175 basic / 394 strict. Only runtime cleanup and the dynamic worker retain
+  production diagnostics; the rest are test debt. This preparation introduces
+  no ignores, unchecked first-party stubs or admission claim.
+- All 74 selected native Windows lock/handoff/liveness and guest identity
+  controls pass. POSIX registration-permission validation retains its explicit
+  native-platform skip; native POSIX execution is not claimed on this worker.
+  Four additional backend-contract controls cover UID/home flow, missing
+  account refusal, registry query ordering and malformed identity refusal.
+  The existing owner synchronizes exactly 108 physical copies and refreshes
+  four unit-source digests plus MCP source-only producer hashes. Unit nodes,
+  coverage targets, packet budget and footprint revision remain unchanged.

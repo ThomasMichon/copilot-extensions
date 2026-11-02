@@ -5,8 +5,9 @@ import importlib.util
 import json
 import os
 import sys
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -22,6 +23,74 @@ def primitive(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_native_account_lookup_retains_uid_and_home_contract(
+    primitive: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: bool,
+) -> None:
+    observed: list[int] = []
+
+    def account(uid: int) -> SimpleNamespace:
+        observed.append(uid)
+        if missing:
+            raise KeyError(uid)
+        return SimpleNamespace(pw_dir=str(tmp_path))
+
+    backend = ModuleType("pwd")
+    monkeypatch.setattr(backend, "getpwuid", account, raising=False)
+    monkeypatch.setitem(sys.modules, "pwd", backend)
+    monkeypatch.setattr(primitive, "os", SimpleNamespace(**{**vars(os), "getuid": lambda: 42}))
+    monkeypatch.setattr(primitive, "_is_wsl_guest", lambda: False)
+    arguments: dict[str, object] = dict(environment={}, os_profile=None, platform="posix", wsl_distro=None)
+    if missing:
+        with pytest.raises(primitive.InstallationContextError, match="passwd-database"):
+            primitive._current_environment(**arguments)
+    else:
+        current, profile = primitive._current_environment(**arguments)
+        assert profile == tmp_path.resolve()
+        assert current["homeRealPath"] == str(profile)
+    assert observed == [42]
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_native_registry_lookup_validates_default_before_second_read(
+    primitive: ModuleType, monkeypatch: pytest.MonkeyPatch, malformed: bool,
+) -> None:
+    identity = "{11111111-2222-3333-4444-555555555555}"
+    root = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
+    opened: list[str] = []
+    queried: list[tuple[object, str]] = []
+
+    def open_key(hive: int, path: str) -> AbstractContextManager[object]:
+        assert hive == 7
+        opened.append(path)
+        return nullcontext(path)
+
+    def query_value(key: object, name: str) -> tuple[object, int]:
+        queried.append((key, name))
+        if name == "DefaultDistribution":
+            return (42 if malformed else identity), 1
+        assert name == "DistributionName"
+        return "Example Distro", 1
+
+    backend = ModuleType("winreg")
+    for name, value in {
+        "OpenKey": open_key, "QueryValueEx": query_value, "HKEY_CURRENT_USER": 7,
+    }.items():
+        monkeypatch.setattr(backend, name, value, raising=False)
+    monkeypatch.setitem(sys.modules, "winreg", backend)
+    monkeypatch.setattr(primitive, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(primitive, "_is_wsl_guest", lambda: False)
+    if malformed:
+        with pytest.raises(primitive.InstallationContextError, match="guest-default-invalid"):
+            primitive._host_default_wsl_distribution()
+        assert opened == [root]
+        assert queried == [(root, "DefaultDistribution")]
+    else:
+        assert primitive._host_default_wsl_distribution() == "Example Distro"
+        assert opened == [root, root + "\\" + identity]
+        assert queried == [(root, "DefaultDistribution"), (root + "\\" + identity, "DistributionName")]
 
 
 @pytest.fixture
