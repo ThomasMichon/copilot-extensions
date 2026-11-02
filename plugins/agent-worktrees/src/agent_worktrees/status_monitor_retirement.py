@@ -42,6 +42,7 @@ def drain_observations(
         "allocation-link": allocation_linker.active_count(),
         "worktrees-feed": worktrees_runtime.feed.active_count(),
         **worktrees_runtime.agenda_counts(control_server),
+        **worktrees_runtime.observation_counts(control_server),
         "worktrees-read": control_server.current_read_count(),
         "repos-map-read": control_server.current_read_count(repository_map.READ_ACTION),
         "repos-map-producer": int(repositories_runtime.health()["repositories"]["refreshing"]),
@@ -81,7 +82,12 @@ def retire_monitor(
     attempt(close_admission)
     attempt(repositories_runtime.shutdown)
     attempt(lambda: worktrees_runtime.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S))
-    attempt(lambda: worktrees_runtime.agendas.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S))
+    attempt(lambda: worktrees_runtime.agendas.feed.wait_closed(
+        status_monitor_cutover._READ_TIMEOUT_S,
+    ))
+    attempt(lambda: worktrees_runtime.observation_wait_closed(
+        status_monitor_cutover._READ_TIMEOUT_S,
+    ))
     attempt(close_request_surfaces)
     attempt(control_server.close)
     attempt(receipts.wait_idle)

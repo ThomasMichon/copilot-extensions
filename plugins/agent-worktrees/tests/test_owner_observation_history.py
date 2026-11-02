@@ -60,6 +60,43 @@ class AdmissionCrash(BaseException):
     pass
 
 
+@pytest.mark.parametrize("operation", ["initialize", "publish"])
+def test_admitted_read_cannot_ack_a_write_after_writer_loss(tmp_path, monkeypatch, operation):
+    election = {"writer": True, "reader": True}
+    store = OwnerObservationHistory(
+        tmp_path / "owner.sqlite3",
+        resident_generation="a" * 32,
+        writer_id="b" * 32,
+        authority_check=lambda: election["writer"],
+        read_authority_check=lambda: election["reader"],
+    )
+    store.activate()
+    try:
+        baseline = store.initialize(record())
+        original = store.snapshot
+
+        def snapshot(*args, **kwargs):
+            election["writer"] = False
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(store, "snapshot", snapshot)
+        with pytest.raises(c.ObservationError, match="not elected"):
+            if operation == "initialize":
+                store.initialize(record())
+            else:
+                store.publish(
+                    record(1), [event(record(1))], batch_id="batch:1",
+                    expected_cursor=baseline["cursor"], post_save=True,
+                )
+        current = store.snapshot(selected())[0]
+        assert current["facts"] == record(0 if operation == "initialize" else 1).facts
+        election["reader"] = False
+        with pytest.raises(c.ObservationError, match="not elected"):
+            store.snapshot(selected())
+    finally:
+        store.close()
+
+
 def take_over(old, generation="c", writer="d"):
     new = OwnerObservationHistory(
         old.path,
@@ -897,7 +934,7 @@ def test_postcommit_owner_loss_does_not_acknowledge_old_resident(history, monkey
     original = old._fence
     injected = [False]
 
-    def fence(conn):
+    def fence(conn, *, read=False):
         if not conn.in_transaction and not injected[0]:
             injected[0] = True
             with sqlite3.connect(old.path) as other:
@@ -905,7 +942,7 @@ def test_postcommit_owner_loss_does_not_acknowledge_old_resident(history, monkey
                     "UPDATE owner_observation_owner SET generation=?,writer=? WHERE singleton=1",
                     ("c" * 32, "d" * 32),
                 )
-        return original(conn)
+        return original(conn, read=read)
 
     monkeypatch.setattr(old, "_fence", fence)
     with pytest.raises(c.ObservationError) as error:

@@ -112,6 +112,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from .runtime_monitor_identity import publish_lock
     from . import repository_map, tracking_write
     from . import handoff_prompt_receipt_control as receipt_control
+    from .owner_observation_transport import (
+        HISTORY_ACTION as OBSERVATION_HISTORY_ACTION,
+        READ_ACTION as OBSERVATION_READ_ACTION,
+    )
     from . import worktree_status_daemon
     from .status_monitor_drain import DrainTrace, drain_with_diagnostics
     from .status_monitor_retirement import drain_observations, prune_retired_surfaces, surface_busy
@@ -562,6 +566,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if worktrees_runtime.feed.active_count():
             reasons.append("worktrees-feed")
         reasons.extend(worktrees_runtime.agenda_busy(control_server))
+        reasons.extend(worktrees_runtime.observation_busy(control_server))
         if control_server.current_read_count():
             reasons.append("worktrees-read")
         if control_server.current_read_count(repository_map.READ_ACTION):
@@ -619,6 +624,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             return receipts.handle(payload)
         if action in {"agenda-read", "agenda-publish"}:
             return worktrees_runtime.agenda_handle(action, payload)
+        if action in {OBSERVATION_READ_ACTION, OBSERVATION_HISTORY_ACTION}:
+            if status_monitor_cutover.active_generation_for_pid(os.getpid()) is None:
+                worktrees_runtime.close_admission("superseded")
+            return (
+                worktrees_runtime.observation_history(payload)
+                if action == OBSERVATION_HISTORY_ACTION
+                else worktrees_runtime.observation_read(payload)
+            )
         if action == "picker-bootstrap":
             return worktrees_runtime.picker_bootstrap(payload)
         if action == READ_ACTION:

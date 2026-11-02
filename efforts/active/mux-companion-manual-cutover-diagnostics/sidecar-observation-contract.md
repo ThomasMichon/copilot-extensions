@@ -3,8 +3,11 @@
 Parent: [live Sidecar implementation plan](sidecar-live-timeline.md).
 Canonical effort: [README.md](README.md), Step 7.
 
-This is the reviewed-design target, not a description of implemented commands.
-Providers expand and advertise actual support before independently installed
+This is the reviewed cross-owner design target. The first worktree-observation
+source implementation is documented in the
+[owning provider contract](../../../plugins/agent-worktrees/docs/worktree-observations.md);
+the remaining Bridge and rich-agenda surfaces below are still proposed.
+Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event
 contracts remain unchanged.
 
@@ -25,7 +28,9 @@ preflight subprocess for every history page or update.
 
 ## New source surfaces
 
-Names below are proposed v1 additions, not existing invocation examples:
+Names below identify the v1 source expansion. Installed support is negotiated,
+not inferred from this plan; only the worktree family has the first source
+implementation in this slice.
 
 | Owner | Capability | Read boundary |
 | --- | --- | --- |
@@ -42,9 +47,10 @@ selected session where applicable, contract version and JSON output. Follow and
 history are distinct operations; an older daemon must not be allowed to interpret
 a history request as an indefinitely held event stream.
 
-The exact owning parser/HTTP/control schemas are implemented and tested under
-these capability names. Any breaking change to this design receives an explicit
-amendment, not an undocumented argument or snapshot-field overload.
+Each provider must implement and test its exact owning parser/HTTP/control
+schemas before advertising these capability names. Any breaking change to this
+design receives an explicit amendment, not an undocumented argument or
+snapshot-field overload.
 
 ## Source identity and positions
 

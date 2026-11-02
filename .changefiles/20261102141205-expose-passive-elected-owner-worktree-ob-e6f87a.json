@@ -1,0 +1,9 @@
+{
+  "comment": "Expose passive elected-owner worktree observations, partial history and held feeds.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

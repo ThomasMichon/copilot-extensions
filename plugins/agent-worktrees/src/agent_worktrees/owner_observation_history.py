@@ -63,6 +63,7 @@ class OwnerObservationHistory:
         resident_generation: str,
         writer_id: str,
         authority_check: Callable[[], bool],
+        read_authority_check: Callable[[], bool] | None = None,
         max_entries: int = 5000,
         max_bytes: int = 8 * 1024 * 1024,
     ) -> None:
@@ -71,11 +72,16 @@ class OwnerObservationHistory:
         self.writer_id = c.generation(writer_id)
         if not callable(authority_check):
             raise c.ObservationError("explicit elected-owner callback required")
+        if read_authority_check is not None and not callable(read_authority_check):
+            raise c.ObservationError("invalid admitted-reader callback")
         if type(max_entries) is not int or not 1 <= max_entries <= 5000:
             raise c.ObservationError("invalid history retention count")
         if type(max_bytes) is not int or not c.BODY_BYTES <= max_bytes <= 8 * 1024 * 1024:
             raise c.ObservationError("invalid history retention bytes")
         self.authority_check = authority_check
+        self.read_authority_check = (
+            authority_check if read_authority_check is None else read_authority_check
+        )
         self.max_entries, self.max_bytes = max_entries, max_bytes
         self._lock = threading.RLock()
         self._active = False
@@ -83,14 +89,15 @@ class OwnerObservationHistory:
         self._failures: dict[tuple[str, str], failures.PendingFailure] = {}
         self._after_intent: Callable[[intents.Intent], None] | None = None
 
-    def _authority(self) -> None:
-        if self._retired or self.authority_check() is not True:
+    def _authority(self, *, read: bool = False) -> None:
+        check = self.read_authority_check if read else self.authority_check
+        if self._retired or check() is not True:
             raise c.ObservationError("owner observation publisher is not elected", "superseded")
         if self.path.is_symlink():
             raise c.ObservationError("linked owner observation database refused", "unavailable")
 
     def _connect(self, *, write: bool = False) -> sqlite3.Connection:
-        self._authority()
+        self._authority(read=not write)
         if not self._active:
             raise c.ObservationError("owner observation index is unready", "unready")
         uri = self.path.resolve().as_uri() + ("?mode=rw" if write else "?mode=ro")
@@ -98,8 +105,8 @@ class OwnerObservationHistory:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _fence(self, conn: sqlite3.Connection) -> None:
-        self._authority()
+    def _fence(self, conn: sqlite3.Connection, *, read: bool = False) -> None:
+        self._authority(read=read)
         row = conn.execute(
             "SELECT generation,writer FROM owner_observation_owner WHERE singleton=1",
         ).fetchone()
@@ -111,11 +118,11 @@ class OwnerObservationHistory:
     def _read(self):
         with self._lock, closing(self._connect()) as conn:
             conn.execute("BEGIN")
-            self._fence(conn)
+            self._fence(conn, read=True)
             yield conn
             conn.rollback()
             with closing(self._connect()) as fresh:
-                self._fence(fresh)
+                self._fence(fresh, read=True)
 
     def activate(self, *, expected_generation: str | None = None) -> None:
         if expected_generation is not None:
@@ -290,11 +297,11 @@ class OwnerObservationHistory:
         self, selected: c.Selection, after_cursor: str | None = None
     ) -> tuple[dict, dict | None]:
         with self._read() as conn:
-            self._fence(conn)
+            self._fence(conn, read=True)
             row = self._row(conn, selected)
             snapshot, reason = self._snapshot(conn, row, selected, after_cursor)
             gap = None if reason is None else self._gap(row, selected, reason, after_cursor)
-            self._fence(conn)
+            self._fence(conn, read=True)
             return snapshot, gap
 
     def _gap(self, row, selected, reason, base):
@@ -355,7 +362,7 @@ class OwnerObservationHistory:
 
     def delta(self, selected: c.Selection, after_cursor: str) -> tuple[dict, dict | None]:
         with self._read() as conn:
-            self._fence(conn)
+            self._fence(conn, read=True)
             row = self._row(conn, selected)
             snapshot, reason = self._snapshot(conn, row, selected, after_cursor)
             gap = None if reason is None else self._gap(row, selected, reason, after_cursor)
@@ -365,7 +372,7 @@ class OwnerObservationHistory:
                 return snapshot, None
             body = {key: snapshot[key] for key in c.BODY_FIELDS["delta"]}
             result = c.frame("delta", self._source(row), snapshot["cursor"], body)
-            self._fence(conn)
+            self._fence(conn, read=True)
             return result, None
 
     def page(
@@ -375,7 +382,7 @@ class OwnerObservationHistory:
         if type(limit) is not int or not 1 <= limit <= 64:
             raise c.ObservationError("invalid owner history page limit")
         with self._read() as conn:
-            self._fence(conn)
+            self._fence(conn, read=True)
             row = self._row(conn, selected, journal)
             source = self._source(row)
             before = None if before_cursor is None else c.sequence(before_cursor, source)
@@ -403,13 +410,13 @@ class OwnerObservationHistory:
                     if error.code != "oversized" or len(entries) <= 1:
                         raise
                     entries.pop(0)
-            self._fence(conn)
+            self._fence(conn, read=True)
             return result
 
     def last_record(self, selected: c.Selection) -> tuple[CanonicalObservation, str, str]:
         """Last materialization for labelled reconciliation, never active-source proof."""
         with self._read() as conn:
-            self._fence(conn)
+            self._fence(conn, read=True)
             row = self._row(conn, selected)
             record = CanonicalObservation(
                 row["project"],
@@ -422,12 +429,12 @@ class OwnerObservationHistory:
                 row["availability"] if row["qualified"] == self.resident_generation else "unknown",
                 row["completeness"],
             )
-            self._fence(conn)
+            self._fence(conn, read=True)
             return record, c.position(self._source(row), row["position"]), row["generation"]
 
     def check_owner(self) -> None:
         with self._lock, closing(self._connect()) as conn:
-            self._fence(conn)
+            self._fence(conn, read=True)
 
     def append_failed(
         self,
