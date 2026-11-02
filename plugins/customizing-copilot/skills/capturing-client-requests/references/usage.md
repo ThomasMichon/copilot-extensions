@@ -51,9 +51,9 @@ The working directory and output parent must already exist. Existing output
 files, including symbolic links, are never overwritten. On Windows choose the
 native CLI executable rather than a `.cmd`, `.bat` or PowerShell shim.
 The selected client must support `--session-id` and the resolved
-`--model`/`--reasoning-effort`/`--context` flags. Native CLI `1.0.100-1` is
-qualified by the synthetic integration case; unsupported flags fail rather
-than being silently removed.
+`--model`/`--reasoning-effort`/`--context` flags. Native CLI `1.0.106-2` is
+qualified on Windows by the synthetic integration case; unsupported flags fail
+rather than being silently removed.
 
 | Argument | Default / meaning |
 |----------|-------------------|
@@ -91,7 +91,8 @@ settings and custom-instruction environment. Repository trust and configuration
 therefore still affect what loads. Pre-trust the intended harness through the
 CLI's normal workflow; the tool does not silently grant blanket tool or path
 permissions or bypass trust. It sets an OpenAI Chat Completions fake provider,
-offline mode, `--no-remote` and `--no-auto-update` only for the child.
+offline mode and `--no-auto-update` only for the child. It does not pass
+the removed `--no-remote` flag or change the operator's remote-session settings.
 Inherited provider overrides, ambient GitHub token variables and proxy
 variables are removed from that child, and loopback bypasses proxies.
 These differences, the selected model and `-p` mode can change composition;
