@@ -1,0 +1,9 @@
+{
+  "comment": "Inspect retained v5 external journal snapshots without migration or writer authority",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
