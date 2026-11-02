@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import threading
 import time
 from typing import Any
 
 from . import owner_observation_contract as c
-from .owner_observation_append import freeze_record, prepare
+from .owner_observation_append import delivery_failed, freeze_record, prepare
 from .owner_observation_history import CanonicalObservation, OwnerObservationHistory
 
 MAX_SUBSCRIBERS = 32
@@ -52,8 +53,27 @@ def observed_entry(
             "head_after": current.head_session_id,
         },
     }
-    if c.encode(previous.facts) != c.encode(current.facts):
-        value["payload"].update(before=previous.facts, after=current.facts)
+    c.entry(value)
+    before = c.utf8(c.encode(previous.facts, c.BODY_BYTES))
+    after = c.utf8(c.encode(current.facts, c.BODY_BYTES))
+    if before != after:
+        payload = {**value["payload"], "before": previous.facts, "after": current.facts}
+        try:
+            c.bounded(payload, 5)
+            c.encode({**value, "payload": payload}, c.BODY_BYTES - 1024)
+        except c.ObservationError:
+            value["payload"].update(
+                facts_omitted=True,
+                before_sha256=hashlib.sha256(before).hexdigest(),
+                after_sha256=hashlib.sha256(after).hexdigest(),
+                before_utf8_bytes=len(before),
+                after_utf8_bytes=len(after),
+                capture_source_before=previous.source,
+                capture_source_after=current.source,
+            )
+        else:
+            value["payload"] = payload
+    c.entry(value)
     return value
 
 
@@ -192,7 +212,26 @@ class OwnerObservationRuntime:
         expected_cursor: str,
         post_save: bool = False,
     ) -> dict:
-        record, entries, _digest = prepare(record, entries, post_save)
+        record = freeze_record(record)
+        try:
+            record, entries, _digest = prepare(record, entries, post_save)
+        except c.ObservationError as error:
+            if error.code != "oversized":
+                raise
+            with self._operations:
+                self._admit()
+                delivery_failed(
+                    self.history,
+                    c.Selection(*record.key, record.head_session_id),
+                    record,
+                    expected_cursor,
+                    error,
+                )
+                self._changed(record.key)
+            raise c.ObservationError(
+                "admitted owner publication requires reconciliation",
+                "cursor-unavailable",
+            ) from error
         with self._operations:
             self._admit()
             try:
@@ -226,9 +265,20 @@ class OwnerObservationRuntime:
                     raise
             selected = c.Selection(*record.key, record.head_session_id)
             previous, cursor, journal = self.history.last_record(selected)
+            try:
+                item = observed_entry(previous, record, batch_id, journal)
+            except c.ObservationError as error:
+                if error.code != "oversized":
+                    raise
+                delivery_failed(self.history, selected, record, cursor, error)
+                self._changed(record.key)
+                raise c.ObservationError(
+                    "admitted owner change requires reconciliation",
+                    "cursor-unavailable",
+                ) from error
             return self.publish(
                 record,
-                [observed_entry(previous, record, batch_id, journal)],
+                [item],
                 batch_id=batch_id,
                 expected_cursor=cursor,
             )

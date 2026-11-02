@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 from contextlib import closing
 from dataclasses import asdict
@@ -50,13 +51,17 @@ def prepare(
         raise c.ObservationError("observation publication requires a bounded explicit entry batch")
     record = freeze_record(record)
     capture = c.utf8(c.encode(asdict(record), c.BODY_BYTES - 2048))
-    frozen = c.decode(c.utf8(c.encode(entries, c.BODY_BYTES)), c.BODY_BYTES)
+    c.bounded(entries, 3)
+    frozen = copy.deepcopy(entries)
     for item in frozen:
-        c.entry(item, post_save=post_save)
+        c.entry(item, post_save=post_save, _check_size=False)
         if item["evidence_kind"] == "persisted-mutation" and c.encode(
             item["record_fence"]
         ) != c.encode(record.record_fence):
             raise c.ObservationError("post-save evidence does not match the selected record fence")
+    for item in frozen:
+        c.entry(item, post_save=post_save)
+    c.encode(frozen, c.BODY_BYTES)
     digest = hashlib.sha256()
     for part in (capture, c.utf8(c.encode(frozen, c.BODY_BYTES)), c.utf8(c.encode(post_save))):
         digest.update(len(part).to_bytes(8, "big"))
@@ -201,7 +206,7 @@ def append(
             c.encode(record.record_fence),
             record.observed_at,
             record.availability,
-            "partial" if gap else record.completeness,
+            record.completeness,
             gap,
             row["generation"],
         ),

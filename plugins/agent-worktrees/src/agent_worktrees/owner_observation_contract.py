@@ -252,7 +252,13 @@ def request(value: dict, *, history: bool = False) -> tuple[Selection, dict]:
     return selected, value
 
 
-def entry(value: dict, *, stored: bool = False, post_save: bool = False) -> None:
+def entry(
+    value: dict,
+    *,
+    stored: bool = False,
+    post_save: bool = False,
+    _check_size: bool = True,
+) -> None:
     exact(value, ENTRY_FIELDS | ({"event_id", "cursor", "head_session_id"} if stored else set()))
     bounded(value, 4)
     enum(value["kind"], KINDS, "event kind")
@@ -302,7 +308,8 @@ def entry(value: dict, *, stored: bool = False, post_save: bool = False) -> None
         reference(value["event_id"], "event identity")
         reference(value["cursor"], "event position")
         reference(value["head_session_id"], "event head", nullable=True)
-    encode(value, BODY_BYTES - 1024)
+    if _check_size:
+        encode(value, BODY_BYTES - 1024)
 
 
 def frame(kind: str, source: Source, cursor: str, body: dict) -> dict:

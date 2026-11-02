@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-import uuid
 from collections.abc import Callable
 from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass
@@ -13,6 +12,7 @@ from typing import Any
 
 from . import owner_observation_contract as c
 from .owner_observation_append import SCHEMA, append, delivery_failed, freeze_record, prepare
+from .owner_observation_initialize import initialize
 
 
 @dataclass(frozen=True)
@@ -279,61 +279,7 @@ class OwnerObservationHistory:
     ) -> dict:
         """Qualify explicit current record input, preserving old journal identities."""
         record = freeze_record(record)
-        selected = c.Selection(record.project, record.worktree_id, record.head_session_id)
-        with self._lock, closing(self._connect(write=True)) as conn, conn:
-            conn.execute("BEGIN IMMEDIATE")
-            self._fence(conn)
-            active = conn.execute(
-                "SELECT generation FROM owner_observation_active WHERE project=? AND worktree=?",
-                record.key,
-            ).fetchone()
-            old = None if active is None else self._row(conn, selected)
-            if old is not None and old["source"] == record.source:
-                same = (
-                    old["facts"] == c.encode(record.facts)
-                    and old["head"] == record.head_session_id
-                    and old["fence"] == c.encode(record.record_fence)
-                    and old["availability"] == record.availability
-                    and old["completeness"] == record.completeness
-                )
-                if not same:
-                    raise c.ObservationError(
-                        "changed record requires cursor-fenced publication", "stale-record"
-                    )
-                conn.execute(
-                    "UPDATE owner_observation_journal SET qualified=?,observed_at=? "
-                    "WHERE generation=?",
-                    (self.resident_generation, record.observed_at, old["generation"]),
-                )
-            else:
-                if old is not None and old["generation"] != expected_source_generation:
-                    raise c.ObservationError(
-                        "source replacement needs the current incarnation", "source-replaced"
-                    )
-                journal = uuid.uuid4().hex
-                conn.execute(
-                    "INSERT INTO owner_observation_journal "
-                    "VALUES (?,?,?,?,?,?,0,0,?,?,?,?,?,NULL)",
-                    (
-                        journal,
-                        record.project,
-                        record.worktree_id,
-                        record.source,
-                        record.head_session_id,
-                        self.resident_generation,
-                        c.encode(record.facts),
-                        c.encode(record.record_fence),
-                        record.observed_at,
-                        record.availability,
-                        record.completeness,
-                    ),
-                )
-                conn.execute(
-                    "INSERT OR REPLACE INTO owner_observation_active VALUES (?,?,?)",
-                    (*record.key, journal),
-                )
-            self._fence(conn)
-        return self.snapshot(selected)[0]
+        return initialize(self, record, expected_source_generation)
 
     def publish(
         self,
@@ -353,8 +299,18 @@ class OwnerObservationHistory:
             raise c.ObservationError(
                 "observation publication requires a bounded explicit entry batch"
             )
-        record, frozen, digest = prepare(record, entries, post_save)
+        record = freeze_record(record)
         selected = c.Selection(record.project, record.worktree_id, record.head_session_id)
+        try:
+            record, frozen, digest = prepare(record, entries, post_save)
+        except c.ObservationError as error:
+            if error.code != "oversized":
+                raise
+            delivery_failed(self, selected, record, expected_cursor, error)
+            raise c.ObservationError(
+                "admitted owner publication requires reconciliation",
+                "cursor-unavailable",
+            ) from error
         with self._lock:
             admitted = False
             materialized = False

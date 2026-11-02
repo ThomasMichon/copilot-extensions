@@ -99,6 +99,13 @@ locator under one native identity conflicts rather than appending a new event.
 Snapshot observation time and current qualification can refresh without an
 event-cursor advance; deliver that snapshot without inventing a history event.
 
+Capture completeness and retained-history coverage remain distinct: preserve
+the former in the journal and qualify the latter in read frames. A successfully
+materialized replacement journal can recover without clearing the old journal's
+gap. Bounded change evidence explicitly marks omitted fact detail with capture
+references, content hashes and sizes; current facts remain independently present
+in the qualified snapshot.
+
 Every history entry distinguishes:
 
 - `persisted-mutation`: captured at an admitted owner mutation seam after

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -377,7 +378,7 @@ def test_admitted_delivery_oversize_withholds_old_facts_and_notifies_gap(runtime
 
 
 @pytest.mark.parametrize(
-    "rejection", ["stale", "wrong-source", "malformed", "bad-cursor", "wire-oversize"]
+    "rejection", ["stale", "wrong-source", "malformed", "bad-cursor", "malformed-oversize"]
 )
 def test_rejected_oversize_submission_cannot_poison_current_facts(runtime, monkeypatch, rejection):
     owner, _clock, _wakes = runtime
@@ -394,8 +395,9 @@ def test_rejected_oversize_submission_cannot_poison_current_facts(runtime, monke
         capture = replace(capture, source="another:record")
     elif rejection == "malformed":
         item["evidence_kind"] = "invented"
-    elif rejection == "wire-oversize":
+    elif rejection == "malformed-oversize":
         item["payload"]["details"].extend(["\u6f22" * 1200] * 2)
+        item["kind"] = "invented"
     else:
         cursor = "not-a-position"
     notifications = []
@@ -580,6 +582,309 @@ def test_duplicate_old_capture_cannot_clear_newer_failed_materialization(runtime
         assert next(stream)["type"] == "gap"
         assert next(stream)["facts"] == two.facts
         assert owner.read(request())["facts"] == two.facts
+    finally:
+        stream.close()
+
+
+def test_large_changed_facts_use_truthful_bounded_omission_evidence(runtime):
+    owner, _clock, _wakes = runtime
+    old = replace(record(), facts={"details": ["a" * 3500] * 5})
+    new = replace(record(1), facts={"details": ["b" * 3500] * 5})
+    initial = owner.initialize(old)
+    stream = owner.stream(request(), lambda: False)
+    try:
+        next(stream)
+        result = owner.reconcile(new, batch_id="large:changed")
+        frame = next(stream)
+        assert frame["type"] == "delta" and frame["facts"] == new.facts
+        assert frame["cursor"] == result["cursor"] != initial["cursor"]
+        item = frame["entries"][0]
+        assert item["kind"] == item["evidence_kind"] == "observed-change"
+        assert item["payload"]["facts_omitted"] is True
+        assert "before" not in item["payload"] and "after" not in item["payload"]
+        assert (
+            item["payload"]["before_sha256"]
+            == hashlib.sha256(c.utf8(c.encode(old.facts))).hexdigest()
+        )
+        assert (
+            item["payload"]["after_sha256"]
+            == hashlib.sha256(c.utf8(c.encode(new.facts))).hexdigest()
+        )
+        assert item["payload"]["capture_source_before"] == old.source
+        assert item["payload"]["capture_source_after"] == new.source
+        assert len(c.utf8(c.encode(frame))) + 1 <= c.FRAME_BYTES
+    finally:
+        stream.close()
+
+
+def deep_capture_facts(value):
+    facts = {"value": value}
+    for _ in range(11):
+        facts = {"nested": facts}
+    return facts
+
+
+def test_capture_valid_deep_changed_facts_use_validated_omission_without_gap(runtime):
+    from agent_worktrees.owner_observation_runtime import observed_entry
+
+    owner, _clock, _wakes = runtime
+    before = replace(record(), facts=deep_capture_facts("before"))
+    after = replace(record(1), facts=deep_capture_facts("after"))
+    initial = owner.initialize(before)
+    item = observed_entry(before, after, "deep:1", initial["source_generation"])
+    assert item["payload"]["facts_omitted"]
+    c.entry(item)
+    full = deepcopy(item)
+    full["payload"].update(before=before.facts, after=after.facts)
+    with pytest.raises(c.ObservationError, match="nesting"):
+        c.entry(full)
+    stream = owner.stream(request(), lambda: False)
+    try:
+        assert next(stream) == initial
+        current = owner.reconcile(after, batch_id="deep:1")
+        frame = next(stream)
+        assert frame["type"] == "delta" and frame["facts"] == after.facts
+        assert frame["cursor"] == current["cursor"] != initial["cursor"]
+        assert frame["entries"][0]["payload"]["facts_omitted"]
+        assert (
+            frame["entries"][0]["payload"]["after_sha256"]
+            == hashlib.sha256(
+                c.utf8(c.encode(after.facts)),
+            ).hexdigest()
+        )
+        assert owner.history._failures == {}
+        assert owner.history.snapshot(c.Selection("project", "full-worktree", "head"))[1] is None
+    finally:
+        stream.close()
+
+
+def test_deep_fact_fallback_does_not_hide_malformed_entry_skeleton(runtime):
+    from agent_worktrees.owner_observation_runtime import observed_entry
+
+    owner, _clock, _wakes = runtime
+    before = replace(record(), facts=deep_capture_facts("before"))
+    after = replace(record(1), facts=deep_capture_facts("after"))
+    initial = owner.initialize(before)
+    with pytest.raises(c.ObservationError, match="source record"):
+        observed_entry(before, after, "malformed [reference]", initial["source_generation"])
+    with pytest.raises(c.ObservationError):
+        owner.reconcile(after, batch_id="malformed [reference]")
+    assert owner.read(request()) == initial
+    assert owner.history._failures == {}
+
+
+@pytest.mark.parametrize("raced", [False, True])
+def test_unrepresentable_reconcile_checks_current_cursor_before_invalidation(
+    runtime, monkeypatch, raced
+):
+    from agent_worktrees import owner_observation_runtime
+
+    owner, _clock, _wakes = runtime
+    source_id = "s" * 512
+    old = replace(record(), source=source_id, facts={"details": ["a" * 3500] * 5})
+    initial = owner.initialize(old)
+    proposed = replace(
+        record(1),
+        source=source_id,
+        facts={"details": ["b" * 3500] * 5},
+        record_fence={"record_revision": 1, "padding": ["x" * 3500] * 3 + [""]},
+    )
+    unused = c.BODY_BYTES - 2048 - len(c.utf8(c.encode(asdict(proposed)))) - 1
+    assert 0 < unused <= 4096
+    fence = deepcopy(proposed.record_fence)
+    fence["padding"][-1] = "x" * unused
+    proposed = replace(proposed, record_fence=fence)
+    assert len(c.utf8(c.encode(asdict(proposed)))) + 1 == c.BODY_BYTES - 2048
+    competing = replace(record(2), source=source_id)
+    original = owner_observation_runtime.observed_entry
+
+    def capture(*args):
+        value = original(*args)
+        if raced:
+            owner.history.publish(
+                competing,
+                [event(competing)],
+                batch_id="competing:2",
+                expected_cursor=initial["cursor"],
+                post_save=True,
+            )
+        return value
+
+    monkeypatch.setattr(owner_observation_runtime, "observed_entry", capture)
+    stream = owner.stream(request(), lambda: False)
+    try:
+        next(stream)
+        with pytest.raises(c.ObservationError) as error:
+            owner.reconcile(proposed, batch_id="b" * 512)
+        if raced:
+            assert error.value.code == "stale-cursor"
+            assert owner.read(request())["facts"] == competing.facts
+            assert owner.history._failures == {}
+        else:
+            assert error.value.code == "cursor-unavailable"
+            assert next(stream)["type"] == "gap"
+            assert next(stream)["facts"] is None
+            assert owner.read(request())["facts"] is None
+    finally:
+        stream.close()
+
+
+@pytest.mark.parametrize("invalid", [None, "stale", "wrong-source", "malformed"])
+def test_direct_oversized_entry_is_invalidated_only_after_matching_admission(runtime, invalid):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    current = owner.publish(
+        record(1),
+        [event(record(1))],
+        batch_id="base:1",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    capture = record(2)
+    item = event(capture)
+    item["payload"] = {"details": ["x" * 3500] * 9}
+    c.entry(item, post_save=True, _check_size=False)
+    with pytest.raises(c.ObservationError):
+        c.entry(item, post_save=True)
+    expected_cursor = current["cursor"]
+    if invalid == "stale":
+        expected_cursor = initial["cursor"]
+    elif invalid == "wrong-source":
+        capture = replace(capture, source="record:wrong")
+    elif invalid == "malformed":
+        item["kind"] = "invented"
+    stream = owner.stream(request(), lambda: False)
+    try:
+        next(stream)
+        with pytest.raises(c.ObservationError) as error:
+            owner.publish(
+                capture,
+                [item],
+                batch_id="large:entry",
+                expected_cursor=expected_cursor,
+                post_save=True,
+            )
+        if invalid is None:
+            assert error.value.code == "cursor-unavailable"
+            assert next(stream)["type"] == "gap"
+            unavailable = next(stream)
+            assert unavailable["facts"] is None and unavailable["availability"] == "unavailable"
+            assert unavailable["cursor"] == current["cursor"]
+        else:
+            assert error.value.code in {"stale-cursor", "source-replaced", "invalid-request"}
+            assert owner.read(request()) == current
+            assert owner.history._failures == {}
+    finally:
+        stream.close()
+
+
+@pytest.mark.parametrize("completeness", ["complete", "unknown"])
+def test_recovery_gap_does_not_rewrite_capture_completeness_or_emit_fake_reconcile(
+    runtime, completeness
+):
+    owner, _clock, _wakes = runtime
+    first = replace(record(1), completeness=completeness)
+    newer = replace(record(2), completeness=completeness)
+    initial = owner.initialize(first)
+    with sqlite3.connect(owner.history.path) as conn:
+        conn.execute(
+            "CREATE TRIGGER fail_once BEFORE INSERT ON owner_observation_entry "
+            "BEGIN SELECT RAISE(ABORT,'failed append'); END",
+        )
+    with pytest.raises(c.ObservationError):
+        owner.publish(
+            newer,
+            [event(newer)],
+            batch_id="recover:1",
+            expected_cursor=initial["cursor"],
+            post_save=True,
+        )
+    with sqlite3.connect(owner.history.path) as conn:
+        conn.execute("DROP TRIGGER fail_once")
+    recovered = owner.publish(
+        newer,
+        [event(newer)],
+        batch_id="recover:1",
+        expected_cursor=initial["cursor"],
+        post_save=True,
+    )
+    assert recovered["completeness"] == "partial" and recovered["facts"] == newer.facts
+    for batch_id in ("recover:1", "reconcile:another"):
+        unchanged = owner.reconcile(newer, batch_id=batch_id)
+        assert unchanged["cursor"] == recovered["cursor"]
+        assert unchanged["completeness"] == "partial" and unchanged["facts"] == newer.facts
+    page = owner.history.page(
+        c.Selection("project", "full-worktree", "head"),
+        initial["source_generation"],
+        None,
+    )
+    assert len(page["entries"]) == 1
+    with sqlite3.connect(owner.history.path) as conn:
+        assert (
+            conn.execute("SELECT completeness FROM owner_observation_journal").fetchone()[0]
+            == completeness
+        )
+
+
+def test_successful_source_replacement_scopes_failure_to_old_journal(runtime):
+    owner, _clock, _wakes = runtime
+    initial = owner.initialize(record())
+    stream = owner.stream(request(), lambda: False)
+    try:
+        next(stream)
+        with sqlite3.connect(owner.history.path) as conn:
+            conn.execute(
+                "CREATE TRIGGER fail_old BEFORE INSERT ON owner_observation_entry "
+                "BEGIN SELECT RAISE(ABORT,'old journal failure'); END",
+            )
+        with pytest.raises(c.ObservationError):
+            owner.publish(
+                record(1),
+                [event(record(1))],
+                batch_id="old:failed",
+                expected_cursor=initial["cursor"],
+                post_save=True,
+            )
+        assert next(stream)["type"] == "gap"
+        assert next(stream)["facts"] is None
+        replacement = record(2, incarnation="record:new")
+        for expected in (None, "c" * 32):
+            with pytest.raises(c.ObservationError) as error:
+                owner.initialize(replacement, expected_source_generation=expected)
+            assert error.value.code == "source-replaced"
+        assert owner.read(request())["facts"] is None
+        with pytest.raises(c.ObservationError):
+            owner.publish(
+                replacement,
+                [event(replacement)],
+                batch_id="wrong:source",
+                expected_cursor=initial["cursor"],
+                post_save=True,
+            )
+        assert owner.read(request())["facts"] is None
+        current = owner.initialize(
+            replacement, expected_source_generation=initial["source_generation"]
+        )
+        assert current["availability"] == "observed" and current["facts"] == replacement.facts
+        assert current["source_generation"] != initial["source_generation"]
+        assert next(stream)["reason"] == "source-replaced"
+        assert next(stream)["facts"] == replacement.facts
+        with sqlite3.connect(owner.history.path) as conn:
+            assert (
+                conn.execute(
+                    "SELECT gap FROM owner_observation_journal WHERE generation=?",
+                    (initial["source_generation"],),
+                ).fetchone()[0]
+                == "journal-write-failed"
+            )
+        assert (
+            owner.history.page(
+                c.Selection("project", "full-worktree", "head"),
+                initial["source_generation"],
+                None,
+            )["completeness"]
+            == "partial"
+        )
     finally:
         stream.close()
 

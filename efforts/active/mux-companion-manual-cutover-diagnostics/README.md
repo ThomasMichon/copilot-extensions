@@ -527,6 +527,26 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+### 2026-11-02 - Bounded change evidence and journal-local recovery
+
+- Large changed captures retain explicit before/after omission, capture-source
+  references, content hashes and byte sizes when full detail cannot fit the
+  entry budget. Unrepresentable admitted publication rechecks the current
+  source/cursor before invalidation and subscriber notification.
+- Journal rows preserve the capture's original completeness. Read frames alone
+  overlay retained-gap coverage, so unchanged recovery captures do not conflict
+  or append spurious observed-change history.
+- Successful fenced source replacement clears pending invalidation for the new
+  journal while retaining the old journal's gap. Same-source refreshes,
+  duplicate acknowledgements and rejected replacement fences cannot clear it.
+- The focused owner packet passed 98 cases, including changed large facts,
+  direct oversized publication, current/stale failure fences, complete/unknown
+  recovery and repeated/new reconciliation batch identities. Capture-valid
+  deeply nested facts use explicit bounded omission; malformed metadata remains
+  an error and cannot be hidden by the fallback.
+- This remains an open source review; no provider attachment, native result,
+  rollout or whole-parent completion is implied.
+
 ### 2026-11-02 - Detached captures and visible keyboard selection
 
 - Publication, initialization and reconciliation detach validated nested capture
