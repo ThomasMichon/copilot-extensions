@@ -122,12 +122,19 @@ def build_snapshot(caller: str, root: Path, generation: str) -> dict:
     }
 
 
-def _withdraw_views(directory: Path, *, paths=None) -> None:
+def _view_data(path: Path, reader) -> object:
+    with reader._open_map(path) as stream:
+        raw = stream.read(reader.MAX_BYTES + 1)
+    if len(raw) > reader.MAX_BYTES:
+        raise ValueError("oversized guard map")
+    return json.loads(raw)
+
+
+def _withdraw_views(directory: Path, *, paths=None, reader=None) -> None:
+    reader = reader if reader is not None else _reader()
     for path in directory.glob("*.json") if paths is None else paths:
         try:
-            with path.open("rb") as stream:
-                raw = stream.read(1024 * 1024 + 1)
-            data = json.loads(raw) if len(raw) <= 1024 * 1024 else {}
+            data = _view_data(path, reader)
         except (OSError, ValueError):
             data = {}
         scope = {
@@ -142,18 +149,14 @@ def _withdraw_views(directory: Path, *, paths=None) -> None:
 
 def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) -> dict:
     directory = root / "guarded-anchors"
-    try:
-        reader = _reader()
-    except (OSError, ValueError, RuntimeError):
-        _withdraw_views(directory)
-        raise
+    reader = _reader()
     explicit = {reader.canonical(caller) for caller in callers}
     selected = set(explicit)
     old_paths = []
     for path in directory.glob("*.json") if include_prepared else ():
         old_paths.append(path)
         try:
-            data = json.loads(path.read_bytes())
+            data = _view_data(path, reader)
             source = data.get("source_root") if isinstance(data, dict) else None
             if (
                 isinstance(source, str) and os.path.isabs(source)
@@ -167,7 +170,7 @@ def _refresh_locked(root: Path, callers=(), *, include_prepared: bool = True) ->
         old_paths = [reader.map_path(caller, root) for caller in selected]
     # Withdraw before acquisition: even an interrupted or failed producer must
     # not leave the old policy looking current after a managed mutation.
-    _withdraw_views(directory, paths=old_paths)
+    _withdraw_views(directory, paths=old_paths, reader=reader)
     generation = uuid.uuid4().hex
     published = 0
     errors = []

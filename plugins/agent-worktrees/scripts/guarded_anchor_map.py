@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 from typing import NamedTuple
 
 SCHEMA = "agent-worktrees.guarded-anchors"
@@ -15,8 +16,18 @@ MAX_ROOTS = 4096
 
 
 def _open_map(path: Path):
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+        raise ValueError("nonregular or indirected guard input")
     if os.name != "nt":
-        return path.open("rb")
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise ValueError("nonregular guard input")
+            return os.fdopen(descriptor, "rb")
+        except BaseException:
+            os.close(descriptor)
+            raise
     import ctypes
     import msvcrt
     from ctypes import wintypes
@@ -33,7 +44,7 @@ def _open_map(path: Path):
     if not native.startswith("\\\\?\\"):
         native = "\\\\?\\UNC\\" + native[2:] if native.startswith("\\\\") else "\\\\?\\" + native
     # Match endpoint-rendezvous: readers must permit atomic replace and removal.
-    handle = kernel.CreateFileW(native, 0x80000000, 0x7, None, 3, 0x80, None)
+    handle = kernel.CreateFileW(native, 0x80000000, 0x7, None, 3, 0x00200080, None)
     if handle == ctypes.c_void_p(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
     try:
@@ -42,6 +53,8 @@ def _open_map(path: Path):
         kernel.CloseHandle(handle)
         raise
     try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("nonregular guard input")
         return os.fdopen(descriptor, "rb")
     except BaseException:
         os.close(descriptor)

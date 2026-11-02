@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import stat
 import sys
 from types import SimpleNamespace
 
@@ -356,6 +357,68 @@ def test_failed_producer_withdraws_old_view_and_reports_failure(producer, monkey
     with pytest.raises(p.module.GuardPublicationError, match="views withdrawn"):
         p.module.refresh(registry_root=p.root)
     assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
+
+
+@pytest.mark.parametrize("consumer", ["hook", "withdraw", "refresh"])
+def test_nonregular_map_is_rejected_by_every_reader(producer, monkeypatch, consumer):
+    p = producer
+    p.module.refresh(p.callers, registry_root=p.root)
+    path = p.reader.map_path(p.callers[0], p.root)
+    original_lstat = Path.lstat
+
+    def nonregular(selected, *args, **kwargs):
+        if selected == path:
+            return SimpleNamespace(st_mode=stat.S_IFIFO, st_file_attributes=0)
+        return original_lstat(selected, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", nonregular)
+    monkeypatch.setattr(p.module, "_reader", lambda: p.reader)
+    if consumer == "hook":
+        assert p.reader.read_map(p.callers[0], p.root).status == "unusable"
+    elif consumer == "withdraw":
+        p.module._withdraw_views(path.parent, paths=[path])
+        data = json.loads(path.read_text())
+        assert data["inventory_authority"] == "unavailable"
+        assert "source_root" not in data
+    else:
+        assert p.module.refresh(registry_root=p.root)["published"] == 1
+
+
+def test_missing_reader_refuses_source_mutation_without_destroying_retry_scopes(producer, monkeypatch):
+    p = producer
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
+    p.module.refresh(p.callers)
+    paths = [p.reader.map_path(caller, p.root) for caller in p.callers]
+    before = [path.read_bytes() for path in paths]
+    effects = []
+
+    def missing():
+        raise p.module.GuardPublicationError("guard-map reader is unavailable")
+
+    monkeypatch.setattr(p.module, "_reader", missing)
+    with pytest.raises(p.module.GuardPublicationError, match="reader is unavailable"):
+        p.module.managed_write(lambda: effects.append("source written"))
+    assert effects == []
+    assert [path.read_bytes() for path in paths] == before
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="native FIFO unavailable")
+def test_native_fifo_does_not_block_hook_withdrawal_or_prepared_scan(producer):
+    p = producer
+    p.module.refresh(p.callers, registry_root=p.root)
+    path = p.reader.map_path(p.callers[0], p.root)
+
+    def fifo():
+        path.unlink(missing_ok=True)
+        os.mkfifo(path)
+
+    fifo()
+    assert p.reader.read_map(p.callers[0], p.root).status == "unusable"
+    p.module._withdraw_views(path.parent, paths=[path])
+    assert json.loads(path.read_text())["inventory_authority"] == "unavailable"
+    fifo()
+    assert p.module.refresh(registry_root=p.root)["published"] == 1
+    assert stat.S_ISREG(path.lstat().st_mode)
 
 
 def test_interrupted_refresh_retains_all_prepared_caller_retry_scopes(producer, monkeypatch):

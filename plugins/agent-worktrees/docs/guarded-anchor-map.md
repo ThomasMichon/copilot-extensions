@@ -56,6 +56,11 @@ failure. Windows readers permit share-delete; the existing atomic writer's
 bounded retries cover transient replacement conflicts while a read finishes.
 Automatically rediscovered callers whose registration was removed are retired;
 an explicitly requested unregistered caller still reports an error.
+All map readers reject nonregular or indirected inputs before opening, with a
+nonblocking POSIX open and post-open type check to cover replacement races.
+If the shared reader itself is unavailable, a managed source write refuses
+before mutation rather than destroying the caller inventory or reading unsafe
+inputs. Hook consumption with a missing reader still fails open.
 
 ## Reader contract
 

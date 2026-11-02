@@ -217,3 +217,8 @@ evaluation is distinct from authorization or successful lifecycle mutation.
   state. The root-isolation, native, guard and registry packet passed its
   other 95 cases with one capability skip; the resident live-grant fixture
   needed an explicit matching `AGENT_HOME` and its corrected case passed.
+- The current-head re-review identified FIFO/nonregular inputs in the hook and
+  both producer reads. All three now share bounded regular-file validation,
+  nonblocking POSIX opens and post-open checks. The focused packet passed 33
+  cases with one native-FIFO capability skip; synthetic FIFO-type rejection
+  runs for all three readers on every platform.
