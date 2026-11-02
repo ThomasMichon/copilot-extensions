@@ -321,7 +321,7 @@ def _source_descriptor(arguments: argparse.Namespace) -> Mapping[str, Any] | Non
     if arguments.source_json and arguments.source_file:
         _fail("Specify only one of --source-json and --source-file.")
     if arguments.source_file:
-        value = read_json(arguments.source_file)
+        value: object = read_json(arguments.source_file)
     elif arguments.source_json:
         try:
             value = json.loads(
