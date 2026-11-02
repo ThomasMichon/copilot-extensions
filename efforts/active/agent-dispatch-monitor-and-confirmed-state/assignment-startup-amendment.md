@@ -25,6 +25,10 @@ The [configured-cohort transport receipt](journal/2026/11.02-configured-cohort-t
 records [#10050](https://github.com/ThomasMichon/copilot-extensions/pull/10050):
 explicit whole-owner projection and history recovery now reach the existing
 coordinator through a negotiated client, without automatic publication or admission.
+The [legacy admission fence receipt](journal/2026/11.02-configured-admission-fence.md)
+records [#10059](https://github.com/ThomasMichon/copilot-extensions/pull/10059):
+fresh legacy queued spawning refuses after projection without activating the
+ordinary publisher or migrating worker prompts.
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
 Parent: [monitor and confirmed-state effort](README.md).
 Standing intent: [Dispatch vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup).
@@ -111,6 +115,17 @@ uncertain expected scope blocks new admission without erasing existing
 custody. A definition or published metadata alone does not establish that a
 legacy lane enforces the new placement contract. Caller migration and
 mixed-cohort fencing remain separate reviewed source gates.
+
+**Selected integration ownership:** the coordinator's actual registrar owns
+the whole configured cohort. Each machine/environment supervisor owns only its
+effective definition scope; host-local pointer bytes must not alternate as
+competing whole-cohort projections. The
+[source-owned projection boundary](../../../plugins/agent-dispatch/docs/pool-cohort-transport.md#coordinator-owned-source-composition)
+is a bounded provider composition, not automatic publication. Before enabling
+the existing reconciliation cadence, resolve unaccepted versus ambiguous
+original requests, preserve original client targets through reconnect, include
+all futures in existing shutdown accounting and explicitly refuse unsupported
+peers. Ordinary allocator and initial-prompt migration remain required.
 
 ## Current foundations and discrepancy
 

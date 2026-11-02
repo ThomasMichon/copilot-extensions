@@ -26,6 +26,7 @@ from .config import (
 )
 from .coordinator import create_app
 from .queue import TaskQueue
+from .registrar_discovery import RegistrarSources
 from .rendezvous import clear_endpoint, write_endpoint
 from .single_instance import SingleInstance
 
@@ -104,6 +105,7 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
         handoff_fallback_grace=cfg.handoff_fallback_grace,
         wake_is_active=_owns_active_route,
         replay_consumer_factory=replay_consumer_factory,
+        cohort_sources=RegistrarSources(),
     )
 
 

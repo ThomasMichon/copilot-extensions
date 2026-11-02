@@ -61,6 +61,7 @@ from .events import EventBus
 from .lease import FencingGuard
 from .loop_governance import LoopGovernance
 from .queue import TaskQueue
+from .registrar_discovery import RegistrarSources
 from .run_waiter_recovery import (
     recover_run_waiters,
 )
@@ -156,6 +157,7 @@ def create_app(
     wake_max_attempts: int = 8,
     wake_retry_base: float = 1.0,
     replay_consumer_factory=None,
+    cohort_sources: RegistrarSources | None = None,
 ) -> FastAPI:
     """Build the coordinator app over an existing :class:`TaskQueue`.
 
@@ -175,11 +177,16 @@ def create_app(
     An explicit ``replay_consumer_factory(queue, checkpoint)`` uses this owner's
     existing waiter cadence and drain boundary. It requires active-owner authority
     and enabled waiter maintenance; ordinary server/CLI construction omits it.
+
+    ``cohort_sources`` binds explicit projection to the coordinator's registrar.
+    It requires active-route authority but does not publish on startup or a tick.
     """
     if replay_consumer_factory is not None and (
         not math.isfinite(wake_interval) or wake_interval <= 0 or not callable(wake_is_active)
     ):
         raise ValueError("replay consumer requires waiter maintenance and active-owner authority")
+    if cohort_sources is not None and not callable(wake_is_active):
+        raise ValueError("configured cohort source requires active-owner authority")
     if (
         token is not None
         and control_token is not None
@@ -884,6 +891,16 @@ def create_app(
     app.state.worktree_status_relay = relay
     # Graceful-cutover drain gate (docs/patterns/graceful-daemon-cutover.md).
     app.state.drain_gate = DrainGate()
+    from .coordinator_pool_source import CoordinatorPoolSource
+
+    cohort_source = (
+        CoordinatorPoolSource(
+            queue, cohort_sources,
+            is_active=wake_is_active, gate=app.state.drain_gate,
+        )
+        if cohort_sources is not None and wake_is_active is not None else None
+    )
+    app.state.pool_cohort_source = cohort_source
 
     @app.middleware("http")
     async def deny_scoped_non_task_surfaces(request: Request, call_next):
@@ -930,7 +947,10 @@ def create_app(
         )
 
 
-    register_status_routes(app, queue, bus, control_token=control_token)
+    register_status_routes(
+        app, queue, bus, control_token=control_token,
+        cohort_source_owned=cohort_source is not None,
+    )
     register_directory_routes(app, directory)
     register_task_routes(
         app,
@@ -944,7 +964,9 @@ def create_app(
         app, queue, bus, control_token=control_token,
         restricted_ingress_authenticated=bool(token),
     )
-    register_registry_routes(app, queue, control_token=control_token)
+    register_registry_routes(
+        app, queue, control_token=control_token, cohort_source=cohort_source,
+    )
     register_execution_scope_routes(app, queue, bus, control_token=control_token)
     register_execution_runtime_routes(app, queue, bus, control_token=control_token)
     register_worktree_status_routes(app, relay)

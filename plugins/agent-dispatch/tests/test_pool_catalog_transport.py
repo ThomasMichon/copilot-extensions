@@ -166,6 +166,7 @@ def test_running_health_advertises_only_the_registered_metadata_contract(queue) 
         "lock_holder_verification": False, "configured_scope_membership": False,
         "configured_cohort_fencing_versions": [1],
         "configured_cohort_projection_versions": [1],
+        "configured_cohort_projection_owner": "explicit-caller",
         "atomic_placement": False,
     }
     assert queue.pool_catalog_snapshot() == before

@@ -311,7 +311,7 @@ def test_status_preserves_automatic_field_and_advertises_actual_admission(
     status = json.loads(capsys.readouterr().out)
     assert "worker-admission" in status["contract"]["actions"]
     assert {item["action"] for item in status["automatic_attempts"]} == {
-        "coordinator-replacement", "supervisor-self-update",
+        "coordinator-replacement", "supervisor-self-update", "automatic-runtime-reconcile",
     }
     worker = next(item for item in status["action_attempts"]
                   if item["action"] == "worker-admission")
