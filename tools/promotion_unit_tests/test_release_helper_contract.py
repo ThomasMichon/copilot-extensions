@@ -29,6 +29,7 @@ def _workflow():
         "run": 'sha="$(git rev-parse origin/dev)"\ngit merge-base --is-ancestor "$sha" origin/dev',
     })
     jobs["source-units"]["permissions"] = {"contents": "read"}
+    jobs["source-units"]["timeout-minutes"] = 20
     jobs["source-units"]["needs"].append("compose-candidate")
     jobs["source-units"]["steps"].extend([{
         "name": "Import the frozen candidate without recomposition",
@@ -79,9 +80,13 @@ def test_source_selected_producer_and_verifier_follow_one_admitted_revision():
 def test_candidate_typechecking_requires_exact_frozen_inputs_before_evidence():
     workflow = _workflow()
     control.verify_candidate_typechecking(workflow)
-    for fault in ("missing", "order", "ignored", "wrong-input", "skip"):
+    for fault in (
+        "missing", "order", "ignored", "wrong-input", "skip", "job-timeout",
+        "step-shell", "job-shell", "workflow-shell",
+    ):
         invalid = deepcopy(workflow)
-        steps = invalid["jobs"]["source-units"]["steps"]
+        job = invalid["jobs"]["source-units"]
+        steps = job["steps"]
         if fault == "missing":
             steps.pop(3)
         elif fault == "order":
@@ -90,8 +95,16 @@ def test_candidate_typechecking_requires_exact_frozen_inputs_before_evidence():
             steps[3]["continue-on-error"] = True
         elif fault == "wrong-input":
             steps[1]["run"] = "echo skipped frozen import"
-        else:
+        elif fault == "skip":
             steps[3]["if"] = "false"
+        elif fault == "job-timeout":
+            job["timeout-minutes"] = 5
+        elif fault == "step-shell":
+            steps[3]["shell"] = 'bash -c \'bash "$0"; exit 0\' {0}'
+        elif fault == "job-shell":
+            job["defaults"] = {"run": {"shell": 'bash -c \'bash "$0"; exit 0\' {0}'}}
+        else:
+            invalid["defaults"] = {"run": {"shell": 'bash -c \'bash "$0"; exit 0\' {0}'}}
         with pytest.raises(UnitEvidenceError, match="candidate MyPy"):
             control.verify_candidate_typechecking(invalid)
 

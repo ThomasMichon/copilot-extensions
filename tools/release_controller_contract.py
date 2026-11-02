@@ -89,6 +89,7 @@ def verify_candidate_typechecking(workflow: dict) -> None:
     ]
     if (
         job.get("permissions") != {"contents": "read"}
+        or job.get("timeout-minutes") != 20
         or not {"gate", "compose-candidate"} <= set(job.get("needs", []))
         or "continue-on-error" in job
         or any(len(indices) != 1 for indices in (*selected, imports, units))
@@ -116,6 +117,16 @@ def verify_candidate_typechecking(workflow: dict) -> None:
         for index in indices
     ) or any(steps[index].get("timeout-minutes") != 6 for index in indices[1:3]):
         raise UnitEvidenceError("candidate MyPy must prepare then enforce frozen inputs before unit evidence")
+    default_shell = job.get("defaults", {}).get("run", {}).get(
+        "shell", workflow.get("defaults", {}).get("run", {}).get("shell"),
+    )
+    if any(
+        steps[index].get("shell", default_shell) not in (
+            None, "bash", "bash --noprofile --norc -e -o pipefail {0}",
+        )
+        for index in indices
+    ):
+        raise UnitEvidenceError("candidate MyPy requires a failure-propagating Bash shell")
 
 
 def required_arguments(source: bytes) -> set[str]:

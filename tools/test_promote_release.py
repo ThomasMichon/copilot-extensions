@@ -185,6 +185,13 @@ def test_promote_creates_wholesale_replace_commit(repo: Path, monkeypatch, long_
     commit = report["commit"]
     if long_message:
         assert large_message.strip() in pr._git(["show", "-s", "--format=%B", commit], cwd=repo)
+        raw_commit = subprocess.run(
+            ["git", "cat-file", "commit", commit], cwd=repo, capture_output=True, check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        ).stdout
+        message_bytes = raw_commit.split(b"\n\n", 1)[1]
+        assert b"\r" not in message_bytes
+        assert large_message.encode("utf-8").strip() in message_bytes
     parents = _git(["log", "-1", "--format=%P", commit], repo).split()
     assert parents == [main_before]
 

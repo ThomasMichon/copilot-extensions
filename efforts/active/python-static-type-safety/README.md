@@ -59,6 +59,10 @@ Confirmed operator responses:
   read-only candidate MyPy steps to Main's
   `.github/workflows/validate-and-promote.yml` through its normal reviewed
   workflow-only bootstrap flow. No pause/resume, runtime rollout or CI bypass.
+- `authorize_candidate_job_timeout=true`: the same reviewed adoption may raise
+  only the read-only `source-units` job deadline from five to 20 minutes to
+  accommodate setup, both six-minute MyPy steps, the unchanged 300-second
+  unit packet and evidence upload.
 
 ## Scope Approvals
 
@@ -66,7 +70,7 @@ Confirmed operator responses:
 - The confirmed terminal policy is every first-party file checked strictly, with typed dynamic boundaries and narrow reviewed third-party exceptions. It is not a literal ban on all `Any` expressions.
 - No blanket ignores, unchecked first-party substitutes or permanent pending/basic cohorts count as completion.
 - Normal PR/CI/review gates remain. Main-controller adoption is limited to the
-  explicitly approved two-step workflow change above; no ruleset/CI bypass,
+  explicitly approved two-step workflow change and job deadline above; no ruleset/CI bypass,
   pause/resume, dependency-policy relaxation, service restart or installed
   rollout is authorized.
 
@@ -272,3 +276,9 @@ composition prerequisites, and review/validation rules.
   Ownership mocking now belongs only to the promotion unit adapter and imports
   the native owner only on Windows. The original library test is unchanged;
   no shared-library payload changes or unnecessary consumer bumps are included.
+- P3 review identified a job deadline shorter than its added steps, effective
+  shell overrides that could mask failure, and text-stdin newline translation.
+  The operator approved the bounded 20-minute job deadline in addition to the
+  two steps. Contract controls reject failure-masking step/job/workflow shells;
+  promotion messages use binary UTF-8 input with a raw commit-object assertion.
+  The unchanged unit budget remains independent. Focused controls pass 109 tests.

@@ -78,13 +78,13 @@ def _git(
     env: dict[str, str] | None = None, input_text: str | None = None,
 ) -> str:
     result = subprocess.run(
-        ["git", *args], cwd=str(cwd or REPO), capture_output=True, text=True, env=env,
-        input=input_text, encoding="utf-8",
+        ["git", *args], cwd=str(cwd or REPO), capture_output=True, env=env,
+        input=input_text.encode("utf-8") if input_text is not None else None,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     if check and result.returncode != 0:
-        raise PromotionError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
-    return result.stdout.strip()
+        raise PromotionError(f"git {' '.join(args)} failed: {result.stderr.decode('utf-8').strip()}")
+    return result.stdout.decode("utf-8").strip()
 
 
 def _rev_parse(ref: str, *, cwd: Path | None = None) -> str | None:

@@ -304,7 +304,7 @@ jobs:
       - compose-candidate
     if: needs.gate.outputs.is_dev == 'true' && needs.compose-candidate.outputs.composed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     permissions:
       contents: read
     outputs:

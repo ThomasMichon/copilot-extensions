@@ -98,7 +98,10 @@ candidate before emitting its unit evidence. The same candidate-local front
 door, pinned lock and project policies apply; checking Dev or recomposing a
 second candidate is not a substitute. Both steps are required and bounded inside
 the existing read-only source-qualification job, which gates signing and
-promotion. Unit selection, evidence and Main's independent lifecycle stay intact.
+promotion. Each MyPy step has a six-minute bound; the combined job has a
+20-minute deadline covering setup, both checks, the unchanged 300-second unit
+packet and evidence upload. Effective shell overrides cannot mask check failures.
+Unit selection, evidence and Main's independent lifecycle stay intact.
 
 `python tools/check-release-controller-compatibility.py --main-ref origin/main`
 validates this prepared sequence and reports `candidate_types_prepared`
