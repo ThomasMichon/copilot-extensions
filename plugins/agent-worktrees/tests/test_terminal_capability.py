@@ -1,6 +1,7 @@
 """Selected-runtime capability responses, without session or daemon effects."""
 
 import json
+import os
 import sys
 from types import SimpleNamespace
 
@@ -8,6 +9,30 @@ import pytest
 
 from agent_worktrees import terminal_launch
 from agent_procutil import owned_process
+
+
+def test_actual_query_entry_exits_before_roster_and_cli_imports():
+    code = (
+        "import builtins,runpy,sys\n"
+        "original=builtins.__import__\n"
+        "def guarded(name,*args,**kwargs):\n"
+        " if name in ('current_roster_entry','argparse'): "
+        "raise AssertionError('query entered the ordinary dispatcher')\n"
+        " return original(name,*args,**kwargs)\n"
+        "builtins.__import__=guarded\n"
+        "sys.argv=['agent-worktrees','--version']\n"
+        "runpy.run_module('agent_worktrees',run_name='__main__')\n"
+    )
+    result = owned_process.run_caller_owned(
+        [sys.executable, "-I", "-B", "-c", code],
+        env=dict(os.environ, CE_TERMINAL_CAPABILITY_QUERY="1"),
+        timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not result.stderr
+    assert json.loads(result.stdout) == {
+        "package": "agent_worktrees", "capability": terminal_launch.CAPABILITY,
+    }
 
 
 @pytest.mark.parametrize("response", ["current", "legacy", "malformed", "foreign", "failed"])

@@ -18,13 +18,13 @@ def available() -> bool:
     return bool(_channel)
 
 
-def answer_query(arguments: list[str] | None = None) -> bool:
+def exit_for_query(arguments: list[str] | None = None) -> None:
     if (sys.argv[1:] if arguments is None else arguments) != ["--version"]:
-        return False
+        return
     if os.environ.pop(QUERY_ENVIRONMENT, "") != "1":
-        return False
+        return
     print(json.dumps({"package": "agent_worktrees", "capability": CAPABILITY}))
-    return True
+    raise SystemExit(0)
 
 
 def select_receiver(

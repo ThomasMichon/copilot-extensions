@@ -395,3 +395,14 @@ reviewed admission revision is implemented and qualified.
   #5579, and the existing #8669 owner keeps its copied-shell/lifecycle scope.
   Source review, required CI, promotion and installed rollout remain distinct.
   No runtime was deployed, live session changed or deployment hold lifted.
+- Reconciliation with current `dev` retained the upstream private-inventory
+  creation owner and regenerated its canonical helper archives; no source
+  implementation conflict was resolved by choosing an older binary. The
+  87-case finite-owner/private-inventory packet and all 23 native cases pass
+  on that merged archive. Its later direct-query sample measured 1003.73 ms
+  cold and 543.34 ms warm with the same observed lower-bound process roles.
+- The newer shrink-only module ceiling required the early Worktrees query
+  helper to own its successful exit directly. Its real module-entry regression
+  refuses ordinary roster/CLI imports and passes with the query packet
+  (13 cases); the entry module stays at its existing ceiling without widening
+  the baseline.

@@ -51,8 +51,7 @@ from __future__ import annotations
 from . import terminal_launch as _terminal_launch
 
 if __name__ == "__main__":
-    if _terminal_launch.answer_query():
-        raise SystemExit(0)
+    _terminal_launch.exit_for_query()
     from .current_roster_entry import run_module_if_selected
     run_module_if_selected()
     import sys as _entry_sys
