@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current slice:** #10039 canonical Work Coalescing Singleton source/test contracts. #10036 canonical Fleet Index and Vault adapter admission is complete.
+- **Current slice:** #10043 canonical Update Telemetry source/test contracts, with isolated Installer Readiness (#10044) and Docker Resource Producer (#10045) implementations. Work Coalescing Singleton (#10039) is complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The lead owns #10039's canonical Work Coalescing Singleton scope, shared admission/coverage manifests, documentation, the effort and full completion judgment. The Fleet Contracts worker and prior test-cohort delegates are complete.
+- **Delegates:** The lead owns #10043, all shared admission/coverage manifests, global documentation, the effort, integration and full completion judgment. Separate source-only worktrees own the non-overlapping library implementations for #10044 and #10045; they return qualified local commits, not independently published PRs. Prior implementation workers are complete.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -105,6 +105,7 @@ rewrite.
 ### Phase 2 - Source and platform qualification
 
 - [x] Land the bounded canonical Installation Context composition/source-map adapter (#9916); keep copies independently pending.
+- [ ] Expose the faithful composed Installation Context dependency to normal consumer checks without stubs or target reassignment (#10048).
 - [ ] Make executed source fragments statically visible with source-mapped composition or genuine typed modules; qualify every source line and byte-identical copy without suppressing errors.
 - [ ] Resolve tooling module identities, independent package environments, dependency/stub versions and declared interpreter/platform targets.
 - [ ] Qualify generated templates and release-materialized copies against the actually checked canonical source, including negative drift controls.
@@ -120,7 +121,10 @@ rewrite.
 - [x] Strictly admit all six canonical Fleet Contracts source/test modules (#10026).
 - [x] Strictly admit canonical Repository Policy source/test modules, including the executable guest reader (#10029).
 - [x] Strictly admit all canonical Fleet Index and Vault adapter source/test modules (#10036).
-- [ ] Strictly admit all canonical Work Coalescing Singleton source/test modules (#10039).
+- [x] Strictly admit all canonical Work Coalescing Singleton source/test modules (#10039).
+- [ ] Strictly admit all canonical Update Telemetry source/test modules (#10043).
+- [ ] Strictly admit all canonical Installer Readiness source/test modules (#10044).
+- [ ] Strictly admit all canonical Docker Resource Producer source/test modules (#10045).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -1429,3 +1433,76 @@ composition prerequisites, and review/validation rules.
   no installation, discovery, wire format, service activation or cutover
   behavior changes. Required remote CI and review remain before merge; the
   larger campaign's Plan and Validation Plan remain open.
+
+### 2026-11-02 - Work Coalescing Singleton merged; independent leaves selected
+
+- #10042 merged as `ed7f33a400d1b67581687b34c62891cc3960b5e6`
+  after exact-head approval, zero open review threads and green required CI in
+  [run 41510792927](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41510792927).
+  #10039 is complete; managed source sync passed. Re-reading this Plan and
+  Validation Plan leaves 47 pending projects and the full campaign gate open.
+- The lead selected #10043's complete eight-file Update Telemetry scope.
+  Separate source-only worktrees implement #10044's ten-file Installer Readiness
+  and #10045's eleven-file Docker Resource Producer scopes. Their edit ownership
+  is library-local; registry activation, consumer qualification, global docs,
+  changefiles, publication and completion stay with the lead. They must preserve
+  existing assertions and authority, schema, resource identity and cleanup
+  contracts, with no installed-runtime or live-container mutation.
+
+### 2026-11-02 - Shared dependency delivery identified during leaf implementation
+
+- The isolated #10044 implementation closes Installer Readiness's annotation
+  delta and passes 47 contained tests, but its normal standalone checker still
+  reports four `installation_context` import-not-found errors on each target.
+  The canonical public imports are correct. A diagnostic probe including the
+  real loader and nineteen fragments renders the existing faithful source view
+  and passes; that alternative is diagnostic evidence, not admission.
+- #10048 owns the shared checker prerequisite: deliver that composed first-party
+  dependency to consumers while retaining physical ownership, source verification,
+  accurate target counts and negative type controls. The library remains pending;
+  no stub, private-fragment import, wrapper or suppression substitutes for it.
+- The isolated #10045 implementation passes its complete eleven-file strict
+  probe on both targets and 107 contained tests on Windows, with 53 POSIX-only
+  skips. Parent integration, consumer qualification and Linux runtime coverage
+  remain before admission; the worker's local commit is not a merged PR.
+
+### 2026-11-02 - Update Telemetry strict qualification
+
+- The complete eight-source-file canonical project passes strict MyPy on Linux
+  and Windows. Its normal local command and the full enforced cohort pass with
+  22 strict and 46 pending projects; physical inventory remains 7,515 files.
+  The contract tests remain owned by the independently pending Worktrees project.
+- JSON event, status and error documents retain explicit dynamic boundaries.
+  The human sink has a minimal write/flush protocol; active-context clocks and
+  enabled-run event paths use narrow lifecycle invariants. Context tokens,
+  recursive redaction, optional publication results and native platform branches
+  are statically visible without changing persisted schemas, fail-open behavior,
+  lock ownership, deadline handling or command execution.
+- The complete Worktrees telemetry, wiring and launch-progress suites passed
+  292 tests with four native-platform skips. After the final human-output edit,
+  the affected human/shell/progress selection passed 82 tests with the same four
+  skips and 210 intentional deselections. Final standalone/bootstrap and native
+  capability controls passed 151 tests with two POSIX-only skips; Manager update
+  and launch-output consumers passed 88 tests with sixteen POSIX-only skips.
+  These retain actual native children, pipes, exit codes, credential redaction
+  and fresh standalone imports. The Windows host does not claim POSIX runtime
+  qualification: skipped controls cover POSIX signal exit, Linux pidfd custody,
+  native Bash/preflight and POSIX installer rendering.
+- The two editable library consumers are Worktrees and Worktree Manager.
+  Payload generation additionally copies the human, redactor and capability
+  sources to fourteen helper packages across thirteen plugins. All 42 generated
+  files are raw-byte-identical to their canonical sources; only the 28 human and
+  capability copies changed. Those copies remain independently pending.
+  The fifteen-entry changefile includes the library, Manager and all thirteen
+  lifecycle plugins. No first-party substitute or missing-import ignore is used.
+- MCP's generated script change required its existing producer-digest refresh.
+  The owning refresh tool changed only that scripts digest: source digest,
+  footprint contract and revision 36 are unchanged. Install-contract, vendoring,
+  generator correspondence, documentation, Ruff and diff checks pass. No changed
+  file belongs to the source-bound promotion-unit packet, so its closure, hashes,
+  selection and budget remain unchanged.
+- Validation tiers: existing units, native consumer integration and fresh
+  dependency-free bootstrap imports were exercised. No machine provisioning,
+  installed update, live external service or container mutation is part of this
+  static admission. Required remote CI/review remain before merge; #10044 and
+  #10045 remain integration-pending and #10048 remains the checker prerequisite.
