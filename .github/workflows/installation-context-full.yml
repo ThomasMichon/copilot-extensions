@@ -227,13 +227,14 @@ jobs:
               selection = (
                   "failed-retained-health or lost-failure-publication or lost-terminal-receipt or adoption-incumbent or "
                   "native-failure-to-repair or repair-failure-to-native or physical_state or "
-                  "state_retains_failed or original_pending_prefix or komodo_incumbent"
+                  "state_retains_failed or original_pending_prefix or komodo_incumbent or node_journal_legacy"
               )
               result = runner.run_contained(
                   [str(python), "-I", "-m", "pytest", "-q", "--tb=short",
                    str(tests / "test_komodo_owner.py"), str(tests / "test_komodo_repair.py"),
                    str(tests / "test_komodo_health_state.py"),
-                   str(tests / "test_komodo_incumbent.py"), "-k", selection,
+                   str(tests / "test_komodo_incumbent.py"),
+                   str(tests / "test_node_journal_legacy.py"), "-k", selection,
                    "--basetemp", str(sandbox / "pytest"), "--junitxml", str(report)],
                   cwd=root / "fleet-manager",
                   env=runner.isolated_environment(os.environ, sandbox),

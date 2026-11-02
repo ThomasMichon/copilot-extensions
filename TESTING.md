@@ -14,6 +14,11 @@ skipped or empty test selection, and uses the standalone runner's environment
 lease, sandbox and whole-process cleanup.
 This is opt-in source qualification, not a required unit-CI expansion, actual
 Docker/official-image startup, installed-service adoption or rollout proof.
+The same opt-in portfolio includes read-only generation-5 node-journal snapshot
+controls. These deserialize bounded owner-supplied bytes into memory, preserve
+the original manager intent (including its legacy `instance` parameter), receipt
+history and plan/step bytes, and retain ordinary current-writer refusal.
+They do not qualify live database capture, migration or repaired-writer execution.
 
 The optional agenda integration packet connects the actual efforts transaction,
 postcommit publisher, authenticated agency resident and held CLI relay to a real
