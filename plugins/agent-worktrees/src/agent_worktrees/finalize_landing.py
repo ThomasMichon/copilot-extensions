@@ -125,7 +125,7 @@ def _pr_content_landed(
     # pulled forward onto different bases (one PR onto main, another onto dev) all pass.
     if not fopg.merged_content_exceeds(record, content_ref, tuple(bases), cwd=cwd, repo=repo):
         return True, None, evidence
-    message = fopg.merged_pr_block_message(record, content_ref, bases[-1], cwd=cwd)
+    message = fopg.merged_pr_block_message(record, content_ref, tuple(bases), cwd=cwd)
     detail = describe(evidence)
     return False, f"{message}\n{detail}" if detail else message, evidence
 

@@ -143,6 +143,11 @@ does not establish their availability in a particular deployed runtime.
 
 ## Assignment lifecycle: current versus target
 
+The [explicit pool claim/start provider and callers](pool-claim-start.md)
+support atomic allocator claims and current-worker acceptance separately from
+the ordinary lane. They do not automatically migrate the supervisor described
+below or implement its selected retry policy.
+
 The [pool-owned startup vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup)
 changes the intended meaning of supervised `CLAIMED`. It is not the behavior
 of the current reservation and worker-claim operations:

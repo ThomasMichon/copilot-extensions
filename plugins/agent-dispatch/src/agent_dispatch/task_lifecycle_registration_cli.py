@@ -91,6 +91,10 @@ def register_task_lifecycle_commands(sub) -> None:
     p.add_argument("--machine", help="override the resolved machine (targeting identity)")
     p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
     p.add_argument("--owner-session-id", help="exact native conversation identity supplied by bridge acquisition")
+    p.add_argument(
+        "--pool-generation", type=int,
+        help="affirmatively accept this allocator-claimed generation; requires --owner-session-id",
+    )
     p.set_defaults(func=_core()._cmd_start)
 
     p = sub.add_parser(

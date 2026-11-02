@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, FiniteFloat, Field
 from .events import EventBus
 from .queue import RoutingAssignment, SpawnReservation, TaskError, TaskQueue
 from .queue_records import WorkerAdmissionInhibited
-from .queue_pool_placement import POOL_PLACEMENT_PROTOCOL, POOL_PLACEMENT_VERSION
+from .queue_pool_placement import POOL_PLACEMENT_PROTOCOL, POOL_PLACEMENT_VERSION, pool_placement_contract
 
 
 class ReserveSpawnBody(BaseModel):
@@ -243,13 +243,8 @@ def register_spawn_routes(
     )
 
     @app.get("/pool-placements/contract", dependencies=[Depends(pool_control)])
-    def pool_placement_contract() -> dict:
-        return {
-            "protocol": POOL_PLACEMENT_PROTOCOL, "supported_versions": [POOL_PLACEMENT_VERSION],
-            "supported_drivers": ["cli"],
-            "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
-            "automatic_lane_migration": False, "startup_retry_policy_complete": False,
-        }
+    def placement_contract() -> dict:
+        return pool_placement_contract()
 
     @app.post("/pool-placements", dependencies=[Depends(pool_control)])
     def place_pool_task(body: PoolPlacementBody, request: Request) -> dict:

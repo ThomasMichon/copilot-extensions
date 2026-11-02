@@ -547,7 +547,10 @@ def register_task_routes(
         return {"adopted": False, "reason": "agent-dispatch has no relay"}
 
     @app.post("/tasks/{task_id}/start")
+    @app.post("/tasks/{task_id}/pool-start")
     def start(task_id: str, body: StartBody, request: Request) -> dict:
+        if request.url.path.endswith("/pool-start") and body.pool_placement_version is None:
+            raise HTTPException(422, detail="explicit pool start requires pool_placement_version")
         worker_id, owner_session_id = _resolve_task_authority(
             request, task_id, body.worker_id, body.owner_session_id
         )
@@ -557,6 +560,7 @@ def register_task_routes(
             lambda: queue.start(
                 task_id, worker_id, owner_session_id=owner_session_id,
                 expected_owner_session_id=expected_owner, expected_generation=generation,
+                require_pool_assignment=body.pool_placement_version is not None,
             ),
             "task.started",
         )

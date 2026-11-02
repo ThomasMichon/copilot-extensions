@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","deliveryKind":"selector","destination":".github/instructions/efforts/completion-gate.instructions.md","plugin":"efforts@copilot-extensions","pluginVersion":"0.1.12-dev1","renderedBytes":1218,"schema":"copilot-extensions.instruction-projection","sourceId":"completion-gate","templateSha256":"bd1c0e740d2de5d1c6cf91b4a89593986d09691e288c3d915c820b09fb7a366d","version":2} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","deliveryKind":"selector","destination":".github/instructions/efforts/completion-gate.instructions.md","plugin":"efforts@copilot-extensions","pluginVersion":"0.1.13-dev1","renderedBytes":1218,"schema":"copilot-extensions.instruction-projection","sourceId":"completion-gate","templateSha256":"dfb5a5116e69f413fb2f8c2195191e64231880ca5c3bbd883bb792c3ffa9c221","version":2} -->
 
 Guidance locator only; no instruction body is delivered here.
 Managed candidate: `.github/instructions/agent-worktrees-generated/copilot-extensions/efforts/completion-gate.local.instructions.md`; reviewed fallback: `.github/copilot/context-fallbacks/efforts/completion-gate.md`.
